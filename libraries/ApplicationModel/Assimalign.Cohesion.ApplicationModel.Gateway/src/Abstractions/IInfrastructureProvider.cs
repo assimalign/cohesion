@@ -22,6 +22,12 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// the platform runs, not from what it was told earlier in the same process. A deployed resource's
 /// instances publish their manifests to the gateway; the provider only starts them.
 /// </para>
+/// <para>
+/// The gateway deploys in dependency order: a resource or child gateway once everything it depends
+/// on is ready, and those that do not depend on each other at the same time. So the gateway may call
+/// the provider concurrently for different resources and child gateways, but never concurrently for
+/// the same one.
+/// </para>
 /// </remarks>
 public interface IInfrastructureProvider
 {
@@ -54,8 +60,9 @@ public interface IInfrastructureProvider
     /// </summary>
     /// <remarks>
     /// The gateway calls it only when the plan's change is <see cref="InfrastructureChange.Create"/>
-    /// or <see cref="InfrastructureChange.Update"/>. How an update replaces running instances, all at
-    /// once or a few at a time, is the platform's rollout.
+    /// or <see cref="InfrastructureChange.Update"/>, once every resource the resource depends on in
+    /// this gateway's part is ready: an instance of it has published and its outputs are read. How an
+    /// update replaces running instances, all at once or a few at a time, is the platform's rollout.
     /// </remarks>
     /// <param name="model">The model the gateway runs.</param>
     /// <param name="resource">The resource, from the model's <see cref="IApplicationModel.Deployment"/>.</param>
@@ -68,10 +75,12 @@ public interface IInfrastructureProvider
     /// balancer or service in front of its instances.
     /// </summary>
     /// <remarks>
-    /// The gateway reads every resource's outputs once its startup completes, records them on the
-    /// resource, and fills them in where a dependent resource refers to them
-    /// (<see cref="ApplicationResourceOutput"/>). Answer from what the platform runs: an output the
-    /// platform assigns later, such as a load balancer's address, is read again on the next run.
+    /// The gateway reads a resource's outputs once an instance of its deployment has published, or,
+    /// for a resource the plan left unchanged, once what it depends on is ready, and before it deploys
+    /// anything that depends on the resource. It records them on the resource and fills them in where
+    /// a dependent resource refers to them (<see cref="ApplicationResourceOutput"/>). Answer from what
+    /// the platform runs: an output the platform assigns later, such as a load balancer's address, is
+    /// read again on the next run.
     /// </remarks>
     /// <param name="model">The model the gateway runs.</param>
     /// <param name="resource">The resource, from the model's <see cref="IApplicationModel.Deployment"/>.</param>
@@ -87,7 +96,8 @@ public interface IInfrastructureProvider
     /// The child's manifest is <see cref="IApplicationModel.Manifest"/> with
     /// <see cref="GatewayDeploymentManifest.Gateway"/> set to <paramref name="gateway"/>, so the child
     /// resolves dependencies outside its own part of the hierarchy. The provider adds where the
-    /// child runs. The gateway calls it on every run; the child reconciles its own part.
+    /// child runs. The gateway calls it on every run, once the resources of this gateway that the
+    /// child's part depends on are ready; the child reconciles its own part.
     /// </remarks>
     /// <param name="model">The model the gateway runs.</param>
     /// <param name="gateway">The child gateway, one of the model's <see cref="IApplicationModel.Deployment"/> gateways.</param>

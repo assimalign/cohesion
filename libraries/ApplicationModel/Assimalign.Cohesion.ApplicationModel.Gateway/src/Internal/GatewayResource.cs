@@ -8,13 +8,16 @@ using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
-// One resource of the run: its aggregate, what its plan changed, the revision it runs, where it
-// stands in the startup window, and when each registered instance last renewed its lease.
+// One resource of the run: its aggregate, what its plan changed, the revision it runs, its previous
+// record entry, where it stands in its startup window, and when each registered instance last
+// renewed its lease.
 //
-// A resource the plan left unchanged starts registered: the platform already runs it. Otherwise it
-// is pending until its first instance registers, or closed when the window closes first. Both
-// transitions leave pending atomically, so a registration that races the deadline either wins or
-// is refused. Registration, renewal, and expiry share one lock, so an instance that renews or
+// A resource the plan left unchanged starts registered and current: the platform already runs it.
+// Otherwise it becomes current when its deployment starts, and is pending until an instance
+// registers after that, or closed when its window closes first. An instance that registers before
+// the deployment starts runs the previous definition, so it is registered without opening the gate.
+// Both transitions leave pending atomically, so a registration that races the deadline either wins
+// or is refused. Registration, renewal, and expiry share one lock, so an instance that renews or
 // publishes again while its lease expires is either kept or dropped whole, never half.
 [DebuggerDisplay("{Aggregate.Manifest.Provider}/{Aggregate.Manifest.Name} {Change}")]
 [DebuggerTypeProxy(typeof(DebugView))]
@@ -28,17 +31,20 @@ internal sealed class GatewayResource
     private readonly Lock _leases = new();
     private readonly Dictionary<ResourceInstanceKey, long> _renewed = new();
     private int _state;
+    private int _current;
     private int _tornDown;
 
-    public GatewayResource(ApplicationResource aggregate, InfrastructureChange change, string revision)
+    public GatewayResource(ApplicationResource aggregate, InfrastructureChange change, string revision, GatewayResourceRecord? previous)
     {
         Aggregate = aggregate;
         Change = change;
         Revision = revision;
+        Previous = previous;
 
         if (change == InfrastructureChange.None)
         {
             _state = registered;
+            _current = 1;
             _registered.TrySetResult();
         }
     }
@@ -49,14 +55,32 @@ internal sealed class GatewayResource
 
     public string Revision { get; }
 
+    // The resource's entry in the record the run started from, or null when it had none.
+    public GatewayResourceRecord? Previous { get; }
+
     public Task Registered => _registered.Task;
 
     public bool IsClosed => Volatile.Read(ref _state) == closed;
 
+    // Whether the platform runs, or may already run, the definition of this run. Until it does, the
+    // record keeps the resource's previous entry.
+    public bool IsCurrent => Volatile.Read(ref _current) != 0;
+
     public bool IsTornDown => Volatile.Read(ref _tornDown) != 0;
+
+    // Marks the deployment started; call it before the provider starts instances.
+    public void MarkCurrent()
+    {
+        Volatile.Write(ref _current, 1);
+    }
 
     public bool TryMarkRegistered()
     {
+        if (!IsCurrent)
+        {
+            return !IsClosed;
+        }
+
         if (Interlocked.CompareExchange(ref _state, registered, pending) == closed)
         {
             return false;
@@ -167,6 +191,8 @@ internal sealed class GatewayResource
         public InfrastructureChange Change => _resource.Change;
 
         public string Revision => _resource.Revision;
+
+        public bool IsCurrent => _resource.IsCurrent;
 
         public bool IsClosed => _resource.IsClosed;
     }

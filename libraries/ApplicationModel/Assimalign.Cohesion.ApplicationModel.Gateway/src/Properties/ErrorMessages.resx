@@ -9,6 +9,10 @@
   <data name="GatewayResourceUnknown" xml:space="preserve"><value>Gateway '{0}' does not run resource '{1}/{2}'.</value></data>
   <data name="GatewayResourceTornDown" xml:space="preserve"><value>Gateway '{0}' tore down resource '{1}/{2}' after it missed its startup window.</value></data>
   <data name="GatewayStartupTimedOut" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) published no manifest within {2}: {3}. New resources were torn down; updated resources keep whatever instances the platform still runs.</value></data>
+  <data name="GatewayStartupTimedOutWithSkipped" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) published no manifest within {2}: {3}. New resources were torn down; updated resources keep whatever instances the platform still runs. Not deployed, because something they depend on did not start: {4}.</value></data>
+  <data name="GatewayDeploymentCycle" xml:space="preserve"><value>Gateway '{0}' cannot deploy its part in dependency order: {1}. A gateway deploys each child gateway, with everything below it, as one step; move one of these resources into the other's gateway.</value></data>
+  <data name="GatewayStepWaits" xml:space="preserve"><value>{0} waits for {1}, because {2} depends on {3}</value></data>
+  <data name="GatewayStepGateway" xml:space="preserve"><value>gateway '{0}'</value></data>
   <data name="GatewayResourceUpdateMissed" xml:space="preserve"><value>Gateway '{0}' stopped accepting resource '{1}/{2}' after its update missed the startup window.</value></data>
   <data name="GatewayResourceOutputsNull" xml:space="preserve"><value>The infrastructure provider returned no outputs for resource '{0}/{1}'.</value></data>
   <data name="GatewayResourcePlanNull" xml:space="preserve"><value>The infrastructure provider returned no plan, or a plan without a revision, for resource '{0}/{1}'.</value></data>

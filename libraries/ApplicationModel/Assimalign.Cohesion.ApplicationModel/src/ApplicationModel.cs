@@ -53,7 +53,8 @@ public sealed class ApplicationModel : IApplicationModel
     /// The rules are the ones composition enforces: gateway names are unique across the hierarchy;
     /// a resource's provider and name are unique within its gateway; a dependency names a resource the
     /// manifest declares, never its own resource, and at most once per resource; a dependency's
-    /// permissions are unique. The model keeps a read-only copy, so later changes to
+    /// permissions are unique; and the dependencies form no cycle, because they order deployment.
+    /// The model keeps a read-only copy, so later changes to
     /// <paramref name="manifest"/>'s lists do not reach it.
     /// </remarks>
     /// <param name="manifest">The manifest of the whole hierarchy, from the root gateway down.</param>
@@ -76,6 +77,7 @@ public sealed class ApplicationModel : IApplicationModel
         var resources = new HashSet<(GatewayName Gateway, ProviderName Provider, ResourceName Name)>();
         Index(manifest, [], resources);
         ApplicationManifest copy = Copy(manifest, resources);
+        ThrowIfCyclic(copy);
         ApplicationManifest deployment = Find(copy, gateway)
             ?? throw new ArgumentException(Format(ErrorMessages.ApplicationModelGatewayUnknown, gateway), nameof(gateway));
 
@@ -239,6 +241,87 @@ public sealed class ApplicationModel : IApplicationModel
         }
 
         return new ApplicationResourceManifest(resource.Provider, resource.Name, Array.AsReadOnly(dependencies));
+    }
+
+    // Third pass: dependencies order deployment, so they may not form a cycle anywhere in the
+    // hierarchy. A depth-first walk that meets a resource still on its path has found one.
+    private static void ThrowIfCyclic(ApplicationManifest manifest)
+    {
+        var order = new List<(GatewayName Gateway, ProviderName Provider, ResourceName Name)>();
+        var dependencies = new Dictionary<(GatewayName Gateway, ProviderName Provider, ResourceName Name), IReadOnlyList<ApplicationResourceDependency>>();
+        Collect(manifest, order, dependencies);
+
+        // A resource is absent until the walk reaches it, false while it is on the walk's path, and
+        // true once everything it depends on has been walked.
+        var walked = new Dictionary<(GatewayName Gateway, ProviderName Provider, ResourceName Name), bool>();
+        var path = new List<(GatewayName Gateway, ProviderName Provider, ResourceName Name)>();
+        var next = new List<int>();
+        foreach (var start in order)
+        {
+            if (walked.ContainsKey(start))
+            {
+                continue;
+            }
+
+            walked[start] = false;
+            path.Add(start);
+            next.Add(0);
+            while (path.Count > 0)
+            {
+                int top = path.Count - 1;
+                IReadOnlyList<ApplicationResourceDependency> edges = dependencies[path[top]];
+                if (next[top] == edges.Count)
+                {
+                    walked[path[top]] = true;
+                    path.RemoveAt(top);
+                    next.RemoveAt(top);
+                    continue;
+                }
+
+                ApplicationResourceDependency edge = edges[next[top]++];
+                var target = (edge.Gateway, edge.Provider, edge.Name);
+                if (!walked.TryGetValue(target, out bool done))
+                {
+                    walked[target] = false;
+                    path.Add(target);
+                    next.Add(0);
+                }
+                else if (!done)
+                {
+                    var cycle = new List<string>();
+                    for (int index = path.IndexOf(target); index < path.Count; index++)
+                    {
+                        cycle.Add(Describe(path[index]));
+                    }
+
+                    cycle.Add(Describe(target));
+                    throw new ArgumentException(Format(ErrorMessages.ApplicationDependencyCycle, string.Join(" -> ", cycle)), manifestParameter);
+                }
+            }
+        }
+    }
+
+    private static void Collect(
+        ApplicationManifest manifest,
+        List<(GatewayName Gateway, ProviderName Provider, ResourceName Name)> order,
+        Dictionary<(GatewayName Gateway, ProviderName Provider, ResourceName Name), IReadOnlyList<ApplicationResourceDependency>> dependencies)
+    {
+        foreach (ApplicationResourceManifest resource in manifest.Resources)
+        {
+            var key = (manifest.Name, resource.Provider, resource.Name);
+            order.Add(key);
+            dependencies.Add(key, resource.Dependencies);
+        }
+
+        foreach (ApplicationManifest gateway in manifest.Gateways)
+        {
+            Collect(gateway, order, dependencies);
+        }
+    }
+
+    private static string Describe((GatewayName Gateway, ProviderName Provider, ResourceName Name) resource)
+    {
+        return string.Concat(resource.Gateway.ToString(), "/", resource.Provider.ToString(), "/", resource.Name.ToString());
     }
 
     private static string Format(string format, params object?[] arguments)

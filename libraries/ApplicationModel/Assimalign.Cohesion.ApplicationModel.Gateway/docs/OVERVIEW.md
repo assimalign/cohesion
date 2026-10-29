@@ -3,15 +3,16 @@
 ## Purpose
 
 Runs an application model: deploys the gateway's part of the hierarchy through an infrastructure
-provider, receives the manifests the deployed instances publish, and exposes each resource's
-aggregate and infrastructure actions. The design record is [DESIGN.md](DESIGN.md).
+provider in dependency order, each resource once what it depends on is ready, receives the
+manifests the deployed instances publish, and exposes each resource's aggregate and infrastructure
+actions. The design record is [DESIGN.md](DESIGN.md).
 
 ## Scope
 
 - In scope: `ApplicationGateway`, the `IInfrastructureProvider` seam, `GatewayDeploymentManifest`,
-  and `ApplicationGatewayException`.
+  the `IGatewayStore` record with its JSON file store, and `ApplicationGatewayException`.
 - Out of scope: HTTP (the publication endpoint and management routes are transport-neutral here),
-  platform providers, identity and authentication, and state persistence.
+  platform providers, and identity and authentication.
 
 ## Dependencies
 
@@ -25,8 +26,10 @@ The root gateway composes its application and runs it through a provider for its
 ApplicationGateway gateway = ApplicationGateway.Create(infrastructure, startupTimeout: TimeSpan.FromMinutes(2));
 
 ApplicationBuilder builder = Application.CreateBuilder("root", args).UseGateway(gateway);
-builder.AddResource("IdentityHub", "identity");
-builder.AddGateway("east").AddResource("Web", "orders-api");
+IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+
+// east deploys once identity has published and its outputs are read.
+builder.AddGateway("east").AddResource("Web", "orders-api").DependsOn(identity, "tokens.issue");
 
 await builder.Build().RunAsync();
 ```

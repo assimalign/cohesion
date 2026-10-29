@@ -33,6 +33,7 @@
   <data name="ApplicationManifestEntryNull" xml:space="preserve"><value>The manifest of gateway '{0}' contains a null entry.</value></data>
   <data name="ApplicationDependencyUnknown" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' depends on '{3}/{4}' in gateway '{5}', which the manifest does not declare.</value></data>
   <data name="ApplicationDependencyDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' declares its dependency on '{3}/{4}' in gateway '{5}' more than once.</value></data>
+  <data name="ApplicationDependencyCycle" xml:space="preserve"><value>The resource dependencies form a cycle: {0}. A resource that must change one it depends on does so at run time, through an action that resource exposes.</value></data>
   <data name="ApplicationPermissionDuplicate" xml:space="preserve"><value>A dependency of resource '{0}/{1}' names permission '{2}' more than once.</value></data>
   <data name="ApplicationModelGatewayUnknown" xml:space="preserve"><value>The manifest declares no gateway named '{0}'.</value></data>
   <data name="ResourceActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>

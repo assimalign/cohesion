@@ -70,7 +70,7 @@ flowchart TB
 | `IApplicationResourceAction` | An infrastructure action on a resource, such as `scale`, executed against the platform. Same invocation and result types as a control. |
 | `IApplicationGateway` | The seam ApplicationModel.Gateway implements: `RunAsync(model)`. Deliberately minimal until chunk 3. |
 | `IApplicationSet` | One gateway's scope. The builder is the root; `AddGateway` makes a child; `AddResource` declares a resource. |
-| `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency; declaring it again adds the new permissions. |
+| `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency, which also orders deployment; declaring it again adds the new permissions, and one that would close a cycle is refused. |
 | `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency` | The hierarchy as data. A dependency names its target by gateway, provider, and name. |
 | `IApplicationResource`, `ApplicationResource` | A gateway's aggregate of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`. |
 | `GatewayName`, `GatewayId`, `ResourcePermission` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. |
@@ -94,10 +94,17 @@ as data (gateway, provider, name) rather than as a reference to another descript
 in this chunk, so separate types would only duplicate the composition API. The gateway chunk decides
 what a root does that a composite does not.
 
-**D4 — `DependsOn` records access, not order.** A dependency carries the permissions the dependent
-resource needs, which the gateway registers with the tenant's identity provider so that provider can
-issue credentials just in time. Two resources may depend on each other, so there is no cycle check.
-Whether dependencies also order startup is the gateway's decision.
+**D4 — `DependsOn` records access and order, so there are no cycles (owner decision, 2026-10-28).**
+A dependency carries the permissions the dependent resource needs, which the gateway registers with
+the tenant's identity provider so that provider can issue credentials just in time. It also orders
+deployment: the gateway deploys a resource once what it depends on runs and its outputs are known,
+so a dependent can be configured from them. A cycle could therefore never start, and it is refused
+where it is declared: `DependsOn` refuses a dependency that leads back to its own resource, naming
+the path (`east/Database.Sql/db -> root/Web/web -> east/Database.Sql/db`), and `Create` refuses a
+manifest whose dependencies form a cycle anywhere in the hierarchy. A resource that must change one
+it depends on does so at run time, through an action the other exposes, such as a Web resource
+adding its path rule to the application gateway deployed before it. This replaces the first
+version of this decision, which recorded access only and accepted mutual dependencies.
 
 **D5 — `Register` and `Record` are atomic with respect to each other.** Each runs under one lock and
 returns its answer from the state that lock protects. An instance that registers before a write is

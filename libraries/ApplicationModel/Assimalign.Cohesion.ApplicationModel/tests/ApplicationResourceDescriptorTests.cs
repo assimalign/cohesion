@@ -54,6 +54,26 @@ public class ApplicationResourceDescriptorTests
         Should.Throw<ArgumentException>(() => api.DependsOn(api));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A dependency that would close a cycle is refused, naming it, and not recorded")]
+    public void DependsOn_ClosingCycle_ShouldThrowAndRecordNothing()
+    {
+        // Arrange
+        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor web = root.AddResource("Web", "web");
+        IApplicationResourceDescriptor api = root.AddResource("Web", "api");
+        IApplicationResourceDescriptor database = root.AddGateway("east").AddResource("Database.Sql", "db");
+        web.DependsOn(api);
+        api.DependsOn(database, "data.read");
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => database.DependsOn(web));
+
+        // Assert
+        exception.Message.ShouldContain("east/Database.Sql/db -> root/Web/web -> root/Web/api -> east/Database.Sql/db", Case.Sensitive);
+        database.Dependencies.ShouldBeEmpty();
+        Should.NotThrow(() => root.Build());
+    }
+
     [Fact(DisplayName = DisplayPrefix + "A resource of another hierarchy is refused")]
     public void DependsOn_WithResourceOfAnotherHierarchy_ShouldThrow()
     {

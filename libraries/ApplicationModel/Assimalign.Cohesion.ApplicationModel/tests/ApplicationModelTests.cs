@@ -94,6 +94,22 @@ public class ApplicationModelTests
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "Dependencies that form a cycle across gateways are refused, naming the cycle")]
+    public void Create_WithDependencyCycle_ShouldThrowNamingTheCycle()
+    {
+        // Arrange: the root's identity provider and east's orders-api depend on each other.
+        var manifest = new ApplicationManifest(
+            "root",
+            [new("IdentityHub", "identity", [new ApplicationResourceDependency("east", "Web", "orders-api", [])])],
+            [new ApplicationManifest("east", [new("Web", "orders-api", [new ApplicationResourceDependency("root", "IdentityHub", "identity", ["tokens.issue"])])], [])]);
+
+        // Act
+        ArgumentException exception = Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
+
+        // Assert
+        exception.Message.ShouldContain("root/IdentityHub/identity -> east/Web/orders-api -> root/IdentityHub/identity", Case.Sensitive);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Repeated dependencies and repeated permissions are refused")]
     public void Create_WithRepeatedDependencyOrPermission_ShouldThrow()
     {

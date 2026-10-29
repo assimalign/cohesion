@@ -14,6 +14,7 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
 {
     private readonly ApplicationSetComposition _composition;
     private readonly List<ApplicationResourceDependency> _dependencies = [];
+    private readonly List<ApplicationResourceDescriptor> _targets = [];
     private readonly ReadOnlyCollection<ApplicationResourceDependency> _dependenciesView;
 
     public ApplicationResourceDescriptor(ApplicationSetComposition composition, ProviderName provider, ResourceName name)
@@ -69,7 +70,17 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
             }
         }
 
+        // A new dependency must not lead back here: dependencies order deployment, so a cycle
+        // could never start.
+        List<ApplicationResourceDescriptor>? path = target.FindPath(this);
+        if (path is not null)
+        {
+            path.Insert(0, this);
+            throw new ArgumentException(Format(ErrorMessages.ApplicationDependencyCycle, Describe(path)), nameof(resource));
+        }
+
         _dependencies.Add(new ApplicationResourceDependency(gateway, target.Provider, target.Name, Union([], permissions)));
+        _targets.Add(target);
         return this;
     }
 
@@ -86,6 +97,51 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
     public ApplicationResourceManifest ToManifest()
     {
         return new ApplicationResourceManifest(Provider, Name, Array.AsReadOnly(_dependencies.ToArray()));
+    }
+
+    // The dependency path from this resource to another, both included, or null when this resource
+    // does not depend on it, directly or through others.
+    private List<ApplicationResourceDescriptor>? FindPath(ApplicationResourceDescriptor destination)
+    {
+        var previous = new Dictionary<ApplicationResourceDescriptor, ApplicationResourceDescriptor?> { [this] = null };
+        var pending = new Stack<ApplicationResourceDescriptor>();
+        pending.Push(this);
+        while (pending.Count > 0)
+        {
+            ApplicationResourceDescriptor current = pending.Pop();
+            if (ReferenceEquals(current, destination))
+            {
+                var path = new List<ApplicationResourceDescriptor>();
+                for (ApplicationResourceDescriptor? step = current; step is not null; step = previous[step])
+                {
+                    path.Add(step);
+                }
+
+                path.Reverse();
+                return path;
+            }
+
+            foreach (ApplicationResourceDescriptor next in current._targets)
+            {
+                if (previous.TryAdd(next, current))
+                {
+                    pending.Push(next);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string Describe(List<ApplicationResourceDescriptor> path)
+    {
+        var names = new string[path.Count];
+        for (int index = 0; index < names.Length; index++)
+        {
+            names[index] = string.Concat(path[index].Set.Name.ToString(), "/", path[index].Provider.ToString(), "/", path[index].Name.ToString());
+        }
+
+        return string.Join(" -> ", names);
     }
 
     private static ReadOnlyCollection<ResourcePermission> Union(IReadOnlyList<ResourcePermission> existing, ResourcePermission[] added)

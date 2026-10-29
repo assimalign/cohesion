@@ -15,9 +15,18 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// </summary>
 internal sealed class TestInfrastructure : IInfrastructureProvider
 {
+    private readonly Lock _calls = new();
+    private readonly List<string> _events = [];
+
     public IResourceManifestPublisher? Gateway { get; set; }
 
     public HashSet<ResourceName> Silent { get; } = [];
+
+    /// <summary>
+    /// Resources whose instance starts only once the task the function returns completes; their
+    /// deployment returns at once, as a platform's does before the workload is ready.
+    /// </summary>
+    public ConcurrentDictionary<ResourceName, Func<Task>> Delayed { get; } = new();
 
     public ScaleAction Scale { get; } = new();
 
@@ -47,6 +56,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
     public ValueTask<IReadOnlyDictionary<OutputName, string>> GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
     {
+        Record($"outputs:{resource.Name}");
         IReadOnlyDictionary<OutputName, string> outputs = Outputs.TryGetValue(resource.Name, out IReadOnlyDictionary<OutputName, string>? configured)
             ? configured
             : new Dictionary<OutputName, string> { [OutputName.Endpoint] = $"http://{resource.Name}.{model.Name}.svc" };
@@ -71,23 +81,34 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
     public async ValueTask DeployResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
     {
-        Deployed.Add($"{model.Name}:{resource.Provider}/{resource.Name}");
+        Record(Deployed, $"{model.Name}:{resource.Provider}/{resource.Name}");
+        Record($"deploy:{resource.Name}");
         Running[resource.Name] = Revisions.GetValueOrDefault(resource.Name, "1");
-        if (!Silent.Contains(resource.Name))
+        if (Silent.Contains(resource.Name))
         {
-            await StartInstanceAsync(resource.Provider, resource.Name, cancellationToken);
+            return;
         }
+
+        if (Delayed.TryGetValue(resource.Name, out Func<Task>? delay))
+        {
+            _ = StartLaterAsync(resource, delay);
+            return;
+        }
+
+        await StartInstanceAsync(resource.Provider, resource.Name, cancellationToken);
     }
 
     public ValueTask DeployGatewayAsync(IApplicationModel model, GatewayName gateway, CancellationToken cancellationToken = default)
     {
-        DeployedGateways.Add(gateway);
+        Record(DeployedGateways, gateway);
+        Record($"gateway:{gateway}");
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask TeardownResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
     {
-        TornDown.Add(resource.Name);
+        Record(TornDown, resource.Name);
+        Record($"teardown:{resource.Name}");
         Running.TryRemove(resource.Name, out _);
         if (OnTeardown is not null)
         {
@@ -97,8 +118,26 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
     public ValueTask TeardownGatewayAsync(IApplicationModel model, GatewayName gateway, CancellationToken cancellationToken = default)
     {
-        TornDownGateways.Add(gateway);
+        Record(TornDownGateways, gateway);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// The calls in the order they were made: <c>deploy:</c>, <c>outputs:</c> and <c>teardown:</c> with
+    /// a resource name, <c>gateway:</c> with a child gateway's.
+    /// </summary>
+    public string[] Events()
+    {
+        lock (_calls)
+        {
+            return [.. _events];
+        }
+    }
+
+    /// <summary>The position of a call in <see cref="Events"/>, or -1 when it was not made.</summary>
+    public int IndexOf(string call)
+    {
+        return Array.IndexOf(Events(), call);
     }
 
     /// <summary>Starts one instance, as a platform does on deployment or scale-out.</summary>
@@ -109,5 +148,33 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         await service.StartingAsync(cancellationToken);
         Instances[instance.Key] = (instance, service);
         return instance;
+    }
+
+    // The gateway deploys independent resources at the same time, so every call is recorded under
+    // one lock.
+    private void Record<T>(List<T> calls, T call)
+    {
+        lock (_calls)
+        {
+            calls.Add(call);
+        }
+    }
+
+    private void Record(string call)
+    {
+        Record(_events, call);
+    }
+
+    private async Task StartLaterAsync(ApplicationResourceManifest resource, Func<Task> delay)
+    {
+        await delay.Invoke();
+        try
+        {
+            await StartInstanceAsync(resource.Provider, resource.Name);
+        }
+        catch (ApplicationGatewayException)
+        {
+            // The gateway stopped waiting for the resource, or stopped running.
+        }
     }
 }

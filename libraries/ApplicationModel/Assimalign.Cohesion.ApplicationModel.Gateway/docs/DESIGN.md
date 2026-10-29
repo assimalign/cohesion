@@ -27,13 +27,16 @@ flowchart LR
 
 ## Startup: reconcile, then run
 
-`RunAsync` loads the gateway's record from its `IGatewayStore` and plans every resource with the
-infrastructure provider. It creates one aggregate per resource, seeded from the record (G12), and
-opens publications. It then deploys each child gateway and only the resources whose plan creates or
-updates them, and saves the record. Every created or updated resource must have an instance publish
-within the startup window. After startup it tears down what the record holds but the model no
-longer declares, and runs until cancelled. A gateway restarted with the same model plans no change,
-so it deploys nothing and waits for no publication: it adopts what runs.
+`RunAsync` first orders its part of the hierarchy, and refuses a part that it, or a gateway below
+it, cannot deploy in dependency order (G19). It loads the gateway's record from its `IGatewayStore`
+and plans every resource with the infrastructure provider. It creates one aggregate per resource,
+seeded from the record (G12), and opens publications. It then deploys in dependency order (G17):
+each resource and child gateway is a step that runs once the steps it waits for are ready, and
+independent steps run at the same time. A resource's step deploys it only when its plan creates or
+updates it, waits for an instance of that deployment to publish within the startup window, and
+reads its outputs (G18). After startup it tears down what the record holds but the model no longer
+declares, and runs until cancelled. A gateway restarted with the same model plans no change, so it
+deploys nothing and waits for no publication: it adopts what runs.
 
 ```mermaid
 sequenceDiagram
@@ -43,24 +46,55 @@ sequenceDiagram
     participant Infra as Infrastructure provider
     participant Inst as Resource instance
     Caller->>GW: RunAsync(model)
+    GW->>GW: order the part, refuse one that cannot deploy in order
     GW->>Store: LoadAsync(gateway)
     GW->>Infra: PlanResourceAsync, once per resource
     GW->>GW: seed aggregates from the record, open publications
-    GW->>Infra: DeployGatewayAsync, once per child gateway
-    GW->>Infra: DeployResourceAsync, for each created or updated resource
-    GW->>Store: SaveAsync(record)
-    Infra->>Inst: start or replace the workload
-    Inst->>GW: PublishAsync(manifest)
-    GW->>Store: SaveAsync(record)
-    GW-->>Inst: snapshots to restore
-    alt every created or updated resource published within the window
+    loop Each step once the steps it waits for are ready, independent steps at once
+        GW->>Infra: DeployResourceAsync if created or updated, or DeployGatewayAsync
+        GW->>Store: SaveAsync(record)
+        Infra->>Inst: start or replace the workload
+        Inst->>GW: PublishAsync(manifest)
+        GW->>Store: SaveAsync(record)
+        GW-->>Inst: snapshots to restore, and a lease
+        GW->>Infra: GetResourceOutputsAsync
+    end
+    alt every created or updated resource published within its window
         GW->>Infra: TeardownResourceAsync and TeardownGatewayAsync for what the model dropped
         GW-->>Caller: Started completes, the gateway runs until cancelled
     else a resource published nothing
         GW->>Infra: TeardownResourceAsync, for a created resource only
-        GW-->>Caller: RunAsync fails with StartupTimedOut
+        GW-->>Caller: RunAsync fails with StartupTimedOut, naming what it did not deploy
     end
 ```
+
+## Deployment order
+
+A gateway's steps are its own resources and its child gateways, each child with everything below
+it. A step waits for the steps that own what its resources depend on. In the hierarchy below,
+`orders-api` waits for `orders-db`. The child gateway `east` waits for the root's `identity`, because
+a resource in its part depends on it. The root's `app-gateway` waits for `east`, because it routes to
+a resource in east's part. An arrow means "waits for".
+
+```mermaid
+flowchart LR
+    subgraph root["Steps of the root gateway"]
+        App["Web/app-gateway"]
+        East["gateway east, with everything below it"]
+        Identity["IdentityHub/identity"]
+    end
+    subgraph east["Steps of gateway east"]
+        Api["Web/orders-api"]
+        Db["Database.Sql/orders-db"]
+    end
+    App --> East
+    East --> Identity
+    Api --> Db
+```
+
+The root therefore deploys `identity`, waits until it is ready, then deploys `east`, and deploys
+`app-gateway` once `east` has started. East deploys `orders-db`, then `orders-api` once
+`orders-db` is ready.
 
 ## The types
 
@@ -97,14 +131,20 @@ names its gateway and carries the global manifest, so a child gateway resolves a
 its own part (east's `orders-api` on the root's `identity`). "Where" is opaque JSON that only the
 gateway's infrastructure provider reads. The provider writes it for each child gateway it deploys.
 
-**G4 — One startup window, decided atomically.** The window opens when deployment finishes and
-covers every resource. A resource's first registration and the window's close race on one atomic
-transition, so a resource is either registered or torn down, never both: a registration that
-loses is undone and refused with `ResourceTornDown`. A missed resource is torn down and the run
-fails, so the deployment fails where its pipeline sees it; resources that published keep running.
+**G4 — One startup window per resource, decided atomically.** A created or updated resource's
+window opens when its deployment starts and lasts `StartupTimeout`, so a resource deep in a
+dependency chain is not charged for the time its dependencies took (G18). A resource's first
+registration and the window's close race on one atomic transition, so a resource is either
+registered or torn down, never both: a registration that loses is undone and refused with
+`ResourceTornDown`. A missed resource is torn down and the run fails, so the deployment fails where
+its pipeline sees it; resources that published keep running. *Superseded:* one window that opened
+when every deployment call had returned and covered every resource.
 
 **G5 — Publications open before deployment.** The aggregates exist before the provider starts
-anything, so a fast instance cannot publish before its aggregate exists.
+anything, so a fast instance cannot publish before its aggregate exists. An instance that publishes
+before its resource's deployment starts, such as a restarted instance of the previous definition
+while the resource waits for its dependencies, is registered but does not make the resource ready
+(G18).
 
 **G6 — Cancellation is not teardown.** Cancelling `RunAsync` stops the gateway, during startup or
 after, and leaves what it deployed running. Teardown happens only to a resource that missed its
@@ -166,15 +206,70 @@ an instance the gateway does not know, such as after a restart without a record,
 and the instance publishes again. Registration, renewal and expiry take one lock per resource, so
 an instance that publishes again while its lease expires is kept or dropped as a whole.
 
-**G16 — Outputs are read once startup completes (owner request, 2026-10-28).** After every created
-or updated resource has published, the gateway asks the provider for each resource's outputs
-(`GetResourceOutputsAsync`), records them on its aggregate, and saves the record when any changed.
-An adopted resource starts with the outputs recorded for the workload that still runs, then takes
-the platform's current values, so an address the platform changed while the gateway was down is
-picked up. `TryGetOutput` resolves a placeholder for a resource this gateway runs. A placeholder
-for another gateway's resource does not resolve here yet: it needs gateway-to-gateway
-publication. Reading outputs per resource, in dependency order, before deploying its dependents
-comes with the readiness gate.
+**G16 — Outputs are read per resource, before what depends on it (owner request, 2026-10-28).** As
+soon as a resource is ready (G18), the gateway asks the provider for its outputs
+(`GetResourceOutputsAsync`), records them on its aggregate, and saves the record when any changed;
+only then do the steps that wait for the resource deploy. An adopted resource starts with the
+outputs recorded for the workload that still runs, then takes the platform's current values, so an
+address the platform changed while the gateway was down is picked up. `TryGetOutput` resolves a
+placeholder for a resource this gateway runs. A placeholder for another gateway's resource does not
+resolve here yet: it needs gateway-to-gateway publication. *Superseded:* one read of every
+resource's outputs after the whole startup.
+
+**G17 — Deploy in dependency order, independent steps at once (owner request, 2026-10-28).** A
+dependency orders deployment (ApplicationModel D4), so the gateway deploys each resource and child
+gateway once everything it waits for is ready, and starts the steps that do not wait for each other
+at the same time, as ARM does with `dependsOn`. A chain therefore takes the sum of its steps, and
+independent resources the longest of theirs. The provider may consequently be called concurrently
+for different resources, never for the same one. `Resources` lists the aggregates in that order.
+*Rejected:* deploying one step at a time in a topological order. It is simpler and deterministic,
+but ten independent resources that take thirty seconds each would start in five minutes instead of
+thirty seconds. *Superseded:* child gateways first, then resources, each in declaration order
+(open question 8).
+
+**G18 — Ready means an instance of the deployment published and the outputs are read.** A created
+or updated resource is ready once an instance has published after its deployment started, and the
+gateway has read its outputs (G16). An adopted resource is ready once its outputs are read. A child
+gateway is ready once `DeployGatewayAsync` returns. A first publication is the whole gate for now:
+health checks and "every instance" readiness need the gateway-to-instance channel. The deployment
+marks the resource current before it calls the provider, because an in-process provider's
+instances publish before the call returns; an instance that published earlier runs the previous
+definition and is registered without opening the gate. An instance manifest does not say which
+revision it runs, so an old instance that publishes during the rollout still opens it.
+
+**G19 — A child gateway is one step.** A gateway cannot see the readiness of what its child deploys,
+so it orders the child with everything below it as one step. The child waits for the gateway's own
+resources that anything in its part depends on: the root's identity provider is ready before a child
+whose resources use it is deployed, and readiness below follows from that, because the child deploys
+its own part after it starts. In the other directions the guarantee is deployment order only. A
+resource that depends on something in a child's part waits until that child has started, not until
+the resource it depends on is ready, and a child that depends on a sibling's part waits until the
+sibling has started. Both need gateway-to-gateway publication to wait for readiness. A child that
+both waits for one of the gateway's steps and is waited for by it cannot be ordered: for example, the
+root's `app-gateway` routes to `east/orders-api` while `east/orders-worker` calls through
+`app-gateway`. `RunAsync` refuses such a part with an `ArgumentException` that names each wait and
+the dependency behind it. It checks the gateway and every gateway below it before it loads its
+record, so nothing is deployed. The model accepts the hierarchy, because no resource depends on
+itself; the limit is this gateway's, and it lifts once a child can wait for its parent's resources
+itself.
+
+**G20 — A step that fails stops only what depends on it.** When a resource misses its window, the
+steps that wait for it, directly or through others, are skipped: they are not deployed, and a
+skipped child gateway keeps running its previous manifest. Steps that do not depend on it carry on.
+Once every step has ended, the run fails with `StartupTimedOut`, naming the missed resources and
+the skipped steps, so one run reports everything a broken deployment left undone, as ARM and
+Terraform do. A failure of another kind, such as a provider exception, cancels the remaining steps
+and is what `RunAsync` throws. *Rejected:* stopping every step at the first miss. Steps already
+waiting for their windows would be abandoned, and the next run would report them one failure at a
+time.
+
+**G21 — A resource's record changes only when the run deploys it.** Until a created or updated
+resource's deployment starts, every save writes its previous entry unchanged, or nothing for a new
+resource. A run that fails or stops before reaching a resource therefore leaves its revision, state,
+instances, and outputs as they were. A later run that rolls the model back finds the resource's
+operator changes, because the platform never replaced the workload. Without this, the first save
+of a run would record the new definition's empty state for resources still waiting for their
+dependencies.
 
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
@@ -210,5 +305,12 @@ candidates for an event source.
    a local gateway.
 7. **Build-time infrastructure actions.** Actions a program declares at build time need a slot on
    the descriptor and the manifest.
-8. **Deployment order.** Child gateways deploy before resources, each in declaration order. Should
-   dependencies order them?
+8. **Deployment order — settled.** Dependencies order deployment (G17), child gateways included
+   (G19).
+9. **Plans before outputs.** The gateway plans every resource before the first step runs. Once a
+   resource's settings are filled in from its dependencies' outputs, the dependent's definition,
+   and so its plan and revision, depend on those outputs. Its plan must then wait for them, and a
+   publication can arrive for a resource that is not planned yet.
+10. **Readiness across gateways.** A parent waits for a child gateway to start, not for the
+    resources it deploys (G19). Waiting for them needs a child to publish its resources' readiness
+    and outputs to its parent, the gateway-to-gateway publication already needed for outputs.
