@@ -67,6 +67,9 @@ to that budget (CG05030); output/operand memory and work retain CG05020/CG05004.
 distinct table or intermediate materialized operand result. Final results materialize under the
 existing API contract. Column names come from the first operand. Types widen across every
 operand's numeric kinds, NULL is neutral, and dynamic values use the existing unknown type.
+This reconciliation includes a union ending a NEXT chain. Carried path variables retain their
+path kind in every operand; path member access is CG03003 before reading data. Quoted display
+names bind later references and star by their decoded variable names.
 Negotiated value encoding accounts for values from all operands. EXPLAIN retains grouping and shows every operand and its
 correlated subplans. The #1662 entity-list wire gate is checked for every operand, including empty
 ones, before execution. No disk or wire format changes are needed.

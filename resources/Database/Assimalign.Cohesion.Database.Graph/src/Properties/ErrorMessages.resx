@@ -316,4 +316,7 @@
   <data name="ReductionPlanningLimit" xml:space="preserve">
     <value>Reduce shape analysis exceeded the fixed planning work limit.</value>
   </data>
+  <data name="StatementKeyMissing" xml:space="preserve">
+    <value>An internal statement lookup could not find its expected key.</value>
+  </data>
 </root>

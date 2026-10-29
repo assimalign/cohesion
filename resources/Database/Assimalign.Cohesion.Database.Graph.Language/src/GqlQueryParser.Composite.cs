@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    // NEXT combines complete composite expressions. Parenthesized operands recursively
+    // NEXT separates complete composite expressions. Parenthesized operands recursively
     // parse this level, so a NEXT inside a group stays within that operand.
     private GqlQueryExpression ParseNextQuery(bool hasInput = false)
     {
@@ -66,7 +66,9 @@ public sealed partial class GqlQueryParser
         }
         if (!IsQueryStart() && !Is("NEXT") && !(hasInput && (Is("DELETE") || Is("DETACH") || Is("SET") || Is("REMOVE"))))
         {
-            Error("CG00015", ErrorMessages.CompositeOperandRequired, Current);
+            if (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT"))
+            { Unsupported("STANDALONE ORDER BY AND PAGE STATEMENT", Current); }
+            else { Error("CG00015", ErrorMessages.CompositeOperandRequired, Current); }
             return EmptyExpression();
         }
         var operand = ParseQuery(hasInput);

@@ -843,7 +843,9 @@ expression caches and correlated registries stay per operand, including reused s
 occurrences. The ordinary planner optionally reports result shapes to the composite reconciler;
 ordinary statements acquire no new plan/planner fields or shape allocations.
 NEXT binds above UNION: GqlCompositeStage carries a nested GraphCompositeStagePlan. Each
-operand plans against the same incoming projected shapes, with isolated lexical registries.
+operand plans against the same incoming projected shapes and binding kinds, including named paths,
+with isolated lexical registries. Displayed result names remain distinct from decoded binding names;
+only referenceable BindingName values become keys for later stages, as at ordinary RETURN boundaries.
 The composite cursor captures the incoming table once under the statement memory budget and
 visits operands in source order. Later stages consume its combined projected bindings. Nested
 cursors restore the enclosing function registry before yielding, and all segments share the
@@ -867,7 +869,8 @@ Result names come from the first operand; types and nullability cover every oper
 kinds widen to the largest kind, floating/integral mixtures to Float64, and decimal/integral
 mixtures to Decimal. Decimal/floating mixtures and other dynamic kinds use DatabaseType.Null
 (unknown), with NULL-only inputs neutral. Materialized values further reconcile the header
-without coercing cells. Composite-value encoding flags cover all operands. Static scalar/composite/entity-list admission visits every leaf, even an
+without coercing cells, including when a composite ends a NEXT chain. Terminal composites pass rows
+directly to the same collector, including unaliased computed columns. Composite-value encoding flags cover all operands. Static scalar/composite/entity-list admission visits every leaf, even an
 empty later operand. EXPLAIN uses explicit-stack traversal to retain each Union/UnionAll group
 and append every operand's complete plan, including correlated apply nodes. Warnings retain
 operand source order. No public interface, assembly reference, persisted format or wire change
@@ -1997,6 +2000,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05028` | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
 | `CG05029` | A composite query contains a modifying operand |
 | `CG05030` | UNION duplicate-elimination state exceeds the statement memory budget |
+| `CG05031` | An internal statement lookup unexpectedly lacks its key; the statement boundary retains the KeyNotFoundException cause and reports a code-free internal-error message. Application function failures retain their existing CG05021 wrapper |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |

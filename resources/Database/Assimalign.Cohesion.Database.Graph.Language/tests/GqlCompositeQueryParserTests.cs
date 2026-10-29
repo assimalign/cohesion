@@ -7,6 +7,23 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 public sealed class GqlCompositeQueryParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [GQL] - NEXT: standalone ordering and paging retain their capability diagnostic")]
+    [InlineData("ORDER BY x")]
+    [InlineData("SKIP 1")]
+    [InlineData("OFFSET 1")]
+    [InlineData("LIMIT 1")]
+    public void Parse_NextStandalonePage_ShouldNameCapability(string tail)
+    {
+        // Arrange
+        string source = "RETURN 1 AS x NEXT " + tail;
+        // Act
+        var diagnostic = new GqlQueryParser().Parse(source).Diagnostics.ShouldHaveSingleItem();
+        // Assert
+        diagnostic.Code.ShouldBe("CK00001");
+        diagnostic.Message!.ShouldContain("STANDALONE ORDER BY AND PAGE STATEMENT", Case.Sensitive);
+        diagnostic.Start.ShouldBe(source.IndexOf(tail, System.StringComparison.Ordinal));
+    }
+
     [Theory(DisplayName = "Cohesion Test [GQL] - UNION: preserves left association and grouped operands")]
     [InlineData("RETURN 1 AS x UNION RETURN 2 AS x UNION RETURN 3 AS x", false)]
     [InlineData("RETURN 1 AS x UNION (RETURN 2 AS x UNION RETURN 3 AS x)", true)]

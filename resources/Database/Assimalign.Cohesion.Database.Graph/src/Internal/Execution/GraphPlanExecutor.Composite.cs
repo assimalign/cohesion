@@ -33,7 +33,8 @@ internal static partial class GraphPlanExecutor
     }
 
     private static async ValueTask<DatabaseResult> ExecuteCompositeAsync(GraphDatabase database, GraphOperation operation,
-        GraphCompositePlan composite, CancellationToken token, bool paths, bool scalarsOnly, bool compositeValues)
+        GraphCompositePlan composite, CancellationToken token, bool paths, bool scalarsOnly, bool compositeValues,
+        IAsyncEnumerable<IReadOnlyDictionary<string, object?>>? incoming = null)
     {
         ValidateCompositeResult(composite, scalarsOnly, compositeValues);
         var types = composite.Projections.Select(projection => projection.Type).ToArray();
@@ -46,7 +47,10 @@ internal static partial class GraphPlanExecutor
         using var retained = new GraphMemoryOwner(budget.Memory);
         retained.Add(128L + 64L * columnCount);
         var rows = new List<object?[]>();
-        await foreach (var row in StreamCompositeRowsAsync(database, operation, composite, token, metadataTypes: types, dynamicTypes: dynamicTypes, nullable: nullable).ConfigureAwait(false))
+        var source = incoming is null
+            ? StreamCompositeRowsAsync(database, operation, composite, token, metadataTypes: types, dynamicTypes: dynamicTypes, nullable: nullable)
+            : StreamCompositeInputRowsAsync(database, operation, composite, incoming, token, types, dynamicTypes, nullable);
+        await foreach (var row in source.ConfigureAwait(false))
         {
             if (scalarsOnly)
             {
@@ -148,13 +152,13 @@ internal static partial class GraphPlanExecutor
         finally { operation.FunctionBindings = parentBindings; }
     }
 
-    private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamCompositeBindingsAsync(GraphDatabase database,
+    private static async IAsyncEnumerable<object?[]> StreamCompositeInputRowsAsync(GraphDatabase database,
         GraphOperation operation, GraphCompositePlan composite, IAsyncEnumerable<IReadOnlyDictionary<string, object?>> source,
-        [EnumeratorCancellation] CancellationToken token)
+        [EnumeratorCancellation] CancellationToken token, DatabaseType[]? metadataTypes = null,
+        bool[]? dynamicTypes = null, bool[]? nullable = null)
     {
         var budget = operation.QueryBudget!;
         using var memory = new GraphMemoryOwner(budget.Memory);
-        using var rowMemory = new GraphMemoryOwner(budget.Memory);
         var incoming = new List<IReadOnlyDictionary<string, object?>>();
         await foreach (var binding in source.ConfigureAwait(false))
         {
@@ -162,10 +166,23 @@ internal static partial class GraphPlanExecutor
             var copy = new Dictionary<string, object?>(binding, StringComparer.Ordinal);
             memory.Add(64); memory.RetainValue(copy, token); incoming.Add(copy);
         }
-        await foreach (var values in StreamCompositeRowsAsync(database, operation, composite, token, incoming).ConfigureAwait(false))
+        await foreach (var values in StreamCompositeRowsAsync(database, operation, composite, token, incoming,
+            metadataTypes, dynamicTypes, nullable).ConfigureAwait(false))
+        { yield return values; }
+    }
+
+    private static async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamCompositeBindingsAsync(GraphDatabase database,
+        GraphOperation operation, GraphCompositePlan composite, IAsyncEnumerable<IReadOnlyDictionary<string, object?>> source,
+        [EnumeratorCancellation] CancellationToken token)
+    {
+        using var rowMemory = new GraphMemoryOwner(operation.QueryBudget!.Memory);
+        await foreach (var values in StreamCompositeInputRowsAsync(database, operation, composite, source, token).ConfigureAwait(false))
         {
             var binding = new Dictionary<string, object?>(StringComparer.Ordinal);
-            for (int i = 0; i < values.Length; i++) { binding.Add(composite.Projections[i].Name, values[i]); }
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (composite.Projections[i].BindingName is { } name) { binding.Add(name, values[i]); }
+            }
             rowMemory.RetainValue(binding, token);
             try { yield return binding; }
             finally { rowMemory.ReleaseValue(binding); }
@@ -201,7 +218,11 @@ internal static partial class GraphPlanExecutor
             { input = StreamStageAsync(stage, input, layout, budget, operation, parameters, token); }
         }
         if (plan.Stages[^1] is GraphCompositeStagePlan finalComposite)
-        { input = StreamCompositeBindingsAsync(database, operation, finalComposite.Composite, input, token); }
+        {
+            await foreach (var row in StreamCompositeInputRowsAsync(database, operation, finalComposite.Composite, input, token).ConfigureAwait(false))
+            { yield return row; }
+            yield break;
+        }
         if (plan.Grouping is { } grouping) { input = StreamGroupsAsync(grouping, input, operation, parameters, token); }
         var distinct = plan.Distinct is null ? null : new HashSet<object?[]>(GraphRowComparer.Instance);
         bool ordered = plan.SortPage is { Keys.Count: > 0 };

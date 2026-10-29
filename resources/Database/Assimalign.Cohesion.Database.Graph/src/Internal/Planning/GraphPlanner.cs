@@ -161,7 +161,7 @@ internal sealed partial class GraphPlanner
                 { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
                 var shared = ReductionState.SharedWork ??= ReductionState.Work ?? new GraphReductionWork(token);
                 var composite = PlanComposite(new GqlQueryExpression(compositeStage.Query, stage.Location), _parameters,
-                    pathsRequest && stageIndex == stages.Count - 1, token, new Dictionary<string, GraphBindingShape>(shapes, StringComparer.Ordinal), shared);
+                    pathsRequest && stageIndex == stages.Count - 1, token, CompositeInputShapes(), shared);
                 compositeWarnings!.AddRange(tokens.Warnings.Skip(reportedWarnings));
                 reportedWarnings = tokens.Warnings.Count;
                 compositeWarnings.AddRange(composite.Warnings);
@@ -179,7 +179,7 @@ internal sealed partial class GraphPlanner
                     if (composite.Shapes[i].Group) { groupVariables.Add(name); }
                 }
                 var output = composite.Projections.Select(projection => projection with
-                    { Expression = new GqlVariableExpression(projection.Name) }).ToArray();
+                    { Expression = new GqlVariableExpression(projection.BindingName ?? projection.Name) }).ToArray();
                 planned.Add(new GraphCompositeStagePlan(compositeStage,
                     new GraphPlan(statement, []) { Projections = output, Parameters = _parameters, Warnings = composite.Warnings }, composite));
                 if (stageIndex == stages.Count - 1) { compositeResultShapes = composite.Shapes; }
@@ -514,6 +514,23 @@ internal sealed partial class GraphPlanner
 
         void ClearScope()
         { variables.Clear(); declarations.Clear(); shapes.Clear(); mandatoryVariables.Clear(); boundVariables.Clear(); groupVariables.Clear(); }
+
+        Dictionary<string, GraphBindingShape> CompositeInputShapes()
+        {
+            var incoming = new Dictionary<string, GraphBindingShape>(StringComparer.Ordinal);
+            foreach (var variable in variables)
+            {
+                token.ThrowIfCancellationRequested();
+                var expression = new GqlVariableExpression(variable.Key);
+                var shape = shapes.TryGetValue(variable.Key, out var recorded) ? recorded : Shape(expression);
+                // Ordinary scalar shapes do not represent a named path at their root.
+                // Import the binding's proven kind separately from its value shape.
+                var kinds = (GraphEntityShape[])shape.EntityKinds.Clone();
+                kinds[0] = new(ProjectionKind(expression), !mandatoryVariables.Contains(variable.Key));
+                incoming.Add(variable.Key, shape with { EntityKinds = kinds });
+            }
+            return incoming;
+        }
 
         bool MayReturn(GqlExpression expression, bool entity, int accesses = 0) => GraphValueExpressions.MayReturn(expression, _parameters, entity,
             (name, depth, entities) => shapes.TryGetValue(name, out var shape)

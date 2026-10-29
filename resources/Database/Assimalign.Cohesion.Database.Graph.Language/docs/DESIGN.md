@@ -660,6 +660,14 @@ cover the admitted forms and deferred operators. Diagnostics: CG00015 missing op
 CG00016 mixed UNION modes, CG01020 column names/order/count mismatch, CG02017 incompatible
 result shape, CG05029 modifying operand, and CG05030 UNION distinct-state memory refusal.
 
+NEXT passes each variable's proven binding kind as well as its value shape into every operand;
+named paths remain valid for ExecutePaths and path property access remains a planning CG03003,
+even on empty inputs. Union boundaries use decoded variable names for later references and star.
+Runtime type and nullability reconciliation also applies to a union ending a NEXT chain.
+Standalone ORDER BY/OFFSET/SKIP/LIMIT after NEXT retains CK00001 naming the unsupported form.
+INSERT followed by NEXT RETURN * parses, but its empty final projection is CG05001 during planning,
+before acquiring the writer lock or applying any mutation.
+
 ## Linear composition (#1145)
 
 The stage list is the planner/executor input. A leading NEXT or WITH immediately followed by NEXT is CG00002. A hand-built RETURN predicate is CG05001; predicates belong to WITH. The original constructors retain the owner-selected single-segment facade for hand-built ASTs; SHOW composition is rejected through either shape. Empty or missing mandatory stage operands are refused by the planner with CG05001. NEXT and FOR are profile keywords and also remain legal variable names and aliases, so `RETURN a AS next NEXT ...` and property keys named next or for remain valid.

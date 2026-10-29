@@ -429,6 +429,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C3) | CG05028 | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
 | New (#1737, GQ-Q1) | CG05029 | A composite query contains a modifying operand |
 | New (#1737, GQ-Q1) | CG05030 | UNION duplicate-elimination state exceeds the statement memory budget |
+| New (#1737, GQ-Q1 fixes) | CG05031 | Internal statement lookup unexpectedly lacks its key; original cause is retained |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |

@@ -212,6 +212,8 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Next] =
             [
                 new("RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x", [[10L], [20L]]),
+                new("LET \"a\"=1 RETURN \"a\" UNION ALL LET \"a\"=2 RETURN \"a\" NEXT RETURN \"a\"*10 AS y", [[10L], [20L]]),
+                new("RETURN null AS k NEXT RETURN k AS x UNION ALL RETURN k AS x", [[null], [null]]),
                 new("LET x = $value RETURN x NEXT RETURN x + 1 AS y", [[6L]], Parameters: new Dictionary<string, object?> { ["value"] = 5L }),
             ],
             [GqlClauses.With] =

@@ -31,7 +31,14 @@ internal static partial class GraphPlanExecutor
             var stage = plan.Stages[i];
             if (stage.Stage is GqlReturnStage && i == plan.Stages.Count - 1) { continue; }
             if (stage is GraphCompositeStagePlan composite)
-            { source = StreamCompositeBindingsAsync(database, operation, composite.Composite, source, token); }
+            {
+                if (i == plan.Stages.Count - 1)
+                {
+                    return await ExecuteCompositeAsync(database, operation, composite.Composite with { Warnings = plan.Warnings },
+                        token, paths, scalarsOnly, compositeValues, source).ConfigureAwait(false);
+                }
+                source = StreamCompositeBindingsAsync(database, operation, composite.Composite, source, token);
+            }
             else if (stage.Stage is GqlMatchStage)
             {
                 foreach (var clause in stage.Plan.MatchClauses)
