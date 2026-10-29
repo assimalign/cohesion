@@ -83,7 +83,9 @@ column-context wrapping, and CS04067 for an identity incarnation removed during 
 CS06061 remains a persisted sequence metadata failure; live/retired owner collisions retain
 their existing catalog refusal, and admission is read-only even on malformed images. OVERRIDING
 USER performs binding and assignment checks before discarding an input, retaining their existing
-diagnostics; typed numeric casts that are discarded are not executed.
+diagnostics. Unknown literals under CAST retain CS02022 (22P02) for invalid text; existing
+constant-fold failures also propagate before discard. Typed numeric casts and volatile inputs
+that are discarded are not executed.
 CS05067 also bounds rewrite/backfill chunk rows and conversion buffers; refusal leaves the old
 table published and releases retained charges. Hidden sequence names/snapshots, conditional DML
 grants, allocation reductions and metadata precision corrections add no diagnostic, persisted

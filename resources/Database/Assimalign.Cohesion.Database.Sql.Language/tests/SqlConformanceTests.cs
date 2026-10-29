@@ -41,6 +41,8 @@ public class SqlConformanceTests
     [InlineData("ALTER TABLE t ALTER id RESTART WITH 10;", SqlQueryCommandType.Alter)]
     [InlineData("ALTER TABLE t ALTER id SET GENERATED ALWAYS;", SqlQueryCommandType.Alter)]
     [InlineData("INSERT INTO t OVERRIDING USER VALUE VALUES(8);", SqlQueryCommandType.Insert)]
+    [InlineData("INSERT INTO t OVERRIDING USER VALUE VALUES(CAST('abc' AS INT),1);", SqlQueryCommandType.Insert)]
+    [InlineData("MERGE INTO t USING (SELECT 1 AS k) s ON t.k=s.k WHEN NOT MATCHED THEN INSERT(id,k) OVERRIDING USER VALUE VALUES(CAST('abc' AS INT),1);", SqlQueryCommandType.Merge)]
     [InlineData("CREATE SEQUENCE s OWNED BY t.id;", SqlQueryCommandType.Create)]
     [InlineData("DISCARD ALL;", SqlQueryCommandType.Discard)]
     [InlineData("ALTER TABLE t ALTER v TYPE \"a space\" USING v;", SqlQueryCommandType.Alter)]

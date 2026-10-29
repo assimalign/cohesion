@@ -23,7 +23,8 @@ internal sealed partial class SqlPlanner
         { throw new SqlPlanningException("CS02003", string.Format(System.Globalization.CultureInfo.CurrentCulture,
             ErrorMessages.IdentityOverrideAssignmentType, type, target.Name, target.Type.Type), expression?.Location); }
         // Untyped string literals need input conversion during binding (PostgreSQL
-        // parse_coerce.c:233-249). Typed numeric conversions and volatile expressions
+        // parse_coerce.c:233-249); BindIgnoredIdentityInput also checks nested CASTs
+        // and constant folds. Typed numeric conversions and volatile expressions
         // are discarded without execution; NULL is replaced before NOT NULL checks.
         if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.String } &&
             value is SqlBoundConstant { Value: not null } constant)
