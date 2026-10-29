@@ -41,6 +41,12 @@ public interface IApplicationResourceDescriptor
     IReadOnlyList<ApplicationResourceDependency> Dependencies { get; }
 
     /// <summary>
+    /// Gets the configuration values the resource's instances receive with their deployment, in
+    /// declaration order.
+    /// </summary>
+    IReadOnlyList<ApplicationResourceSetting> Settings { get; }
+
+    /// <summary>
     /// Gets the placeholder for the endpoint the resource's platform gives it, through which its
     /// dependents reach every instance, such as a load balancer's address.
     /// </summary>
@@ -81,4 +87,38 @@ public interface IApplicationResourceDescriptor
     /// on this resource, directly or through others; or a permission is <see langword="default"/>.
     /// </exception>
     IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource, params ResourcePermission[] permissions);
+
+    /// <summary>
+    /// Gives the resource's instances a configuration value with their deployment.
+    /// </summary>
+    /// <remarks>
+    /// The infrastructure provider passes the value to every instance, for example as an environment
+    /// variable. Setting a name again replaces its value.
+    /// </remarks>
+    /// <param name="name">The configuration key, such as <c>Logging:LogLevel:Default</c>.</param>
+    /// <param name="value">The value.</param>
+    /// <returns>This descriptor.</returns>
+    /// <exception cref="System.ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
+    /// <exception cref="System.ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
+    IApplicationResourceDescriptor WithSetting(SettingName name, string value);
+
+    /// <summary>
+    /// Gives the resource's instances a configuration value filled in from another resource's
+    /// output, such as the endpoint of a store it uses.
+    /// </summary>
+    /// <remarks>
+    /// The resource depends on the output's resource, with no permissions unless
+    /// <see cref="DependsOn"/> grants them, so the gateway deploys it once that resource runs and
+    /// its outputs are known, then fills the value in. Setting a name again replaces its value.
+    /// </remarks>
+    /// <param name="name">The configuration key, such as <c>ConfigurationStore:Endpoint</c>.</param>
+    /// <param name="output">The placeholder for the output, from the other resource's descriptor.</param>
+    /// <returns>This descriptor.</returns>
+    /// <exception cref="System.ArgumentNullException"><paramref name="output"/> is <see langword="null"/>.</exception>
+    /// <exception cref="System.ArgumentException">
+    /// <paramref name="name"/> or the output's name is <see langword="default"/>; the output is this
+    /// resource's own, which exists only once it is deployed; the output's resource is not declared
+    /// in this hierarchy; or that resource already depends on this one, directly or through others.
+    /// </exception>
+    IApplicationResourceDescriptor WithSetting(SettingName name, ApplicationResourceOutput output);
 }

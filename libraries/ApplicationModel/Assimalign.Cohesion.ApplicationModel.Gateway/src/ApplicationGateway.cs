@@ -22,16 +22,18 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="RunAsync"/> loads the gateway's record from its <see cref="IGatewayStore"/>, plans each
-/// resource with the infrastructure provider, and deploys in dependency order: a resource or child
-/// gateway deploys once everything it depends on is ready, and independent ones deploy at the same
-/// time. Only the resources whose plan changes something are deployed; the others keep running. A
+/// <see cref="RunAsync"/> loads the gateway's record from its <see cref="IGatewayStore"/> and deploys
+/// in dependency order: a resource or child gateway deploys once everything it depends on is ready,
+/// and independent ones deploy at the same time. At that point the gateway fills in the resource's
+/// settings from the outputs of what it depends on and plans it with the infrastructure provider.
+/// Only the resources whose plan changes something are deployed; the others keep running. A
 /// resource is ready once an instance of its deployment has published and its outputs are read. A
 /// resource keeps its recorded state while its definition (the model's and the provider's revision)
-/// is unchanged, and keeps its registered instances while the platform keeps them running. Every
-/// created or updated resource must have an instance publish within <see cref="StartupTimeout"/> of
-/// its deployment: a new one that does not is torn down, an updated one is left to the platform,
-/// what depends on it is not deployed, and the run fails with
+/// is unchanged, even when a value filled in from a dependency changes, and keeps its registered
+/// instances while the platform keeps them running. Until it is planned, a resource runs as the
+/// previous run left it. Every created or updated resource must have an instance publish within
+/// <see cref="StartupTimeout"/> of its deployment: a new one that does not is torn down, an updated
+/// one is left to the platform, what depends on it is not deployed, and the run fails with
 /// <see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>. After startup the gateway tears down the
 /// resources and child gateways its record holds but the model no longer declares, then runs until
 /// cancelled. Cancellation stops the gateway; it does not tear down what the gateway deployed.
@@ -163,9 +165,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// <returns>A task that completes when the gateway stops.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// The gateway, or a gateway below it, cannot deploy its part in dependency order: a child gateway
-    /// deploys as one step, so it cannot both wait for one of its parent's steps and be waited for by
-    /// it. Nothing has been deployed.
+    /// The gateway, or a gateway below it, cannot deploy its part: a child gateway deploys as one step,
+    /// so it cannot both wait for one of its parent's steps and be waited for by it; or a resource's
+    /// setting uses an output of another gateway's resource. Nothing has been deployed.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// The gateway has already run, or the infrastructure provider returned no action list, no plan,
@@ -173,7 +175,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// </exception>
     /// <exception cref="ApplicationGatewayException">
     /// A created or updated resource published no manifest within <see cref="StartupTimeout"/> of its
-    /// deployment.
+    /// deployment (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>), or a setting uses an
+    /// output its resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>).
     /// </exception>
     public async Task RunAsync(IApplicationModel model, CancellationToken cancellationToken = default)
     {
@@ -186,12 +189,14 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
 
         try
         {
-            // Every gateway of this part must be able to deploy in order before anything deploys.
+            // Every gateway of this part must be able to deploy in order, and to fill in its
+            // resources' settings, before anything deploys.
             GatewayStep[] steps = GatewayStep.Order(model.Deployment);
             ThrowIfUnordered(model.Deployment.Gateways);
+            ThrowIfUnresolvable(model.Deployment);
 
             GatewayRecord? record = await _store.LoadAsync(model.Name, cancellationToken).ConfigureAwait(false);
-            await CreateResourcesAsync(model, record, steps, cancellationToken).ConfigureAwait(false);
+            CreateResources(model, record, steps);
             await DeployAsync(model, steps, cancellationToken).ConfigureAwait(false);
 
             // Retire what the model no longer declares only once the deployment has started, so a
@@ -425,7 +430,30 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         }
     }
 
-    private async Task CreateResourcesAsync(IApplicationModel model, GatewayRecord? record, GatewayStep[] steps, CancellationToken cancellationToken)
+    // Refuses a setting, in this gateway or any below it, that uses an output of another gateway's
+    // resource: a gateway learns only its own resources' outputs.
+    private static void ThrowIfUnresolvable(ApplicationManifest gateway)
+    {
+        foreach (ApplicationResourceManifest resource in gateway.Resources)
+        {
+            foreach (ApplicationResourceSetting setting in resource.Settings)
+            {
+                if (setting.Output is { } output && output.Gateway != gateway.Name)
+                {
+                    throw new ArgumentException(
+                        Format(ErrorMessages.GatewaySettingUnresolvable, setting.Name, resource.Provider, resource.Name, gateway.Name, output.Output, output.Provider, output.Name, output.Gateway),
+                        "model");
+                }
+            }
+        }
+
+        foreach (ApplicationManifest child in gateway.Gateways)
+        {
+            ThrowIfUnresolvable(child);
+        }
+    }
+
+    private void CreateResources(IApplicationModel model, GatewayRecord? record, GatewayStep[] steps)
     {
         var recorded = new Dictionary<(ProviderName Provider, ResourceName Name), GatewayResourceRecord>();
         foreach (GatewayResourceRecord entry in record?.Resources ?? [])
@@ -439,35 +467,11 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             IReadOnlyCollection<IApplicationResourceAction> actions = _infrastructure.GetResourceActions(model, manifest)
                 ?? throw new InvalidOperationException(Format(ErrorMessages.GatewayResourceActionsNull, manifest.Provider, manifest.Name));
 
-            InfrastructurePlan? plan = await _infrastructure.PlanResourceAsync(model, manifest, cancellationToken).ConfigureAwait(false);
-            if (plan?.Revision is null)
-            {
-                throw new InvalidOperationException(Format(ErrorMessages.GatewayResourcePlanNull, manifest.Provider, manifest.Name));
-            }
-
-            // The state recorded for a definition survives as long as the definition does; the
-            // registered instances survive only while the platform keeps them running.
-            string revision = string.Concat(Fingerprint(manifest), ":", plan.Revision);
+            // Until its step plans it, a resource runs as the previous run left it: its recorded
+            // state, outputs, and instances. The plan then keeps what still applies.
             recorded.Remove((manifest.Provider, manifest.Name), out GatewayResourceRecord? previous);
-            bool sameDefinition = previous is not null && previous.Revision == revision;
-
-            // The outputs, like the instances, belong to the workload that still runs.
-            bool sameWorkload = sameDefinition && plan.Change == InfrastructureChange.None;
-            ApplicationResource aggregate = ApplicationResource.Create(
-                manifest,
-                sameDefinition ? previous!.State : null,
-                actions,
-                sameWorkload ? previous!.Outputs : null);
-            var resource = new GatewayResource(aggregate, plan.Change, revision, previous);
-            if (sameWorkload)
-            {
-                foreach (ResourceManifest instance in previous!.Instances ?? [])
-                {
-                    resource.Register(instance);
-                }
-            }
-
-            lookup.Add((manifest.Provider, manifest.Name), resource);
+            ApplicationResource aggregate = ApplicationResource.Create(manifest, previous?.State, actions, previous?.Outputs);
+            lookup.Add((manifest.Provider, manifest.Name), new GatewayResource(aggregate, previous));
         }
 
         // The resources are kept in the order they deploy in.
@@ -599,16 +603,27 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         }
     }
 
-    // Deploys a resource when its plan changes it, waits for an instance of the deployment to
-    // publish, and reads the resource's outputs; then what depends on it can deploy.
+    // Fills in a resource's settings, plans it, deploys it when the plan changes it, waits for an
+    // instance of the deployment to publish, and reads the resource's outputs; then what depends on
+    // it can be planned.
     private async Task<bool> RunResourceAsync(IApplicationModel model, GatewayResource resource, CancellationToken cancellationToken)
     {
         ApplicationResourceManifest manifest = resource.Aggregate.Manifest;
-        if (resource.Change != InfrastructureChange.None)
+        IReadOnlyDictionary<SettingName, string> settings = ResolveSettings(manifest);
+        InfrastructurePlan? plan = await _infrastructure.PlanResourceAsync(model, manifest, settings, cancellationToken).ConfigureAwait(false);
+        if (plan?.Revision is null)
         {
-            // Current before the call: an in-process provider's instances publish before it returns.
-            resource.MarkCurrent();
-            await _infrastructure.DeployResourceAsync(model, manifest, cancellationToken).ConfigureAwait(false);
+            throw new InvalidOperationException(Format(ErrorMessages.GatewayResourcePlanNull, manifest.Provider, manifest.Name));
+        }
+
+        // The definition is the model's manifest, settings as declared, and the provider's revision.
+        // A value filled in from a dependency is not part of it, so a dependency that moved does not
+        // cost this resource its recorded state. Planned before the call: an in-process provider's
+        // instances publish before it returns.
+        resource.Plan(plan.Change, string.Concat(Fingerprint(manifest), ":", plan.Revision));
+        if (plan.Change != InfrastructureChange.None)
+        {
+            await _infrastructure.DeployResourceAsync(model, manifest, settings, cancellationToken).ConfigureAwait(false);
             await SaveAsync(cancellationToken).ConfigureAwait(false);
 
             bool started;
@@ -649,6 +664,33 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         return true;
     }
 
+    // The values of a resource's settings by name. Each output belongs to a resource of this gateway
+    // the resource depends on, which is ready, so its outputs have been read.
+    private IReadOnlyDictionary<SettingName, string> ResolveSettings(ApplicationResourceManifest manifest)
+    {
+        FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource> resources = Volatile.Read(ref _resources)!;
+        var settings = new Dictionary<SettingName, string>(manifest.Settings.Count);
+        foreach (ApplicationResourceSetting setting in manifest.Settings)
+        {
+            if (setting.Output is not { } output)
+            {
+                settings.Add(setting.Name, setting.Value!);
+                continue;
+            }
+
+            if (!resources[(output.Provider, output.Name)].Aggregate.Outputs.TryGetValue(output.Output, out string? value))
+            {
+                throw new ApplicationGatewayException(
+                    ApplicationGatewayErrorCode.OutputMissing,
+                    Format(ErrorMessages.GatewaySettingOutputMissing, setting.Name, manifest.Provider, manifest.Name, output.Output, output.Provider, output.Name));
+            }
+
+            settings.Add(setting.Name, value);
+        }
+
+        return settings.AsReadOnly();
+    }
+
     private GatewayResource Find(ApplicationResourceManifest manifest)
     {
         return Volatile.Read(ref _resources)![(manifest.Provider, manifest.Name)];
@@ -658,7 +700,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     {
         foreach (GatewayResourceRecord retired in Volatile.Read(ref _retiredResources))
         {
-            await _infrastructure.TeardownResourceAsync(model, new ApplicationResourceManifest(retired.Provider, retired.Name, []), cancellationToken).ConfigureAwait(false);
+            await _infrastructure.TeardownResourceAsync(model, new ApplicationResourceManifest(retired.Provider, retired.Name, [], []), cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref _retiredResources, Array.FindAll(Volatile.Read(ref _retiredResources), entry => !ReferenceEquals(entry, retired)));
             await SaveAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -699,7 +741,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
 
             if (!resource.IsCurrent)
             {
-                // Until the run deploys a resource, its entry stays as the previous run left it, so a
+                // Until the run plans a resource, its entry stays as the previous run left it, so a
                 // run that fails or stops before reaching it leaves its record untouched.
                 if (resource.Previous is not null)
                 {
@@ -713,7 +755,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             resources.Add(new GatewayResourceRecord(
                 aggregate.Manifest.Provider,
                 aggregate.Manifest.Name,
-                resource.Revision,
+                resource.Revision!,
                 [.. aggregate.State],
                 [.. aggregate.Instances],
                 aggregate.Outputs));

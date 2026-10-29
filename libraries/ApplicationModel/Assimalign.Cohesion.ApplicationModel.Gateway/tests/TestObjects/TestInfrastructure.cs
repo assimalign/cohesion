@@ -46,6 +46,12 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     /// <summary>The workloads the platform runs, with the revision each runs.</summary>
     public ConcurrentDictionary<ResourceName, string> Running { get; } = new();
 
+    /// <summary>The settings each workload runs with, which its instances receive when they start.</summary>
+    public ConcurrentDictionary<ResourceName, IReadOnlyDictionary<SettingName, string>> RunningSettings { get; } = new();
+
+    /// <summary>The settings each resource was last planned with.</summary>
+    public ConcurrentDictionary<ResourceName, IReadOnlyDictionary<SettingName, string>> Planned { get; } = new();
+
     public ConcurrentDictionary<ResourceInstanceKey, (TestInstance Instance, ResourceService Service)> Instances { get; } = new();
 
     /// <summary>
@@ -69,20 +75,33 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         return [Scale];
     }
 
-    public ValueTask<InfrastructurePlan> PlanResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
+    public ValueTask<InfrastructurePlan> PlanResourceAsync(
+        IApplicationModel model,
+        ApplicationResourceManifest resource,
+        IReadOnlyDictionary<SettingName, string> settings,
+        CancellationToken cancellationToken = default)
     {
+        Record($"plan:{resource.Name}");
+        Planned[resource.Name] = settings;
+
+        // A workload that runs other settings needs an update; the revision leaves them out.
         string revision = Revisions.GetValueOrDefault(resource.Name, "1");
         InfrastructureChange change = !Running.TryGetValue(resource.Name, out string? running) ? InfrastructureChange.Create
-            : running == revision ? InfrastructureChange.None
+            : running == revision && SameSettings(RunningSettings.GetValueOrDefault(resource.Name), settings) ? InfrastructureChange.None
             : InfrastructureChange.Update;
 
         return ValueTask.FromResult(new InfrastructurePlan(change, revision));
     }
 
-    public async ValueTask DeployResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
+    public async ValueTask DeployResourceAsync(
+        IApplicationModel model,
+        ApplicationResourceManifest resource,
+        IReadOnlyDictionary<SettingName, string> settings,
+        CancellationToken cancellationToken = default)
     {
         Record(Deployed, $"{model.Name}:{resource.Provider}/{resource.Name}");
         Record($"deploy:{resource.Name}");
+        RunningSettings[resource.Name] = settings;
         Running[resource.Name] = Revisions.GetValueOrDefault(resource.Name, "1");
         if (Silent.Contains(resource.Name))
         {
@@ -123,8 +142,8 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     }
 
     /// <summary>
-    /// The calls in the order they were made: <c>deploy:</c>, <c>outputs:</c> and <c>teardown:</c> with
-    /// a resource name, <c>gateway:</c> with a child gateway's.
+    /// The calls in the order they were made: <c>plan:</c>, <c>deploy:</c>, <c>outputs:</c> and
+    /// <c>teardown:</c> with a resource name, <c>gateway:</c> with a child gateway's.
     /// </summary>
     public string[] Events()
     {
@@ -140,10 +159,13 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         return Array.IndexOf(Events(), call);
     }
 
-    /// <summary>Starts one instance, as a platform does on deployment or scale-out.</summary>
+    /// <summary>
+    /// Starts one instance with the settings its workload runs with, as a platform does on deployment
+    /// or scale-out.
+    /// </summary>
     public async Task<TestInstance> StartInstanceAsync(ProviderName provider, ResourceName name, CancellationToken cancellationToken = default)
     {
-        var instance = new TestInstance(provider, name);
+        var instance = new TestInstance(provider, name, RunningSettings.GetValueOrDefault(name) ?? new Dictionary<SettingName, string>());
         ResourceService service = ResourceService.Create(ResourceControlPlane.Create(instance, TestSerializer.Json), new GatewayForwarder(this));
         await service.StartingAsync(cancellationToken);
         Instances[instance.Key] = (instance, service);
@@ -163,6 +185,24 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     private void Record(string call)
     {
         Record(_events, call);
+    }
+
+    private static bool SameSettings(IReadOnlyDictionary<SettingName, string>? running, IReadOnlyDictionary<SettingName, string> planned)
+    {
+        if ((running?.Count ?? 0) != planned.Count)
+        {
+            return false;
+        }
+
+        foreach (KeyValuePair<SettingName, string> setting in planned)
+        {
+            if (!running!.TryGetValue(setting.Key, out string? value) || value != setting.Value)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private async Task StartLaterAsync(ApplicationResourceManifest resource, Func<Task> delay)

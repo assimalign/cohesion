@@ -28,15 +28,17 @@ flowchart LR
 ## Startup: reconcile, then run
 
 `RunAsync` first orders its part of the hierarchy, and refuses a part that it, or a gateway below
-it, cannot deploy in dependency order (G19). It loads the gateway's record from its `IGatewayStore`
-and plans every resource with the infrastructure provider. It creates one aggregate per resource,
-seeded from the record (G12), and opens publications. It then deploys in dependency order (G17):
-each resource and child gateway is a step that runs once the steps it waits for are ready, and
-independent steps run at the same time. A resource's step deploys it only when its plan creates or
-updates it, waits for an instance of that deployment to publish within the startup window, and
-reads its outputs (G18). After startup it tears down what the record holds but the model no longer
-declares, and runs until cancelled. A gateway restarted with the same model plans no change, so it
-deploys nothing and waits for no publication: it adopts what runs.
+it, cannot deploy in dependency order (G19) or whose settings it cannot fill in (G22). It loads the
+gateway's record from its `IGatewayStore`, creates one aggregate per resource as the previous run
+left it (G23), and opens publications. It then deploys in dependency order (G17): each resource and
+child gateway is a step that runs once the steps it waits for are ready, and independent steps run
+at the same time. A resource's step fills in its settings from the outputs of what it depends on,
+plans it with the infrastructure provider, keeps what the plan leaves in place (G12), deploys it
+only when the plan creates or updates it, waits for an instance of that deployment to publish within
+the startup window, and reads its outputs (G18). After startup it tears down what the record holds
+but the model no longer declares, and runs until cancelled. A gateway restarted with the same model
+and the same outputs plans no change, so it deploys nothing and waits for no publication: it adopts
+what runs.
 
 ```mermaid
 sequenceDiagram
@@ -46,11 +48,12 @@ sequenceDiagram
     participant Infra as Infrastructure provider
     participant Inst as Resource instance
     Caller->>GW: RunAsync(model)
-    GW->>GW: order the part, refuse one that cannot deploy in order
+    GW->>GW: order the part, refuse one it cannot deploy in order or configure
     GW->>Store: LoadAsync(gateway)
-    GW->>Infra: PlanResourceAsync, once per resource
     GW->>GW: seed aggregates from the record, open publications
     loop Each step once the steps it waits for are ready, independent steps at once
+        GW->>GW: fill in the settings from the outputs of what it depends on
+        GW->>Infra: PlanResourceAsync with the settings
         GW->>Infra: DeployResourceAsync if created or updated, or DeployGatewayAsync
         GW->>Store: SaveAsync(record)
         Infra->>Inst: start or replace the workload
@@ -101,12 +104,12 @@ The root therefore deploys `identity`, waits until it is ready, then deploys `ea
 | Type | Role |
 | --- | --- |
 | `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IResourceManifestPublisher` (`PublishAsync`, the publication endpoint's logic). `RecordAsync` records a write's snapshot and saves the record. Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
-| `IInfrastructureProvider` | The platform: plans a resource (`PlanResourceAsync`), deploys resources and child gateways, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears down resources and child gateways, and supplies each resource's infrastructure actions. |
-| `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run. |
+| `IInfrastructureProvider` | The platform: plans a resource with its settings' values (`PlanResourceAsync`), deploys resources with those values and child gateways, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears down resources and child gateways, and supplies each resource's infrastructure actions. |
+| `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IGatewayStore`, `GatewayRecord`, `GatewayResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
 | `JsonFileGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
 | `GatewayDeploymentManifest` | What a gateway deploys (the whole hierarchy plus the gateway's name) and where (opaque provider settings). UTF-8 JSON with camel-case names. `ToModel()` creates the gateway's model. |
-| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`). |
+| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`, or `OutputMissing` for a setting whose output the provider did not report). |
 
 In ApplicationModel: `IApplicationModel.Role` and `GatewayRole` say whether a model's gateway is the
 root or a composite; `IApplicationResourceAction` is an infrastructure action, and
@@ -142,9 +145,9 @@ when every deployment call had returned and covered every resource.
 
 **G5 — Publications open before deployment.** The aggregates exist before the provider starts
 anything, so a fast instance cannot publish before its aggregate exists. An instance that publishes
-before its resource's deployment starts, such as a restarted instance of the previous definition
-while the resource waits for its dependencies, is registered but does not make the resource ready
-(G18).
+before its resource is planned, such as a restarted instance of the previous definition while the
+resource waits for its dependencies, is registered with the state the previous run recorded (G23)
+but does not make the resource ready (G18).
 
 **G6 — Cancellation is not teardown.** Cancelling `RunAsync` stops the gateway, during startup or
 after, and leaves what it deployed running. Teardown happens only to a resource that missed its
@@ -162,8 +165,9 @@ Dispatch uses the controls' statuses: `NotFound`, `NotSupported`, and `Rejected`
 not bind.
 
 **G10 — Reconcile, don't redeploy (owner request, 2026-10-28).** The provider plans each resource
-first, from what the platform runs: `None`, `Create`, or `Update`, and the revision it would run.
-The gateway deploys only what changes. A plan of `None` is adopted: the resource starts registered,
+before it deploys it, from what the platform runs: `None`, `Create`, or `Update`, and the revision it
+would run. A resource is planned at its step, once its settings' values are known (G22). The gateway
+deploys only what changes. A plan of `None` is adopted: the resource starts registered,
 outside the startup window, so a gateway restarted with the same model deploys nothing and tears
 nothing down. This replaces the restart behaviour open question 2 described, where a restarted
 gateway saw no registrations and tore everything down. A plan step separate from the deployment
@@ -179,13 +183,16 @@ Database area replaces it in each gateway once that area is ready, and the gatew
 Snapshot values are stored as base64, because the platform's content serializer may not be JSON.
 
 **G12 — State follows the definition.** A resource's revision is a fingerprint of its manifest
-(provider, name, dependencies) followed by the provider's revision (image, platform settings). The
-recorded state survives while the revision does. A new revision is a new deployment of that
-resource and starts without the previous state; a workload that disappeared and is created again
-keeps it. Registered instances survive only while the plan is `None`, because a created or updated
-workload replaces them. This refines "state lasts until the next deployment" to each resource: a
+(provider, name, dependencies, settings as declared) followed by the provider's revision (image,
+platform settings). The recorded state survives while the revision does. A new revision is a new
+deployment of that resource and starts without the previous state; a workload that disappeared and
+is created again keeps it. Registered instances survive only while the plan is `None`, because a
+created or updated workload replaces them; an instance that renewed or published during the run
+still runs and stays (G23). This refines "state lasts until the next deployment" to each resource: a
 deployment that does not change a resource leaves its operator changes in place, which keeps every
-running instance consistent with the record.
+running instance consistent with the record. A setting's value filled in from a dependency's output
+is not part of the definition (G22), so a dependency that moved updates the resource but keeps its
+operator changes; a value changed in the model is part of it.
 
 **G13 — A missed update is not torn down.** A new resource that misses the startup window is torn
 down (G4). An updated one is not: its previous instances are the platform's to keep or replace, as
@@ -209,7 +216,8 @@ an instance that publishes again while its lease expires is kept or dropped as a
 **G16 — Outputs are read per resource, before what depends on it (owner request, 2026-10-28).** As
 soon as a resource is ready (G18), the gateway asks the provider for its outputs
 (`GetResourceOutputsAsync`), records them on its aggregate, and saves the record when any changed;
-only then do the steps that wait for the resource deploy. An adopted resource starts with the
+only then are the steps that wait for the resource planned and deployed, with those values in their
+settings (G22). An adopted resource starts with the
 outputs recorded for the workload that still runs, then takes the platform's current values, so an
 address the platform changed while the gateway was down is picked up. `TryGetOutput` resolves a
 placeholder for a resource this gateway runs. A placeholder for another gateway's resource does not
@@ -231,11 +239,11 @@ thirty seconds. *Superseded:* child gateways first, then resources, each in decl
 or updated resource is ready once an instance has published after its deployment started, and the
 gateway has read its outputs (G16). An adopted resource is ready once its outputs are read. A child
 gateway is ready once `DeployGatewayAsync` returns. A first publication is the whole gate for now:
-health checks and "every instance" readiness need the gateway-to-instance channel. The deployment
-marks the resource current before it calls the provider, because an in-process provider's
-instances publish before the call returns; an instance that published earlier runs the previous
-definition and is registered without opening the gate. An instance manifest does not say which
-revision it runs, so an old instance that publishes during the rollout still opens it.
+health checks and "every instance" readiness need the gateway-to-instance channel. The plan marks
+the resource current before the gateway calls the provider to deploy it, because an in-process
+provider's instances publish before the call returns; an instance that published earlier runs the
+previous definition and is registered without opening the gate. An instance manifest does not say
+which revision it runs, so an old instance that publishes during the rollout still opens it.
 
 **G19 — A child gateway is one step.** A gateway cannot see the readiness of what its child deploys,
 so it orders the child with everything below it as one step. The child waits for the gateway's own
@@ -263,13 +271,44 @@ and is what `RunAsync` throws. *Rejected:* stopping every step at the first miss
 waiting for their windows would be abandoned, and the next run would report them one failure at a
 time.
 
-**G21 — A resource's record changes only when the run deploys it.** Until a created or updated
-resource's deployment starts, every save writes its previous entry unchanged, or nothing for a new
-resource. A run that fails or stops before reaching a resource therefore leaves its revision, state,
-instances, and outputs as they were. A later run that rolls the model back finds the resource's
-operator changes, because the platform never replaced the workload. Without this, the first save
-of a run would record the new definition's empty state for resources still waiting for their
-dependencies.
+**G21 — A resource's record changes only when the run plans it.** Until a resource's step plans it,
+every save writes its previous entry unchanged, or nothing for a new resource. A run that fails or
+stops before reaching a resource therefore leaves its revision, state, instances, and outputs as
+they were. A later run that rolls the model back finds the resource's operator changes, because the
+platform never replaced the workload. Without this, the first save of a run would record the new
+definition's empty state for resources still waiting for their dependencies. A write recorded on an
+instance before its resource is planned is held in memory and saved once the plan keeps it.
+
+**G22 — Settings are filled in at the step, from this gateway's own outputs (owner request,
+2026-10-29).** A resource's settings (ApplicationModel D17) are configuration values its instances
+receive with their deployment. At the resource's step, everything it depends on is ready and its
+outputs are read (G16), so the gateway fills in each output-valued setting from the aggregate of the
+resource it names. It then plans the resource with the values (`PlanResourceAsync`), because the
+platform needs an update when it runs other values, and deploys with the same values
+(`DeployResourceAsync`); the provider delivers them, for example as environment variables. The
+values are not part of the resource's definition: the gateway fingerprints the settings as declared,
+and the provider's revision leaves the values out. A redeployed dependency with a new address
+therefore updates its dependents, which keep their operator changes (G12). A setting whose output the
+provider did not report fails the run with `OutputMissing`, naming the setting and the output, as a
+provider failure does (G20). A gateway learns only its own resources' outputs, so a setting that uses
+an output of another gateway's resource is refused before anything deploys, for this gateway and
+every gateway below it, as G19 refuses an unorderable part (open question 11). *Superseded:*
+planning every resource before the first step (open question 9), which planned a dependent before
+the values it would deploy with existed. *Rejected:* recording the values in the gateway's record
+and upgrading a `None` plan to `Update` when they changed. The provider could then plan before the
+values exist, but it could not tell that the platform drifted from them.
+
+**G23 — Until its step plans it, a resource runs as the previous run left it.** The gateway creates
+every aggregate before the first step, so publications are accepted from the start (G5), but a
+resource's plan waits for its dependencies. Until then its aggregate holds the recorded state and
+outputs, and the recorded instances are carried with fresh leases, so an instance that renews or
+restarts while the resource waits keeps its registration or restores the operator's changes. The
+plan then keeps what still applies: a plan of `None` for the same definition keeps everything; any
+other plan drops the outputs and the carried instances that have not renewed or published since,
+because the platform replaces the workload; a new definition also clears the state. An instance that
+proved it runs stays registered through an update, so it does not have to publish again, and it does
+not open the startup gate either. *Rejected:* refusing publications until the resource is planned. An
+instance restarted while a long chain deploys would fail its start until the gateway reached it.
 
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
@@ -307,10 +346,16 @@ candidates for an event source.
    the descriptor and the manifest.
 8. **Deployment order — settled.** Dependencies order deployment (G17), child gateways included
    (G19).
-9. **Plans before outputs.** The gateway plans every resource before the first step runs. Once a
-   resource's settings are filled in from its dependencies' outputs, the dependent's definition,
-   and so its plan and revision, depend on those outputs. Its plan must then wait for them, and a
-   publication can arrive for a resource that is not planned yet.
+9. **Plans before outputs — settled.** Each resource is planned at its step, with its settings'
+   values (G22); until then it runs as the previous run left it, so early publications are accepted
+   (G23).
 10. **Readiness across gateways.** A parent waits for a child gateway to start, not for the
     resources it deploys (G19). Waiting for them needs a child to publish its resources' readiness
     and outputs to its parent, the gateway-to-gateway publication already needed for outputs.
+11. **Settings across gateways.** A setting may use only an output of its own gateway's resources
+    (G22), so east's `orders-api` cannot yet read the root's identity provider endpoint. That
+    direction needs no new channel: the root deploys east only once the identity provider is ready
+    (G19), so it could pass the value down in east's deployment manifest, and east fill it in from
+    there. That changes `DeployGatewayAsync` to take the deployment manifest the gateway builds. A
+    setting that uses an output of a resource in a child's or a sibling's part needs that child to
+    publish its outputs to its parent (question 10).

@@ -13,7 +13,7 @@ internal static class TestManifests
 
     public static readonly ResourceActionName FlushCache = "flush-cache";
 
-    public static ApplicationResourceManifest OrdersApi { get; } = new("Web", "orders-api", []);
+    public static ApplicationResourceManifest OrdersApi { get; } = new("Web", "orders-api", [], []);
 
     /// <summary>An instance with a stateful log-level control and an imperative flush.</summary>
     public static ResourceManifest Instance()

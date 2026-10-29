@@ -15,12 +15,15 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
     private readonly ApplicationSetComposition _composition;
     private readonly List<ApplicationResourceDependency> _dependencies = [];
     private readonly List<ApplicationResourceDescriptor> _targets = [];
+    private readonly List<ApplicationResourceSetting> _settings = [];
     private readonly ReadOnlyCollection<ApplicationResourceDependency> _dependenciesView;
+    private readonly ReadOnlyCollection<ApplicationResourceSetting> _settingsView;
 
     public ApplicationResourceDescriptor(ApplicationSetComposition composition, ProviderName provider, ResourceName name)
     {
         _composition = composition;
         _dependenciesView = _dependencies.AsReadOnly();
+        _settingsView = _settings.AsReadOnly();
         Provider = provider;
         Name = name;
     }
@@ -32,6 +35,8 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
     public ResourceName Name { get; }
 
     public IReadOnlyList<ApplicationResourceDependency> Dependencies => _dependenciesView;
+
+    public IReadOnlyList<ApplicationResourceSetting> Settings => _settingsView;
 
     public IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource, params ResourcePermission[] permissions)
     {
@@ -94,9 +99,72 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
         return new ApplicationResourceOutput(Set.Name, Provider, Name, name);
     }
 
+    public IApplicationResourceDescriptor WithSetting(SettingName name, string value)
+    {
+        if (name.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.SettingNameMissing, nameof(name));
+        }
+
+        ArgumentNullException.ThrowIfNull(value);
+
+        _composition.Hierarchy.ThrowIfBuilt();
+
+        AddOrReplace(new ApplicationResourceSetting(name, value, null));
+        return this;
+    }
+
+    public IApplicationResourceDescriptor WithSetting(SettingName name, ApplicationResourceOutput output)
+    {
+        if (name.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.SettingNameMissing, nameof(name));
+        }
+
+        ArgumentNullException.ThrowIfNull(output);
+
+        if (output.Output.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.OutputNameMissing, nameof(output));
+        }
+
+        if (output.Gateway == Set.Name && output.Provider == Provider && output.Name == Name)
+        {
+            throw new ArgumentException(Format(ErrorMessages.ApplicationSettingOutputSelf, name, Provider, Name, output.Output), nameof(output));
+        }
+
+        if (!_composition.Hierarchy.Resources.TryGetValue((output.Gateway, output.Provider, output.Name), out ApplicationResourceDescriptor? target))
+        {
+            throw new ArgumentException(
+                Format(ErrorMessages.ApplicationSettingOutputUnknown, name, Provider, Name, output.Provider, output.Name, output.Gateway),
+                nameof(output));
+        }
+
+        // The value exists only once the other resource is deployed, so this one depends on it. A
+        // dependency that would close a cycle throws here, before the setting is recorded.
+        DependsOn(target);
+        AddOrReplace(new ApplicationResourceSetting(name, null, output));
+        return this;
+    }
+
     public ApplicationResourceManifest ToManifest()
     {
-        return new ApplicationResourceManifest(Provider, Name, Array.AsReadOnly(_dependencies.ToArray()));
+        return new ApplicationResourceManifest(Provider, Name, Array.AsReadOnly(_dependencies.ToArray()), Array.AsReadOnly(_settings.ToArray()));
+    }
+
+    // A name set again keeps its place and takes the new value.
+    private void AddOrReplace(ApplicationResourceSetting setting)
+    {
+        for (int index = 0; index < _settings.Count; index++)
+        {
+            if (_settings[index].Name == setting.Name)
+            {
+                _settings[index] = setting;
+                return;
+            }
+        }
+
+        _settings.Add(setting);
     }
 
     // The dependency path from this resource to another, both included, or null when this resource
@@ -179,5 +247,7 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
         public ResourceName Name => _descriptor.Name;
 
         public IReadOnlyList<ApplicationResourceDependency> Dependencies => _descriptor.Dependencies;
+
+        public IReadOnlyList<ApplicationResourceSetting> Settings => _descriptor.Settings;
     }
 }

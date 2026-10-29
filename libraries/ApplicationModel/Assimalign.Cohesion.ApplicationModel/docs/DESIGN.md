@@ -15,9 +15,11 @@ The library has three parts:
    `RunAsync`, which hands the model to the gateway.
 2. **Declarative.** What each gateway deploys. An `IApplicationSet` is one gateway's scope: the
    application resources it runs and the child gateways it runs, each with a set of its own. An
-   `IApplicationResourceDescriptor` declares one resource and, through `DependsOn`, the resources it
-   needs and the permissions it needs on each. `GetManifest()` projects a set and everything below
-   it as `ApplicationManifest` data; the root's manifest is the global manifest.
+   `IApplicationResourceDescriptor` declares one resource: through `DependsOn`, the resources it
+   needs and the permissions it needs on each; through `WithSetting`, the configuration values its
+   instances receive with their deployment, given in the model or filled in from another resource's
+   output. `GetManifest()` projects a set and everything below it as `ApplicationManifest` data; the
+   root's manifest is the global manifest.
 3. **Runtime.** `IApplicationResource` is a gateway's view of one declared resource: the instances
    running it and the state written to them since the gateway was deployed. It answers an
    instance's publication with the state to restore, and a recorded write with the instances that
@@ -70,10 +72,10 @@ flowchart TB
 | `IApplicationResourceAction` | An infrastructure action on a resource, such as `scale`, executed against the platform. Same invocation and result types as a control. |
 | `IApplicationGateway` | The seam ApplicationModel.Gateway implements: `RunAsync(model)`. Deliberately minimal until chunk 3. |
 | `IApplicationSet` | One gateway's scope. The builder is the root; `AddGateway` makes a child; `AddResource` declares a resource. |
-| `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency, which also orders deployment; declaring it again adds the new permissions, and one that would close a cycle is refused. |
-| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency` | The hierarchy as data. A dependency names its target by gateway, provider, and name. |
-| `IApplicationResource`, `ApplicationResource` | A gateway's aggregate of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`. |
-| `GatewayName`, `GatewayId`, `ResourcePermission` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. |
+| `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency, which also orders deployment; declaring it again adds the new permissions, and one that would close a cycle is refused. `WithSetting(name, value)` and `WithSetting(name, output)` give its instances a configuration value; the second depends on the output's resource. `Endpoint` and `Output(name)` hand out its own output placeholders. |
+| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting` | The hierarchy as data. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. |
+| `IApplicationResource`, `ApplicationResource` | A gateway's aggregate of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`. The gateway also sets its `Outputs` and clears its state when a deployment redefines it. |
+| `GatewayName`, `GatewayId`, `ResourcePermission`, `OutputName`, `SettingName` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. `SettingName` is a configuration key and compares case-insensitively. |
 
 ## Decisions
 
@@ -121,7 +123,9 @@ state it does not understand.
 **D7 — Durability belongs to the gateway.** The aggregate keeps its state in memory for the life of
 one deployment. A gateway that restarts within the same deployment seeds a new aggregate through
 `ApplicationResource.Create(manifest, state)`. A gateway should persist a recorded snapshot before it
-acknowledges the write, or a restart can lose a write that running instances already apply.
+acknowledges the write, or a restart can lose a write that running instances already apply. A
+gateway seeds the aggregate before it knows whether the run redefines the resource, and calls
+`ClearState()` when it does; instances already registered keep what they restored.
 
 **D8 — Reads take no lock.** `Instances` and `State` return read-only copies that each change
 replaces, so a management read never waits on a registration, and a debugger never deadlocks on a
@@ -177,6 +181,27 @@ dependent refers to it. Output names follow the action-name grammar; the provide
 outputs a resource has. Values are strings, as configuration and environment variables carry them.
 Outputs belong to the logical resource, not to an instance: an instance's own address is a separate
 question for the gateway-to-instance channel.
+
+**D17 — Settings are configuration values delivered with the deployment (owner request,
+2026-10-29).** `WithSetting(name, value)` gives a resource's instances a configuration value, and
+`WithSetting(name, output)` gives them one filled in from another resource's output, as in
+`api.WithSetting("ConfigurationStore:Endpoint", store.Endpoint)`. The gateway fills outputs in when
+it deploys the resource, and its infrastructure provider delivers the values, for example as
+environment variables, so an instance reads them through its configuration like any other key.
+This is the "outputs passed to dependent resources" part of the goal: the value is generated at run
+time but arrives the way configuration always does. A setting from an output makes the resource
+depend on the output's resource, with no permissions, because only a dependency deploys that
+resource first; `DependsOn` grants permissions on the same dependency. The builder adds the
+dependency itself, as an ARM or Bicep reference does, and a dependency that would close a cycle is
+refused before the setting is recorded. In manifest data the dependency must be declared, since
+`Create` validates data rather than adding to it. A resource's own outputs cannot be its settings:
+they exist only once it is deployed. Names are configuration keys (colon-separated segments of
+letters, digits, `_`, `-` and `.`) and compare case-insensitively, as configuration keys do;
+setting a name again replaces its value in place. *Rejected:* requiring an explicit `DependsOn`
+before an output can be used. It adds a call that can only ever be required, and forgetting it
+would be an error instead of the ordering the setting needs anyway. *Not chosen:* the name
+"inputs". It pairs well with outputs, but the instance reads these values as configuration, and the
+owner's direction treats configuration as the instance's settings model.
 
 ## Threading
 

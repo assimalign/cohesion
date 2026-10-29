@@ -16,4 +16,7 @@ public enum ApplicationGatewayErrorCode
 
     /// <summary>A resource published no manifest within the startup window, so the gateway tore it down.</summary>
     StartupTimedOut,
+
+    /// <summary>A setting uses an output that its resource's infrastructure provider did not report.</summary>
+    OutputMissing,
 }

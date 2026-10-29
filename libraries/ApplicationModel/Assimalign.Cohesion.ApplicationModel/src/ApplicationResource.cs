@@ -179,6 +179,22 @@ public sealed class ApplicationResource : IApplicationResource
         }
     }
 
+    /// <summary>
+    /// Removes the state recorded for the resource, as when a deployment redefines it.
+    /// </summary>
+    /// <remarks>
+    /// Registered instances keep the state they restored. An instance that registers later restores
+    /// none until a write records new state.
+    /// </remarks>
+    public void ClearState()
+    {
+        lock (_lock)
+        {
+            _state.Clear();
+            Volatile.Write(ref _stateView, ReadOnlyCollection<ResourceStateSnapshot>.Empty);
+        }
+    }
+
     /// <inheritdoc/>
     public async ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionName action, ResourceActionContext context, CancellationToken cancellationToken = default)
     {

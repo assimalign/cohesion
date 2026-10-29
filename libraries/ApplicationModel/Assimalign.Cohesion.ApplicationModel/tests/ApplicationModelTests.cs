@@ -40,12 +40,12 @@ public class ApplicationModelTests
     public void Create_ThenChangeSourceLists_ShouldNotChangeModel()
     {
         // Arrange
-        var resources = new List<ApplicationResourceManifest> { new("Web", "orders-api", []) };
+        var resources = new List<ApplicationResourceManifest> { new("Web", "orders-api", [], []) };
         var manifest = new ApplicationManifest("root", resources, []);
 
         // Act
         ApplicationModel model = ApplicationModel.Create(manifest);
-        resources.Add(new ApplicationResourceManifest("Web", "customers-api", []));
+        resources.Add(new ApplicationResourceManifest("Web", "customers-api", [], []));
 
         // Assert
         model.Manifest.Resources.ShouldHaveSingleItem().Name.Value.ShouldBe("orders-api");
@@ -66,7 +66,7 @@ public class ApplicationModelTests
     public void Create_WithRepeatedResource_ShouldThrow()
     {
         // Arrange
-        var manifest = new ApplicationManifest("root", [new("Web", "orders-api", []), new("web", "orders-api", [])], []);
+        var manifest = new ApplicationManifest("root", [new("Web", "orders-api", [], []), new("web", "orders-api", [], [])], []);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
@@ -77,7 +77,7 @@ public class ApplicationModelTests
     {
         // Arrange
         var dependency = new ApplicationResourceDependency("west", "Database.Sql", "orders-db", []);
-        var manifest = new ApplicationManifest("root", [new("Web", "orders-api", [dependency])], []);
+        var manifest = new ApplicationManifest("root", [new("Web", "orders-api", [dependency], [])], []);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
@@ -88,7 +88,7 @@ public class ApplicationModelTests
     {
         // Arrange
         var dependency = new ApplicationResourceDependency("root", "Web", "orders-api", []);
-        var manifest = new ApplicationManifest("root", [new("Web", "orders-api", [dependency])], []);
+        var manifest = new ApplicationManifest("root", [new("Web", "orders-api", [dependency], [])], []);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
@@ -100,8 +100,8 @@ public class ApplicationModelTests
         // Arrange: the root's identity provider and east's orders-api depend on each other.
         var manifest = new ApplicationManifest(
             "root",
-            [new("IdentityHub", "identity", [new ApplicationResourceDependency("east", "Web", "orders-api", [])])],
-            [new ApplicationManifest("east", [new("Web", "orders-api", [new ApplicationResourceDependency("root", "IdentityHub", "identity", ["tokens.issue"])])], [])]);
+            [new("IdentityHub", "identity", [new ApplicationResourceDependency("east", "Web", "orders-api", [])], [])],
+            [new ApplicationManifest("east", [new("Web", "orders-api", [new ApplicationResourceDependency("root", "IdentityHub", "identity", ["tokens.issue"])], [])], [])]);
 
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
@@ -114,12 +114,12 @@ public class ApplicationModelTests
     public void Create_WithRepeatedDependencyOrPermission_ShouldThrow()
     {
         // Arrange
-        ApplicationResourceManifest database = new("Database.Sql", "orders-db", []);
+        ApplicationResourceManifest database = new("Database.Sql", "orders-db", [], []);
         var repeatedDependency = new ApplicationManifest("root", [database, new("Web", "orders-api", [
             new ApplicationResourceDependency("root", "Database.Sql", "orders-db", []),
-            new ApplicationResourceDependency("root", "Database.Sql", "orders-db", ["data.read"])])], []);
+            new ApplicationResourceDependency("root", "Database.Sql", "orders-db", ["data.read"])], [])], []);
         var repeatedPermission = new ApplicationManifest("root", [database, new("Web", "orders-api", [
-            new ApplicationResourceDependency("root", "Database.Sql", "orders-db", ["data.read", "data.read"])])], []);
+            new ApplicationResourceDependency("root", "Database.Sql", "orders-db", ["data.read", "data.read"])], [])], []);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(repeatedDependency));

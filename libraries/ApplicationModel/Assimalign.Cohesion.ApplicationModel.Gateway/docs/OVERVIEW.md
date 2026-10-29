@@ -3,9 +3,9 @@
 ## Purpose
 
 Runs an application model: deploys the gateway's part of the hierarchy through an infrastructure
-provider in dependency order, each resource once what it depends on is ready, receives the
-manifests the deployed instances publish, and exposes each resource's aggregate and infrastructure
-actions. The design record is [DESIGN.md](DESIGN.md).
+provider in dependency order, each resource once what it depends on is ready and with its settings
+filled in from their outputs, receives the manifests the deployed instances publish, and exposes
+each resource's aggregate and infrastructure actions. The design record is [DESIGN.md](DESIGN.md).
 
 ## Scope
 
@@ -28,8 +28,13 @@ ApplicationGateway gateway = ApplicationGateway.Create(infrastructure, startupTi
 ApplicationBuilder builder = Application.CreateBuilder("root", args).UseGateway(gateway);
 IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
 
-// east deploys once identity has published and its outputs are read.
-builder.AddGateway("east").AddResource("Web", "orders-api").DependsOn(identity, "tokens.issue");
+// east deploys once identity has published and its outputs are read. Inside east, orders-api
+// deploys once orders-db is ready, with the database's endpoint in its configuration.
+IApplicationSet east = builder.AddGateway("east");
+IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
+east.AddResource("Web", "orders-api")
+    .DependsOn(identity, "tokens.issue")
+    .WithSetting("Database:Endpoint", database.Endpoint);
 
 await builder.Build().RunAsync();
 ```

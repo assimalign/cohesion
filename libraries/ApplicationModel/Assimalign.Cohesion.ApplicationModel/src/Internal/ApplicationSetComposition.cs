@@ -56,6 +56,7 @@ internal sealed class ApplicationSetComposition
 
         var descriptor = new ApplicationResourceDescriptor(this, provider, name);
         _resources.Add(descriptor);
+        Hierarchy.Resources.Add((Owner.Name, provider, name), descriptor);
         return descriptor;
     }
 

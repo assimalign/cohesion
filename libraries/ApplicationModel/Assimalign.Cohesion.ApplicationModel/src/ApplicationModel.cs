@@ -53,7 +53,9 @@ public sealed class ApplicationModel : IApplicationModel
     /// The rules are the ones composition enforces: gateway names are unique across the hierarchy;
     /// a resource's provider and name are unique within its gateway; a dependency names a resource the
     /// manifest declares, never its own resource, and at most once per resource; a dependency's
-    /// permissions are unique; and the dependencies form no cycle, because they order deployment.
+    /// permissions are unique; the dependencies form no cycle, because they order deployment; and a
+    /// resource's setting names are unique, each setting has a value or an output but not both, and
+    /// an output belongs to a resource the setting's resource depends on.
     /// The model keeps a read-only copy, so later changes to
     /// <paramref name="manifest"/>'s lists do not reach it.
     /// </remarks>
@@ -184,7 +186,7 @@ public sealed class ApplicationModel : IApplicationModel
         ApplicationResourceManifest resource,
         HashSet<(GatewayName Gateway, ProviderName Provider, ResourceName Name)> resources)
     {
-        if (resource.Dependencies is null)
+        if (resource.Dependencies is null || resource.Settings is null)
         {
             throw new ArgumentException(Format(ErrorMessages.ApplicationManifestListMissing, gateway), manifestParameter);
         }
@@ -240,7 +242,64 @@ public sealed class ApplicationModel : IApplicationModel
             dependencies[index] = new ApplicationResourceDependency(dependency.Gateway, dependency.Provider, dependency.Name, Array.AsReadOnly(permissions));
         }
 
-        return new ApplicationResourceManifest(resource.Provider, resource.Name, Array.AsReadOnly(dependencies));
+        var names = new HashSet<SettingName>();
+        var settings = new ApplicationResourceSetting[resource.Settings.Count];
+        for (int index = 0; index < settings.Length; index++)
+        {
+            ApplicationResourceSetting? setting = resource.Settings[index];
+            if (setting is null)
+            {
+                throw new ArgumentException(Format(ErrorMessages.ApplicationManifestEntryNull, gateway), manifestParameter);
+            }
+
+            if (setting.Name.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.SettingNameMissing, manifestParameter);
+            }
+
+            if ((setting.Value is null) == (setting.Output is null))
+            {
+                throw new ArgumentException(
+                    Format(ErrorMessages.ApplicationSettingValueMissing, setting.Name, resource.Provider, resource.Name, gateway),
+                    manifestParameter);
+            }
+
+            if (!names.Add(setting.Name))
+            {
+                throw new ArgumentException(
+                    Format(ErrorMessages.ApplicationSettingDuplicate, resource.Provider, resource.Name, gateway, setting.Name),
+                    manifestParameter);
+            }
+
+            if (setting.Output is { } output)
+            {
+                if (output.Output.Value is null)
+                {
+                    throw new ArgumentException(ErrorMessages.OutputNameMissing, manifestParameter);
+                }
+
+                var source = (output.Gateway, output.Provider, output.Name);
+                if (source == (gateway, resource.Provider, resource.Name))
+                {
+                    throw new ArgumentException(
+                        Format(ErrorMessages.ApplicationSettingOutputSelf, setting.Name, resource.Provider, resource.Name, output.Output),
+                        manifestParameter);
+                }
+
+                // An output exists once its resource is deployed, and only a dependency deploys
+                // that resource first.
+                if (!targets.Contains(source))
+                {
+                    throw new ArgumentException(
+                        Format(ErrorMessages.ApplicationSettingNotDependency, setting.Name, resource.Provider, resource.Name, gateway, output.Provider, output.Name, output.Gateway),
+                        manifestParameter);
+                }
+            }
+
+            settings[index] = setting;
+        }
+
+        return new ApplicationResourceManifest(resource.Provider, resource.Name, Array.AsReadOnly(dependencies), Array.AsReadOnly(settings));
     }
 
     // Third pass: dependencies order deployment, so they may not form a cycle anywhere in the

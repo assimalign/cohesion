@@ -14,13 +14,17 @@ internal sealed class TestInstance : IResource, IResourceAction
     private readonly ResourceActionState<LogLevelSetting> _state =
         ResourceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
 
-    public TestInstance(ProviderName provider, ResourceName name)
+    public TestInstance(ProviderName provider, ResourceName name, IReadOnlyDictionary<SettingName, string> settings)
     {
         Provider = provider;
         Name = name;
+        Settings = settings;
     }
 
     public LogLevelSetting Level => _state.Value;
+
+    /// <summary>The settings the platform started the instance with, as its configuration would read them.</summary>
+    public IReadOnlyDictionary<SettingName, string> Settings { get; }
 
     public ProviderName Provider { get; }
 

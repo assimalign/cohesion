@@ -11,7 +11,8 @@ them. The design record is [DESIGN.md](DESIGN.md).
 
 - In scope: `IApplication`, `IApplicationBuilder`, and `IApplicationModel` with their
   implementations; the `IApplicationGateway` seam; `IApplicationSet`; `IApplicationResourceDescriptor`
-  and `DependsOn`; the manifest records; and `IApplicationResource` and `ApplicationResource`.
+  with `DependsOn`, `WithSetting`, and its output placeholders; the manifest records; and
+  `IApplicationResource` and `ApplicationResource`.
 - Out of scope: gateways, platforms, infrastructure actions, and the deployment manifest's wire
   format (ApplicationModel.Gateway); the identity provider; area verbs such as `AddWeb`.
 
@@ -31,7 +32,9 @@ IApplicationSet east = builder.AddGateway("east");
 IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
 east.AddResource("Web", "orders-api")
     .DependsOn(database, "data.read", "data.write")
-    .DependsOn(identity);
+    .DependsOn(identity)
+    .WithSetting("Database:Endpoint", database.Endpoint)        // filled in when east deploys it
+    .WithSetting("Logging:LogLevel:Default", "Information");
 
 Application application = builder.UseGateway(gateway).Build();   // composition closes here
 ApplicationManifest manifest = application.Model.Manifest;       // the global manifest
