@@ -85,9 +85,10 @@ restriction following the owner decision and Neo4j. The language DESIGN cites th
 
 Every operand is planned and statically wire-admitted before any operand executes. All read one
 statement snapshot and share work/memory limits and cancellation. UNION distinct state is charged
-to that budget (CG05030); EXCEPT/INTERSECT retained rows and hash counts use CG05032. Their hash
-work and retained rows share the statement grant; output/operand memory and work retain
-CG05020/CG05004. UNION ALL has no
+to that budget (CG05030); EXCEPT/INTERSECT retained frames, rows and hash counts use CG05032.
+Every hash visit and every row forwarded through UNION ALL or OTHERWISE consumes work at each
+visited operator in a mixed tree, including visits that discard duplicates. Output/operand memory
+and work retain CG05020/CG05004. UNION ALL has no
 distinct table or intermediate materialized operand result. Final results materialize under the
 existing API contract. Column names come from the first operand. Types widen across every
 operand's numeric kinds, NULL is neutral, and dynamic values use the existing unknown type.

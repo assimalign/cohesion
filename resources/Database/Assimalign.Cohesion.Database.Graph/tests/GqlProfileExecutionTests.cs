@@ -185,7 +185,11 @@ public sealed class GqlProfileExecutionTests
                 Mutation("MATCH ()-[r:KNOWS]->() REMOVE r.weight", 1,
                     new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [[null]])),
             ],
-            [GqlClauses.SetOperation] = [new("RETURN 1 AS x UNION RETURN 1 AS x", [[1L]])],
+            [GqlClauses.SetOperation] =
+            [
+                new("RETURN 1 AS x UNION RETURN 1 AS x", [[1L]]),
+                new("FOR x IN [1,1,2] RETURN x EXCEPT RETURN -1 AS x UNION RETURN 2 AS x", [[1L], [2L]], Physical: 17),
+            ],
             [GqlClauses.UnionDistinct] = [new("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L], [2L]])],
             [GqlClauses.UnionAll] = [new("RETURN 1 AS x UNION ALL RETURN 1 AS x", [[1L], [1L]])],
             [GqlClauses.Except] = [new("FOR x IN [1,1,2,NULL] RETURN x EXCEPT RETURN 2 AS x", [[1L], [null]])],
@@ -194,7 +198,7 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.Intersect] = [new("FOR x IN [1,1,2] RETURN x INTERSECT RETURN 1 AS x", [[1L]])],
             [GqlClauses.IntersectDistinct] = [new("FOR x IN [1,1,2] RETURN x INTERSECT DISTINCT RETURN 1 AS x", [[1L]])],
             [GqlClauses.IntersectAll] = [new("FOR x IN [1,1,2] RETURN x INTERSECT ALL FOR x IN [1,1,1] RETURN x", [[1L], [1L]])],
-            [GqlClauses.Otherwise] = [new("FOR x IN [] RETURN x OTHERWISE RETURN 2 AS x", [[2L]])],
+            [GqlClauses.Otherwise] = [new("FOR x IN [] RETURN x OTHERWISE RETURN 2 AS x", [[2L]], Physical: 2)],
             [GqlClauses.Return] =
             [
                 new("RETURN [10,20,30][-1], {k:{j:1}}.k.j, [1] IN [[1]], [NULL] = [NULL]", [[30L, 1L, true, null]]),

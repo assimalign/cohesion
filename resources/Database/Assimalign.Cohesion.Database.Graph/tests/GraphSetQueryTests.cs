@@ -182,6 +182,89 @@ public sealed class GraphSetQueryTests
         session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Graph] - Composite queries: hash visits and forwarded rows charge work at every depth")]
+    [InlineData("UNION", 402)]
+    [InlineData("UNION ALL", 402)]
+    [InlineData("OTHERWISE", 200)]
+    public async Task ExecuteAsync_ForwardingDepth_ShouldChargeLinearWorkAsync(string op, long operandWork)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("set-forward-work", new());
+        var database = await engine.CreateDatabaseAsync("g", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var parameters = new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 100).ToArray() };
+        string left = "FOR x IN $xs RETURN x" + (op == "OTHERWISE" ? "" : " EXCEPT RETURN -1 AS x");
+        foreach (int depth in new[] { 1, 10, 100 })
+        {
+            var request = GraphQueryRequest.FromGql(left + string.Concat(Enumerable.Repeat($" {op} FOR x IN [] RETURN x", depth)), parameters);
+
+            // Act
+            await using var result = (DatabaseResultSet)await session.ExecuteAsync(request, CancellationToken.None);
+            var values = new List<object?>();
+            await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { values.Add(row.GetValue(0)); }
+
+            // Assert
+            values.ShouldBe(parameters["xs"].ShouldBeOfType<int[]>().Cast<object?>());
+            session.LastStatementMetrics!.Physical.ShouldBe(operandWork + 100L * depth);
+            _output.WriteLine($"{op}: depth={depth}; rows={values.Count}; work={session.LastStatementMetrics.Physical}");
+            session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+            session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Composite queries: deep hash and forwarding chains refuse at the shared work limit")]
+    [InlineData("UNION", 100)]
+    [InlineData("UNION ALL", 100)]
+    [InlineData("OTHERWISE", 1000)]
+    public async Task ExecuteAsync_DeepForwardingChain_ShouldRefuseWorkAndReleaseStateAsync(string op, int depth)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("set-forward-limit", new());
+        var database = await engine.CreateDatabaseAsync("g", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string left = "FOR x IN $xs RETURN x" + (op == "OTHERWISE" ? "" : " EXCEPT RETURN -1 AS x");
+        var request = GraphQueryRequest.FromGql(left + string.Concat(Enumerable.Repeat($" {op} FOR x IN [] RETURN x", depth)),
+            new Dictionary<string, object?> { ["xs"] = Enumerable.Range(0, 100).ToArray() }, limits: new() { WorkUnits = 1000 });
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05004");
+        session.LastStatementMetrics!.Physical.ShouldBe(1001);
+        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        (await GraphExistsTests.RowsAsync(session, "RETURN 1"))[0][0].ShouldBe(1L);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Set queries: empty frames report retained set-state memory exhaustion")]
+    [InlineData("EXCEPT", "CG05032")]
+    [InlineData("EXCEPT ALL", "CG05032")]
+    [InlineData("INTERSECT", "CG05032")]
+    [InlineData("INTERSECT ALL", "CG05032")]
+    [InlineData("UNION", "CG05030")]
+    public async Task ExecuteAsync_EmptySetFrames_ShouldRefuseWithSetMemoryCodeAsync(string op, string code)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("set-frame-limit", new());
+        var database = await engine.CreateDatabaseAsync("g", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        string query = string.Join($" {op} ", Enumerable.Repeat("FOR x IN [] RETURN x", 100));
+        if (op == "UNION") { query = "FOR x IN [] RETURN x EXCEPT " + query; }
+        var request = GraphQueryRequest.FromGql(query,
+            parameters: null, limits: new() { MemoryBytes = 10_000 });
+
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
+
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        session.LastStatementMetrics!.Physical.ShouldBe(0);
+        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+        (await GraphExistsTests.RowsAsync(session, "RETURN 1"))[0][0].ShouldBe(1L);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph] - Set queries: cancellation at recorded left, right and output work releases every owner")]
     [InlineData(1)]
     [InlineData(10)]

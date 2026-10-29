@@ -679,7 +679,9 @@ Cypher25Parser.g4:75-77 supplies only UNION and is not fallback precedent.
 Diagnostics: CG00015 missing operand,
 CG00016 mixed UNION modes, CG01020 column names/order/count mismatch, CG02017 incompatible
 result shape, CG05029 modifying operand, CG05030 UNION distinct-state memory refusal, and
-CG05032 EXCEPT/INTERSECT retained-state memory refusal. No new interface or wire/disk format.
+CG05032 EXCEPT/INTERSECT retained-state memory refusal, including empty execution frames.
+Every parent hash visit or forwarded row in a mixed tree consumes the shared work budget (CG05004).
+No new interface or wire/disk format.
 
 NEXT passes each variable's proven binding kind as well as its value shape into every operand;
 named paths remain valid for ExecutePaths and path property access remains a planning CG03003,

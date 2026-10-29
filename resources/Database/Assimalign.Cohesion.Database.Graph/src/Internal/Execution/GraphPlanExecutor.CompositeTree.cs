@@ -23,7 +23,7 @@ internal static partial class GraphPlanExecutor
         {
             var cursor = new GraphCompositeCursor(composite.Nodes[index], budget.Memory);
             stack.Add(cursor);
-            cursor.Memory.Add(320); // frame, stack slot, owner and empty hash/list headers
+            RetainCompositeState(cursor, null, 320, composite, token); // frame, stack slot, owner and empty hash/list headers
         }
         try
         {
@@ -88,6 +88,7 @@ internal static partial class GraphPlanExecutor
                 {
                     token.ThrowIfCancellationRequested(); operation.EnsureActive();
                     var parent = stack[level];
+                    budget.Consume(); // Every parent hashes or forwards this row, including duplicate hash visits.
                     if (parent.Node.Operator == GqlCompositeOperator.Otherwise) { parent.HasRows = true; }
                     else if (parent.Seen is { } seen)
                     {
@@ -96,7 +97,6 @@ internal static partial class GraphPlanExecutor
                     }
                     else if (parent.Counts is { } counts)
                     {
-                        budget.Consume();
                         bool all = parent.Node.Operator is GqlCompositeOperator.ExceptAll or GqlCompositeOperator.IntersectAll;
                         if (parent.Phase == GraphCompositeCursorPhase.ReadLeft)
                         {
@@ -133,11 +133,12 @@ internal static partial class GraphPlanExecutor
         }
     }
 
-    private static void RetainCompositeState(GraphCompositeCursor cursor, object?[] row, long bytes,
+    private static void RetainCompositeState(GraphCompositeCursor cursor, object?[]? row, long bytes,
         GraphCompositePlan composite, CancellationToken token)
     {
         try { cursor.Memory.Add(bytes); cursor.Memory.RetainValue(row, token); }
-        catch (GraphPlanningException error) when (error.Diagnostics[0].Code == "CG05020")
+        catch (GraphPlanningException error) when (error.Diagnostics[0].Code == "CG05020" &&
+            (cursor.Seen is not null || cursor.Counts is not null))
         {
             bool union = cursor.Node.Operator == GqlCompositeOperator.Union;
             throw new GraphPlanningException(union ? "CG05030" : "CG05032",

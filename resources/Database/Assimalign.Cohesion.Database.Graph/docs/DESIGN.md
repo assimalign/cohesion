@@ -872,6 +872,10 @@ O(distinct left rows). The deterministic 100/200-row fixture records 700/1400 wo
 of the four modes. Hash behavior is the existing GraphRowComparer/GraphValueComparer contract.
 The explicit stack also handles mixed operators without recursive iterator chains. Homogeneous
 UNION keeps its existing flattened fast path. Nested operations retain separate budgeted owners.
+Every parent hash visit or forwarded row consumes one work unit, including UNION duplicate visits
+and UNION ALL/OTHERWISE forwarding; work therefore grows with both row count and visited depth.
+Frame reservations use the same retained-state diagnostic as their rows/keys: CG05030 for UNION,
+CG05032 for EXCEPT/INTERSECT, and CG05020 for ordinary operand and forwarding frames.
 
 OTHERWISE drains the complete left cursor; on any row it skips the right cursor entirely, while
 retaining duplicates and NULL rows. Errors propagate and never trigger fallback. Both branches are
@@ -2022,7 +2026,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05029` | A composite query contains a modifying operand |
 | `CG05030` | UNION duplicate-elimination state exceeds the statement memory budget |
 | `CG05031` | An internal statement lookup unexpectedly lacks its key; the statement boundary retains the KeyNotFoundException cause and reports a code-free internal-error message. Application function failures retain their existing CG05021 wrapper |
-| `CG05032` | EXCEPT/INTERSECT retained rows and hash state exceed the statement memory budget |
+| `CG05032` | EXCEPT/INTERSECT retained frames, rows and hash state exceed the statement memory budget |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
