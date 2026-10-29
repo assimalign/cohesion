@@ -141,6 +141,12 @@ public static class SqlClauses
     /// <summary>A named <c>WINDOW</c> clause.</summary>
     public const string Window = "WINDOW";
 
+    /// <summary>A physical-row window frame.</summary>
+    public const string WindowRows = "ROWS window frame";
+
+    /// <summary>A peer-based window frame without offsets.</summary>
+    public const string WindowRange = "RANGE window frame";
+
     /// <summary>A <c>UNION</c> set operation.</summary>
     public const string SetOperation = "UNION";
 

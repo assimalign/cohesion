@@ -448,8 +448,12 @@ internal static class SqlPersistedExpression
     }
 
     private static bool SameWindow(SqlWindowSpecification? a, SqlWindowSpecification? b) => a is null || b is null
-        ? a is null && b is null : Same(a.ExistingWindow, b.ExistingWindow) && SameList(a.PartitionBy, b.PartitionBy, AreEquivalent) &&
+        ? a is null && b is null : Same(a.ExistingWindow, b.ExistingWindow) && SameFrame(a.Frame, b.Frame) && SameList(a.PartitionBy, b.PartitionBy, AreEquivalent) &&
             SameList(a.OrderBy, b.OrderBy, (x,y) => x.IsDescending == y.IsDescending && x.NullPlacement == y.NullPlacement && AreEquivalent(x.Expression,y.Expression));
+
+    private static bool SameFrame(SqlWindowFrame? a, SqlWindowFrame? b) => a is null || b is null ? a is null && b is null :
+        a.Mode == b.Mode && a.Start.Kind == b.Start.Kind && a.End.Kind == b.End.Kind &&
+        AreEquivalent(a.Start.Offset, b.Start.Offset) && AreEquivalent(a.End.Offset, b.End.Offset);
 
     private static bool SameTable(SqlRelationReference? left, SqlRelationReference? right)
         => left is null || right is null

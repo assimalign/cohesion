@@ -56,6 +56,8 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Cube, "SELECT a FROM t GROUP BY CUBE(a);")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Window, "SELECT RANK() OVER w WINDOW w AS();")]
+    [InlineData(SqlClauses.WindowRows, "SELECT SUM(v) OVER(ROWS 2 PRECEDING) FROM t;")]
+    [InlineData(SqlClauses.WindowRange, "SELECT SUM(v) OVER(RANGE UNBOUNDED PRECEDING) FROM t;")]
     [InlineData(SqlClauses.Over, "SELECT RANK() OVER();")]
     [InlineData(SqlClauses.Partition, "SELECT RANK() OVER(PARTITION BY a) FROM t;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
@@ -162,7 +164,7 @@ public class SqlLanguageProfileTests
         var options = new QueryParserOptions();
         options.Analyzers.Add(observer);
 
-        _ = new SqlQueryParser(options).Parse("SELECT SUM(id) OVER () FROM t;");
+        _ = new SqlQueryParser(options).Parse("SELECT SUM(id) OVER (GROUPS CURRENT ROW) FROM t;");
 
         observer.SawUnsupportedClause.ShouldBeTrue();
     }

@@ -72,6 +72,8 @@ internal sealed partial class SqlPlanner
             {
                 (filteredCalls ??= new()).Add(filtered);
             }
+            if (expression is SqlWindowExpression { Function.Filter: not null } window)
+            { (filteredCalls ??= new()).Add(window.Function); }
             bool deferred = IsFilteredSource(filteredCalls, expression);
             switch (expression)
             {
@@ -130,6 +132,8 @@ internal sealed partial class SqlPlanner
             OuterScope = parent;
             OuterDependencies = parentDependencies;
         }
+        if (dependencies.Contains(scope.Id) && owner is not null && (owner.Windows.Count > 0 || HasWindows(owner)) && IsFrameOffsetSource(owner, source))
+        { throw new SqlPlanningException("CS05081", ErrorMessages.WindowFrameOffsetScope, source.Location); }
         foreach (int dependency in dependencies)
         {
             if (dependency != scope.Id) { parentDependencies?.Add(dependency); }
@@ -184,6 +188,8 @@ internal sealed partial class SqlPlanner
     {
         foreach (var window in select.Windows)
         {
+            if (window.Specification.Frame?.Start.Offset is { } start) { yield return start; }
+            if (window.Specification.Frame?.End.Offset is { } end) { yield return end; }
             foreach (var key in window.Specification.PartitionBy) { yield return key; }
             foreach (var key in window.Specification.OrderBy) { yield return key.Expression; }
         }

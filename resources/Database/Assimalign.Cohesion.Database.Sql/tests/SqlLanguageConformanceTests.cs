@@ -251,7 +251,8 @@ public sealed class SqlLanguageConformanceTests
         // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
         // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
         // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(75);
+        // Two explicit window frame clauses (#1526, SQ-W2).
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(77);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -671,6 +672,9 @@ public sealed class SqlLanguageConformanceTests
             ["NTILE"] = new("NTILE(3) OVER()", 1, DatabaseType.Int32, "scalar_rows"),
             ["LAG"] = new("LAG(i,0) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
             ["LEAD"] = new("LEAD(i,0) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["FIRST_VALUE"] = new("FIRST_VALUE(i) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["LAST_VALUE"] = new("LAST_VALUE(i) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["NTH_VALUE"] = new("NTH_VALUE(i,1) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
             ["COALESCE"] = new("COALESCE(NULL, 7)", 7L),
             ["CAST"] = new("CAST('42' AS INT)", 42),
             ["UPPER"] = new("UPPER('Ada')", "ADA"),
@@ -854,6 +858,10 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[1L],[1L]]),
         [SqlClauses.Window] = Query("SELECT ROW_NUMBER() OVER w FROM t WINDOW w AS(ORDER BY id) ORDER BY id;",
             expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L],[2L],[3L]]),
+        [SqlClauses.WindowRows] = Query("SELECT SUM(age ORDER BY id DESC) FILTER(WHERE age>0) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Rows }, [[36m],[81m],[86m]]),
+        [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE UNBOUNDED PRECEDING) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Range }, [[36],[45],[41]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
         [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC NULLS LAST, 1 DESC;",

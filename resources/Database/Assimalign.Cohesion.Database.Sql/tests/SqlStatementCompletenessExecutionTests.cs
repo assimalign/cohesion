@@ -273,12 +273,10 @@ public sealed class SqlStatementCompletenessExecutionTests
     }
 
     /// <summary>
-    /// Pins the boundary with #1103: a declared name is not unknown, so this check leaves
-    /// it to the parse-time recognized-unsupported guard. #1103 rejects these names
-    /// with CK00001 and flips this pin in the same change.
+    /// Pins the required-OVER placement diagnostic independently of the input cardinality.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a declared name that does not execute is not an unknown function")]
-    public async Task ExecuteAsync_DeclaredNonExecutingFunction_ShouldNotBeRejectedAsUnknown()
+    [Fact(DisplayName = "Cohesion Test [SqlEngine] - Functions: a window name without OVER is a placement failure on empty and populated inputs")]
+    public async Task ExecuteAsync_WindowWithoutOver_ShouldNotBeRejectedAsUnknown()
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("sql-completeness-declared", new SqlDatabaseEngineOptions());
@@ -287,14 +285,14 @@ public sealed class SqlStatementCompletenessExecutionTests
         await SeedAsync(session, withRows: false);
 
         // Act
-        var empty = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT FIRST_VALUE() FROM t;"));
+        var empty = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT FIRST_VALUE() FROM t;"));
         await ExecuteAsync(session, _rows[0]);
-        var populated = await Should.ThrowAsync<DatabaseParseException>(() => RowsAsync(session, "SELECT FIRST_VALUE() FROM t;"));
+        var populated = await Should.ThrowAsync<DatabaseException>(() => RowsAsync(session, "SELECT FIRST_VALUE() FROM t;"));
 
         // Assert
         foreach (var failure in new[] { empty, populated })
         {
-            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05076");
             failure.Message.ShouldContain("FIRST_VALUE", Case.Sensitive);
             failure.Message.ShouldNotContain("Unknown function", Case.Sensitive);
         }

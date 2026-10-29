@@ -27,15 +27,15 @@ statement-end parent-key check, including substitution by another final parent; 
 make RESTRICT immediate and implement action closure. PostgreSQL references:
 src/backend/parser/gram.y:4581-4689 and src/backend/utils/adt/ri_triggers.c:897-955,4237-4250.
 
-## Window stage (#1526, SQ-W1)
+## Window stage (#1526, SQ-W1/SQ-W2)
 
 OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
 OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
 after HAVING and before the query tail. Names use the existing case-insensitive identifier
 rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
-has none. Definitions cannot reference themselves or later definitions. Explicit ROWS,
-RANGE, GROUPS and EXCLUDE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE remain
-CK00001, naming the deferred form. Frames are not silently approximated with ROWS.
+has none. Definitions cannot reference themselves or later definitions. ROWS frames,
+offset-free RANGE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute as
+described below; deferred frame forms retain named CK00001 refusals.
 
 ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
 WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
@@ -92,6 +92,88 @@ no live PostgreSQL comparison is claimed.
 | CS05077 | Nested windows |
 | CS05078 | Nonpositive NTILE count (22014) |
 | CS05079 | Statement window memory exceeded |
+
+### Frame execution (#1526, SQ-W2)
+
+ROWS accepts the short UNBOUNDED PRECEDING, n PRECEDING and CURRENT ROW forms, and
+BETWEEN bounds using UNBOUNDED/n PRECEDING, CURRENT ROW and n/UNBOUNDED FOLLOWING.
+The short form ends at CURRENT ROW. Boundary categories follow PostgreSQL: a start
+category after its end, UNBOUNDED FOLLOWING starts and UNBOUNDED PRECEDING ends fail
+with CS05080 (42P20). Two offsets in the same direction may describe an empty frame;
+their numeric values are not a planning-time ordering restriction. Offsets accept signed
+integer expressions and parameters, evaluated once per window execution and shared across
+partitions; a named specification shares initialization across its functions. Empty input
+does not initialize offsets. Current-query row variables, aggregate and window functions
+are prohibited; outer-query values remain constant for each child-window execution.
+Offsets use the engine's signed integer domain; numeric/text assignment coercions require
+an explicit CAST. PostgreSQL uses assignment coercion at this boundary. Noninteger, NULL and
+negative offsets report CS02070 (42804), CS02071 (22004) and CS02072 (22013).
+Offsets beyond the partition, including Int64.MaxValue, clamp without arithmetic overflow.
+
+Without an explicit frame, ORDER BY uses RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
+including every current-row peer; without ORDER BY the frame is the whole partition.
+Explicit offset-free RANGE also executes, including CURRENT ROW peer boundaries and
+UNBOUNDED FOLLOWING. RANGE with offsets, GROUPS, EXCLUDE, FROM FIRST/LAST and
+IGNORE/RESPECT NULLS remain named CK00001 refusals. Explicit frames do not change
+ranking/navigation semantics. A named window with an explicit frame may be referenced
+by OVER name, but cannot be copied by OVER(name) or another named definition (CS01066).
+
+All catalog aggregates execute over frames, including FILTER, Boolean/statistical functions,
+STRING_AGG, LISTAGG and application aggregates. DISTINCT inside an aggregate window is
+CK00001. Existing engine aggregate-input ORDER BY and WITHIN GROUP execute as well;
+this extends PostgreSQL, which refuses aggregate-local ORDER BY with OVER. FILTER runs
+before input expressions. Empty frames return COUNT zero and other native aggregates NULL.
+The result type, collation, coercions and numeric rounding are the ordinary aggregate's.
+FIRST_VALUE, LAST_VALUE and NTH_VALUE respect NULLs and read the selected frame member;
+an empty frame or missing nth member returns NULL. NTH_VALUE's index is evaluated per
+current row; NULL yields NULL and nonpositive values report CS05082 (22016), even for
+an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
+a noninteger index reports CS02073 (42804). Value types follow the first argument, including CHAR and its collation.
+
+Native frames reuse one accumulator while their head stays fixed, including bounded
+PRECEDING heads clamped to the partition start. They consume each qualifying input once,
+reading a non-consuming native final result. Equal frames share the previously computed
+result. SUM, COUNT, MIN, MAX, AVG, Boolean and statistical native aggregates ignore
+aggregate-local ORDER BY when evaluating frames, including its key expressions, so ordering
+does not disable incremental transitions. FILTER still runs before argument evaluation.
+Application aggregates and ordered string aggregates preserve their specified input order.
+Ordinary application accumulator Finish remains once-only. Recomputed frames (including
+native frames whose head moves) charge each candidate input visit before FILTER or any
+input expression/transition against a fixed 1,000,000-visit statement cap. CS05084 (54000)
+refuses the next visit and releases all reservations. The cap spans functions, partitions
+and window stages sharing the statement, including under LIMIT; equal cached frames spend
+no visits. SQL has no general statement work budget, so this fixed cap bounds otherwise
+quadratic fallback work without changing the public accumulator contract. String output cost is
+also proportional to the total returned text. Native ordered/string buffers and accumulator
+scratch charge CS05079's statement grant. Ordered aggregate inputs evaluate their arguments
+and keys once after FILTER; their actual retained payload and conservative stable-sort scratch
+reserve the grant before buffering. Those reservations release on success, refusal or cancellation;
+complete retained-memory refinement remains SQ-W3.
+No public accumulator contract, disk version or wire format changes.
+EXPLAIN retains frame boundaries for each function and ANALYZE reports frame_visits,
+counting candidate aggregate inputs before FILTER. Frames do not split shared sort groups,
+and LIMIT applies after the complete window input. Generated tests enumerate every legal
+boundary-category pair, NULL/tied keys, both directions, explicit NULL placement, empty and
+singleton partitions, zero and oversize offsets, several windows, FILTER and value functions.
+Work-counter tests establish linear growing-frame transitions against a brute-force reference.
+
+References re-derived in the local PostgreSQL clone: parser/gram.y:16882-16933
+(bound categories), parser/parse_clause.c:2885-2902,3697-3719 (copies and ROWS offset types),
+executor/nodeWindowAgg.c:734-770,2233-2279 (incremental frames, NULL/negative offsets),
+utils/adt/windowfuncs.c:656-723 (frame value functions). No live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS02070 | Noninteger ROWS frame offset (42804) |
+| CS02071 | NULL frame offset (22004) |
+| CS02072 | Negative frame offset (22013) |
+| CS02073 | Noninteger NTH_VALUE index (42804) |
+| CS05080 | Invalid frame boundary categories (42P20) |
+| CS05081 | Row variable, aggregate or window in frame offset (42P20) |
+| CS05082 | Nonpositive NTH_VALUE index (22016) |
+| CS05083 | OVER on a scalar function (42809) |
+| CS05084 | Statement window frame recomputation exceeds 1,000,000 input visits (54000) |
+
 
 
 Double-quoted identifiers use doubled `""` for an embedded double quote: `"a""b"` names
@@ -385,7 +467,7 @@ bare output alias is reserved for OUTPUT detection: `DELETE FROM t output WHERE 
 reports CK00001; use `AS output` to spell that alias. RETURNING subqueries report
 CK00001 naming SUBQUERY in
 RETURNING, even after an INSERT SELECT or a supported DML WHERE subquery. Windows also
-remain CK00001; aggregates fail planning with CS05017. Modifying CTE bodies retain
+parse for the binding-time CS05076 placement refusal; ordinary aggregates fail planning with CS05017. Modifying CTE bodies retain
 CK00001 and perform no writes. Empty lists and SELECT ... RETURNING report CS00003.
 ON CONFLICT ... RETURNING returns inserted and updated rows, excluding skipped proposals (#1118).
 EXPLAIN reports the expanded RETURNING projection count and names for INSERT,
@@ -694,7 +776,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions (#1526), identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), the profile has **75 of 77 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions and two explicit frame clauses (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), the profile has **77 of 79 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -745,7 +827,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT/FULL require ON or USING; CROSS accepts neither. FULL requires hash-compatible conditions (CS05070 otherwise). NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
-| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. GROUPING SETS, ROLLUP, CUBE, empty sets and GROUPING masks execute; windows and other ordered-set aggregates report `CK00001`. |
+| `GROUP BY` / `HAVING` | Supported subset, measured | One or more grouping expressions; `WHERE` filters input rows and `HAVING` filters groups after aggregation. Composes with supported N-way joins, `ORDER BY`, `LIMIT`, and `OFFSET`, including server/client execution. Ungrouped, unaggregated projected columns are errors. `DISTINCT`/`ALL` and aggregate input `ORDER BY` execute; STRING_AGG and LISTAGG concatenate text. GROUPING SETS, ROLLUP, CUBE, empty sets and GROUPING masks execute; aggregate windows execute; other ordered-set aggregates report `CK00001`. |
 | Subqueries / `INSERT ... SELECT` | Supported subset, measured | Correlated and uncorrelated scalar, `IN`/`NOT IN`, `EXISTS`/`NOT EXISTS`, and scalar `op ANY`, `op SOME` or `op ALL` queries in supported SELECT expressions and UPDATE/DELETE WHERE predicates, plus aliased derived tables and transactional insert-source queries. Each body may be a set operation (#1114). All use the outer statement snapshot; nesting is limited to 32 subquery levels, within the statement's expression nesting limit (256 levels by default, `CS00006`). Subqueries in UPDATE SET, VALUES, CHECK/DEFAULT, and LIMIT/OFFSET/FETCH/TOP expressions report `CK00001`. See the subquery contract below. |
 | `TOP` / `FETCH` | Supported subset, measured | Row counts normalize to LIMIT/Offset plan fields; see [Pagination](#pagination-1107). PERCENT, WITH TIES and DML TOP retain CK00001. |
 | `SELECT ALL` | Recognized, not supported | rejected with `CK00001` |
@@ -756,7 +838,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute except before MERGE. |
 | `WITH RECURSIVE ... MERGE` | Recognized, not supported | CK00001 at RECURSIVE even for acyclic lists; plain WITH ... MERGE binds and executes. |
 | `SELECT ... FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` / `FOR KEY SHARE` | Recognized, not supported | Complete locking strengths in the SELECT tail report CK00001, including in subqueries and CTE bodies. Deliberate change from CS00003 in #1719; qualified identifiers and implicit aliases retain their ordinary meaning. |
-| Window functions / `OVER` / `WINDOW` | Ranking and navigation execute | See Window stage; frames, aggregate windows and value functions remain deferred |
+| Window functions / `OVER` / `WINDOW` | Ranking, navigation, aggregate and value functions execute | See Window stage; ROWS and offset-free RANGE execute, including the peer-based default |
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
@@ -1087,9 +1169,8 @@ before it binds the statement or reads a row: projections, predicates, joins,
 grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
 statement therefore fails the same way over an empty table as over a populated
 one; the evaluator used to find the name per row, so an empty table succeeded.
-Recognized value-window names that do not execute yet, such as `FIRST_VALUE` and `LAST_VALUE` (see
-[Builtin functions](#builtin-functions)), are not unknown. They reject at parse time
-with one named `CK00001` and are absent from the executable profile (#1103).
+Window names, including FIRST_VALUE, LAST_VALUE and NTH_VALUE, are in the executable profile;
+a call without OVER fails at binding with CS05076.
 
 **Function arguments (#1189).** A call to an executable function must pass a number
 of arguments its signature accepts (the table under
@@ -2371,7 +2452,7 @@ exceed 1,048,576 UTF-16 units. Ordered calls check while buffering, before sorti
 DISTINCT calls retain one representative per equivalence class, selected in sorted input
 order, so case-insensitive aggregation preserves one input spelling.
 
-Window frames/aggregate windows/value functions, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
+Deferred frame modes and value modifiers, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
 (including ERROR and TRUNCATE) retain CK00001. ON OVERFLOW is matched contextually
 inside LISTAGG and names the whole construct once; OVERFLOW remains an ordinary identifier.
 FILTER adds one named clause; the T1 modifiers add none.
@@ -2737,7 +2818,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 75/77 declared-clause count.
+These contextual exclusions do not change the 77/79 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3904,7 +3985,7 @@ existing compiled schema with newly quoted function-named columns is a no-op.
 
 COUNT/SUM/AVG/MIN/MAX keep their existing signatures: COUNT(*)/COUNT(value),
 SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
-Window frames, aggregate windows and value-window functions remain deferred (CK00001).
+ROWS, offset-free RANGE, aggregate windows and value-window functions execute as described under Window stage.
 Ranking and LAG/LEAD require OVER and execute as described under Window stage. LOG(base, x), trig,
 regex functions, TO_CHAR and other unknown names remain CS01016.
 
@@ -3918,7 +3999,7 @@ No reference implementation code is copied.
 types, a result type, a volatility and a NULL rule. A name and parameter-type list is
 registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
 overload of a built-in's name is accepted only for a number of arguments the built-in does
-not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a window operator name (`RANK`, `LEAD`, ...), a name in the recognized-unsupported vocabulary (`FIRST_VALUE`, ...), a type name (`INT`, `DATE`), `ANY`,
+not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a window operator name (`RANK`, `LEAD`, ...), a deferred frame/value modifier (`IGNORE`, ...), a type name (`INT`, `DATE`), `ANY`,
 `SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
 parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
 nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
@@ -3973,10 +4054,9 @@ fails the open.
 
 A call found in neither the engine catalog nor the profile's executable and recognized-
 unsupported lists fails at plan time with `CS01016`, `Unknown function '<name>'.`
-before any row is read (#1068). Recognized unsupported functions fail at parse time with
-exactly one `CK00001` naming the function, even over an empty table (#1103):
-the deferred window value functions FIRST_VALUE, LAST_VALUE and NTH_VALUE.
-Ranking and navigation calls require OVER and bind as described in Window stage.
+before any row is read (#1068). Deferred frame and value-modifier forms fail at parse time
+with a named CK00001, even over an empty table. Ranking, navigation and value calls
+require OVER and bind as described in Window stage.
 
 The ISO datetime value functions execute as described in the T1 table above.
 Their unqualified, unquoted spellings never bind a column; quote an identifier
@@ -4104,8 +4184,8 @@ rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
 including `MATERIALIZED`, `SEARCH`, `percent` and `ties`,
 render quoted in canonical SQL. `WITH` remains a profile keyword; its nested-form
-refusal is a dedicated parser rule. The table also holds the recognized
-non-executing functions listed above, including the window and niladic datetime names (#1103). Profile keywords
+refusal is a dedicated parser rule. Deferred GROUPS/EXCLUDE and IGNORE/RESPECT NULLS
+have entries; executable window and datetime names live in the profile. Profile keywords
 that start an unsupported form by another rule, such as `LEFT` or `CROSS`, need no entry.
 A recognized construct is skipped once it is reported, so the text after it adds
 no second diagnostic: `= ANY (array_operand)` no longer parses as a call to a
@@ -4270,10 +4350,9 @@ SDK v9 artifacts do not carry scripts; extraction refuses Script calls with COHD
 
 ## Quoted calls (#1103 review)
 
-A quoted identifier followed by parentheses is a function call. Recognized unsupported
-built-ins use their lowercase lookup spelling for quoted names: `"first_value"(id)` reports
-parse-time `CK00001`, while `"FIRST_VALUE"(id)` and `"First_Value"(id)` are distinct names outside
-that vocabulary. Unquoted names match the vocabulary without regard to case. Quoting a name
+A quoted identifier followed by parentheses is a function call. Executable value-window
+names retain their call tree, including quoted spellings; the binder requires OVER.
+Deferred frame/value modifiers remain contextual capability refusals. Quoting a name
 without parentheses keeps it a column reference, including `"sqrt"` and `"current_date"`.
 Declared executable calls such as `"abs"(id)` remain executable. Unknown function names
 continue to be resolved by the engine's function catalog during planning.

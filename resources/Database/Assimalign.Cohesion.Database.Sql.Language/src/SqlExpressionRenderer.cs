@@ -387,7 +387,17 @@ public static partial class SqlExpressionRenderer
         specification.ExistingWindow is null ? "" : Identifier(specification.ExistingWindow),
         specification.PartitionBy.Count == 0 ? "" : "PARTITION BY " + List(specification.PartitionBy),
         specification.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", specification.OrderBy.Select(Ordering)),
+        specification.Frame is null ? "" : (specification.Frame.Mode == SqlWindowFrameMode.Rows ? "ROWS" : "RANGE") +
+            " BETWEEN " + FrameBound(specification.Frame.Start) + " AND " + FrameBound(specification.Frame.End),
     }.Where(part => part.Length > 0));
+
+    private static string FrameBound(SqlWindowFrameBound bound) => bound.Kind switch
+    {
+        SqlWindowFrameBoundKind.UnboundedPreceding => "UNBOUNDED PRECEDING",
+        SqlWindowFrameBoundKind.UnboundedFollowing => "UNBOUNDED FOLLOWING",
+        SqlWindowFrameBoundKind.CurrentRow => "CURRENT ROW",
+        _ => Expression(bound.Offset!) + (bound.Kind == SqlWindowFrameBoundKind.Preceding ? " PRECEDING" : " FOLLOWING"),
+    };
 
     private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
         (key.NullPlacement switch { SqlNullPlacement.First => " NULLS FIRST", SqlNullPlacement.Last => " NULLS LAST", _ => "" });
@@ -403,7 +413,9 @@ public static partial class SqlExpressionRenderer
         // With no WITHIN GROUP keys it must stay delimited on a round trip.
         bool specialForm = SqlUnsupportedVocabulary.IsNiladicFunction(call.FunctionName) ||
             call.FunctionName.ToUpperInvariant() is "EXTRACT" or "POSITION" or "SUBSTRING" or "TRIM";
-        string name = window ? call.FunctionName.ToUpperInvariant() : (listaggName && !listagg) || (specialForm &&
+        bool nativeWindow = window && (Contains(_windowFunctions, call.FunctionName) ||
+            call.FunctionName.ToUpperInvariant() is "PERCENT_RANK" or "CUME_DIST");
+        string name = nativeWindow ? call.FunctionName.ToUpperInvariant() : (listaggName && !listagg) || (specialForm &&
             (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0 || call.Filter is not null))
             ? "\"" + call.FunctionName + "\"" : FunctionName(call.FunctionName);
         return name + "(" + quantifier + Arguments(call.Arguments) +

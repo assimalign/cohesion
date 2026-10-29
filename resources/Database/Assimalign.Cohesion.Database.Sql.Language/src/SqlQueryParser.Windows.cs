@@ -10,19 +10,11 @@ public sealed partial class SqlQueryParser
     private SqlExpression ParseOver(ref TokenLexer lexer, SqlFunctionCallExpression call)
     {
         RequireSkippedConstruct(lexer.Current.Position, CurrentTokenEnd(ref lexer), SqlClauses.Over);
-        int overStart = lexer.Current.Position;
-        int overEnd = CurrentTokenEnd(ref lexer);
-        int diagnosticsBefore = _parseDiagnostics.Count;
         Advance(ref lexer);
         string? name = null;
         SqlWindowSpecification? specification = null;
         if (lexer.Current.Type == TokenType.LeftParen) { specification = ParseWindowSpecification(ref lexer); }
         else { name = ParseWindowName(ref lexer); }
-        if (!IsExecutableWindow(call.FunctionName) && diagnosticsBefore == _parseDiagnostics.Count)
-        {
-            RequireSkippedConstruct(overStart, overEnd,
-                call.FunctionName.ToUpperInvariant() + " OVER (window function)");
-        }
         return Nest(ref lexer, new SqlWindowExpression(call, name, specification,
             Location.Create(1, 1, call.Location?.Start ?? 0, _lastTokenEnd)));
     }
@@ -77,6 +69,22 @@ public sealed partial class SqlQueryParser
                 } while (!IsAtEnd(ref lexer));
             }
             if (IsKeyword(ref lexer, "ORDER")) { ParseAggregateOrdering(ref lexer, order); }
+            SqlWindowFrame? frame = null;
+            if (IsWord(ref lexer, "ROWS") || IsWord(ref lexer, "RANGE"))
+            {
+                bool rows = IsWord(ref lexer, "ROWS");
+                int frameStart = lexer.Current.Position;
+                RequireSkippedConstruct(frameStart, CurrentTokenEnd(ref lexer), rows ? SqlClauses.WindowRows : SqlClauses.WindowRange);
+                Advance(ref lexer);
+                bool between = IsKeyword(ref lexer, "BETWEEN");
+                if (between) { Advance(ref lexer); }
+                var first = ParseFrameBound(ref lexer);
+                if (between) { ExpectKeyword(ref lexer, "AND", "AND between frame bounds"); }
+                var last = between ? ParseFrameBound(ref lexer) : new SqlWindowFrameBound(SqlWindowFrameBoundKind.CurrentRow);
+                frame = new SqlWindowFrame(rows ? SqlWindowFrameMode.Rows : SqlWindowFrameMode.Range, first, last);
+                if (!rows && (first.Offset is not null || last.Offset is not null))
+                { RequireSkippedConstruct(frameStart, _lastTokenEnd, "RANGE with offsets window frame"); }
+            }
             if (IsFrameWord(ref lexer))
             {
                 RequireSkippedConstruct(lexer.Current.Position, CurrentTokenEnd(ref lexer), CurrentText(ref lexer).ToUpperInvariant() + " window frame");
@@ -90,7 +98,7 @@ public sealed partial class SqlQueryParser
                 }
             }
             Expect(ref lexer, TokenType.RightParen, "')' after window specification");
-            return new SqlWindowSpecification(existing, partition.AsReadOnly(), order.AsReadOnly());
+            return new SqlWindowSpecification(existing, partition.AsReadOnly(), order.AsReadOnly(), frame);
         }
         finally { _parenthesisDepth--; }
     }
@@ -98,6 +106,34 @@ public sealed partial class SqlQueryParser
     private static bool IsFrameWord(ref TokenLexer lexer) => IsWord(ref lexer, "ROWS") || IsWord(ref lexer, "RANGE") ||
         IsWord(ref lexer, "GROUPS") || IsWord(ref lexer, "EXCLUDE");
 
-    private static bool IsExecutableWindow(string name) => name.ToUpperInvariant() is
-        "ROW_NUMBER" or "RANK" or "DENSE_RANK" or "PERCENT_RANK" or "CUME_DIST" or "NTILE" or "LAG" or "LEAD";
+    private static bool IsWindowValueModifier(TokenLexer lexer, string functionName)
+    {
+        bool from = IsKeyword(ref lexer, "FROM");
+        if (from && !functionName.Equals("NTH_VALUE", StringComparison.OrdinalIgnoreCase)) { return false; }
+        if (!from && !IsWord(ref lexer, "IGNORE") && !IsWord(ref lexer, "RESPECT")) { return false; }
+        if (!AdvancePastComments(ref lexer)) { return false; }
+        if (from ? !IsWord(ref lexer, "FIRST") && !IsWord(ref lexer, "LAST") : !IsWord(ref lexer, "NULLS")) { return false; }
+        return AdvancePastComments(ref lexer) && (IsKeyword(ref lexer, "OVER") || from &&
+            (IsWord(ref lexer, "IGNORE") || IsWord(ref lexer, "RESPECT")));
+    }
+
+    private SqlWindowFrameBound ParseFrameBound(ref TokenLexer lexer)
+    {
+        if (IsWord(ref lexer, "CURRENT"))
+        {
+            Advance(ref lexer);
+            ExpectWord(ref lexer, "ROW");
+            return new SqlWindowFrameBound(SqlWindowFrameBoundKind.CurrentRow);
+        }
+        bool unbounded = IsWord(ref lexer, "UNBOUNDED");
+        SqlExpression? offset = null;
+        if (unbounded) { Advance(ref lexer); }
+        else { offset = ParseOperand(ref lexer, OperandRule.Expression); }
+        bool preceding = IsWord(ref lexer, "PRECEDING");
+        if (preceding || IsWord(ref lexer, "FOLLOWING")) { Advance(ref lexer); }
+        else { AddExpectedDiagnostic(ref lexer, "PRECEDING or FOLLOWING after frame offset"); }
+        return new SqlWindowFrameBound(unbounded
+            ? preceding ? SqlWindowFrameBoundKind.UnboundedPreceding : SqlWindowFrameBoundKind.UnboundedFollowing
+            : preceding ? SqlWindowFrameBoundKind.Preceding : SqlWindowFrameBoundKind.Following, offset);
+    }
 }

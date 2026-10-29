@@ -16,6 +16,19 @@ internal sealed partial class SqlPlanner
 {
     // The same closed mapping supplies every emitted plan node. Tests enumerate the plan
     // family and exercise this switch, so a new record cannot silently disappear from EXPLAIN.
+    private static string WindowFrameDetail(SqlWindowFunction function)
+    {
+        if (function.Frame is not { } frame) { return "RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW (default)"; }
+        return frame.Syntax.Mode.ToString().ToUpperInvariant() + " BETWEEN " + Bound(frame.Syntax.Start) + " AND " + Bound(frame.Syntax.End);
+        static string Bound(SqlWindowFrameBound bound) => bound.Kind switch
+        {
+            SqlWindowFrameBoundKind.UnboundedPreceding => "UNBOUNDED PRECEDING",
+            SqlWindowFrameBoundKind.UnboundedFollowing => "UNBOUNDED FOLLOWING",
+            SqlWindowFrameBoundKind.CurrentRow => "CURRENT ROW",
+            _ => SqlExpressionRenderer.Render(bound.Offset!) + (bound.Kind == SqlWindowFrameBoundKind.Preceding ? " PRECEDING" : " FOLLOWING"),
+        };
+    }
+
     internal static string DescribeOperator(SqlPlan plan) => plan switch
     {
         SqlWindowAggregatePlan => "Window",
@@ -159,6 +172,8 @@ internal sealed partial class SqlPlanner
                             "partition=" + string.Join(", ", group.PartitionSyntax.Select(SqlExpressionRenderer.Render)) +
                             "; order=" + string.Join(", ", group.OrderSyntax.Select(key => SqlExpressionRenderer.Render(key.Expression) +
                                 (key.IsDescending ? " DESC" : " ASC") + (NullsFirst(key) ? " NULLS FIRST" : " NULLS LAST"))) +
+                            "; frames=" + string.Join(", ", group.Functions.Select(function => function.Name + ":" + WindowFrameDetail(function))) +
+                            (metrics is null ? "" : "; frame_visits=" + group.Functions.Sum(function => metrics.ActualCandidates(function) ?? 0)) +
                             "; functions=" + string.Join(", ", group.Functions.Select(function => function.Name)) +
                             "; sort_shared=" + group.SortShared.ToString().ToLowerInvariant() +
                             (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : ""), actual: metrics?.ActualCandidates(group));

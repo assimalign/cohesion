@@ -1041,6 +1041,16 @@ public sealed partial class SqlQueryParser
             Expect(ref lexer, TokenType.RightParen, _errorWithinGroupClosingExpected);
         }
         var call = ParseCallFilter(ref lexer, new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg));
+        while (IsWindowValueModifier(lexer, name))
+        {
+            int modifierStart = lexer.Current.Position;
+            string form = CurrentText(ref lexer).ToUpperInvariant();
+            Advance(ref lexer);
+            form += " " + CurrentText(ref lexer).ToUpperInvariant();
+            int modifierEnd = CurrentTokenEnd(ref lexer);
+            Advance(ref lexer);
+            RequireSkippedConstruct(modifierStart, modifierEnd, form);
+        }
         if (IsKeyword(ref lexer, "OVER")) { return ParseOver(ref lexer, call); }
         SkipCallExtensions(ref lexer);
         return call;

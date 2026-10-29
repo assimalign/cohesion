@@ -15,7 +15,9 @@ internal sealed partial class SqlPlanner
         name.Equals("ROW_NUMBER", StringComparison.OrdinalIgnoreCase) || name.Equals("RANK", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("DENSE_RANK", StringComparison.OrdinalIgnoreCase) || name.Equals("PERCENT_RANK", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("CUME_DIST", StringComparison.OrdinalIgnoreCase) || name.Equals("NTILE", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("LAG", StringComparison.OrdinalIgnoreCase) || name.Equals("LEAD", StringComparison.OrdinalIgnoreCase);
+        name.Equals("LAG", StringComparison.OrdinalIgnoreCase) || name.Equals("LEAD", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("FIRST_VALUE", StringComparison.OrdinalIgnoreCase) || name.Equals("LAST_VALUE", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("NTH_VALUE", StringComparison.OrdinalIgnoreCase);
 
     private static bool ContainsWindow(SqlExpression expression)
     {
@@ -78,7 +80,7 @@ internal sealed partial class SqlPlanner
         return false;
     }
 
-    private sealed record WindowKeys(IReadOnlyList<SqlExpression> Partition, IReadOnlyList<SqlOrderByColumn> Order);
+    private sealed record WindowKeys(IReadOnlyList<SqlExpression> Partition, IReadOnlyList<SqlOrderByColumn> Order, SqlWindowFrame? Frame);
 
     private static Dictionary<string, WindowKeys> NamedWindows(SqlSelectExpression select)
     {
@@ -87,6 +89,7 @@ internal sealed partial class SqlPlanner
         {
             if (names.ContainsKey(window.Name))
             { throw new SqlPlanningException("CS01064", ErrorMessages.WindowDuplicateName, select.Location); }
+            ValidateFrameBounds(window.Specification.Frame);
             names.Add(window.Name, WindowKeysOf(window.Specification, names));
         }
         return names;
@@ -94,12 +97,12 @@ internal sealed partial class SqlPlanner
 
     private static WindowKeys WindowKeysOf(SqlWindowSpecification specification, Dictionary<string, WindowKeys> names)
     {
-        if (specification.ExistingWindow is not { } name) { return new(specification.PartitionBy, specification.OrderBy); }
+        if (specification.ExistingWindow is not { } name) { return new(specification.PartitionBy, specification.OrderBy, specification.Frame); }
         if (!names.TryGetValue(name, out var parent))
         { throw new SqlPlanningException("CS01065", ErrorMessages.WindowUnknownName); }
-        if (specification.PartitionBy.Count > 0 || specification.OrderBy.Count > 0 && parent.Order.Count > 0)
+        if (parent.Frame is not null || specification.PartitionBy.Count > 0 || specification.OrderBy.Count > 0 && parent.Order.Count > 0)
         { throw new SqlPlanningException("CS01066", ErrorMessages.WindowInvalidCopy); }
-        return new(parent.Partition, specification.OrderBy.Count == 0 ? parent.Order : specification.OrderBy);
+        return new(parent.Partition, specification.OrderBy.Count == 0 ? parent.Order : specification.OrderBy, specification.Frame);
     }
 
     private static WindowKeys WindowKeysOf(SqlWindowExpression window, Dictionary<string, WindowKeys> names)
@@ -113,6 +116,7 @@ internal sealed partial class SqlPlanner
     {
         foreach (var definition in select.Windows)
         {
+            _ = BindFrame(definition.Specification.Frame, scope);
             foreach (var key in definition.Specification.PartitionBy) { ValidateExpression(key, scope, _subqueryTypes); }
             foreach (var key in definition.Specification.OrderBy) { ValidateExpression(key.Expression, scope, _subqueryTypes); }
         }
@@ -128,22 +132,35 @@ internal sealed partial class SqlPlanner
     {
         var names = NamedWindows(select);
         var groups = new List<SqlWindowGroup>();
+        var frames = new Dictionary<SqlWindowFrame, SqlWindowFrameBinding>();
         foreach (var window in WindowExpressions(select).Distinct())
         {
             var keys = WindowKeysOf(window, names);
             foreach (var key in keys.Partition) { ValidateExpression(key, scope, _subqueryTypes); }
             foreach (var key in keys.Order) { ValidateExpression(key.Expression, scope, _subqueryTypes); }
-            foreach (var argument in window.Function.Arguments) { ValidateExpression(argument, scope, _subqueryTypes); }
-            string name = window.Function.FunctionName.ToUpperInvariant();
-            int count = window.Function.Arguments.Count;
-            if (window.Function.Quantifier != SqlSetQuantifier.Default || window.Function.OrderBy.Count > 0 || window.Function.Filter is not null ||
-                window.Function.Arguments.Any(argument => argument is SqlStarExpression) ||
-                (name is "LAG" or "LEAD" ? count < 1 || count > 3 : name == "NTILE" ? count != 1 : count != 0))
-            { throw new SqlPlanningException("CS00011", ErrorMessages.WindowSignature, window.Location); }
-            int integerArgument = name == "NTILE" ? 0 : name is "LAG" or "LEAD" && count > 1 ? 1 : -1;
+            SqlWindowFrameBinding? frame = null;
+            if (keys.Frame is { } syntax && !frames.TryGetValue(syntax, out frame))
+            { frames.Add(syntax, frame = BindFrame(syntax, scope)!); }
+            var call = window.Function;
+            string name = call.FunctionName.ToUpperInvariant();
+            int count = call.Arguments.Count;
+            SqlGroupAggregate? aggregate = null;
+            if (_functions.Catalog.IsAggregate(name)) { aggregate = BindWindowAggregate(call, scope); }
+            else
+            {
+                if (!IsWindowFunction(name))
+                { CheckCall(call, _functions.Catalog); throw new SqlPlanningException("CS05083", ErrorMessages.WindowRequiresAggregate, window.Location); }
+                if (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0 || call.Filter is not null ||
+                    call.Arguments.Any(argument => argument is SqlStarExpression) ||
+                    (name is "LAG" or "LEAD" ? count < 1 || count > 3 : name is "NTILE" or "FIRST_VALUE" or "LAST_VALUE" ? count != 1 : name == "NTH_VALUE" ? count != 2 : count != 0))
+                { throw new SqlPlanningException("CS00011", ErrorMessages.WindowSignature, window.Location); }
+                foreach (var argument in call.Arguments) { ValidateExpression(argument, scope, _subqueryTypes); }
+            }
+            int integerArgument = name == "NTILE" ? 0 : name == "NTH_VALUE" || name is "LAG" or "LEAD" && count > 1 ? 1 : -1;
             if (integerArgument >= 0 && scope.StaticTypeOf(window.Function.Arguments[integerArgument]) is not
                 (DatabaseType.Null or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
-            { throw new SqlPlanningException("CS02068", ErrorMessages.WindowIntegerArgument, window.Location); }
+            { throw new SqlPlanningException(name == "NTH_VALUE" ? "CS02073" : "CS02068",
+                name == "NTH_VALUE" ? ErrorMessages.WindowNthInteger : ErrorMessages.WindowIntegerArgument, window.Location); }
             var group = groups.FirstOrDefault(candidate => SameKeys(candidate.PartitionSyntax, keys.Partition) && SameOrder(candidate.OrderSyntax, keys.Order));
             if (group is null)
             {
@@ -155,13 +172,13 @@ internal sealed partial class SqlPlanner
             int ordinal = start++;
             slots[window] = ordinal;
             var type = scope.WindowType(window);
-            var arguments = window.Function.Arguments.Select(scope.Bind).ToArray();
+            var arguments = aggregate?.Arguments ?? window.Function.Arguments.Select(scope.Bind).ToArray();
             if (name is "LAG" or "LEAD")
             {
                 Coerce(0);
                 if (arguments.Length > 2) { Coerce(2); }
             }
-            group.Functions.Add(new(window, name, ordinal, arguments, type));
+            group.Functions.Add(new(window, name, ordinal, arguments, type, frame, aggregate));
 
             void Coerce(int index)
             {
@@ -218,6 +235,92 @@ internal sealed partial class SqlPlanner
         bool SameOrder(IReadOnlyList<SqlOrderByColumn> a, IReadOnlyList<SqlOrderByColumn> b) => a.Count == b.Count &&
             a.Select((key, i) => key.IsDescending == b[i].IsDescending && NullsFirst(key) == NullsFirst(b[i]) &&
                 SameGroupExpression(key.Expression, b[i].Expression, scope)).All(same => same);
+    }
+
+    private static bool IsFrameOffsetSource(SqlSelectExpression select, SqlExpression source)
+    {
+        if (select.Windows.Count == 0 && !HasWindows(select)) { return false; }
+        foreach (var window in WindowExpressions(select))
+        { if (Includes(window.Specification?.Frame)) { return true; } }
+        foreach (var definition in select.Windows)
+        { if (Includes(definition.Specification.Frame)) { return true; } }
+        return false;
+
+        bool Includes(SqlWindowFrame? frame) => frame is not null &&
+            (frame.Start.Offset is { } start && WalkSubqueries(start).Any(node => ReferenceEquals(node, source)) ||
+             frame.End.Offset is { } end && WalkSubqueries(end).Any(node => ReferenceEquals(node, source)));
+    }
+
+    private void ValidateFrameAggregateScope(SqlWindowFrame? frame)
+    {
+        if (frame?.Start.Offset is { } start && (ContainsAggregate(start) || ContainsGrouping(start)) ||
+            frame?.End.Offset is { } end && (ContainsAggregate(end) || ContainsGrouping(end)))
+        { throw new SqlPlanningException("CS05081", ErrorMessages.WindowFrameOffsetScope); }
+    }
+
+    private static void ValidateFrameBounds(SqlWindowFrame? frame)
+    {
+        if (frame is null) { return; }
+        // PostgreSQL gram.y checks boundary categories, not the values of two offsets
+        // in the same direction. ROWS BETWEEN 1 PRECEDING AND 2 PRECEDING is empty.
+        if (frame.Start.Kind == SqlWindowFrameBoundKind.UnboundedFollowing ||
+            frame.End.Kind == SqlWindowFrameBoundKind.UnboundedPreceding || frame.Start.Kind > frame.End.Kind)
+        { throw new SqlPlanningException("CS05080", ErrorMessages.WindowFrameBounds); }
+    }
+
+    private SqlWindowFrameBinding? BindFrame(SqlWindowFrame? frame, SqlExpressionEvaluator scope)
+    {
+        ValidateFrameBounds(frame);
+        if (frame is null) { return null; }
+        return new(frame, Offset(frame.Start.Offset), Offset(frame.End.Offset));
+
+        SqlBoundExpression? Offset(SqlExpression? expression)
+        {
+            if (expression is null) { return null; }
+            Check(expression);
+            ValidateExpression(expression, scope, _subqueryTypes);
+            if (scope.StaticTypeOf(expression) is not (DatabaseType.Null or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
+            { throw new SqlPlanningException("CS02070", ErrorMessages.WindowFrameInteger, expression.Location); }
+            return scope.Bind(expression);
+        }
+        void Check(SqlExpression expression)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is SqlColumnReferenceExpression && scope.Bind(expression) is not SqlBoundOuterColumn || expression is SqlWindowExpression ||
+                expression is SqlFunctionCallExpression call && (IsAggregate(call) || IsGrouping(call)))
+            { throw new SqlPlanningException("CS05081", ErrorMessages.WindowFrameOffsetScope, expression.Location); }
+            foreach (var child in Children(expression)) { Check(child); }
+        }
+    }
+
+    private SqlGroupAggregate BindWindowAggregate(SqlFunctionCallExpression call, SqlExpressionEvaluator scope)
+    {
+        if (call.Quantifier == SqlSetQuantifier.Distinct)
+        { throw new SqlUnsupportedQueryException(ErrorMessages.WindowDistinctAggregate, location: call.Location); }
+        CheckCall(call, _functions.Catalog);
+        foreach (var argument in Children(call))
+        {
+            if (argument is not SqlStarExpression) { ValidateExpression(argument, scope, _subqueryTypes); }
+        }
+        if (call.Filter is not null) { ValidatePredicate(call.Filter, scope, "FILTER", _subqueryTypes); }
+        if (call.FunctionName.Equals("LISTAGG", StringComparison.OrdinalIgnoreCase) && (!call.HasWithinGroupOrdering || call.OrderBy.Count == 0))
+        { throw new SqlPlanningException("CS00003", ErrorMessages.ListaggRequiresWithinGroup, call.Location); }
+        var function = (SqlAggregateFunction)scope.ResolveFunction(call)!;
+        SqlBoundExpression[] arguments;
+        SqlBoundCollation collation;
+        if (function is SqlStringAggregateFunction)
+        {
+            if (call.Arguments.Count > 1 && call.Arguments[1] is not
+                (SqlLiteralExpression { LiteralType: SqlLiteralType.String or SqlLiteralType.Null } or SqlParameterExpression))
+            { throw new SqlUnsupportedQueryException(ErrorMessages.StringAggregateDelimiter, location: call.Arguments[1].Location); }
+            arguments = new SqlBoundExpression[call.Arguments.Count];
+            arguments[0] = scope.Bind(call.Arguments[0], out collation);
+            for (int i = 1; i < arguments.Length; i++) { arguments[i] = scope.Bind(call.Arguments[i]); }
+        }
+        else { arguments = scope.BindArguments(call.Arguments, out collation, statisticsInput: function is SqlStatisticsFunction); }
+        scope.BindParameterCoercions(function, arguments, collation);
+        return new(call, function, arguments, SqlFunctionResolver.CoercionTargets(function, arguments.Length), collation,
+            _functions.Database, BindOrdering(call.OrderBy, scope), [], call.Filter is null ? null : scope.BindPredicate(call.Filter));
     }
 
     private SqlPlan PlanWindowSelect(SqlSelectExpression select, SqlCatalogTable? table, SqlSystemViewDefinition? view,

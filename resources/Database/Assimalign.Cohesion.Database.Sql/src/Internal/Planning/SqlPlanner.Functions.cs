@@ -13,8 +13,7 @@ internal sealed partial class SqlPlanner
     /// Checks every function call in the statement, in every expression position, before binding
     /// reads the catalog or execution reads a row. A name the engine's function catalog does not hold
     /// is unknown (#1068) unless it is an evaluator form or the SQL dialect declares it. Recognized
-    /// non-executing names such as <c>FIRST_VALUE</c> reject at parse time with <c>CK00001</c> (#1103);
-    /// ranking and navigation bind in their own window stage and require <c>OVER</c>.
+    /// ranking, navigation and value functions bind in their own window stage and require <c>OVER</c>.
     /// a call whose argument count, or <c>*</c>, no overload
     /// of its function accepts fails with <c>CS01006</c> (#1189): <c>ABS(1, 2)</c>, <c>UPPER()</c>,
     /// <c>COALESCE()</c>, <c>COUNT(a, b)</c>, <c>SUM(*)</c>. The evaluator used to find an unknown name
@@ -181,6 +180,9 @@ internal sealed partial class SqlPlanner
         foreach (var column in select.Columns) { ValidateFunctionCalls(column.Expression, allowNextValue, allowWindows: true); }
         foreach (var window in select.Windows)
         {
+            ValidateFrameAggregateScope(window.Specification.Frame);
+            ValidateFunctionCalls(window.Specification.Frame?.Start.Offset, allowNextValue: false);
+            ValidateFunctionCalls(window.Specification.Frame?.End.Offset, allowNextValue: false);
             foreach (var key in window.Specification.PartitionBy) { ValidateFunctionCalls(key, allowNextValue: false); }
             foreach (var key in window.Specification.OrderBy) { ValidateFunctionCalls(key.Expression, allowNextValue: false); }
         }
@@ -225,6 +227,7 @@ internal sealed partial class SqlPlanner
         {
             if (!allowWindows) { throw new SqlPlanningException("CS05076", ErrorMessages.WindowPlacement, expression.Location); }
             if (Children(window).Any(ContainsWindow)) { throw new SqlPlanningException("CS05077", ErrorMessages.WindowNested, expression.Location); }
+            ValidateFrameAggregateScope(window.Specification?.Frame);
         }
         if (expression is SqlFunctionCallExpression bare && IsWindowFunction(bare.FunctionName))
         { throw new SqlPlanningException("CS05076", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WindowRequiresOver, bare.FunctionName), expression.Location); }

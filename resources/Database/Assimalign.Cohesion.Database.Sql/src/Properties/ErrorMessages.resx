@@ -286,7 +286,7 @@
   </data>
   <data name="WindowDuplicateName" xml:space="preserve"><value>A WINDOW name is defined more than once.</value></data>
   <data name="WindowUnknownName" xml:space="preserve"><value>The referenced window is not defined or is not an earlier WINDOW definition.</value></data>
-  <data name="WindowInvalidCopy" xml:space="preserve"><value>A copied window cannot specify PARTITION BY or override an existing ORDER BY.</value></data>
+  <data name="WindowInvalidCopy" xml:space="preserve"><value>A copied window cannot specify PARTITION BY, override an existing ORDER BY, or copy a window with an explicit frame.</value></data>
   <data name="WindowSignature" xml:space="preserve"><value>The window function has an invalid argument count or call modifier.</value></data>
   <data name="WindowIntegerArgument" xml:space="preserve"><value>Window offsets and bucket counts require an integer argument.</value></data>
   <data name="WindowDefaultType" xml:space="preserve"><value>The navigation value and default have incompatible types.</value></data>
@@ -294,6 +294,15 @@
   <data name="WindowNested" xml:space="preserve"><value>Window functions cannot contain other window functions.</value></data>
   <data name="WindowRequiresOver" xml:space="preserve"><value>Window function {0} requires an OVER clause.</value></data>
   <data name="WindowBucketCount" xml:space="preserve"><value>NTILE requires a positive bucket count (SQLSTATE 22014).</value></data>
+  <data name="WindowFrameBounds" xml:space="preserve"><value>A window frame cannot start after its ending boundary category, start with UNBOUNDED FOLLOWING, or end with UNBOUNDED PRECEDING (SQLSTATE 42P20).</value></data>
+  <data name="WindowFrameOffsetScope" xml:space="preserve"><value>A window frame offset cannot contain row variables, aggregate or window functions (SQLSTATE 42P20).</value></data>
+  <data name="WindowFrameInteger" xml:space="preserve"><value>A ROWS window frame offset requires an integer (SQLSTATE 42804).</value></data>
+  <data name="WindowFrameNull" xml:space="preserve"><value>A window frame offset must not be NULL (SQLSTATE 22004).</value></data>
+  <data name="WindowFrameNegative" xml:space="preserve"><value>A window frame offset must not be negative (SQLSTATE 22013).</value></data>
+  <data name="WindowNthInteger" xml:space="preserve"><value>NTH_VALUE requires an integer frame index (SQLSTATE 42804).</value></data>
+  <data name="WindowNthPositive" xml:space="preserve"><value>NTH_VALUE requires an argument greater than zero (SQLSTATE 22016).</value></data>
+  <data name="WindowDistinctAggregate" xml:space="preserve"><value>DISTINCT inside an aggregate window is not supported.</value></data>
+  <data name="WindowRequiresAggregate" xml:space="preserve"><value>OVER requires an aggregate or window function (SQLSTATE 42809).</value></data>
   <data name="WindowMemoryBudget" xml:space="preserve"><value>Window state exceeds the statement memory budget of {0} bytes.</value></data>
   <data name="GroupingPlacement" xml:space="preserve">
     <value>GROUPING is allowed only in a grouped query's SELECT, HAVING or ORDER BY, outside aggregate inputs and grouping keys.</value>
@@ -952,4 +961,5 @@
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
   <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
+  <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
 </root>
