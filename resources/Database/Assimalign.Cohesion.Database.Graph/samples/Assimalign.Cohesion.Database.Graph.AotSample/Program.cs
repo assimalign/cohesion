@@ -40,6 +40,8 @@ await Check("INSERT (a:ComprehensionProperty {k:[x IN [1] | x+10][0]}) SET a.k=[
 await Check("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0] RETURN count(*)", [[3L]]);
 await Check("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,coalesce(n.m,0) ORDER BY n.k", [[2L,11L,21L],[4L,12L,0L]]);
 await Check("RETURN 7", [[7L]]);
+await Check("FOR x IN [1,1] RETURN x UNION FOR x IN [1,2] RETURN x", [[1L],[2L]]);
+await Check("RETURN 1 AS x UNION ALL (RETURN 1 AS x UNION ALL RETURN 2 AS x)", [[1L],[1L],[2L]]);
 await Check("FOR x IN [1,1,1] MERGE (n:MergeSmoke {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]]);
 await Check("MATCH (a:MergeSmoke {id:1}) MERGE (a)-[r:MergeEdge]-(b:MergeSmoke {id:2}) ON CREATE SET r.hit=1 ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[1L]]);
 await Check("MERGE (:MergeSmoke {id:2})-[r:MergeEdge]-(:MergeSmoke {id:1}) ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[2L]]);
@@ -82,6 +84,8 @@ await Refuse(new() { WorkUnits = 3 }, "CG05004");
 await Refuse(new() { MemoryBytes = 1024 }, "CG05020");
 await Refuse(new() { WorkUnits = 0 }, "CG08021");
 await Check("RETURN 7", [[7L]]);
+await Check("FOR x IN [1,1] RETURN x UNION FOR x IN [1,2] RETURN x", [[1L],[2L]]);
+await Check("RETURN 1 AS x UNION ALL (RETURN 1 AS x UNION ALL RETURN 2 AS x)", [[1L],[1L],[2L]]);
 await session.ExecuteAsync("INSERT (s:ModeLoop)-[:LOOP]->(s)", cancellationToken: CancellationToken.None);
 await using (var pattern = (DatabaseResultSet)await session.ExecuteAsync("MATCH (a:N {k:1}) RETURN [x IN [a] | size([p=(x)-[:T]->(b) | size(nodes(p))])]", cancellationToken: CancellationToken.None))
 {
