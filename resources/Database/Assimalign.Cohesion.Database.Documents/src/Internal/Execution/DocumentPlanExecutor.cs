@@ -48,6 +48,9 @@ internal static partial class DocumentPlanExecutor
     private static async ValueTask<DatabaseResult> ExecuteSelectAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
+        // Planning has validated every expression. An empty window never opens its input,
+        // including when blocking stages or dynamic column types prevent early paging.
+        if (plan.Logical.Limit == 0) { return CreateResult(plan.Logical, [], cancellationToken); }
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
             query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
@@ -139,6 +142,7 @@ internal static partial class DocumentPlanExecutor
     private static DatabaseResult ExecuteSystemCollection(DocumentDatabase database, DocumentOperation operation,
         DocumentSystemCollectionPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, string? writeVerb = null)
     {
+        if (plan.Logical.Limit == 0) { return CreateResult(plan.Logical, [], cancellationToken); }
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
             query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);

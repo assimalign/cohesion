@@ -69,7 +69,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Star(document),
-                OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlMetaExpression meta => document.Id is null ? null : meta.Member == "id" ? document.Id : (decimal)document.Version,
                 OqlArrayExpression or OqlObjectExpression => Construct(expression, document, group),
                 OqlPathExpression path => ReadPath(path, document),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
@@ -174,6 +174,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 foreach (var member in obj.Members) { ValidateInputs(member.Value); }
                 break;
             case OqlSelectExpression select:
+                ValidateInputs(select.Source);
                 _ = PagingCount(select.Limit, "LIMIT");
                 _ = PagingCount(select.Offset, "OFFSET");
                 foreach (var binding in select.Unnest) { ValidateInputs(binding.Collection); }

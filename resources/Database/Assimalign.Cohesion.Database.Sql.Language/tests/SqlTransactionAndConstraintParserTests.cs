@@ -203,17 +203,6 @@ public sealed class SqlTransactionAndConstraintParserTests
     }
 
     [Theory]
-    [InlineData("CREATE TABLE t (parent_id INT REFERENCES parent(id) ON UPDATE CASCADE);")]
-    [InlineData("CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE CASCADE ON UPDATE RESTRICT);")]
-    [InlineData("ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (parent_id) REFERENCES parent(id) ON UPDATE RESTRICT;")]
-    public void OnUpdate_RemainsUnsupported(string sql)
-    {
-        SqlLanguageProfile.Instance.Supports("ON UPDATE").ShouldBeFalse();
-        Parse(sql).Diagnostics.Single(diagnostic => diagnostic.Code == "CK00001")
-            .Message!.ShouldContain("ON UPDATE");
-    }
-
-    [Theory]
     [InlineData("CREATE TABLE t (parent_id INT REFERENCES parent());")]
     [InlineData("CREATE TABLE t (id INT, FOREIGN KEY (id) REFERENCES parent(a, b));")]
     [InlineData("CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0);")]

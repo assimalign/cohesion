@@ -65,75 +65,69 @@ public sealed partial class SqlQueryParser
         ExpectDdlKeyword(ref lexer, "REFERENCES");
         var parent = ParseUnaliasedTableReference(ref lexer);
         var parentColumns = ParseConstraintColumns(ref lexer);
-        var action = SqlReferentialAction.NoAction;
-        if (IsKeyword(ref lexer, "ON"))
+        var onDelete = SqlReferentialAction.NoAction;
+        var onUpdate = SqlReferentialAction.NoAction;
+        bool hasDelete = false, hasUpdate = false;
+        while (IsKeyword(ref lexer, "ON"))
         {
             Advance(ref lexer);
-            if (IsKeyword(ref lexer, "DELETE"))
-            {
-                Advance(ref lexer);
-                if (IsKeyword(ref lexer, "CASCADE"))
-                {
-                    action = SqlReferentialAction.Cascade;
-                    Advance(ref lexer);
-                }
-                else if (IsKeyword(ref lexer, "RESTRICT"))
-                {
-                    action = SqlReferentialAction.Restrict;
-                    ExpectDdlKeyword(ref lexer, "RESTRICT");
-                }
-                else if (IsWord(ref lexer, "NO"))
-                {
-                    Advance(ref lexer);
-                    if (IsWord(ref lexer, "ACTION")) { Advance(ref lexer); }
-                    else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid3); }
-                }
-                else if (IsKeyword(ref lexer, "SET"))
-                {
-                    Advance(ref lexer);
-                    if (IsKeyword(ref lexer, "NULL"))
-                    {
-                        action = SqlReferentialAction.SetNull;
-                        Advance(ref lexer);
-                    }
-                    else
-                    {
-                        action = SqlReferentialAction.SetDefault;
-                        ExpectDdlKeyword(ref lexer, "DEFAULT");
-                    }
-                    if (lexer.Current.Type == TokenType.LeftParen)
-                    {
-                        AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
-                            ErrorMessages.SqlQueryParserParseConstraintVoid4);
-                        ParseConstraintColumns(ref lexer);
-                    }
-                }
-                else
-                {
-                    AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid5);
-                }
-            }
-            else if (IsKeyword(ref lexer, "UPDATE"))
-            {
-                // The preflight scanner emits CK00001. Consume this action only
-                // for error recovery; it is never an accepted referential action.
-                Advance(ref lexer);
-                if (IsKeyword(ref lexer, "CASCADE") || IsKeyword(ref lexer, "RESTRICT"))
-                {
-                    Advance(ref lexer);
-                }
-            }
-            else
+            bool update = IsKeyword(ref lexer, "UPDATE");
+            if (!update && !IsKeyword(ref lexer, "DELETE"))
             {
                 AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid6);
+                break;
             }
+            if (update ? hasUpdate : hasDelete)
+            {
+                AddSyntaxDiagnostic(ref lexer, ErrorMessages.ReferentialActionRepeated);
+            }
+            Advance(ref lexer);
+            var action = ParseReferentialAction(ref lexer);
+            if (update) { onUpdate = action; hasUpdate = true; }
+            else { onDelete = action; hasDelete = true; }
         }
         if (columns.Count != parentColumns.Count)
         {
             AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid7);
         }
         return new SqlConstraintDefinition(name, SqlConstraintKind.ForeignKey, columns,
-            parent, parentColumns, action);
+            parent, parentColumns, onDelete, onUpdate: onUpdate);
+    }
+
+    private SqlReferentialAction ParseReferentialAction(ref TokenLexer lexer)
+    {
+        if (IsKeyword(ref lexer, "CASCADE"))
+        {
+            Advance(ref lexer);
+            return SqlReferentialAction.Cascade;
+        }
+        if (IsKeyword(ref lexer, "RESTRICT"))
+        {
+            Advance(ref lexer);
+            return SqlReferentialAction.Restrict;
+        }
+        if (IsWord(ref lexer, "NO"))
+        {
+            Advance(ref lexer);
+            if (IsWord(ref lexer, "ACTION")) { Advance(ref lexer); }
+            else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid3); }
+            return SqlReferentialAction.NoAction;
+        }
+        if (IsKeyword(ref lexer, "SET"))
+        {
+            Advance(ref lexer);
+            bool setNull = IsKeyword(ref lexer, "NULL");
+            ExpectDdlKeyword(ref lexer, setNull ? "NULL" : "DEFAULT");
+            if (lexer.Current.Type == TokenType.LeftParen)
+            {
+                AddUnsupportedSurfaceDiagnostic(lexer.Current.Position, lexer.Current.Position + 1,
+                    ErrorMessages.SqlQueryParserParseConstraintVoid4);
+                ParseConstraintColumns(ref lexer);
+            }
+            return setNull ? SqlReferentialAction.SetNull : SqlReferentialAction.SetDefault;
+        }
+        AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseConstraintVoid5);
+        return SqlReferentialAction.NoAction;
     }
 
     private List<string> ParseConstraintColumns(ref TokenLexer lexer)

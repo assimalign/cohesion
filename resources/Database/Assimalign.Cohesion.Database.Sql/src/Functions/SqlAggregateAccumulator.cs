@@ -216,6 +216,14 @@ public abstract class SqlAggregateAccumulator
         return function.CheckResult(result, default);
     }
 
+    /// <summary>Reads a native aggregate's non-consuming frame result; application finish hooks remain once-only.</summary>
+    internal SqlValue ReadWindowResult(CancellationToken cancellationToken)
+    {
+        try { return _function!.CheckResult(FinishCore(), default); }
+        catch (Exception exception) when (SqlEvaluationException.IsFunctionFailure(exception, cancellationToken))
+        { throw SqlEvaluationException.FunctionFailed(_function!.Name, exception); }
+    }
+
     /// <summary>Adds one row; the engine calls it through <see cref="Add"/>.</summary>
     /// <param name="arguments">The row's arguments: of the declared types, and none NULL when the function is strict.</param>
     protected abstract void AddCore(scoped in SqlArguments arguments);

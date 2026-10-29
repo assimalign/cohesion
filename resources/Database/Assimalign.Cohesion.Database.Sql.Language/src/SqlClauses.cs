@@ -141,6 +141,12 @@ public static class SqlClauses
     /// <summary>A named <c>WINDOW</c> clause.</summary>
     public const string Window = "WINDOW";
 
+    /// <summary>A physical-row window frame.</summary>
+    public const string WindowRows = "ROWS window frame";
+
+    /// <summary>A peer-based window frame without offsets.</summary>
+    public const string WindowRange = "RANGE window frame";
+
     /// <summary>A <c>UNION</c> set operation.</summary>
     public const string SetOperation = "UNION";
 
@@ -201,6 +207,9 @@ public static class SqlClauses
     /// <summary>A <c>REFERENCES</c> constraint.</summary>
     public const string References = "REFERENCES";
 
+    /// <summary>A foreign-key <c>ON UPDATE</c> action declaration.</summary>
+    public const string OnUpdate = "ON UPDATE";
+
     /// <summary>A <c>CHECK</c> constraint.</summary>
     public const string Check = "CHECK";
 
@@ -213,10 +222,10 @@ public static class SqlClauses
     /// <summary>A referential <c>RESTRICT</c> action.</summary>
     public const string Restrict = "RESTRICT";
 
-    /// <summary>Assigns NULL through a foreign-key deletion action.</summary>
+    /// <summary>Assigns NULL through a foreign-key action.</summary>
     public const string SetNull = "SET NULL";
 
-    /// <summary>Assigns defaults through a foreign-key deletion action.</summary>
+    /// <summary>Assigns defaults through a foreign-key action.</summary>
     public const string SetDefault = "SET DEFAULT";
 
     /// <summary>Checks foreign-key references at statement end.</summary>

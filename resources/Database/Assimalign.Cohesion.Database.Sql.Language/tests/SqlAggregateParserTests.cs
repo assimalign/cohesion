@@ -40,9 +40,9 @@ public class SqlAggregateParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - Aggregates: Rejects unsupported extensions explicitly")]
-    [InlineData("SELECT SUM(amount) OVER () FROM t;", "OVER")]
-    [InlineData("SELECT FIRST_VALUE() FROM t;", "FIRST_VALUE")]
-    [InlineData("SELECT LAST_VALUE() FROM t;", "LAST_VALUE")]
+    [InlineData("SELECT SUM(amount) OVER (GROUPS CURRENT ROW) FROM t;", "GROUPS")]
+    [InlineData("SELECT FIRST_VALUE(v) IGNORE NULLS OVER() FROM t;", "IGNORE NULLS")]
+    [InlineData("SELECT LAST_VALUE(v) OVER(EXCLUDE TIES) FROM t;", "EXCLUDE")]
     [InlineData("SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
     [InlineData("SELECT PERCENTILE_DISC(0.5) WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]
     [InlineData("SELECT MODE() WITHIN GROUP (ORDER BY amount) FROM t;", "WITHIN GROUP")]

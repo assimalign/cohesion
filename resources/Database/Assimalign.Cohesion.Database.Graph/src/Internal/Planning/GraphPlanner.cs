@@ -239,6 +239,12 @@ internal sealed partial class GraphPlanner
                 foreach (var path in clause.Paths)
                 { if (!Validate(path, creating: false, declared: true, incomingPrefilterScope: incomingPrefilterScope)) { clauseMatchesNothing = true; } }
                 ValidateExpression(clause.Predicate);
+                if (correlation?.Owner is GqlPatternComprehensionExpression && clause.Predicate is { } collectionFilter)
+                {
+                    var filterKind = KnownFunctionKind(collectionFilter, false);
+                    if (filterKind != GraphFunctionKind.Unknown && (filterKind & GraphFunctionKind.Boolean) == 0)
+                    { throw new GraphPlanningException("CG02013", ErrorMessages.BooleanRequired, collectionFilter.Location); }
+                }
                 bool selective = clause.Paths.Any(path => path.Selector is not null);
                 // A post-selection WHERE cannot constrain the search, including through
                 // an index anchor or a catalog-based matches-nothing shortcut.
@@ -602,7 +608,7 @@ internal sealed partial class GraphPlanner
                 GraphFunctionKind.Path => GraphProjectionKind.Path,
                 _ => MayReturn(call, entity: true) ? GraphProjectionKind.EntityValue : GraphProjectionKind.Scalar,
             },
-            GqlListExpression or GqlListComprehensionExpression or GqlListSliceExpression or GqlReduceExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression or
+            GqlListExpression or GqlPatternComprehensionExpression or GqlListComprehensionExpression or GqlListSliceExpression or GqlReduceExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression or
                 GqlMemberExpression or GqlPropertyExpression or GqlSubscriptExpression or GqlAggregateExpression => MayReturn(expression, entity: true) ? GraphProjectionKind.EntityValue : GraphProjectionKind.Scalar,
             GqlLiteralExpression or GqlParameterExpression or GqlCastExpression or
                 GqlBinaryExpression or GqlLogicalExpression or GqlUnaryExpression or
@@ -996,6 +1002,9 @@ internal sealed partial class GraphPlanner
                     case GqlReduceExpression reduce:
                         ValidateReduction(reduce, allowAggregates, ordering, variableScope, iterators, orderInput);
                         break;
+                    case GqlPatternComprehensionExpression pattern:
+                        ValidatePatternComprehension(pattern, ordering, variableScope, iterators, orderInput);
+                        break;
                     case GqlExistsExpression exists:
                         ValidateExists(exists, ordering, variableScope, iterators, orderInput);
                         break;
@@ -1030,6 +1039,23 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
+        void ValidatePatternComprehension(GqlPatternComprehensionExpression expression, bool ordering,
+            IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            if (expression.Pattern is null || expression.Projection is null || expression.Pattern.Selector is not null || expression.Pattern.Mode is not null ||
+                expression.Pattern.Nodes is null || expression.Pattern.Relationships is null or { Count: 0 } ||
+                expression.Pattern.Elements?.Any(element => element is GqlParenthesizedPathPattern) == true ||
+                GraphGrouping.ContainsAggregate(expression.Projection, _database.Engine.Functions, token))
+            { throw GraphValueExpressions.InvalidPattern(expression); }
+            var state = CorrelatedState;
+            state.Subplans ??= new(ReferenceEqualityComparer.Instance);
+            if (state.Subplans.ContainsKey(expression)) { return; }
+            state.Subplans.Add(expression, PlanCorrelated(expression,
+                new GqlQueryExpression([new GqlMatchClause([expression.Pattern], expression.Predicate, false)], [], [], false,
+                    [new GqlProjection(expression.Projection)], expression.Location), ordering, variableScope, iterators, orderInput));
+        }
+
         void ValidateExists(GqlExistsExpression exists, bool ordering, IReadOnlySet<string>? variableScope,
             IReadOnlySet<string>? iterators, (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
         {
@@ -1079,6 +1105,9 @@ internal sealed partial class GraphPlanner
                     if (!projections[alias.Value].Optional) { scope.Mandatory.Add(alias.Key); } else { scope.Mandatory.Remove(alias.Key); }
                 }
             }
+            // The optional path name declares a fresh local binding.
+            if (owner is GqlPatternComprehensionExpression { Pattern.Variable: { } localPath })
+            { scope.Variables.Remove(localPath); scope.Shapes.Remove(localPath); scope.Mandatory.Remove(localPath); scope.Groups.Remove(localPath); }
             var previous = state.Correlation;
             GraphPlan inner;
             try
@@ -1330,7 +1359,7 @@ internal sealed partial class GraphPlanner
                     "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" => GraphFunctionKind.Boolean,
                     "-" or "*" or "/" or "%" => GraphFunctionKind.Number, "||" => GraphFunctionKind.String, _ => GraphFunctionKind.Unknown,
                 };
-                case GqlListExpression or GqlListComprehensionExpression or GqlListSliceExpression: return GraphFunctionKind.List;
+                case GqlListExpression or GqlPatternComprehensionExpression or GqlListComprehensionExpression or GqlListSliceExpression: return GraphFunctionKind.List;
                 case GqlMapExpression: return GraphFunctionKind.Map;
                 case GqlReduceExpression reduce: return ReductionKind(reduce, ordering, iterators);
                 case GqlVariableExpression variable:

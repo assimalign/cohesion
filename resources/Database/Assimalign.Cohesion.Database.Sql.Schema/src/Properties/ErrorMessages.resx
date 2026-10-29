@@ -32,6 +32,7 @@
   <data name="ValidatorValidateTableConstraintsVoid" xml:space="preserve"><value>The constraint entry cannot be null.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid2" xml:space="preserve"><value>The constraint name is declared more than once.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid3" xml:space="preserve"><value>Constraint kind '{0}' is not defined.</value></data>
+  <data name="UpdateActionInvalid" xml:space="preserve"><value>The update action must be a defined foreign-key action; CHECK constraints require NO ACTION.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid4" xml:space="preserve"><value>The referential delete action is invalid for this constraint.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid5" xml:space="preserve"><value>Referenced table '{0}' is not declared.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid6" xml:space="preserve"><value>A reference must pair every local column with one referenced column.</value></data>

@@ -37,8 +37,9 @@ var query = statement.OqlExpression;
 ```
 
 The package references only the shared `Assimalign.Cohesion.Database.Language` package. The
-Documents engine supplies catalog binding, planning, and execution. Queries and index DDL address
-one collection in the session's database. `CREATE COLLECTION [IF NOT EXISTS]`,
+Documents engine supplies catalog binding, planning, and execution. Collection sources and index DDL address
+one collection in the session's database; derived and expression sources compose further SELECTs.
+`CREATE COLLECTION [IF NOT EXISTS]`,
 `DROP COLLECTION [IF EXISTS]`, `CREATE INDEX`, and `DROP INDEX` use the same
 parse-plan-execute path as `SELECT`. `INSERT INTO ... (KEY, VALUE) VALUES` and INSERT SELECT
 create externally keyed documents. UPSERT uses the same forms to insert or wholly replace. `META([alias]).id` and `.version` expose stored identities
@@ -51,7 +52,9 @@ serialization or budget failure rolls back writes before any results are exposed
 USE KEYS, OBJECT transformations, multiple bindings, position variables, WITHIN and UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
 produce `CK00001`; all three remain usable field names. Uncorrelated SELECT expression subqueries return arrays; EXISTS and IN (SELECT RAW ...) execute.
-Correlation, derived FROM and subqueries in DML remain deferred; see DIALECT.md.
+Derived FROM requires an alias with optional AS. Uncorrelated expression sources iterate arrays,
+parameters and subqueries; their explicit aliases require AS. OqlSelectExpression.Source retains
+the FROM expression. Correlation and subqueries in DML remain deferred; see DIALECT.md.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`
 are executable presence predicates. NIL remains a NULL synonym.
 

@@ -93,6 +93,48 @@ internal static partial class GraphPlanExecutor
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
+    internal static async ValueTask<object?[]> CollectPatternAsync(GraphDatabase database, GraphOperation operation,
+        GraphCorrelatedSubplan subplan, IReadOnlyDictionary<string, object?> arguments,
+        IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+    {
+        var budget = operation.QueryBudget ??= new ExpansionBudget();
+        using var memory = new GraphMemoryOwner(budget.Memory);
+        memory.Add(128);
+        var output = new List<object?>();
+        var inner = ExecuteCorrelatedAsync(database, operation, subplan, arguments, parameters, token).GetAsyncEnumerator(token);
+        var registry = operation.FunctionBindings as GraphCorrelatedBindings;
+        try
+        {
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                registry?.OnInnerAdvance?.Invoke();
+                if (!await inner.MoveNextAsync().ConfigureAwait(false)) { break; }
+                token.ThrowIfCancellationRequested();
+                budget.Consume();
+                if (output.Count == output.Capacity)
+                {
+                    int capacity = output.Capacity == 0 ? 4 : checked(output.Capacity * 2);
+                    int previousCapacity = output.Capacity;
+                    memory.Add(32L + 16L * capacity);
+                    output.Capacity = capacity;
+                    if (previousCapacity != 0) { memory.Release(32L + 16L * previousCapacity); }
+                }
+                var value = GraphExpressionEvaluator.Evaluate(subplan.Plan.Projections[0].Expression, inner.Current,
+                    operation.EvaluationContext, parameters);
+                memory.RetainValue(value, token);
+                output.Add(value);
+            }
+            memory.Add(32L + 16L * output.Count);
+            return output.ToArray();
+        }
+        finally
+        {
+            await inner.DisposeAsync().ConfigureAwait(false);
+            registry?.OnInnerDisposed?.Invoke();
+        }
+    }
+
     internal static async ValueTask<bool> ExistsAsync(GraphDatabase database, GraphOperation operation,
         GraphCorrelatedSubplan subplan, IReadOnlyDictionary<string, object?> arguments,
         IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)

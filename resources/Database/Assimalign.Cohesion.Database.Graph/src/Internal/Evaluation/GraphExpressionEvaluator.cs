@@ -45,6 +45,7 @@ internal static partial class GraphExpressionEvaluator
                 GqlListExpression list => list.Items.Select(item => Evaluate(item, bindings, context, parameters)).ToArray(),
                 GqlListComprehensionExpression comprehension => Comprehension(comprehension, bindings, context, parameters),
                 GqlReduceExpression reduce => Reduce(reduce, bindings, context, parameters),
+                GqlPatternComprehensionExpression pattern => CollectPattern(pattern, bindings, context, parameters),
                 GqlExistsExpression exists => Exists(exists, bindings, context, parameters),
                 GqlListPredicateExpression predicate => ListPredicate(predicate, bindings, context, parameters),
                 GqlListSliceExpression slice => Slice(slice, bindings, context, parameters),

@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Client;
+using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.AotSample;
 
@@ -238,6 +239,12 @@ internal static class Program
         Check("in process: ranking and navigation window stage", await RowsAsync(session,
             "SELECT Id,RANK() OVER w,LAG(Score,1,0) OVER w FROM customers WINDOW w AS(ORDER BY Id) ORDER BY Id"),
             [[1L,1L,0L],[2L,2L,100L]]);
+        Check("in process: ROWS frames, aggregate FILTER and value functions", await RowsAsync(session,
+            "SELECT Id,SUM(Score) FILTER(WHERE Score>0) OVER w,FIRST_VALUE(Score) OVER w,LAST_VALUE(Score) OVER w,NTH_VALUE(Score,2) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
+            [[1L,100m,100L,100L,null],[2L,300m,100L,200L,200L]]);
+        Check("in process: ordered native and application frame aggregates", await RowsAsync(session,
+            "SELECT Id,SUM(Score ORDER BY Id DESC) FILTER(WHERE Score>0) OVER w,product(Score) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
+            [[1L,100m,100L],[2L,300m,20000L]]);
         Check("in process: persisted view with pinned call", await RowsAsync(session, "SELECT n FROM native_view"), [[5]]);
         Check("in process: VIEWS metadata", await RowsAsync(session, "SELECT CHECK_OPTION, IS_UPDATABLE FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'native_view'"), [["NONE", "NO"]]);
         await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");
@@ -383,6 +390,32 @@ internal static class Program
         await session.ExecuteAsync("DELETE FROM action_parent WHERE id = 1", cancellationToken: CancellationToken.None);
         Check("in process: SET DEFAULT expression", await RowsAsync(session, "SELECT pid FROM action_child"), [[2]]);
         Check("in process: SET NULL", await RowsAsync(session, "SELECT pid FROM null_child"), [[null]]);
+        await session.ExecuteAsync("CREATE TABLE update_parent (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO update_parent VALUES (1)", cancellationToken: CancellationToken.None);
+        string[] updateActions = ["CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
+        for (int actionIndex = 0; actionIndex < updateActions.Length; actionIndex++)
+        {
+            string action = updateActions[actionIndex];
+            string declaration = $"CREATE TABLE update_child_{actionIndex} (pid INT, CONSTRAINT update_fk_{actionIndex} FOREIGN KEY(pid) REFERENCES update_parent(id) ON UPDATE {action} ON DELETE CASCADE)";
+            var parsedConstraint = ((SqlCreateTableExpression)((SqlQueryStatement)new SqlQueryParser().Parse(declaration + ";")).SqlExpression).Constraints.Single();
+            Check("in process: ON UPDATE rendering " + action,
+                SqlExpressionRenderer.Render(parsedConstraint).Contains(" ON DELETE CASCADE ON UPDATE " + action, StringComparison.Ordinal), true);
+            await session.ExecuteAsync(declaration, cancellationToken: CancellationToken.None);
+            Check("in process: ON UPDATE metadata " + action, await RowsAsync(session,
+                $"SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_NAME='update_fk_{actionIndex}'"), [[action]]);
+            if (actionIndex < 3)
+            {
+                CheckFailure("in process: ON UPDATE refusal " + action, await FailureAsync(async () =>
+                    await session.ExecuteAsync("UPDATE update_parent SET id=2", cancellationToken: CancellationToken.None)), "CK00001: ON UPDATE " + action + " action execution");
+                Check("in process: ON UPDATE atomicity " + action, await RowsAsync(session, "SELECT id FROM update_parent"), [[1]]);
+            }
+            await session.ExecuteAsync($"DROP TABLE update_child_{actionIndex}", cancellationToken: CancellationToken.None);
+        }
+        await session.ExecuteAsync("CREATE TABLE update_self (id INT PRIMARY KEY, pid INT REFERENCES update_self(id) ON UPDATE CASCADE)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO update_self VALUES (1,1)", cancellationToken: CancellationToken.None);
+        CheckFailure("in process: self ON UPDATE refusal", await FailureAsync(async () =>
+            await session.ExecuteAsync("UPDATE update_self SET id=2", cancellationToken: CancellationToken.None)), "CK00001: ON UPDATE CASCADE action execution");
+        Check("in process: self ON UPDATE atomicity", await RowsAsync(session, "SELECT id,pid FROM update_self"), [[1,1]]);
         await session.ExecuteAsync("CREATE TABLE expression_clock (id INT DEFAULT CAST('3' AS INT), stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO expression_clock DEFAULT VALUES", cancellationToken: CancellationToken.None);

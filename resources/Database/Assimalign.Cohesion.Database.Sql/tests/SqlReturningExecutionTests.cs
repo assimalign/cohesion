@@ -259,10 +259,12 @@ public sealed class SqlReturningExecutionTests
         await ExecuteAsync(session, "INSERT INTO t VALUES (1, 1)");
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseParseException>(() => ExecuteAsync(session, sql));
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
 
         // Assert
-        failure.Diagnostics.ShouldContain(item => item.Code == (sql.StartsWith("SELECT", StringComparison.Ordinal) ? "CS00003" : "CK00001"));
+        bool window = sql.Contains("OVER", StringComparison.Ordinal);
+        if (!window) { failure.ShouldBeOfType<DatabaseParseException>(); }
+        failure.Diagnostics.ShouldContain(item => item.Code == (window ? "CS05076" : sql.StartsWith("SELECT", StringComparison.Ordinal) ? "CS00003" : "CK00001"));
         await using var result = await QueryAsync(session, "SELECT * FROM t");
         CheckRows(await ReadAsync(result), [[1, 1]]);
     }

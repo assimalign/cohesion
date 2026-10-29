@@ -125,7 +125,7 @@ public sealed class OqlQueryParserTests
     [InlineData("DEFINE people AS SELECT * FROM people", "DEFINE", 0)]
     [InlineData("SELECT ELEMENT(address) FROM people", "ELEMENT", 7)]
     [InlineData("SELECT FLATTEN(address) FROM people", "FLATTEN", 7)]
-    [InlineData("SELECT * FROM (SELECT city FROM addresses) p", "derived FROM subquery", 15)]
+    [InlineData("SELECT * FROM (SELECT city FROM addresses) p JOIN people q ON TRUE", "JOIN", 45)]
     [InlineData("CREATE DATABASE other", "CREATE", 0)]
     [InlineData("DROP DATABASE other", "DROP", 0)]
     [InlineData("USE other", "USE", 0)]

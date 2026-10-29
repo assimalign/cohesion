@@ -179,6 +179,21 @@ internal sealed class SqlStatementMetrics
     internal long HashMemoryBytes => (_accessPath as JoinWork)?.MemoryBytes ?? 0;
     internal long PeakHashMemoryBytes => (_accessPath as JoinWork)?.PeakMemoryBytes ?? 0;
 
+    private const long windowFrameVisitLimit = 1_000_000;
+
+    internal void RecordWindowFrameRecomputation()
+    {
+        if (_accessPath is not JoinWork state) { state = new([]) { ScalarPath = _accessPath as string }; _accessPath = state; }
+        if (state.ObservationState is not WindowFrameWork work)
+        { work = new() { Analysis = state.Operators }; state.ObservationState = work; }
+        if (work.Visits == windowFrameVisitLimit)
+        {
+            throw new SqlExecutionException("CS05084", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.WindowFrameWorkLimit, windowFrameVisitLimit));
+        }
+        work.Visits++;
+    }
+
     internal bool IsAnalyzing => (_accessPath as JoinWork)?.Operators is not null;
 
     internal void BeginAnalysis()
@@ -261,7 +276,14 @@ internal sealed class SqlStatementMetrics
         internal long CandidatePairs;
         internal long MemoryBytes;
         internal long PeakMemoryBytes;
-        internal AnalysisState? Operators;
+        // Reuse the analysis reference slot for window work. Statements without OVER
+        // keep their existing object sizes, including joins and EXPLAIN ANALYZE.
+        internal object? ObservationState;
+        internal AnalysisState? Operators
+        {
+            get => ObservationState is WindowFrameWork work ? work.Analysis : ObservationState as AnalysisState;
+            set { if (ObservationState is WindowFrameWork work) { work.Analysis = value; } else { ObservationState = value; } }
+        }
 
         private sealed class DebugView
         {
@@ -293,7 +315,7 @@ internal sealed class SqlStatementMetrics
             CandidatePairs = previous.CandidatePairs;
             MemoryBytes = previous.MemoryBytes;
             PeakMemoryBytes = previous.PeakMemoryBytes;
-            Operators = previous.Operators;
+            ObservationState = previous.ObservationState;
             DmlStatement = previous.DmlStatement;
             RowReads = previous.RowReads;
             AssociationRowReads = previous.AssociationRowReads;
@@ -301,6 +323,19 @@ internal sealed class SqlStatementMetrics
         }
 
         internal SqlDmlMemory? Memory;
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("WindowFrameWork")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(WindowFrameWork.DebugView))]
+    private sealed class WindowFrameWork
+    {
+        internal long Visits;
+        internal AnalysisState? Analysis;
+
+        private sealed class DebugView
+        {
+            public DebugView(WindowFrameWork value) { _ = value; }
+        }
     }
 
     [global::System.Diagnostics.DebuggerDisplay("AnalysisState")]

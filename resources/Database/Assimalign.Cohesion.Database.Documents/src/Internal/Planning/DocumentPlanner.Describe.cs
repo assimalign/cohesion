@@ -18,6 +18,7 @@ internal sealed partial class DocumentPlanner
         DocumentNestedPlan => "SelectWithSubqueries",
         DocumentNestedQueryPlan => "Subquery",
         DocumentPlan => "Select",
+        DocumentFromPlan => "Select",
         DocumentLogicalPlan { Query.IsValue: true, IsGrouped: false } => "ProjectValue",
         DocumentLogicalPlan { IsGrouped: true } => "Group",
         DocumentLogicalPlan => "Project",
@@ -62,6 +63,7 @@ internal sealed partial class DocumentPlanner
         var logical = plan switch
         {
             DocumentPlan p => p.Logical,
+            DocumentFromPlan p => p.Logical,
             DocumentSystemCollectionPlan p => p.Logical,
             _ => null,
         };
@@ -82,6 +84,13 @@ internal sealed partial class DocumentPlanner
         if (plan is DocumentCreateIndexPlan creation)
         { detail = "include_missing=" + creation.IncludeMissing; }
         Add(DescribeOperator(plan), null, indexName, detail);
+        if (plan is DocumentFromPlan from)
+        {
+            int projection = nodes.Count;
+            Add(DescribeOperator(from.Logical), 0, detail: AggregateDetail(from.Logical));
+            Add(from.Input is null ? "ExpressionSource" : "DerivedSource", AddBindings(from.Logical, projection),
+                detail: "alias=" + from.Logical.Query.Alias + "; " + (from.Input is null ? "evaluate_once" : "streamed") + "; sort=outer");
+        }
         var returning = plan switch
         {
             DocumentInsertPlan p => p.Returning,

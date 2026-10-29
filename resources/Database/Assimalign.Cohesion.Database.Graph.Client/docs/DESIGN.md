@@ -395,6 +395,15 @@ existing pre-mutation refusal of writing stages. No protocol capability or wire 
 
 QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the existing request encoding. Lists use the negotiated composite-value parameter codec. Final planned column kinds govern Execute admission: scalar LET/FOR values pass, possible composites require negotiation, and carried entities keep the ExecutePaths hint. Read-only composed path requests preserve optionality; a write stage anywhere rejects the request before execution. GraphLinearCompositionWireTests verifies both InMemory and TCP, own-write reads, row-valued insertion maps, bound MATCH maps, map/entity member access, decoded star bindings and Int64 COUNT metadata through WITH. Scope, duplicate carried-name, INSERT-map and runtime container rejections retain coded diagnostics and permit the next statement on the exact same server session. Comma-separated MATCH maps can reference later pattern parts; their clause-wide predicates, including anonymous elements, execute over both transports and validate under EXPLAIN. FOR/UNWIND retains proven node and relationship list element kinds through WITH/NEXT for later MATCH, DELETE and ExecutePaths; scalar/mixed lists retain coded rejection and exact-session reuse. No protocol format changes.
 
+## Pattern comprehensions (#1736, GQ-C3)
+
+QueryAsync carries pattern collection as ordinary GQL. Scalar/property projections and nested
+lists use the existing protocol 2.1 composite capability over InMemory and TCP. Entity-valued
+lists (nodes, relationships and paths) retain CG05001 until #1662; no available capability
+encodes those values. Refusal precedes writes and preserves the exact session. Pattern tests
+cover NULL correlation, iterator correlation, projection, EXPLAIN and subsequent rental reuse.
+No client API or wire contract changes.
+
 ## List comprehensions and slices (#1736, GQ-C1)
 
 QueryAsync uses the existing scalar/composite encoding for comprehensions and slices. Lexical

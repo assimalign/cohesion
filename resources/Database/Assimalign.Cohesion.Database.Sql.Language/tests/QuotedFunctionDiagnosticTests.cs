@@ -5,7 +5,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class QuotedFunctionDiagnosticTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Quoted functions: value functions remain deferred and ranking requires binding")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Quoted functions: window functions require OVER during binding")]
     [InlineData("lead")]
     [InlineData("lag")]
     [InlineData("rank")]
@@ -22,14 +22,7 @@ public sealed class QuotedFunctionDiagnosticTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        if (name is "first_value" or "last_value" or "nth_value")
-        {
-            var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("CK00001", diagnostic.Message);
-            diagnostic.Start.ShouldBe(7);
-            diagnostic.End.ShouldBe(9 + name.Length);
-        }
-        else { statement.Diagnostics.ShouldBeEmpty(); } // Required OVER is a binding diagnostic.
+        statement.Diagnostics.ShouldBeEmpty(); // Required OVER is a binding diagnostic.
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Quoted functions: preserve case and column references")]

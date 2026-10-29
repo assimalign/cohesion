@@ -4,13 +4,15 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>A query over one collection in the session's database.</summary>
+/// <summary>A query over a collection, derived query, or expression.</summary>
 [global::System.Diagnostics.DebuggerDisplay("OqlSelectExpression")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlSelectExpression.DebugView))]
 public sealed class OqlSelectExpression : OqlExpression
 {
-    /// <summary>Initializes a collection query.</summary>
-    /// <param name="collection">The unqualified collection name or reserved COHESION_SCHEMA system collection name.</param>
+    private readonly object _from;
+
+    /// <summary>Initializes a query over a collection or expression source.</summary>
+    /// <param name="collection">The unqualified collection name or reserved COHESION_SCHEMA system collection name; ignored when <paramref name="source"/> is supplied.</param>
     /// <param name="alias">The optional iteration variable.</param>
     /// <param name="projections">The projected expressions.</param>
     /// <param name="predicate">The optional document filter.</param>
@@ -25,13 +27,14 @@ public sealed class OqlSelectExpression : OqlExpression
     /// <param name="unnest">The ordered array bindings applied before WHERE.</param>
     /// <param name="groupAliases">The optional aliases parallel to <paramref name="groupBy"/>; null entries leave terms unnamed.</param>
     /// <param name="groupAs">The optional GROUP AS binding for the array of input binding wrappers.</param>
+    /// <param name="source">The FROM expression, including a subquery for a derived source; null selects <paramref name="collection"/>.</param>
     public OqlSelectExpression(string collection, string? alias, IReadOnlyList<OqlProjection> projections,
         OqlExpression? predicate, IReadOnlyList<OqlExpression> groupBy, OqlExpression? having,
         IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, OqlExpression? limit = null,
         OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null,
-        IReadOnlyList<string?>? groupAliases = null, string? groupAs = null) : base(location)
+        IReadOnlyList<string?>? groupAliases = null, string? groupAs = null, OqlExpression? source = null) : base(location)
     {
-        Collection = collection;
+        _from = source is null ? collection : source;
         Alias = alias;
         Projections = projections;
         Predicate = predicate;
@@ -50,8 +53,10 @@ public sealed class OqlSelectExpression : OqlExpression
     /// <summary>Gets whether the projection returns one bare value (VALUE or RAW).</summary>
     public bool IsValue { get; }
 
-    /// <summary>Gets the collection name; database qualification is never accepted.</summary>
-    public string Collection { get; }
+    /// <summary>Gets the collection name, or an empty string for an expression source.</summary>
+    public string Collection => _from as string ?? string.Empty;
+    /// <summary>Gets the FROM expression, or null for a collection source.</summary>
+    public OqlExpression? Source => _from as OqlExpression;
     /// <summary>Gets the optional iteration variable.</summary>
     public string? Alias { get; }
     /// <summary>Gets the array bindings in expansion order.</summary>
@@ -103,6 +108,7 @@ public sealed class OqlSelectExpression : OqlExpression
         public bool IsDistinct => _target.IsDistinct;
         public bool IsValue => _target.IsValue;
         public string Collection => _target.Collection;
+        public OqlExpression? Source => _target.Source;
         public string? Alias => _target.Alias;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlUnnestExpression> Unnest => _target.Unnest;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlProjection> Projections => _target.Projections;

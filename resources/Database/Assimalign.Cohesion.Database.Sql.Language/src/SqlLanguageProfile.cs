@@ -56,7 +56,7 @@ public static class SqlLanguageProfile
         "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "STDDEV_SAMP", "STDDEV_POP", "VARIANCE", "VAR_SAMP", "VAR_POP",
         "GROUPING", "GROUPING_ID",
         // Window functions
-        "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD",
+        "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
         // Null handling
         "COALESCE", "NULLIF",
         // Type
@@ -121,6 +121,8 @@ public static class SqlLanguageProfile
         SqlClauses.Over,
         SqlClauses.Partition,
         SqlClauses.Window,
+        SqlClauses.WindowRows,
+        SqlClauses.WindowRange,
         SqlClauses.OrderBy,
         SqlClauses.Limit,
         SqlClauses.Offset,
@@ -140,6 +142,7 @@ public static class SqlLanguageProfile
         SqlClauses.Constraint,
         SqlClauses.ForeignKey,
         SqlClauses.References,
+        SqlClauses.OnUpdate,
         SqlClauses.Check,
         SqlClauses.UniqueConstraint,
         SqlClauses.Cascade,

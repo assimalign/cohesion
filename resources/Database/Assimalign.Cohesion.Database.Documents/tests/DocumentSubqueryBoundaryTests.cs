@@ -23,7 +23,7 @@ public sealed class DocumentSubqueryBoundaryTests
     [InlineData("SELECT (SELECT n FROM items s UNNEST d.tags AS d) FROM items d", "Correlated")]
     [InlineData("SELECT (SELECT COUNT(*) FROM items s WHERE d.n > 0 GROUP BY s.n AS d) FROM items d", "Correlated")]
     [InlineData("SELECT (SELECT COUNT(*) FROM items s GROUP BY d.n AS d) FROM items d", "Correlated")]
-    [InlineData("SELECT * FROM (SELECT n FROM items) s", "derived FROM")]
+    [InlineData("SELECT * FROM (SELECT n FROM items) s JOIN items t ON TRUE", "JOIN")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('x', (SELECT RAW n FROM items))", "DML")]
     [InlineData("UPSERT INTO items (KEY k) SELECT (SELECT RAW n FROM items) AS k FROM items", "DML")]
     [InlineData("UPDATE items SET n = (SELECT RAW n FROM items)", "DML")]

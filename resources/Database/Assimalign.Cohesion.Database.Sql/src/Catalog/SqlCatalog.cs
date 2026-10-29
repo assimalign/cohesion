@@ -82,10 +82,11 @@ public sealed partial class SqlCatalog
     private const int schemaStateChunkSize = 3 * 1024;
 
     // The version of a table record's trailing extension this catalog writes; it reads
-    // only the current version. Version 7 adds TYPE default assignment coercion;
+    // only the current version. Version 8 adds each constraint's ON UPDATE action;
+    // version 7 adds TYPE default assignment coercion;
     // version 6 adds frozen missing values; version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
     // version 4 (data-storage format 7, phase E3) each column's domain name.
-    private const int tableExtensionVersion = 7;
+    private const int tableExtensionVersion = 8;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -1342,7 +1343,7 @@ public sealed partial class SqlCatalog
                         if (!_pendingReclamations.TryAdd(intent.ObjectId, new SqlReclamationIntent(unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
                         _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
                         break;
-                    case 16: // Retired table-owned identity counters are never read in format 29.
+                    case 16: // Retired table-owned identity counters are never read in format 30.
                         throw new SqlCatalogException("CS06059", ErrorMessages.IdentityCounterMalformed);
                     case sequenceRecordKind:
                     case sequenceCounterRecordKind:
@@ -1766,7 +1767,7 @@ public sealed partial class SqlCatalog
                 writer.AppendString(column, Collation.Binary);
             }
             AppendOptionalString(ref writer, constraint.CheckExpression);
-            writer.AppendInt8((sbyte)constraint.OnDelete);
+            writer.AppendInt8((sbyte)constraint.OnDelete).AppendInt8((sbyte)constraint.OnUpdate);
         }
         foreach (var column in table.Columns)
         {
@@ -1923,10 +1924,11 @@ public sealed partial class SqlCatalog
                 var referencedColumns = ReadColumnNames(ref reader);
                 string? expression = ReadOptionalString(ref reader);
                 var onDelete = (SqlCatalogReferentialAction)reader.ReadInt8();
+                var onUpdate = (SqlCatalogReferentialAction)reader.ReadInt8();
                 try
                 {
                     constraints.Add(new SqlCatalogConstraint(constraintName, kind, localColumns,
-                        referencedSchema, referencedTable, referencedColumns, expression, onDelete));
+                        referencedSchema, referencedTable, referencedColumns, expression, onDelete, onUpdate: onUpdate));
                 }
                 catch (ArgumentException exception)
                 {
@@ -1997,7 +1999,7 @@ public sealed partial class SqlCatalog
             var constraint = constraints[index];
             constraints[index] = new SqlCatalogConstraint(constraint.Name, constraint.Kind, constraint.Columns,
                 constraint.ReferencedSchema, constraint.ReferencedTable, constraint.ReferencedColumns,
-                constraint.CheckExpression, constraint.OnDelete, ReadFunctionCalls(ref reader, constraint.CheckExpression?.Length ?? 0));
+                constraint.CheckExpression, constraint.OnDelete, ReadFunctionCalls(ref reader, constraint.CheckExpression?.Length ?? 0), constraint.OnUpdate);
         }
         for (int index = 0; index < columns.Count; index++)
         {

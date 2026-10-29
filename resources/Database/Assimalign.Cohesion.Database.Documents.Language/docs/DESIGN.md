@@ -91,6 +91,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `OPTIONS` | No | INSERT/UPSERT header element; one CK00001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
 | `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST bindings |
+| `DERIVED FROM` | Yes | Parenthesized SELECT, required alias, optional AS; streams its rows into the outer pipeline |
+| `EXPRESSION FROM` | Yes | Uncorrelated expression, AS before an explicit alias; arrays expand and MISSING supplies no rows |
 | `UNNEST` | Yes | Optional INNER; one row per array element, chainable |
 | `LEFT UNNEST` | Yes | Optional OUTER; preserves empty and non-array inputs with a MISSING variable |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
@@ -111,7 +113,7 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | 1..32 ordered scalar paths or one DISTINCT ARRAY key; scalar-only UNIQUE; IF NOT EXISTS |
 | `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
-| `SUBQUERY` | Yes | Parenthesized uncorrelated SELECT returns an array; derived FROM, correlation and DML subqueries remain named CK00001 refusals |
+| `SUBQUERY` | Yes | Parenthesized uncorrelated SELECT returns an array; correlation and DML subqueries remain named CK00001 refusals |
 | `EXISTS` | Yes | Unary collection operator; arrays test nonemptiness, MISSING propagates, other inputs give NULL |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 
@@ -308,7 +310,10 @@ numbers outside the decimal domain, become CD00007 for paging. Direct AST counts
 No new shared public member or visibility grant is required; the two assemblies keep the message
 locally, with equality covered by planner/parser tests.
 
-Paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY. INSERT and UPSERT SELECT
+Unless LIMIT is zero, paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY.
+LIMIT 0 preserves eager static validation, then returns no rows with planned column names and
+types before opening any stored, system, expression or derived source or running a blocking stage.
+This also applies to an inner derived SELECT's own zero limit. INSERT and UPSERT SELECT
 sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain CK00001, naming the
 statement and clause (for example, DELETE LIMIT). INSERT/UPSERT VALUES paging names
 INSERT VALUES LIMIT, UPSERT VALUES OFFSET, or the corresponding clause. RETURNING as an implicit source alias may precede paging.
@@ -536,7 +541,7 @@ unnested colon; an ordinary `EXISTS x IN array` remains an IN expression. Qualif
 syntax retains its path in a unary `.*` node so planning can name correlation before refusing
 an otherwise unsupported qualified star. ParseSelect stops at its matching closing parenthesis; recursive expression
 parsing shares CD00005's 128-level limit. The capability scan admits nested SELECT only within
-a SELECT statement and names derived FROM or SUBQUERY in DML for deferred forms. SELECT
+a SELECT statement and names SUBQUERY in DML for deferred forms. SELECT
 quantifiers and reserved labels retain their existing positional rules within nested scopes.
 IN with a direct SELECT requires RAW or VALUE (CD00014); an ordinary parenthesized expression
 keeps the existing value-list interpretation. Source Text remains the statement renderer;
@@ -544,6 +549,20 @@ there is no separate OQL AST renderer. The engine renders nested plans in EXPLAI
 The [dialect](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records every default,
 cache policy, scope, retention and deferred form. OqlSubqueryParserTests and the engine's
 advertised-clause corpus cover the syntax together with the runtime and transport suites.
+
+## FROM source expressions (#1731, OQ-Q2)
+
+OqlSelectExpression.Source holds an expression or OqlSubqueryExpression for FROM; null retains
+the collection-source representation. The existing collection storage slot holds either the
+collection name or expression, preserving ordinary SELECT node size. Collection is empty for an
+expression source, and logical-plan copies preserve Source. The parser permits optional AS for
+derived aliases, requires AS before generic explicit aliases, and diagnoses a missing derived
+alias with CD00015. Unnamed generic expressions without an implicit field name give CD01033
+at binding. The profile advertises DERIVED FROM and EXPRESSION FROM beside FROM, with live
+conformance cases. The [dialect](DIALECT.md#derived-and-expression-from-sources-1731-oq-q2)
+records the pinned Couchbase references, row semantics, star/metadata choices and execution defaults.
+The capability scan restores grouping state per SELECT scope, preserving contextual aliases such
+as LETTING after a grouped derived query.
 
 ## Grammar, statement, and expression trees
 
@@ -554,7 +573,7 @@ query        := SELECT [ALL | DISTINCT] select-kind from-clause
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
                 [LIMIT count [OFFSET count] | OFFSET count [LIMIT count]]
 count        := ['+' | '-'] integer-literal | parameter
-from-clause  := FROM collection [AS? identifier] unnest*
+from-clause  := FROM (collection [AS? identifier] | subquery [AS] identifier | expression [AS identifier]) unnest*
 unnest       := [INNER | LEFT [OUTER]] UNNEST expression [AS? identifier]
 aggregate-call := COUNT '(' '*' ')' | aggregate-name '(' [ALL | DISTINCT] expression ')'
 quantified-expression := (ANY | SOME | EVERY) identifier IN expression SATISFIES expression END
@@ -718,6 +737,9 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
 | `CD00014` | Direct IN subquery requires SELECT RAW or SELECT VALUE |
+| `CD00015` | Derived FROM subquery requires an alias |
+| `CD01033` | FROM expression requires an explicit alias or implicit field name |
+| `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and

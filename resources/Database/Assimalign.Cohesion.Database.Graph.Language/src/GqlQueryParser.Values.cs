@@ -56,7 +56,7 @@ public sealed partial class GqlQueryParser
         if (Current.Type != TokenType.RightBracket)
         {
             if ((Current.Type == TokenType.LeftParen || _position + 1 < _tokens.Count && _tokens[_position + 1].Type == TokenType.Equals) && HasComprehensionBar())
-            { Unsupported("PATTERN COMPREHENSION", Current); return new GqlListExpression(items); }
+            { return ParsePatternComprehension(start); }
             if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
                 _tokens[_position + 1].Text.Equals("IN", StringComparison.OrdinalIgnoreCase))
             {
@@ -135,13 +135,32 @@ public sealed partial class GqlQueryParser
             if (depth == 0 && _tokens[i].Type == TokenType.Comma) { return false; }
             if (depth == 0 && i > _position && i + 1 < _tokens.Count && _tokens[i - 1].Type == TokenType.RightParen &&
                 _tokens[i].Type is TokenType.Minus or TokenType.LeftArrow or TokenType.RightArrow &&
-                _tokens[i + 1].Type is TokenType.LeftParen or TokenType.LeftBracket) { relationship = true; }
+                StartsComprehensionRelationship(i)) { relationship = true; }
             if (_tokens[i].Type is TokenType.LeftBracket or TokenType.LeftParen or TokenType.LeftBrace) { depth++; }
             if (_tokens[i].Type == TokenType.RightBracket && depth == 0) { break; }
             if (_tokens[i].Type is TokenType.RightBracket or TokenType.RightParen or TokenType.RightBrace) { depth--; }
             if (_tokens[i].Text == "|" && depth == 0) { return relationship; }
         }
         return false;
+    }
+
+    private bool StartsComprehensionRelationship(int index)
+    {
+        // Probe the pattern boundary; ParsePath owns quantifier validation. An abbreviated
+        // connector may end in a touching '>' and carry an ISO postfix before its next node.
+        int next = index + 1;
+        if (_tokens[index].Type == TokenType.LeftArrow && _tokens[next].Type == TokenType.GreaterThan && Adjacent(index, next))
+        { next++; }
+        if (next < _tokens.Count && _tokens[next].Type == TokenType.LeftBracket) { return true; }
+        if (next < _tokens.Count && _tokens[next].Type is TokenType.Plus or TokenType.Asterisk) { next++; }
+        else if (next < _tokens.Count && _tokens[next].Type == TokenType.LeftBrace)
+        {
+            next++;
+            while (next < _tokens.Count && _tokens[next].Type is TokenType.Integer or TokenType.Comma) { next++; }
+            if (next >= _tokens.Count || _tokens[next].Type != TokenType.RightBrace) { return false; }
+            next++;
+        }
+        return next < _tokens.Count && _tokens[next].Type == TokenType.LeftParen;
     }
 
     private GqlExpression ParseMap()

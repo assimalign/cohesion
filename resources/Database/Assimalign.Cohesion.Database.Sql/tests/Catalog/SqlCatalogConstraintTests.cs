@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog.Tests;
 
 public sealed class SqlCatalogConstraintTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Constraints: all five delete actions survive WAL recovery")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Constraints: all five delete and update actions survive WAL recovery")]
     [InlineData(SqlCatalogReferentialAction.Restrict)]
     [InlineData(SqlCatalogReferentialAction.Cascade)]
     [InlineData(SqlCatalogReferentialAction.NoAction)]
@@ -26,7 +26,7 @@ public sealed class SqlCatalogConstraintTests
         using var storage = SqlStorage.Create(new NonClosingStream(data), new NonClosingStream(journal), new MemoryStream(), "constraints");
         SqlCatalog catalog = SqlCatalog.Open(storage);
         var reference = new SqlCatalogConstraint("fk_parent", SqlCatalogConstraintKind.Reference,
-            ["parent_id"], "dbo", "parent", ["id"], onDelete: action);
+            ["parent_id"], "dbo", "parent", ["id"], onDelete: action, onUpdate: action);
         var check = new SqlCatalogConstraint("ck_positive", SqlCatalogConstraintKind.Check,
             ["qty"], checkExpression: "qty > 0");
         await catalog.CreateTableAsync("dbo", "child",
@@ -47,6 +47,7 @@ public sealed class SqlCatalogConstraintTests
         table.Constraints[0].ReferencedTable.ShouldBe("parent");
         table.Constraints[0].ReferencedColumns.ShouldBe(["id"]);
         table.Constraints[0].OnDelete.ShouldBe(action);
+        table.Constraints[0].OnUpdate.ShouldBe(action);
         table.Constraints[1].CheckExpression.ShouldBe("qty > 0");
         table.FindColumn("extra").ShouldNotBeNull();
 
@@ -149,6 +150,44 @@ public sealed class SqlCatalogConstraintTests
         columns[0] = "changed";
         definitions[0] = new SqlCatalogConstraint("ck", SqlCatalogConstraintKind.Check, [], checkExpression: "1 = 1");
         table.Constraints.ShouldHaveSingleItem().Columns.ShouldBe(["parent_id"]);
+        table.Constraints[0].OnUpdate.ShouldBe(SqlCatalogReferentialAction.NoAction);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - ON UPDATE: format-29 foreign-key extensions are refused before decoding actions (#1723)")]
+    public void Open_Extension7ForeignKey_ShouldRefuseVersion()
+    {
+        // Arrange: extension 7 has a delete byte and no update byte, followed by column metadata.
+        using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "legacy-update");
+        var writer = LegacyTable();
+        writer.AppendInt8((sbyte)DatabaseObjectOwner.Adhoc).AppendNull().AppendInt32(7).AppendInt32(1)
+            .AppendString("fk", Collation.Binary).AppendInt8((sbyte)SqlCatalogConstraintKind.Reference)
+            .AppendInt32(1).AppendString("id", Collation.Binary).AppendString("dbo", Collation.Binary)
+            .AppendString("p", Collation.Binary).AppendInt32(1).AppendString("id", Collation.Binary)
+            .AppendNull().AppendInt8((sbyte)SqlCatalogReferentialAction.Cascade)
+            .AppendInt32(-1).AppendInt32(0).AppendNull().AppendInt32(0).AppendInt32(0)
+            .AppendBoolean(false).AppendNull().AppendBoolean(false);
+        using (var transaction = storage.BeginTransaction())
+        {
+            storage.InsertRow(transaction, writer.ToArray());
+            transaction.Commit();
+        }
+
+        // Act
+        var error = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
+
+        // Assert
+        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06060");
+        error.Message.ShouldContain("version 7", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - ON UPDATE: invalid public action metadata is refused (#1723)")]
+    public void Construct_InvalidUpdateMetadata_ShouldRefuse()
+    {
+        // Arrange / Act / Assert
+        Should.Throw<ArgumentException>(() => new SqlCatalogConstraint("fk", SqlCatalogConstraintKind.Reference,
+            ["id"], "dbo", "p", ["id"], onUpdate: (SqlCatalogReferentialAction)99));
+        Should.Throw<ArgumentException>(() => new SqlCatalogConstraint("ck", SqlCatalogConstraintKind.Check,
+            [], checkExpression: "1=1", onUpdate: SqlCatalogReferentialAction.Cascade));
     }
 
     private static SqlCatalogColumn Column(string name) => new(name, new DatabaseTypeInfo(DatabaseType.Int32));

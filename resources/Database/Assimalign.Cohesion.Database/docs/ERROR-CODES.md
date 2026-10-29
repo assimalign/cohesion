@@ -74,6 +74,11 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
+Foreign-key ON UPDATE metadata (#1723, SQ-F1) adds no identity: unimplemented changing-action
+execution uses structured CK00001 before row writes on every update path. Malformed/duplicate
+action syntax retains CS00003; malformed catalog action metadata retains CS06059, unsupported
+table extensions CS06060, and earlier SQL record-space formats CS06041. Compiled v8 is refused as the
+existing InvalidDocument schema.format condition.
 Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
 two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
 clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
@@ -143,7 +148,7 @@ structured-carrier messages remain unprefixed.
 | New (#1720, SQ-H2) | CS01063 | Binding/grouping — GROUPING requires 1–31 non-star expression arguments (54023) |
 | New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42P20) |
 | New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
-| New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY or ORDER BY (42P20) |
+| New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY/ORDER BY or copies an explicit frame (42P20) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -165,6 +170,10 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS02067 | Values/types — Recursive UNION changes or conflicts with the anchor collation; COLLATE hint (42P21) |
 | New (#1526, SQ-W1) | CS02068 | Non-integer navigation offset or bucket count (42804) |
 | New (#1526, SQ-W1) | CS02069 | Incompatible navigation value and default types (42804) |
+| New (#1526, SQ-W2) | CS02070 | Noninteger ROWS frame offset (42804) |
+| New (#1526, SQ-W2) | CS02071 | NULL frame offset (22004) |
+| New (#1526, SQ-W2) | CS02072 | Negative frame offset (22013) |
+| New (#1526, SQ-W2) | CS02073 | Noninteger NTH_VALUE index (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -254,6 +263,11 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W1) | CS05077 | Nested window function (42P20) |
 | New (#1526, SQ-W1) | CS05078 | Non-positive NTILE bucket count (22014) |
 | New (#1526, SQ-W1) | CS05079 | Window state exceeds statement memory grant (54000) |
+| New (#1526, SQ-W2) | CS05080 | Invalid frame boundary categories (42P20) |
+| New (#1526, SQ-W2) | CS05081 | Row variable, aggregate or window in frame offset (42P20) |
+| New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
+| New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
+| New (#1526, SQ-W2 fixes) | CS05084 | Window frame recomputation exceeds 1,000,000 candidate input visits per statement (54000) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -301,6 +315,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
 | New (#1731, OQ-Q1) | CD00014 | Language/syntax — direct IN subquery requires SELECT RAW or SELECT VALUE |
+| New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -316,6 +331,8 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1729, OQ-G2) | CD01030 | Binding/names — invalid grouping alias declaration, shape or collision with FROM/UNNEST |
 | New (#1729, OQ-G2) | CD01031 | Binding/names — GROUP AS referenced in an aggregate's row input |
 | New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
+| New (#1731, OQ-Q2) | CD01033 | Binding/names — FROM expression has no explicit alias or implicit field name |
+| New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -371,6 +388,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1734) | CG00011 | Language/syntax — SHORTEST selector requires a positive Int64 literal count |
 | New (#1736, GQ-C1 fixes) | CG00012 | Language/syntax — list slice omits both bounds; rejected during planning |
 | New (#1537, GQ-E1) | CG00013 | Language/syntax — EXISTS omits its nonempty braced pattern |
+| New (#1736, GQ-C3) | CG00014 | Language — pattern comprehension requires a nonempty path and projection |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |
@@ -404,6 +422,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C2) | CG05025 | Execution — malformed reduce/list-predicate body or aggregate inside that body |
 | New (#1736, GQ-C2) | CG05026 | Planning — reduce shape/type analysis exceeds 65,536 visited nodes or closure steps |
 | New (#1537, GQ-E1) | CG05027 | Execution — malformed or missing correlated subplan or missing argument |
+| New (#1736, GQ-C3) | CG05028 | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |

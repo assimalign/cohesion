@@ -170,21 +170,23 @@ public sealed class SqlKeywordDispositionTests
         ["LOCALTIME"] = Parses("SELECT LOCALTIME FROM t"),
         ["LOCALTIMESTAMP"] = Parses("SELECT LOCALTIMESTAMP FROM t"),
         ["EXTRACT"] = Parses("SELECT EXTRACT(YEAR FROM a) FROM t"),
-        ["FIRST_VALUE"] = Rejects("SELECT FIRST_VALUE() FROM t", "FIRST_VALUE"),
-        ["LAST_VALUE"] = Rejects("SELECT LAST_VALUE() FROM t", "LAST_VALUE"),
-        ["NTH_VALUE"] = Rejects("SELECT NTH_VALUE() FROM t", "NTH_VALUE"),
-        // Windows: the frame words belong to the OVER specification that rejects them.
+        ["FIRST_VALUE"] = Parses("SELECT FIRST_VALUE(a) OVER() FROM t"),
+        ["LAST_VALUE"] = Parses("SELECT LAST_VALUE(a) OVER() FROM t"),
+        ["NTH_VALUE"] = Parses("SELECT NTH_VALUE(a,2) OVER() FROM t"),
+        // Window functions and physical-row/offset-free peer frames execute.
         ["OVER"] = Parses("SELECT ROW_NUMBER() OVER (ORDER BY a) FROM t"),
         ["PARTITION"] = Parses("SELECT RANK() OVER(PARTITION BY a) FROM t"),
         ["WINDOW"] = Parses("SELECT a FROM t WINDOW w AS (ORDER BY a)"),
-        ["RANGE"] = Rejects(WindowFrame("RANGE"), "window frame"),
+        ["RANGE"] = Parses(WindowFrame("RANGE")),
         ["GROUPS"] = Rejects("SELECT ROW_NUMBER() OVER(GROUPS CURRENT ROW) FROM t", "GROUPS window frame"),
         ["EXCLUDE"] = Rejects("SELECT ROW_NUMBER() OVER(EXCLUDE TIES) FROM t", "EXCLUDE window frame"),
-        ["ROW"] = Rejects(WindowFrame("ROWS"), "window frame"),
-        ["PRECEDING"] = Rejects(WindowFrame("ROWS"), "window frame"),
-        ["FOLLOWING"] = Rejects("SELECT SUM(a) OVER (ORDER BY a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM t", "window frame"),
-        ["CURRENT"] = Rejects(WindowFrame("ROWS"), "window frame"),
-        ["UNBOUNDED"] = Rejects(WindowFrame("ROWS"), "window frame"),
+        ["IGNORE"] = Rejects("SELECT FIRST_VALUE(a) IGNORE NULLS OVER() FROM t", "IGNORE NULLS"),
+        ["RESPECT"] = Rejects("SELECT LAST_VALUE(a) RESPECT NULLS OVER() FROM t", "RESPECT NULLS"),
+        ["ROW"] = Parses(WindowFrame("ROWS")),
+        ["PRECEDING"] = Parses(WindowFrame("ROWS")),
+        ["FOLLOWING"] = Parses("SELECT SUM(a) OVER (ORDER BY a ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM t"),
+        ["CURRENT"] = Parses(WindowFrame("ROWS")),
+        ["UNBOUNDED"] = Parses(WindowFrame("ROWS")),
     };
 
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Keyword disposition: every keyword and recognized-unsupported entry has a case")]
@@ -261,7 +263,7 @@ public sealed class SqlKeywordDispositionTests
     private static string[] Words()
         => SqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(SqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
-            .Concat(new[] { "ILIKE", "SIMILAR", "CEILING", "CONCAT", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "EXTRACT", "FLOOR", "LOCALTIME", "LOCALTIMESTAMP", "LTRIM", "MOD", "NOW", "NULLIF", "POWER", "REPLACE", "ROUND", "RTRIM", "SQRT", "SUBSTRING", "TRIM" })
+            .Concat(new[] { "ILIKE", "SIMILAR", "CEILING", "CONCAT", "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "EXTRACT", "FLOOR", "LOCALTIME", "LOCALTIMESTAMP", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE", "LTRIM", "MOD", "NOW", "NULLIF", "POWER", "REPLACE", "ROUND", "RTRIM", "SQRT", "SUBSTRING", "TRIM" })
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

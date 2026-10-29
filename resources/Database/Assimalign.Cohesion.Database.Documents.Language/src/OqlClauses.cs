@@ -75,6 +75,12 @@ public static class OqlClauses
     /// <summary>Introduces the source collections and iteration variables for a query.</summary>
     public const string From = "FROM";
 
+    /// <summary>Reads a parenthesized SELECT as a source with a required alias.</summary>
+    public const string DerivedFrom = "DERIVED FROM";
+
+    /// <summary>Iterates an uncorrelated expression as a source.</summary>
+    public const string ExpressionFrom = "EXPRESSION FROM";
+
     /// <summary>Expands an array into inner rows.</summary>
     public const string Unnest = "UNNEST";
 

@@ -1,8 +1,15 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+Foreign keys persist all five ON UPDATE actions and report truthful UPDATE_RULE metadata.
+SQL format 30 and compiled-schema v9 refuse earlier formats. Changing referenced keys under
+CASCADE/SET NULL/SET DEFAULT reports CK00001 before row writes until SQ-F2; RESTRICT/NO ACTION
+retain statement-end checks (#1723, SQ-F1).
+
 Ranking, distribution, NTILE and LAG/LEAD execute in a budgeted WindowAgg stage between
 HAVING and DISTINCT/ORDER BY/pagination, with named windows and shared compatible sorts
-(#1526, SQ-W1). Frames, value functions and aggregate windows follow in SQ-W2/SQ-W3.
+(#1526, SQ-W1/SQ-W2). ROWS, offset-free RANGE, aggregate windows with FILTER and
+FIRST_VALUE/LAST_VALUE/NTH_VALUE execute over their frames. RANGE offsets, GROUPS and EXCLUDE
+remain deferred to SQ-W3.
 
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
@@ -131,11 +138,11 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   strings, and ignores trailing spaces for comparison, grouping and index keys. CHAR-to-text
   casts and concatenation strip padding; LENGTH ignores it, while LIKE sees padded input.
   Domains and function parameters/results preserve their CHAR lengths. Compiled schemas use
-  format v8; result-header format 2 carries Character identity and the declared length.
+  format v9; result-header format 2 carries Character identity and the declared length.
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 29). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 30). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -271,7 +278,7 @@ physical index registrations exported by `Database.Indexing`.
 
 - **Fixed-length characters** — columns retain Character identity and length; domains and
   function signatures retain CHAR(n). The [current record-space format](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#execution-model)
-  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v8.
+  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v9.
 
 - **Metadata model** — table descriptions with stable `ObjectId`s, ordered columns
   typed by the shared type system (`DatabaseTypeInfo`), nullability, default
@@ -324,7 +331,7 @@ See [DESIGN.md](DESIGN.md) for the persistence model and decisions.
 
 Standalone sequences have internal catalog objects and share the identity allocator (#1717,
 SQ-S1). SQ-S2 delivers CREATE/ALTER/DROP SEQUENCE, NEXT VALUE FOR, nextval/currval/setval/lastval,
-REGCLASS references and INFORMATION_SCHEMA.SEQUENCES. SQL format 29 stores definitions and reservations.
+REGCLASS references and INFORMATION_SCHEMA.SEQUENCES. SQL format 30 stores definitions and reservations.
 Identity columns now own catalog sequences, including SERIAL aliases, identity ALTER/RESTART,
 OVERRIDING and recoverable populated-table backfill (SQ-S3). Column nextval and NEXT VALUE FOR
 defaults retain dependencies. The shared allocator reserves up to 32 values before use, retaining rollback
@@ -450,7 +457,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v9`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated

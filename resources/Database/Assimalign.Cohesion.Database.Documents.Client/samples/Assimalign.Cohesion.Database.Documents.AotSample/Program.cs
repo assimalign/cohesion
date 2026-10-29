@@ -281,6 +281,20 @@ internal static class Program
             var orderedPage = await connection.QueryAsync("SELECT META().id FROM ordering ORDER BY v DESC LIMIT 1 OFFSET 1", cancellationToken: token);
             Check(orderedPage.Count == 1 && orderedPage.Single().GetValue(0) is "n", "ordered index early page");
             Check(await connection.ExecuteAsync("DROP COLLECTION ordering", cancellationToken: token) == 0, "ordering cleanup");
+            var derivedSource = await connection.QueryAsync("SELECT d.score FROM (SELECT score FROM items) d ORDER BY d.score DESC LIMIT 1", cancellationToken: token);
+            Check(derivedSource.Count == 1, "derived source ordered page");
+            var expressionSource = await connection.QueryAsync("SELECT RAW v FROM [1,NULL,{n:2}] AS v", cancellationToken: token);
+            Check(expressionSource.Count == 3 && expressionSource.Documents[0].GetInt32() == 1 &&
+                expressionSource.Documents[1].ValueKind == JsonValueKind.Null && expressionSource.Documents[2].GetProperty("n").GetInt32() == 2, "expression source values");
+            Check((await connection.QueryAsync("SELECT RAW v FROM MISSING AS v", cancellationToken: token)).Count == 0, "missing source empty");
+            using var sourceParameter = JsonDocument.Parse("[1,2]");
+            var parameterSource = await connection.QueryAsync("SELECT RAW v FROM @p AS v",
+                new Dictionary<string, object?> { ["p"] = sourceParameter.RootElement }, token);
+            Check(parameterSource.Documents.Select(document => document.GetInt32()).SequenceEqual([1, 2]), "parameter array source");
+            Check((await connection.QueryAsync("SELECT * FROM [1] AS v", cancellationToken: token)).Documents.Single().GetRawText() == "{\"v\":1}", "expression source star");
+            Check((await connection.QueryAsync("SELECT META(v).id AS id FROM [1] AS v", cancellationToken: token)).Single()[0] is null, "expression source metadata");
+            var derivedPlan = await connection.QueryAsync("EXPLAIN SELECT d.score FROM (SELECT score FROM items) d", cancellationToken: token);
+            Check(derivedPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "DerivedSource"), "derived source explain");
             Check(await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: token) == 0, "index create");
             var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
             Check(explained.IsDocumentQuery && explained.Documents.Any(document =>

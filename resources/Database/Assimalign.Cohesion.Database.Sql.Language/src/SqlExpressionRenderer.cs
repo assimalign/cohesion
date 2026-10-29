@@ -33,15 +33,19 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// </remarks>
 public static partial class SqlExpressionRenderer
 {
-    /// <summary>Renders an ALTER COLUMN TYPE or identity operation as canonical SQL without a terminator.</summary>
+    /// <summary>Renders an ALTER COLUMN TYPE, identity or ADD CONSTRAINT operation as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
-    /// <returns>The canonical type alteration or identity operation.</returns>
+    /// <returns>The canonical type alteration, identity or ADD CONSTRAINT operation.</returns>
     /// <exception cref="ArgumentNullException">The query is null.</exception>
-    /// <exception cref="NotSupportedException">The action is not a type or identity alteration.</exception>
+    /// <exception cref="NotSupportedException">The action is not a supported alteration.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
     public static string Render(SqlAlterTableExpression query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        if (query.Action is SqlAlterAddConstraintAction addConstraint)
+        {
+            return "ALTER TABLE " + SequenceName(query.Table) + " ADD " + Render(addConstraint.Constraint);
+        }
         if (query.Action is SqlAlterIdentityAction identity)
         {
             return "ALTER TABLE " + SequenceName(query.Table) + " ALTER COLUMN " + Identifier(identity.ColumnName) + " " +
@@ -383,7 +387,17 @@ public static partial class SqlExpressionRenderer
         specification.ExistingWindow is null ? "" : Identifier(specification.ExistingWindow),
         specification.PartitionBy.Count == 0 ? "" : "PARTITION BY " + List(specification.PartitionBy),
         specification.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", specification.OrderBy.Select(Ordering)),
+        specification.Frame is null ? "" : (specification.Frame.Mode == SqlWindowFrameMode.Rows ? "ROWS" : "RANGE") +
+            " BETWEEN " + FrameBound(specification.Frame.Start) + " AND " + FrameBound(specification.Frame.End),
     }.Where(part => part.Length > 0));
+
+    private static string FrameBound(SqlWindowFrameBound bound) => bound.Kind switch
+    {
+        SqlWindowFrameBoundKind.UnboundedPreceding => "UNBOUNDED PRECEDING",
+        SqlWindowFrameBoundKind.UnboundedFollowing => "UNBOUNDED FOLLOWING",
+        SqlWindowFrameBoundKind.CurrentRow => "CURRENT ROW",
+        _ => Expression(bound.Offset!) + (bound.Kind == SqlWindowFrameBoundKind.Preceding ? " PRECEDING" : " FOLLOWING"),
+    };
 
     private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
         (key.NullPlacement switch { SqlNullPlacement.First => " NULLS FIRST", SqlNullPlacement.Last => " NULLS LAST", _ => "" });
@@ -399,7 +413,9 @@ public static partial class SqlExpressionRenderer
         // With no WITHIN GROUP keys it must stay delimited on a round trip.
         bool specialForm = SqlUnsupportedVocabulary.IsNiladicFunction(call.FunctionName) ||
             call.FunctionName.ToUpperInvariant() is "EXTRACT" or "POSITION" or "SUBSTRING" or "TRIM";
-        string name = window ? call.FunctionName.ToUpperInvariant() : (listaggName && !listagg) || (specialForm &&
+        bool nativeWindow = window && (Contains(_windowFunctions, call.FunctionName) ||
+            call.FunctionName.ToUpperInvariant() is "PERCENT_RANK" or "CUME_DIST");
+        string name = nativeWindow ? call.FunctionName.ToUpperInvariant() : (listaggName && !listagg) || (specialForm &&
             (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0 || call.Filter is not null))
             ? "\"" + call.FunctionName + "\"" : FunctionName(call.FunctionName);
         return name + "(" + quantifier + Arguments(call.Arguments) +

@@ -59,7 +59,7 @@ public sealed class SqlWindowWireTests
             (Sql: "SELECT RANK() OVER missing FROM t", Code: "CS01065"),
             (Sql: "SELECT NTILE(0) OVER() FROM t", Code: "CS05078"),
             (Sql: "SELECT id FROM t WHERE RANK() OVER()>1", Code: "CS05076"),
-            (Sql: "SELECT SUM(v) OVER() FROM t", Code: "CK00001"),
+            (Sql: "SELECT SUM(DISTINCT v) OVER() FROM t", Code: "CK00001"),
         })
         {
             var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(refusal.Sql, cancellationToken: SqlClientTestHarness.Timeout(30)));

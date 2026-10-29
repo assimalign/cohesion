@@ -38,6 +38,8 @@ internal static class SqlUnsupportedVocabulary
         new("PARTITION", SqlClauses.Partition, SqlWordPosition.Clause),
         new("GROUPS", "GROUPS window frame", SqlWordPosition.Rule),
         new("EXCLUDE", "EXCLUDE window frame", SqlWordPosition.Rule),
+        new("IGNORE", "IGNORE NULLS", SqlWordPosition.Rule),
+        new("RESPECT", "RESPECT NULLS", SqlWordPosition.Rule),
         new("NATURAL", SqlClauses.Natural, SqlWordPosition.Clause),
         new("USING", SqlClauses.Using, SqlWordPosition.Clause),
         new("ALL", SqlClauses.All, SqlWordPosition.Rule),
@@ -47,10 +49,6 @@ internal static class SqlUnsupportedVocabulary
         new("ANY", "ANY array comparison", SqlWordPosition.Rule),
         new("SOME", "SOME array comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
-        // Window functions awaiting execution.
-        new("FIRST_VALUE", "FIRST_VALUE", SqlWordPosition.WindowFunction),
-        new("LAST_VALUE", "LAST_VALUE", SqlWordPosition.WindowFunction),
-        new("NTH_VALUE", "NTH_VALUE", SqlWordPosition.WindowFunction),
         new("~", "~ operator", SqlWordPosition.Rule),
     ];
 

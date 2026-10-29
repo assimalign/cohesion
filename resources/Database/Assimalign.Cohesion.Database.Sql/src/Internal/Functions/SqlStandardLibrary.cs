@@ -142,6 +142,12 @@ internal static class SqlStandardLibrary
     /// <returns><see langword="true"/> for a standard-library leaf.</returns>
     internal static bool Contains(SqlFunction function) => Array.IndexOf(_functions, function) >= 0;
 
+    // Match native identities, including the Boolean instances built through the application
+    // factory. An application's own aggregate retains its specified input ordering.
+    internal static bool IgnoresWindowOrdering(SqlAggregateFunction function)
+        => function is SqlCountFunction or SqlSumFunction or SqlExtremumFunction or SqlStatisticsFunction ||
+            Contains(function) && function.Name is "BOOL_AND" or "BOOL_OR" or "EVERY";
+
     /// <summary>Whether a name is a built-in's, ignoring case.</summary>
     /// <param name="name">The name as written.</param>
     /// <returns><see langword="true"/> when the standard library registers a function of the name.</returns>

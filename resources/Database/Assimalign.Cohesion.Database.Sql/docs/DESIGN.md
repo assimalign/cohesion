@@ -1,14 +1,56 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-## Window stage (#1526, SQ-W1)
+## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+
+SQL catalog format advances 29 -> 30 and table extension 7 -> 8. Each constraint stores a
+mandatory OnUpdate byte beside OnDelete. All five actions survive decode, CHECK call-vector
+reconstruction, table/column rename, compiled snapshots, schema equivalence and reconciliation.
+Identity facets, owned-sequence records and missing-value/default-coercion fields carry forward
+unchanged. Earlier catalogs, including format 29 with foreign keys, are refused through the
+existing CS06041 gate; no legacy reader or upgrade path is added. Direct unsupported table
+extensions retain CS06060 and malformed constraint metadata retains CS06059.
+
+Compiled schemas advance v8 -> v9 together with Sdk.Database pins. CompiledSchemaConstraint
+has public OnUpdate metadata defaulting to NO ACTION; the shared compiled action enum gains
+NO ACTION, SET NULL and SET DEFAULT. Existing compiled ON DELETE declarations still admit
+RESTRICT/CASCADE. The typed References builder retains its signature and compiles NO ACTION
+update metadata. Constraint equality includes both actions, so changing only OnUpdate creates
+a drop/add migration; rendering and catalog verification preserve it. Applied and pending v8
+markers are refused before comparing hashes, like every earlier format.
+
+INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS.UPDATE_RULE now renders the stored action, including
+the omitted NO ACTION default. Persistent views and declared provisioning scripts use the same
+metadata. No wire frame or client contract changes. InMemory/TCP conformance covers metadata,
+refusals and usable connections.
+
+All update paths share ValidateParentUpdate before physical row application. A changed referenced
+key under CASCADE/SET NULL/SET DEFAULT throws structured CK00001 naming ON UPDATE action
+execution, before considering child presence or final-parent substitution. Self-references check
+changing actions before outgoing FK validation can mistake the pending key change for an orphan.
+Action eligibility compares the binary stored key representation through the row codec, so case-only,
+accent-only and other representation changes cannot disappear under key collation. Both refusal
+sites share this predicate (PostgreSQL src/backend/utils/adt/ri_triggers.c:4237-4250,
+datum_image_eq). Parent-presence and RESTRICT/NO ACTION checks retain collation-aware equality.
+DELETE, DELETE USING and MERGE compose their SET NULL/DEFAULT updates and check every incoming
+update action before any table group's outgoing FK validation; chain order cannot mask CK00001.
+That branch inspects pending rows only for changing actions; ordinary DML gains no allocation. Unchanged keys and
+unrelated-column changes remain executable. RESTRICT/NO ACTION deliberately keep today's
+statement-end parent validation until SQ-F2 adds immediate RESTRICT and action closure; no stored
+changing action silently becomes RESTRICT. Sequence-before-table lock ordering and ordinary-DML
+Release allocation guards are retained. No new diagnostic identity is needed: unsupported action
+execution uses CK00001; syntax and metadata errors keep their existing owning conditions.
+PostgreSQL src/backend/parser/gram.y:4581-4689 defines ordering/defaults; ri_triggers.c:897-955
+records the future RESTRICT/NO ACTION distinction. See Sql.Language DIALECT for the interim contract.
+
+## Window stage (#1526, SQ-W1/SQ-W2)
 
 OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
 OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
 after HAVING and before the query tail. Names use the existing case-insensitive identifier
 rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
-has none. Definitions cannot reference themselves or later definitions. Explicit ROWS,
-RANGE, GROUPS and EXCLUDE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE remain
-CK00001, naming the deferred form. Frames are not silently approximated with ROWS.
+has none. Definitions cannot reference themselves or later definitions. ROWS frames,
+offset-free RANGE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute as
+described below; deferred frame forms retain named CK00001 refusals.
 
 ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
 WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
@@ -70,6 +112,88 @@ no live PostgreSQL comparison is claimed.
 | CS05078 | Nonpositive NTILE count (22014) |
 | CS05079 | Statement window memory exceeded |
 
+### Frame execution (#1526, SQ-W2)
+
+ROWS accepts the short UNBOUNDED PRECEDING, n PRECEDING and CURRENT ROW forms, and
+BETWEEN bounds using UNBOUNDED/n PRECEDING, CURRENT ROW and n/UNBOUNDED FOLLOWING.
+The short form ends at CURRENT ROW. Boundary categories follow PostgreSQL: a start
+category after its end, UNBOUNDED FOLLOWING starts and UNBOUNDED PRECEDING ends fail
+with CS05080 (42P20). Two offsets in the same direction may describe an empty frame;
+their numeric values are not a planning-time ordering restriction. Offsets accept signed
+integer expressions and parameters, evaluated once per window execution and shared across
+partitions; a named specification shares initialization across its functions. Empty input
+does not initialize offsets. Current-query row variables, aggregate and window functions
+are prohibited; outer-query values remain constant for each child-window execution.
+Offsets use the engine's signed integer domain; numeric/text assignment coercions require
+an explicit CAST. PostgreSQL uses assignment coercion at this boundary. Noninteger, NULL and
+negative offsets report CS02070 (42804), CS02071 (22004) and CS02072 (22013).
+Offsets beyond the partition, including Int64.MaxValue, clamp without arithmetic overflow.
+
+Without an explicit frame, ORDER BY uses RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
+including every current-row peer; without ORDER BY the frame is the whole partition.
+Explicit offset-free RANGE also executes, including CURRENT ROW peer boundaries and
+UNBOUNDED FOLLOWING. RANGE with offsets, GROUPS, EXCLUDE, FROM FIRST/LAST and
+IGNORE/RESPECT NULLS remain named CK00001 refusals. Explicit frames do not change
+ranking/navigation semantics. A named window with an explicit frame may be referenced
+by OVER name, but cannot be copied by OVER(name) or another named definition (CS01066).
+
+All catalog aggregates execute over frames, including FILTER, Boolean/statistical functions,
+STRING_AGG, LISTAGG and application aggregates. DISTINCT inside an aggregate window is
+CK00001. Existing engine aggregate-input ORDER BY and WITHIN GROUP execute as well;
+this extends PostgreSQL, which refuses aggregate-local ORDER BY with OVER. FILTER runs
+before input expressions. Empty frames return COUNT zero and other native aggregates NULL.
+The result type, collation, coercions and numeric rounding are the ordinary aggregate's.
+FIRST_VALUE, LAST_VALUE and NTH_VALUE respect NULLs and read the selected frame member;
+an empty frame or missing nth member returns NULL. NTH_VALUE's index is evaluated per
+current row; NULL yields NULL and nonpositive values report CS05082 (22016), even for
+an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
+a noninteger index reports CS02073 (42804). Value types follow the first argument, including CHAR and its collation.
+
+Native frames reuse one accumulator while their head stays fixed, including bounded
+PRECEDING heads clamped to the partition start. They consume each qualifying input once,
+reading a non-consuming native final result. Equal frames share the previously computed
+result. SUM, COUNT, MIN, MAX, AVG, Boolean and statistical native aggregates ignore
+aggregate-local ORDER BY when evaluating frames, including its key expressions, so ordering
+does not disable incremental transitions. FILTER still runs before argument evaluation.
+Application aggregates and ordered string aggregates preserve their specified input order.
+Ordinary application accumulator Finish remains once-only. Recomputed frames (including
+native frames whose head moves) charge each candidate input visit before FILTER or any
+input expression/transition against a fixed 1,000,000-visit statement cap. CS05084 (54000)
+refuses the next visit and releases all reservations. The cap spans functions, partitions
+and window stages sharing the statement, including under LIMIT; equal cached frames spend
+no visits. SQL has no general statement work budget, so this fixed cap bounds otherwise
+quadratic fallback work without changing the public accumulator contract. String output cost is
+also proportional to the total returned text. Native ordered/string buffers and accumulator
+scratch charge CS05079's statement grant. Ordered aggregate inputs evaluate their arguments
+and keys once after FILTER; their actual retained payload and conservative stable-sort scratch
+reserve the grant before buffering. Those reservations release on success, refusal or cancellation;
+complete retained-memory refinement remains SQ-W3.
+No public accumulator contract, disk version or wire format changes.
+EXPLAIN retains frame boundaries for each function and ANALYZE reports frame_visits,
+counting candidate aggregate inputs before FILTER. Frames do not split shared sort groups,
+and LIMIT applies after the complete window input. Generated tests enumerate every legal
+boundary-category pair, NULL/tied keys, both directions, explicit NULL placement, empty and
+singleton partitions, zero and oversize offsets, several windows, FILTER and value functions.
+Work-counter tests establish linear growing-frame transitions against a brute-force reference.
+
+References re-derived in the local PostgreSQL clone: parser/gram.y:16882-16933
+(bound categories), parser/parse_clause.c:2885-2902,3697-3719 (copies and ROWS offset types),
+executor/nodeWindowAgg.c:734-770,2233-2279 (incremental frames, NULL/negative offsets),
+utils/adt/windowfuncs.c:656-723 (frame value functions). No live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS02070 | Noninteger ROWS frame offset (42804) |
+| CS02071 | NULL frame offset (22004) |
+| CS02072 | Negative frame offset (22013) |
+| CS02073 | Noninteger NTH_VALUE index (42804) |
+| CS05080 | Invalid frame boundary categories (42P20) |
+| CS05081 | Row variable, aggregate or window in frame offset (42P20) |
+| CS05082 | Nonpositive NTH_VALUE index (22016) |
+| CS05083 | OVER on a scalar function (42809) |
+| CS05084 | Statement window frame recomputation exceeds 1,000,000 input visits (54000) |
+
+
 ## Owned identity sequences (#1717, SQ-S3)
 
 Identity type changes preserve the live last value and called flag, including an uncalled
@@ -110,7 +234,7 @@ internal-dependency exclusion; TINYINT has eight-bit numeric precision.
 
 SQL format **29** extends kind 18 with owning table id, column name and identity ownership;
 kind 16 is retired and never decoded. Format 28 and earlier are refused by the existing open
-gate. Compiled-schema v8 and wire/result framing are unchanged. Table creation, identity
+gate. Compiled-schema v9 and wire/result framing are unchanged. Table creation, identity
 addition/removal, renames, storage replacement and owned-sequence deletion publish directory
 changes in the same catalog transaction. Reopen validates global sequence ids before orphan cleanup, both ownership directions and
 sequence-default references; interrupted prepared sequences remain invisible and are reclaimed.
@@ -278,7 +402,7 @@ the family-declared reset only for retained state. The two-byte Ready changes no
 
 Persisted CHECK/domain/view/function expressions and declared-script sequence DDL are refused; column sequence defaults use the SQ-S3 dependency path and other compound sequence DEFAULT expressions remain refused
 with CS03074 until dependency and receipt ownership are modeled. CASCADE/RESTRICT are equivalent
-for these unowned generators. SQL format 29 already represents all definitions and counters.
+for these unowned generators. SQL format 30 already represents all definitions and counters.
 SQ-S3 supplies identity linkage, SERIAL and owned dependencies. The full SQL-visible defaults,
 setval semantics, standard row sharing and deliberate PostgreSQL differences are in DIALECT.
 Reference: PostgreSQL src/backend/commands/sequence.c:867-1044,1415-1587; NEXT VALUE FOR is absent
@@ -2643,7 +2767,7 @@ emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain expl
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
 on the typed path, so `Default(row => row.Status, "it's pending")` records `'it''s pending'`.
 Both paths store literal text in `CompiledSchemaColumn.DefaultLiteral`; equivalent rendered text
-has the same canonical document and hash. The document now uses `cohesion/database-schema/v8`
+has the same canonical document and hash. The document now uses `cohesion/database-schema/v9`
 for normalized decimal identities; typed defaults keep the shape introduced in B2.
 The engine validates one literal before writing anything and
 resolves its column's effective type, including a domain's base type. Preflight calls the same
@@ -2654,7 +2778,7 @@ Build with `CS03101` before either file set exists; finite and underflow checks 
 defaults apply here too. Valid rounding, Unicode character lengths and excess-space trimming
 therefore agree with DDL. The renderer emits canonical SQL; expressions/functions are refused,
 and `DEFAULT NULL` has the same live meaning as absence. The compiled document format is
-`cohesion/database-schema/v8`; B2 introduced `defaultLiteral` in v4. Null defaults
+`cohesion/database-schema/v9`; B2 introduced `defaultLiteral` in v4. Null defaults
 are omitted from canonical JSON. A non-null literal can backfill an added required column, subject to the planner's
 existing destructive-change opt-in. SDK extraction renders C# compile-time constants with the
 same schema renderer and preserves the same text and hash.
@@ -3051,7 +3175,7 @@ utility.c:1480-1483 and namespace.c:526-531.
 
 AUTHORIZATION and nested schema elements are rejected with CK00001. Atomic nested statements
 would require a separate DDL execution contract because each existing statement self-commits.
-Record-space format 29 has no upgrade reader: export older databases, recreate and explicitly
+Record-space format 30 has no upgrade reader: export older databases, recreate and explicitly
 CREATE SCHEMA for non-dbo table namespaces before importing. Namespace records are not synthesized.
 
 The area root carries only the model-independent ownership contracts (`DatabaseObjectOwner`,
@@ -3250,9 +3374,10 @@ invented. This is a deliberate MVP limitation relative to the standard's
 Foreign keys store referenced columns rather than an index identity. The views
 resolve those columns to the primary key first (including the legacy fallback),
 then to a matching unique index ordered deterministically by name. Foreign keys
-report `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, and
-`DELETE_RULE = 'RESTRICT'` or `'CASCADE'`.
-Constraints are enforced immediately and are not deferrable.
+report `MATCH_OPTION = 'NONE'`; UPDATE_RULE and DELETE_RULE each report the stored
+RESTRICT, CASCADE, NO ACTION, SET NULL or SET DEFAULT action. Omitted SQL actions default
+to NO ACTION. Constraints are not deferrable; SQ-F1 retains statement-end parent-key
+checks for RESTRICT and NO ACTION updates until SQ-F2 implements immediate RESTRICT.
 
 Constraint names remain unique within a table, as the catalog already requires,
 rather than within the entire SQL schema. Consequently `CHECK_CONSTRAINTS` and
@@ -3881,7 +4006,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 29 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 30 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -3907,7 +4032,7 @@ project reference or InternalsVisibleTo change is required.
   after a crash. No format bump is needed: the claim is consulted only for marker-free catalogs
   (RecordSpaceFormatVersion == 1), which carry no format number. Older engines harmlessly
   ignore the claim, so a bump would fence no interrupted catalog and would unnecessarily
-  refuse every intact format-29 database. Claim-file creation and deletion are not directory-fsynced.
+  refuse every intact format-30 database. Claim-file creation and deletion are not directory-fsynced.
   A lost create loses the proof and refuses adoption; a lost delete leaves a stale claim fenced
   by the checkpointed data header. Neither permits adopting committed data as creation.
   Create and open complete a marker-free catalog only when the catalog-owned internal
@@ -5603,8 +5728,8 @@ transitive closure of child deletions into the same statement apply bracket (see
 snapshot fixed at the transaction's begin, every child version in that closure must
 be one the snapshot sees
 ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)). Parent key
-updates are restricted while referenced. `ON UPDATE` is unsupported and returns
-`CK00001`.
+updates under RESTRICT/NO ACTION retain statement-end checks in SQ-F1. ON UPDATE changing
+actions are persisted; execution refuses with CK00001 before row writes until SQ-F2.
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts
@@ -7052,7 +7177,7 @@ records only typed objects, whose structure scripts cannot change; it is safe to
 generation after script execution or receipt-chain recovery.
 
 Owner-review choices: scripts, and their preceding typed migration, run inline to preserve order;
-data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v8 typed
+data-scaling scripts therefore add Build latency (49a). Scripts remain outside the SDK v9 typed
 artifact; COHDBSDK110 prevents silent omission. Deploy the runtime declarations in Apply mode before
 Verify-mode startup. Informational ScriptApplied event 22 contains engine, database, name and
 SHA-256, never SQL text. COHESION_SCHEMA.FUNCTIONS adds IS_SQL_DEFINED; new TYPES and DOMAINS views
@@ -7234,7 +7359,7 @@ Domain base types and function parameter/result type text retain CHAR(n), and re
 restores padding and comparison semantics. String and Character both accept collations.
 SQL record-space format **12** supersedes 11 because CHAR index equality now ignores trailing
 spaces. Catalog records retain their existing shapes; no old-format reader is added.
-Applied/pending compiled documents use **cohesion/database-schema/v8**, shared with the SDK;
+Applied/pending compiled documents use **cohesion/database-schema/v9**, shared with the SDK;
 v6 and earlier documents are refused before hashes are compared. Rebuild artifacts and recreate
 databases. INFORMATION_SCHEMA.COLUMNS reports CHARACTER with length; the COHESION_SCHEMA type,
 domain and function views expose CHAR(n) through their existing name/signature columns.
@@ -7247,10 +7372,10 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-current format **29** extends kind 18 with ownership and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **30** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
-Earlier database formats are refused by the existing format gate; compiled-schema v8 is unchanged.
+Earlier database formats are refused by the existing format gate; compiled-schema v9 is current.
 All new types and sequence entry points are internal, accessible to the owning Sql test assembly.
 There is no new SQL syntax, function, session state, public API or wire message in this run.
 
@@ -7574,7 +7699,7 @@ The populated-table worker handoff and expanded crash/wire convergence coverage 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(the current format is 28, which added the sequence records); earlier SQL files are refused without an upgrade reader. Compiled-schema v8, dense row encoding,
+(format 28 added sequence records; the current format is 30); earlier SQL files are refused without an upgrade reader. Compiled-schema v9, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -7730,7 +7855,7 @@ pending chunk in the same transaction. Open validates the envelope and ordering,
 gates the target document's format before checking its hash or resuming. Catalog persistence knows no SQL executor,
 worker, or hosting lifecycle.
 
-The compiled document is now `cohesion/database-schema/v8` (#1108), matching Sdk.Database.
+The compiled document is now `cohesion/database-schema/v9` (#1108), matching Sdk.Database.
 Applied-schema records (kind 6) and pending targets (kind 9) both retain the complete versioned
 document, so their field layout does not change. The SQL record-space gate is now 20 (#1121).
 SQL checks those document formats before opening
@@ -7757,7 +7882,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 29 requires the complete table extension 7 record,
+after the existing constraints. Current format 30 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -7835,7 +7960,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 29 also requires the call vectors, identity facets and extension 7 missing-value literals and TYPE default-assignment flags;
+  which this catalog always writes. Current format 30 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -8240,7 +8365,7 @@ missing tables/columns, primary-key drops, malformed persisted records).
 
 #### Catalog: Owned identity records (#1123, #1717)
 
-Kind 16 is retired. Format 29 represents identities with the shared kind-18 sequence definition
+Kind 16 is retired. Format 30 represents identities with the shared kind-18 sequence definition
 and kind-19 durable reservation. The definition records the owning table id, column and identity
 flag. Ownership and table metadata publish atomically, and load checks both directions.
 AllocateIdentity remains the existing concrete public entry point and uses the same allocator
@@ -8928,7 +9053,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v9`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated

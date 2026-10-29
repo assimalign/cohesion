@@ -56,6 +56,8 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Cube, "SELECT a FROM t GROUP BY CUBE(a);")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Window, "SELECT RANK() OVER w WINDOW w AS();")]
+    [InlineData(SqlClauses.WindowRows, "SELECT SUM(v) OVER(ROWS 2 PRECEDING) FROM t;")]
+    [InlineData(SqlClauses.WindowRange, "SELECT SUM(v) OVER(RANGE UNBOUNDED PRECEDING) FROM t;")]
     [InlineData(SqlClauses.Over, "SELECT RANK() OVER();")]
     [InlineData(SqlClauses.Partition, "SELECT RANK() OVER(PARTITION BY a) FROM t;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
@@ -70,6 +72,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Collate, "SELECT name FROM t WHERE name = 'Alice' COLLATE case_insensitive;")]
     [InlineData(SqlClauses.Constraint, "CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0));")]
     [InlineData(SqlClauses.ForeignKey, "CREATE TABLE t (parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));")]
+    [InlineData(SqlClauses.OnUpdate, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON UPDATE CASCADE);")]
     [InlineData(SqlClauses.References, "CREATE TABLE t (parent_id INT REFERENCES parent(id));")]
     [InlineData(SqlClauses.Check, "CREATE TABLE t (id INT CHECK (id > 0));")]
     [InlineData(SqlClauses.UniqueConstraint, "CREATE TABLE t (email TEXT UNIQUE);")]
@@ -161,7 +164,7 @@ public class SqlLanguageProfileTests
         var options = new QueryParserOptions();
         options.Analyzers.Add(observer);
 
-        _ = new SqlQueryParser(options).Parse("SELECT SUM(id) OVER () FROM t;");
+        _ = new SqlQueryParser(options).Parse("SELECT SUM(id) OVER (GROUPS CURRENT ROW) FROM t;");
 
         observer.SawUnsupportedClause.ShouldBeTrue();
     }

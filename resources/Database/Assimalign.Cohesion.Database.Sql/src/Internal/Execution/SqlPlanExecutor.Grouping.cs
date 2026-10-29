@@ -220,8 +220,9 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static void AddAggregateInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
-        SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp)
+    private static long AddAggregateInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp,
+        SqlWindowMemory? windowMemory = null)
     {
         var values = new SqlValue[aggregate.Arguments.Length];
         EvaluateArguments(aggregate, evaluator, source, values);
@@ -235,7 +236,7 @@ internal sealed partial class SqlPlanExecutor
         }
         // Keys are input expressions even for rows the transition function skips.
         if (aggregate.Function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput && values.Any(value => value.IsNull) ||
-            aggregate.Function is SqlStringAggregateFunction && values[0].IsNull) { return; }
+            aggregate.Function is SqlStringAggregateFunction && values[0].IsNull) { return 0; }
         if (state.Distinct is not null)
         {
             if (state.Distinct.TryGetValue(tuple, out var previous))
@@ -246,14 +247,14 @@ internal sealed partial class SqlPlanExecutor
                 {
                     row.CopyTo(previous, 0);
                 }
-                return;
+                return 0;
             }
             state.Distinct.Add(tuple, row);
         }
         if (state.Inputs is null)
         {
             state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, transactionTimestamp));
-            return;
+            return 0;
         }
         if (aggregate.Function is SqlStringAggregateFunction)
         {
@@ -261,7 +262,12 @@ internal sealed partial class SqlPlanExecutor
             // Check while buffering, before sorting or allocating a group's output builder.
             SqlBuiltinScalarFunction.CheckLength(state.StringLength);
         }
+        // Charge the evaluated payload, including computed keys, before the buffer owns it.
+        // Allow for list growth, stable-sort tuples/indexes and the sort's key arrays.
+        long bytes = windowMemory is null ? 0 : 128L + row.Length * 16L + SqlHashJoinTable.RowBytes(row);
+        windowMemory?.Reserve(bytes);
         state.Inputs.Add(row);
+        return bytes;
     }
 
     private static int CompareAggregateInputs(object?[] left, object?[] right, SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator,

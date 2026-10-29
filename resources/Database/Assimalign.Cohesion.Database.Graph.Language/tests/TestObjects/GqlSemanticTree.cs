@@ -59,6 +59,7 @@ internal static class GqlSemanticTree
         GqlMemberExpression value => new object?[] { "member", Expression(value.Operand), value.Member },
         GqlListComprehensionExpression value => new object?[] { "comprehension", value.Variable, Expression(value.List), Expression(value.Predicate), Expression(value.Projection) },
         GqlReduceExpression value => new object?[] { "reduce", value.Accumulator, Expression(value.Initial), value.Variable, Expression(value.List), Expression(value.Body) },
+        GqlPatternComprehensionExpression value => new object?[] { "pattern-comprehension", Path(value.Pattern), Expression(value.Predicate), Expression(value.Projection) },
         GqlExistsExpression value => new object?[] { "exists", value.MatchClauses.Select(clause => new object?[] { clause.Optional, clause.Paths.Select(Path).ToArray(), Expression(clause.Predicate) }).ToArray() },
         GqlListPredicateExpression value => new object?[] { "list-predicate", value.Kind, value.Variable, Expression(value.List), Expression(value.Predicate) },
         GqlListSliceExpression value => new object?[] { "slice", Expression(value.Operand), Expression(value.From), Expression(value.To) },

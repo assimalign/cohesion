@@ -146,6 +146,15 @@ public sealed class GqlProfileExecutionTests
                 new("RETURN all(x IN [TRUE,NULL] WHERE x), any(x IN [FALSE,NULL] WHERE x), none(x IN [FALSE,NULL] WHERE x), single(x IN [TRUE,NULL] WHERE x)", [[null, null, null, null]]),
                 new("MATCH (a:Person) WHERE any(x IN [a.age] WHERE x > 40) RETURN a.name", [["Alice"]]),
             ],
+            [GqlClauses.PatternComprehension] =
+            [
+                new("MATCH (a:Person {name:'Alice'}) RETURN [(a)-[:KNOWS]->(b) | b.name]", [[new object?[] { "Bob" }]]),
+                new("RETURN [p=(:Person {name:'Alice'})-[:KNOWS]->(b) WHERE b.age < 18 | size(nodes(p))]", [[new object?[] { 2L }]]),
+                new("OPTIONAL MATCH (a:MissingPattern) RETURN [(a)->(b) | b.name]", [[Array.Empty<object?>()]]),
+                new("RETURN [p=(a)->{1,2}(b) | path_length(p)]", [[new object?[] { 1L, 1L }]]),
+                new("RETURN [p=(a)<-+(b) | path_length(p)]", [[new object?[] { 1L, 1L }]]),
+                new("RETURN [p=(a)<->*(b) WHERE path_length(p)>0 | path_length(p)]", [[new object?[] { 1L, 1L, 1L, 1L }]]),
+            ],
             [GqlClauses.ListComprehension] =
             [
                 new("RETURN [x IN [1,2,3] WHERE x > 1 | x * 2]", [[new object?[] { 4L, 6L }]]),
@@ -544,6 +553,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.ListPredicate => query.Projections.Any(projection => projection.Expression is GqlListPredicateExpression) ||
             query.OrderBy.Any(order => order.Expression is GqlListPredicateExpression) ||
             query.Text?.Contains("any(", StringComparison.OrdinalIgnoreCase) == true,
+        GqlClauses.PatternComprehension => query.Projections.Any(item => item.Expression is GqlPatternComprehensionExpression),
         GqlClauses.ListComprehension => query.Projections.Any(item => item.Expression is GqlListComprehensionExpression),
         GqlClauses.ListSlice => query.Projections.Any(item => item.Expression is GqlListSliceExpression),
         GqlClauses.Let => query.Stages.Any(stage => stage is GqlLetStage),

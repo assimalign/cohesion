@@ -34,8 +34,8 @@ public sealed class SqlJoinShapeTests
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - USING: preflight skips advertised clauses and locates the next excluded form")]
     [InlineData("SELECT * FROM t JOIN u USING (id) NATURAL JOIN v;", "NATURAL")]
-    [InlineData("SELECT * FROM t JOIN u USING (id) WINDOW w AS (ROWS CURRENT ROW);", "ROWS")]
-    [InlineData("SELECT * FROM t JOIN u USING (id) ORDER BY SUM(id) OVER ();", "OVER")]
+    [InlineData("SELECT * FROM t JOIN u USING (id) WINDOW w AS (GROUPS CURRENT ROW);", "GROUPS")]
+    [InlineData("SELECT * FROM t JOIN u USING (id) ORDER BY SUM(id) OVER (EXCLUDE TIES);", "EXCLUDE")]
     [InlineData("SELECT * FROM t, LATERAL (SELECT id FROM u) d;", "LATERAL")]
     [InlineData("SELECT * FROM t JOIN LATERAL (SELECT id FROM u) d ON TRUE;", "LATERAL")]
 

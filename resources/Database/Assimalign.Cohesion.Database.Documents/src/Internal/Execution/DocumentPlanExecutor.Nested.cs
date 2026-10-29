@@ -16,12 +16,17 @@ internal static partial class DocumentPlanExecutor
     internal static ValueTask<DatabaseResult> ExecuteNestedQueryAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentStatementPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken,
         DocumentNestedExecutionContext nested)
-        => plan switch
+    {
+        var logical = SourceLogical(plan);
+        if (logical.Limit == 0) { return ValueTask.FromResult<DatabaseResult>(CreateResult(logical, [], cancellationToken)); }
+        return plan switch
         {
+            DocumentFromPlan source => ExecuteFromAsync(database, operation, source, parameters, cancellationToken, nested),
             DocumentPlan select => ExecuteNestedSelectAsync(database, operation, select, parameters, cancellationToken, null, nested),
             DocumentSystemCollectionPlan system => ExecuteNestedSystemCollectionAsync(database, operation, system, parameters, cancellationToken, null, nested),
             _ => throw new DocumentPlanningException("CD05001", ErrorMessages.PlanExecutorExecuteAsyncFailure),
         };
+    }
 
     private static async ValueTask<DatabaseResult> ExecuteNestedStatementAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentNestedPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)

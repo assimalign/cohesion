@@ -77,6 +77,13 @@ public sealed class DocumentSubqueryParityTests
 
     public static IEnumerable<object[]> QueryPositions()
     {
+        yield return ["SELECT RAW v FROM [1,2,3] AS v", "SELECT RAW v FROM (SELECT RAW n FROM items) v", 0];
+        yield return ["SELECT RAW v FROM [1,2,3] AS v", "SELECT RAW v FROM COALESCE((SELECT RAW n FROM items), []) AS v", 1];
+        yield return ["SELECT SUM(v) AS n FROM [1,2,3] AS v", "SELECT SUM(v) AS n FROM (SELECT RAW n FROM items) v", 0];
+        yield return ["SELECT * FROM [{n:1},{n:2},{n:3}] AS v", "SELECT * FROM (SELECT n FROM items) v", 0];
+        yield return ["SELECT RAW v FROM [NULL,{},[],1] AS v", "SELECT RAW v FROM (SELECT RAW v FROM [NULL,{},[],1] AS v) v", 0];
+        yield return ["SELECT RAW v FROM @deep AS v", "SELECT RAW v FROM (SELECT RAW v FROM @deep AS v) v", 0];
+        yield return ["SELECT RAW v FROM [1,2,3] AS v", "SELECT RAW v FROM (SELECT RAW d FROM (SELECT RAW n FROM items) d) v", 0];
         yield return ["SELECT n FROM items WHERE n IN [1,2,3] ORDER BY n", "SELECT n FROM items WHERE n IN (SELECT RAW n FROM items) ORDER BY n", 1];
         yield return ["SELECT n FROM items ORDER BY [1,2,3], n DESC", "SELECT n FROM items ORDER BY (SELECT RAW n FROM items), n DESC", 1];
         yield return ["SELECT COUNT(*) AS c FROM items GROUP BY [1,2,3]", "SELECT COUNT(*) AS c FROM items GROUP BY (SELECT RAW n FROM items)", 1];

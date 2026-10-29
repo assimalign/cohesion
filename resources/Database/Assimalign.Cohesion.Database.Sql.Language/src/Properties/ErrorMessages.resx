@@ -14,7 +14,7 @@
   <data name="IntervalYearMonthUnsupported" xml:space="preserve"><value>Year-month INTERVAL literals are not supported.</value></data>
   <data name="TimeTextInvalid" xml:space="preserve"><value>TIME requires a valid clock within 00:00:00 through 23:59:59.9999999, optionally with AM/PM and a supported zone.</value></data>
   <data name="IntervalTextInvalid" xml:space="preserve"><value>Invalid day-time INTERVAL literal.</value></data>
-  <data name="AlterTypeRenderingRequired" xml:space="preserve"><value>This renderer requires an ALTER COLUMN TYPE action.</value></data>
+  <data name="AlterTypeRenderingRequired" xml:space="preserve"><value>This renderer requires an ALTER COLUMN TYPE, identity or ADD CONSTRAINT action.</value></data>
   <data name="RendererThrowIfTooDeepNotSupported" xml:space="preserve"><value>The expression nests {0} levels deep; the SQL dialect allows at most {1}, so its text would not parse.</value></data>
   <data name="SqlExpressionRendererNodeNotSupported" xml:space="preserve"><value>Expression node '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererLevelNotSupported" xml:space="preserve"><value>Binary operator '{0}' has no SQL spelling.</value></data>
@@ -31,9 +31,11 @@
   <data name="SqlQueryParserParseConstraintVoid" xml:space="preserve"><value>Expected a CHECK predicate.</value></data>
   <data name="SqlQueryParserParseConstraintVoid2" xml:space="preserve"><value>Expected PRIMARY KEY, FOREIGN KEY, REFERENCES, CHECK, or UNIQUE.</value></data>
   <data name="SqlQueryParserParseConstraintVoid3" xml:space="preserve"><value>Expected ACTION.</value></data>
-  <data name="SqlQueryParserParseConstraintVoid4" xml:space="preserve"><value>Column lists after ON DELETE SET NULL or SET DEFAULT are not supported by the SQL surface.</value></data>
+  <data name="SqlQueryParserParseConstraintVoid4" xml:space="preserve"><value>Column lists after ON DELETE or ON UPDATE SET NULL or SET DEFAULT are not supported by the SQL surface.</value></data>
   <data name="SqlQueryParserParseConstraintVoid5" xml:space="preserve"><value>Expected CASCADE, RESTRICT, NO ACTION, SET NULL, or SET DEFAULT.</value></data>
-  <data name="SqlQueryParserParseConstraintVoid6" xml:space="preserve"><value>Expected DELETE after ON.</value></data>
+  <data name="ConstraintRenderingUnknown" xml:space="preserve"><value>The constraint kind or referential action cannot be rendered.</value></data>
+  <data name="ReferentialActionRepeated" xml:space="preserve"><value>A foreign key may specify ON DELETE and ON UPDATE only once each.</value></data>
+  <data name="SqlQueryParserParseConstraintVoid6" xml:space="preserve"><value>Expected DELETE or UPDATE after ON.</value></data>
   <data name="SqlQueryParserParseConstraintVoid7" xml:space="preserve"><value>Foreign key and referenced key must contain the same number of columns.</value></data>
   <data name="QueryParserParseConstraintColumnsVoid" xml:space="preserve"><value>Expected a constraint column name.</value></data>
   <data name="SqlQueryParserReadDdlIdentifierVoid" xml:space="preserve"><value>Expected an identifier.</value></data>

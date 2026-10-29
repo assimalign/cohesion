@@ -90,7 +90,9 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 29;
+    // Format 30 adds foreign-key ON UPDATE metadata to table extension 8; rows and
+    // format-29 identity/owned-sequence records are unchanged (#1723, SQ-F1).
+    internal const int RecordSpaceFormatVersion = 30;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
