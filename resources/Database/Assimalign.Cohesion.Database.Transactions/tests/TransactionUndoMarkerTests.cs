@@ -448,7 +448,9 @@ public sealed class TransactionUndoMarkerTests
         ulong old = await InsertAsync(coordinator, storage, seeded, 1);
         await coordinator.CommitAsync(seeded);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
-        var reader = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        // Re-capture visibility on every read, so an accidentally released root writer
+        // would immediately expose its surviving suffix or hide the committed row.
+        var reader = await coordinator.BeginAsync(IsolationLevel.ReadCommitted);
         var marker = await coordinator.CreateUndoMarkerAsync(writer);
         long reads = 0, overlaps = 0, undos = 0, purges = 0, newLocation = 0;
         int undoing = 0;
