@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// <para>
 /// The actions are bound to this instance's runtime, so executing one changes this process only.
 /// Keeping a resource's instances consistent is the job of the gateway that manages them, through
-/// each instance's <see cref="IResourceControlPlane"/>.
+/// each instance's <see cref="IApplicationInstanceControlPlane"/>.
 /// </para>
 /// </remarks>
 public interface IApplicationResourceInstance : IApplicationResource
@@ -28,15 +28,15 @@ public interface IApplicationResourceInstance : IApplicationResource
     /// A restarted process is a new instance with a new key: it starts from the state the resource's
     /// code defines and restores whatever state its publisher returns.
     /// </remarks>
-    ResourceInstanceKey Key { get; }
+    InstanceKey Key { get; }
 
     /// <summary>
     /// Gets the actions this instance's control plane executes.
     /// </summary>
-    IReadOnlyCollection<IResourceAction> Actions { get; }
+    IReadOnlyCollection<IApplicationInstanceAction> Actions { get; }
 
     /// <summary>
     /// Gets the contributors to this instance's health.
     /// </summary>
-    IReadOnlyCollection<IResourceHealthContributor> HealthContributors { get; }
+    IReadOnlyCollection<IApplicationHealthContributor> HealthContributors { get; }
 }

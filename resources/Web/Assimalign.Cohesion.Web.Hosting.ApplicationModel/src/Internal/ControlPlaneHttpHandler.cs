@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 
 /// <summary>
-/// Maps the control plane's HTTP routes onto an <see cref="IResourceControlPlane"/>.
+/// Maps the control plane's HTTP routes onto an <see cref="IApplicationInstanceControlPlane"/>.
 /// </summary>
 /// <remarks>
 /// <list type="bullet">
@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 /// <item><c>PUT /state/{name}</c>: restores an action's state; the body is the snapshot's value.</item>
 /// </list>
 /// Bodies in both directions are written by the control plane's content serializer, and responses
-/// carry its media type. An action or restore answers with its <see cref="ResourceActionResult"/>,
+/// carry its media type. An action or restore answers with its <see cref="ApplicationActionResult"/>,
 /// whose <c>state</c> is the snapshot a successful write to a stateful action left. Statuses map to
 /// 200 (succeeded), 400 (rejected), 404 (no such action), and 405 (operation not accepted). Any other
 /// failure is the engine's 500.
@@ -30,12 +30,12 @@ internal static class ControlPlaneHttpHandler
     private const string actionsPrefix = "/actions/";
     private const string statePrefix = "/state/";
 
-    public static async Task InvokeAsync(IResourceControlPlane controlPlane, IHttpContext context)
+    public static async Task InvokeAsync(IApplicationInstanceControlPlane controlPlane, IHttpContext context)
     {
         string path = context.Request.Path.Value ?? string.Empty;
         HttpMethod method = context.Request.Method;
         CancellationToken cancellationToken = context.RequestCancelled;
-        IResourceContentSerializer serializer = controlPlane.Serializer;
+        IApplicationContentSerializer serializer = controlPlane.Serializer;
 
         if (path == "/manifest")
         {
@@ -49,19 +49,19 @@ internal static class ControlPlaneHttpHandler
             return;
         }
 
-        if (TryReadName(path, actionsPrefix, out ResourceActionName action))
+        if (TryReadName(path, actionsPrefix, out ActionName action))
         {
-            ResourceActionKind operation = method == HttpMethod.Get ? ResourceActionKind.Read
-                : method == HttpMethod.Post ? ResourceActionKind.Write
-                : ResourceActionKind.None;
-            if (operation == ResourceActionKind.None)
+            ApplicationActionKind operation = method == HttpMethod.Get ? ApplicationActionKind.Read
+                : method == HttpMethod.Post ? ApplicationActionKind.Write
+                : ApplicationActionKind.None;
+            if (operation == ApplicationActionKind.None)
             {
                 context.Response.StatusCode = HttpStatusCode.MethodNotAllowed;
                 return;
             }
 
-            byte[] input = operation == ResourceActionKind.Write ? await ReadBodyAsync(context, cancellationToken).ConfigureAwait(false) : [];
-            ResourceActionResult result = await controlPlane.ExecuteAsync(action, ResourceActionContext.Create(operation, serializer, input), cancellationToken).ConfigureAwait(false);
+            byte[] input = operation == ApplicationActionKind.Write ? await ReadBodyAsync(context, cancellationToken).ConfigureAwait(false) : [];
+            ApplicationActionResult result = await controlPlane.ExecuteAsync(action, ApplicationActionContext.Create(operation, serializer, input), cancellationToken).ConfigureAwait(false);
 
             await WriteResultAsync(context, serializer, result, cancellationToken).ConfigureAwait(false);
             return;
@@ -78,11 +78,11 @@ internal static class ControlPlaneHttpHandler
             byte[] value = await ReadBodyAsync(context, cancellationToken).ConfigureAwait(false);
             if (value.Length == 0)
             {
-                await WriteResultAsync(context, serializer, ResourceActionResult.Rejected(ErrorMessages.SnapshotValueRequired), cancellationToken).ConfigureAwait(false);
+                await WriteResultAsync(context, serializer, ApplicationActionResult.Rejected(ErrorMessages.SnapshotValueRequired), cancellationToken).ConfigureAwait(false);
                 return;
             }
 
-            ResourceActionResult result = await controlPlane.RestoreAsync(ResourceStateSnapshot.Create(action, value), cancellationToken).ConfigureAwait(false);
+            ApplicationActionResult result = await controlPlane.RestoreAsync(ApplicationActionSnapshot.Create(action, value), cancellationToken).ConfigureAwait(false);
 
             await WriteResultAsync(context, serializer, result, cancellationToken).ConfigureAwait(false);
             return;
@@ -91,11 +91,11 @@ internal static class ControlPlaneHttpHandler
         context.Response.StatusCode = HttpStatusCode.NotFound;
     }
 
-    private static bool TryReadName(string path, string prefix, out ResourceActionName name)
+    private static bool TryReadName(string path, string prefix, out ActionName name)
     {
         name = default;
         return path.StartsWith(prefix, StringComparison.Ordinal)
-            && ResourceActionName.TryCreate(path[prefix.Length..], out name);
+            && ActionName.TryCreate(path[prefix.Length..], out name);
     }
 
     private static async Task<byte[]> ReadBodyAsync(IHttpContext context, CancellationToken cancellationToken)
@@ -105,20 +105,20 @@ internal static class ControlPlaneHttpHandler
         return buffer.ToArray();
     }
 
-    private static Task WriteResultAsync(IHttpContext context, IResourceContentSerializer serializer, ResourceActionResult result, CancellationToken cancellationToken)
+    private static Task WriteResultAsync(IHttpContext context, IApplicationContentSerializer serializer, ApplicationActionResult result, CancellationToken cancellationToken)
     {
         HttpStatusCode status = result.Status switch
         {
-            ResourceActionStatus.Succeeded => HttpStatusCode.Ok,
-            ResourceActionStatus.Rejected => HttpStatusCode.BadRequest,
-            ResourceActionStatus.NotFound => HttpStatusCode.NotFound,
+            ApplicationActionStatus.Succeeded => HttpStatusCode.Ok,
+            ApplicationActionStatus.Rejected => HttpStatusCode.BadRequest,
+            ApplicationActionStatus.NotFound => HttpStatusCode.NotFound,
             _ => HttpStatusCode.MethodNotAllowed,
         };
 
         return WriteAsync(context, serializer, status, serializer.Serialize(result), cancellationToken);
     }
 
-    private static async Task WriteAsync(IHttpContext context, IResourceContentSerializer serializer, HttpStatusCode status, ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
+    private static async Task WriteAsync(IHttpContext context, IApplicationContentSerializer serializer, HttpStatusCode status, ReadOnlyMemory<byte> body, CancellationToken cancellationToken)
     {
         context.Response.StatusCode = status;
         context.Response.Headers[HttpHeaderKey.ContentType] = serializer.MediaType;

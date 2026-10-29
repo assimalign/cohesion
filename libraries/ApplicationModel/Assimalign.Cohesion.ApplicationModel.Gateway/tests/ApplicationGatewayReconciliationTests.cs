@@ -22,11 +22,11 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
     private readonly TemporaryDirectory _directory = new();
     private readonly TestInfrastructure _infrastructure = new();
-    private readonly JsonFileGatewayStore _store;
+    private readonly JsonFileApplicationGatewayStore _store;
 
     public ApplicationGatewayReconciliationTests()
     {
-        _store = JsonFileGatewayStore.Create(_directory.FullPath);
+        _store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
     }
 
     public void Dispose()
@@ -53,7 +53,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         _infrastructure.TornDown.ShouldBeEmpty();
         IApplicationResourceDeployment ordersApi = second.Gateway.Resources.ShouldHaveSingleItem();
         ordersApi.Instances.ShouldHaveSingleItem();
-        ordersApi.State.ShouldHaveSingleItem().Action.ShouldBe((ResourceActionName)"log-level");
+        ordersApi.State.ShouldHaveSingleItem().Action.ShouldBe((ActionName)"log-level");
     }
 
     [Fact(DisplayName = DisplayPrefix + "An instance started after a restart restores the state recorded before it")]
@@ -90,7 +90,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         // Assert
         _infrastructure.TornDown.Select(name => name.Value).ShouldBe(["customers-api"]);
         _infrastructure.TornDownGateways.Select(name => name.Value).ShouldBe(["east"]);
-        GatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
+        ApplicationGatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
         record.Resources.Select(resource => resource.Name.Value).ShouldBe(["orders-api"]);
         record.Gateways.ShouldBeEmpty();
     }
@@ -114,7 +114,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         _infrastructure.Deployed.Count.ShouldBe(2);
         IApplicationResourceDeployment ordersApi = second.Gateway.Resources.Single();
         ordersApi.State.ShouldBeEmpty();
-        ResourceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
+        ApplicationInstanceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
         _infrastructure.Instances[instance.Key].Instance.Level.Level.ShouldBe("Information");
     }
 
@@ -137,7 +137,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         _infrastructure.Deployed.Count.ShouldBe(2);
         IApplicationResourceDeployment ordersApi = second.Gateway.Resources.Single();
         ordersApi.State.ShouldHaveSingleItem();
-        ResourceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
+        ApplicationInstanceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
         _infrastructure.Instances[instance.Key].Instance.Level.Level.ShouldBe("Debug");
     }
 
@@ -175,8 +175,8 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         await WriteLogLevelAsync(running.Gateway, "Warning");
 
         // Assert
-        GatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
-        GatewayResourceRecord ordersApi = record.Resources.ShouldHaveSingleItem();
+        ApplicationGatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
+        ApplicationResourceRecord ordersApi = record.Resources.ShouldHaveSingleItem();
         ordersApi.Revision.ShouldEndWith(":1");
         ordersApi.Instances.ShouldHaveSingleItem();
         Encoding.UTF8.GetString(ordersApi.State.ShouldHaveSingleItem().Value.Span).ShouldBe("""{"Level":"Warning"}""");
@@ -191,12 +191,12 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
     // gateway, which restores it on the others.
     private async Task WriteLogLevelAsync(ApplicationGateway gateway, string level)
     {
-        (TestInstance instance, ResourceService service) = _infrastructure.Instances.Values.First();
-        ResourceActionResult write = await service.ControlPlane.ExecuteAsync(
+        (TestInstance instance, ApplicationInstanceService service) = _infrastructure.Instances.Values.First();
+        ApplicationActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
-            ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
+            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
-        foreach (ResourceInstanceKey target in await gateway.RecordAsync("Web", "orders-api", instance.Key, write.State!))
+        foreach (InstanceKey target in await gateway.RecordAsync("Web", "orders-api", instance.Key, write.State!))
         {
             await _infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
         }

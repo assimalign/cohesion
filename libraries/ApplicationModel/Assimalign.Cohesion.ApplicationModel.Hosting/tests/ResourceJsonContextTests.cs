@@ -19,11 +19,11 @@ public class ResourceJsonContextTests
     {
         // Arrange
         var resource = new TestResource(new LogLevelAction());
-        ResourceManifest manifest = ResourceControlPlane.Create(resource, TestSerializer.Json).Manifest;
+        ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(resource, TestSerializer.Json).Manifest;
 
         // Act
-        byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, ResourceJsonContext.Default.ResourceManifest);
-        ResourceManifest? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourceManifest);
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, ResourceJsonContext.Default.ApplicationInstanceManifest);
+        ApplicationInstanceManifest? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ApplicationInstanceManifest);
 
         // Assert
         read.ShouldNotBeNull();
@@ -37,19 +37,19 @@ public class ResourceJsonContextTests
     public void Serialize_Snapshots_ShouldEmbedTheValue()
     {
         // Arrange
-        IReadOnlyList<ResourceStateSnapshot> snapshots =
+        IReadOnlyList<ApplicationActionSnapshot> snapshots =
         [
-            ResourceStateSnapshot.Create("cors", Encoding.UTF8.GetBytes("""{"origins":["https://shop.example"]}""")),
+            ApplicationActionSnapshot.Create("cors", Encoding.UTF8.GetBytes("""{"origins":["https://shop.example"]}""")),
         ];
 
         // Act
-        string json = JsonSerializer.Serialize(snapshots, ResourceJsonContext.Default.IReadOnlyListResourceStateSnapshot);
-        IReadOnlyList<ResourceStateSnapshot>? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.IReadOnlyListResourceStateSnapshot);
+        string json = JsonSerializer.Serialize(snapshots, ResourceJsonContext.Default.IReadOnlyListApplicationActionSnapshot);
+        IReadOnlyList<ApplicationActionSnapshot>? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.IReadOnlyListApplicationActionSnapshot);
 
         // Assert
         json.ShouldBe("""[{"action":"cors","value":{"origins":["https://shop.example"]}}]""");
-        ResourceStateSnapshot snapshot = read.ShouldNotBeNull().ShouldHaveSingleItem();
-        snapshot.Action.ShouldBe((ResourceActionName)"cors");
+        ApplicationActionSnapshot snapshot = read.ShouldNotBeNull().ShouldHaveSingleItem();
+        snapshot.Action.ShouldBe((ActionName)"cors");
         Encoding.UTF8.GetString(snapshot.Value.Span).ShouldBe("""{"origins":["https://shop.example"]}""");
     }
 
@@ -62,25 +62,25 @@ public class ResourceJsonContextTests
     public void Deserialize_MalformedSnapshot_ShouldThrow(string json)
     {
         // Act / Assert
-        Should.Throw<JsonException>(() => JsonSerializer.Deserialize(json, ResourceJsonContext.Default.IReadOnlyListResourceStateSnapshot));
+        Should.Throw<JsonException>(() => JsonSerializer.Deserialize(json, ResourceJsonContext.Default.IReadOnlyListApplicationActionSnapshot));
     }
 
     [Fact(DisplayName = DisplayPrefix + "A publication is written as its snapshots and its lease")]
     public void Serialize_Publication_ShouldCarrySnapshotsAndLease()
     {
         // Arrange
-        var publication = new ResourcePublication(
-            [ResourceStateSnapshot.Create("cors", """{"origins":["https://shop.example"]}"""u8.ToArray())],
+        var publication = new ApplicationInstancePublication(
+            [ApplicationActionSnapshot.Create("cors", """{"origins":["https://shop.example"]}"""u8.ToArray())],
             TimeSpan.FromSeconds(30));
 
         // Act
-        string json = JsonSerializer.Serialize(publication, ResourceJsonContext.Default.ResourcePublication);
-        ResourcePublication? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourcePublication);
+        string json = JsonSerializer.Serialize(publication, ResourceJsonContext.Default.ApplicationInstancePublication);
+        ApplicationInstancePublication? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ApplicationInstancePublication);
 
         // Assert
         json.ShouldBe("""{"snapshots":[{"action":"cors","value":{"origins":["https://shop.example"]}}],"lease":"00:00:30"}""");
         read.ShouldNotBeNull().Lease.ShouldBe(TimeSpan.FromSeconds(30));
-        read.Snapshots.ShouldHaveSingleItem().Action.ShouldBe((ResourceActionName)"cors");
+        read.Snapshots.ShouldHaveSingleItem().Action.ShouldBe((ActionName)"cors");
     }
 
     [Fact(DisplayName = DisplayPrefix + "A result with an embedded output and a state snapshot survives a round trip")]
@@ -90,15 +90,15 @@ public class ResourceJsonContextTests
         const string json = """{"status":"Succeeded","output":{"origins":["https://partner.example"]},"state":{"action":"cors","value":{"origins":["https://partner.example"]}}}""";
 
         // Act
-        ResourceActionResult? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourceActionResult);
-        string written = JsonSerializer.Serialize(read!, ResourceJsonContext.Default.ResourceActionResult);
+        ApplicationActionResult? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ApplicationActionResult);
+        string written = JsonSerializer.Serialize(read!, ResourceJsonContext.Default.ApplicationActionResult);
 
         // Assert
         read.ShouldNotBeNull();
-        read.Status.ShouldBe(ResourceActionStatus.Succeeded);
+        read.Status.ShouldBe(ApplicationActionStatus.Succeeded);
         Encoding.UTF8.GetString(read.Output.Span).ShouldBe("""{"origins":["https://partner.example"]}""");
-        ResourceStateSnapshot state = read.State.ShouldNotBeNull();
-        state.Action.ShouldBe((ResourceActionName)"cors");
+        ApplicationActionSnapshot state = read.State.ShouldNotBeNull();
+        state.Action.ShouldBe((ActionName)"cors");
         Encoding.UTF8.GetString(state.Value.Span).ShouldBe("""{"origins":["https://partner.example"]}""");
         written.ShouldBe(json);
     }
@@ -107,12 +107,12 @@ public class ResourceJsonContextTests
     public void Serialize_Rejection_ShouldCarryOnlyStatusAndReason()
     {
         // Act
-        string json = JsonSerializer.Serialize(ResourceActionResult.Rejected("A log level is required."), ResourceJsonContext.Default.ResourceActionResult);
-        ResourceActionResult? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourceActionResult);
+        string json = JsonSerializer.Serialize(ApplicationActionResult.Rejected("A log level is required."), ResourceJsonContext.Default.ApplicationActionResult);
+        ApplicationActionResult? read = JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ApplicationActionResult);
 
         // Assert
         json.ShouldBe("""{"status":"Rejected","reason":"A log level is required."}""");
-        read.ShouldNotBeNull().Status.ShouldBe(ResourceActionStatus.Rejected);
+        read.ShouldNotBeNull().Status.ShouldBe(ApplicationActionStatus.Rejected);
         read.Reason.ShouldBe("A log level is required.");
         read.Output.IsEmpty.ShouldBeTrue();
         read.State.ShouldBeNull();
@@ -128,6 +128,6 @@ public class ResourceJsonContextTests
     public void Deserialize_MalformedResult_ShouldThrow(string json)
     {
         // Act / Assert
-        Should.Throw<JsonException>(() => JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ResourceActionResult));
+        Should.Throw<JsonException>(() => JsonSerializer.Deserialize(json, ResourceJsonContext.Default.ApplicationActionResult));
     }
 }

@@ -1,0 +1,54 @@
+using System;
+using System.Text.Json.Serialization;
+
+namespace Assimalign.Cohesion.ApplicationModel;
+
+/// <summary>
+/// The state of one stateful action, written by the control plane's content serializer: what a
+/// gateway keeps after a write and restores on instances that start before the resource is next
+/// deployed.
+/// </summary>
+[JsonConverter(typeof(ApplicationActionSnapshotJsonConverter))]
+public sealed class ApplicationActionSnapshot
+{
+    private ApplicationActionSnapshot(ActionName action, ReadOnlyMemory<byte> value)
+    {
+        Action = action;
+        Value = value;
+    }
+
+    /// <summary>
+    /// Gets the name of the action whose state this is.
+    /// </summary>
+    public ActionName Action { get; }
+
+    /// <summary>
+    /// Gets the state's value as content.
+    /// </summary>
+    public ReadOnlyMemory<byte> Value { get; }
+
+    /// <summary>
+    /// Creates a snapshot.
+    /// </summary>
+    /// <remarks>The snapshot keeps a copy of <paramref name="value"/>, so the caller may reuse its buffer.</remarks>
+    /// <param name="action">The name of the action whose state this is.</param>
+    /// <param name="value">The state's value, written by the control plane's content serializer.</param>
+    /// <returns>The snapshot.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="action"/> is <see langword="default"/>, or <paramref name="value"/> is empty.
+    /// </exception>
+    public static ApplicationActionSnapshot Create(ActionName action, ReadOnlyMemory<byte> value)
+    {
+        if (action.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.ActionNameMissing, nameof(action));
+        }
+
+        if (value.IsEmpty)
+        {
+            throw new ArgumentException(ErrorMessages.ApplicationActionSnapshotEmpty, nameof(value));
+        }
+
+        return new ApplicationActionSnapshot(action, value.ToArray());
+    }
+}

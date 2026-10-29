@@ -61,10 +61,10 @@ stateful write:
 ApplicationResourceDeployment ordersApi = ApplicationResourceDeployment.Create(model.Manifest.Gateways[0].Resources[1]);
 
 // An instance published its manifest: answer with the state it must restore.
-IReadOnlyList<ResourceStateSnapshot> restore = ordersApi.Register(published);
+IReadOnlyList<ApplicationActionSnapshot> restore = ordersApi.Register(published);
 
 // A stateful write succeeded on one instance: restore its snapshot on the others.
-foreach (ResourceInstanceKey target in ordersApi.Record(source, write.State!))
+foreach (InstanceKey target in ordersApi.Record(source, write.State!))
 {
     // Send write.State to the target instance's control plane (RestoreAsync).
 }

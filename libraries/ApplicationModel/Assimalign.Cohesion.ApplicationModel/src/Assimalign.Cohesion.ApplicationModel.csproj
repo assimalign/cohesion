@@ -9,9 +9,9 @@
 	<ItemGroup>
 		<CohesionValueType Include="ValueObjects\ResourceId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 		<CohesionValueType Include="ValueObjects\ResourceName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
-		<CohesionValueType Include="ValueObjects\ResourceInstanceKey.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\InstanceKey.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 		<CohesionValueType Include="ValueObjects\ProviderId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 		<CohesionValueType Include="ValueObjects\ProviderName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
-		<CohesionValueType Include="ValueObjects\ResourceActionName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\ActionName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
 	</ItemGroup>
 </Project>

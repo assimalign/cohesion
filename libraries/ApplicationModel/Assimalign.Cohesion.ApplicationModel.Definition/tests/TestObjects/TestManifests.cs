@@ -9,25 +9,25 @@ namespace Assimalign.Cohesion.ApplicationModel.Definition.Tests;
 /// </summary>
 internal static class TestManifests
 {
-    public static readonly ResourceActionName LogLevel = "log-level";
+    public static readonly ActionName LogLevel = "log-level";
 
-    public static readonly ResourceActionName FlushCache = "flush-cache";
+    public static readonly ActionName FlushCache = "flush-cache";
 
     public static ApplicationResourceManifest OrdersApi { get; } = new("Web", "orders-api", [], [], []);
 
     /// <summary>An instance with a stateful log-level control and an imperative flush.</summary>
-    public static ResourceManifest Instance()
+    public static ApplicationInstanceManifest Instance()
     {
-        return Instance(new ResourceActionDescriptor(FlushCache, ResourceActionKind.Write, false), new ResourceActionDescriptor(LogLevel, ResourceActionKind.ReadWrite, true));
+        return Instance(new ApplicationActionDescriptor(FlushCache, ApplicationActionKind.Write, false), new ApplicationActionDescriptor(LogLevel, ApplicationActionKind.ReadWrite, true));
     }
 
-    public static ResourceManifest Instance(params ResourceActionDescriptor[] actions)
+    public static ApplicationInstanceManifest Instance(params ApplicationActionDescriptor[] actions)
     {
-        return new ResourceManifest("Web", "orders-api", ResourceInstanceKey.New(), actions);
+        return new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), actions);
     }
 
-    public static ResourceStateSnapshot LogLevelSnapshot(string level)
+    public static ApplicationActionSnapshot LogLevelSnapshot(string level)
     {
-        return ResourceStateSnapshot.Create(LogLevel, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}"""));
+        return ApplicationActionSnapshot.Create(LogLevel, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}"""));
     }
 }

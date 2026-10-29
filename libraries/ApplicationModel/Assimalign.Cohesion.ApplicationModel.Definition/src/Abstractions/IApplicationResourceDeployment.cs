@@ -32,13 +32,13 @@ public interface IApplicationResourceDeployment : IApplicationResource
     /// <summary>
     /// Gets the registered instances' manifests, ordered by instance key and so by start time.
     /// </summary>
-    IReadOnlyCollection<ResourceManifest> Instances { get; }
+    IReadOnlyCollection<ApplicationInstanceManifest> Instances { get; }
 
     /// <summary>
     /// Gets the state recorded since the gateway was deployed: one snapshot per action, ordered by
     /// action name.
     /// </summary>
-    IReadOnlyCollection<ResourceStateSnapshot> State { get; }
+    IReadOnlyCollection<ApplicationActionSnapshot> State { get; }
 
     /// <summary>
     /// Gets the infrastructure actions the gateway exposes on the resource, ordered by name.
@@ -58,13 +58,13 @@ public interface IApplicationResourceDeployment : IApplicationResource
     /// <param name="context">The invocation.</param>
     /// <param name="cancellationToken">Cancels the invocation.</param>
     /// <returns>
-    /// The action's result, <see cref="ResourceActionStatus.NotFound"/> when the resource has no such
-    /// action, <see cref="ResourceActionStatus.NotSupported"/> when the action does not accept the
-    /// requested operation, or <see cref="ResourceActionStatus.Rejected"/> when the input does not
+    /// The action's result, <see cref="ApplicationActionStatus.NotFound"/> when the resource has no such
+    /// action, <see cref="ApplicationActionStatus.NotSupported"/> when the action does not accept the
+    /// requested operation, or <see cref="ApplicationActionStatus.Rejected"/> when the input does not
     /// bind.
     /// </returns>
     /// <exception cref="System.ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
-    ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionName action, ResourceActionContext context, CancellationToken cancellationToken = default);
+    ValueTask<ApplicationActionResult> ExecuteAsync(ActionName action, ApplicationActionContext context, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Registers an instance and returns the state it must restore before serving.
@@ -80,14 +80,14 @@ public interface IApplicationResourceDeployment : IApplicationResource
     /// <exception cref="System.ArgumentException">
     /// The manifest names another resource, or has no instance key.
     /// </exception>
-    IReadOnlyList<ResourceStateSnapshot> Register(ResourceManifest instance);
+    IReadOnlyList<ApplicationActionSnapshot> Register(ApplicationInstanceManifest instance);
 
     /// <summary>
     /// Removes an instance that stopped.
     /// </summary>
     /// <param name="key">The instance's key.</param>
     /// <returns>Whether the instance was registered.</returns>
-    bool Unregister(ResourceInstanceKey key);
+    bool Unregister(InstanceKey key);
 
     /// <summary>
     /// Records the snapshot a stateful write left on one instance, and returns the other instances
@@ -106,5 +106,5 @@ public interface IApplicationResourceDeployment : IApplicationResource
     /// <exception cref="System.ArgumentException">
     /// The source instance's manifest does not declare the snapshot's action stateful.
     /// </exception>
-    IReadOnlyList<ResourceInstanceKey> Record(ResourceInstanceKey source, ResourceStateSnapshot snapshot);
+    IReadOnlyList<InstanceKey> Record(InstanceKey source, ApplicationActionSnapshot snapshot);
 }

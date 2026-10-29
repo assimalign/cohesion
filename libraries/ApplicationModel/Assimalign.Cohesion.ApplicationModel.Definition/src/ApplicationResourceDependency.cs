@@ -15,4 +15,4 @@ public sealed record ApplicationResourceDependency(
     GatewayName Gateway,
     ProviderName Provider,
     ResourceName Name,
-    IReadOnlyList<ResourcePermission> Permissions);
+    IReadOnlyList<Permission> Permissions);

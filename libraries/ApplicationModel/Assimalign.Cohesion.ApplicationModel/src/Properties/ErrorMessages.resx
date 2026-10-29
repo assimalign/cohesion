@@ -6,12 +6,12 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="ResourceNameInvalid" xml:space="preserve"><value>A resource name is 1 to 63 lowercase ASCII letters, digits, or hyphens, starting with a letter and ending with a letter or digit.</value></data>
   <data name="ProviderNameInvalid" xml:space="preserve"><value>A provider name is one or more dot-separated segments of ASCII letters and digits, each starting with a letter, at most 128 characters.</value></data>
-  <data name="ResourceActionNameInvalid" xml:space="preserve"><value>An action name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ActionNameInvalid" xml:space="preserve"><value>An action name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
   <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
   <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
-  <data name="ResourceActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
+  <data name="ActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
   <data name="ResourceActionOperationInvalid" xml:space="preserve"><value>An invocation requests exactly one operation: Read or Write.</value></data>
-  <data name="ResourceStateSnapshotEmpty" xml:space="preserve"><value>A state snapshot is a UTF-8 JSON value and cannot be empty.</value></data>
-  <data name="ResourceStateSnapshotInvalid" xml:space="preserve"><value>A state snapshot is a JSON object with a string 'action' and a 'value'.</value></data>
-  <data name="ResourceActionResultInvalid" xml:space="preserve"><value>An action result is a JSON object whose 'status' is Succeeded, Rejected, NotFound, or NotSupported; a rejection carries a 'reason'.</value></data>
+  <data name="ApplicationActionSnapshotEmpty" xml:space="preserve"><value>A state snapshot is a UTF-8 JSON value and cannot be empty.</value></data>
+  <data name="ApplicationActionSnapshotInvalid" xml:space="preserve"><value>A state snapshot is a JSON object with a string 'action' and a 'value'.</value></data>
+  <data name="ApplicationActionResultInvalid" xml:space="preserve"><value>An action result is a JSON object whose 'status' is Succeeded, Rejected, NotFound, or NotSupported; a rejection carries a 'reason'.</value></data>
 </root>

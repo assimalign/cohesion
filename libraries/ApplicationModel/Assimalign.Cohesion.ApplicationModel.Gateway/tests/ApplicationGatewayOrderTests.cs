@@ -23,11 +23,11 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
 
     private readonly TemporaryDirectory _directory = new();
     private readonly TestInfrastructure _infrastructure = new();
-    private readonly JsonFileGatewayStore _store;
+    private readonly JsonFileApplicationGatewayStore _store;
 
     public ApplicationGatewayOrderTests()
     {
-        _store = JsonFileGatewayStore.Create(_directory.FullPath);
+        _store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
     }
 
     public void Dispose()
@@ -107,7 +107,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         exception.Message.ShouldContain("did not start: Web/api, Web/web.", Case.Sensitive);
         _infrastructure.Deployed.ShouldBe(["root:Database.Sql/db", "root:Caching/cache"]);
         _infrastructure.TornDown.Select(name => name.Value).ShouldBe(["db"]);
-        GatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
+        ApplicationGatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
         record.Resources.Select(resource => resource.Name.Value).ShouldBe(["cache"]);
     }
 
@@ -121,7 +121,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
             await WriteLogLevelAsync(first.Gateway, "api", "Debug");
         }
 
-        GatewayResourceRecord before = (await _store.LoadAsync("root"))!.Resources.Single(resource => resource.Name.Value == "api");
+        ApplicationResourceRecord before = (await _store.LoadAsync("root"))!.Resources.Single(resource => resource.Name.Value == "api");
 
         // Act: both are redefined, and db's new revision never starts.
         _infrastructure.Revisions["db"] = "2";
@@ -130,7 +130,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         await Should.ThrowAsync<ApplicationGatewayException>(() => CreateGateway(_shortWindow).RunAsync(model));
 
         // Assert
-        GatewayResourceRecord after = (await _store.LoadAsync("root"))!.Resources.Single(resource => resource.Name.Value == "api");
+        ApplicationResourceRecord after = (await _store.LoadAsync("root"))!.Resources.Single(resource => resource.Name.Value == "api");
         after.Revision.ShouldBe(before.Revision);
         after.Instances.ShouldHaveSingleItem().Key.ShouldBe(before.Instances.Single().Key);
         Encoding.UTF8.GetString(after.State.ShouldHaveSingleItem().Value.Span).ShouldBe("""{"Level":"Debug"}""");
@@ -287,12 +287,12 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     // gateway, which restores it on the others.
     private async Task WriteLogLevelAsync(ApplicationGateway gateway, string resource, string level)
     {
-        (TestInstance instance, ResourceService service) = _infrastructure.Instances.Values.First(entry => entry.Instance.Name.Value == resource);
-        ResourceActionResult write = await service.ControlPlane.ExecuteAsync(
+        (TestInstance instance, ApplicationInstanceService service) = _infrastructure.Instances.Values.First(entry => entry.Instance.Name.Value == resource);
+        ApplicationActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
-            ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
+            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
-        foreach (ResourceInstanceKey target in await gateway.RecordAsync(instance.Provider, instance.Name, instance.Key, write.State!))
+        foreach (InstanceKey target in await gateway.RecordAsync(instance.Provider, instance.Name, instance.Key, write.State!))
         {
             await _infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
         }

@@ -10,11 +10,11 @@ speak through the same types without either loading the other's code. The design
 
 - In scope: `IApplicationResource`, the base of a resource's definition, deployment, and instances;
   the identity value objects (`ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
-  `ResourceInstanceKey`, `ResourceActionName`); the instance manifest (`ResourceManifest`,
-  `ResourceActionDescriptor`, `ResourceActionKind`); invocation (`ResourceActionContext`,
-  `ResourceActionResult`, `ResourceActionStatus`); state (`ResourceStateSnapshot`); content
-  (`IResourceContentSerializer`, `ResourceContentException`); and publication
-  (`IResourceManifestPublisher`, `ResourcePublication`).
+  `InstanceKey`, `ActionName`); the instance manifest (`ApplicationInstanceManifest`,
+  `ApplicationActionDescriptor`, `ApplicationActionKind`); invocation (`ApplicationActionContext`,
+  `ApplicationActionResult`, `ApplicationActionStatus`); state (`ApplicationActionSnapshot`); content
+  (`IApplicationContentSerializer`, `ApplicationContentException`); and publication
+  (`IApplicationInstancePublisher`, `ApplicationInstancePublication`).
 - Out of scope: the logical model (ApplicationModel.Definition), the instance runtime and its HTTP
   publisher (ApplicationModel.Hosting), and gateways (ApplicationModel.Gateway).
 
@@ -28,8 +28,8 @@ An instance publishes its manifest through the seam, and its gateway answers wit
 restore:
 
 ```csharp
-ResourceManifest manifest = new("Web", "orders-api", ResourceInstanceKey.New(), actions);
-ResourcePublication publication = await publisher.PublishAsync(manifest, cancellationToken);
+ApplicationInstanceManifest manifest = new("Web", "orders-api", InstanceKey.New(), actions);
+ApplicationInstancePublication publication = await publisher.PublishAsync(manifest, cancellationToken);
 ```
 
 Every form of a resource derives the same id from its provider and name:

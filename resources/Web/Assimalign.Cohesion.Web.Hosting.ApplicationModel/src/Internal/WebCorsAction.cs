@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 /// The action keeps no copy: its state is the setting, read and written through. The middleware
 /// <c>UseCors()</c> placed reads the setting on each request, so a change applies from the next one.
 /// </remarks>
-internal sealed class WebCorsAction : IResourceAction, IResourceActionState
+internal sealed class WebCorsAction : IApplicationInstanceAction, IApplicationActionState
 {
     private readonly IWebApplicationSetting<CorsPolicy?> _setting;
 
@@ -26,43 +26,43 @@ internal sealed class WebCorsAction : IResourceAction, IResourceActionState
         Name = setting.Name;
     }
 
-    public ResourceActionName Name { get; }
+    public ActionName Name { get; }
 
-    public ResourceActionKind Kind => ResourceActionKind.ReadWrite;
+    public ApplicationActionKind Kind => ApplicationActionKind.ReadWrite;
 
-    public IResourceActionState? State => this;
+    public IApplicationActionState? State => this;
 
     /// <summary>
     /// Gets the default policy in effect.
     /// </summary>
     public WebCorsPolicy Current => WebCorsPolicyMapping.FromPolicy(_setting.Value);
 
-    public ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
+    public ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
-        if (context.Operation == ResourceActionKind.Read)
+        if (context.Operation == ApplicationActionKind.Read)
         {
-            return ValueTask.FromResult(ResourceActionResult.Success(Current, context.Serializer));
+            return ValueTask.FromResult(ApplicationActionResult.Success(Current, context.Serializer));
         }
 
         WebCorsPolicy? policy = context.ReadInput<WebCorsPolicy>();
         if (policy is null)
         {
-            return ValueTask.FromResult(ResourceActionResult.Rejected(ErrorMessages.CorsPolicyRequired));
+            return ValueTask.FromResult(ApplicationActionResult.Rejected(ErrorMessages.CorsPolicyRequired));
         }
 
         Apply(policy);
-        return ValueTask.FromResult(ResourceActionResult.Success());
+        return ValueTask.FromResult(ApplicationActionResult.Success());
     }
 
-    public ReadOnlyMemory<byte> GetSnapshot(IResourceContentSerializer serializer)
+    public ReadOnlyMemory<byte> GetSnapshot(IApplicationContentSerializer serializer)
     {
         return serializer.Serialize(Current);
     }
 
-    public ValueTask RestoreAsync(ReadOnlyMemory<byte> snapshot, IResourceContentSerializer serializer, CancellationToken cancellationToken = default)
+    public ValueTask RestoreAsync(ReadOnlyMemory<byte> snapshot, IApplicationContentSerializer serializer, CancellationToken cancellationToken = default)
     {
         WebCorsPolicy policy = serializer.Deserialize<WebCorsPolicy>(snapshot)
-            ?? throw new ResourceContentException(ErrorMessages.CorsPolicyRequired);
+            ?? throw new ApplicationContentException(ErrorMessages.CorsPolicyRequired);
 
         Apply(policy);
         return ValueTask.CompletedTask;
@@ -79,7 +79,7 @@ internal sealed class WebCorsAction : IResourceAction, IResourceActionState
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
         {
-            throw new ResourceContentException(exception.Message, exception);
+            throw new ApplicationContentException(exception.Message, exception);
         }
 
         _setting.Set(built);

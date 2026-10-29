@@ -17,13 +17,13 @@ internal sealed class TestInfrastructureAction : IApplicationResourceAction
 
     public int Invocations { get; private set; }
 
-    public ResourceActionName Name { get; }
+    public ActionName Name { get; }
 
-    public ResourceActionKind Kind => ResourceActionKind.Write;
+    public ApplicationActionKind Kind => ApplicationActionKind.Write;
 
-    public ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
+    public ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
         Invocations++;
-        return ValueTask.FromResult(ResourceActionResult.Success());
+        return ValueTask.FromResult(ApplicationActionResult.Success());
     }
 }

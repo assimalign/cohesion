@@ -314,14 +314,14 @@ public sealed class ApplicationModel : IApplicationModel
                     manifestParameter);
             }
 
-            var permissions = new ResourcePermission[dependency.Permissions.Count];
-            var named = new HashSet<ResourcePermission>();
+            var permissions = new Permission[dependency.Permissions.Count];
+            var named = new HashSet<Permission>();
             for (int position = 0; position < permissions.Length; position++)
             {
-                ResourcePermission permission = dependency.Permissions[position];
+                Permission permission = dependency.Permissions[position];
                 if (permission.Value is null)
                 {
-                    throw new ArgumentException(ErrorMessages.ResourcePermissionMissing, manifestParameter);
+                    throw new ArgumentException(ErrorMessages.PermissionMissing, manifestParameter);
                 }
 
                 if (!named.Add(permission))

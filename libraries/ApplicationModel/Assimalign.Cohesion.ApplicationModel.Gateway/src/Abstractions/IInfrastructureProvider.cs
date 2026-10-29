@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// <remarks>
 /// <para>
 /// The provider answers "where": its own configuration says where resources run, and it adds
-/// <see cref="GatewayDeploymentManifest.Infrastructure"/> to the deployment manifest of each child
+/// <see cref="ApplicationDeploymentManifest.Infrastructure"/> to the deployment manifest of each child
 /// gateway it deploys. The gateway answers "what", from its model, and writes the rest of that
 /// manifest.
 /// </para>
@@ -152,7 +152,7 @@ public interface IInfrastructureProvider
     /// The gateway writes the child's manifest: <see cref="IApplicationModel.Manifest"/>, so the child
     /// resolves dependencies outside its own part of the hierarchy; the child's name; and the values of
     /// the outputs from this gateway and those above that settings in the child's part use. The
-    /// provider adds where the child runs (<see cref="GatewayDeploymentManifest.Infrastructure"/>),
+    /// provider adds where the child runs (<see cref="ApplicationDeploymentManifest.Infrastructure"/>),
     /// for example with <c>deployment with { Infrastructure = ... }</c>. The gateway calls it on every
     /// run, once the resources of this gateway that the child's part depends on are ready, so a
     /// changed output reaches the child as a changed manifest; the child reconciles its own part.
@@ -160,11 +160,11 @@ public interface IInfrastructureProvider
     /// <param name="model">The model the gateway runs.</param>
     /// <param name="deployment">
     /// The child's deployment manifest, for one of the model's <see cref="IApplicationModel.Deployment"/>
-    /// gateways, without <see cref="GatewayDeploymentManifest.Infrastructure"/>.
+    /// gateways, without <see cref="ApplicationDeploymentManifest.Infrastructure"/>.
     /// </param>
     /// <param name="cancellationToken">Cancels the deployment.</param>
     /// <returns>A task that completes when the child gateway has been started.</returns>
-    ValueTask DeployGatewayAsync(IApplicationModel model, GatewayDeploymentManifest deployment, CancellationToken cancellationToken = default);
+    ValueTask DeployGatewayAsync(IApplicationModel model, ApplicationDeploymentManifest deployment, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Removes a resource's workload: after a new resource missed its startup window, or after the

@@ -34,7 +34,7 @@ flowchart LR
 
 `RunAsync` first orders its part of the hierarchy, and refuses a part that it, or a gateway below
 it, cannot deploy in dependency order (G19) or whose settings it cannot fill in (G22). It loads the
-gateway's record from its `IGatewayStore`, creates one aggregate per resource as the previous run
+gateway's record from its `IApplicationGatewayStore`, creates one aggregate per resource as the previous run
 left it (G23), and opens publications. It then deploys in dependency order (G17): each resource and
 child gateway is a step that runs once the steps it waits for are ready, and independent steps run
 at the same time. A resource's step fills in its settings from the outputs of what it depends on,
@@ -108,15 +108,15 @@ The root therefore deploys `identity`, waits until it is ready, then deploys `ea
 
 | Type | Role |
 | --- | --- |
-| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IResourceManifestPublisher` (`PublishAsync`, the publication endpoint's logic). `RecordAsync` records a write's snapshot and saves the record. Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
+| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic). `RecordAsync` records a write's snapshot and saves the record. Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
 | `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys resources with those values and child gateways, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears down resources and child gateways, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
-| `IGatewayStore`, `GatewayRecord`, `GatewayResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
-| `JsonFileGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
-| `GatewayDeploymentManifest` | What a gateway deploys (the whole hierarchy, the gateway's name, and the values of the outputs from above that its part's settings use) and where (opaque provider settings). UTF-8 JSON with camel-case names. The parent gateway writes the "what" and its provider adds the "where". `ToModel()` creates the gateway's model, values included. |
+| `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
+| `JsonFileApplicationGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
+| `ApplicationDeploymentManifest` | What a gateway deploys (the whole hierarchy, the gateway's name, and the values of the outputs from above that its part's settings use) and where (opaque provider settings). UTF-8 JSON with camel-case names. The parent gateway writes the "what" and its provider adds the "where". `ToModel()` creates the gateway's model, values included. |
 | `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`, or `OutputMissing` for a setting whose output the provider did not report). |
 
-In ApplicationModel: `IApplicationModel.Role` and `GatewayRole` say whether a model's gateway is the
+In ApplicationModel: `IApplicationModel.Role` and `ApplicationGatewayRole` say whether a model's gateway is the
 root or a composite; `IApplicationResourceAction` is an infrastructure action, and
 `IApplicationResourceDeployment.Actions` and `ExecuteAsync` expose and dispatch them.
 
@@ -131,7 +131,7 @@ without a gateway. The retired design had a platform-specific gateway per platfo
 **G2 — The publication endpoint is transport-neutral.** `PublishAsync` is the endpoint's logic: route
 the manifest to its resource's aggregate and answer with the snapshots to restore. A transport only
 adapts it, and an in-process resource publishes to the gateway object directly, because the gateway
-is an `IResourceManifestPublisher`. Each refusal has an error code a transport can map without
+is an `IApplicationInstancePublisher`. Each refusal has an error code a transport can map without
 parsing text: `PublicationsClosed` to 503, `ResourceUnknown` to 404, `ResourceTornDown` to 410.
 
 **G3 — What and where travel together, and "what" is the whole hierarchy.** A deployment manifest
@@ -183,9 +183,9 @@ keeps the decision out of the publication path: in-process providers start insta
 deploy call that reports what it changed. The gateway would learn of an update only after the new
 instances had published with the old state.
 
-**G11 — The record lives behind a store (owner request, 2026-10-28).** `IGatewayStore` loads the
+**G11 — The record lives behind a store (owner request, 2026-10-28).** `IApplicationGatewayStore` loads the
 record once and saves the whole record after every change: deployment, registration, recorded
-write, teardown. Saves never overlap. `JsonFileGatewayStore` is the placeholder. A store over the
+write, teardown. Saves never overlap. `JsonFileApplicationGatewayStore` is the placeholder. A store over the
 Database area replaces it in each gateway once that area is ready, and the gateway does not change.
 Snapshot values are stored as base64, because the platform's content serializer may not be JSON.
 

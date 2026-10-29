@@ -208,8 +208,8 @@ package registers a resource service.
   and a platform restarts a process on any failed exit.
 - Other signals, and shutdown signals outside a run: Hosting registers SIGINT, SIGQUIT and SIGTERM
   only while `RunAsync` runs.
-- Health checks. A resource reports its health through Hosting.Resources
-  (`IResourceHealthContributor`), and a Web application serves health endpoints through Web.Health.
+- Health checks. A resource reports its health through ApplicationModel.Hosting
+  (`IApplicationHealthContributor`), and a Web application serves health endpoints through Web.Health.
 - Dependency injection, configuration, logging, and HTTP delivery belong to their respective
   packages.
 - Hosting does not install a synchronization context or task scheduler.

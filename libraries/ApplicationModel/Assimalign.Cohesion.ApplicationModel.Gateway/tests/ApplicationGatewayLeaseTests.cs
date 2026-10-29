@@ -23,16 +23,16 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
 
     private readonly TemporaryDirectory _directory = new();
     private readonly TestInfrastructure _infrastructure = new();
-    private readonly JsonFileGatewayStore _store;
+    private readonly JsonFileApplicationGatewayStore _store;
 
     public ApplicationGatewayLeaseTests()
     {
-        _store = JsonFileGatewayStore.Create(_directory.FullPath);
+        _store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
     }
 
     public void Dispose()
     {
-        foreach ((_, ResourceService service) in _infrastructure.Instances.Values)
+        foreach ((_, ApplicationInstanceService service) in _infrastructure.Instances.Values)
         {
             service.StopAsync().GetAwaiter().GetResult();
         }
@@ -45,7 +45,7 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
     {
         // Arrange
         await using RunningGateway running = await StartAsync(_store);
-        ResourceService service = _infrastructure.Instances.Values.Single().Service;
+        ApplicationInstanceService service = _infrastructure.Instances.Values.Single().Service;
 
         // Act: the instance dies, so its renewals stop.
         await service.StopAsync();
@@ -96,7 +96,7 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
 
         // Act: the second gateway starts without the first one's record.
         using var otherDirectory = new TemporaryDirectory();
-        await using RunningGateway second = await StartAsync(JsonFileGatewayStore.Create(otherDirectory.FullPath));
+        await using RunningGateway second = await StartAsync(JsonFileApplicationGatewayStore.Create(otherDirectory.FullPath));
         int adopted = second.Gateway.Resources.Single().Instances.Count;
         await Eventually.WaitUntilAsync(() => second.Gateway.Resources.Single().Instances.Count == 1);
 
@@ -105,7 +105,7 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
         _infrastructure.Deployed.ShouldHaveSingleItem();
     }
 
-    private Task<RunningGateway> StartAsync(IGatewayStore store)
+    private Task<RunningGateway> StartAsync(IApplicationGatewayStore store)
     {
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
         builder.AddResource("Web", "orders-api");

@@ -23,7 +23,7 @@ internal sealed class RunningGateway : IAsyncDisposable
     /// <summary>Starts a gateway over the platform and waits until its startup completes.</summary>
     public static async Task<RunningGateway> StartAsync(
         TestInfrastructure infrastructure,
-        IGatewayStore store,
+        IApplicationGatewayStore store,
         IApplicationModel model,
         TimeSpan? startupTimeout = null,
         TimeSpan? leaseDuration = null)

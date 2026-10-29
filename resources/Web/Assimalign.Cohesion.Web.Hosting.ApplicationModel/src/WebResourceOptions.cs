@@ -22,13 +22,13 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel;
 /// <para>
 /// Control-plane content is JSON. Each action's input, output, and state types are written through
 /// the source-generated context that declares them: the resource's own for its actions, and the one
-/// passed with <see cref="AddAction(IResourceAction, JsonSerializerContext)"/> for an action the
+/// passed with <see cref="AddAction(IApplicationInstanceAction, JsonSerializerContext)"/> for an action the
 /// application adds.
 /// </para>
 /// </remarks>
 public sealed class WebResourceOptions
 {
-    private readonly List<Func<WebApplicationContext, IResourceAction>> _actions = [];
+    private readonly List<Func<WebApplicationContext, IApplicationInstanceAction>> _actions = [];
     private readonly List<JsonSerializerContext> _jsonContexts = [];
 
     internal WebResourceOptions(ResourceName name)
@@ -73,7 +73,7 @@ public sealed class WebResourceOptions
     /// </remarks>
     public Func<HttpClient>? HttpClientFactory { get; set; }
 
-    internal IReadOnlyList<Func<WebApplicationContext, IResourceAction>> Actions => _actions;
+    internal IReadOnlyList<Func<WebApplicationContext, IApplicationInstanceAction>> Actions => _actions;
 
     internal IReadOnlyList<JsonSerializerContext> JsonContexts => _jsonContexts;
 
@@ -93,7 +93,7 @@ public sealed class WebResourceOptions
     /// </param>
     /// <returns>The same options for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="action"/> is <see langword="null"/>.</exception>
-    public WebResourceOptions AddAction(IResourceAction action, JsonSerializerContext? jsonContext = null)
+    public WebResourceOptions AddAction(IApplicationInstanceAction action, JsonSerializerContext? jsonContext = null)
     {
         ArgumentNullException.ThrowIfNull(action);
 
@@ -118,7 +118,7 @@ public sealed class WebResourceOptions
     /// </param>
     /// <returns>The same options for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
-    public WebResourceOptions AddAction(Func<WebApplicationContext, IResourceAction> factory, JsonSerializerContext? jsonContext = null)
+    public WebResourceOptions AddAction(Func<WebApplicationContext, IApplicationInstanceAction> factory, JsonSerializerContext? jsonContext = null)
     {
         ArgumentNullException.ThrowIfNull(factory);
 

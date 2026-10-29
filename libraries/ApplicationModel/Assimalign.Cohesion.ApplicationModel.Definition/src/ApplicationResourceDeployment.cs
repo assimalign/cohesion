@@ -22,17 +22,17 @@ namespace Assimalign.Cohesion.ApplicationModel;
 public sealed class ApplicationResourceDeployment : IApplicationResourceDeployment
 {
     private readonly Lock _lock = new();
-    private readonly SortedDictionary<ResourceInstanceKey, ResourceManifest> _instances = new();
-    private readonly SortedDictionary<ResourceActionName, ResourceStateSnapshot> _state;
-    private readonly FrozenDictionary<ResourceActionName, IApplicationResourceAction> _actions;
-    private ReadOnlyCollection<ResourceManifest> _instancesView = ReadOnlyCollection<ResourceManifest>.Empty;
-    private ReadOnlyCollection<ResourceStateSnapshot> _stateView;
+    private readonly SortedDictionary<InstanceKey, ApplicationInstanceManifest> _instances = new();
+    private readonly SortedDictionary<ActionName, ApplicationActionSnapshot> _state;
+    private readonly FrozenDictionary<ActionName, IApplicationResourceAction> _actions;
+    private ReadOnlyCollection<ApplicationInstanceManifest> _instancesView = ReadOnlyCollection<ApplicationInstanceManifest>.Empty;
+    private ReadOnlyCollection<ApplicationActionSnapshot> _stateView;
     private FrozenDictionary<OutputName, string> _outputs;
 
     private ApplicationResourceDeployment(
         ApplicationResourceManifest manifest,
-        SortedDictionary<ResourceActionName, ResourceStateSnapshot> state,
-        SortedDictionary<ResourceActionName, IApplicationResourceAction> actions,
+        SortedDictionary<ActionName, ApplicationActionSnapshot> state,
+        SortedDictionary<ActionName, IApplicationResourceAction> actions,
         FrozenDictionary<OutputName, string> outputs)
     {
         Manifest = manifest;
@@ -53,10 +53,10 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     public ApplicationResourceManifest Manifest { get; }
 
     /// <inheritdoc/>
-    public IReadOnlyCollection<ResourceManifest> Instances => Volatile.Read(ref _instancesView);
+    public IReadOnlyCollection<ApplicationInstanceManifest> Instances => Volatile.Read(ref _instancesView);
 
     /// <inheritdoc/>
-    public IReadOnlyCollection<ResourceStateSnapshot> State => Volatile.Read(ref _stateView);
+    public IReadOnlyCollection<ApplicationActionSnapshot> State => Volatile.Read(ref _stateView);
 
     /// <inheritdoc/>
     public IReadOnlyCollection<IApplicationResourceAction> Actions { get; }
@@ -91,7 +91,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     /// </exception>
     public static ApplicationResourceDeployment Create(
         ApplicationResourceManifest manifest,
-        IEnumerable<ResourceStateSnapshot>? state = null,
+        IEnumerable<ApplicationActionSnapshot>? state = null,
         IEnumerable<IApplicationResourceAction>? actions = null,
         IReadOnlyDictionary<OutputName, string>? outputs = null)
     {
@@ -107,8 +107,8 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
             throw new ArgumentException(ErrorMessages.ResourceNameMissing, nameof(manifest));
         }
 
-        var snapshots = new SortedDictionary<ResourceActionName, ResourceStateSnapshot>();
-        foreach (ResourceStateSnapshot snapshot in state ?? [])
+        var snapshots = new SortedDictionary<ActionName, ApplicationActionSnapshot>();
+        foreach (ApplicationActionSnapshot snapshot in state ?? [])
         {
             if (snapshot is null)
             {
@@ -121,7 +121,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
             }
         }
 
-        var exposed = new SortedDictionary<ResourceActionName, IApplicationResourceAction>();
+        var exposed = new SortedDictionary<ActionName, IApplicationResourceAction>();
         foreach (IApplicationResourceAction action in actions ?? [])
         {
             if (action is null)
@@ -131,10 +131,10 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
 
             if (action.Name.Value is null)
             {
-                throw new ArgumentException(ErrorMessages.ResourceActionNameMissing, nameof(actions));
+                throw new ArgumentException(ErrorMessages.ActionNameMissing, nameof(actions));
             }
 
-            if (action.Kind is not (ResourceActionKind.Read or ResourceActionKind.Write or ResourceActionKind.ReadWrite))
+            if (action.Kind is not (ApplicationActionKind.Read or ApplicationActionKind.Write or ApplicationActionKind.ReadWrite))
             {
                 throw new ArgumentException(Format(ErrorMessages.ApplicationResourceActionKindInvalid, action.Name), nameof(actions));
             }
@@ -195,42 +195,42 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
         lock (_lock)
         {
             _state.Clear();
-            Volatile.Write(ref _stateView, ReadOnlyCollection<ResourceStateSnapshot>.Empty);
+            Volatile.Write(ref _stateView, ReadOnlyCollection<ApplicationActionSnapshot>.Empty);
         }
     }
 
     /// <inheritdoc/>
-    public async ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionName action, ResourceActionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask<ApplicationActionResult> ExecuteAsync(ActionName action, ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         if (!_actions.TryGetValue(action, out IApplicationResourceAction? target))
         {
-            return ResourceActionResult.NotFound();
+            return ApplicationActionResult.NotFound();
         }
 
-        if ((target.Kind & context.Operation) == ResourceActionKind.None)
+        if ((target.Kind & context.Operation) == ApplicationActionKind.None)
         {
-            return ResourceActionResult.NotSupported();
+            return ApplicationActionResult.NotSupported();
         }
 
-        ResourceActionResult? result;
+        ApplicationActionResult? result;
         try
         {
             result = await target.ExecuteAsync(context, cancellationToken).ConfigureAwait(false);
         }
-        catch (ResourceContentException exception)
+        catch (ApplicationContentException exception)
         {
             // The input did not bind to the action's input type, or the action refused its value:
             // the caller's error, not the action's.
-            return ResourceActionResult.Rejected(exception.Message);
+            return ApplicationActionResult.Rejected(exception.Message);
         }
 
         return result ?? throw new InvalidOperationException(Format(ErrorMessages.ApplicationResourceActionResultNull, target.Name));
     }
 
     /// <inheritdoc/>
-    public IReadOnlyList<ResourceStateSnapshot> Register(ResourceManifest instance)
+    public IReadOnlyList<ApplicationActionSnapshot> Register(ApplicationInstanceManifest instance)
     {
         ArgumentNullException.ThrowIfNull(instance);
 
@@ -243,12 +243,12 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
 
         if (instance.Key == default)
         {
-            throw new ArgumentException(ErrorMessages.ResourceInstanceKeyMissing, nameof(instance));
+            throw new ArgumentException(ErrorMessages.InstanceKeyMissing, nameof(instance));
         }
 
         if (instance.Actions is null)
         {
-            throw new ArgumentException(ErrorMessages.ResourceManifestActionsMissing, nameof(instance));
+            throw new ArgumentException(ErrorMessages.ApplicationInstanceManifestActionsMissing, nameof(instance));
         }
 
         lock (_lock)
@@ -256,8 +256,8 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
             _instances[instance.Key] = instance;
             Volatile.Write(ref _instancesView, Copy(_instances.Values));
 
-            var restore = new List<ResourceStateSnapshot>();
-            foreach (ResourceStateSnapshot snapshot in _state.Values)
+            var restore = new List<ApplicationActionSnapshot>();
+            foreach (ApplicationActionSnapshot snapshot in _state.Values)
             {
                 if (IsStateful(instance, snapshot.Action))
                 {
@@ -270,7 +270,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     }
 
     /// <inheritdoc/>
-    public bool Unregister(ResourceInstanceKey key)
+    public bool Unregister(InstanceKey key)
     {
         lock (_lock)
         {
@@ -285,13 +285,13 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     }
 
     /// <inheritdoc/>
-    public IReadOnlyList<ResourceInstanceKey> Record(ResourceInstanceKey source, ResourceStateSnapshot snapshot)
+    public IReadOnlyList<InstanceKey> Record(InstanceKey source, ApplicationActionSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
         lock (_lock)
         {
-            if (!_instances.TryGetValue(source, out ResourceManifest? origin))
+            if (!_instances.TryGetValue(source, out ApplicationInstanceManifest? origin))
             {
                 throw new InvalidOperationException(Format(ErrorMessages.ApplicationResourceInstanceUnknown, source, Manifest.Provider, Manifest.Name));
             }
@@ -304,8 +304,8 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
             _state[snapshot.Action] = snapshot;
             Volatile.Write(ref _stateView, Copy(_state.Values));
 
-            var targets = new List<ResourceInstanceKey>();
-            foreach (KeyValuePair<ResourceInstanceKey, ResourceManifest> instance in _instances)
+            var targets = new List<InstanceKey>();
+            foreach (KeyValuePair<InstanceKey, ApplicationInstanceManifest> instance in _instances)
             {
                 if (instance.Key != source && IsStateful(instance.Value, snapshot.Action))
                 {
@@ -319,9 +319,9 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
 
     // An instance of another version may lack the action, or declare it without state; it neither
     // receives nor reports that action's state.
-    private static bool IsStateful(ResourceManifest instance, ResourceActionName action)
+    private static bool IsStateful(ApplicationInstanceManifest instance, ActionName action)
     {
-        foreach (ResourceActionDescriptor descriptor in instance.Actions)
+        foreach (ApplicationActionDescriptor descriptor in instance.Actions)
         {
             if (descriptor.IsStateful && descriptor.Name == action)
             {
@@ -368,9 +368,9 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
 
         public ApplicationResourceManifest Manifest => _resource.Manifest;
 
-        public IReadOnlyCollection<ResourceManifest> Instances => _resource.Instances;
+        public IReadOnlyCollection<ApplicationInstanceManifest> Instances => _resource.Instances;
 
-        public IReadOnlyCollection<ResourceStateSnapshot> State => _resource.State;
+        public IReadOnlyCollection<ApplicationActionSnapshot> State => _resource.State;
 
         public IReadOnlyCollection<IApplicationResourceAction> Actions => _resource.Actions;
 

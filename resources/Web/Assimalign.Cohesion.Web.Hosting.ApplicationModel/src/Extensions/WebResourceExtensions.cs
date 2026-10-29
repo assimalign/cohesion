@@ -25,7 +25,7 @@ public static class WebResourceExtensions
         /// always does, and the resource exposes each setting it knows. The <c>cors</c> setting that
         /// <c>builder.Services.AddCors(...)</c> registers becomes the <c>cors</c> action, whose writes
         /// change the default policy the middleware <c>UseCors()</c> placed applies. Actions the
-        /// application defines are added with <see cref="WebResourceOptions.AddAction(IResourceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
+        /// application defines are added with <see cref="WebResourceOptions.AddAction(IApplicationInstanceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
         /// </para>
         /// <para>
         /// When the resource has a manifest endpoint (by default the
@@ -74,8 +74,8 @@ public static class WebResourceExtensions
 
             // Control-plane content is JSON. The resource's own actions write their types through its
             // internal context, and each action the application added through the context it came with.
-            IResourceContentSerializer serializer = JsonResourceContentSerializer.Create([WebResourceJsonContext.Default, .. options.JsonContexts]);
-            ResourceManifestPublisher publisher = ResourceManifestPublisher.Create(new ResourceManifestPublisherOptions
+            IApplicationContentSerializer serializer = JsonApplicationContentSerializer.Create([WebResourceJsonContext.Default, .. options.JsonContexts]);
+            ApplicationInstancePublisher publisher = ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions
             {
                 Endpoint = manifestEndpoint,
                 HttpClientFactory = options.HttpClientFactory,
@@ -85,11 +85,11 @@ public static class WebResourceExtensions
             // The control plane exposes the settings the application registered, so it is created once
             // the application's container exists: the first of the two services the build resolves
             // creates it, and the other shares it.
-            Func<WebApplicationContext, IResourceAction>[] addedActions = [.. options.Actions];
-            ResourceControlPlane? controlPlane = null;
-            ResourceControlPlane GetControlPlane(WebApplicationContext context)
+            Func<WebApplicationContext, IApplicationInstanceAction>[] addedActions = [.. options.Actions];
+            ApplicationInstanceControlPlane? controlPlane = null;
+            ApplicationInstanceControlPlane GetControlPlane(WebApplicationContext context)
             {
-                return controlPlane ??= ResourceControlPlane.Create(
+                return controlPlane ??= ApplicationInstanceControlPlane.Create(
                     new WebResource(name, context.Settings, CreateAddedActions(addedActions, context)),
                     serializer);
             }
@@ -98,16 +98,16 @@ public static class WebResourceExtensions
             // for every lifecycle service before it starts any service or server. The control-plane
             // server is a host service of its own, so it listens only once the gateway's state is in
             // effect, and the Web host stops it only after the application's servers have drained.
-            builder.AddService(context => ResourceService.Create(GetControlPlane(context), publisher));
+            builder.AddService(context => ApplicationInstanceService.Create(GetControlPlane(context), publisher));
             builder.AddService(context => new WebResourceControlPlaneServer(listener, GetControlPlane(context)));
 
             return builder;
         }
     }
 
-    private static IResourceAction[] CreateAddedActions(Func<WebApplicationContext, IResourceAction>[] factories, WebApplicationContext context)
+    private static IApplicationInstanceAction[] CreateAddedActions(Func<WebApplicationContext, IApplicationInstanceAction>[] factories, WebApplicationContext context)
     {
-        var actions = new IResourceAction[factories.Length];
+        var actions = new IApplicationInstanceAction[factories.Length];
         for (int i = 0; i < factories.Length; i++)
         {
             actions[i] = factories[i].Invoke(context)

@@ -18,7 +18,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     private readonly Lock _calls = new();
     private readonly List<string> _events = [];
 
-    public IResourceManifestPublisher? Gateway { get; set; }
+    public IApplicationInstancePublisher? Gateway { get; set; }
 
     public HashSet<ResourceName> Silent { get; } = [];
 
@@ -35,7 +35,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     public List<GatewayName> DeployedGateways { get; } = [];
 
     /// <summary>The deployment manifest each child gateway was last deployed with.</summary>
-    public ConcurrentDictionary<GatewayName, GatewayDeploymentManifest> GatewayDeployments { get; } = new();
+    public ConcurrentDictionary<GatewayName, ApplicationDeploymentManifest> GatewayDeployments { get; } = new();
 
     public List<GatewayName> TornDownGateways { get; } = [];
 
@@ -64,7 +64,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     /// <summary>The platform's name; a resource's extensions for it apply here.</summary>
     public PlatformName Platform => "test";
 
-    public ConcurrentDictionary<ResourceInstanceKey, (TestInstance Instance, ResourceService Service)> Instances { get; } = new();
+    public ConcurrentDictionary<InstanceKey, (TestInstance Instance, ApplicationInstanceService Service)> Instances { get; } = new();
 
     /// <summary>
     /// The outputs the platform reports for each resource; an endpoint named after the resource and
@@ -136,7 +136,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         await StartInstanceAsync(resource.Provider, resource.Name, cancellationToken);
     }
 
-    public ValueTask DeployGatewayAsync(IApplicationModel model, GatewayDeploymentManifest deployment, CancellationToken cancellationToken = default)
+    public ValueTask DeployGatewayAsync(IApplicationModel model, ApplicationDeploymentManifest deployment, CancellationToken cancellationToken = default)
     {
         GatewayDeployments[deployment.Gateway] = deployment;
         Record(DeployedGateways, deployment.Gateway);
@@ -186,7 +186,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     public async Task<TestInstance> StartInstanceAsync(ProviderName provider, ResourceName name, CancellationToken cancellationToken = default)
     {
         var instance = new TestInstance(provider, name, RunningSettings.GetValueOrDefault(name) ?? new Dictionary<SettingName, string>());
-        ResourceService service = ResourceService.Create(ResourceControlPlane.Create(instance, TestSerializer.Json), new GatewayForwarder(this));
+        ApplicationInstanceService service = ApplicationInstanceService.Create(ApplicationInstanceControlPlane.Create(instance, TestSerializer.Json), new GatewayForwarder(this));
         await service.StartingAsync(cancellationToken);
         Instances[instance.Key] = (instance, service);
         return instance;

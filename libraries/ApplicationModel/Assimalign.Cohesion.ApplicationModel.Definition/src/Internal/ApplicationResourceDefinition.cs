@@ -42,7 +42,7 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
 
     public IReadOnlyList<ApplicationResourceExtension> Extensions => _extensionsView;
 
-    public IApplicationResourceDefinition DependsOn(IApplicationResourceDefinition resource, params ResourcePermission[] permissions)
+    public IApplicationResourceDefinition DependsOn(IApplicationResourceDefinition resource, params Permission[] permissions)
     {
         ArgumentNullException.ThrowIfNull(resource);
         ArgumentNullException.ThrowIfNull(permissions);
@@ -58,11 +58,11 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
             throw new ArgumentException(Format(ErrorMessages.ApplicationDependencyForeign, resource.Provider, resource.Name), nameof(resource));
         }
 
-        foreach (ResourcePermission permission in permissions)
+        foreach (Permission permission in permissions)
         {
             if (permission.Value is null)
             {
-                throw new ArgumentException(ErrorMessages.ResourcePermissionMissing, nameof(permissions));
+                throw new ArgumentException(ErrorMessages.PermissionMissing, nameof(permissions));
             }
         }
 
@@ -256,10 +256,10 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
         return string.Join(" -> ", names);
     }
 
-    private static ReadOnlyCollection<ResourcePermission> Union(IReadOnlyList<ResourcePermission> existing, ResourcePermission[] added)
+    private static ReadOnlyCollection<Permission> Union(IReadOnlyList<Permission> existing, Permission[] added)
     {
-        var permissions = new List<ResourcePermission>(existing);
-        foreach (ResourcePermission permission in added)
+        var permissions = new List<Permission>(existing);
+        foreach (Permission permission in added)
         {
             if (!permissions.Contains(permission))
             {

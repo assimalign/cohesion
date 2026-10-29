@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 /// </summary>
 internal sealed class WebResource : IApplicationResourceInstance
 {
-    public WebResource(ResourceName name, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IResourceAction> addedActions)
+    public WebResource(ResourceName name, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IApplicationInstanceAction> addedActions)
     {
         Name = name;
         Actions = [.. CreateActions(settings), .. addedActions];
@@ -24,17 +24,17 @@ internal sealed class WebResource : IApplicationResourceInstance
 
     public ResourceName Name { get; }
 
-    public ResourceInstanceKey Key { get; } = ResourceInstanceKey.New();
+    public InstanceKey Key { get; } = InstanceKey.New();
 
-    public IReadOnlyCollection<IResourceAction> Actions { get; }
+    public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; }
 
-    public IReadOnlyCollection<IResourceHealthContributor> HealthContributors { get; } = [];
+    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors { get; } = [];
 
     // The last registration of a name is the one its feature uses, as UseCors does. A setting the
     // resource has no action for stays out of the manifest.
-    private static IResourceAction[] CreateActions(IEnumerable<IWebApplicationSetting> settings)
+    private static IApplicationInstanceAction[] CreateActions(IEnumerable<IWebApplicationSetting> settings)
     {
-        var actions = new List<IResourceAction>();
+        var actions = new List<IApplicationInstanceAction>();
         foreach (IWebApplicationSetting setting in settings.GroupBy(static setting => setting.Name).Select(static group => group.Last()))
         {
             if (setting is IWebApplicationSetting<CorsPolicy?> cors)

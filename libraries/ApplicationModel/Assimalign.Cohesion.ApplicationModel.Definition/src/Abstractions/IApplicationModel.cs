@@ -34,7 +34,7 @@ public interface IApplicationModel
     /// <summary>
     /// Gets the gateway's position in the hierarchy.
     /// </summary>
-    GatewayRole Role => Name == Manifest.Name ? GatewayRole.Root : GatewayRole.Composite;
+    ApplicationGatewayRole Role => Name == Manifest.Name ? ApplicationGatewayRole.Root : ApplicationGatewayRole.Composite;
 
     /// <summary>
     /// Gets the manifest of the whole hierarchy, from the root gateway down.

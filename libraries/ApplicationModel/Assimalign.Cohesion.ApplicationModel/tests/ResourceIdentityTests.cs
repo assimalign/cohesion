@@ -93,10 +93,10 @@ public class ResourceIdentityTests
     [InlineData("a")]
     [InlineData("log-level")]
     [InlineData("flush-cache-2")]
-    public void ResourceActionName_TryCreate_WithWords_ShouldSucceed(string value)
+    public void ActionName_TryCreate_WithWords_ShouldSucceed(string value)
     {
         // Arrange & Act
-        bool created = ResourceActionName.TryCreate(value, out _);
+        bool created = ActionName.TryCreate(value, out _);
 
         // Assert
         created.ShouldBeTrue();
@@ -110,10 +110,10 @@ public class ResourceIdentityTests
     [InlineData("log--level")]
     [InlineData("log_level")]
     [InlineData("log/level")]
-    public void ResourceActionName_TryCreate_WithMalformedWord_ShouldFail(string value)
+    public void ActionName_TryCreate_WithMalformedWord_ShouldFail(string value)
     {
         // Arrange & Act
-        bool created = ResourceActionName.TryCreate(value, out _);
+        bool created = ActionName.TryCreate(value, out _);
 
         // Assert
         created.ShouldBeFalse();

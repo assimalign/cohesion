@@ -9,8 +9,8 @@ each resource's aggregate and infrastructure actions. The design record is [DESI
 
 ## Scope
 
-- In scope: `ApplicationGateway`, the `IInfrastructureProvider` seam, `GatewayDeploymentManifest`,
-  the `IGatewayStore` record with its JSON file store, and `ApplicationGatewayException`.
+- In scope: `ApplicationGateway`, the `IInfrastructureProvider` seam, `ApplicationDeploymentManifest`,
+  the `IApplicationGatewayStore` record with its JSON file store, and `ApplicationGatewayException`.
 - Out of scope: HTTP (the publication endpoint and management routes are transport-neutral here),
   platform providers, and identity and authentication.
 
@@ -46,11 +46,11 @@ passed it. The manifest carries the values of the parent's outputs that settings
 use, such as the identity provider's endpoint:
 
 ```csharp
-GatewayDeploymentManifest deployment = GatewayDeploymentManifest.Parse(json);
+ApplicationDeploymentManifest deployment = ApplicationDeploymentManifest.Parse(json);
 ApplicationGateway gateway = ApplicationGateway.Create(infrastructure);
 
 await gateway.RunAsync(deployment.ToModel(), cancellationToken);
 ```
 
 A transport hands each publication to `gateway.PublishAsync(manifest)` and returns its snapshots;
-an in-process resource uses the gateway as its `IResourceManifestPublisher`.
+an in-process resource uses the gateway as its `IApplicationInstancePublisher`.

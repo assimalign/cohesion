@@ -76,7 +76,7 @@ public interface IApplicationResourceDefinition : IApplicationResource
     /// <paramref name="resource"/> is this resource, belongs to another hierarchy, or already depends
     /// on this resource, directly or through others; or a permission is <see langword="default"/>.
     /// </exception>
-    IApplicationResourceDefinition DependsOn(IApplicationResourceDefinition resource, params ResourcePermission[] permissions);
+    IApplicationResourceDefinition DependsOn(IApplicationResourceDefinition resource, params Permission[] permissions);
 
     /// <summary>
     /// Gives the resource's instances a configuration value with their deployment.

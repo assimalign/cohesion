@@ -10,18 +10,18 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// Records each publication and renewal, and answers with the snapshots and lease it was given, as a
 /// gateway answers with the state written since the last deployment.
 /// </summary>
-internal sealed class TestPublisher : IResourceManifestPublisher
+internal sealed class TestPublisher : IApplicationInstancePublisher
 {
-    private readonly IReadOnlyList<ResourceStateSnapshot> _snapshots;
+    private readonly IReadOnlyList<ApplicationActionSnapshot> _snapshots;
     private int _renewals;
     private volatile bool _known = true;
 
-    public TestPublisher(params ResourceStateSnapshot[] snapshots)
+    public TestPublisher(params ApplicationActionSnapshot[] snapshots)
     {
         _snapshots = snapshots;
     }
 
-    public ConcurrentQueue<ResourceManifest> Published { get; } = new();
+    public ConcurrentQueue<ApplicationInstanceManifest> Published { get; } = new();
 
     /// <summary>The lease publications answer with; none unless a test sets one.</summary>
     public TimeSpan? Lease { get; init; }
@@ -41,14 +41,14 @@ internal sealed class TestPublisher : IResourceManifestPublisher
     /// <summary>A task each publication waits for before it answers, as a slow gateway would.</summary>
     public Task PublishGate { get; init; } = Task.CompletedTask;
 
-    public async ValueTask<ResourcePublication> PublishAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)
+    public async ValueTask<ApplicationInstancePublication> PublishAsync(ApplicationInstanceManifest manifest, CancellationToken cancellationToken = default)
     {
         Published.Enqueue(manifest);
         await PublishGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        return new ResourcePublication(_snapshots, Lease);
+        return new ApplicationInstancePublication(_snapshots, Lease);
     }
 
-    public ValueTask<bool> RenewAsync(ResourceManifest manifest, CancellationToken cancellationToken = default)
+    public ValueTask<bool> RenewAsync(ApplicationInstanceManifest manifest, CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _renewals);
         if (RenewalFailure is { } failure)

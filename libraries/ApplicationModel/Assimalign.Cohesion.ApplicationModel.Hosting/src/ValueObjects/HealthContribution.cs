@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// One health contributor's transport-neutral result.
 /// </summary>
 /// <param name="Status">
-/// The reported status. A default contribution is <see cref="ResourceHealthStatus.Unhealthy"/>, so
+/// The reported status. A default contribution is <see cref="ApplicationHealthStatus.Unhealthy"/>, so
 /// a result nobody set fails closed.
 /// </param>
 /// <param name="Description">An optional human-readable description.</param>
@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// reflection.
 /// </param>
 public readonly record struct HealthContribution(
-    ResourceHealthStatus Status,
+    ApplicationHealthStatus Status,
     string? Description = null,
     IReadOnlyDictionary<string, string>? Data = null)
 {
@@ -25,7 +25,7 @@ public readonly record struct HealthContribution(
     /// <returns>A healthy contribution.</returns>
     public static HealthContribution Healthy(string? description = null, IReadOnlyDictionary<string, string>? data = null)
     {
-        return new HealthContribution(ResourceHealthStatus.Healthy, description, data);
+        return new HealthContribution(ApplicationHealthStatus.Healthy, description, data);
     }
 
     /// <summary>Creates a degraded contribution.</summary>
@@ -34,7 +34,7 @@ public readonly record struct HealthContribution(
     /// <returns>A degraded contribution.</returns>
     public static HealthContribution Degraded(string? description = null, IReadOnlyDictionary<string, string>? data = null)
     {
-        return new HealthContribution(ResourceHealthStatus.Degraded, description, data);
+        return new HealthContribution(ApplicationHealthStatus.Degraded, description, data);
     }
 
     /// <summary>Creates an unhealthy contribution.</summary>
@@ -43,6 +43,6 @@ public readonly record struct HealthContribution(
     /// <returns>An unhealthy contribution.</returns>
     public static HealthContribution Unhealthy(string? description = null, IReadOnlyDictionary<string, string>? data = null)
     {
-        return new HealthContribution(ResourceHealthStatus.Unhealthy, description, data);
+        return new HealthContribution(ApplicationHealthStatus.Unhealthy, description, data);
     }
 }

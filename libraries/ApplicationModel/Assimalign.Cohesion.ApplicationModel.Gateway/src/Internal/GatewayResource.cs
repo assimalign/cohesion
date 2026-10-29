@@ -34,21 +34,21 @@ internal sealed class GatewayResource
 
     private readonly TaskCompletionSource _registered = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Lock _leases = new();
-    private readonly Dictionary<ResourceInstanceKey, long> _renewed = new();
-    private readonly HashSet<ResourceInstanceKey> _carried = [];
+    private readonly Dictionary<InstanceKey, long> _renewed = new();
+    private readonly HashSet<InstanceKey> _carried = [];
     private InfrastructureChange _change;
     private string? _revision;
     private int _state;
     private int _current;
     private int _tornDown;
 
-    public GatewayResource(ApplicationResourceDeployment aggregate, ApplicationResourceManifest declared, GatewayResourceRecord? previous)
+    public GatewayResource(ApplicationResourceDeployment aggregate, ApplicationResourceManifest declared, ApplicationResourceRecord? previous)
     {
         Aggregate = aggregate;
         Declared = declared;
         Previous = previous;
 
-        foreach (ResourceManifest instance in previous?.Instances ?? [])
+        foreach (ApplicationInstanceManifest instance in previous?.Instances ?? [])
         {
             Aggregate.Register(instance);
             _renewed[instance.Key] = Stopwatch.GetTimestamp();
@@ -63,7 +63,7 @@ internal sealed class GatewayResource
     public ApplicationResourceManifest Declared { get; }
 
     // The resource's entry in the record the run started from, or null when it had none.
-    public GatewayResourceRecord? Previous { get; }
+    public ApplicationResourceRecord? Previous { get; }
 
     // What the plan changes; meaningful once the resource is current.
     public InfrastructureChange Change => _change;
@@ -98,7 +98,7 @@ internal sealed class GatewayResource
                 // The platform replaces the workload, so what the record held for it is gone; an
                 // instance that renewed or published since still runs and stays registered.
                 Aggregate.SetOutputs(FrozenDictionary<OutputName, string>.Empty);
-                foreach (ResourceInstanceKey key in _carried)
+                foreach (InstanceKey key in _carried)
                 {
                     _renewed.Remove(key);
                     Aggregate.Unregister(key);
@@ -145,18 +145,18 @@ internal sealed class GatewayResource
     }
 
     // Registers an instance that published and starts its lease.
-    public IReadOnlyList<ResourceStateSnapshot> Register(ResourceManifest instance)
+    public IReadOnlyList<ApplicationActionSnapshot> Register(ApplicationInstanceManifest instance)
     {
         lock (_leases)
         {
-            IReadOnlyList<ResourceStateSnapshot> restore = Aggregate.Register(instance);
+            IReadOnlyList<ApplicationActionSnapshot> restore = Aggregate.Register(instance);
             _renewed[instance.Key] = Stopwatch.GetTimestamp();
             _carried.Remove(instance.Key);
             return restore;
         }
     }
 
-    public bool TryRenew(ResourceInstanceKey key)
+    public bool TryRenew(InstanceKey key)
     {
         lock (_leases)
         {
@@ -171,7 +171,7 @@ internal sealed class GatewayResource
         }
     }
 
-    public void Unregister(ResourceInstanceKey key)
+    public void Unregister(InstanceKey key)
     {
         lock (_leases)
         {
@@ -187,7 +187,7 @@ internal sealed class GatewayResource
         lock (_leases)
         {
             long now = Stopwatch.GetTimestamp();
-            foreach (ResourceInstanceKey key in new List<ResourceInstanceKey>(_renewed.Keys))
+            foreach (InstanceKey key in new List<InstanceKey>(_renewed.Keys))
             {
                 _renewed[key] = now;
             }
@@ -200,8 +200,8 @@ internal sealed class GatewayResource
         lock (_leases)
         {
             long now = Stopwatch.GetTimestamp();
-            List<ResourceInstanceKey>? expired = null;
-            foreach (KeyValuePair<ResourceInstanceKey, long> entry in _renewed)
+            List<InstanceKey>? expired = null;
+            foreach (KeyValuePair<InstanceKey, long> entry in _renewed)
             {
                 if (Stopwatch.GetElapsedTime(entry.Value, now) > lease)
                 {
@@ -214,7 +214,7 @@ internal sealed class GatewayResource
                 return 0;
             }
 
-            foreach (ResourceInstanceKey key in expired)
+            foreach (InstanceKey key in expired)
             {
                 _renewed.Remove(key);
                 _carried.Remove(key);

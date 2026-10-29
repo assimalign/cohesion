@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// </summary>
 internal sealed class TestResource : IApplicationResourceInstance
 {
-    public TestResource(params IResourceAction[] actions)
+    public TestResource(params IApplicationInstanceAction[] actions)
     {
         Actions = actions;
     }
@@ -16,9 +16,9 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public ResourceName Name { get; init; } = "orders-api";
 
-    public ResourceInstanceKey Key { get; init; } = ResourceInstanceKey.New();
+    public InstanceKey Key { get; init; } = InstanceKey.New();
 
-    public IReadOnlyCollection<IResourceAction> Actions { get; init; }
+    public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; init; }
 
-    public IReadOnlyCollection<IResourceHealthContributor> HealthContributors { get; init; } = [];
+    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors { get; init; } = [];
 }

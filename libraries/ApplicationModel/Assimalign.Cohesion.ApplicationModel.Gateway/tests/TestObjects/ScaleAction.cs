@@ -12,19 +12,19 @@ internal sealed class ScaleAction : IApplicationResourceAction
 {
     public int Replicas { get; private set; } = 1;
 
-    public ResourceActionName Name => "scale";
+    public ActionName Name => "scale";
 
-    public ResourceActionKind Kind => ResourceActionKind.Write;
+    public ApplicationActionKind Kind => ApplicationActionKind.Write;
 
-    public ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
+    public ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
         ScaleSetting? setting = context.ReadInput<ScaleSetting>();
         if (setting is null || setting.Replicas < 0)
         {
-            return ValueTask.FromResult(ResourceActionResult.Rejected("Replicas must be zero or more."));
+            return ValueTask.FromResult(ApplicationActionResult.Rejected("Replicas must be zero or more."));
         }
 
         Replicas = setting.Replicas;
-        return ValueTask.FromResult(ResourceActionResult.Success());
+        return ValueTask.FromResult(ApplicationActionResult.Success());
     }
 }

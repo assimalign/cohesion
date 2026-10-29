@@ -28,11 +28,11 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
 
     private readonly TemporaryDirectory _directory = new();
     private readonly TestInfrastructure _infrastructure = new();
-    private readonly JsonFileGatewayStore _store;
+    private readonly JsonFileApplicationGatewayStore _store;
 
     public ApplicationGatewaySettingTests()
     {
-        _store = JsonFileGatewayStore.Create(_directory.FullPath);
+        _store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
     }
 
     public void Dispose()
@@ -125,7 +125,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         {
         }
 
-        GatewayDeploymentManifest deployment = GatewayDeploymentManifest.Parse(_infrastructure.GatewayDeployments["east"].ToUtf8Json());
+        ApplicationDeploymentManifest deployment = ApplicationDeploymentManifest.Parse(_infrastructure.GatewayDeployments["east"].ToUtf8Json());
         await using RunningGateway child = await RunningGateway.StartAsync(east, _store, deployment.ToModel());
 
         // Assert: only the root's output travels; east reads its own database's endpoint itself.
@@ -166,7 +166,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         {
         }
 
-        GatewayDeploymentManifest first = _infrastructure.GatewayDeployments["east"];
+        ApplicationDeploymentManifest first = _infrastructure.GatewayDeployments["east"];
         _infrastructure.Outputs["identity"] = new Dictionary<OutputName, string> { [OutputName.Endpoint] = "http://identity-moved.root.svc" };
 
         // Act
@@ -269,7 +269,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
             await _infrastructure.StartInstanceAsync("Web", "api");
         }
 
-        ResourceInstanceKey[] recorded = [.. _infrastructure.Instances.Values.Where(entry => entry.Instance.Name.Value == "api").Select(entry => entry.Instance.Key)];
+        InstanceKey[] recorded = [.. _infrastructure.Instances.Values.Where(entry => entry.Instance.Name.Value == "api").Select(entry => entry.Instance.Key)];
         _infrastructure.Revisions["db"] = "2";
         _infrastructure.Outputs["db"] = new Dictionary<OutputName, string> { [OutputName.Endpoint] = MovedEndpoint };
         var release = new TaskCompletionSource();
@@ -281,7 +281,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         // Act: while api waits, one of its recorded instances renews.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
         IApplicationResourceDeployment api = Resource(gateway, "api");
-        ResourceManifest renewing = api.Instances.Single(instance => instance.Key == recorded[0]);
+        ApplicationInstanceManifest renewing = api.Instances.Single(instance => instance.Key == recorded[0]);
         bool renewed = await gateway.RenewAsync(renewing);
         release.SetResult();
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
@@ -292,7 +292,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         recorded.Length.ShouldBe(2);
         renewed.ShouldBeTrue();
         _infrastructure.RunningSettings["api"]["Db:Endpoint"].ShouldBe(MovedEndpoint);
-        ResourceInstanceKey[] keys = [.. api.Instances.Select(instance => instance.Key)];
+        InstanceKey[] keys = [.. api.Instances.Select(instance => instance.Key)];
         keys.Length.ShouldBe(2);
         keys.ShouldContain(recorded[0]);
         keys.ShouldNotContain(recorded[1]);
@@ -351,12 +351,12 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
     // gateway, which restores it on the others.
     private async Task WriteLogLevelAsync(ApplicationGateway gateway, string resource, string level)
     {
-        (TestInstance instance, ResourceService service) = _infrastructure.Instances.Values.First(entry => entry.Instance.Name.Value == resource);
-        ResourceActionResult write = await service.ControlPlane.ExecuteAsync(
+        (TestInstance instance, ApplicationInstanceService service) = _infrastructure.Instances.Values.First(entry => entry.Instance.Name.Value == resource);
+        ApplicationActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
-            ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
+            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
-        foreach (ResourceInstanceKey target in await gateway.RecordAsync(instance.Provider, instance.Name, instance.Key, write.State!))
+        foreach (InstanceKey target in await gateway.RecordAsync(instance.Provider, instance.Name, instance.Key, write.State!))
         {
             await _infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
         }

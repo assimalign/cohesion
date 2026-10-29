@@ -32,7 +32,7 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        var instance = new ResourceManifest("Web", "customers-api", ResourceInstanceKey.New(), []);
+        var instance = new ApplicationInstanceManifest("Web", "customers-api", InstanceKey.New(), []);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => resource.Register(instance));
@@ -44,9 +44,9 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        ResourceManifest first = TestManifests.Instance();
+        ApplicationInstanceManifest first = TestManifests.Instance();
         resource.Register(first);
-        ResourceStateSnapshot snapshot = TestManifests.LogLevelSnapshot("Debug");
+        ApplicationActionSnapshot snapshot = TestManifests.LogLevelSnapshot("Debug");
         resource.Record(first.Key, snapshot);
 
         // Act
@@ -61,7 +61,7 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi, [TestManifests.LogLevelSnapshot("Debug")]);
-        ResourceManifest stateless = TestManifests.Instance(new ResourceActionDescriptor(TestManifests.LogLevel, ResourceActionKind.Read, false));
+        ApplicationInstanceManifest stateless = TestManifests.Instance(new ApplicationActionDescriptor(TestManifests.LogLevel, ApplicationActionKind.Read, false));
 
         // Act
         var restore = resource.Register(stateless);
@@ -75,7 +75,7 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        ResourceManifest instance = TestManifests.Instance();
+        ApplicationInstanceManifest instance = TestManifests.Instance();
 
         // Act
         resource.Register(instance);
@@ -89,7 +89,7 @@ public class ApplicationResourceDeploymentTests
     public void Create_WithPersistedState_ShouldAnswerRegistrationWithIt()
     {
         // Arrange
-        ResourceStateSnapshot persisted = TestManifests.LogLevelSnapshot("Warning");
+        ApplicationActionSnapshot persisted = TestManifests.LogLevelSnapshot("Warning");
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi, [persisted]);
 
         // Act
@@ -114,11 +114,11 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        ResourceManifest source = TestManifests.Instance();
-        ResourceManifest second = TestManifests.Instance();
-        ResourceManifest third = TestManifests.Instance();
-        ResourceManifest stateless = TestManifests.Instance(new ResourceActionDescriptor(TestManifests.FlushCache, ResourceActionKind.Write, false));
-        foreach (ResourceManifest instance in new[] { source, second, third, stateless })
+        ApplicationInstanceManifest source = TestManifests.Instance();
+        ApplicationInstanceManifest second = TestManifests.Instance();
+        ApplicationInstanceManifest third = TestManifests.Instance();
+        ApplicationInstanceManifest stateless = TestManifests.Instance(new ApplicationActionDescriptor(TestManifests.FlushCache, ApplicationActionKind.Write, false));
+        foreach (ApplicationInstanceManifest instance in new[] { source, second, third, stateless })
         {
             resource.Register(instance);
         }
@@ -136,8 +136,8 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        ResourceManifest source = TestManifests.Instance();
-        ResourceManifest stopped = TestManifests.Instance();
+        ApplicationInstanceManifest source = TestManifests.Instance();
+        ApplicationInstanceManifest stopped = TestManifests.Instance();
         resource.Register(source);
         resource.Register(stopped);
 
@@ -156,12 +156,12 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        ResourceManifest instance = TestManifests.Instance();
+        ApplicationInstanceManifest instance = TestManifests.Instance();
         resource.Register(instance);
 
         // Act & Assert
-        Should.Throw<InvalidOperationException>(() => resource.Record(ResourceInstanceKey.New(), TestManifests.LogLevelSnapshot("Debug")));
-        Should.Throw<ArgumentException>(() => resource.Record(instance.Key, ResourceStateSnapshot.Create(TestManifests.FlushCache, "{}"u8.ToArray())));
+        Should.Throw<InvalidOperationException>(() => resource.Record(InstanceKey.New(), TestManifests.LogLevelSnapshot("Debug")));
+        Should.Throw<ArgumentException>(() => resource.Record(instance.Key, ApplicationActionSnapshot.Create(TestManifests.FlushCache, "{}"u8.ToArray())));
         resource.State.ShouldBeEmpty();
     }
 
@@ -183,16 +183,16 @@ public class ApplicationResourceDeploymentTests
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi, actions: [new TestInfrastructureAction("scale"), restart]);
 
         // Act
-        ResourceActionResult executed = await resource.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json));
-        ResourceActionResult unsupported = await resource.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json));
-        ResourceActionResult missing = await resource.ExecuteAsync("delete", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json));
+        ApplicationActionResult executed = await resource.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json));
+        ApplicationActionResult unsupported = await resource.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json));
+        ApplicationActionResult missing = await resource.ExecuteAsync("delete", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json));
 
         // Assert
         resource.Actions.Select(action => action.Name.Value).ShouldBe(["restart", "scale"]);
-        executed.Status.ShouldBe(ResourceActionStatus.Succeeded);
+        executed.Status.ShouldBe(ApplicationActionStatus.Succeeded);
         restart.Invocations.ShouldBe(1);
-        unsupported.Status.ShouldBe(ResourceActionStatus.NotSupported);
-        missing.Status.ShouldBe(ResourceActionStatus.NotFound);
+        unsupported.Status.ShouldBe(ApplicationActionStatus.NotSupported);
+        missing.Status.ShouldBe(ApplicationActionStatus.NotFound);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Instances are ordered by key, and so by start time")]
@@ -200,10 +200,10 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        ResourceManifest[] instances = [TestManifests.Instance(), TestManifests.Instance(), TestManifests.Instance()];
+        ApplicationInstanceManifest[] instances = [TestManifests.Instance(), TestManifests.Instance(), TestManifests.Instance()];
 
         // Act
-        foreach (ResourceManifest instance in instances.Reverse())
+        foreach (ApplicationInstanceManifest instance in instances.Reverse())
         {
             resource.Register(instance);
         }

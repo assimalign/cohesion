@@ -23,8 +23,8 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Tests;
 internal sealed class GatewayStandIn : IAsyncDisposable
 {
     private readonly WebApplication _application;
-    private readonly ConcurrentQueue<ResourceManifest> _manifests = new();
-    private readonly JsonResourceContentSerializer _json = JsonResourceContentSerializer.Create();
+    private readonly ConcurrentQueue<ApplicationInstanceManifest> _manifests = new();
+    private readonly JsonApplicationContentSerializer _json = JsonApplicationContentSerializer.Create();
     private byte[] _answer = "[]"u8.ToArray();
     private string _lease = "null";
     private int _refusal;
@@ -45,7 +45,7 @@ internal sealed class GatewayStandIn : IAsyncDisposable
     /// <summary>
     /// Gets the manifests received so far, in arrival order.
     /// </summary>
-    public IReadOnlyCollection<ResourceManifest> Manifests => _manifests;
+    public IReadOnlyCollection<ApplicationInstanceManifest> Manifests => _manifests;
 
     /// <summary>
     /// Gets how many renewals instances have sent.
@@ -128,7 +128,7 @@ internal sealed class GatewayStandIn : IAsyncDisposable
             return;
         }
 
-        _manifests.Enqueue(_json.Deserialize<ResourceManifest>(body.ToArray())!);
+        _manifests.Enqueue(_json.Deserialize<ApplicationInstanceManifest>(body.ToArray())!);
 
         if (Volatile.Read(ref _refusal) is int refusal and > 0)
         {

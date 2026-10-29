@@ -38,7 +38,7 @@ internal sealed class RunningResource : IAsyncDisposable
     /// <summary>
     /// Gets the resource instance the managed application's control plane serves.
     /// </summary>
-    public IApplicationResourceInstance Resource => ResourceServices.Single().ControlPlane.Resource;
+    public IApplicationResourceInstance Resource => InstanceServices.Single().ControlPlane.Resource;
 
     /// <summary>
     /// Gets the default CORS policy in effect, as the <c>cors</c> action reports it.
@@ -59,9 +59,9 @@ internal sealed class RunningResource : IAsyncDisposable
     /// <summary>
     /// Gets the resource services among the host's services, as an in-process gateway finds them.
     /// </summary>
-    public IReadOnlyList<IResourceService> ResourceServices => _application.Context.ServiceProvider
+    public IReadOnlyList<IApplicationInstanceService> InstanceServices => _application.Context.ServiceProvider
         .GetRequiredService<IEnumerable<IHostService>>()
-        .OfType<IResourceService>()
+        .OfType<IApplicationInstanceService>()
         .ToArray();
 
     /// <param name="manifestEndpoint">Where the instance publishes; <see langword="null"/> runs it unmanaged.</param>

@@ -6,5 +6,5 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// </summary>
 internal static class TestSerializer
 {
-    public static JsonResourceContentSerializer Json { get; } = JsonResourceContentSerializer.Create(TestJsonContext.Default);
+    public static JsonApplicationContentSerializer Json { get; } = JsonApplicationContentSerializer.Create(TestJsonContext.Default);
 }

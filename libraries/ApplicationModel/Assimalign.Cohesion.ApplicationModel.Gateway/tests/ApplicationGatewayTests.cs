@@ -31,7 +31,7 @@ public class ApplicationGatewayTests
         await run;
 
         // Assert
-        model.Role.ShouldBe(GatewayRole.Root);
+        model.Role.ShouldBe(ApplicationGatewayRole.Root);
         infrastructure.DeployedGateways.Select(name => name.Value).ShouldBe(["east", "west"]);
         infrastructure.Deployed.ShouldBe(["root:IdentityHub/identity"]);
         gateway.Resources.ShouldHaveSingleItem().Instances.Count.ShouldBe(1);
@@ -54,7 +54,7 @@ public class ApplicationGatewayTests
         await run;
 
         // Assert
-        model.Role.ShouldBe(GatewayRole.Composite);
+        model.Role.ShouldBe(ApplicationGatewayRole.Composite);
         infrastructure.DeployedGateways.Select(name => name.Value).ShouldBe(["east-edge"]);
         infrastructure.Deployed.ShouldBe(["east:Database.Sql/orders-db", "east:Web/orders-api"]);
     }
@@ -111,7 +111,7 @@ public class ApplicationGatewayTests
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
         builder.AddResource("Web", "orders-api");
         (ApplicationGateway gateway, _) = CreateGateway();
-        var manifest = new ResourceManifest("Web", "orders-api", ResourceInstanceKey.New(), []);
+        var manifest = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), []);
         ApplicationGatewayException before = Should.Throw<ApplicationGatewayException>(() => gateway.PublishAsync(manifest));
         using var stop = new CancellationTokenSource();
         Task run = gateway.RunAsync(builder.Build().Model, stop.Token);
@@ -159,13 +159,13 @@ public class ApplicationGatewayTests
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         TestInstance second = await infrastructure.StartInstanceAsync("Web", "orders-api");
         IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
-        (TestInstance first, ResourceService firstService) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
+        (TestInstance first, ApplicationInstanceService firstService) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
 
         // Act: the write runs once; the gateway records it and restores it on the others.
-        ResourceActionResult write = await firstService.ControlPlane.ExecuteAsync(
+        ApplicationActionResult write = await firstService.ControlPlane.ExecuteAsync(
             "log-level",
-            ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
-        foreach (ResourceInstanceKey target in ordersApi.Record(first.Key, write.State!))
+            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
+        foreach (InstanceKey target in ordersApi.Record(first.Key, write.State!))
         {
             await infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
         }
@@ -193,20 +193,20 @@ public class ApplicationGatewayTests
         IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
 
         // Act
-        ResourceActionResult scaled = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));
-        ResourceActionResult read = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Read, TestSerializer.Json));
-        ResourceActionResult unknown = await ordersApi.ExecuteAsync("restart", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json));
-        ResourceActionResult rejected = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, "not json"u8.ToArray()));
+        ApplicationActionResult scaled = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));
+        ApplicationActionResult read = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json));
+        ApplicationActionResult unknown = await ordersApi.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json));
+        ApplicationActionResult rejected = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, "not json"u8.ToArray()));
         stop.Cancel();
         await run;
 
         // Assert
-        ordersApi.Actions.ShouldHaveSingleItem().Name.ShouldBe(new ResourceActionName("scale"));
-        scaled.Status.ShouldBe(ResourceActionStatus.Succeeded);
+        ordersApi.Actions.ShouldHaveSingleItem().Name.ShouldBe(new ActionName("scale"));
+        scaled.Status.ShouldBe(ApplicationActionStatus.Succeeded);
         infrastructure.Scale.Replicas.ShouldBe(3);
-        read.Status.ShouldBe(ResourceActionStatus.NotSupported);
-        unknown.Status.ShouldBe(ResourceActionStatus.NotFound);
-        rejected.Status.ShouldBe(ResourceActionStatus.Rejected);
+        read.Status.ShouldBe(ApplicationActionStatus.NotSupported);
+        unknown.Status.ShouldBe(ApplicationActionStatus.NotFound);
+        rejected.Status.ShouldBe(ApplicationActionStatus.Rejected);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A gateway runs once")]

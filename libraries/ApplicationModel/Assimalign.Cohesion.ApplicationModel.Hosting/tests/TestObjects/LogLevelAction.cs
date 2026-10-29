@@ -7,39 +7,39 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// <summary>
 /// A stateful control, shaped like an area's: a read reports the level, a write sets it.
 /// </summary>
-internal sealed class LogLevelAction : IResourceAction
+internal sealed class LogLevelAction : IApplicationInstanceAction
 {
-    private readonly ResourceActionState<LogLevelSetting> _state;
+    private readonly ApplicationActionState<LogLevelSetting> _state;
 
     public LogLevelAction(string initialLevel = "Information")
     {
-        _state = ResourceActionState<LogLevelSetting>.Create(new LogLevelSetting(initialLevel), setting => Applied.Add(setting));
+        _state = ApplicationActionState<LogLevelSetting>.Create(new LogLevelSetting(initialLevel), setting => Applied.Add(setting));
     }
 
     public List<LogLevelSetting> Applied { get; } = [];
 
     public LogLevelSetting Current => _state.Value;
 
-    public ResourceActionName Name => "log-level";
+    public ActionName Name => "log-level";
 
-    public ResourceActionKind Kind => ResourceActionKind.ReadWrite;
+    public ApplicationActionKind Kind => ApplicationActionKind.ReadWrite;
 
-    public IResourceActionState? State => _state;
+    public IApplicationActionState? State => _state;
 
-    public async ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
+    public async ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
-        if (context.Operation == ResourceActionKind.Read)
+        if (context.Operation == ApplicationActionKind.Read)
         {
-            return ResourceActionResult.Success(_state.Value, context.Serializer);
+            return ApplicationActionResult.Success(_state.Value, context.Serializer);
         }
 
         LogLevelSetting? setting = context.ReadInput<LogLevelSetting>();
         if (setting is null || string.IsNullOrWhiteSpace(setting.Level))
         {
-            return ResourceActionResult.Rejected("A log level is required.");
+            return ApplicationActionResult.Rejected("A log level is required.");
         }
 
         await _state.SetAsync(setting, cancellationToken);
-        return ResourceActionResult.Success();
+        return ApplicationActionResult.Success();
     }
 }

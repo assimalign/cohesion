@@ -141,9 +141,9 @@ public class ApplicationModelTests
         IApplicationModel child = ApplicationModel.Create(manifest, "east");
 
         // Assert
-        root.Role.ShouldBe(GatewayRole.Root);
+        root.Role.ShouldBe(ApplicationGatewayRole.Root);
         root.Deployment.Name.Value.ShouldBe("root");
-        child.Role.ShouldBe(GatewayRole.Composite);
+        child.Role.ShouldBe(ApplicationGatewayRole.Composite);
         child.Name.Value.ShouldBe("east");
         child.Id.ShouldBe(GatewayId.FromName("east"));
         child.Manifest.Name.Value.ShouldBe("root");

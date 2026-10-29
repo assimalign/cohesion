@@ -40,9 +40,9 @@ managed instance, `AddResource` builds these pieces and registers the last two a
 | Piece | Role |
 | --- | --- |
 | `WebResource` (internal) | The `IApplicationResourceInstance`: provider `Web`, the resource's name, a new instance key, one action for each registered setting the resource knows, then the actions the application added, built when the application is built. |
-| `ResourceControlPlane` | ApplicationModel.Hosting' control plane over the resource, writing JSON through the resource's own context and the contexts the added actions came with. |
-| `ResourceManifestPublisher` | The HTTP publisher for `COHESION_MANIFEST_ENDPOINT`, with the builder's optional HTTP client callback. |
-| `ResourceService` | Publishes and restores in `StartingAsync`, then renews the lease until `StopAsync`. |
+| `ApplicationInstanceControlPlane` | ApplicationModel.Hosting' control plane over the resource, writing JSON through the resource's own context and the contexts the added actions came with. |
+| `ApplicationInstancePublisher` | The HTTP publisher for `COHESION_MANIFEST_ENDPOINT`, with the builder's optional HTTP client callback. |
+| `ApplicationInstanceService` | Publishes and restores in `StartingAsync`, then renews the lease until `StopAsync`. |
 | `WebResourceControlPlaneServer` (internal) | Serves the control plane on `COHESION_CONTROL_PLANE_ENDPOINT`. |
 
 ## Lifecycle
@@ -92,7 +92,7 @@ when a second area's ApplicationModel.Hosting package needs an HTTP control plan
 every `StartingAsync` before any `StartAsync`, so the server listens only once the gateway's state
 is in effect, and the Web host's stop order keeps it reachable while the application drains. The
 resource service knows no server, so an in-process gateway registers none and calls
-`IResourceService.ControlPlane` directly. A gateway push that arrives before the listener opens is
+`IApplicationInstanceService.ControlPlane` directly. A gateway push that arrives before the listener opens is
 refused, and the gateway-to-instance channel retries it with the current state.
 
 **W3 — The listener is private.** It binds the IP address or `localhost` in

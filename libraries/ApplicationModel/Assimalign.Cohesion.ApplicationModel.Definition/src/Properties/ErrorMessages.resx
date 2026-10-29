@@ -5,11 +5,11 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="GatewayNameInvalid" xml:space="preserve"><value>A gateway name is 1 to 63 lowercase ASCII letters, digits, or hyphens, starting with a letter and ending with a letter or digit.</value></data>
-  <data name="ResourcePermissionInvalid" xml:space="preserve"><value>A permission is dot-separated segments of lowercase ASCII letters and digits in hyphen-separated words, at most 128 characters.</value></data>
+  <data name="PermissionInvalid" xml:space="preserve"><value>A permission is dot-separated segments of lowercase ASCII letters and digits in hyphen-separated words, at most 128 characters.</value></data>
   <data name="GatewayNameMissing" xml:space="preserve"><value>A gateway name is required.</value></data>
   <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
   <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
-  <data name="ResourcePermissionMissing" xml:space="preserve"><value>A permission is required; a default permission is not one.</value></data>
+  <data name="PermissionMissing" xml:space="preserve"><value>A permission is required; a default permission is not one.</value></data>
   <data name="OutputNameInvalid" xml:space="preserve"><value>An output name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
   <data name="OutputNameMissing" xml:space="preserve"><value>An output name is required; a default output name is not one.</value></data>
   <data name="SettingNameInvalid" xml:space="preserve"><value>A setting name is colon-separated segments of ASCII letters, digits, underscores, hyphens, and periods, at most 256 characters.</value></data>
@@ -31,8 +31,8 @@
   <data name="ApplicationOutputDuplicate" xml:space="preserve"><value>The model is given more than one value for output '{0}' of '{1}/{2}' in gateway '{3}'.</value></data>
   <data name="ApplicationSettingNotDependency" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses an output of '{4}/{5}' in gateway '{6}', which the resource does not depend on.</value></data>
   <data name="ApplicationResourceOutputsNull" xml:space="preserve"><value>Resource '{0}/{1}' was given null outputs, an output without a name, or an output without a value.</value></data>
-  <data name="ResourceInstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
-  <data name="ResourceManifestActionsMissing" xml:space="preserve"><value>The instance manifest has no action list.</value></data>
+  <data name="InstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
+  <data name="ApplicationInstanceManifestActionsMissing" xml:space="preserve"><value>The instance manifest has no action list.</value></data>
   <data name="ApplicationResourceDuplicate" xml:space="preserve"><value>Gateway '{0}' already declares resource '{1}/{2}'.</value></data>
   <data name="ApplicationGatewayDuplicate" xml:space="preserve"><value>The application set already declares a gateway named '{0}'.</value></data>
   <data name="ApplicationDependencySelf" xml:space="preserve"><value>Resource '{0}/{1}' cannot depend on itself.</value></data>
@@ -54,7 +54,7 @@
   <data name="ApplicationDependencyCycle" xml:space="preserve"><value>The resource dependencies form a cycle: {0}. A resource that must change one it depends on does so at run time, through an action that resource exposes.</value></data>
   <data name="ApplicationPermissionDuplicate" xml:space="preserve"><value>A dependency of resource '{0}/{1}' names permission '{2}' more than once.</value></data>
   <data name="ApplicationModelGatewayUnknown" xml:space="preserve"><value>The manifest declares no gateway named '{0}'.</value></data>
-  <data name="ResourceActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
+  <data name="ActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
   <data name="ApplicationResourceActionNull" xml:space="preserve"><value>The infrastructure action list contains null.</value></data>
   <data name="ApplicationResourceActionKindInvalid" xml:space="preserve"><value>Infrastructure action '{0}' must accept Read, Write, or both, and nothing else.</value></data>
   <data name="ApplicationResourceActionDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' has more than one infrastructure action named '{2}'.</value></data>

@@ -26,10 +26,10 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 internal sealed class WebResourceControlPlaneServer : IHostService
 {
     private readonly IPEndPoint _endPoint;
-    private readonly IResourceControlPlane _controlPlane;
+    private readonly IApplicationInstanceControlPlane _controlPlane;
     private WebApplicationServer? _server;
 
-    public WebResourceControlPlaneServer(IPEndPoint endPoint, IResourceControlPlane controlPlane)
+    public WebResourceControlPlaneServer(IPEndPoint endPoint, IApplicationInstanceControlPlane controlPlane)
     {
         _endPoint = endPoint;
         _controlPlane = controlPlane;
@@ -91,9 +91,9 @@ internal sealed class WebResourceControlPlaneServer : IHostService
     // The engine's whole pipeline: every request goes to the control plane's routes.
     private sealed class ControlPlanePipeline : IWebApplicationPipeline
     {
-        private readonly IResourceControlPlane _controlPlane;
+        private readonly IApplicationInstanceControlPlane _controlPlane;
 
-        public ControlPlanePipeline(IResourceControlPlane controlPlane)
+        public ControlPlanePipeline(IApplicationInstanceControlPlane controlPlane)
         {
             _controlPlane = controlPlane;
         }

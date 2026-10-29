@@ -40,10 +40,10 @@ public class ApplicationIdentityTests
     [InlineData("data.", false)]
     [InlineData("data read", false)]
     [InlineData("", false)]
-    public void ResourcePermission_TryCreate_ShouldFollowGrammar(string value, bool expected)
+    public void Permission_TryCreate_ShouldFollowGrammar(string value, bool expected)
     {
         // Arrange & Act
-        bool created = ResourcePermission.TryCreate(value, out _);
+        bool created = Permission.TryCreate(value, out _);
 
         // Assert
         created.ShouldBe(expected);

@@ -15,9 +15,9 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public ResourceName Name => "orders-api";
 
-    public ResourceInstanceKey Key { get; } = ResourceInstanceKey.New();
+    public InstanceKey Key { get; } = InstanceKey.New();
 
-    public IReadOnlyCollection<IResourceAction> Actions => [LogLevel];
+    public IReadOnlyCollection<IApplicationInstanceAction> Actions => [LogLevel];
 
-    public IReadOnlyCollection<IResourceHealthContributor> HealthContributors => [];
+    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors => [];
 }

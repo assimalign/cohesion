@@ -21,11 +21,11 @@ public sealed class ApplicationGatewayExtensionTests : IDisposable
 
     private readonly TemporaryDirectory _directory = new();
     private readonly TestInfrastructure _infrastructure = new();
-    private readonly JsonFileGatewayStore _store;
+    private readonly JsonFileApplicationGatewayStore _store;
 
     public ApplicationGatewayExtensionTests()
     {
-        _store = JsonFileGatewayStore.Create(_directory.FullPath);
+        _store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
     }
 
     public void Dispose()
@@ -103,10 +103,10 @@ public sealed class ApplicationGatewayExtensionTests : IDisposable
     // Writes the level on api's instance and records it through the gateway.
     private async Task WriteLogLevelAsync(ApplicationGateway gateway, string level)
     {
-        (TestInstance instance, ResourceService service) = _infrastructure.Instances.Values.Single();
-        ResourceActionResult write = await service.ControlPlane.ExecuteAsync(
+        (TestInstance instance, ApplicationInstanceService service) = _infrastructure.Instances.Values.Single();
+        ApplicationActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
-            ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
+            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
         await gateway.RecordAsync(instance.Provider, instance.Name, instance.Key, write.State!);
     }

@@ -74,7 +74,7 @@ flowchart TB
 | `IApplicationBuilder`, `ApplicationBuilder` | The root set, plus `Args`, `UseGateway`, and `Build`. `Application.CreateBuilder(name, args)` creates it. |
 | `IApplication`, `Application` | A built application: `Model` and `RunAsync`, which runs the selected gateway with the model, once. |
 | `IApplicationModel`, `ApplicationModel` | The immutable model for one gateway: `Manifest` (the whole hierarchy, validated and read-only), `Name` and `Deployment` (that gateway and its part), `Role`, and `Outputs` (the values passed down from the gateways above). `ApplicationModel.Create(manifest, gateway, outputs)` builds one from data. |
-| `GatewayRole` | `Root` for the hierarchy's top gateway, `Composite` for any other. |
+| `ApplicationGatewayRole` | `Root` for the hierarchy's top gateway, `Composite` for any other. |
 | `IApplicationResourceAction` | An infrastructure action on a resource, such as `scale`, executed against the platform. Same invocation and result types as a control. |
 | `IApplicationGateway` | The seam ApplicationModel.Gateway implements: `RunAsync(model)`. Deliberately minimal until chunk 3. |
 | `IApplicationSet` | One gateway's scope. The builder is the root; `AddGateway` makes a child; `AddResource` declares a resource. |
@@ -82,7 +82,7 @@ flowchart TB
 | `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting`, `ApplicationResourceExtension`, `ApplicationResourceOutputValue` | The hierarchy as data. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. An extension has a platform, a name, and a JSON value. An output value is an output with the value a gateway passes down. |
 | `IApplicationResourceDeployment`, `ApplicationResourceDeployment` | A gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`. The gateway also sets its `Outputs` and clears its state when a deployment redefines it. |
 | `IApplicationResource` (in ApplicationModel) | The base all three forms share: provider, name, and id. |
-| `GatewayName`, `GatewayId`, `ResourcePermission`, `OutputName`, `SettingName`, `PlatformName`, `ExtensionName` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. `SettingName` is a configuration key and compares case-insensitively. `PlatformName` names an infrastructure provider's platform, such as `kubernetes`. |
+| `GatewayName`, `GatewayId`, `Permission`, `OutputName`, `SettingName`, `PlatformName`, `ExtensionName` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. `SettingName` is a configuration key and compares case-insensitively. `PlatformName` names an infrastructure provider's platform, such as `kubernetes`. |
 
 ## Decisions
 
@@ -251,12 +251,12 @@ of it across its instances; and each instance, one running copy. They share an
 | --- | --- | --- |
 | `ApplicationModel` | What both sides exchange: `IApplicationResource`, the identity value objects, the instance manifest, snapshots, the action context and result, and the content-serializer and publisher seams | Core |
 | `ApplicationModel.Definition` | The logical side: `IApplicationResourceDefinition`, sets, the builder, manifests, the validated model, and `IApplicationResourceDeployment` | ApplicationModel |
-| `ApplicationModel.Hosting` | The physical side: `IApplicationResourceInstance`, health contributors, the control plane, `ResourceService`, and the publishers | ApplicationModel, Hosting |
+| `ApplicationModel.Hosting` | The physical side: `IApplicationResourceInstance`, health contributors, the control plane, `ApplicationInstanceService`, and the publishers | ApplicationModel, Hosting |
 
 The instance side never loads the logical model, and the logical side never loads the instance
 runtime: each references only the contracts, which is the line between the logical and the physical
 instance drawn on 2026-10-28. One type per concept means an in-process gateway and an instance
-exchange the same `ResourceManifest` object. The root and Definition share the
+exchange the same `ApplicationInstanceManifest` object. The root and Definition share the
 `Assimalign.Cohesion.ApplicationModel` namespace, so a gateway's `Program.cs` still needs one
 `using`; Hosting has its own. The deployment sits here rather than in the gateway, because it is
 built from a definition and keeps D15's reason: a transport can expose it without a gateway
@@ -288,7 +288,7 @@ None. The library raises no events and has no event source.
    provider should declare the permissions it accepts; that arrives with the area packages.
 3. **Composite depth.** May a child gateway run child gateways of its own? This chunk allows it.
 4. **Deployment manifest — settled in chunk 3.** ApplicationModel.Gateway's
-   `GatewayDeploymentManifest` carries the "what" (this manifest plus a gateway name) and the "where"
+   `ApplicationDeploymentManifest` carries the "what" (this manifest plus a gateway name) and the "where"
    (provider settings), with its JSON wire contract. The `/infra` routes' transport is still open.
 5. **Area verbs.** `set.AddWeb("orders-api")` and resource options belong to the area packages, once
    area implementations consolidate into `<Area>.ApplicationModel`.
@@ -296,7 +296,7 @@ None. The library raises no events and has no event source.
    gateway needs. A descriptor and its manifest record have no slot for them yet; the slot's shape
    comes with the generation that fills it.
 7. **A child gateway's model — settled in chunk 3** (D14): the whole manifest plus the child's name,
-   carried by a `GatewayDeploymentManifest`.
+   carried by an `ApplicationDeploymentManifest`.
 8. **Apply conditions beyond the platform.** An extension applies on one platform (D19). A
    condition on the gateway (only east's cluster autoscales) or on an environment (only production)
    would need the condition as data beside the platform. Today the same resource declared in two

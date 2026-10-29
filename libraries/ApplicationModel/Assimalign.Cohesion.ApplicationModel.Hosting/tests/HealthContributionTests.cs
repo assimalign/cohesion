@@ -14,7 +14,7 @@ public class HealthContributionTests
         HealthContribution contribution = default;
 
         // Assert
-        contribution.Status.ShouldBe(ResourceHealthStatus.Unhealthy);
+        contribution.Status.ShouldBe(ApplicationHealthStatus.Unhealthy);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Factories report their status")]
@@ -26,8 +26,8 @@ public class HealthContributionTests
         HealthContribution unhealthy = HealthContribution.Unhealthy("offline");
 
         // Assert
-        healthy.ShouldBe(new HealthContribution(ResourceHealthStatus.Healthy, "ready"));
-        degraded.ShouldBe(new HealthContribution(ResourceHealthStatus.Degraded, "slow"));
-        unhealthy.ShouldBe(new HealthContribution(ResourceHealthStatus.Unhealthy, "offline"));
+        healthy.ShouldBe(new HealthContribution(ApplicationHealthStatus.Healthy, "ready"));
+        degraded.ShouldBe(new HealthContribution(ApplicationHealthStatus.Degraded, "slow"));
+        unhealthy.ShouldBe(new HealthContribution(ApplicationHealthStatus.Unhealthy, "offline"));
     }
 }

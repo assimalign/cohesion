@@ -39,11 +39,11 @@ public sealed class WebResourceEndToEndTests
         await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] });
 
         // Assert
-        ResourceManifest manifest = gateway.Manifests.ShouldHaveSingleItem();
+        ApplicationInstanceManifest manifest = gateway.Manifests.ShouldHaveSingleItem();
         manifest.Provider.ShouldBe((ProviderName)"Web");
         manifest.Name.ShouldBe((ResourceName)"orders-api");
         manifest.Key.ShouldBe(instance.Resource.Key);
-        manifest.Actions.ShouldHaveSingleItem().ShouldBe(new ResourceActionDescriptor("cors", ResourceActionKind.ReadWrite, IsStateful: true));
+        manifest.Actions.ShouldHaveSingleItem().ShouldBe(new ApplicationActionDescriptor("cors", ApplicationActionKind.ReadWrite, IsStateful: true));
     }
 
     [Fact(DisplayName = DisplayPrefix + "An application that registers no CORS exposes no cors action")]
@@ -69,7 +69,7 @@ public sealed class WebResourceEndToEndTests
         await using RunningResource instance = await RunningResource.StartAsync(gateway.ManifestEndpoint, new WebCorsPolicy { Origins = [shop] });
 
         // Assert
-        IResourceService service = instance.ResourceServices.ShouldHaveSingleItem();
+        IApplicationInstanceService service = instance.InstanceServices.ShouldHaveSingleItem();
         service.ControlPlane.Resource.ShouldBeSameAs(instance.Resource);
         service.ControlPlane.Manifest.Key.ShouldBe(gateway.Manifests.ShouldHaveSingleItem().Key);
     }
@@ -81,7 +81,7 @@ public sealed class WebResourceEndToEndTests
         await using RunningResource instance = await RunningResource.StartAsync(manifestEndpoint: null, new WebCorsPolicy { Origins = [shop] });
 
         // Assert
-        instance.ResourceServices.ShouldBeEmpty();
+        instance.InstanceServices.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = DisplayPrefix + "An action the application adds is published and served beside the resource's own")]
@@ -98,7 +98,7 @@ public sealed class WebResourceEndToEndTests
 
         // Assert
         gateway.Manifests.ShouldHaveSingleItem().Actions.Select(static action => action.Name)
-            .ShouldBe(new ResourceActionName[] { "cors", "greeting" });
+            .ShouldBe(new ActionName[] { "cors", "greeting" });
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         response.Content.Headers.ContentType.ShouldNotBeNull().MediaType.ShouldBe("application/json");
         using JsonDocument envelope = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -341,7 +341,7 @@ public sealed class WebResourceEndToEndTests
 
         // Assert
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
-        ResourceManifest? manifest = JsonResourceContentSerializer.Create().Deserialize<ResourceManifest>(await response.Content.ReadAsByteArrayAsync());
+        ApplicationInstanceManifest? manifest = JsonApplicationContentSerializer.Create().Deserialize<ApplicationInstanceManifest>(await response.Content.ReadAsByteArrayAsync());
         manifest.ShouldNotBeNull().Key.ShouldBe(instance.Resource.Key);
     }
 

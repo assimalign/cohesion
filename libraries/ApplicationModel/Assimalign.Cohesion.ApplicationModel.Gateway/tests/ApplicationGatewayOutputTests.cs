@@ -18,11 +18,11 @@ public sealed class ApplicationGatewayOutputTests : IDisposable
 
     private readonly TemporaryDirectory _directory = new();
     private readonly TestInfrastructure _infrastructure = new();
-    private readonly JsonFileGatewayStore _store;
+    private readonly JsonFileApplicationGatewayStore _store;
 
     public ApplicationGatewayOutputTests()
     {
-        _store = JsonFileGatewayStore.Create(_directory.FullPath);
+        _store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
     }
 
     public void Dispose()
@@ -44,7 +44,7 @@ public sealed class ApplicationGatewayOutputTests : IDisposable
         running.Gateway.Resources.Single().Outputs[OutputName.Endpoint].ShouldBe("http://settings.root.svc");
         running.Gateway.TryGetOutput(store.Endpoint, out string? endpoint).ShouldBeTrue();
         endpoint.ShouldBe("http://settings.root.svc");
-        GatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
+        ApplicationGatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
         record.Resources.Single().Outputs[OutputName.Endpoint].ShouldBe("http://settings.root.svc");
     }
 

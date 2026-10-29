@@ -7,20 +7,20 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// <summary>
 /// A configurable action for edge cases; by default a stateless write that succeeds.
 /// </summary>
-internal sealed class TestAction : IResourceAction
+internal sealed class TestAction : IApplicationInstanceAction
 {
-    public ResourceActionName Name { get; init; } = "flush-cache";
+    public ActionName Name { get; init; } = "flush-cache";
 
-    public ResourceActionKind Kind { get; init; } = ResourceActionKind.Write;
+    public ApplicationActionKind Kind { get; init; } = ApplicationActionKind.Write;
 
-    public IResourceActionState? State { get; init; }
+    public IApplicationActionState? State { get; init; }
 
-    public Func<ResourceActionContext, ValueTask<ResourceActionResult>> Handler { get; init; } =
-        _ => ValueTask.FromResult(ResourceActionResult.Success());
+    public Func<ApplicationActionContext, ValueTask<ApplicationActionResult>> Handler { get; init; } =
+        _ => ValueTask.FromResult(ApplicationActionResult.Success());
 
     public int Invocations { get; private set; }
 
-    public ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionContext context, CancellationToken cancellationToken = default)
+    public ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
         Invocations++;
         return Handler.Invoke(context);
