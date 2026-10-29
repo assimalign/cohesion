@@ -234,46 +234,42 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
-        // A snapshot and its retained storage bindings must fall on the same side of a
-        // TRUNCATE publication. No table lock or data apply gate is held while BEGIN waits.
-        await _database.Catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
+        TransactionContext? context = null;
+        TransactionContext? configurationPin = null;
         try
         {
-            var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-            TransactionContext? context = null;
-            TransactionContext? configurationPin = null;
+            // The pin only retains versions; it captures no catalog bindings. A TRUNCATE
+            // marker may publish after it: the context and catalog below are still captured
+            // together on the publication's later side, and see its replacement owner.
+            configurationPin = await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
+            await _database.Catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                // Retain the begin horizon while early SET may still select Snapshot, even
-                // after a READ COMMITTED begin. The pin precedes the context's capture; no
-                // data lock or page latch is held. The truncate gate precedes registration.
-                configurationPin = await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
                 context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
                 return new SqlDatabaseTransaction(_coordinator, context, _database,
                     _executor.CaptureCatalogSnapshot(), transactionStart, configurationPin);
             }
-            catch (Exception exception)
-            {
-                // Offline storage leaves recovery to abort this context (#1243). Cleanup
-                // must never replace the capture/construction failure that brought us here.
-                if (!_database.IsOffline)
-                {
-                    try { if (context is not null) { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); } }
-                    catch (Exception) { /* Preserve the original capture/construction failure. */ }
-                    try { if (configurationPin is not null) { await _coordinator.RollbackAsync(configurationPin, CancellationToken.None).ConfigureAwait(false); } }
-                    catch (Exception) { /* Preserve the original capture/construction failure. */ }
-                }
-                // BEGIN failures cross the model boundary; catalog capture/construction
-                // failures retain their exact cause, including an offline capture (#1716).
-                if (context is null)
-                {
-                    var translated = _database.TranslateFailure(exception);
-                    if (!ReferenceEquals(translated, exception)) { throw translated; }
-                }
-                throw;
-            }
+            finally { _database.Catalog.TruncateSnapshotGate.Release(); }
         }
-        finally { _database.Catalog.TruncateSnapshotGate.Release(); }
+        catch (Exception exception)
+        {
+            // Offline storage leaves recovery to abort these contexts. Cleanup preserves
+            // the original construction, catalog capture or canceled gate-wait failure.
+            if (!_database.IsOffline)
+            {
+                try { if (context is not null) { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); } }
+                catch (Exception) { /* Preserve the original capture/construction failure. */ }
+                try { if (configurationPin is not null) { await _coordinator.RollbackAsync(configurationPin, CancellationToken.None).ConfigureAwait(false); } }
+                catch (Exception) { /* Preserve the original capture/construction failure. */ }
+            }
+            if (context is null)
+            {
+                var translated = _database.TranslateFailure(exception);
+                if (!ReferenceEquals(translated, exception)) { throw translated; }
+            }
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -510,29 +506,42 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             && !ReferenceEquals(metrics, previousMetrics);
 
     private ValueTask<DatabaseResult> ExecuteStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
-        => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt) : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
+        => IsSelfCommitting(request) && CurrentTransaction is null
+            ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt)
+            : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
 
     internal static Action? DefinitionLeaseEntered { get; set; }
 
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
+        using var metadata = await EnterMetadataStatementAsync(request, cancellationToken).ConfigureAwait(false);
+        return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
+    }
+
+    private async ValueTask<IDisposable?> EnterMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken)
+    {
         // Sequence DDL uses its object grants; unrelated metadata leases remain compatible.
         if (request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression)
-        { return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false); }
+        { return null; }
         // DROP SCHEMA takes its definition lease in the executor, after sequence and table locks.
         if (request.Statement.SqlExpression is SqlDropSchemaExpression)
         {
             if (_ddlLockOwner is null) { _database.DdlInterlock.CheckDefinitionAdmission(_database.Name.ToString()); }
-            return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
+            return null;
         }
         bool definition = request.Statement.SqlExpression
             is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
                 or SqlCreateSchemaExpression or SqlCreateViewExpression or SqlDropViewExpression;
-        using var metadata = _ddlLockOwner is not null
+        var metadata = _ddlLockOwner is not null
             ? await _database.DdlInterlock.EnterMetadataAsync(definition, cancellationToken).ConfigureAwait(false)
             : _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), definition);
-        if (definition) { DefinitionLeaseEntered?.Invoke(); }
-        return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
+        try { if (definition) { DefinitionLeaseEntered?.Invoke(); } }
+        catch
+        {
+            metadata.Dispose();
+            throw;
+        }
+        return metadata;
     }
 
     private async ValueTask<DatabaseResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
@@ -602,6 +611,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             try
             {
                 await transaction.StartDataStatementAsync().ConfigureAwait(false);
+                using var metadata = IsSelfCommitting(request)
+                    ? await EnterMetadataStatementAsync(request, cancellationToken).ConfigureAwait(false) : null;
                 SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
                 if (request.Statement.SqlExpression is SqlTruncateExpression)
                 {
@@ -914,7 +925,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         };
         if (control.CommandType == SqlQueryCommandType.SetTransaction)
         {
-            if (transaction is null) { return TransactionDiagnostic("CS04071", ErrorMessages.TransactionIsolationOutside); }
+            if (transaction is null)
+            {
+                return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0,
+                    [new Diagnostic { Code = "CS04071", Message = ErrorMessages.TransactionIsolationOutside, Severity = DiagnosticSeverity.Warning }]);
+            }
             ThrowIfTransactionRefuses();
             if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
             return transaction.TrySetIsolationLevel(isolationLevel)

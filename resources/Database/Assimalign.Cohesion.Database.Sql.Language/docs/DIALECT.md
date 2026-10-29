@@ -310,22 +310,28 @@ repeated supported levels use the last mode. All mode words remain contextual id
 READ ONLY, READ WRITE, DEFERRABLE and NOT DEFERRABLE report CK00001 naming the form.
 Incomplete or malformed isolation modes report CS00012 (42601).
 
-SET requires an active block (CS04071, 25000), before its first admitted data statement
-(CS04072, 25001), including SELECT, plain EXPLAIN and unsuccessful data/DDL attempts.
-Malformed or refused control statements and pre-canceled requests do not consume that first
-statement. SET outside a block and nested BEGIN retain their state errors before checking
-SERIALIZABLE; an aborted transaction retains its existing refusal. Repeated early SET is allowed. Even an idempotent SET after data is refused;
-PostgreSQL permits that exception, but the owner rule here does not. A failed SET leaves the
-transaction usable. Savepoints remain unavailable (#1726); when introduced they must refuse
-isolation changes inside a savepoint using the same timing condition.
+Outside a block, SET succeeds with Warning CS04071 (25000) and has no effect, including for
+SERIALIZABLE. Inside a block, SET must precede its first admitted data statement (CS04072, 25001),
+including SELECT, plain EXPLAIN and unsuccessful data/DDL attempts. Malformed or refused control
+statements and pre-canceled requests do not consume that first statement. SET outside a block
+returns its warning and nested BEGIN retains its state error before checking SERIALIZABLE; an
+aborted transaction retains its existing refusal. Repeated early SET is allowed. Even an idempotent
+SET after data is refused; PostgreSQL permits that exception, but the owner rule here does not.
+The outside-block warning follows PostgreSQL src/backend/utils/misc/guc_funcs.c:83 and
+src/backend/access/transam/xact.c:3763-3799. A failed SET leaves the transaction usable.
+Savepoints remain unavailable (#1726); when introduced they must refuse isolation changes inside
+a savepoint using the same timing condition.
 
 Snapshot visibility and the catalog capture are fixed at the original BEGIN, including when
 an early SET changes READ COMMITTED to REPEATABLE READ after a concurrent commit. PostgreSQL
 instead acquires its transaction snapshot at the first query. READ COMMITTED refreshes visibility
-per statement. A temporary begin-horizon pin lasts until the first admitted data statement or
-transaction end, protecting an early switch to Snapshot; SET acquires no data locks and creates
-no further pins. Default BEGIN, auto-commit, DISCARD ALL and pooled reuse retain Snapshot.
-Typed isolation APIs still accept Snapshot and ReadCommitted and refuse Serializable.
+per statement. A temporary begin-horizon pin starts before the truncate gate; the transaction
+context and catalog capture still share the gate with publication. The pin lasts until the first
+admitted data statement or transaction end, protecting an early switch to Snapshot. READ COMMITTED
+releases its begin catalog reference at that first statement. Even a DDL interlock refusal closes
+configuration. SET acquires no data locks and creates no further pins. Default BEGIN, auto-commit,
+DISCARD ALL and pooled reuse retain Snapshot. Typed isolation APIs still accept Snapshot and
+ReadCommitted and refuse Serializable.
 
 Reference behavior: PostgreSQL `src/backend/commands/variable.c:576-604` (early changes and
 subtransactions) and `src/backend/utils/time/snapmgr.c:293-337` (first-query snapshot).
@@ -985,7 +991,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Supported | CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION; defaults to NO ACTION. Either order beside ON DELETE, once each. UPDATE_RULE reports the stored action. Actions execute on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE, including self-references and mixed delete/update chains. Stored key representation changes fire actions even under an equality collation; NULL keys use MATCH SIMPLE. RESTRICT checks existing children immediately and rejects parent substitution; NO ACTION checks the complete statement state and accepts another final parent. SET DEFAULT evaluates per row, including sequence/identity defaults; absent defaults assign NULL. Conflicting cascade assignments fail with CS05085 (27000); the whole statement rolls back. |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE and PREPARE TRANSACTION stay CS00002 (#1726); TRANSACTION alone is not a statement. |
-| `BEGIN` / `START TRANSACTION ... ISOLATION LEVEL` and `SET TRANSACTION ISOLATION LEVEL` | Supported (+2 clauses) | READ COMMITTED, READ UNCOMMITTED and REPEATABLE READ execute; SERIALIZABLE is CS04073. SET is early-block-only, with CS04071/CS04072 state refusals. See Transaction isolation (#1012) for mode lists, timing and begin-snapshot semantics. |
+| `BEGIN` / `START TRANSACTION ... ISOLATION LEVEL` and `SET TRANSACTION ISOLATION LEVEL` | Supported (+2 clauses) | READ COMMITTED, READ UNCOMMITTED and REPEATABLE READ execute; SERIALIZABLE is CS04073. SET is early-block-only, with an outside-block CS04071 warning/no-op and CS04072 late-state refusals. See Transaction isolation (#1012) for mode lists, timing and begin-snapshot semantics. |
 | `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
 

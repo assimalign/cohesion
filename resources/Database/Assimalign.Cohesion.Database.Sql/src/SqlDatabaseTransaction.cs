@@ -68,7 +68,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     // The database whose offline state (#1243) refuses the transaction's commit and rollback and
     // makes its disposal touch nothing.
     private readonly SqlDatabase _database;
-    private readonly SqlCatalogSnapshot? _catalogSnapshot;
+    private SqlCatalogSnapshot? _catalogSnapshot;
     private Exception? _storageFailure;
 
     internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabase database, SqlCatalogSnapshot? catalogSnapshot, DateTimeOffset? transactionStart = null,
@@ -116,20 +116,30 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
         // Admission is already held: configuration sees RunningOperations, including the
         // interval before this flag is published. Even a failing data statement closes SET.
         _dataStatementStarted = true;
+        if (IsolationLevel == IsolationLevel.ReadCommitted) { _catalogSnapshot = null; }
         await ReleaseConfigurationPinAsync().ConfigureAwait(false);
     }
+
+    // Test-only rendezvous and observation of the disposed-manager handoff. Neither
+    // hook runs under a root/manager/context lock or changes production ownership.
+    internal static Func<ValueTask>? ConfigurationPinReleasingAsync { get; set; }
+    internal static Action? ConfigurationPinDisposalHandoff { get; set; }
 
     private async ValueTask ReleaseConfigurationPinAsync()
     {
         var pin = Interlocked.Exchange(ref _configurationPin, null);
         if (pin is not null && pin.State == TransactionState.Active && !_database.IsOffline)
         {
-            try { await _coordinator.RollbackAsync(pin).ConfigureAwait(false); }
+            try
+            {
+                if (ConfigurationPinReleasingAsync is { } releasing) { await releasing().ConfigureAwait(false); }
+                await _coordinator.RollbackAsync(pin).ConfigureAwait(false);
+            }
             // Exchange gives this path sole ownership. A disposed manager, or an end
             // already claimed on this private pin, means kernel disposal owns its abort.
             // Pin teardown must not replace an already-completed transaction's outcome.
-            catch (ObjectDisposedException) { }
-            catch (TransactionAbortedException) { }
+            catch (ObjectDisposedException) { ConfigurationPinDisposalHandoff?.Invoke(); }
+            catch (TransactionAbortedException) { ConfigurationPinDisposalHandoff?.Invoke(); }
         }
     }
 

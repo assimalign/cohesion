@@ -5648,43 +5648,53 @@ and notification until its interleaving and outcome counters move, with a time c
 
 BEGIN/START isolation options initialize the context at the requested effective level.
 READ UNCOMMITTED maps to ReadCommitted and REPEATABLE READ to Snapshot. Optionless BEGIN and
-auto-commit remain Snapshot. SET TRANSACTION applies only to the open block before its first
-admitted data statement; even failed data/DDL attempts and plain EXPLAIN close configuration.
-Control failures and pre-cancellation leave configuration open. Repeated early supported modes
-use the last level; any SERIALIZABLE mode is refused. CS04071 identifies SET outside a block,
-CS04072 identifies late/running configuration, and CS04073 identifies unsupported SERIALIZABLE.
-Other modes retain CK00001. These refusals preserve transaction usability. Savepoints remain
-unimplemented (#1726); future savepoint admission must join the same CS04072 check.
-Existing nested-BEGIN and aborted-scope checks, and SET's missing-block check, precede the
-SERIALIZABLE refusal, preserving state diagnostics before unsupported-level validation.
+auto-commit remain Snapshot. SET TRANSACTION configures the open block before its first admitted
+data statement. Admission and first-statement marking precede metadata interlocks, deferred
+execution and system-view write checks; even failed data/DDL attempts and plain EXPLAIN close
+configuration. Parse failures, control failures and pre-cancellation leave configuration open.
+Repeated early supported modes use the last level. Inside a block, any SERIALIZABLE mode is
+refused with CS04073; other modes retain CK00001. Outside a block, SET succeeds with Warning
+CS04071 and changes no default, including for SERIALIZABLE. Nested-BEGIN, aborted-scope and
+missing-block checks precede unsupported-level validation. Refusals preserve transaction usability.
+Savepoints remain unimplemented (#1726); future savepoint admission must join the CS04072 check.
 
 | Code | Isolation condition | SQLSTATE |
 |---|---|---|
 | CS00012 | Malformed or incomplete isolation mode | 42601 |
-| CS04071 | SET TRANSACTION outside an active block | 25000 |
+| CS04071 | SET TRANSACTION outside an active block (Warning; success) | 25000 |
 | CS04072 | SET TRANSACTION after the first data statement or during an operation | 25001 |
 | CS04073 | SERIALIZABLE text isolation is unsupported | 0A000 |
 
 Early SET replaces the immutable kernel context under root transaction state admission,
-preserving id, sequence, lifecycle and the original begin snapshot. A begin-time snapshot pin
-precedes context creation under TruncateSnapshotGate and protects the original horizon while
-READ COMMITTED may still switch to Snapshot. The catalog is captured at BEGIN for either
-initial level and used only in Snapshot mode. The first admitted data statement or every end
-path releases the pin; construction/cancellation failures unwind both registrations. Offline
-storage retains recovery-owned cleanup. SET takes no data locks. Lock order is root state,
-manager registration, context end latch; coordinator tracking follows manager release. No
-storage/page latch spans those operations. End cores run outside root state; operation admission
-excludes configuration during data work. Auto-commit creates no configuration pin.
-If kernel disposal has already claimed a private configuration pin, cleanup leaves that abort
-to the kernel instead of replacing the completed transaction's outcome with a teardown refusal.
-The database-disposal race corpus verifies that coordinator tracking drains in either ordering.
+preserving id, sequence, lifecycle and the original begin snapshot. The begin-time pin starts
+before TruncateSnapshotGate; only context creation and its matching catalog capture hold the
+gate. A TRUNCATE marker can publish after the pin and before the context: the context sees the
+marker and uses the new owner. The earlier pin only retains a conservative pruning horizon.
+Immutable catalog captures are shared until committed DDL or storage replacement invalidates
+them under the catalog monitor. BEGIN captures for either initial level; only Snapshot uses the
+capture for reads. The first admitted READ COMMITTED data statement drops the transaction's
+catalog reference. Sharing avoids copying every definition for every unchanged BEGIN.
+
+The first admitted data statement or every end path releases the configuration pin exactly once;
+construction and canceled gate waits unwind both registrations. Offline storage retains
+recovery-owned cleanup. SET takes no data locks. Lock order is root state, manager registration,
+context end latch; coordinator tracking follows manager release. No storage/page latch spans
+those operations. End cores run outside root state; operation admission excludes configuration
+during data work. Auto-commit creates no configuration pin.
+If kernel disposal has claimed the private pin, cleanup leaves its abort to the kernel and
+preserves the completed transaction's outcome. A test-only rendezvous after the active-pin check
+completes kernel disposal before pin rollback resumes. Commit and rollback regressions assert
+the actual disposed-manager handoff and drained registrations.
 
 Unlike PostgreSQL's first-query snapshot acquisition (utils/time/snapmgr.c:293-337), Snapshot
 remains fixed at the original begin after early SET. Timing follows commands/variable.c:576-604,
-except that the owner also refuses idempotent late SET. Pool return and DISCARD ALL keep the
-Snapshot default without retaining isolation state. No protocol or disk version changes.
-Nonparallel race tests assert both configuration/end outcomes and horizon release; two-session
-and InMemory/TCP tests verify effective levels and failure recovery.
+except that the owner also refuses idempotent late SET. Outside-block warning/no-op behavior
+follows PostgreSQL src/backend/utils/misc/guc_funcs.c:83 and src/backend/access/transam/xact.c:3763-3799.
+The kernel checks a continuously retained begin-time pin before restoring fixed visibility and
+reports the effective level through TransactionIsolationChanged. Pool return and DISCARD ALL
+keep the Snapshot default without retaining isolation state. No protocol or disk version changes.
+Nonparallel tests verify configuration/end outcomes, horizon release, TRUNCATE publication between
+pin and context, two-session visibility and InMemory/TCP diagnostics and failure recovery.
 
 
 ## SQL transaction control and the B7 seam

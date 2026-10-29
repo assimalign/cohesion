@@ -651,6 +651,10 @@ Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPage
 
 ## Transaction isolation text (#1012)
 
+Outside a transaction block, SET TRANSACTION succeeds with Warning CS04071 through the existing
+negotiated diagnostic frame; QueryAsync exposes the warning and leaves Ready idle. InMemory/TCP
+conformance verifies the warning and continued usability. No client API or wire format changes.
+
 BEGIN/START isolation modes and early SET TRANSACTION use existing Execute, diagnostic and Ready
 frames on InMemory and TCP. READ COMMITTED and READ UNCOMMITTED see a concurrent commit on the next
 statement; REPEATABLE READ keeps the begin snapshot. CS04071/CS04072/CS04073 preserve connection

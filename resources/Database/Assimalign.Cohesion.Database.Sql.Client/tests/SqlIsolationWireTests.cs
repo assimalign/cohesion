@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Database.Protocol;
+
 namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 public sealed class SqlIsolationWireTests
@@ -52,9 +54,9 @@ public sealed class SqlIsolationWireTests
         await using var connection = await harness.Client.ConnectAsync(ceiling.Token);
 
         // Act / Assert
-        var outside = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.ExecuteAsync("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", cancellationToken: ceiling.Token));
+        var outside = await connection.QueryAsync("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", cancellationToken: ceiling.Token);
         outside.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04071");
+        outside.Diagnostics[0].Severity.ShouldBe(ProtocolDiagnosticSeverity.Warning);
         var begin = await Should.ThrowAsync<SqlClientException>(async () =>
             await connection.ExecuteAsync("BEGIN ISOLATION LEVEL SERIALIZABLE", cancellationToken: ceiling.Token));
         begin.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04073");

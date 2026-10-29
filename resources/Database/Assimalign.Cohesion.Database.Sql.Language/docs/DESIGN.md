@@ -802,8 +802,8 @@ lands.
 SqlTransactionExpression carries an ordered SqlTransactionIsolationLevel list preserving all four
 SQL spellings independently of the kernel mapping. Optional commas and repeated modes parse; the
 renderer emits canonical BEGIN or SET TRANSACTION with comma-separated modes. Both profile clauses
-have live execution cases. CS00012 identifies malformed isolation syntax. READ ONLY/READ WRITE and
-[NOT] DEFERRABLE retain CK00001 naming the complete form. SERIALIZABLE parses and execution refuses
+have live execution cases. CS00012 identifies malformed isolation syntax. Runtime admission precedes DDL interlocks; outside a block SET returns success with Warning CS04071 and no default change, as documented in DIALECT. READ ONLY/READ WRITE and
+[NOT] DEFERRABLE retain CK00001 naming the complete form. SERIALIZABLE parses and execution inside a transaction block refuses
 it with CS04073. No reserved keywords or formats change. DIALECT records effective isolation,
 early SET timing and the begin-time snapshot difference from PostgreSQL. Savepoints remain #1726.
 

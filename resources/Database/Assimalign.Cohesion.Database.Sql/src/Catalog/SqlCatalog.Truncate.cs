@@ -259,6 +259,7 @@ public sealed partial class SqlCatalog
             _registrations = merged;
             _registrationsLocation = registrationsLocation;
             Volatile.Write(ref _storageBindingGeneration, bindingGeneration);
+            _snapshot = null;
             return default;
         }
     }
