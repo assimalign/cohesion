@@ -18,11 +18,11 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal static partial class DocumentPlanExecutor
 {
     private static async ValueTask<DatabaseResult> ExecuteUpdateAsync(DocumentDatabase database, DocumentOperation operation,
-        DocumentUpdatePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        DocumentUpdatePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name);
+        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested, sourceName: plan.Statement.Alias ?? plan.Statement.Collection);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
-        using var returning = plan.Returning is null ? null : new ReturningRows(database, operation, plan.Returning, parameters, cancellationToken);
+        using var returning = plan.Returning is null ? null : new ReturningRows(database, operation, plan.Returning, parameters, cancellationToken, nested);
         using var pendingMemory = operation.GetStatementMemory(cancellationToken).Reserve();
         var pending = new List<(DocumentId Id, byte[] Content)>();
         // Freeze membership and every RHS against the statement snapshot before writing.
@@ -35,31 +35,45 @@ internal static partial class DocumentPlanExecutor
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
             var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version);
-            if (!evaluator.Matches(plan.Statement.Predicate, context)) { continue; }
-            var values = plan.Targets.Select(target => target.Value is null ? DocumentMissing.Instance : evaluator.Evaluate(target.Value, context)).ToArray();
-            var content = DocumentJsonPatcher.Patch(json.RootElement, plan.Targets, values, plan.Statement.Location, cancellationToken);
+            if (!(nested is null ? evaluator.Matches(plan.Statement.Predicate, context) : await evaluator.MatchesAsync(plan.Statement.Predicate, context, null, nested).ConfigureAwait(false))) { continue; }
+            long before = nested is null ? 0 : evaluator.Memory.Bytes - nested.RetainedBytes;
+            var values = new object?[plan.Targets.Count];
+            byte[] content;
+            try
+            {
+                for (int index = 0; index < values.Length; index++)
+                {
+                    var value = plan.Targets[index].Value;
+                    values[index] = value is null ? DocumentMissing.Instance : nested is null ? evaluator.Evaluate(value, context) :
+                        await evaluator.EvaluateAsync(value, context, null, nested).ConfigureAwait(false);
+                }
+                content = DocumentJsonPatcher.Patch(json.RootElement, plan.Targets, values, plan.Statement.Location, cancellationToken);
+            }
+            finally { if (nested is not null) { evaluator.Memory.Release(evaluator.Memory.Bytes - nested.RetainedBytes - before); } }
             pendingMemory.Charge(160L + entry.Id.Length * 2L + content.Length);
             pending.Add((document.Id, content));
         }
+        var versions = await StageNestedReturningAsync(database, operation, returning, plan.Returning, pending, pendingMemory, nested, cancellationToken).ConfigureAwait(false);
         var collection = new DocumentCollection(database, plan.Collection, operation.Session);
-        foreach (var document in pending)
+        for (int index = 0; index < pending.Count; index++)
         {
+            var document = pending[index];
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
             var stored = await collection.WriteAsync(operation.Context, document.Id, document.Content, null,
-                insertOnly: false, cancellationToken).ConfigureAwait(false);
-            returning?.Add(stored);
+                insertOnly: false, cancellationToken, versions?[index]).ConfigureAwait(false);
+            if (returning is not null && versions is null) { await returning.AddAsync(stored, nested).ConfigureAwait(false); }
         }
         cancellationToken.ThrowIfCancellationRequested();
         return returning?.Complete(pending.Count) ?? (DatabaseResult)new DocumentCommandResult(pending.Count);
     }
 
     private static async ValueTask<DatabaseResult> ExecuteDeleteAsync(DocumentDatabase database, DocumentOperation operation,
-        DocumentDeletePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        DocumentDeletePlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested = null)
     {
-        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name);
+        var evaluator = new DocumentExpressionEvaluator(plan.Statement.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested, sourceName: plan.Statement.Alias ?? plan.Statement.Collection);
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access, cancellationToken).ConfigureAwait(false);
-        using var returning = plan.Returning is null ? null : new ReturningRows(database, operation, plan.Returning, parameters, cancellationToken);
+        using var returning = plan.Returning is null ? null : new ReturningRows(database, operation, plan.Returning, parameters, cancellationToken, nested);
         using var pendingMemory = operation.GetStatementMemory(cancellationToken).Reserve();
         var pending = new List<DocumentId>();
         // Finish reading and evaluating the statement snapshot before changing any content
@@ -71,9 +85,10 @@ internal static partial class DocumentPlanExecutor
             operation.Session.LastQueryDocumentsRead++;
             var document = database.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
-            if (evaluator.Matches(plan.Statement.Predicate, new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version)))
+            if (nested is null ? evaluator.Matches(plan.Statement.Predicate, new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version)) :
+                await evaluator.MatchesAsync(plan.Statement.Predicate, new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version), null, nested).ConfigureAwait(false))
             {
-                returning?.Add(document);
+                if (returning is not null) { await returning.AddAsync(document, nested).ConfigureAwait(false); }
                 pendingMemory.Charge(96L + entry.Id.Length * 2L);
                 pending.Add(document.Id);
             }
@@ -94,17 +109,17 @@ internal static partial class DocumentPlanExecutor
     private static async ValueTask<DatabaseResult> ExecuteWriteAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentCollectionMetadata metadata, OqlExpression statement, IReadOnlyList<(OqlExpression Key, OqlExpression Value)> values,
         (DocumentStatementPlan Source, int KeyOrdinal, int? ValueOrdinal)? select, bool insertOnly, DocumentLogicalPlan? returningPlan,
-        IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested = null)
     {
         string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
         // Materialize and validate the complete statement snapshot before the first mutation.
-        using var returning = returningPlan is null ? null : new ReturningRows(database, operation, returningPlan, parameters, cancellationToken);
+        using var returning = returningPlan is null ? null : new ReturningRows(database, operation, returningPlan, parameters, cancellationToken, nested);
         using var pendingMemory = operation.GetStatementMemory(cancellationToken).Reserve();
         var pending = new List<(DocumentId Id, byte[] Content)>();
         var keys = new HashSet<string>(StringComparer.Ordinal);
         if (select is { } sourcePlan)
         {
-            await using var result = (DatabaseResultSet)(sourcePlan.Source switch
+            await using var result = (DatabaseResultSet)(nested is not null ? await ExecuteNestedQueryAsync(database, operation, sourcePlan.Source, parameters, cancellationToken, nested).ConfigureAwait(false) : sourcePlan.Source switch
             {
                 DocumentPlan source => await ExecuteSelectAsync(database, operation, source, parameters, cancellationToken, writeVerb: verb).ConfigureAwait(false),
                 DocumentSystemCollectionPlan source => ExecuteSystemCollection(database, operation, source, parameters, cancellationToken, writeVerb: verb),
@@ -120,20 +135,33 @@ internal static partial class DocumentPlanExecutor
         }
         else
         {
-            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, writeVerb: verb, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name);
+            var evaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken, writeVerb: verb, transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name, operation: nested is null ? null : operation, nested: nested, sourceName: null);
             foreach (var pair in values)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Add(evaluator.Evaluate(pair.Key, default), evaluator.Evaluate(pair.Value, default));
+                long before = nested is null ? 0 : evaluator.Memory.Bytes - nested.RetainedBytes;
+                long pendingBefore = pendingMemory.Bytes;
+                try
+                {
+                    Add(nested is null ? evaluator.Evaluate(pair.Key, default) : await evaluator.EvaluateAsync(pair.Key, default, null, nested).ConfigureAwait(false),
+                        nested is null ? evaluator.Evaluate(pair.Value, default) : await evaluator.EvaluateAsync(pair.Value, default, null, nested).ConfigureAwait(false));
+                }
+                finally
+                {
+                    if (nested is not null)
+                    { evaluator.Memory.Release(evaluator.Memory.Bytes - nested.RetainedBytes - before - (pendingMemory.Bytes - pendingBefore)); }
+                }
             }
         }
+        var versions = await StageNestedReturningAsync(database, operation, returning, returningPlan, pending, pendingMemory, nested, cancellationToken).ConfigureAwait(false);
         var collection = new DocumentCollection(database, metadata, operation.Session);
-        foreach (var document in pending)
+        for (int index = 0; index < pending.Count; index++)
         {
+            var document = pending[index];
             operation.EnsureActive();
             var stored = await collection.WriteAsync(operation.Context, document.Id, document.Content, null,
-                insertOnly, cancellationToken).ConfigureAwait(false);
-            returning?.Add(stored);
+                insertOnly, cancellationToken, versions?[index]).ConfigureAwait(false);
+            if (returning is not null && versions is null) { await returning.AddAsync(stored, nested).ConfigureAwait(false); }
         }
         cancellationToken.ThrowIfCancellationRequested();
         return returning?.Complete(pending.Count) ?? (DatabaseResult)new DocumentCommandResult(pending.Count);
@@ -167,5 +195,26 @@ internal static partial class DocumentPlanExecutor
             pendingMemory.Charge(32L + content.Length);
             pending.Add((id, content));
         }
+    }
+
+    private static async ValueTask<ulong[]?> StageNestedReturningAsync(DocumentDatabase database, DocumentOperation operation,
+        ReturningRows? returning, DocumentLogicalPlan? plan, IReadOnlyList<(DocumentId Id, byte[] Content)> pending,
+        DocumentAggregateMemory.Reservation retained, DocumentNestedExecutionContext? nested, CancellationToken cancellationToken)
+    {
+        if (nested is null || returning is null || plan is null || !DocumentPlanner.HasSubquery(plan.Query)) { return null; }
+        retained.Charge(32L + pending.Count * 8L);
+        var versions = new ulong[pending.Count];
+        // Reserve the actual versions first; both staged RETURNING and the eventual
+        // writes use these identities. No branch or subquery is evaluated speculatively.
+        for (int index = 0; index < pending.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            operation.EnsureActive();
+            ulong version = (ulong)database.DataStorage.ReserveTransactionSequence();
+            versions[index] = version;
+            var document = pending[index];
+            await returning.AddAsync(new Document(document.Id, new DocumentVersion(version), document.Content), nested).ConfigureAwait(false);
+        }
+        return versions;
     }
 }

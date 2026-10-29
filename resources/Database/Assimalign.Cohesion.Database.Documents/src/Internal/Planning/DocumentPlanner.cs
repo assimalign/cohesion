@@ -55,8 +55,8 @@ internal sealed partial class DocumentPlanner
     private DocumentStatementPlan PlanCore(OqlExpression expression,
         IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null) => expression switch
     {
-        OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName),
-        OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName),
+        OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName, nested),
+        OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
         OqlSelectExpression { Source: not null } select => PlanFrom(select, nested),

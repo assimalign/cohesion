@@ -116,6 +116,12 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Subquery] =
             [
+                new("SELECT (SELECT RAW d.name FROM [1] AS s) AS names FROM items d WHERE name = 'alpha'", [[Json("[\"alpha\"]")]]),
+                new("SELECT (SELECT RAW v FROM d.tags AS v) AS tags FROM items d WHERE name = 'alpha'", [[Json("[\"blue\"]")]]),
+                new("UPDATE items d SET names = (SELECT RAW d.name FROM [1] AS s) WHERE EXISTS (SELECT RAW s.name FROM items s WHERE s.name = d.name)",
+                    [[Json("[\"alpha\"]")]], VerificationStatement: "SELECT names FROM items WHERE name = 'alpha'", ExpectedAffectedCount: 4),
+                new("DELETE FROM items d WHERE d.name IN (SELECT RAW s.name FROM items s WHERE s.name = 'alpha')", [["beta"], ["gamma"], ["delta"]],
+                    VerificationStatement: "SELECT name FROM items", ExpectedAffectedCount: 1),
                 new("SELECT (SELECT RAW name FROM items WHERE name = 'alpha') AS names FROM items WHERE name = 'beta'", [[Json("[\"alpha\"]")]]),
                 new("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items WHERE category = 'b')", [["gamma"]]),
                 new("SELECT (SELECT RAW name FROM items s WHERE category = 'b') AS names FROM items d WHERE name = 'alpha'", [[Json("[\"gamma\"]")]]),

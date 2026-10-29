@@ -77,6 +77,15 @@ public sealed class DocumentSubqueryParityTests
 
     public static IEnumerable<object[]> QueryPositions()
     {
+        yield return ["SELECT [n] AS v FROM items d", "SELECT (SELECT RAW d.n FROM [1] AS s) AS v FROM items d", 3];
+        yield return ["SELECT n FROM items d WHERE n IN [n]", "SELECT n FROM items d WHERE n IN (SELECT RAW d.n FROM [1] AS s)", 3];
+        yield return ["SELECT n FROM items d ORDER BY [-n]", "SELECT n FROM items d ORDER BY (SELECT RAW -d.n FROM [1] AS s)", 3];
+        yield return ["SELECT COUNT(*) AS c FROM items d GROUP BY [n]", "SELECT COUNT(*) AS c FROM items d GROUP BY (SELECT RAW d.n FROM [1] AS s)", 3];
+        yield return ["SELECT COUNT(*) AS c FROM items d GROUP BY n AS k HAVING EXISTS [k]", "SELECT COUNT(*) AS c FROM items d GROUP BY n AS k HAVING EXISTS (SELECT RAW k FROM [1] AS s)", 3];
+        yield return ["SELECT SUM(n) FROM items d", "SELECT SUM(FIRST v FOR v IN (SELECT RAW d.n FROM [1] AS s) END) FROM items d", 3];
+        yield return ["SELECT * FROM items d UNNEST [d.n] AS v", "SELECT * FROM items d UNNEST (SELECT RAW d.n FROM [1] AS s) AS v", 3];
+        yield return ["SELECT RAW [d.n] FROM items d", "SELECT RAW (SELECT RAW v FROM [d.n] AS v) FROM items d", 3];
+        yield return ["SELECT RAW [d.n] FROM items d", "SELECT RAW (SELECT RAW v.n FROM d AS v) FROM items d", 3];
         yield return ["SELECT RAW v FROM [1,2,3] AS v", "SELECT RAW v FROM (SELECT RAW n FROM items) v", 0];
         yield return ["SELECT RAW v FROM [1,2,3] AS v", "SELECT RAW v FROM COALESCE((SELECT RAW n FROM items), []) AS v", 1];
         yield return ["SELECT SUM(v) AS n FROM [1,2,3] AS v", "SELECT SUM(v) AS n FROM (SELECT RAW n FROM items) v", 0];
@@ -176,6 +185,7 @@ public sealed class DocumentSubqueryParityTests
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: generated expressions preserve values failures and callback reachability")]
     [MemberData(nameof(Expressions))]
+    [MemberData(nameof(CorrelatedExpressions))]
     public async Task ExecuteAsync_GeneratedExpression_ShouldMatchSynchronousSemanticsAsync(string synchronous, string asynchronous)
     {
         // Arrange
@@ -198,7 +208,7 @@ public sealed class DocumentSubqueryParityTests
             calls = 0;
             try
             {
-                await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT " + expression + " FROM items LIMIT 1",
+                await using var result = (DatabaseResultSet)await session.ExecuteAsync("SELECT " + expression + " FROM items AS outer LIMIT 1",
                     DocumentSubqueryRegressionTests.DeepParameters(), CancellationToken.None);
                 await foreach (var row in result.GetRowsAsync(CancellationToken.None))
                 {
@@ -209,6 +219,16 @@ public sealed class DocumentSubqueryParityTests
             }
             catch (DatabaseException exception)
             { return (null, null, false, exception.Diagnostics.Single().Code, calls); }
+        }
+    }
+
+    public static IEnumerable<object[]> CorrelatedExpressions()
+    {
+        foreach (var pair in Expressions())
+        {
+            string nested = ((string)pair[1]).Replace("FROM items LIMIT 1", "FROM items s WHERE outer.n = 1 LIMIT 1", StringComparison.Ordinal)
+                .Replace("FROM items WHERE FALSE", "FROM items s WHERE outer.n = 1 AND FALSE", StringComparison.Ordinal);
+            if (nested != (string)pair[1]) { yield return [pair[0], nested]; }
         }
     }
 }

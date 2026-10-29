@@ -34,6 +34,14 @@ public sealed class DocumentDatabaseEngineOptions
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
 
     /// <summary>
+    /// Gets or sets the maximum expression evaluations across all query depths of a statement
+    /// containing subqueries or expression sources. Defaults to ten million and must be positive.
+    /// Each reached expression consumes one unit; cache hits also consume a unit. Exhaustion
+    /// refuses the statement with CD05020 and rolls back its writes.
+    /// </summary>
+    public long StatementWorkBudget { get; set; } = 10_000_000;
+
+    /// <summary>
     /// Gets or sets how commits reach stable storage. When unset, opening a
     /// database selects <see cref="StorageCommitDurability.Synchronous"/> for
     /// durable backing and <see cref="StorageCommitDurability.None"/> otherwise.
@@ -199,6 +207,7 @@ public sealed class DocumentDatabaseEngineOptions
     internal DocumentDatabaseEngineOptions Snapshot() => new()
     {
         StatementMemoryBudget = StatementMemoryBudget,
+        StatementWorkBudget = StatementWorkBudget,
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
         CheckpointInterval = CheckpointInterval,
@@ -227,6 +236,7 @@ public sealed class DocumentDatabaseEngineOptions
 
         public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
         public long StatementMemoryBudget => _target.StatementMemoryBudget;
+        public long StatementWorkBudget => _target.StatementWorkBudget;
         public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
         public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
         public long CheckpointJournalSize => _target.CheckpointJournalSize;

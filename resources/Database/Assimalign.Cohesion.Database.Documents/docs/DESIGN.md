@@ -506,6 +506,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
 | `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
 | `CD05018` | Retained statement source rows, ordered candidate buckets, groups, RETURNING results or aggregate values exceed the statement memory budget |
+| `CD05020` | Shared expression evaluation work budget exhausted across nested queries and expression sources |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | Direct IN subquery requires RAW/VALUE |
@@ -599,16 +600,14 @@ before ordinary catalog lookup or mutation. Virtual sources do not provide mutab
 
 DocumentNestedPlan owns the root statement plan and an immutable-use, reference-keyed map of
 OqlSubqueryExpression to DocumentNestedQueryPlan. Planning binds every nested SELECT once,
-with its own grouping, metadata and lexical scope. Correlation is refused with named CK00001;
-the scoped visitor preserves inner shadowing and carries all outer declarations to deeper queries.
+with its own grouping, metadata and lexical scope. The scoped visitor records free outer names, preserves inner shadowing and propagates transitive captures to deeper queries; only deterministic queries with no outer dependencies cache.
 There is no cross-statement plan cache in Documents: a reused request rebuilds root and nested
 plans against the current operation snapshot, so CREATE/DROP INDEX cannot retain stale access.
 The wrapper exists only for statements containing subqueries; ordinary plan records stay unchanged.
 
 DocumentNestedExecutionContext borrows the statement's DocumentOperation and database, parameter
 snapshot, frozen function catalog and cancellation token. It never creates or completes an operation,
-transaction or snapshot. EvaluateAsync explicitly receives the caller's DocumentEvaluationContext,
-the binding-frame extension point for OQ-Q3. Every nested access uses ReadCandidatesAsync, including
+transaction or snapshot. EvaluateAsync receives the caller's lexical binding chain. Each evaluator keeps outer bindings separate from its local source and UNNEST frames, so stars contain only local rows. Every nested access uses ReadCandidatesAsync, including
 asynchronous index/intersection access; there is no sync-over-async bridge. The context drives the
 existing selection, grouping and result helpers through a separate async expression/row path.
 The original synchronous evaluator and executor remain the allocation path for ordinary queries.
@@ -623,7 +622,7 @@ pre-evaluating a list. Both retain the existing last-non-MISSING map stage befor
 serialization, including the failure order of replaced values; changing that order would change
 ordinary queries. Only operand dispatch, await/iteration scheduling, lazy branch loops,
 synchronous constant-constructor caching and scratch release brackets remain separate: ordinary
-queries keep their original allocation path, while async release excludes nested-owned values.
+queries keep their original allocation path, while async release excludes statement-cache reservations.
 The permanent generated parity corpus compares equivalent literal/subquery operands, including
 NULL/MISSING, null/object/nested arrays, results and runtime kinds, diagnostic codes and
 developer callback counts. Several-row clause pairs cover WHERE, ORDER BY, GROUP BY, HAVING,
@@ -637,29 +636,38 @@ uncorrelated results only when every call is a native nonvolatile function or a 
 NOW_STR/NOW_MILLIS and all developer callbacks disable caching transitively. Failures never cache.
 LastQuerySubqueriesExecuted is an internal statement counter used by deterministic tests.
 
-The operation owns the existing DocumentAggregateMemory counter. The nested context owns one
-reservation and all materialized subquery arrays until statement exit, including per-evaluation
-arrays. OQ-Q3 changes this ownership contract: uncached results must belong to the evaluating
-row, transferring ownership only to surviving group, order and output consumers; statement-long
-retention must not become the common per-row correlation path. Each nested executor owns
-source/group/sort scratch and its temporary result, sharing that
-same counter; nested result disposal releases its row reservations. Before array serialization the
-context reserves a conservative bound (three times value retention plus item/array overhead,
-covering JSON escaping), then shrinks to the actual owned JSON representation and slot overhead.
-Async expression scratch excludes context-owned reservations from its release delta. On success,
-outer projections clone their values and transfer output reservations as usual; context disposal
-clears its cache/values and releases its reservation. Failure and cancellation unwind the same
-owners, and operation completion or abort clears the statement counter. JSON clones carry their
-own lifetime beyond source JsonDocument disposal. No public execution seam, visibility grant,
-project reference, persisted contract or wire shape was added.
+The operation owns the DocumentAggregateMemory counter. Cached deterministic arrays have statement lifetime. Uncached subquery results have expression lifetime:
+filters release discarded arrays immediately; projection, group keys, ordered keys and expanded
+UNNEST rows clone and charge independent retained values. No list in the statement context retains
+uncached arrays. Each nested query owns its temporary sources, results and conservative array
+serialization reservation. Failure/cancellation unwind each reservation before operation cleanup.
+The deterministic 10,000-row filter test observes identical first/last evaluation peaks under a
+16 MiB grant, replacing the former 8,488 retained bytes per row. Ordinary Release allocations stay
+at the base budgets because outer-scope state exists only in the nested evaluator state variant.
+
+DML predicates, SET/VALUES expressions and INSERT/UPSERT SELECT materialize all pending writes
+before mutation. RETURNING containing subqueries stages before writes too. UPDATE/INSERT/UPSERT
+reserve each actual version from the existing durable allocator, evaluate the post-image with that
+version, then pass the reserved version into the existing internal collection write path. DELETE
+stages its pre-images. All nested reads therefore see statement-start data, including earlier
+statements in the same transaction, and unreached RETURNING branches read nothing. Failed
+statements can leave version gaps, as failed content writes already can. No version is invented,
+reused or made visible before the normal transactional write. RETURNING callbacks may run before
+a later storage/constraint failure; results remain private until every write succeeds. The version
+array is charged with the pending buffer. This avoids retaining snapshots of whole collections.
+
+StatementWorkBudget defaults to 10,000,000 reached expression evaluations for nested/expression-source
+statements. All depths and cache hits share one context counter; unreached expressions consume no
+work. CD05020 refuses before the next evaluation. Memory, cancellation, snapshot and operation
+remain shared. There is no correlated memoization and no new interface, friend grant, project
+reference, persisted format or wire shape. EXPLAIN records captured names beside cache policy.
 
 Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null normalization and
 object-star preservation (nonobject roots wrap under document). Star deliberately follows this
 engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
 IN subqueries retain the conservative CD00014 guard pending owner sign-off; this is a deliberate
 SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
-shadow them. Qualified outer stars and FROM references to outer aliases are named correlation
-refusals. Unqualified fields otherwise bind to the inner source, as in Couchbase. EXISTS uses
+shadow them. Qualified stars retain their CK00001 refusal; FROM references to explicit outer aliases use per-row expression scans. Unqualified fields otherwise bind to the inner source, as in Couchbase. EXISTS uses
 Couchbase coll_exists.go:40-53; the array
 contract follows subqueries.adoc:26-68 at the pinned versions linked in the language DIALECT.
 PostgreSQL src/backend/optimizer/plan/subselect.c:392-410 informed the separate subplan ownership
@@ -683,8 +691,7 @@ selective scans; the statement wrapper adds no ordinary-plan fields.
 
 DocumentFromPlan owns the outer logical plan and an optional derived input plan. Generic inputs
 retain the expression in OqlSelectExpression.Source. PlanNested's lexical visitor validates the
-source before introducing its row alias, refusing outer captures with CK00001 and otherwise
-unbound source variables with CD01034. Comprehension-local bindings remain valid. Planning
+source before introducing its row alias, binding outer captures and refusing otherwise unbound source variables with CD01034. Comprehension-local bindings remain valid. Planning
 binds inner collections, parameters, grouping and metadata even when LIMIT 0 skips execution.
 The ordinary AST and plan allocation path remains unchanged: the collection-name storage slot
 also carries the optional source expression. CD00015 names a missing derived alias; CD01033
@@ -703,8 +710,7 @@ Grouping, DISTINCT and sorting use the existing blocking helpers. Retained input
 UNNEST bindings are independently cloned and charged to the same CD05018 counter before the
 input advances. Temporary projected rows, expression values and result rows have scoped owners.
 The source UNNEST cursor also reserves independently generated arrays while re-reading their elements.
-Only surviving final results transfer their reservation to DocumentQueryResult. Q1's nested
-arrays retain their existing statement ownership. Candidate discovery uses the operation snapshot
+Only surviving final results transfer their reservation to DocumentQueryResult. Cached nested arrays keep statement ownership; uncached arrays use expression or consumer ownership. Candidate discovery uses the operation snapshot
 and sees own writes. No new public execution seam, interface, reference or friend grant is needed.
 EXPLAIN includes DerivedSource/ExpressionSource and the inner tree; outer ORDER BY always sorts.
 After eager planning, a zero LIMIT returns an empty result with planned column metadata before
@@ -1863,7 +1869,7 @@ managed memory. UNNEST multiplies input rows and has no row cap; it is not a joi
 does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
 writer locking is conservative; there are no persisted query statistics, join,
-correlated/DML subqueries, external sort, replication, model-specific security,
+external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 
 Co-located tests cover nested/mixed JSON, expected-version writes, explicit commit

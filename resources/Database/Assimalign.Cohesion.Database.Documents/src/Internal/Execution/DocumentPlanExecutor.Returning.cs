@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Documents.Protocol;
@@ -34,7 +35,7 @@ internal static partial class DocumentPlanExecutor
         private readonly DocumentAggregateMemory _memory;
 
         internal ReturningRows(DocumentDatabase database, DocumentOperation operation, DocumentLogicalPlan plan,
-            IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+            IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested = null)
         {
             _plan = plan;
             _operation = operation;
@@ -44,7 +45,7 @@ internal static partial class DocumentPlanExecutor
             _wholeDocument = plan.Projections.Count == 1 && plan.Projections[0].Expression is OqlStarExpression;
             _evaluator = new DocumentExpressionEvaluator(plan.Query.Alias, parameters, cancellationToken,
                 transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name,
-                resultClause: "RETURNING");
+                resultClause: "RETURNING", operation: nested is null ? null : operation, nested: nested);
             Charge(128L + plan.Projections.Count * 64L);
             long headerBytes = 5;
             foreach (var projection in plan.Projections)
@@ -59,7 +60,7 @@ internal static partial class DocumentPlanExecutor
             _writer = new DocumentRowWriter();
         }
 
-        internal void Add(Document document)
+        internal async ValueTask AddAsync(Document document, DocumentNestedExecutionContext? nested)
         {
             _operation.EnsureActive();
             _cancellationToken.ThrowIfCancellationRequested();
@@ -71,7 +72,11 @@ internal static partial class DocumentPlanExecutor
             for (int index = 0; index < values.Length; index++)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                var value = _evaluator.EvaluateProjection(_plan.Projections[index].Expression, context, null, DocumentRowWriter.WritesBareValue(_plan.Query));
+                long before = _memory.Bytes - (nested?.RetainedBytes ?? 0);
+                object? value;
+                try { value = nested is null ? _evaluator.EvaluateProjection(_plan.Projections[index].Expression, context, null, DocumentRowWriter.WritesBareValue(_plan.Query)) :
+                    await _evaluator.EvaluateProjectionAsync(_plan.Projections[index].Expression, context, null, DocumentRowWriter.WritesBareValue(_plan.Query), nested).ConfigureAwait(false); }
+                finally { if (nested is not null) { _memory.Release(_memory.Bytes - nested.RetainedBytes - before); } }
                 if (_plan.Query.IsValue && value is DocumentMissing) { value = null; }
                 Charge(value switch
                 {

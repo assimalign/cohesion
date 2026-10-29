@@ -15,9 +15,10 @@ internal sealed partial class DocumentExpressionEvaluator
         _cancellationToken.ThrowIfCancellationRequested();
         try
         {
+            nested.ConsumeWork(_cancellationToken);
             return expression switch
             {
-                OqlSubqueryExpression subquery => await nested.EvaluateAsync(subquery, document, _cancellationToken).ConfigureAwait(false),
+                OqlSubqueryExpression subquery => await nested.EvaluateAsync(subquery, CaptureBindings(document), _cancellationToken).ConfigureAwait(false),
                 OqlLiteralExpression literal => Normalize(literal.Value),
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
@@ -67,7 +68,11 @@ internal sealed partial class DocumentExpressionEvaluator
 
     internal async ValueTask<bool> MatchesAsync(OqlExpression? expression, DocumentEvaluationContext document,
         IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
-        => expression is null || Truth(await EvaluateAsync(expression, document, group, nested).ConfigureAwait(false)) is true;
+    {
+        long before = Memory.Bytes - nested.RetainedBytes;
+        try { return expression is null || Truth(await EvaluateAsync(expression, document, group, nested).ConfigureAwait(false)) is true; }
+        finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
+    }
 
     private async ValueTask<object?> BinaryAsync(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
     {
@@ -182,7 +187,15 @@ internal sealed partial class DocumentExpressionEvaluator
             foreach (var document in group)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                var values = star ? Array.Empty<object?>() : (await EvaluateArgumentsAsync(call.Arguments, document, null, nested).ConfigureAwait(false));
+                long inputStart = memory.Bytes - nested.RetainedBytes;
+                object?[] values;
+                try
+                {
+                    values = star ? Array.Empty<object?>() : await EvaluateArgumentsAsync(call.Arguments, document, null, nested).ConfigureAwait(false);
+                    for (int index = 0; index < values.Length; index++)
+                    { if (values[index] is JsonElement json) { values[index] = json.Clone(); } }
+                }
+                finally { memory.Release(memory.Bytes - nested.RetainedBytes - inputStart); }
                 AddAggregate(function, name, accumulator, seen, values, memory);
             }
             result = RetainAggregateResult(name, accumulator.Finish().Value, memory);
@@ -211,7 +224,11 @@ internal sealed partial class DocumentExpressionEvaluator
         async IAsyncEnumerable<object?> ElementsAsync(OqlArrayExpression array)
         {
             foreach (var element in array.Elements)
-            { yield return await EvaluateAsync(element, document, group, nested).ConfigureAwait(false); }
+            {
+                long before = Memory.Bytes - nested.RetainedBytes;
+                try { yield return await EvaluateAsync(element, document, group, nested).ConfigureAwait(false); }
+                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
+            }
         }
         async IAsyncEnumerable<KeyValuePair<string, object?>> MembersAsync()
         {
@@ -237,8 +254,13 @@ internal sealed partial class DocumentExpressionEvaluator
                 _cancellationToken.ThrowIfCancellationRequested();
                 var inner = document.Bind(expression.Variable, ReadJson(item));
                 if (!await MatchesAsync(expression.Predicate, inner, group, nested).ConfigureAwait(false)) { continue; }
-                var mapped = await EvaluateAsync(expression.Projection, inner, group, nested).ConfigureAwait(false);
-                if (KeepMapped(expression, mapped)) { yield return mapped; }
+                long before = Memory.Bytes - nested.RetainedBytes;
+                try
+                {
+                    var mapped = await EvaluateAsync(expression.Projection, inner, group, nested).ConfigureAwait(false);
+                    if (KeepMapped(expression, mapped)) { yield return mapped; }
+                }
+                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
             }
         }
     }

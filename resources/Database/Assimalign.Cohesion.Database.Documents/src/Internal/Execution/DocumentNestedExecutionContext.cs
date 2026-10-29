@@ -5,12 +5,14 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Language;
+using Assimalign.Cohesion.Database.Documents.Catalog;
+using Assimalign.Cohesion.Database.Documents.Protocol;
 using Assimalign.Cohesion.Database.Execution;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
-// Statement-local owner. Future correlation passes the caller's binding frame through
-// EvaluateAsync; it never opens another operation or transaction.
+// Statement-local cache owner. Uncached arrays belong to the evaluating expression;
+// consumers clone and charge retained values before releasing expression scratch.
 [System.Diagnostics.DebuggerDisplay("DocumentNestedExecutionContext")]
 [System.Diagnostics.DebuggerTypeProxy(typeof(DocumentNestedExecutionContext.DebugView))]
 internal sealed class DocumentNestedExecutionContext : IDisposable
@@ -20,10 +22,26 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
     private readonly IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan> _plans;
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly Dictionary<OqlSubqueryExpression, JsonElement> _cache = new(ReferenceEqualityComparer.Instance);
-    private readonly List<JsonElement> _values = [];
     private readonly DocumentAggregateMemory.Reservation _retained;
+    private long _work;
 
     internal long RetainedBytes => _retained.Bytes;
+    internal DocumentVariableBinding? Bindings { get; private set; }
+
+    internal void ConsumeWork(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _operation.EnsureActive();
+        if (_work == _database.Engine.EngineOptions.StatementWorkBudget)
+        { throw new DocumentPlanningException("CD05020", ErrorMessages.NestedWorkExceeded); }
+        _work++;
+    }
+
+    internal Document ReadDocument(DocumentCatalogEntry entry)
+    {
+        _operation.Session.LastQueryDocumentsRead++;
+        return _database.ReadDocument(entry);
+    }
 
     internal DocumentNestedExecutionContext(DocumentDatabase database, DocumentOperation operation,
         IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan> plans,
@@ -37,14 +55,38 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
     }
 
     internal async ValueTask<object?> EvaluateAsync(OqlSubqueryExpression expression,
-        DocumentEvaluationContext outer, CancellationToken cancellationToken)
+        DocumentVariableBinding? outer, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         _operation.EnsureActive();
         var plan = _plans[expression];
         if (plan.CacheForStatement && _cache.TryGetValue(expression, out var cached)) { return cached; }
-        // The binding frame is intentionally explicit even while Q1 refuses correlation.
-        _ = outer;
+        var memory = _operation.GetStatementMemory(cancellationToken);
+        long before = memory.Bytes - RetainedBytes;
+        var previous = Bindings;
+        JsonElement array;
+        try
+        {
+            Bindings = outer;
+            array = await MaterializeAsync(expression, plan, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Bindings = previous;
+            memory.Release(memory.Bytes - RetainedBytes - before);
+        }
+        if (plan.CacheForStatement)
+        {
+            _retained.Charge(128L + memory.ValueBytes(array));
+            _cache.Add(expression, array);
+        }
+        else { memory.Charge(128L + memory.ValueBytes(array)); }
+        return array;
+    }
+
+    private async ValueTask<JsonElement> MaterializeAsync(OqlSubqueryExpression expression,
+        DocumentNestedQueryPlan plan, CancellationToken cancellationToken)
+    {
         _operation.Session.LastQuerySubqueriesExecuted++;
         await using var result = (DatabaseResultSet)await DocumentPlanExecutor.ExecuteNestedQueryAsync(
             _database, _operation, plan.Plan, _parameters, cancellationToken, this).ConfigureAwait(false);
@@ -74,22 +116,13 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
         // Reserve the independent array before allocating its JSON representation.
         long bytes = 384L;
         foreach (var value in values) { bytes += 64L + 3L * memory.ValueBytes(value); }
-        _retained.Charge(bytes);
-        JsonElement array;
-        try { array = DocumentJsonValue.Array(values); }
-        catch { _retained.Rewind(_retained.Bytes - bytes); throw; }
-        long actual = 128L + memory.ValueBytes(array);
-        if (actual > bytes) { _retained.Charge(actual - bytes); }
-        else { _retained.Rewind(_retained.Bytes - bytes + actual); }
-        _values.Add(array);
-        if (plan.CacheForStatement) { _cache.Add(expression, array); }
-        return array;
+        scratch.Charge(bytes);
+        return DocumentJsonValue.Array(values);
     }
 
     public void Dispose()
     {
         _cache.Clear();
-        _values.Clear();
         _retained.Dispose();
     }
 

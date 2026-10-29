@@ -108,7 +108,7 @@ internal sealed partial class DocumentPlanner
 
     private DocumentStatementPlan PlanWrite(OqlExpression statement, string destination,
         IReadOnlyList<(OqlExpression Key, OqlExpression Value)> values, OqlSelectExpression? select,
-        string? keyName, string? valueName)
+        string? keyName, string? valueName, IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null)
     {
         string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
         DocumentSystemCollections.EnsureReadOnly(destination, statement.Location);
@@ -129,7 +129,7 @@ internal sealed partial class DocumentPlanner
             {
                 foreach (var expression in new[] { pair.Key, pair.Value })
                 {
-                    if (!IsConstant(expression))
+                    if (!IsWriteValue(expression))
                     {
                         throw new DocumentPlanningException("CD05001", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteValuesContext, verb), expression.Location);
                     }
@@ -140,8 +140,8 @@ internal sealed partial class DocumentPlanner
                 ? new DocumentUpsertPlan(collection, upsert, Returning: returning)
                 : new DocumentInsertPlan(collection, (OqlInsertExpression)statement, returning);
         }
-        var source = Plan((OqlExpression)select);
-        var logical = source is DocumentPlan plan ? plan.Logical : ((DocumentSystemCollectionPlan)source).Logical;
+        var source = PlanCore(select, nested);
+        var logical = QueryLogical(source);
         int keyOrdinal = Bind(keyName);
         int? valueOrdinal = valueName is null ? null : Bind(valueName);
         return statement is OqlUpsertExpression upsertSelect
@@ -158,6 +158,22 @@ internal sealed partial class DocumentPlanner
                 ErrorMessages.WriteOutputMissing, verb, name), statement.Location);
         }
     }
+
+    private static bool IsWriteValue(OqlExpression expression)
+        => HasSubquery(expression) ? IsNestedWriteValue(expression, null) : IsConstant(expression);
+
+    private static bool IsNestedWriteValue(OqlExpression expression, DocumentBindingScope? bound) => expression switch
+    {
+        OqlSubqueryExpression => true,
+        OqlComprehensionExpression comprehension => IsNestedWriteValue(comprehension.Collection, bound) &&
+            IsNestedWriteValue(comprehension.Projection, new DocumentBindingScope(comprehension.Variable, bound)) &&
+            (comprehension.Predicate is null || IsNestedWriteValue(comprehension.Predicate, new DocumentBindingScope(comprehension.Variable, bound))),
+        OqlQuantifiedExpression quantified => IsNestedWriteValue(quantified.Collection, bound) &&
+            IsNestedWriteValue(quantified.Predicate, new DocumentBindingScope(quantified.Variable, bound)),
+        OqlPathExpression { Segments.Count: > 0 } path => DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null,
+        OqlMetaExpression or OqlStarExpression => false,
+        _ => IsConstant(expression, bound) || NestedChildren(expression).Any() && NestedChildren(expression).All(child => IsNestedWriteValue(child, bound)),
+    };
 
     private DocumentLogicalPlan? PlanReturning(OqlReturningExpression? returning, string collection, string? alias)
     {

@@ -83,6 +83,7 @@ public sealed class OqlReturningParserTests
         var statement = new OqlQueryParser().Parse(query);
 
         // Assert
+        if (construct == "SUBQUERY") { statement.Diagnostics.ShouldBeEmpty(); return; }
         var error = statement.Diagnostics.ShouldHaveSingleItem();
         error.Code.ShouldBe("CK00001");
         error.Message.ShouldNotBeNull().ShouldContain(construct, Case.Sensitive);
