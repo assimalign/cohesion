@@ -18,7 +18,7 @@ bucket and CS05079 budget refusals and reusable connections. ROWS/default-peer a
 FILTER, Boolean/statistical and value functions preserve types, NULLs and frame diagnostics on
 both transports; EXPLAIN includes frame boundaries and transition visits. RANGE offsets,
 GROUPS, every exclusion and IGNORE NULLS use the same exchange. The wire corpus also checks
-CS02074-02076 and CS05085-05087 with reusable connections. No client surface or protocol format changes.
+CS02074-02076 and CS05086-05088 with reusable connections. No client surface or protocol format changes.
 
 ## Owned identity wire surface (#1717, SQ-S3)
 

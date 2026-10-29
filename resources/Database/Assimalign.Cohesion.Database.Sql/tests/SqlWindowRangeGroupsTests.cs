@@ -130,9 +130,9 @@ public sealed class SqlWindowRangeGroupsTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Frames: invalid distance domains, ordering and NULL treatment have specific codes")]
-    [InlineData("ORDER BY id,id RANGE 1 PRECEDING", "CS05085")]
-    [InlineData("RANGE 1 PRECEDING", "CS05085")]
-    [InlineData("GROUPS CURRENT ROW", "CS05086")]
+    [InlineData("ORDER BY id,id RANGE 1 PRECEDING", "CS05086")]
+    [InlineData("RANGE 1 PRECEDING", "CS05086")]
+    [InlineData("GROUPS CURRENT ROW", "CS05087")]
     [InlineData("ORDER BY CAST(id AS TEXT) RANGE 1 PRECEDING", "CS02074")]
     [InlineData("ORDER BY id RANGE 1.5 PRECEDING", "CS02075")]
     [InlineData("ORDER BY id RANGE CAST('1 day' AS INTERVAL) PRECEDING", "CS02075")]
@@ -175,7 +175,7 @@ public sealed class SqlWindowRangeGroupsTests
         rows.Select(r=>r[5]).ShouldBe(new object?[]{40,null,40,null,40});
         (await RowsAsync(session,"SELECT COUNT(*) OVER(ROWS 1 PRECEDING EXCLUDE GROUP),COUNT(*) OVER(ROWS 1 PRECEDING EXCLUDE TIES) FROM t ORDER BY id")).ShouldAllBe(row=>Equals(row[0],0L) && Equals(row[1],1L));
         foreach (string sql in new[]{"SELECT RANK() IGNORE NULLS OVER()", "SELECT SUM(id) RESPECT NULLS OVER() FROM t"})
-        { (await Should.ThrowAsync<DatabaseException>(()=>ExecuteAsync(session,sql))).Diagnostics.ShouldContain(d=>d.Code=="CS05087"); }
+        { (await Should.ThrowAsync<DatabaseException>(()=>ExecuteAsync(session,sql))).Diagnostics.ShouldContain(d=>d.Code=="CS05088"); }
         await ExecuteAsync(session,"CREATE TABLE f(id INT,k DOUBLE PRECISION)");
         await ExecuteAsync(session,"INSERT INTO f VALUES(1,CAST('-Infinity' AS DOUBLE)),(2,0),(3,CAST('Infinity' AS DOUBLE)),(4,CAST('NaN' AS DOUBLE)),(5,NULL)");
         (await RowsAsync(session,"SELECT COUNT(*) OVER(ORDER BY k NULLS LAST RANGE 0 PRECEDING) FROM f ORDER BY id")).Select(r=>r[0]).ShouldBe([1L,1L,1L,1L,1L]);

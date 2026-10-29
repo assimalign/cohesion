@@ -191,7 +191,7 @@ domains and incompatible offsets report CS02074 and CS02075. NULL offsets retain
 negative or NaN RANGE offsets report CS02076. Floating positive infinity is a valid offset.
 Offsets initialize once per execution, including across partitions, and empty inputs do not
 initialize them. GROUPS counts peer groups, accepts the ROWS integer-offset domain and
-requires ORDER BY (CS05086). Offset RANGE ordering arity reports CS05085.
+requires ORDER BY (CS05087). Offset RANGE ordering arity reports CS05086.
 
 Distance boundaries follow ordering direction, including DESC, explicit NULL placement and
 peer-inclusive zero offsets. A NULL current key's offset boundary is its NULL peer boundary;
@@ -216,7 +216,7 @@ The local PostgreSQL grammar implements IGNORE/RESPECT NULLS, so these clauses e
 LAG, LEAD, FIRST_VALUE, LAST_VALUE and NTH_VALUE. Omission means RESPECT NULLS; explicit
 RESPECT is retained in canonical SQL. IGNORE skips NULL argument values when counting
 navigation/frame members; offset zero still reads the current row. Incompatible functions
-report CS05087. FROM FIRST/LAST has no implementation in the local PostgreSQL grammar and
+report CS05088. FROM FIRST/LAST has no implementation in the local PostgreSQL grammar and
 retains its named CK00001 refusals. Value-function NULL skipping scans the selected members;
 it does not promise the moving-aggregate complexity bound.
 
@@ -294,9 +294,9 @@ executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL compari
 | CS02074 | Unsupported RANGE ordering-key domain (0A000) |
 | CS02075 | Incompatible RANGE offset domain (0A000) |
 | CS02076 | Negative or NaN RANGE offset (22013) |
-| CS05085 | Offset RANGE requires exactly one ordering key (42P20) |
-| CS05086 | GROUPS requires ORDER BY (42P20) |
-| CS05087 | NULL treatment on an incompatible function (42601) |
+| CS05086 | Offset RANGE requires exactly one ordering key (42P20) |
+| CS05087 | GROUPS requires ORDER BY (42P20) |
+| CS05088 | NULL treatment on an incompatible function (42601) |
 
 ## Owned identity sequences (#1717, SQ-S3)
 

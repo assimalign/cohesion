@@ -148,7 +148,7 @@ internal sealed partial class SqlPlanner
             string name = call.FunctionName.ToUpperInvariant();
             int count = call.Arguments.Count;
             if (window.NullTreatment != SqlWindowNullTreatment.Default && name is not ("LAG" or "LEAD" or "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE"))
-            { throw new SqlPlanningException("CS05087", ErrorMessages.WindowNullTreatment, window.Location); }
+            { throw new SqlPlanningException("CS05088", ErrorMessages.WindowNullTreatment, window.Location); }
             SqlGroupAggregate? aggregate = null;
             if (_functions.Catalog.IsAggregate(name)) { aggregate = BindWindowAggregate(call, scope); }
             else
@@ -279,9 +279,9 @@ internal sealed partial class SqlPlanner
         if (frame is null) { return null; }
         bool rangeOffset = frame.Mode == SqlWindowFrameMode.Range && (frame.Start.Offset is not null || frame.End.Offset is not null);
         if (rangeOffset && ordering.Count != 1)
-        { throw new SqlPlanningException("CS05085", ErrorMessages.WindowRangeOrdering); }
+        { throw new SqlPlanningException("CS05086", ErrorMessages.WindowRangeOrdering); }
         if (frame.Mode == SqlWindowFrameMode.Groups && ordering.Count == 0)
-        { throw new SqlPlanningException("CS05086", ErrorMessages.WindowGroupsOrdering); }
+        { throw new SqlPlanningException("CS05087", ErrorMessages.WindowGroupsOrdering); }
         var keyType = rangeOffset ? scope.StaticTypeOf(ordering[0].Expression) : DatabaseType.Null;
         if (rangeOffset && !SqlWindowRange.Supports(keyType))
         { throw new SqlPlanningException("CS02074", ErrorMessages.WindowRangeKeyType); }

@@ -271,9 +271,9 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
 | New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
 | New (#1526, SQ-W2 fixes) | CS05084 | Window frame recomputation exceeds 1,000,000 candidate input visits per statement (54000) |
-| New (#1526, SQ-W3) | CS05085 | Offset RANGE requires exactly one ORDER BY key (42P20) |
-| New (#1526, SQ-W3) | CS05086 | GROUPS requires ORDER BY (42P20) |
-| New (#1526, SQ-W3) | CS05087 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
+| New (#1526, SQ-W3) | CS05086 | Offset RANGE requires exactly one ORDER BY key (42P20) |
+| New (#1526, SQ-W3) | CS05087 | GROUPS requires ORDER BY (42P20) |
+| New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

@@ -29,12 +29,12 @@ public sealed class SqlWindowRangeWireTests
         var plan=await connection.QueryAsync("EXPLAIN ANALYZE SELECT AVG(v) OVER(ORDER BY id RANGE 1 PRECEDING EXCLUDE TIES) FROM t",cancellationToken:SqlClientTestHarness.Timeout(30));
         plan.ShouldContain(row=>Equals(row["operator"],"WindowAgg") && row["detail"]!.ToString()!.Contains("RANGE BETWEEN 1 PRECEDING AND CURRENT ROW EXCLUDE TIES",StringComparison.Ordinal) && row["detail"]!.ToString()!.Contains("inverse_transitions=",StringComparison.Ordinal));
         foreach(var (sql,code) in new[]{
-            ("SELECT SUM(v) OVER(RANGE 1 PRECEDING) FROM t","CS05085"),
-            ("SELECT SUM(v) OVER(GROUPS CURRENT ROW) FROM t","CS05086"),
+            ("SELECT SUM(v) OVER(RANGE 1 PRECEDING) FROM t","CS05086"),
+            ("SELECT SUM(v) OVER(GROUPS CURRENT ROW) FROM t","CS05087"),
             ("SELECT SUM(v) OVER(ORDER BY CAST(id AS TEXT) RANGE 1 PRECEDING) FROM t","CS02074"),
             ("SELECT SUM(v) OVER(ORDER BY id RANGE 1.5 PRECEDING) FROM t","CS02075"),
             ("SELECT SUM(v) OVER(ORDER BY id RANGE -1 PRECEDING) FROM t","CS02076"),
-            ("SELECT RANK() IGNORE NULLS OVER() FROM t","CS05087"),
+            ("SELECT RANK() IGNORE NULLS OVER() FROM t","CS05088"),
         })
         {
             var failure=await Should.ThrowAsync<SqlClientException>(async()=>await connection.QueryAsync(sql,cancellationToken:SqlClientTestHarness.Timeout(30)));
