@@ -131,9 +131,11 @@ public sealed class WebResourceOptions
         return this;
     }
 
+    // Read through AppEnvironment, so an application a gateway runs in its own process reads the
+    // values its scope holds, not the process's.
     private static Uri? ReadEndpoint(string variable)
     {
-        string? value = System.Environment.GetEnvironmentVariable(variable);
+        string? value = AppEnvironment.GetValue(variable);
 
         return string.IsNullOrWhiteSpace(value) ? null : new Uri(value, UriKind.Absolute);
     }

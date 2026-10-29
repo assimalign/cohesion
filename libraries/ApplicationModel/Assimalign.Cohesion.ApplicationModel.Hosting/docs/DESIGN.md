@@ -123,7 +123,10 @@ a Tier 2 or Tier 3 area that composes Web inside its own host must not stand up 
 plane, and an ambient registry let a nested Web builder discover the outer resource (the old code
 keyed the registry by entry assembly to stop it). Explicit creation makes "only the outer resource has a
 control plane" structural, and lets one process host several instances. *Cost:* the SDK and
-ApplicationModel chunk must attach an enabled executable's control plane without a registry.
+ApplicationModel chunk must attach an enabled executable's control plane without a registry. What
+an instance reads from its environment can be a scope of its own (Core's `AppEnvironmentScope`, which
+a gateway that runs it in process enters for it), but that is the environment, not a registry of
+control planes: this library still creates nothing ambiently.
 
 **D2 — The provider is a name on the resource, not an object.** The scaffold's `IResourceProvider`
 held one `IApplicationResourceInstance` and published it. In process, such a provider is one per instance, because its
@@ -207,7 +210,7 @@ and the client it returns is disposed afterward, the way an HTTP client factory'
 used. A factory such as `Assimalign.Cohesion.Http.ClientFactory` pools and rotates the handlers, so
 publications do not exhaust sockets. Without a callback, every publisher in the process shares one
 `SocketsHttpHandler`, whose connections are recycled every two minutes. Another transport derives
-from `ApplicationInstancePublisher`.
+from `ApplicationInstancePublisher`; `Create` picks the in-process one by its scheme (D17).
 
 **D14 — Registrations are leases (owner decision, 2026-10-28).** Instances published once and sent
 nothing after, so a gateway could not tell a dead instance from a live one, least of all after its
@@ -254,6 +257,18 @@ base, and the namespace is `Assimalign.Cohesion.ApplicationModel.Hosting`. The i
 therefore loads neither the builder nor the validated model, and the gateway loads none of this
 library. `ApplicationActionResult.WithState` became public on the way, because the control plane that
 attaches a write's snapshot now lives in a different assembly from the result.
+
+**D17 — The endpoint's scheme picks the transport; one is inside the process (2026-10-29).** The
+owner kept `IApplicationInstancePublisher` as one seam so a platform can bring its own transport.
+`ApplicationInstancePublisher.Create` now chooses by the endpoint's scheme: `http` and `https` get the
+HTTP publisher, and `inprocess` gets one that publishes to whatever is registered for the endpoint
+(`ApplicationInstancePublisher.Register`) when each call is made. A gateway that runs its resources in
+its own process registers its transport there and names the endpoint in each program's
+`ManifestEndpoint`, so a program's code is the same on every platform: it publishes to the endpoint its
+environment names. The registry is process-wide, as the names of named pipes are machine-wide; a
+registration is removed only by its own handle. A call made while nothing is registered fails, as one
+to an HTTP endpoint that nothing listens on does. *Rejected:* an ambient publisher the program would
+pick up (D1 forbids it here), and handing the program the gateway object (Gateway.InProcess I5).
 
 ## Concurrency
 

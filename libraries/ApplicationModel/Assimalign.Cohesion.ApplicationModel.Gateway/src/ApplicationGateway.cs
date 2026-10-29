@@ -46,8 +46,10 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// renewing is unregistered once it lapses. After startup every registered instance, the adopted
 /// ones included, has one full lease to renew, so an instance that died while the gateway was down
 /// leaves within one lease. The gateway is transport-neutral: a transport hands each publication to
-/// <see cref="PublishAsync"/>, and an in-process resource can publish to the gateway directly,
-/// because it is an <see cref="IApplicationInstancePublisher"/>.
+/// <see cref="PublishAsync"/> and each renewal to <see cref="RenewAsync"/>, as the
+/// <see cref="IApplicationInstancePublisher"/> it is. The transports the gateway was built with
+/// (<see cref="ApplicationBuilder.UseTransport"/>) start once <see cref="RunAsync"/> has loaded the
+/// record, before anything is joined or deployed, and stop when the run ends.
 /// </para>
 /// <para>
 /// A child gateway joins through <see cref="JoinAsync"/>, which this gateway implements as an
@@ -71,6 +73,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private readonly IInfrastructureProvider _infrastructure;
     private readonly IApplicationGatewayStore _store;
     private readonly IApplicationParentGateway? _parent;
+    private readonly IApplicationGatewayTransport[] _transports;
     private readonly SemaphoreSlim _saves = new(1, 1);
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Dictionary<GatewayName, (ApplicationManifest Manifest, long Renewed)> _children = [];
@@ -86,6 +89,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         IInfrastructureProvider infrastructure,
         IApplicationGatewayStore store,
         IApplicationParentGateway? parent,
+        IApplicationGatewayTransport[] transports,
         TimeSpan startupTimeout,
         TimeSpan leaseDuration)
     {
@@ -93,6 +97,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         _infrastructure = infrastructure;
         _store = store;
         _parent = parent;
+        _transports = transports;
         StartupTimeout = startupTimeout;
         LeaseDuration = leaseDuration;
     }
@@ -188,6 +193,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             throw new InvalidOperationException(ErrorMessages.ApplicationGatewayAlreadyRun);
         }
 
+        int transportsStarted = 0;
+        bool failed = false;
         try
         {
             IApplicationModel model = _model;
@@ -195,6 +202,14 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
             ApplicationGatewayRecord? record = await _store.LoadAsync(model.Name, cancellationToken).ConfigureAwait(false);
             CreateResources(model, record, steps);
+
+            // The gateway receives publications from here, so its transports start before it joins
+            // its parent or deploys: an instance the previous run left can publish meanwhile.
+            foreach (IApplicationGatewayTransport transport in _transports)
+            {
+                await transport.StartAsync(this, cancellationToken).ConfigureAwait(false);
+                transportsStarted++;
+            }
 
             // A child fills its settings in from its parent's outputs, so it joins before anything
             // deploys; its restarted instances can publish meanwhile.
@@ -232,12 +247,38 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         catch (Exception exception)
         {
             // Every other failure ends the run; Started reports it before the caller sees it.
+            failed = true;
             _started.TrySetException(exception);
             throw;
         }
         finally
         {
             Volatile.Write(ref _lifecycle, stopped);
+            await StopTransportsAsync(transportsStarted, failed).ConfigureAwait(false);
+        }
+    }
+
+    // Stops the transports that started, last first. One that fails to stop does not keep the others
+    // running. Its failure is the run's unless the run already failed, whose own failure it would hide.
+    private async Task StopTransportsAsync(int started, bool failed)
+    {
+        List<Exception>? failures = null;
+        for (int i = started - 1; i >= 0; i--)
+        {
+            try
+            {
+                await _transports[i].StopAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                // Deliberately broad: each transport fails to stop in its own terms.
+                (failures ??= []).Add(exception);
+            }
+        }
+
+        if (failures is not null && !failed)
+        {
+            throw failures.Count == 1 ? failures[0] : new AggregateException(failures);
         }
     }
 

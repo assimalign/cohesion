@@ -237,6 +237,37 @@ public class HostRunTests
         Should.NotThrow(registration.Dispose);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "Shutdown signal: A run inside a scope drains on the scope's shutdown")]
+    public async Task RunAsync_InAppEnvironmentScope_DrainsOnTheScopesShutdown()
+    {
+        // Arrange: the host's default signals, so the run registers through the scope.
+        using var shutdown = new CancellationTokenSource();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new DelegateHostService(_ =>
+        {
+            started.TrySetResult();
+            return Task.CompletedTask;
+        }));
+        var host = new TestHost(options);
+        using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(new Dictionary<string, string>(), shutdown.Token);
+
+        // Act
+        Task run;
+        using (AppEnvironment.Enter(scope))
+        {
+            run = host.RunAsync(timeoutSource.Token);
+        }
+
+        await started.Task.WaitAsync(timeoutSource.Token);
+        await shutdown.CancelAsync();
+        await run.WaitAsync(timeoutSource.Token);
+
+        // Assert
+        host.Context.State.ShouldBe(HostState.Stopped);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Shutdown signal: A signal after its run ended is ignored")]
     public void RequestShutdown_AfterRunEnded_DoesNotThrow()
     {

@@ -289,10 +289,11 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     }
 
     // An entry-point application (CreateBuilder(args)) that configured no listener and registered
-    // no custom server serves the Http:Endpoints section, or the loopback development endpoint when
-    // that section is empty, so `dotnet run` answers instead of running without a listener.
-    // Explicit compositions (CreateBuilder(options), a UseServer/UseConfiguration call, a custom
-    // server) are left exactly as composed.
+    // no custom server serves the Http:Endpoints section, or, when that section is empty, the http
+    // endpoint its platform assigned it in the runtime contract (an in-process gateway assigns each
+    // resource its own port), else the loopback development endpoint, so `dotnet run` answers
+    // instead of running without a listener. Explicit compositions (CreateBuilder(options), a
+    // UseServer/UseConfiguration call, a custom server) are left exactly as composed.
     private void ApplyDefaultEndpoints()
     {
         if (!_isEntryPoint || Server.HasListenerConfiguration)
@@ -315,7 +316,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             return;
         }
 
-        Server.UseDefaultEndpoints(Configuration, DevelopmentEndPoint);
+        Server.UseDefaultEndpoints(Configuration, HttpServerConfiguration.GetPlatformEndPoint() ?? DevelopmentEndPoint);
     }
 
     // Owner decision 35 (#1380): a request feature is an IHttpFeature singleton. The pipeline stamps

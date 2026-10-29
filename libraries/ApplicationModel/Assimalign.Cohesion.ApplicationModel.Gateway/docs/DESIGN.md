@@ -37,7 +37,8 @@ flowchart LR
 
 `RunAsync` orders the gateway's resources (G17), loads its record from its
 `IApplicationGatewayStore`, creates one aggregate per resource as the previous run left it (G23),
-and opens publications and joins. A gateway whose model names a parent then joins it, and waits
+and opens publications and joins, starting the transports its instances publish through (G33). A
+gateway whose model names a parent then joins it, and waits
 within the startup window until the parent reports every output of its resources that the
 gateway's settings use (G26). It then deploys in dependency order: each resource is a step that runs
 once the steps it waits for are ready, and independent steps run at the same time. A resource's step
@@ -60,7 +61,7 @@ sequenceDiagram
     Caller->>GW: RunAsync()
     GW->>GW: order the resources
     GW->>Store: LoadAsync(gateway)
-    GW->>GW: seed aggregates from the record, open publications and joins
+    GW->>GW: seed aggregates from the record, open publications and joins, start the transports
     opt the model names a parent
         GW->>Parent: JoinAsync(manifest), again until every output it uses is reported
         Parent-->>GW: the outputs' values, and a lease
@@ -407,12 +408,27 @@ control plane uses (`NotFound`, `NotSupported`, `Rejected` for input that does n
 actions without referencing a gateway package; it moved here once the definitions held only
 definitions.
 
+**G33 — Transports carry publications to the gateway (2026-10-29).** A gateway takes each
+publication and renewal through `IApplicationInstancePublisher`, which it implements. How they
+reach it from where the instances run is a transport's job: `IApplicationGatewayTransport`, added
+with `ApplicationBuilder.UseTransport`, any number per gateway. `RunAsync` starts each one once it
+has loaded the record and created the resources, before it joins its parent or deploys, so an
+instance the previous run left can publish again. It stops them, last first, when the run ends. A
+transport that cannot start fails the run before anything is joined or deployed. A transport that
+fails to stop fails the run, unless the run failed already: its own failure is the one reported.
+The first transport is in process: Gateway.InProcess's infrastructure is also the channel its
+programs publish through. An HTTP manifest endpoint will be another (G9). *Rejected:* passing the
+gateway to the provider on each call (`DeployResourceAsync(gateway, …)`). It would tie how
+instances reach the gateway to the platform that starts them, which differs on every platform but
+in-process.
+
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
 today. The options are: serve HTTP from this library tier with `Http.Connections`, as the retired
 gateway did; move the endpoint contracts into ApplicationModel and bind them in `Web.ApplicationModel`;
 or relax one of the guards. That choice is open, so this chunk stops at transport-neutral logic.
-Joins have no transport either: a child joins a parent in the same process directly (G26).
+Whichever it is, the endpoint ships as a transport (G33). Joins have no transport either: a child
+joins a parent in the same process directly (G26).
 
 ## AOT
 
@@ -426,7 +442,8 @@ candidates for an event source.
 
 ## Open questions
 
-1. **HTTP binding** (G9): which of the three options, for publications and for joins.
+1. **HTTP binding** (G9): which of the three options, for publications and for joins. Publications
+   arrive through a transport (G33) either way.
 2. **Instance liveness.** Resolved by leases (G15). A lease only bounds how long a dead instance stays
    registered; asking the platform which instances run would detect a death sooner.
 3. **Startup failure scope.** Only missed new resources are torn down (G13). Should a failed startup

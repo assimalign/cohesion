@@ -35,6 +35,7 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
     private static readonly TimeSpan _defaultLeaseDuration = TimeSpan.FromSeconds(30);
 
     private readonly IApplicationModelBuilder _model;
+    private readonly List<IApplicationGatewayTransport> _transports = [];
     private IInfrastructureProvider? _infrastructure;
     private IApplicationGatewayStore? _store;
     private IApplicationParentGateway? _parent;
@@ -134,6 +135,29 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
     }
 
     /// <summary>
+    /// Adds a transport the gateway's instances reach it through. A gateway may have several, and
+    /// it starts each when it runs.
+    /// </summary>
+    /// <param name="transport">The transport.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="transport"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The transport is already added.</exception>
+    /// <exception cref="InvalidOperationException">The gateway is built.</exception>
+    public ApplicationBuilder UseTransport(IApplicationGatewayTransport transport)
+    {
+        ArgumentNullException.ThrowIfNull(transport);
+        ThrowIfBuilt();
+
+        if (_transports.Contains(transport))
+        {
+            throw new ArgumentException(ErrorMessages.GatewayTransportDuplicate, nameof(transport));
+        }
+
+        _transports.Add(transport);
+        return this;
+    }
+
+    /// <summary>
     /// Sets where the gateway keeps its record, so a restarted gateway reconciles against it; the
     /// record stays in memory unless set.
     /// </summary>
@@ -179,7 +203,7 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
 
         IApplicationModel model = _built ?? BuildModel();
         _isBuilt = true;
-        return new ApplicationGateway(model, _infrastructure, _store ?? new InMemoryApplicationGatewayStore(), _parent, _startupTimeout, _leaseDuration);
+        return new ApplicationGateway(model, _infrastructure, _store ?? new InMemoryApplicationGatewayStore(), _parent, [.. _transports], _startupTimeout, _leaseDuration);
     }
 
     IApplicationParent IApplicationModelBuilder.UseParent(GatewayName name)
@@ -196,6 +220,11 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
     IApplicationGatewayBuilder IApplicationGatewayBuilder.UseInfrastructure(IInfrastructureProvider infrastructure)
     {
         return UseInfrastructure(infrastructure);
+    }
+
+    IApplicationGatewayBuilder IApplicationGatewayBuilder.UseTransport(IApplicationGatewayTransport transport)
+    {
+        return UseTransport(transport);
     }
 
     IApplicationGatewayBuilder IApplicationGatewayBuilder.UseStore(IApplicationGatewayStore store)

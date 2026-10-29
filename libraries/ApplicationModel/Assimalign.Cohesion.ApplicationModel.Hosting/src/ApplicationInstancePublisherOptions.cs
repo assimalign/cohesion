@@ -4,13 +4,14 @@ using System.Net.Http;
 namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 
 /// <summary>
-/// Configures the HTTP manifest publisher that <see cref="ApplicationInstancePublisher.Create"/> creates.
+/// Configures the manifest publisher that <see cref="ApplicationInstancePublisher.Create"/> creates.
 /// </summary>
 public sealed class ApplicationInstancePublisherOptions
 {
     /// <summary>
-    /// Gets or sets the absolute <c>http</c> or <c>https</c> URL the gateway receives manifests on.
-    /// Required.
+    /// Gets or sets the absolute URL the gateway receives manifests on: <c>http</c> or <c>https</c>,
+    /// or <see cref="ApplicationInstancePublisher.InProcessScheme"/> for a gateway in the instance's
+    /// own process. Required.
     /// </summary>
     /// <remarks>
     /// A gateway that provisions the instance names it in the

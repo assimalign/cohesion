@@ -1,28 +1,15 @@
 # ApplicationModel.Gateway.InProcess
 
-`Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` is the opt-in gateway that realizes a
-Cohesion application inside one process. It invokes each enabled, composable member's registered
-executable entry point under an isolated ambient `ResourceContext`, adopts the `IHost` built by
-that member, and preserves the normal plan-driven ordering, readiness, liveness, and teardown
-contracts.
+Runs a gateway's resources inside the gateway's own process. `InProcessInfrastructure` is the
+`inprocess` infrastructure provider and the in-process transport the programs publish through:
+`builder.UseInProcess(infrastructure)` sets both on an `ApplicationBuilder`.
 
-Select the gateway with `--gateway inprocess`. A gateway project that hosts members in process must
-also set:
+Bind each resource to its program's entry point with `AddProgram(provider, name, main)`. Deploying
+the resource runs the entry point on a background thread in an `AppEnvironmentScope`. The scope
+names the gateway, the in-process manifest endpoint, loopback ports for the program's `http`
+endpoint and control plane, and every setting as a configuration variable. The program's host
+stops on the scope's shutdown, which disposing the infrastructure signals, the last deployed program
+first.
 
-```xml
-<CohesionGatewayInProcess>true</CohesionGatewayInProcess>
-```
-
-That property is the sanctioned Composite boundary. It makes project-referenced members real
-runtime references and permits the area runtime assemblies required by those members. Every
-nested member must have `CohesionApplicationModel=enabled`, must be project-referenced, and must
-publish `artifact.composable=true`; disabled executables, manifest-package references, images,
-and non-composable kinds remain out-of-process only.
-
-The package depends on `Assimalign.Cohesion.ApplicationModel.Gateway`, plain
-`Assimalign.Cohesion.Hosting`, and `Assimalign.Cohesion.Hosting.Resources`. It does not reference
-an area runtime. Resource-area implementations remain unaware of orchestration; their generated
-registration and ordinary `Program.Main` form the bridge.
-
-See [docs/OVERVIEW.md](docs/OVERVIEW.md) for the project guide and
-[docs/DESIGN.md](docs/DESIGN.md) for lifecycle, isolation, remapping, and NativeAOT invariants.
+See [docs/OVERVIEW.md](docs/OVERVIEW.md) for usage and [docs/DESIGN.md](docs/DESIGN.md) for the
+decisions and open questions.

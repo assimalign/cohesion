@@ -851,6 +851,29 @@ internal static class HttpServerConfiguration
                 || protocol.Equals("h3", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Gets the address the application's platform assigned it: the runtime contract's <c>http</c>
+    /// endpoint (<see cref="AppEnvironment.TryGetEndpoint(string, out Uri?)"/>), when it is a plain
+    /// <c>http</c> one.
+    /// </summary>
+    /// <remarks>
+    /// A platform that shares the machine's ports among its resources, such as a gateway that runs
+    /// them in its own process, assigns each its port this way. An <c>https</c> endpoint needs a
+    /// certificate, which the application configures itself, so it is not bound here.
+    /// </remarks>
+    /// <returns>The endpoint, or <see langword="null"/> when the platform assigned none.</returns>
+    /// <exception cref="InvalidOperationException">The endpoint's host is neither an IP address nor <c>localhost</c>.</exception>
+    public static IPEndPoint? GetPlatformEndPoint()
+    {
+        if (!AppEnvironment.TryGetEndpoint("http", out Uri? address)
+            || !string.Equals(address.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return new IPEndPoint(ResolveHost(address.IdnHost), address.Port);
+    }
+
     private static IPAddress ResolveHost(string? host)
     {
         if (string.IsNullOrEmpty(host) || host.Equals("localhost", StringComparison.OrdinalIgnoreCase))

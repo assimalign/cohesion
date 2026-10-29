@@ -29,8 +29,9 @@ public static class WebResourceExtensions
         /// </para>
         /// <para>
         /// When the resource has a manifest endpoint (by default the
-        /// <see cref="AppEnvironment.Variables.ManifestEndpoint"/> variable its gateway sets), the
-        /// instance is managed. Before any of the application's services or servers start, it
+        /// <see cref="AppEnvironment.Variables.ManifestEndpoint"/> variable its gateway sets, read
+        /// through <see cref="AppEnvironment"/> so a gateway that runs the application in its own
+        /// process can set it for this application alone), the instance is managed. Before any of the application's services or servers start, it
         /// publishes its manifest and restores the state the gateway answers with; it then serves its
         /// control plane on <see cref="WebResourceOptions.ControlPlaneEndpoint"/>, ahead of the
         /// application's servers and until they have drained. A publication the gateway refuses or
@@ -46,8 +47,8 @@ public static class WebResourceExtensions
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException">
         /// <paramref name="name"/> is <see langword="default"/>; the manifest endpoint is not an
-        /// absolute http or https URL; or the control-plane endpoint is not an absolute http URL whose
-        /// host is an IP address or localhost.
+        /// absolute http, https, or inprocess URL; or the control-plane endpoint is not an absolute
+        /// http URL whose host is an IP address or localhost.
         /// </exception>
         /// <exception cref="InvalidOperationException">The resource has a manifest endpoint but no control-plane endpoint.</exception>
         public WebApplicationBuilder AddResource(ResourceName name, Action<WebResourceOptions>? configure = null)

@@ -22,7 +22,10 @@
   <data name="ApplicationInstancePublicationSnapshotNull" xml:space="preserve"><value>The manifest publisher returned a null snapshot.</value></data>
   <data name="ApplicationInstancePublicationSnapshotDuplicate" xml:space="preserve"><value>The manifest publisher returned more than one snapshot for action '{0}'.</value></data>
   <data name="ResourceStateRestoreFailed" xml:space="preserve"><value>The snapshot the manifest publisher returned for action '{0}' was not restored ({1}). {2}</value></data>
-  <data name="ManifestEndpointInvalid" xml:space="preserve"><value>A manifest endpoint is an absolute http or https URL.</value></data>
+  <data name="ManifestEndpointInvalid" xml:space="preserve"><value>A manifest endpoint is an absolute http, https, or inprocess URL.</value></data>
+  <data name="InProcessEndpointInvalid" xml:space="preserve"><value>An in-process endpoint is an absolute inprocess URL, such as inprocess://local/.</value></data>
+  <data name="InProcessEndpointRegistered" xml:space="preserve"><value>The in-process endpoint '{0}' is already registered.</value></data>
+  <data name="InProcessEndpointUnknown" xml:space="preserve"><value>No gateway receives publications at the in-process endpoint '{0}'.</value></data>
   <data name="ManifestPublicationRefused" xml:space="preserve"><value>The gateway at '{0}' refused the resource manifest with HTTP status {1}.</value></data>
   <data name="ManifestRenewalRefused" xml:space="preserve"><value>The gateway at '{0}' refused the instance's renewal with HTTP status {1}.</value></data>
   <data name="ManifestHttpClientNull" xml:space="preserve"><value>The HTTP client factory returned null instead of a client.</value></data>

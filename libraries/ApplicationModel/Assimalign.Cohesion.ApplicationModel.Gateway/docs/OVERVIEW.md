@@ -11,7 +11,8 @@ record is [DESIGN.md](DESIGN.md).
 ## Scope
 
 - In scope: `ApplicationGateway` and its `ApplicationBuilder`; the `IApplicationGateway`,
-  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, and `IInfrastructureProvider` seams; the
+  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, `IApplicationGatewayTransport`, and
+  `IInfrastructureProvider` seams; the
   deployment of a resource (`IApplicationResourceDeployment`, `ApplicationResourceDeployment`,
   `IApplicationResourceAction`); the `IApplicationGatewayStore` record with its JSON file store; and
   `ApplicationGatewayException`.
@@ -52,6 +53,9 @@ ApplicationGateway east = builder.UseInfrastructure(infrastructure).Build();
 await east.RunAsync(cancellationToken);
 ```
 
-A transport hands each publication to `gateway.PublishAsync(manifest)` and returns its snapshots,
-and each join to `gateway.JoinAsync(manifest)`; in the same process, a resource uses the gateway as
-its `IApplicationInstancePublisher` and a child uses it as its `IApplicationParentGateway`.
+A transport (`builder.UseTransport(transport)`) hands each publication to
+`gateway.PublishAsync(manifest)` and returns its snapshots; the gateway starts its transports when it
+runs and stops them when the run ends. A child gateway in the same process joins through
+`gateway.JoinAsync(manifest)`, using the gateway as its `IApplicationParentGateway`. To run every
+resource inside the gateway program's own process, use Gateway.InProcess:
+`builder.UseInProcess(infrastructure)` sets its infrastructure, which is also its transport.

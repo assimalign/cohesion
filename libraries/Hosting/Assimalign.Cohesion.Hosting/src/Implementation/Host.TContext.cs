@@ -443,6 +443,11 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// <see cref="HostOptions{TContext}.ShutdownTimeout"/> and this method returns. A host started
     /// with <c>StartAsync</c>, such as one nested in another host's services, handles no signals.
     /// </para>
+    /// <para>
+    /// A run inside an <see cref="AppEnvironmentScope"/> shares its process with other programs, so
+    /// it stops on the scope's <see cref="AppEnvironmentScope.Shutdown"/> instead of the process's
+    /// signals, which belong to the host of programs that entered the scope.
+    /// </para>
     /// </remarks>
     public Task RunAsync(CancellationToken cancellationToken = default)
     {

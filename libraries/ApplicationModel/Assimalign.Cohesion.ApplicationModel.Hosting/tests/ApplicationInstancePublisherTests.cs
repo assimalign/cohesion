@@ -232,6 +232,58 @@ public class ApplicationInstancePublisherTests
         Should.Throw<ArgumentException>(() => ApplicationInstancePublisher.Create(options));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "An in-process endpoint publishes to the publisher registered for it")]
+    public async Task PublishAsync_WithInProcessEndpoint_ShouldPublishToTheRegisteredPublisher()
+    {
+        // Arrange
+        var endpoint = new Uri($"inprocess://{Guid.NewGuid():N}/");
+        var gateway = new TestPublisher { Lease = TimeSpan.FromSeconds(30) };
+        using IDisposable registration = ApplicationInstancePublisher.Register(endpoint, gateway);
+        ApplicationInstancePublisher publisher = ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions { Endpoint = endpoint });
+        ApplicationInstanceManifest manifest = CreateManifest(new LogLevelAction());
+
+        // Act
+        ApplicationInstancePublication publication = await publisher.PublishAsync(manifest);
+        bool renewed = await publisher.RenewAsync(manifest);
+
+        // Assert
+        gateway.Published.ShouldHaveSingleItem().ShouldBeSameAs(manifest);
+        publication.Lease.ShouldBe(TimeSpan.FromSeconds(30));
+        renewed.ShouldBeTrue();
+        gateway.Renewals.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An in-process endpoint nothing is registered for refuses the publication")]
+    public async Task PublishAsync_WithUnregisteredInProcessEndpoint_ShouldThrow()
+    {
+        // Arrange
+        var endpoint = new Uri($"inprocess://{Guid.NewGuid():N}/");
+        IDisposable registration = ApplicationInstancePublisher.Register(endpoint, new TestPublisher());
+        ApplicationInstancePublisher publisher = ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions { Endpoint = endpoint });
+        registration.Dispose();
+
+        // Act & Assert
+        await Should.ThrowAsync<InvalidOperationException>(() => publisher.PublishAsync(CreateManifest()).AsTask());
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An in-process endpoint is registered once at a time")]
+    public void Register_WithRegisteredEndpoint_ShouldThrow()
+    {
+        // Arrange
+        var endpoint = new Uri($"inprocess://{Guid.NewGuid():N}/");
+        using IDisposable registration = ApplicationInstancePublisher.Register(endpoint, new TestPublisher());
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => ApplicationInstancePublisher.Register(endpoint, new TestPublisher()));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Only an in-process URL can be registered")]
+    public void Register_WithHttpEndpoint_ShouldThrow()
+    {
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => ApplicationInstancePublisher.Register(_endpoint, new TestPublisher()));
+    }
+
     private static ApplicationInstancePublisher CreatePublisher(HttpMessageHandler handler)
     {
         return ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions

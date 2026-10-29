@@ -112,10 +112,17 @@ requests the run's shutdown instead by cancelling a token linked to the caller's
 takes the caller's cancellation path: before the host has started it cancels the start, and
 afterward it drains the host within `ShutdownTimeout`. `RunAsync` then returns, and the process
 exits when its entry point does. A platform that delivers no such signal, such as a browser,
-registers none, and a host started with `StartAsync` registers none: a nested host, a test host, and
-an in-process gateway's instances never compete with the outer run for them. Each run registers
-afresh and removes its handlers when it ends. `ShutdownTimeout` should stay below the platform's
-grace period between SIGTERM and SIGKILL (30 seconds by default on Kubernetes).
+registers none, and a host started with `StartAsync` registers none: a nested host and a test host
+never compete with the outer run for them. Each run registers afresh and removes its handlers when it
+ends. `ShutdownTimeout` should stay below the platform's grace period between SIGTERM and SIGKILL
+(30 seconds by default on Kubernetes).
+
+A run inside an `AppEnvironmentScope` (Core, 2026-10-29) shares its process with other programs,
+as each resource of an in-process gateway does, and calls `RunAsync` from its own `Main`. The
+process's signals are not its own there: it registers on the scope's `Shutdown` token instead, which
+the host of programs cancels to stop it, and registers no process signal. So a gateway program keeps
+SIGTERM for itself and stops its programs in the order it chooses, and a program's `Program.cs` needs
+no change to run in process.
 
 Before this (2026-10-28), nothing in Hosting handled a signal. SIGTERM, which Kubernetes and Docker
 send to stop a container, ended the process without stopping the host and cut off in-flight work;

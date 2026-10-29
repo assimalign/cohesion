@@ -13,9 +13,12 @@ place on 2026-09-26 (R9 in the [developer-experience design](DEVELOPER_EXPERIENC
 variable name, value, or wire behavior changed.
 
 Out-of-process resources receive values through process environment variables. In-process
-resources receive the same keys through the ambient resource context introduced by runtime
-contract item 12. A standalone process with no gateway has `COHESION_GATEWAY` unset and resolves
-its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`.
+resources receive the same keys through an ambient context: the `AppEnvironmentScope` (Core) the
+in-process gateway enters on the thread it runs each resource's program on (2026-10-29). Inside it,
+`AppEnvironment` reads the scope's values, a contract variable the scope does not set reads as unset,
+and a host run stops on the scope's shutdown signal instead of the process's. A standalone process
+with no gateway has `COHESION_GATEWAY` unset and resolves its environment name as
+`COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`.
 
 ## Variable contract
 
@@ -44,8 +47,8 @@ its environment name as `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Producti
 | `COHESION_TELEMETRY_PROTOCOL` | `otlp-grpc` or `otlp-http` | Optional; otlp-http is implemented as OTLP/HTTP JSON; otlp-grpc remains contract-valid but this build refuses it | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_TELEMETRY_HEADERS_PATH` | Path to an OTLP headers file | Optional and reserved in v1 when collector headers are required | Local: protected file path; In-process: ambient context; Docker: tmpfs file; Kubernetes: Secret volume |
 | `COHESION_LOG_FORMAT` | `json`; unset means ordinary stdout/stderr text | Optional and reserved in v1 | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
-| `COHESION_MANIFEST_ENDPOINT` | Absolute `http` or `https` URL the instance POSTs its resource manifest to | Set by the gateway that provisions the instance; unset means the instance is not managed | Local/Docker: environment; Kubernetes: ConfigMap |
-| `COHESION_CONTROL_PLANE_ENDPOINT` | Absolute `http` URL the instance serves its control plane on | Set with `COHESION_MANIFEST_ENDPOINT` | Local/Docker: environment; Kubernetes: ConfigMap |
+| `COHESION_MANIFEST_ENDPOINT` | Absolute `http` or `https` URL the instance POSTs its resource manifest to, or an `inprocess` URL of a gateway in the instance's own process | Set by the gateway that provisions the instance; unset means the instance is not managed | Local/Docker: environment; In-process: ambient context, an `inprocess://` endpoint; Kubernetes: ConfigMap |
+| `COHESION_CONTROL_PLANE_ENDPOINT` | Absolute `http` URL the instance serves its control plane on | Set with `COHESION_MANIFEST_ENDPOINT` | Local/Docker: environment; In-process: ambient context, a loopback port; Kubernetes: ConfigMap |
 
 ## Name construction
 

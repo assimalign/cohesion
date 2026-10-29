@@ -33,7 +33,7 @@ not an edge.
 | Shipped library/resource projects | 238 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 716 |
+| Declared project references | 714 |
 | Declared shared-source links | 64 |
 
 ## Ambiguous project names
@@ -171,7 +171,6 @@ flowchart LR
     N3 --> N1
     N3 --> N2
     N3 --> N5
-    N4 --> N1
     N4 --> N2
     N4 --> N5
     N5 --> N0
@@ -183,7 +182,7 @@ flowchart LR
 | `Assimalign.Cohesion.ApplicationModel.Definition` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.ApplicationModel.Gateway` | `Assimalign.Cohesion.ApplicationModel.Definition` | — | — | — |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Gateway`<br>`Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | — | — | — |
-| `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Gateway`<br>`Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.Hosting` | — | — | — |
+| `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | `Assimalign.Cohesion.ApplicationModel.Gateway`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.ApplicationModel.Hosting` | `Assimalign.Cohesion.ApplicationModel`<br>`Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Hosting` | — | — | — |
 
 ### `libraries/Cache`
@@ -1052,10 +1051,10 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Web.Hosting` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.Web.Routing` | 37 | Assimalign.Cohesion.IntegrationCheck, Assimalign.Cohesion.SourceGeneration.Web.Tests, Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Antiforgery.Tests, … |
 | `Assimalign.Cohesion.Http.Connections` | 33 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.Connections.NamedPipes.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, … |
-| `Assimalign.Cohesion.ApplicationModel.Definition` | 31 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Definition.Tests, Assimalign.Cohesion.ApplicationModel.Gateway, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
-| `Assimalign.Cohesion.Hosting` | 31 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, Assimalign.Cohesion.ApplicationModel.Hosting, … |
 | `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | 31 | Assimalign.Cohesion.ApiManager.Hosting.Tests, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting, … |
+| `Assimalign.Cohesion.ApplicationModel.Definition` | 30 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Definition.Tests, Assimalign.Cohesion.ApplicationModel.Gateway, Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane, … |
 | `Assimalign.Cohesion.Connections.InMemory` | 30 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, Assimalign.Cohesion.Connections.Tests, … |
+| `Assimalign.Cohesion.Hosting` | 30 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, Assimalign.Cohesion.ApplicationModel.Hosting, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, … |
 | `Assimalign.Cohesion.Http.Streaming` | 25 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, Assimalign.Cohesion.Http.ServerSentEvents.Tests, … |
 | `Assimalign.Cohesion.Web.Testing` | 25 | Assimalign.Cohesion.Web.Antiforgery.Tests, Assimalign.Cohesion.Web.Api.Tests, Assimalign.Cohesion.Web.Authentication.Bearer.Tests, Assimalign.Cohesion.Web.Authentication.Cookie.Tests, … |
 | `Assimalign.Cohesion.DependencyInjection` | 23 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.DependencyInjection.Tests, … |

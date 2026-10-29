@@ -864,6 +864,12 @@ control plane — that configured no listener of its own gets one when it is bui
 
 - the endpoints under `Http:Endpoints`, bound exactly as `UseConfiguration` binds them, from every
   configuration source the entry point composes (appsettings, `COHESION_CONFIG__*`, command line);
+- otherwise HTTP/1.1 on the **platform's endpoint**: the runtime contract's `http` endpoint
+  (`COHESION_ENDPOINT_HTTP_HOST`, `_PORT`, and `_SCHEME` `http`), when the application's platform
+  assigned one. A gateway that runs its resources in its own process does, because its resources share
+  the machine's ports; inside the program's scope Core's `AppEnvironment` reads the values
+  (2026-10-29). An `https` endpoint needs a certificate the application configures itself, so it is
+  not bound here;
 - otherwise HTTP/1.1 on the **development endpoint**, `127.0.0.1:5000` (loopback only, so an
   unconfigured application is never exposed beyond the machine), with any configured `Http:Limits`.
 

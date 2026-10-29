@@ -32,7 +32,10 @@ public static partial class HostExtensions
         /// by a graceful stop with fresh lifecycle tokens. Startup failures still propagate.
         /// While the run is active, the process's shutdown signals (SIGINT, SIGQUIT and SIGTERM)
         /// request a graceful shutdown instead of ending the process, as cancelling
-        /// <paramref name="cancellationToken"/> does.
+        /// <paramref name="cancellationToken"/> does. A run inside an <see cref="AppEnvironmentScope"/>
+        /// shares its process with other programs: it stops on the scope's
+        /// <see cref="AppEnvironmentScope.Shutdown"/> instead, and the process's signals are left to
+        /// the host of programs that entered the scope.
         /// </remarks>
         public Task RunAsync(CancellationToken cancellationToken = default)
         {

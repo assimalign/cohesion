@@ -1,49 +1,37 @@
-# Gateway.InProcess overview
+# Assimalign.Cohesion.ApplicationModel.Gateway.InProcess — Overview
 
-`Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` realizes enabled, composable Cohesion
-resources as independently owned hosts inside one gateway process. It preserves the ordinary
-application model, plan validation, dependency gate, resource control planes, and observed-state
-contract while replacing operating-system child processes with ambient entry-point invocations.
+`Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` runs a gateway's resources inside the
+gateway's own process. Its `InProcessInfrastructure` is an infrastructure provider (the `inprocess`
+platform) and the transport its programs publish through. Each resource is a program the gateway
+program references. Deploying a resource calls the program's entry point on a thread of its own, in
+an environment of its own.
 
-The package depends only on `ApplicationModel`, `ApplicationModel.Gateway`, plain `Hosting`, and
-`Hosting.Resources`. It does not reference a resource area's `*.Hosting` package; the consuming
-Composite obtains those runtimes through enabled project references when
-`CohesionGatewayInProcess=true`.
+```csharp
+await using var infrastructure = new InProcessInfrastructure();
+infrastructure
+    .AddProgram("Web", "orders-api", Orders.Program.MainAsync)
+    .AddProgram("Web", "storefront", Storefront.Program.MainAsync);
 
-Select the provider with `--gateway inprocess`. The generated `Gateway.CreateBuilder(args)` binds
-the same-application closure of enabled, composable project resources by manifest identity, so a
-resource is colocatable whichever verb adds it over `Manifests.<Name>`: the area's hand-written
-verb (`builder.AddWeb(Manifests.AppAApi, new WebResourceOptions { ... })`), a third-party
-application model's verb, or `builder.AddResource(Manifests.<Name>)`. `Sdk.Gateway` generates no
-per-resource `Add<Name>()` verb (owner decision of 2026-09-25). Each member receives a
-resource-specific content root, persisted loopback endpoints, resolved mounts and credentials, and
-observed dependency addresses through its ambient `ResourceContext`.
+ApplicationBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
+IApplicationResourceDefinition orders = builder.AddResource("Web", "orders-api");
+builder.AddResource("Web", "storefront").WithSetting("Orders:Url", orders.Endpoint);
 
-Configure supervision with `InProcessGatewayOptions.LivenessFailureThreshold` (positive,
-default 3) and `MaximumRestartAttempts` (nonnegative, default 5; zero disables restarts). Both
-properties throw `ArgumentOutOfRangeException` on invalid assignment and preserve their previous
-value, including after gateway construction. Valid later assignments remain supported. This
-changes 10.0.0-preview.1 behavior, where only gateway construction checked these limits.
+await builder.Build().RunAsync(cancellationToken);
+```
 
-`--mode render` emits the same versioned local plan-set envelope as the Local gateway, with each
-resource compiled to an `inProcessHost` unit. It is offline: member entry points are not invoked,
-runtime inputs are not resolved, and the state directory is not created.
+Each program is an ordinary application. A Web program calls `WebApplication.CreateBuilder(args)`
+and `builder.AddResource(name)`. It listens on the loopback port the infrastructure assigned, reads
+its settings from configuration, and publishes to the gateway over the in-process channel. Nothing
+in it knows where it runs.
 
-See [DESIGN.md](DESIGN.md) for lifecycle, restart, remapping, and NativeAOT decisions and
-[API reference (cohesion-docs)](https://github.com/assimalign/cohesion-docs) for the
-public API map.
+The gateway deploys in dependency order, so `storefront` starts only once `orders-api` has
+published, with `Orders:Url` set to the address `orders-api` serves. Programs outlive the gateway's
+run: disposing the infrastructure stops them, the last deployed first.
 
-Declared resource commands use the adopted host's registered control plane directly after
-Running. This retains the generic gateway's ownership, observation, and teardown behavior while
-avoiding a second control-plane instance for an in-process member.
+**Depends on:** ApplicationModel.Gateway (`IInfrastructureProvider`, `IApplicationGatewayTransport`,
+`ApplicationBuilder`) and ApplicationModel.Hosting (the in-process endpoint). It references no
+resource area.
 
-
-## Checked manifest paths and sources (#1470)
-
-Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceHttpPath`, and mount
-`Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
-or comparing raw text. Valid string initializers remain supported; malformed strings are refused
-at construction or typed JSON import. Default structs still pass through explicit manifest/plan
-validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
-Database storage format, diagnostic identity, event or counter changes. All binary consumers
-must be rebuilt together, including installed SDK/framework E2E payloads.
+See [DESIGN.md](DESIGN.md) for the environment each program receives, the channel, and the
+lifecycle. Public API reference belongs in
+[cohesion-docs](https://github.com/assimalign/cohesion-docs).

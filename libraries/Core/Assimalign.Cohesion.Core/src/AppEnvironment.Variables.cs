@@ -98,6 +98,9 @@ public static partial class AppEnvironment
         /// <summary>Gets the variable naming the URL a resource instance serves its control plane on.</summary>
         public const string ControlPlaneEndpoint = "COHESION_CONTROL_PLANE_ENDPOINT";
 
+        // The prefix every variable of the contract starts with. Internal: it names no variable.
+        internal const string Prefix = "COHESION_";
+
         /// <summary>
         /// Builds a declared-endpoint environment-variable name.
         /// </summary>
@@ -193,6 +196,21 @@ public static partial class AppEnvironment
             return ConfigurationPattern
                 .Replace("<Section>", section, StringComparison.Ordinal)
                 .Replace("<Key>", key, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Builds the configuration bridge variable of a configuration key whose sections are
+        /// separated by colons, such as <c>Orders:Url</c>.
+        /// </summary>
+        /// <param name="key">The configuration key.</param>
+        /// <returns>The configuration variable name, with a double underscore for each colon.</returns>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> is empty.</exception>
+        public static string Configuration(string key)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+            int sections = ConfigurationPattern.IndexOf("<Section>", StringComparison.Ordinal);
+            return string.Concat(ConfigurationPattern.AsSpan(0, sections), key.Replace(":", "__", StringComparison.Ordinal));
         }
 
         private static string NormalizeName(string value)

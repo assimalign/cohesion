@@ -39,6 +39,17 @@ public interface IApplicationGatewayBuilder
     IApplicationGatewayBuilder UseInfrastructure(IInfrastructureProvider infrastructure);
 
     /// <summary>
+    /// Adds a transport the gateway's instances reach it through. A gateway may have several, and
+    /// it starts each when it runs.
+    /// </summary>
+    /// <param name="transport">The transport.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="transport"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">The transport is already added.</exception>
+    /// <exception cref="InvalidOperationException">The gateway is built.</exception>
+    IApplicationGatewayBuilder UseTransport(IApplicationGatewayTransport transport);
+
+    /// <summary>
     /// Sets where the gateway keeps its record, so a restarted gateway reconciles against it; the
     /// record stays in memory unless set.
     /// </summary>

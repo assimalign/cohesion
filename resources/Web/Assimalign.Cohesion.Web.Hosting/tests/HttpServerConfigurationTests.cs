@@ -491,6 +491,57 @@ public class HttpServerConfigurationTests
         listener.Protocols.ShouldBe(HttpProtocol.Http20);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: the http endpoint the platform assigned replaces the development endpoint")]
+    public void GetPlatformEndPoint_WithAssignedHttpEndpoint_ShouldReturnIt()
+    {
+        // Arrange — a scope, as a gateway that runs the application in its own process gives it.
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(
+            new Dictionary<string, string>
+            {
+                [AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1",
+                [AppEnvironment.Variables.Endpoint("http", "PORT")] = "5123",
+                [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = "http",
+            },
+            CancellationToken.None);
+
+        // Act
+        System.Net.IPEndPoint? endPoint;
+        using (AppEnvironment.Enter(scope))
+        {
+            endPoint = HttpServerConfiguration.GetPlatformEndPoint();
+        }
+
+        // Assert
+        endPoint.ShouldBe(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 5123));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: no http endpoint, or an https one, leaves the development endpoint")]
+    [InlineData(null)]
+    [InlineData("https")]
+    public void GetPlatformEndPoint_WithoutPlainHttpEndpoint_ShouldReturnNull(string? scheme)
+    {
+        // Arrange
+        var variables = new Dictionary<string, string>();
+        if (scheme is not null)
+        {
+            variables[AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1";
+            variables[AppEnvironment.Variables.Endpoint("http", "PORT")] = "5124";
+            variables[AppEnvironment.Variables.Endpoint("http", "SCHEME")] = scheme;
+        }
+
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(variables, CancellationToken.None);
+
+        // Act
+        System.Net.IPEndPoint? endPoint;
+        using (AppEnvironment.Enter(scope))
+        {
+            endPoint = HttpServerConfiguration.GetPlatformEndPoint();
+        }
+
+        // Assert
+        endPoint.ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should register an HTTP/3 endpoint and advertise it through Alt-Svc")]
     public async Task Bind_Http3Endpoint_ShouldRegisterHttp3AndEnableAltSvc()
     {

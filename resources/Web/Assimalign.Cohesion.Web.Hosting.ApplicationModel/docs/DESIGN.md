@@ -132,6 +132,16 @@ stores snapshots as opaque bytes and passes action content through. *Rejected:* 
 builder taking a platform's serializer, the previous version; it made every action's content type
 public API, and a platform had to track every area's types.
 
+**W7 — The resource reads its endpoints from its environment, so it runs in process unchanged
+(2026-10-29).** `WebResourceOptions` reads `ManifestEndpoint` and `ControlPlaneEndpoint` through
+Core's `AppEnvironment`, which reads the program's `AppEnvironmentScope` when a gateway runs the
+application in its own process (Gateway.InProcess). That gateway names an `inprocess://` manifest
+endpoint, which `ApplicationInstancePublisher.Create` resolves to its channel, and a loopback
+control-plane port of the program's own. With Web.Hosting binding the platform's `http` endpoint,
+the same `Program.cs` (`CreateBuilder(args)`, `AddResource(name)`) runs on any platform and in
+process. The in-process end-to-end test runs two such programs, one calling the other at the address
+its setting received.
+
 ## Open questions
 
 1. **Authentication.** Publication and the control plane are anonymous.
