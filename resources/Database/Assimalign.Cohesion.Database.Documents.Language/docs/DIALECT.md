@@ -243,7 +243,7 @@ scope rules. Unqualified ordinary field paths continue to address the initial FR
 
 SELECT * yields a synthetic object keyed by the explicit FROM alias and every JOIN/NEST/UNNEST
 alias; MISSING members are omitted and NULL members remain. A top-level qualified star (b.*)
-is supported in joined SELECT projections and yields that alias's value, using the existing bare
+is supported in ungrouped joined SELECT projections and yields that alias's value, using the existing bare
 result mode when it is the sole projection. Non-join qualified stars retain their existing refusal.
 Join queries support grouping, GROUP AS, HAVING, DISTINCT, ordering and paging, and execute inside
 correlated subqueries. Equal sort keys retain input source order. Nonblocking joins apply paging
@@ -257,6 +257,9 @@ StatementWorkBudget (CD05020). No lookup opens a session operation or calls publ
 LIMIT 0 and EXPLAIN perform static validation without document lookups. EXPLAIN exposes KeyJoin,
 LeftKeyJoin, KeyNest and LeftKeyNest, with the collection, alias, snapshot lookup and cache policy.
 There is no disk or wire version change.
+
+Joined ordering retains an explicit sort; EXPLAIN index candidates name key_join_requires_sort.
+An array-only direct AST supplied through Bindings retains the ordinary UNNEST representation.
 
 ## Derived and expression FROM sources (#1731, OQ-Q2)
 

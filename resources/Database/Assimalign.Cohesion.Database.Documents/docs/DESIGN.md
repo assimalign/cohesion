@@ -506,7 +506,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
 | `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
 | `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, RETURNING results or aggregate values exceed the statement memory budget |
-| `CD05020` | Shared expression evaluation work budget exhausted across nested queries and expression sources |
+| `CD05020` | Shared expression/lookup work budget exhausted across nested queries, expression sources and key joins |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | Direct IN subquery requires RAW/VALUE |
@@ -794,7 +794,9 @@ src/Raven.Server/Documents/Queries/Results/QueryResultRetrieverBase.cs:921-931 (
 
 Joined frames retain a DocumentEvaluationContext for stored values, so content paths, metadata,
 GROUP AS wrappers and synthetic stars agree on source identity. Blocking stages preserve the initial
-row's id/version while owning cloned source content. LEFT JOIN's absent frame and its META are MISSING;
+row's id/version while owning cloned source content. A lazy MISSING source marker retains absent
+stored identity in binding frames; path evaluation canonicalizes it to ordinary MISSING, preserving
+existing non-join metadata behavior. LEFT JOIN's absent frame and its META are MISSING;
 NEST arrays have no scalar identity. EXPLAIN inserts KeyJoin/LeftKeyJoin/KeyNest/LeftKeyNest between
 projection and initial access, with collection, alias, snapshot and cache details, without lookups.
 The generated nested-loop oracle and statement counters prove one lookup per distinct right-hand

@@ -7,6 +7,22 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlKeyJoinParserTests
 {
+    [Fact(DisplayName = "Cohesion Test [OQL] - Source bindings: an array-only direct AST retains the ordinary UNNEST representation")]
+    public void Construct_ArrayOnlyBindings_ShouldPreserveOrdinarySourceRepresentation()
+    {
+        // Arrange
+        var parsed = new OqlQueryParser().Parse("SELECT * FROM items UNNEST tags AS t").ShouldBeOfType<OqlQueryStatement>();
+        var original = parsed.OqlExpression.ShouldBeOfType<OqlSelectExpression>();
+        // Act
+        var copy = new OqlSelectExpression(original.Collection, original.Alias, original.Projections, original.Predicate,
+            original.GroupBy, original.Having, original.OrderBy, original.IsDistinct, original.IsValue, bindings: original.Unnest);
+        // Assert
+        copy.Bindings.ShouldBeSameAs(copy.Unnest);
+        copy.Bindings.Single().ShouldBeSameAs(original.Unnest.Single());
+        copy.Collection.ShouldBe(original.Collection);
+        copy.Alias.ShouldBeNull();
+    }
+
     [Theory(DisplayName = "Cohesion Test [OQL] - Key joins: grammar preserves ordered binding kinds")]
     [InlineData("JOIN", false, false)]
     [InlineData("INNER JOIN", false, false)]
@@ -51,8 +67,8 @@ public sealed class OqlKeyJoinParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Key joins: general predicates legacy keys and DML joins remain named refusals")]
-    [InlineData("SELECT * FROM a AS a JOIN b AS b ON a.k = b.k", "JOIN")]
-    [InlineData("SELECT * FROM a AS a NEST b AS b ON META(b).id = a.k AND TRUE", "NEST")]
+    [InlineData("SELECT * FROM a AS a JOIN b AS b ON a.k = b.k", "JOIN general ON predicate")]
+    [InlineData("SELECT * FROM a AS a NEST b AS b ON META(b).id = a.k AND TRUE", "NEST general ON predicate")]
     [InlineData("SELECT * FROM a AS a JOIN b AS b ON KEYS a.k", "ON KEYS")]
     [InlineData("UPDATE a AS a JOIN b AS b ON META(b).id = a.k SET k = 1", "JOIN")]
     [InlineData("DELETE FROM a AS a NEST b AS b ON META(b).id = a.k", "NEST")]

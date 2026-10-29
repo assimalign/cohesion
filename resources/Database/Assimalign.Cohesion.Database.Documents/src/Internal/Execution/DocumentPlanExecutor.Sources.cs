@@ -163,7 +163,7 @@ internal static partial class DocumentPlanExecutor
                     var match = LookupJoinKey(plan!, join, key, nested, cancellationToken);
                     if (match is not null || join.IsLeft)
                     {
-                        object? value = match is { } document ? document : DocumentMissing.Instance;
+                        object? value = match is { } document ? document : DocumentMissing.UnmatchedSource;
                         if (join.IsNest && key is string)
                         {
                             try { value = nested.Nest(match, cancellationToken); }

@@ -326,6 +326,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             start = 1;
             object? value = found.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : found.Value;
+            if (value is DocumentMissing) { return DocumentMissing.Instance; }
             if (value is not JsonElement json)
             { return start == path.Segments.Count ? value : DocumentMissing.Instance; }
             current = json;
@@ -363,7 +364,8 @@ internal sealed partial class DocumentExpressionEvaluator
                 for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
                 { if (frame.Name == name) { found = frame; break; } }
             }
-            if (found?.Value is DocumentMissing) { return DocumentMissing.Instance; }
+            if (found?.Value is DocumentMissing missing && !ReferenceEquals(missing, DocumentMissing.Instance))
+            { return DocumentMissing.Instance; }
             source = found?.Value is DocumentEvaluationContext captured ? captured : default;
         }
         return source.Id is null ? null : expression.Member == "id" ? source.Id : (decimal)source.Version;

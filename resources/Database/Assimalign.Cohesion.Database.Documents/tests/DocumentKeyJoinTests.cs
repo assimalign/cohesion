@@ -76,6 +76,8 @@ public sealed class DocumentKeyJoinTests
     [InlineData("SELECT META(a).id AS id FROM [1] AS a JOIN items AS b ON META(b).id = 'a'", "")]
     [InlineData("SELECT META(b).id AS id FROM [1] AS a NEST items AS b ON META(b).id = 'a'", "")]
     [InlineData("SELECT RAW (SELECT b.* FROM [1] AS s LEFT JOIN items AS b ON META(b).id = 'absent') FROM [1] AS a", "[null]")]
+    [InlineData("SELECT RAW (SELECT META(u).id AS id FROM [1] AS s) FROM [1] AS a LEFT UNNEST [] AS u", "[{\"id\":null}]")]
+    [InlineData("SELECT RAW (SELECT META(b).id AS id FROM [1] AS s) FROM [1] AS a LEFT JOIN items AS b ON META(b).id = 'absent'", "[{}]")]
     [InlineData("SELECT RAW g FROM [1] AS a JOIN items AS b ON META(b).id = 'a' GROUP BY a GROUP AS g", "[{\"a\":1,\"b\":{\"n\":1}}]")]
     public async Task ExecuteAsync_SourceCompositions_ShouldPreserveBindingsAsync(string query, string expected)
     {
@@ -139,6 +141,10 @@ public sealed class DocumentKeyJoinTests
         var plan = await DocumentSubqueryTests.RowsAsync(session, "EXPLAIN SELECT * FROM [1] AS a LEFT NEST items AS b ON META(b).id = 'a'");
         plan.ShouldContain(row => Equals(row.GetValue(2), "LeftKeyNest"));
         session.LastQueryDocumentsRead.ShouldBe(0);
+        await session.ExecuteAsync("CREATE INDEX by_n ON items (n INCLUDE MISSING)", cancellationToken: CancellationToken.None);
+        var orderedPlan = await DocumentSubqueryTests.RowsAsync(session,
+            "EXPLAIN SELECT b.n FROM items AS a JOIN items AS b ON META(b).id = META(a).id ORDER BY a.n");
+        orderedPlan.Select(row => row.GetValue(5) as string ?? string.Empty).ShouldContain(detail => detail.Contains("key_join_requires_sort", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents] - Key joins: cache identity includes the collection and is shared across nested plans")]

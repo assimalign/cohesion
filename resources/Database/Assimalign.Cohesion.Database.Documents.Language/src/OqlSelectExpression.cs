@@ -36,7 +36,8 @@ public sealed class OqlSelectExpression : OqlExpression
         OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null,
         IReadOnlyList<string?>? groupAliases = null, string? groupAs = null, OqlExpression? source = null, IReadOnlyList<OqlSourceBindingExpression>? bindings = null) : base(location)
     {
-        _from = bindings is null ? source is null ? collection : source : new Sources(source is null ? collection : source, bindings);
+        _from = bindings is null || !bindings.Any(binding => binding is OqlJoinExpression)
+            ? source is null ? collection : source : new Sources(source is null ? collection : source, bindings);
         Alias = alias;
         Projections = projections;
         Predicate = predicate;

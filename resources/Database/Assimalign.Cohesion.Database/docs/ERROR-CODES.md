@@ -345,7 +345,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
 | New (#1731, OQ-Q2) | CD01033 | Binding/names — FROM expression has no explicit alias or implicit field name |
 | New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
-| New (#1732) | CD01035 | Binding/names — key expression references no earlier binding, missing joined alias, or ambiguous/invalid joined META receiver |
+| New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference, missing joined alias, or ambiguous/invalid joined META receiver |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -528,7 +528,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD05018 | Retained SELECT sources/groups, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
-| CD05020 | Shared expression evaluation budget exhausted across a statement's subqueries and expression sources (#1731, OQ-Q3) | — |
+| CD05020 | Shared expression/lookup work budget exhausted across a statement's subqueries, expression sources and key joins (#1731, #1732) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

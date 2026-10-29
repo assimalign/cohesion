@@ -69,7 +69,7 @@ public sealed partial class OqlQueryParser
                 string capability = nest ? left ? OqlClauses.LeftNest : OqlClauses.Nest : left ? OqlClauses.LeftJoin : OqlClauses.Join;
                 if (!Supports(capability)) { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(capability, Profile.Language, Span(joinToken, joinToken))); break; }
                 if (Current.Type is not (TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function))
-                { UnsupportedKeyJoin(joinToken); break; }
+                { UnsupportedKeyJoin(joinToken, " right-hand expression source"); break; }
                 string name = CollectionName();
                 string? right = null;
                 if (Take("AS")) { right = Identifier(); }
@@ -197,7 +197,7 @@ public sealed partial class OqlQueryParser
             groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly());
     }
 
-    private void UnsupportedKeyJoin(Lexeme token, string suffix = " key equality")
+    private void UnsupportedKeyJoin(Lexeme token, string suffix = " general ON predicate")
         => _diagnostics.Add(QueryDiagnostics.UnsupportedClause(token.Text.ToUpperInvariant() + suffix, Profile.Language, Span(token, token)));
 
     private bool IsSourceBindingClause() => IsUnnestClause() || IsJoinClause(_position);
