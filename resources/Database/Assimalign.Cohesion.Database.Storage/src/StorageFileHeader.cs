@@ -130,7 +130,9 @@ public unsafe struct StorageFileHeader
     public const int ExpectedMagic = 0x434F4845;
 
     /// <summary>
-    /// The current storage format version, the only one this engine opens. Version 4 (#1160)
+    /// The current storage format version, the only one this engine opens. Version 5 (#1726)
+    /// fences savepoint partial undo using ordinary physical WAL brackets and root-writer stamps.
+    /// The record and journal layouts are unchanged. Version 4 (#1160)
     /// distinguishes checksummed reclaimed pages from zero-only uninitialized pages and requires
     /// a checksum on every nonzero pooled page. Version 3
     /// (#1253) replaced the journal's full before- and after-images with a full page image
@@ -139,7 +141,7 @@ public unsafe struct StorageFileHeader
     /// checksums, journal frame version 3, the alternating header slots, the persisted LSN
     /// floor and the chained checkpoint anchor. There is no upgrade path between versions (#1152).
     /// </summary>
-    public const int CurrentFormatVersion = 4;
+    public const int CurrentFormatVersion = 5;
 
     /// <summary>
     /// Validates that the header names this engine's file format: the expected magic number
