@@ -614,6 +614,8 @@ under inner aggregates and in FROM. Only group keys, group bindings and the encl
 row inputs remain visible; hidden source paths use the direct-reference CD05001 refusal. GROUP AS
 captures in that aggregate's row input retain CD01031. The visitor matches complete group keys
 before their components and preserves inner source, comprehension and projection-alias shadowing.
+Repeated subquery group keys also compare their free receiver bindings across enclosing scopes;
+identical text cannot prove a key after a captured UNNEST/comprehension binding is shadowed.
 This follows the SQL++ rule that grouping hides original objects
 ([GROUP BY](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/groupby.html#group-as-clause))
 and PostgreSQL src/backend/parser/parse_agg.c:1427-1514's level-aware grouping check.

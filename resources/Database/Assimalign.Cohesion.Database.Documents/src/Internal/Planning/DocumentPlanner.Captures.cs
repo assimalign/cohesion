@@ -32,6 +32,71 @@ internal sealed partial class DocumentPlanner
             EquivalentPath(a, b, alias, variables, leftScope, rightScope, localDepth);
     }
 
+    private static bool EquivalentNestedBindings(OqlSelectExpression query, DocumentBindingScope? left,
+        DocumentBindingScope? right, int localDepth)
+    {
+        if (ReferenceEquals(left, right)) { return true; }
+        return SameQuery(query, null);
+
+        bool SameName(string? name, DocumentBindingScope? local)
+        {
+            if (DocumentBindingScope.Resolve(local, name, out _) is not null) { return true; }
+            var a = DocumentBindingScope.Resolve(left, name, out int aDistance);
+            var b = DocumentBindingScope.Resolve(right, name, out int bDistance);
+            return ReferenceEquals(a, b) || a is not null && b is not null && aDistance < localDepth && aDistance == bDistance;
+        }
+
+        bool SameQuery(OqlSelectExpression select, DocumentBindingScope? local)
+        {
+            // FROM resolves before its own alias; later clauses see only bindings
+            // introduced so far. Local declarations mask the enclosing scopes being
+            // compared, including in transitive captures and nested ORDER BY.
+            if (select.Source is not null ? !Same(select.Source, local) : !SameName(select.Collection, local)) { return false; }
+            var source = new DocumentBindingScope(select.Alias ?? select.Collection, local);
+            foreach (var binding in select.Unnest)
+            {
+                if (!Same(binding.Collection, source)) { return false; }
+                source = new DocumentBindingScope(binding.Variable, source);
+            }
+            if (select.Predicate is not null && !Same(select.Predicate, source)) { return false; }
+            foreach (var key in select.GroupBy) { if (!Same(key, source)) { return false; } }
+            var grouped = source;
+            foreach (var name in select.GroupAliases)
+            { if (name is not null) { grouped = new DocumentBindingScope(name, grouped); } }
+            if (select.GroupAs is not null) { grouped = new DocumentBindingScope(select.GroupAs, grouped); }
+            foreach (var projection in select.Projections) { if (!Same(projection.Expression, grouped)) { return false; } }
+            if (select.Having is not null && !Same(select.Having, grouped)) { return false; }
+            var ordered = grouped;
+            foreach (var projection in select.Projections)
+            { if (projection.Alias is not null) { ordered = new DocumentBindingScope(projection.Alias, ordered); } }
+            foreach (var order in select.OrderBy)
+            {
+                if (order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
+                    select.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection)
+                { if (!Same(projection.Expression, grouped)) { return false; } }
+                else if (!Same(order.Expression, ordered)) { return false; }
+            }
+            return true;
+        }
+
+        bool Same(OqlExpression expression, DocumentBindingScope? local)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is OqlSubqueryExpression subquery) { return SameQuery(subquery.Query, local); }
+            if (expression is OqlPathExpression { Segments.Count: > 0 } path) { return SameName(path.Segments[0].Name, local); }
+            if (expression is OqlComprehensionExpression comprehension)
+            {
+                var inner = new DocumentBindingScope(comprehension.Variable, local);
+                return Same(comprehension.Collection, local) && Same(comprehension.Projection, inner) &&
+                    (comprehension.Predicate is null || Same(comprehension.Predicate, inner));
+            }
+            if (expression is OqlQuantifiedExpression quantified)
+            { return Same(quantified.Collection, local) && Same(quantified.Predicate, new DocumentBindingScope(quantified.Variable, local)); }
+            foreach (var child in NestedChildren(expression)) { if (!Same(child, local)) { return false; } }
+            return true;
+        }
+    }
+
     // Validate against this grouped query at every nested depth. Inner aggregate inputs
     // do not restore this query's hidden source; an aggregate in this query already
     // exempts its own row inputs before reaching this visitor. PostgreSQL's analogous

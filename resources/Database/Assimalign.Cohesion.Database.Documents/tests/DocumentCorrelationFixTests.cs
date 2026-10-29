@@ -132,6 +132,7 @@ public sealed class DocumentCorrelationFixTests
     [InlineData("SELECT (SELECT RAW SUM(d.n) FROM [1] AS s) FROM [{g:1,n:10}] AS d GROUP BY d.g")]
     [InlineData("SELECT (SELECT RAW d.n FROM [1] AS s) FROM [{n:10}] AS d GROUP BY d.n + 1")]
     [InlineData("SELECT (SELECT RAW (SELECT RAW s.n FROM [1] AS t) FROM [{g:1,n:10}] AS s GROUP BY s.g) FROM [1] AS d")]
+    [InlineData("SELECT RAW ARRAY (SELECT RAW d.n + x FROM [1] AS s) FOR x IN [0] END FROM [{n:10,x:1},{n:11,x:0}] AS d UNNEST [d.x] AS x GROUP BY (SELECT RAW d.n + x FROM [1] AS s)")]
     public async Task ExecuteAsync_UngroupedCapture_ShouldMatchDirectRefusalAsync(string query)
     {
         // Arrange
@@ -159,6 +160,7 @@ public sealed class DocumentCorrelationFixTests
     [InlineData("SELECT RAW (SELECT {n:9} AS d FROM [1] AS s ORDER BY (SELECT RAW d.n FROM [1] AS t)) FROM [{g:1,n:10}] AS d GROUP BY d.g", "[{\"d\":{\"n\":9}}]")]
     [InlineData("SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM [{n:10}] AS d GROUP BY (SELECT RAW d.n FROM [1] AS s)", "[10]")]
     [InlineData("SELECT RAW SUM(FIRST v FOR v IN (SELECT RAW g FROM [9] AS g) END) FROM [{n:1}] AS d GROUP BY d.n GROUP AS g", "9")]
+    [InlineData("SELECT RAW ARRAY (SELECT RAW d.n FROM [1] AS s) FOR s IN [0] END FROM [{n:10}] AS d GROUP BY (SELECT RAW d.n FROM [1] AS s)", "[[10]]")]
     public async Task ExecuteAsync_GroupedCapture_ShouldAllowVisibleBindingsAsync(string query, string expected)
     {
         // Arrange

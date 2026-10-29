@@ -555,6 +555,8 @@ enforces group-key visibility (CD05001), including nested FROM and inner aggrega
 An enclosing aggregate may capture its source-row inputs; its GROUP AS binding remains unavailable
 there (CD01031). Local metadata alone permits identity paging. The engine parity and conformance
 corpora cover these scope distinctions alongside shadowing and group bindings.
+Subquery group-key equivalence includes free binding identity, retaining inner declarations that
+mask outer names while refusing a proof after an enclosing capture is shadowed.
 Per-element predicate/operand scratch has iteration lifetime, excluding live collections and
 statement caches. Object maps retain their live member results until serialization while releasing
 discarded member scratch; ARRAY/FIRST retain their existing streaming and lazy behavior.

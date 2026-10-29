@@ -731,7 +731,9 @@ internal sealed partial class DocumentPlanner
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables,
         DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0) => (left, right) switch
     {
-        (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(a.Query, b.Query),
+        (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(a.Query, b.Query) &&
+            EquivalentNestedBindings(a.Query, leftScope, rightScope, localDepth) &&
+            EquivalentNestedBindings(b.Query, leftScope, rightScope, localDepth),
         (OqlComprehensionExpression a, OqlComprehensionExpression b) => a.IsFirst == b.IsFirst && a.Variable == b.Variable &&
             (a.Predicate is null) == (b.Predicate is null) &&
             EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&

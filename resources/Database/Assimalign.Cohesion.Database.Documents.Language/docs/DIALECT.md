@@ -145,6 +145,8 @@ Inner aggregates do not restore an enclosing query's hidden fields. This follows
 Captured paths never constrain local indexes or prove local index ordering. Only local-source
 META().id / META(local_alias).id permits identity paging; ordering by captured metadata keeps
 ascending inner document identity for equal keys. Metadata equivalence includes its receiver.
+Repeated subquery group keys must also capture the same bindings; matching text alone does not
+prove grouping when a comprehension or quantifier shadows an enclosing name.
 META(outer_alias).id/version follows a captured stored source's identity. Captured expression,
 derived and local-value bindings have no stored identity and return NULL for metadata.
 A nested `FROM d.items AS i`, or `FROM d AS i`
