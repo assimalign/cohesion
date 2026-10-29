@@ -66,6 +66,14 @@ Direct references are Database.Client, Documents.Protocol, Database.Types, Datab
 
 `DocumentClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
 
+## Key join wire results (#1732)
+
+INNER/LEFT document-key JOIN and NEST use existing request text, JSON result cells and MISSING
+bits. DocumentKeyJoinWireTests checks per-source metadata, synthetic and qualified stars, correlated
+joins, unknown-key NEST arrays, EXPLAIN and located CD00016/CD01035/CD02028 refusals over InMemory
+and TCP. The NativeAOT consumer exercises both transports. No client API, capability, frame or version
+changes are needed; ordinary RAW numeric roots keep their existing JSON value shape.
+
 ## FROM source results (#1731, OQ-Q2)
 
 Derived and uncorrelated expression FROM sources use the existing row/document frames on

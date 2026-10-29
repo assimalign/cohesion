@@ -90,6 +90,24 @@ internal static class Program
         finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
     }
 
+    private static async Task RunKeyJoinsAsync(DocumentConnection connection, CancellationToken cancellationToken = default)
+    {
+        await connection.CreateCollectionAsync("join_items", cancellationToken);
+        await connection.QueryAsync("INSERT INTO join_items (KEY, VALUE) VALUES ('a',{n:1}), ('b',{n:2})", cancellationToken: cancellationToken);
+        var joined = await connection.QueryAsync("SELECT META(a).id AS a, META(b).id AS b FROM join_items AS a JOIN join_items AS b ON META(b).id = META(a).id ORDER BY a.n", cancellationToken: cancellationToken);
+        Check(joined.Count == 2 && joined.All(row => Equals(row[0], row[1])), "key JOIN metadata");
+        var missing = await connection.QueryAsync("SELECT b, META(b).id AS id FROM [1] AS a LEFT JOIN join_items AS b ON META(b).id = 'absent'", cancellationToken: cancellationToken);
+        Check(missing.Single().IsMissing(0) && missing.Single().IsMissing(1), "LEFT JOIN MISSING binding and metadata");
+        var nest = await connection.QueryAsync("SELECT RAW b FROM ['a','absent',NULL] AS k LEFT NEST join_items AS b ON META(b).id = k", cancellationToken: cancellationToken);
+        Check(nest.Documents[0].GetArrayLength() == 1 && nest.Documents[1].GetArrayLength() == 0 && nest.Documents[2].ValueKind == JsonValueKind.Null, "LEFT NEST scalar and unknown keys");
+        var star = await connection.QueryAsync("SELECT b.* FROM [1] AS a JOIN join_items AS b ON META(b).id = 'b'", cancellationToken: cancellationToken);
+        Check(star.Documents.Single().GetProperty("n").GetInt32() == 2, "qualified joined star");
+        var correlated = await connection.QueryAsync("SELECT RAW (SELECT RAW b.n FROM [1] AS s JOIN join_items AS b ON META(b).id = META(a).id) FROM join_items AS a ORDER BY a.n", cancellationToken: cancellationToken);
+        Check(correlated.Documents.Select(row => row[0].GetInt32()).SequenceEqual(new[] { 1, 2 }), "correlated key join");
+        var plan = await connection.QueryAsync("EXPLAIN SELECT * FROM [1] AS a NEST join_items AS b ON META(b).id = 'a'", cancellationToken: cancellationToken);
+        Check(plan.Documents.Any(row => row.GetProperty("operator").GetString() == "KeyNest"), "key join EXPLAIN");
+    }
+
     private static async Task RunAsync(bool tcp)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -143,6 +161,7 @@ internal static class Program
             Check(await connection.GetCollectionAsync("items", token) == "items", "get collection");
             var saved = await connection.PutAsync("items", "one", "{\"name\":\"東京\",\"score\":3,\"nested\":[1,null]}"u8.ToArray(), cancellationToken: token);
             Check(saved.Version.Value > 0, "put version");
+            await RunKeyJoinsAsync(connection, token);
             var functions = (await connection.QueryAsync("SELECT LOWER('A') AS s, ROUND(-2.5) AS n, ROUND(4.9999999999999999999999999999,-1) AS edge, MILLIS_TO_STR(0) AS d, TYPE(score) AS t, ARRAY_LENGTH(nested) AS a, IFMISSING(absent,1) AS c, LENGTH('😀a') AS l FROM items", cancellationToken: token)).Single();
             Check((string)functions["s"]! == "a", "scalar string");
             Check((decimal)functions["n"]! == -3m, "scalar rounding");

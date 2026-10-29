@@ -87,6 +87,8 @@ public sealed class DocumentSubqueryParityTests
 
     public static IEnumerable<object[]> QueryPositions()
     {
+        yield return ["SELECT RAW [a.n] FROM items AS a", "SELECT RAW (SELECT RAW b.n FROM [1] AS s JOIN items AS b ON META(b).id = META(a).id) FROM items AS a", 3];
+        yield return ["SELECT RAW a.n FROM items AS a UNNEST [1] AS s", "SELECT RAW b.n FROM items AS a JOIN items AS b ON META(b).id = META(a).id", 0];
         yield return ["SELECT RAW [n] FROM items GROUP BY n", "SELECT RAW (SELECT RAW items.n FROM [1] AS s) FROM items GROUP BY n", 3];
         yield return ["SELECT RAW [META().id] FROM items GROUP BY META().id", "SELECT RAW (SELECT RAW META(items).id FROM [1] AS s) FROM items GROUP BY META().id", 3];
         yield return ["SELECT RAW [[n]] FROM items GROUP BY n", "SELECT RAW (SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM [1] AS t) FROM items d GROUP BY (SELECT RAW d.n FROM [1] AS s)", 9];
