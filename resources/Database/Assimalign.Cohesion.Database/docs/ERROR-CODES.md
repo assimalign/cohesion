@@ -74,7 +74,10 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
-Foreign-key ON UPDATE execution (#1723, SQ-F2) adds CS05085 for conflicting cascade assignments.
+Foreign-key ON UPDATE execution (#1723, SQ-F2) adds CS05085 for different action origins
+proposing conflicting stored values. A same-parent-row/constraint revisit replaces its earlier
+proposal; actions match the statement's completed direct assignments. Every referential closure,
+including plain UPDATE, upsert and DELETE, obeys CS05067's retained-memory budget.
 RESTRICT uses the existing CS03039 FK violation immediately; NO ACTION checks statement-end state.
 Update-action snapshot conflicts retain CS04064 (40001) through the existing serialization condition. Malformed/duplicate
 action syntax retains CS00003; malformed catalog action metadata retains CS06059, unsupported

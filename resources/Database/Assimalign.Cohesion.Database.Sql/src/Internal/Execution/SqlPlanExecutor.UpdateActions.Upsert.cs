@@ -19,6 +19,7 @@ internal sealed partial class SqlPlanExecutor
         bool applying = false;
         try
         {
+            using var attempt = statement.Metrics.BeginReferentialAttempt(_definitions.StatementMemoryBudget);
             await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
             var rows = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
             var direct = new List<SqlConstraintUpdate>(writes.Count);
@@ -29,13 +30,19 @@ internal sealed partial class SqlPlanExecutor
                 var row = new SqlConstraintUpdate(table, location, write.OldValues ?? [], (object?[])write.Values.Clone(),
                     write.OldLocation.HasValue ? plan.Assignments.Select(assignment => assignment.Ordinal).ToHashSet() : []);
                 rows.Add((table.ObjectId, SqlRecordLocation.Pack(location.Item1, location.Item2)), row);
+                var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!;
+                if (write.OldValues is not null) { memory.Retain(write.OldValues); }
+                memory.Retain(write.Values);
+                memory.Retain(write.Record);
+                memory.Retain(row.NewValues);
+                memory.Reserve(384L + 32L * row.Assigned.Count);
                 direct.Add(row);
             }
             var pending = await CollectReferentialUpdatesAsync([], [], statement, cancellationToken, rows, validateUpdates: true).ConfigureAwait(false);
             var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
             var returned = returning is null ? null : new List<object?[]>(direct.Count);
             if (returned is not null)
-            { foreach (var row in direct) { returned.Add(ProjectRow(row.NewValues, returning!, evaluator, cancellationToken)); } }
+            { foreach (var write in writes) { returned.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); } }
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
                 applying = true;

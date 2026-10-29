@@ -1,6 +1,6 @@
 # The Declared SQL Dialect
 
-## Foreign-key update declarations (#1723, SQ-F1)
+## Foreign-key update actions (#1723, SQ-F1/SQ-F2)
 
 Foreign keys accept ON UPDATE { CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION }
 in CREATE TABLE column REFERENCES/table constraints and ALTER TABLE ADD CONSTRAINT/ADD COLUMN.
@@ -13,19 +13,24 @@ and views over it report the stored UPDATE_RULE. CompiledSchemaConstraint expose
 the typed References builder keeps its existing declaration and defaults update metadata to NO ACTION.
 Declared provisioning scripts may carry the SQL clause and persistent views over its metadata.
 
-SQ-F1 does not execute update actions. Changing any referenced parent key under CASCADE,
-SET NULL or SET DEFAULT refuses with CK00001 naming ON UPDATE action execution, even when
-no child currently refers to that key or another final parent retains it. UPDATE, UPDATE FROM,
-ON CONFLICT DO UPDATE and MERGE refuse before any row mutation. Self-referencing updates report
-the action-execution refusal before an outgoing orphan check. Action eligibility compares the
-stored binary representation: case-only and accent-only changes still refuse under an insensitive
-collation. DELETE, DELETE USING and MERGE DELETE chains that SET NULL/DEFAULT on referenced
-keys check all update actions before outgoing FK validation, so they also report CK00001.
-Unchanged referenced keys
-and unrelated-column updates execute normally. RESTRICT and NO ACTION both retain the existing
-statement-end parent-key check, including substitution by another final parent; SQ-F2 will
-make RESTRICT immediate and implement action closure. PostgreSQL references:
-src/backend/parser/gram.y:4581-4689 and src/backend/utils/adt/ri_triggers.c:897-955,4237-4250.
+UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE execute CASCADE, SET NULL and
+SET DEFAULT through a bounded statement closure before applying any row. DELETE SET actions
+also seed update actions when they change a referenced key. RESTRICT checks immediately;
+NO ACTION checks the final state, including another final parent supplying the old key.
+Action eligibility compares stored binary key images, including case/accent changes under an
+insensitive collation; an old key containing NULL matches no child (MATCH SIMPLE).
+
+Actions match child keys after the statement's own assignments. A directly assigned key that
+still matches the old parent receives the action; a key assigned elsewhere keeps that value.
+A later proposal from the same parent row and constraint replaces that origin's earlier proposal.
+Different action origins proposing different values for one column report CS05085, independent
+of traversal order. RETURNING reports the statement's own row image before subsequent actions,
+on every update path. Closure memory on every path, including plain DELETE, obeys the statement
+budget (CS05067); abandoned lock-retry attempts release their retained buffers and reservations.
+
+PostgreSQL references: src/backend/parser/gram.y:4581-4689 and
+src/backend/utils/adt/ri_triggers.c:897-955,1223-1328,4237-4250. The cascade query matches
+old foreign keys against the completed direct assignments; RETURNING precedes AFTER ROW actions.
 
 ## Window stage (#1526, SQ-W1/SQ-W2)
 

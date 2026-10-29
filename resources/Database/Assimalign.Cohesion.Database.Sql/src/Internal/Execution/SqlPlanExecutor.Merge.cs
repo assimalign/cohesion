@@ -288,7 +288,26 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private async Task<DatabaseResult> ApplyMergeAsync(SqlMergePlan plan, List<MergeWrite> writes,
+    private Task<DatabaseResult> ApplyMergeAsync(SqlMergePlan plan, List<MergeWrite> writes,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        foreach (var write in writes)
+        {
+            if ((write.Action.Action == SqlMergeAction.Delete && _catalog.HasDeleteActions(plan.Table)) ||
+                (write.Action.Action == SqlMergeAction.Update && HasUpdateActions(plan.Table, write.Action.Assignments)))
+            { return ApplyReferentialMergeAsync(plan, writes, statement, cancellationToken); }
+        }
+        return ApplyMergeCoreAsync(plan, writes, statement, cancellationToken);
+    }
+
+    private async Task<DatabaseResult> ApplyReferentialMergeAsync(SqlMergePlan plan, List<MergeWrite> writes,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        using var attempt = statement.Metrics.BeginReferentialAttempt(_definitions.StatementMemoryBudget);
+        return await ApplyMergeCoreAsync(plan, writes, statement, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<DatabaseResult> ApplyMergeCoreAsync(SqlMergePlan plan, List<MergeWrite> writes,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var targets = writes.Where(write => write.Candidate.Target is not null).Select(write => write.Candidate.Target!).ToArray();

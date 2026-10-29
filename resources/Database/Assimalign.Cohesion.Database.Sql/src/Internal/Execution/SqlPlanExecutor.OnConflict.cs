@@ -179,9 +179,7 @@ internal sealed partial class SqlPlanExecutor
             // inside this release scope and precede the coordinator gate and page latches.
             await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
             var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
-            var pendingUpdates = BuildConstraintUpdates(table,
-                writes.Select((write, index) => (write.OldLocation ?? SqlRecordLocation.Pack(new PageId(-1L - index), 0), write.OldValues ?? [], write.Values)), plan.Assignments);
-            if (_catalog.HasIncomingReferences(table, changingUpdates: true))
+            if (replacements.Count != 0 && HasUpdateActions(table, plan.Assignments))
             {
                 try
                 {
@@ -204,6 +202,12 @@ internal sealed partial class SqlPlanExecutor
                     goto RetryArbitration;
                 }
             }
+            // Pending inserts can supply an old NO ACTION key, even when no changing
+            // action exists. Ordinary upserts retain their original replacement-only map.
+            var pendingUpdates = replacements.Count != 0 && writes.Count != replacements.Count && HasUpdateActions(table, plan.Assignments, changingOnly: false)
+                ? BuildConstraintUpdates(table, writes.Select((write, index) =>
+                    (write.OldLocation ?? SqlRecordLocation.Pack(new PageId(-1L - index), 0), write.OldValues ?? [], write.Values)), plan.Assignments)
+                : BuildConstraintUpdates(table, replacements.Select(write => (write.OldLocation!.Value, write.OldValues!, write.Values)), plan.Assignments);
             foreach (var write in writes)
             {
                 if (write.OldValues is not null)

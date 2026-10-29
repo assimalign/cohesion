@@ -66,7 +66,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // Built after SET assignments are collected. Stable table/key projections are indexed
-    // once, using constraint equality; MERGE maintains mutable projections separately.
+    // once, using constraint equality; MERGE and DELETE closures maintain mutable projections.
     [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdates")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdates.DebugView))]
     private class SqlConstraintUpdates
@@ -239,16 +239,16 @@ internal sealed partial class SqlPlanExecutor
         IReadOnlyList<SqlConstraintUpdate>? removedUpdates = null)
     {
         var updates = finalRows ?? new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
-        var final = finalRows is not null && !validateUpdates ? new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!) : null;
+        var final = (finalRows is not null && !validateUpdates) || (finalRows is null && statement.Metrics.HasReferentialAttempt)
+            ? new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!) : null;
         SqlUpdateActionState? actionState = null;
         try
         {
-            HashSet<(ulong, ulong, SqlCatalogConstraint, ulong)>? appliedSets = deletions.Count == 0 ? null : [];
+            HashSet<(ulong, ulong, SqlCatalogConstraint, ulong)>? appliedSets = null;
             bool expanded;
             do
             {
                 long generationBefore = actionState?.Generation ?? 0;
-                int setsBefore = appliedSets?.Count ?? 0;
                 foreach (var deletion in deletions.Values)
                 {
                     foreach (var reference in IncomingReferences(deletion.Table, statement, cancellationToken))
@@ -258,7 +258,7 @@ internal sealed partial class SqlPlanExecutor
                         if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
                         var keys = reference.ParentKey.Read(deletion.EffectiveValues ?? deletion.Values);
                         if (keys.Any(value => value is null)) { continue; }
-                        var actionView = final ?? (actionState is null ? null : new SqlConstraintUpdates(updates));
+                        var actionView = final;
                         var matches = CollectConstraintMatches(actionView is null
                             ? FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement))
                             : FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken, deletions, actionView, ConstraintCurrentSnapshot(statement)), statement);
@@ -300,12 +300,12 @@ internal sealed partial class SqlPlanExecutor
                                     : ResolveColumnDefault(child, ordinal, bound.DefaultValues[ordinal], statement, cancellationToken);
                                 if (value is null && !child.Columns[ordinal].IsNullable) { throw Violation(child, constraint, keys); }
                                 value = CoerceForColumn(value, child.Columns[ordinal]);
-                                if (actionState is not null && update.Assigned.Contains(ordinal) &&
-                                    (!actionState.Origins.TryGetValue((key.Item1, key.Item2, ordinal), out var origin) ||
-                                        origin.Parent != deletion.Table.ObjectId || origin.Location != SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex) ||
-                                        !ReferenceEquals(origin.Constraint, constraint)) &&
-                                    !StoredAssignmentEqual(child.Columns[ordinal], update.NewValues[ordinal], value))
-                                { throw SqlExecutionException.ReferentialAssignmentConflict(constraint.Name, child.Schema, child.Name, child.Columns[ordinal].Name); }
+                                if (actionState is not null)
+                                {
+                                    RecordActionProposal(actionState, key, ordinal,
+                                        (deletion.Table.ObjectId, SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), constraint),
+                                        child, update.NewValues[ordinal], value, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget));
+                                }
                                 changed |= !Equals(update.NewValues[ordinal], value);
                                 update.NewValues[ordinal] = value;
                                 update.Assigned.Add(ordinal);
@@ -318,7 +318,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 actionState = await ExpandUpdateActionsAsync(updates, deletions, scannedTables, statement, cancellationToken,
                     final, actionState, removedUpdates).ConfigureAwait(false);
-                expanded = actionState is not null && (actionState.Generation != generationBefore || (appliedSets?.Count ?? 0) != setsBefore);
+                expanded = actionState is not null && actionState.Generation != generationBefore;
                 if (actionState is not null && deletions.Count != 0)
                 {
                     // Key actions can move children onto an already deleted proposed key.
@@ -390,12 +390,11 @@ internal sealed partial class SqlPlanExecutor
                 update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
                 statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewVersion);
             }
-            // PostgreSQL ri_triggers.c:2800-2813 uses current parent visibility for ReadCommitted
-            // RI writes while transaction snapshots retain their crosscheck.
+            // PostgreSQL ri_triggers.c:2800-2822 uses a fresh regular (committed)
+            // snapshot in ReadCommitted, not the all-writers child-discovery image.
             ValidateRows(table, group.Select(update => update.NewValues).ToList(), statement, cancellationToken,
-                current: !validateUpdates && statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted,
                 references: references, deletions: deletions, updates: indexed,
-                foreignKeySnapshot: validateUpdates && statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
+                foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
             CollectReleasedReferences(table, group.Where(update => update.Location.PageId.Value >= 0).Select(update => update.OldValues).ToList(), released, statement, cancellationToken);
         }
         await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);

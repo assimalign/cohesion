@@ -16,7 +16,7 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteJoinedUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await PrepareJoinedUpdateIntentsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
-        if (_catalog.HasIncomingReferences(plan.Table, changingUpdates: true))
+        if (HasUpdateActions(plan.Table, plan.Assignments))
         { return await ExecuteReferentialUpdateAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
             Enumerable.Repeat(true, plan.Source!.Associations.Columns.Count).ToArray());
@@ -201,6 +201,8 @@ internal sealed partial class SqlPlanExecutor
                     // manager's deadlock detection rather than on a global ordering.
                     await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken, cascade: true).ConfigureAwait(false);
 
+                    using var attempt = _catalog.HasDeleteActions(plan.Table)
+                        ? statement.Metrics.BeginReferentialAttempt(_definitions.StatementMemoryBudget) : null;
                     var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
                     var returningTargets = plan.Returning is null ? null : targets.Select(target =>
                         SqlRecordLocation.Pack(target.Location.PageId, target.Location.SlotIndex)).ToHashSet();

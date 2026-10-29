@@ -12,7 +12,9 @@ source ordering, and ALTER ADD CONSTRAINT uses that renderer. The profile gains 
 (+1 clause); parser/completeness and live engine conformance cover metadata and action execution
 on every update path. PostgreSQL src/backend/parser/gram.y:4581-4689 supplies the ordering,
 default and action vocabulary. SQ-F2 executes the changing actions and distinguishes immediate
-RESTRICT from statement-end NO ACTION; see DIALECT.
+RESTRICT from statement-end NO ACTION; see DIALECT. Actions match the completed direct child
+assignments; same-origin revisions converge, different-origin disagreements retain CS05085, and
+RETURNING preserves the direct row image before later actions (ri_triggers.c:1274-1313).
 
 ## Window stage (#1526, SQ-W1/SQ-W2)
 

@@ -119,9 +119,11 @@ internal sealed class SqlStatementMetrics
         if (_accessPath is JoinedDmlWork work) { work.PeakTargetRows = Math.Max(work.PeakTargetRows, count); }
     }
 
-    internal SqlDmlMemory? DmlMemory(long budget)
+    internal SqlDmlMemory? DmlMemory(long budget, bool referential = false)
     {
-        if (_accessPath is not JoinedDmlWork { DmlStatement: not null } work) { return null; }
+        if (referential) { EnableReferentialWork(); }
+        if (_accessPath is ReferentialDmlWork { Attempt: { } attempt }) { return attempt.Memory; }
+        if (_accessPath is not JoinedDmlWork work || (work.DmlStatement is null && work is not ReferentialDmlWork)) { return null; }
         if (work is not BudgetedDmlWork budgeted)
         {
             // Empty joined statements keep the original work object's size and allocation.
@@ -129,7 +131,36 @@ internal sealed class SqlStatementMetrics
             budgeted = new(work) { Memory = memory };
             _accessPath = budgeted;
         }
+        else if (budgeted.Memory is null) { budgeted.Memory = new SqlDmlMemory(this, budget); }
         return budgeted.Memory;
+    }
+
+    // Attempt buffers must leave the ledger before a refused lock is awaited. Direct
+    // proposals remain in the outer ledger and survive the retry without a second charge.
+    internal IDisposable BeginReferentialAttempt(long budget)
+    {
+        var work = EnableReferentialWork();
+        return work.Attempt = new ReferentialAttempt(work, SqlDmlMemory.ForAttempt(this, budget, work.Memory));
+    }
+
+    internal bool HasReferentialAttempt => _accessPath is ReferentialDmlWork { Attempt: not null };
+
+    private ReferentialDmlWork EnableReferentialWork()
+    {
+        if (_accessPath is ReferentialDmlWork current) { return current; }
+        var previous = _accessPath as JoinedDmlWork ?? new JoinedDmlWork { ScalarPath = AccessPath };
+        if (_accessPath is JoinWork prior && prior is not JoinedDmlWork)
+        {
+            previous.Paths = prior.Paths;
+            previous.ScalarPath = prior.ScalarPath;
+            previous.CandidatePairs = prior.CandidatePairs;
+            previous.MemoryBytes = prior.MemoryBytes;
+            previous.PeakMemoryBytes = prior.PeakMemoryBytes;
+            previous.ObservationState = prior.ObservationState;
+        }
+        var work = new ReferentialDmlWork(previous);
+        _accessPath = work;
+        return work;
     }
 
     internal void ReleaseDmlMemory()
@@ -306,7 +337,7 @@ internal sealed class SqlStatementMetrics
         internal int PeakTargetRows;
     }
 
-    private sealed class BudgetedDmlWork : JoinedDmlWork
+    private class BudgetedDmlWork : JoinedDmlWork
     {
         internal BudgetedDmlWork(JoinedDmlWork previous)
         {
@@ -323,6 +354,31 @@ internal sealed class SqlStatementMetrics
         }
 
         internal SqlDmlMemory? Memory;
+    }
+
+    private sealed class ReferentialDmlWork : BudgetedDmlWork
+    {
+        internal ReferentialDmlWork(JoinedDmlWork previous) : base(previous)
+        { Memory = (previous as BudgetedDmlWork)?.Memory; }
+
+        internal ReferentialAttempt? Attempt;
+    }
+
+    [global::System.Diagnostics.DebuggerDisplay("ReferentialAttempt")]
+    [global::System.Diagnostics.DebuggerTypeProxy(typeof(ReferentialAttempt.DebugView))]
+    private sealed class ReferentialAttempt : IDisposable
+    {
+        private readonly ReferentialDmlWork _work;
+        internal ReferentialAttempt(ReferentialDmlWork work, SqlDmlMemory memory)
+        { _work = work; Memory = memory; }
+
+        internal SqlDmlMemory Memory { get; }
+        public void Dispose() { _work.Attempt = null; Memory.Dispose(); }
+
+        private sealed class DebugView
+        {
+            public DebugView(ReferentialAttempt value) { _ = value; }
+        }
     }
 
     [global::System.Diagnostics.DebuggerDisplay("WindowFrameWork")]

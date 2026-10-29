@@ -748,24 +748,23 @@ internal sealed partial class SqlPlanExecutor
         {
             var (child, constraint) = reference;
             if (restrictOnly && constraint.OnUpdate != SqlCatalogReferentialAction.Restrict) { continue; }
+            // Keep ordinary parent validation's matching-key projection and comparison
+            // policy. Only the stored-image predicate decides whether an action fires.
+            var keys = reference.ParentKey.Read(oldValues);
+            if (keys.Any(value => value is null)) { continue; }
+            bool changed = reference.ParentKey.Ordinals.Select((ordinal, i) => !ValuesEqual(newValues[ordinal], keys[i],
+                reference.ParentKey.Collations[i], statement.Metrics)).Any(value => value);
             if (!ReferencedKeyChanged(reference.ParentKey, oldValues, newValues, statement.Metrics)) { continue; }
             if (constraint.OnUpdate == SqlCatalogReferentialAction.Restrict)
             {
                 // Immediate RESTRICT observes existing children and never substitutes
                 // another final parent (ri_triggers.c:897-904,945-955).
-                if (FindConstraintRows(reference.ChildKey, reference.ParentKey.Read(oldValues), statement,
+                if (FindConstraintRows(reference.ChildKey, keys, statement,
                     cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
-                { throw Violation(child, constraint, reference.ParentKey.Read(oldValues)); }
+                { throw Violation(child, constraint, keys); }
                 continue;
             }
             if (restrictOnly || constraint.OnUpdate != SqlCatalogReferentialAction.NoAction) { continue; }
-            var keys = reference.ParentKey.Read(oldValues);
-            if (keys.Any(value => value is null))
-            {
-                continue;
-            }
-            bool changed = reference.ParentKey.Ordinals.Select((ordinal, i) => !ValuesEqual(newValues[ordinal], keys[i],
-                reference.ParentKey.Collations[i], statement.Metrics)).Any(value => value);
             // A different replacement may retain the old referenced key (a swap). Only
             // removing that key from the final parent state can orphan an incoming child.
             if (changed && updates is not null && HasPendingParent(reference.ParentKey, keys, updates, deletions, statement.Metrics, cancellationToken)) { continue; }

@@ -1142,6 +1142,10 @@ public sealed class SqlLanguageConformanceTests
                 await ExecuteAsync(session, "UPDATE p_image SET id='ADA';");
                 await ExpectRowsAsync(session, "SELECT id FROM p_image;", [["ADA"]]);
                 await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["ADA"]]);
+                await ExecuteAsync(session, "CREATE TABLE self_update(id INT PRIMARY KEY,pid INT REFERENCES self_update(id) ON UPDATE CASCADE);");
+                await ExecuteAsync(session, "INSERT INTO self_update VALUES(1,NULL),(2,1);");
+                await ExpectRowsAsync(session, "UPDATE self_update SET id=id+10,pid=pid RETURNING id,pid;", [[11,null],[12,1]]);
+                await ExpectRowsAsync(session, "SELECT id,pid FROM self_update ORDER BY id;", [[11,null],[12,11]]);
                 string[] actions = ["SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
                 for (int index = 0; index < actions.Length; index++)
                 {

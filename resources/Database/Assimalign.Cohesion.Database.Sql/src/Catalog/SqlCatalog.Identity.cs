@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Storage;
@@ -14,6 +15,7 @@ public sealed partial class SqlCatalog
     private readonly Dictionary<ulong, SqlCatalogSequence> _identitySequences = new();
     private ulong _sequenceDefaultGeneration = ulong.MaxValue;
     private bool _hasSequenceDefaults;
+    private IncomingActionDirectory? _incomingActions;
 
     internal bool HasSequenceDefaults
     {
@@ -65,22 +67,51 @@ public sealed partial class SqlCatalog
     // Avoid allocating a table snapshot/closure on sequence-free DML without references.
     internal bool HasIncomingReferences(SqlCatalogTable table, bool changingUpdates = false)
     {
+        var actions = IncomingActions();
+        return actions.Tables.TryGetValue(table.ObjectId, out var incoming) &&
+            (changingUpdates ? incoming.UpdateColumns.Count != 0 : incoming.Any);
+    }
+
+    internal IReadOnlySet<string>? ReferencedUpdateColumns(SqlCatalogTable table, bool changingOnly)
+        => IncomingActions().Tables.TryGetValue(table.ObjectId, out var incoming)
+            ? changingOnly ? incoming.UpdateColumns : incoming.ReferencedColumns : null;
+
+    internal bool HasDeleteActions(SqlCatalogTable table)
+        => IncomingActions().Tables.TryGetValue(table.ObjectId, out var incoming) && incoming.DeleteActions;
+
+    private IncomingActionDirectory IncomingActions()
+    {
+        var cached = Volatile.Read(ref _incomingActions);
+        if (cached is not null && cached.Generation == Volatile.Read(ref _ddlGeneration)) { return cached; }
         lock (_sync)
         {
+            cached = _incomingActions;
+            if (cached is not null && cached.Generation == _ddlGeneration) { return cached; }
+            var tables = new Dictionary<ulong, IncomingActionSet>();
             foreach (var slot in _tables.Values)
             {
                 for (int index = 0; index < slot.Table.Constraints.Count; index++)
                 {
                     var constraint = slot.Table.Constraints[index];
-                    if (constraint.Kind == SqlCatalogConstraintKind.Reference &&
-                        (!changingUpdates || constraint.OnUpdate is SqlCatalogReferentialAction.Cascade or SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault) &&
-                        string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(constraint.ReferencedTable, table.Name, StringComparison.OrdinalIgnoreCase)) { return true; }
+                    if (constraint.Kind != SqlCatalogConstraintKind.Reference ||
+                        !_tables.TryGetValue((constraint.ReferencedSchema!, constraint.ReferencedTable!), out var parent)) { continue; }
+                    if (!tables.TryGetValue(parent.Table.ObjectId, out var incoming))
+                    { tables.Add(parent.Table.ObjectId, incoming = new(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase), false, true)); }
+                    foreach (string column in constraint.ReferencedColumns) { incoming.ReferencedColumns.Add(column); }
+                    if (constraint.OnUpdate is SqlCatalogReferentialAction.Cascade or SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)
+                    { foreach (string column in constraint.ReferencedColumns) { incoming.UpdateColumns.Add(column); } }
+                    if (constraint.OnDelete is SqlCatalogReferentialAction.Cascade or SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)
+                    { tables[parent.Table.ObjectId] = incoming with { DeleteActions = true }; }
                 }
             }
-            return false;
+            cached = new(_ddlGeneration, tables);
+            Volatile.Write(ref _incomingActions, cached);
+            return cached;
         }
     }
+
+    private sealed record IncomingActionDirectory(ulong Generation, Dictionary<ulong, IncomingActionSet> Tables);
+    private sealed record IncomingActionSet(HashSet<string> UpdateColumns, HashSet<string> ReferencedColumns, bool DeleteActions, bool Any);
 
     internal SqlCatalogSequence IdentitySequence(ulong tableId, string column)
     {

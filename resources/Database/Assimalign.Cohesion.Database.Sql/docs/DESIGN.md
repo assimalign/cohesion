@@ -27,8 +27,15 @@ UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE execute CASCADE, SET NULL a
 through one pre-apply worklist. Delete SET actions seed the same worklist when they change a
 key another table references. Matching uses the pre-action child state, so a key swap does not
 reassociate already-cascaded children with another parent's old key. Composed assignments retain
-all untouched columns; a different assignment to an already assigned column fails with CS05085,
-including conflicting diamonds and cycles. Equal revisits converge without recursion. A subsequent
+all untouched columns. Each parent-row/constraint origin can revise its earlier proposal as a
+composite key moves in multiple hops; different origins proposing different stored values fail
+with CS05085, including conflicting diamonds and cycles. Equal revisits converge without recursion.
+Direct assignments are the child image used for action matching: a key still equal to the old
+parent key receives the action, including an explicit self-assignment; a directly moved key keeps
+its assigned value. This follows PostgreSQL src/backend/utils/adt/ri_triggers.c:1274-1313's
+UPDATE ... WHERE old-key query and replaces the first pass's direct-assignment conflict policy.
+RETURNING uses each direct proposal before subsequent actions, consistently across all four paths (PostgreSQL src/backend/executor/nodeModifyTable.c:2754,
+src/backend/commands/trigger.c:5190-5246). A subsequent
 delete of the same physical parent row through the same edge composes with its update; independent
 parent replacements still conflict. MERGE also
 retains key events for proposed updates subsequently removed by a delete cascade and revisits
@@ -63,7 +70,16 @@ closure inversions use #1420's first-two-refusal release/retry and retained wait
 restarts its existing unwritten arbitration and retains completed wait grants. Its metadata intents
 preceding the arbitration mark retain their existing transaction duration. Failure/cancellation
 before apply releases preparation grants; admitted physical writes roll back in one statement bracket.
-Ordinary DML keeps the existing Release allocation guards. Nonparallel tests record actual waits,
+Closure attempts own disposable memory ledgers, separate from retained direct proposals. Every
+path, including plain UPDATE, upsert and DELETE, charges closure rows, projections and directories
+against the statement budget; failure and retry release the abandoned attempt before waiting.
+DELETE maintains one mutable projection directory and refreshes changed rows incrementally. Another
+pass runs only when visible key actions or newly reached deletes can expose further work. Final
+foreign-key validation uses a fresh committed READ COMMITTED snapshot (ri_triggers.c:2800-2822),
+never the all-writers snapshot used for lock-protected child discovery. Action eligibility metadata
+is cached once per catalog generation; unrelated assignments and insert-only upserts retain their
+ordinary execution path. Ordinary DML keeps the existing Release allocation guards. Large depth/work acceptance fixtures
+request an explicit memory grant; separate small-budget cases verify refusal and cleanup. Nonparallel tests record actual waits,
 exercise success, constraint failure, cancellation and session teardown, and race parent updates
 against child inserts/deletes until update/insert/delete/wait counters advance. Both transports
 cover every action/path, self-references, immediate/final timing, coded conflicts and usable connections.
