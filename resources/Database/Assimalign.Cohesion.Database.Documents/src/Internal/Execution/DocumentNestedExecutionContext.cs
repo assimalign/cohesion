@@ -24,6 +24,10 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
     private readonly Dictionary<OqlSubqueryExpression, JsonElement> _cache = new(ReferenceEqualityComparer.Instance);
     private readonly DocumentAggregateMemory.Reservation _retained;
     private long _work;
+    private readonly long _lookupLimit;
+    private long _lookupBytes;
+    private Dictionary<(Guid Collection, string Id), LinkedListNode<CachedLookup>>? _lookups;
+    private LinkedList<CachedLookup>? _lookupOrder;
 
     internal long RetainedBytes => _retained.Bytes;
     internal DocumentVariableBinding? Bindings { get; private set; }
@@ -37,6 +41,94 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
         if (_work == _database.Engine.EngineOptions.StatementWorkBudget)
         { throw new DocumentPlanningException("CD05020", ErrorMessages.NestedWorkExceeded); }
         _work++;
+    }
+
+    internal DocumentEvaluationContext? Lookup(Guid collection, string id,
+        DocumentAggregateMemory.Reservation active, CancellationToken cancellationToken)
+    {
+        ConsumeWork(cancellationToken);
+        _lookups ??= new();
+        _lookupOrder ??= new();
+        if (_lookups.TryGetValue((collection, id), out var cached))
+        {
+            _lookupOrder.Remove(cached);
+            _lookupOrder.AddLast(cached);
+            RetainActive(cached.Value.Result, active);
+            return cached.Value.Result;
+        }
+        var memory = _operation.GetStatementMemory(cancellationToken);
+        using var scratch = memory.Reserve();
+        scratch.Charge(256L + 2L * id.Length);
+        _operation.Session.LastQueryKeyLookups++;
+        var entry = _database.Catalog.FindDocument(collection, id, _operation.Context.Snapshot);
+        DocumentEvaluationContext? result = null;
+        if (entry is { } found)
+        {
+            scratch.Charge(384L + found.Length * 3L);
+            var document = ReadDocument(found);
+            using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
+            scratch.Retain(json.RootElement);
+            result = new DocumentEvaluationContext(json.RootElement.Clone(), found.Id, found.Version);
+        }
+        // Rows own a separate conservative reservation, even while the cache also
+        // retains the representation. Eviction can therefore release only its owner.
+        RetainActive(result, active);
+        long bytes = scratch.Bytes;
+        if (bytes <= _lookupLimit)
+        {
+            TrimLookups(bytes);
+            _retained.Adopt(scratch.Detach());
+            var node = _lookupOrder.AddLast(new CachedLookup((collection, id), result, bytes));
+            _lookups.Add((collection, id), node);
+            _lookupBytes += bytes;
+        }
+        return result;
+    }
+
+    internal JsonElement Nest(Guid collection, string id, DocumentEvaluationContext? match,
+        DocumentAggregateMemory.Reservation active, CancellationToken cancellationToken)
+    {
+        ConsumeWork(cancellationToken);
+        _lookups!.TryGetValue((collection, id), out var node);
+        if (node?.Value.Nest is { } cached) { active.Retain(cached); return cached; }
+        var memory = _operation.GetStatementMemory(cancellationToken);
+        active.Charge(512L + (match is { } document ? 3L * memory.ValueBytes(document.Content) : 0));
+        var array = DocumentJsonValue.Array(match is { } row ? [row.Content] : []);
+        if (node is not null)
+        {
+            long bytes = 64L + memory.ValueBytes(array);
+            if (bytes > _lookupLimit - node.Value.Bytes) { EvictLookup(node); }
+            else
+            {
+                TrimLookups(bytes);
+                _retained.Charge(bytes);
+                _lookupBytes += bytes;
+                node.Value.Bytes += bytes;
+                node.Value.Nest = array;
+            }
+        }
+        return array;
+    }
+
+    private static void RetainActive(DocumentEvaluationContext? result, DocumentAggregateMemory.Reservation active)
+    {
+        if (result is not { } row) { return; }
+        active.Charge(128);
+        active.Retain(row.Id);
+        active.Retain(row.Content);
+    }
+
+    private void TrimLookups(long incoming)
+    {
+        while (_lookupBytes > _lookupLimit - incoming) { EvictLookup(_lookupOrder!.First!); }
+    }
+
+    private void EvictLookup(LinkedListNode<CachedLookup> node)
+    {
+        _lookups!.Remove(node.Value.Key);
+        _lookupOrder!.Remove(node);
+        _lookupBytes -= node.Value.Bytes;
+        _retained.Rewind(_retained.Bytes - node.Value.Bytes);
     }
 
     internal Document ReadDocument(DocumentCatalogEntry entry)
@@ -54,6 +146,9 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
         _plans = plans;
         _parameters = parameters;
         _retained = operation.GetStatementMemory(cancellationToken).Reserve();
+        // Keep seven eighths of the grant available to sources, active rows and
+        // blocking operators. Oversized entries are used without being cached.
+        _lookupLimit = database.Engine.EngineOptions.StatementMemoryBudget / 8;
     }
 
     internal async ValueTask<object?> EvaluateAsync(OqlSubqueryExpression expression,
@@ -108,7 +203,9 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
             object? value;
             if (expression.Query.IsValue)
             { value = row.GetValue(0); }
-            else if (expression.Query.Projections.Count == 1 && expression.Query.Projections[0].Expression is OqlStarExpression &&
+            else if (expression.Query.Projections.Count == 1 && expression.Query.Projections[0].Expression is OqlUnaryExpression { Operator: ".*" })
+            { value = row.IsMissing(0) ? DocumentMissing.Instance : row.GetValue(0); }
+            else if (DocumentRowWriter.WritesBareValue(expression.Query) &&
                 row.GetValue(0) is JsonElement { ValueKind: JsonValueKind.Object } document)
             { value = document; }
             else
@@ -131,7 +228,21 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
     public void Dispose()
     {
         _cache.Clear();
+        _lookups?.Clear();
+        _lookupOrder?.Clear();
+        _lookupBytes = 0;
         _retained.Dispose();
+    }
+
+    private sealed class CachedLookup
+    {
+        public CachedLookup((Guid Collection, string Id) key, DocumentEvaluationContext? result, long bytes)
+        { Key = key; Result = result; Bytes = bytes; }
+
+        public (Guid Collection, string Id) Key { get; }
+        public DocumentEvaluationContext? Result { get; }
+        public long Bytes { get; set; }
+        public JsonElement? Nest { get; set; }
     }
 
     private sealed class DebugView

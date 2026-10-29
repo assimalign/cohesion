@@ -418,6 +418,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         return _database.RunAsync(this, operation =>
         {
             LastQueryDocumentsRead = 0;
+            LastQueryKeyLookups = 0;
             LastQuerySubqueriesExecuted = 0;
             LastQueryIndexEntriesRead = 0;
             // Preserve the typed seam's parse diagnostics before touching an error-recovery AST.
@@ -452,6 +453,7 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
 
     /// <summary>JSON documents read by the last admitted OQL statement, before its residual filter.</summary>
     internal long LastQueryDocumentsRead { get; set; }
+    internal long LastQueryKeyLookups { get; set; }
 
     internal long LastQuerySubqueriesExecuted { get; set; }
     // Snapshot-visible entries advanced by the ordered catalog cursor, including

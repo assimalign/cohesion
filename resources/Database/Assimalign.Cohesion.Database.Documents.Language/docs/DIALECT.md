@@ -170,7 +170,8 @@ derived and local-value bindings have no stored identity and return NULL for met
 A nested `FROM d.items AS i`, or `FROM d AS i`
 where d is an explicit outer alias, iterates that outer value per row. An implicit collection name
 in a bare FROM continues to name the collection. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
-Qualified stars (`d.*`) retain their existing CK00001 refusal.
+Qualified stars (`d.*`) retain their CK00001 refusal outside joined SELECT projections; see
+[key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
 
 Subqueries execute in UPDATE/DELETE predicates, SET and VALUES expressions, INSERT/UPSERT SELECT
 sources and RETURNING. Every nested read sees statement-start data, including writes from earlier
@@ -194,6 +195,82 @@ Subquery expressions are known arrays for the literal-array function-kind rule: 
 and CONCAT reject them with CD05001 during planning. Constructors and ARRAY/FIRST retain
 in-order evaluation, serialization and failure reachability on both execution paths. This run adds no disk,
 protocol, frame or capability version. InMemory, TCP and NativeAOT use the ordinary JSON cells.
+
+## Key JOIN and NEST (#1732, OQ-J1)
+
+The executable key-only ANSI spelling is:
+
+~~~sql
+SELECT META(a).id AS parent, b.*
+FROM parents AS a
+LEFT OUTER JOIN children AS b ON META(b).id = a.childId
+~~~
+
+Each binding is [INNER] JOIN, LEFT [OUTER] JOIN, [INNER] NEST or LEFT [OUTER] NEST.
+Bindings execute left to right and may interleave with UNNEST. The right-hand source must be a
+stored collection in this database. ON must be exactly META(rightAlias).id = keyExpression;
+parentheses are allowed. The key expression sees earlier sources and lexical outer captures,
+including scalar functions, parameters and subqueries. A self or forward source reference gives
+CD01035. Unqualified key fields address the initial FROM value; a field whose name collides with
+a self or later source alias must be qualified with its earlier source alias.
+General ON predicates, reversed equality, ON KEYS, expression/derived right-hand
+sources, comma joins and joins on UPDATE/DELETE remain named CK00001 refusals.
+INSERT/UPSERT SELECT and expression subqueries may contain the supported SELECT joins.
+
+Every FROM and UNNEST source in every SELECT scope of a statement containing JOIN or NEST
+requires an explicit alias, including nested SELECTs without their own joins. DML targets keep their
+existing alias rules. AS is optional for collection, JOIN/NEST and UNNEST aliases; existing expression
+FROM rules still apply. An inferred UNNEST/path alias does not satisfy this rule (CD00016).
+This temporary restriction avoids deciding the open unaliased-collection rule in #1767.
+Aliases are ordinal and unique within the SELECT (CD00010; CD01023 for direct ASTs).
+
+Keys are ordinal strings, NULL or MISSING. Other values, including arrays, give located CD02028;
+key lists are outside this scalar-key subset. INNER JOIN drops unmatched inputs; LEFT JOIN binds
+MISSING. NEST binds a one-element array when matched. The unmatched lookup-NEST table is:
+
+| Key | INNER NEST | LEFT NEST binding |
+| --- | --- | --- |
+| Existing string | One row | One-element array |
+| Absent string | No row | Empty array |
+| NULL or MISSING | No row | MISSING |
+
+This follows the pinned [ANSI key equality](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/join.adoc#L106-L123),
+[LEFT JOIN missing binding](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/join.adoc#L1034) and
+[lookup-NEST unknown-key table](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/nest.adoc#L307-L335).
+
+META(alias).id/version retains each stored document's identity, independent of JSON properties.
+Unmatched JOIN metadata is MISSING. Expression/derived sources and NEST arrays have no single
+document identity, so their metadata is NULL; an unknown-key LEFT NEST binding is MISSING.
+META() is ambiguous in a joined SELECT and gives CD01035. META on UNNEST and comprehension
+variables remains invalid, including when a local UNNEST shadows a captured source name.
+Bindings take effect in declaration order, after evaluating their own input/key expression.
+JOIN and NEST aliases replace captured names with their local metadata behavior. Grouping,
+captures and ORDER BY projection aliases keep their existing scope rules. Unqualified ordinary
+field paths continue to address the initial FROM value.
+
+SELECT * yields a synthetic object keyed by the explicit FROM alias and every JOIN/NEST/UNNEST
+alias; MISSING members are omitted and NULL members remain. A top-level qualified star (b.*)
+is supported in ungrouped joined SELECT projections and yields that alias's value, using the existing bare
+result mode when it is the sole projection. Non-join qualified stars retain their existing refusal.
+Join queries support grouping, GROUP AS, HAVING, DISTINCT, ordering and paging, and execute inside
+correlated subqueries. Equal sort keys retain input source order. Nonblocking joins apply paging
+before projection and infer dynamic headers from the selected window, as expression sources do.
+
+All lookups use the current operation and its snapshot. The statement caches both hits and misses
+by collection identity and ordinal key, across chains and subqueries. Its least-recently-used cache
+is limited to one eighth of StatementMemoryBudget (8 MiB of the default 64 MiB grant).
+Eviction releases an entry and its NEST array; an evicted key is looked up again with FindDocument
+in the same operation and snapshot. Oversized entries bypass the cache. Current rows and rows
+held for ordering or grouping keep independent charges until their owners release them. Cached
+content and NEST arrays, dictionary entries and key strings are charged to the shared
+StatementMemoryBudget (CD05018). Lookup attempts, cache hits and NEST materialization also consume
+StatementWorkBudget (CD05020). No lookup opens a session operation or calls public GetAsync.
+LIMIT 0 and EXPLAIN perform static validation without document lookups. EXPLAIN exposes KeyJoin,
+LeftKeyJoin, KeyNest and LeftKeyNest, with the collection, alias, snapshot lookup and cache policy.
+There is no disk or wire version change.
+
+Joined ordering retains an explicit sort; EXPLAIN index candidates name key_join_requires_sort.
+An array-only direct AST supplied through Bindings retains the ordinary UNNEST representation.
 
 ## Derived and expression FROM sources (#1731, OQ-Q2)
 
@@ -249,7 +326,9 @@ must re-read, under the shared CD05018 memory budget. Outer ORDER BY sorts; it c
 inner index-order guarantee. EXPLAIN includes DerivedSource/ExpressionSource and nested plans.
 All levels share the operation, snapshot, function catalog, work/memory bounds and cancellation.
 Correlated sources are evaluated per outer row. INSERT/UPSERT SELECT accepts both source forms.
-JOIN/NEST (including comma joins) retain named CK00001 refusals. No format or wire
+Scalar key JOIN/NEST may follow either source form; see [key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
+General ON predicates, ON KEYS, expression/derived right-hand sources and comma joins retain
+named CK00001 refusals. No format or wire
 version changes are required.
 
 ## RETURNING (#1727)
@@ -569,8 +648,8 @@ NULL or non-array collections give NULL. `NOT ANY x IN [NULL] SATISFIES x = 1 EN
 following [Couchbase ANY](https://github.com/couchbase/query/blob/master/expression/coll_any.go)
 and [EVERY](https://github.com/couchbase/query/blob/master/expression/coll_every.go).
 UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES stay contextual names. END remains reserved.
-UNNEST in UPDATE/DELETE, FLATTEN calls, multi-binding quantifiers, NEST,
-JOIN, WITHIN and ANY AND EVERY remain deferred with CK00001.
+UNNEST/JOIN/NEST in UPDATE/DELETE, FLATTEN calls, multi-binding quantifiers, general JOIN/NEST
+predicates, WITHIN and ANY AND EVERY remain deferred with CK00001.
 The DML refusal applies at an UNNEST clause, so `DELETE FROM items WHERE ANY x IN tags
 SATISFIES unnest END` and UPDATE predicates/values may read a field named unnest. A MERGE INTO
 inside a CASE result in SATISFIES receives one CK00001 naming MERGE.

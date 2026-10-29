@@ -5,26 +5,19 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// <summary>An array expansion binding in a SELECT FROM clause.</summary>
 [global::System.Diagnostics.DebuggerDisplay("OqlUnnestExpression")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Documents.Language.OqlUnnestExpression.DebugView))]
-public sealed class OqlUnnestExpression : OqlExpression
+public sealed class OqlUnnestExpression : OqlSourceBindingExpression
 {
     /// <summary>Initializes an array binding.</summary>
     /// <param name="collection">The array expression evaluated in the preceding scope.</param>
     /// <param name="variable">The bound variable, including an inferred path name.</param>
     /// <param name="isLeft">Whether to preserve empty or non-array input with MISSING.</param>
     /// <param name="location">The source span.</param>
-    public OqlUnnestExpression(OqlExpression collection, string variable, bool isLeft = false, Location? location = null) : base(location)
+    public OqlUnnestExpression(OqlExpression collection, string variable, bool isLeft = false, Location? location = null) : base(collection, variable, isLeft, location)
     {
-        Collection = collection;
-        Variable = variable;
-        IsLeft = isLeft;
     }
 
     /// <summary>Gets the array expression.</summary>
-    public OqlExpression Collection { get; }
-    /// <summary>Gets the variable name.</summary>
-    public string Variable { get; }
-    /// <summary>Gets whether empty or non-array input is preserved.</summary>
-    public bool IsLeft { get; }
+    public OqlExpression Collection => Expression;
 
     private sealed class DebugView
     {

@@ -48,6 +48,7 @@ internal sealed partial class DocumentPlanner
         DocumentOrderEligibility Refuse(string reason) => new(false, reason);
         if (logical.IsGrouped) { return Refuse("grouping_changes_order"); }
         if (query.IsDistinct) { return Refuse("distinct_changes_order"); }
+        if (query.Bindings != query.Unnest) { return Refuse("key_join_requires_sort"); }
         if (query.Unnest.Count > 0) { return Refuse("unnest_changes_order"); }
         if (index.Paths.Count == 0) { return Refuse("array_index"); }
         bool Matches(OqlExpression expression, string name) => expression is OqlPathExpression field &&

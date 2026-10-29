@@ -207,6 +207,24 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT name FROM items WHERE amount IS NOT VALUED", [["delta"]]),
                 new("SELECT name FROM items WHERE details.score IS VALUED", [["alpha"], ["beta"], ["gamma"]]),
             ],
+            [OqlClauses.Join] =
+            [
+                new("SELECT b.name FROM items AS a JOIN items AS b ON META(b).id = META(a).id ORDER BY b.name", [["alpha"], ["beta"], ["delta"], ["gamma"]]),
+                new("SELECT b.name FROM [{key:'A'}] AS a JOIN items AS b ON META(b).id = LOWER(key)", [["alpha"]]),
+            ],
+            [OqlClauses.LeftJoin] =
+            [
+                new("SELECT a.name, b FROM items AS a LEFT JOIN items AS b ON META(b).id = 'absent' ORDER BY a.name", [["alpha", null], ["beta", null], ["delta", null], ["gamma", null]], Missing: [(0,1),(1,1),(2,1),(3,1)]),
+            ],
+            [OqlClauses.Nest] =
+            [
+                new("SELECT ARRAY_LENGTH(b) AS n FROM items AS a NEST items AS b ON META(b).id = META(a).id", [[1L],[1L],[1L],[1L]]),
+            ],
+            [OqlClauses.LeftNest] =
+            [
+                new("SELECT ARRAY_LENGTH(b) AS n FROM items AS a LEFT NEST items AS b ON META(b).id = 'absent'", [[0L],[0L],[0L],[0L]]),
+                new("SELECT b FROM items AS a LEFT NEST items AS b ON META(b).id = NULL", [[null],[null],[null],[null]], Missing: [(0,0),(1,0),(2,0),(3,0)]),
+            ],
             [OqlClauses.Unnest] =
             [
                 new("SELECT d.name, t FROM items d UNNEST d.tags AS t ORDER BY d.name", [["alpha", "blue"], ["beta", "green"], ["gamma", "blue"]]),
@@ -604,6 +622,10 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
         OqlClauses.DerivedFrom => expression is OqlSelectExpression { Source: OqlSubqueryExpression },
         OqlClauses.ExpressionFrom => expression is OqlSelectExpression { Source: not null and not OqlSubqueryExpression },
+        OqlClauses.Join => expression is OqlSelectExpression joins && joins.Bindings.OfType<OqlJoinExpression>().Any(binding => !binding.IsLeft && !binding.IsNest),
+        OqlClauses.LeftJoin => expression is OqlSelectExpression leftJoins && leftJoins.Bindings.OfType<OqlJoinExpression>().Any(binding => binding.IsLeft && !binding.IsNest),
+        OqlClauses.Nest => expression is OqlSelectExpression nests && nests.Bindings.OfType<OqlJoinExpression>().Any(binding => !binding.IsLeft && binding.IsNest),
+        OqlClauses.LeftNest => expression is OqlSelectExpression leftNests && leftNests.Bindings.OfType<OqlJoinExpression>().Any(binding => binding.IsLeft && binding.IsNest),
         OqlClauses.Unnest => expression is OqlSelectExpression unnestQuery && unnestQuery.Unnest.Any(binding => !binding.IsLeft),
         OqlClauses.LeftUnnest => expression is OqlSelectExpression leftQuery && leftQuery.Unnest.Any(binding => binding.IsLeft),
         OqlClauses.Any => expression is OqlSelectExpression { Predicate: OqlQuantifiedExpression { IsEvery: false } },
