@@ -833,6 +833,40 @@ The cold/warm synchronous seam corpus includes collection and nested collection;
 inner read can suspend**, a real asynchronous scalar evaluator is required. This preserves the
 GQ-E1/OQ-Q1 invariant. Fanout tests prove exactly N+1 advances and one disposal for N outputs.
 
+### Composite query planning and execution (#1737, GQ-Q1)
+
+`GraphCompositePlan` retains the binary syntax tree and source-ordered leaf plans. A prewalk
+rejects writes and mixed UNION modes; every leaf is then planned by its own GraphPlanner against
+the same GraphOperation snapshot. Parameter normalization occurs once. The existing 65,536-visit reduce planning cap is shared
+across all operands and correlated passes. Binding scopes, native
+expression caches and correlated registries stay per operand, including reused source-free AST
+occurrences. The ordinary planner optionally reports result shapes to the composite reconciler;
+ordinary statements acquire no new plan/planner fields or shape allocations. All names, kinds,
+functions, parameters and wire capabilities are validated before opening an execution cursor.
+See the language DESIGN/DIALECT for associativity, grouping, local page semantics and references.
+
+UNION ALL drains operand cursors directly into the existing materialized final result contract;
+it creates no per-operand result set or union distinct table. Each operand reuses existing match,
+boundary, grouping, sort/page and lexical subplan execution. UNION uses GraphRowComparer and
+GraphValueComparer without a second equality contract, retaining the first structural occurrence.
+Its hash-state grants are shared with all operand/output memory and refuse with CG05030; other
+memory/work refusals retain CG05020/CG05004. Every submitted composite row consumes one work unit.
+Cancellation reaches every advance and projection, and failures dispose every cursor and owner.
+Unknown root result kinds are reconciled during execution, before a result can escape. NULL is
+kind-neutral; numeric representations are compatible. Collection values preserve heterogeneous
+contents, with proven incompatible nested entity kinds refused during planning.
+
+Result names/types/nullability come from the first operand, and composite-value encoding flags
+cover all operands. Static scalar/composite/entity-list admission visits every leaf, even an
+empty later operand. EXPLAIN uses explicit-stack traversal to retain each Union/UnionAll group
+and append every operand's complete plan, including correlated apply nodes. Warnings retain
+operand source order. No public interface, assembly reference, persisted format or wire change
+is introduced. GraphUnionTests compares generated graphs to an independent structural bag/set
+oracle; GraphUnionExecutionTests proves one statement snapshot, cancellation in both operands,
+metadata and typed path delivery. Work accounting is deterministic and linear: doubling two
+100-row operands to two 200-row operands doubles recorded work from 400 to 800 units in each mode.
+GraphUnionWireTests covers InMemory and TCP, refusals, entity-list admission and session reuse.
+
 ### Linear composition (#1145)
 
 The planner validates each source-ordered stage against its incoming scope. LET adds bindings; FOR/UNWIND retains a proven node or relationship element kind from COLLECT, homogeneous entity lists and compatible result branches, while unproven or mixed elements stay Value bindings; a RETURN/NEXT or WITH boundary retains only referenceable projected columns, including entity kinds, optionality, composite possibilities and Int64 COUNT metadata. Carried columns use binding names independently of displayed source text; duplicate carried names are CG01015 during planning, including EXPLAIN. MATCH anchors prefer carried entities. An INSERT introduces its label and relationship-type names for later stages without retaining negative token-cache entries. Unknown names empty only their MATCH stage.
@@ -1929,12 +1963,16 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01017` | A hand-built list comprehension omits its iterator name |
 | `CG01018` | Reduce/list-predicate iterator declaration is missing/empty, or a reduce accumulator is missing/empty or equals its iterator |
 | `CG01019` | Binding/names — outer binding has a proven incompatible correlated pattern kind |
+| `CG01020` | Composite operand column names, order or count differ |
 | `CG00012` | List slice omits both bounds; refused during planning, including EXPLAIN |
 | `CG00013` | Language/syntax — EXISTS omits its nonempty braced pattern |
 | `CG00014` | Language — pattern comprehension requires a nonempty path and projection |
+| `CG00015` | A composite operation is missing its query operand |
+| `CG00016` | UNION and UNION ALL are mixed within one composite tree |
 | `CG02014` | Invalid list-operation source or slice bound kind/range; known non-integer bound types fail planning |
 | `CG02015` | Reduce/list-predicate source is neither a list nor NULL; known incompatible kinds fail planning |
 | `CG02016` | Values/types — runtime correlated argument has an incompatible entity kind |
+| `CG02017` | Composite operand result shapes are incompatible |
 | `CG07016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `CG06017` | Unsupported graph record or tree-registration format, including formats 1–4: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
@@ -1947,6 +1985,8 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05026` | Reduce shape/type analysis exceeds the fixed statement planning cap of 65,536 visited nodes or closure steps |
 | `CG05027` | Execution — malformed or missing correlated subplan or missing argument |
 | `CG05028` | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
+| `CG05029` | A composite query contains a modifying operand |
+| `CG05030` | UNION duplicate-elimination state exceeds the statement memory budget |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |

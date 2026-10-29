@@ -61,6 +61,8 @@ public static class GqlLanguageProfile
         GqlClauses.OptionalMatch,
         GqlClauses.Explain,
         GqlClauses.Return,
+        GqlClauses.SetOperation,
+        GqlClauses.UnionAll,
         GqlClauses.Next,
         GqlClauses.With,
         GqlClauses.GroupBy,

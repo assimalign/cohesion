@@ -185,6 +185,8 @@ public sealed class GqlProfileExecutionTests
                 Mutation("MATCH ()-[r:KNOWS]->() REMOVE r.weight", 1,
                     new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [[null]])),
             ],
+            [GqlClauses.SetOperation] = [new("RETURN 1 AS x UNION RETURN 1 AS x", [[1L]])],
+            [GqlClauses.UnionAll] = [new("RETURN 1 AS x UNION ALL RETURN 1 AS x", [[1L], [1L]])],
             [GqlClauses.Return] =
             [
                 new("RETURN [10,20,30][-1], {k:{j:1}}.k.j, [1] IN [[1]], [NULL] = [NULL]", [[30L, 1L, true, null]]),
@@ -538,6 +540,8 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.SetOperation => query.Composite is { Operator: GqlCompositeOperator.Union },
+        GqlClauses.UnionAll => query.Composite is { Operator: GqlCompositeOperator.UnionAll },
         GqlClauses.Merge => query.Stages.Any(stage => stage is GqlMergeStage),
         GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),
         GqlClauses.Remove => query.Stages.Any(stage => stage is GqlRemoveStage),

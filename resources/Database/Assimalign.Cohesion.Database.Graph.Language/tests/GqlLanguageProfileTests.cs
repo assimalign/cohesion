@@ -76,14 +76,13 @@ public class GqlLanguageProfileTests
     public void Profile_AdvertisesOnlyExecutableClauses()
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
-            GqlClauses.Match, GqlClauses.QuantifiedPath, GqlClauses.PathMode, GqlClauses.PathSelector, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Next, GqlClauses.With, GqlClauses.GroupBy, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Exists, GqlClauses.Case, GqlClauses.ListComprehension, GqlClauses.PatternComprehension, GqlClauses.ListSlice, GqlClauses.Reduce, GqlClauses.ListPredicate, GqlClauses.Create, GqlClauses.Insert, GqlClauses.Merge,
+            GqlClauses.Match, GqlClauses.QuantifiedPath, GqlClauses.PathMode, GqlClauses.PathSelector, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.SetOperation, GqlClauses.UnionAll, GqlClauses.Next, GqlClauses.With, GqlClauses.GroupBy, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Exists, GqlClauses.Case, GqlClauses.ListComprehension, GqlClauses.PatternComprehension, GqlClauses.ListSlice, GqlClauses.Reduce, GqlClauses.ListPredicate, GqlClauses.Create, GqlClauses.Insert, GqlClauses.Merge,
             GqlClauses.Set, GqlClauses.Remove, GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Filter, GqlClauses.Let, GqlClauses.For, GqlClauses.Unwind, GqlClauses.Show,
             GqlClauses.LabelExpression]);
     }
 
     [Theory]
     [InlineData(GqlClauses.MandatoryMatch)]
-    [InlineData(GqlClauses.SetOperation)]
     [InlineData(GqlClauses.Call)]
     public void FutureClauses_AreNotAdvertised(string clause)
     {

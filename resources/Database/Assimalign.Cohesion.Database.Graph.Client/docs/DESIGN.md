@@ -40,6 +40,15 @@ sequenceDiagram
     GraphConnection-->>App: GraphPath enumeration
 ```
 
+## Composite queries (#1737, GQ-Q1)
+
+UNION and UNION ALL use the existing Execute and ExecutePaths framing. Result metadata follows
+the first operand and value capability admission visits every operand before execution. InMemory
+and TCP conformance covers duplicate/NULL/scalar-list results, correlated operands, EXPLAIN,
+CG00016/CG01020/CG02017/CG05029 refusals, the #1662 entity-list gate and authenticated-session
+reuse. EXCEPT, INTERSECT and OTHERWISE retain named CK00001 refusals for GQ-Q2. No client source,
+protocol, capability or version changes are required.
+
 ## Correlated existence predicates (#1537)
 
 EXISTS/NOT EXISTS return ordinary Boolean scalar cells through the existing Execute exchange.

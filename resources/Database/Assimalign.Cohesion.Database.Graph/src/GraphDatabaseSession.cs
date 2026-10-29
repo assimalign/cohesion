@@ -322,7 +322,12 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
                     throw new GraphPlanningException("CG05001", ErrorMessages.SessionExecuteCoreAsyncGraphPlanning, request.Statement.GqlExpression.Location);
                 }
                 var planner = new GraphPlanner(_database, operation.Context.Snapshot);
-                var plan = planner.Plan(request.Statement.GqlExpression, request.Parameters);
+                if (request.Statement.GqlExpression.Composite is not null)
+                {
+                    var composite = planner.PlanComposite(request.Statement.GqlExpression, request.Parameters, false, cancellationToken);
+                    return ValueTask.FromResult<DatabaseResult>(planner.Describe(composite, operation.QueryBudget));
+                }
+                var plan = planner.Plan(request.Statement.GqlExpression, request.Parameters, token: cancellationToken);
                 return ValueTask.FromResult<DatabaseResult>(planner.Describe(plan, operation.QueryBudget));
             }
             return GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,

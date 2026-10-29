@@ -35,6 +35,7 @@ public sealed partial class GqlQueryParser
     }
 
     private bool IsExistsQueryClause() => Is("RETURN") || Is("WITH") || Is("NEXT") || Is("UNION") ||
+        Is("EXCEPT") || Is("INTERSECT") || Is("OTHERWISE") ||
         Is("CALL") || Is("ORDER") || Is("LIMIT") || Is("OFFSET") || Is("SKIP") || Is("INSERT") ||
         Is("CREATE") || Is("MERGE") || Is("DELETE") || Is("DETACH") || Is("SET") || Is("REMOVE") ||
         Is("LET") || Is("FOR") || Is("UNWIND") || Is("FILTER");

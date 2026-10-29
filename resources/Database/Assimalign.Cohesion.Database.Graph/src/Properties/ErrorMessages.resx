@@ -43,6 +43,12 @@
   <data name="MatchClausePathsRequired" xml:space="preserve"><value>A matching clause requires a non-null, non-empty path list.</value></data>
   <data name="MatchLimitExceeded" xml:space="preserve"><value>The query exceeded 100000 path matches.</value></data>
   <data name="InsertEndpointInvalid" xml:space="preserve"><value>An inserted endpoint must be a non-null node compatible with its existing binding.</value></data>
+  <data name="UnionOperandMalformed" xml:space="preserve"><value>A composite operand must be a complete read-only query returning columns.</value></data>
+  <data name="CompositeMixedUnion" xml:space="preserve"><value>A composite query cannot mix UNION and UNION ALL, including inside groups.</value></data>
+  <data name="CompositeReadOnly" xml:space="preserve"><value>Composite query operands must be read-only.</value></data>
+  <data name="CompositeColumns" xml:space="preserve"><value>Composite operands must return the same column names in the same order.</value></data>
+  <data name="CompositeShapes" xml:space="preserve"><value>Composite operands have incompatible result shapes.</value></data>
+  <data name="UnionMemoryExceeded" xml:space="preserve"><value>UNION duplicate elimination exceeds the statement memory budget.</value></data>
   <data name="EntityListWireUnsupported" xml:space="preserve"><value>Lists of nodes or relationships cannot be returned over the wire yet. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>

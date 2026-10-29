@@ -49,9 +49,10 @@ internal sealed partial class GraphPlanner
     /// <param name="paths">Whether path-request projection shape takes precedence over duplicate column names.</param>
     /// <param name="token">Cancellation observed while validating and indexing expression structure.</param>
     /// <param name="normalizedParameters">Whether these are the statement's already captured bindings for replanning.</param>
+    /// <param name="resultShapes">Optional composite-only output shape collection.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="DatabaseException">The statement is invalid (<c>CG05001</c>, <c>CG03003</c>, <c>CG01015</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false)
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false, List<GraphBindingShape>? resultShapes = null)
     {
         try
         {
@@ -61,7 +62,7 @@ internal sealed partial class GraphPlanner
             if (_nativeExpressions is ReductionPlanningState previous) { previous.Work = null; }
             if (_nativeExpressions is CorrelatedPlanningState correlated) { correlated.Subplans = null; correlated.Anti = null; }
             GraphPlan? plan = null;
-            try { plan = PlanCore(query, paths, token); }
+            try { plan = PlanCore(query, paths, token, resultShapes: resultShapes); }
             catch (GraphPlanningException) when (query.Text is null && _nativeExpressions is CorrelatedPlanningState { Subplans: not null })
             {
                 // An unbound programmatic occurrence can report a scope error using a plan
@@ -72,7 +73,8 @@ internal sealed partial class GraphPlanner
                 // Discover EXISTS during the ordinary validation walk. Queries without it
                 // retain their exact planning path, allocations and malformed-AST refusals.
                 bindingState.Subplans = null; bindingState.Anti = null; bindingState.Work = null;
-                return PlanCore(query, paths, token, boundStages: GraphLexicalOccurrences.Bind(query.Stages, token));
+                resultShapes?.Clear();
+                return PlanCore(query, paths, token, boundStages: GraphLexicalOccurrences.Bind(query.Stages, token), resultShapes: resultShapes);
             }
             return plan!;
         }
@@ -83,7 +85,7 @@ internal sealed partial class GraphPlanner
     }
 
     private GraphPlan PlanCore(GqlQueryExpression statement, bool pathsRequest, CancellationToken token, CorrelationScope? correlation = null,
-        IReadOnlyList<GqlStage>? boundStages = null)
+        IReadOnlyList<GqlStage>? boundStages = null, List<GraphBindingShape>? resultShapes = null)
     {
         if (_parameters is not null) { _parameters = new Dictionary<string, object?>(_parameters, StringComparer.Ordinal); }
         var query = statement;
@@ -440,6 +442,8 @@ internal sealed partial class GraphPlanner
             }
         }
         var final = planned[^1].Plan;
+        if (resultShapes is not null)
+        { foreach (var projection in final.Projections) { resultShapes.Add(Shape(projection.Expression)); } }
         return final with
         {
             Query = statement,
@@ -1186,7 +1190,7 @@ internal sealed partial class GraphPlanner
             IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
             (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
         {
-            ReductionState.Work ??= new(token);
+            ReductionState.Work ??= ReductionState.SharedWork ?? new(token);
             _ = GraphValueExpressions.Children(expression).ToArray();
             ValidateExpression(expression.List, allowAggregates, ordering, variableScope, iterators, orderInput);
             ValidateReductionSource(expression.List, ordering, iterators);
@@ -1972,12 +1976,13 @@ internal sealed partial class GraphPlanner
         internal Dictionary<string, BindingKind>? Variables;
         internal Dictionary<string, GraphBindingShape>? Shapes;
         internal GraphReductionWork? Work;
+        internal GraphReductionWork? SharedWork;
         internal ReductionPlanningState(Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>? native) { Native = native; }
         private sealed class DebugView { public DebugView(ReductionPlanningState value) { } }
     }
 
     // Only statements with correlated subplans pay for this state. Reduction-only planning
-    // keeps its original object layout and native-expression cache.
+    // keeps its native-expression cache without a correlated registry.
     private sealed class CorrelatedPlanningState : ReductionPlanningState
     {
         internal Dictionary<GqlExpression, GraphCorrelatedSubplan>? Subplans;
@@ -1987,7 +1992,7 @@ internal sealed partial class GraphPlanner
             : base(previous is ReductionPlanningState reduction ? reduction.Native : previous as Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>)
         {
             if (previous is ReductionPlanningState state)
-            { Variables = state.Variables; Shapes = state.Shapes; Work = state.Work; }
+            { Variables = state.Variables; Shapes = state.Shapes; Work = state.Work; SharedWork = state.SharedWork; }
         }
     }
 
