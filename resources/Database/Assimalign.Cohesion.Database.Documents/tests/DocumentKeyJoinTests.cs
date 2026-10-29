@@ -33,10 +33,11 @@ public sealed class DocumentKeyJoinTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("parents", CancellationToken.None);
         await session.CreateCollectionAsync("children", CancellationToken.None);
-        var right = Enumerable.Range(0, 13).Select(index => (Id: "r" + index, N: index)).ToArray();
+        var right = Enumerable.Range(0, 13).Select(index => (Id: "r" + index, N: index, Next: "r" + (index + 1))).ToArray();
         foreach (var item in right)
-        { await session.ExecuteAsync("INSERT INTO children (KEY, VALUE) VALUES ('" + item.Id + "', {n:" + item.N + "})", cancellationToken: CancellationToken.None); }
+        { await session.ExecuteAsync("INSERT INTO children (KEY, VALUE) VALUES ('" + item.Id + "', {n:" + item.N + ",next:'" + item.Next + "'})", cancellationToken: CancellationToken.None); }
         var expected = new List<string>();
+        var chained = new List<string>();
         for (int index = 0; index < 120; index++)
         {
             string? key = index % 7 == 0 ? null : "r" + index % 17;
@@ -45,9 +46,13 @@ public sealed class DocumentKeyJoinTests
             await session.ExecuteAsync("INSERT INTO parents (KEY, VALUE) VALUES ('p" + index.ToString("D3", CultureInfo.InvariantCulture) + "', " + document + ")", cancellationToken: CancellationToken.None);
             var matches = right.Where(item => !missing && key == item.Id).ToArray();
             if (matches.Length == 0 && !left) { continue; }
-            string value = matches.Length > 0 ? nest ? "[{\"n\":" + matches[0].N + "}]" : "{\"n\":" + matches[0].N + "}" :
+            string body = matches.Length > 0 ? "{\"n\":" + matches[0].N + ",\"next\":\"" + matches[0].Next + "\"}" : "";
+            string value = matches.Length > 0 ? nest ? "[" + body + "]" : body :
                 nest && key is not null && !missing ? "[]" : "MISSING";
             expected.Add(index + ":" + value);
+            var second = right.Where(item => matches.Any(first => first.Next == item.Id)).ToArray();
+            foreach (int element in new[] { 1, 2 })
+            { chained.Add(index + ":" + (second.Length == 0 ? "MISSING" : second[0].N.ToString(CultureInfo.InvariantCulture)) + ":" + element); }
         }
         // Act
         var rows = await DocumentSubqueryTests.RowsAsync(session, "SELECT a.n, b FROM parents AS a " + form + " children AS b ON META(b).id = a.k ORDER BY a.n");
@@ -56,6 +61,16 @@ public sealed class DocumentKeyJoinTests
         session.LastQueryKeyLookups.ShouldBe(17);
         session.LastQueryDocumentsRead.ShouldBe(133);
         _output.WriteLine("Nested-loop oracle: 120 x 13 = 1560 comparisons; executor: 17 distinct key probes and 13 right-hand reads.");
+        // Act: expand NEST or JOIN values, look up a key from that earlier binding,
+        // and expand again. LEFT UNNEST preserves every unmatched outer tuple.
+        string expanded = nest ? "b" : "CASE WHEN b IS MISSING THEN [] ELSE [b] END";
+        var chainRows = await DocumentSubqueryTests.RowsAsync(session,
+            "SELECT a.n AS parent_n, c.n AS child_n, u FROM parents AS a " + form + " children AS b ON META(b).id = a.k LEFT UNNEST " + expanded +
+            " AS found LEFT JOIN children AS c ON META(c).id = found.next UNNEST [1,2] AS u ORDER BY a.n, u");
+        // Assert
+        chainRows.Select(row => row.GetValue(0) + ":" + (row.IsMissing(1) ? "MISSING" : Convert.ToString(row.GetValue(1), CultureInfo.InvariantCulture)) + ":" + row.GetValue(2)).ShouldBe(chained);
+        session.LastQueryKeyLookups.ShouldBe(17);
+        session.LastQueryDocumentsRead.ShouldBe(133);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Key joins: chains preserve metadata stars arrays and lexical captures")]
