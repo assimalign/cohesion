@@ -147,6 +147,15 @@ public static class SqlClauses
     /// <summary>A peer-based window frame without offsets.</summary>
     public const string WindowRange = "RANGE window frame";
 
+    /// <summary>Peer-group window frames.</summary>
+    public const string WindowGroups = "GROUPS window frame";
+
+    /// <summary>Window frame exclusion.</summary>
+    public const string WindowExclude = "EXCLUDE window frame";
+
+    /// <summary>NULL treatment for navigation and frame value functions.</summary>
+    public const string WindowNullTreatment = "window NULL treatment";
+
     /// <summary>A <c>UNION</c> set operation.</summary>
     public const string SetOperation = "UNION";
 

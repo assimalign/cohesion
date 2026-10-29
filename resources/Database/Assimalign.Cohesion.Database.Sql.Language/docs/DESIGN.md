@@ -19,23 +19,29 @@ Unchanged cells introduce no action proposal. Disagreements compare completed pe
 including first-pass DELETE SET origins, so composite-key intermediate states do not create false
 CS05085 failures and mixed DELETE/UPDATE actions cannot silently choose different replacements.
 
-## Window stage (#1526, SQ-W1/SQ-W2)
+## Window stage (#1526, SQ-W1/SQ-W2/SQ-W3)
 
 SqlWindowExpression holds a function and either OVER name or an inline SqlWindowSpecification.
 SqlNamedWindow retains declaration order and a specification's inherited name. The SELECT
 node stores named definitions in an optional payload over its existing grouping-list reference,
 so ordinary SELECT nodes keep their allocation size. The profile advertises eight ranking and
 navigation functions plus FIRST_VALUE/LAST_VALUE/NTH_VALUE, OVER, PARTITION, WINDOW,
-ROWS and offset-free RANGE. SqlWindowFrame and SqlWindowFrameBound retain explicit boundary
+ROWS, RANGE, GROUPS and EXCLUDE, plus navigation/value-function NULL treatment. SqlWindowFrame and SqlWindowFrameBound retain explicit boundary
 kinds and offset expressions, participating in depth, canonical rendering and binding.
-RANGE with offsets, GROUPS, EXCLUDE and value-function modifiers retain CK00001. Canonical built-in window names render unquoted, and named
+The frame retains its exclusion and mode; SqlWindowExpression retains explicit NULL treatment.
+FROM FIRST/LAST retain CK00001 because the local PostgreSQL grammar does not implement them. Canonical built-in window names render unquoted, and named
 keys participate in view traversal, structural equivalence and child-subquery binding.
 
 Binding, stage placement, diagnostics and memory ownership are described in Sql DESIGN and
 [DIALECT.md](DIALECT.md). Parser, profile, keyword and completeness corpora advance together.
 Native order-insensitive frame aggregates ignore local ordering during evaluation; fallback
 recomputation shares the fixed 1,000,000-input-visit statement cap (CS05084). The corpus includes
-ordered, filtered growing frames; syntax and the window-free AST layout are unchanged.
+ordered/filtered moving frames, RANGE/GROUPS/exclusion membership and NULL treatment. Native
+moving states require arguments and FILTER without volatile calls or subqueries; otherwise
+frame-head movement restarts evaluation under CS05084
+(PostgreSQL executor/nodeWindowAgg.c:3002-3033).
+The profile adds three clauses (GROUPS, EXCLUDE, NULL treatment); the contextual unsupported
+word table removes GROUPS, EXCLUDE, IGNORE and RESPECT. Window-free AST layout is unchanged.
 PostgreSQL references: parser/parse_clause.c:2766-2902 and parser/parse_agg.c:879-994.
 
 ## Owned identity syntax (#1717, SQ-S3)
@@ -733,7 +739,7 @@ CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING
   is a valid CAST target here.
 - **Recognized clause tokens stay in the lexer tables.** `RECURSIVE` is now
   advertised for binding; window clauses are lexed and parsed for their executable
-  stage, with named unsupported diagnostics for deferred frames and value functions. Gateable
+  stage, with named unsupported diagnostics for deferred FROM FIRST/LAST modifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
   including OVER/WINDOW/PARTITION, while NATURAL remains absent. Nested WITH and recursive
   execution retain positional capability checks. `ParseCore` scans a copy of its configured
@@ -784,8 +790,8 @@ its ordinary bare output alias before SET.
 
 ## Non-goals (current dialect)
 
-CORRESPONDING, nested or data-modifying CTEs and recursive execution, RANGE with offsets, GROUPS and EXCLUDE,
-FROM FIRST/LAST and IGNORE/RESPECT NULLS, LATERAL,
+CORRESPONDING, nested or data-modifying CTEs and recursive execution,
+FROM FIRST/LAST, LATERAL,
 UPDATE SET subqueries,
 RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature

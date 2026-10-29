@@ -245,7 +245,7 @@ internal sealed partial class SqlPlanExecutor
         return FinishSelect(projected, projections, limit, offset, isDistinct, evaluator, cancellationToken);
     }
 
-    private static DatabaseResult FinishSelect(List<object?[]> projected, IReadOnlyList<SqlProjection> projections,
+    private DatabaseResult FinishSelect(List<object?[]> projected, IReadOnlyList<SqlProjection> projections,
         SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
         Collation[]? projectionCollations = null)
     {
@@ -554,20 +554,27 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
-    private static List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
+    private List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, Collation[]? collations = null)
     {
-        var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
-            .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
-        int count = 0;
-        for (int i = 0; i < rows.Count; i++)
+        var windowMemory = SqlWindowMemory.For(_metrics);
+        long scratch = windowMemory is null ? 0 : 128L + 32L * projections.Count + 64L * rows.Count;
+        windowMemory?.Reserve(scratch);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var row = rows[i];
-            if (seen.Add(row)) { rows[count++] = row; }
+            var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
+                .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
+            int count = 0;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var row = rows[i];
+                if (seen.Add(row)) { rows[count++] = row; }
+            }
+            rows.RemoveRange(count, rows.Count - count);
+            return rows;
         }
-        rows.RemoveRange(count, rows.Count - count);
-        return rows;
+        finally { windowMemory?.Release(scratch); }
     }
 
     private static Collation[] CaptureProjectionCollations(IReadOnlyList<SqlProjection> projections,

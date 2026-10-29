@@ -28,6 +28,12 @@ public sealed class SqlWindowParserTests
     [InlineData("SELECT SUM(v) FILTER(WHERE v>0) OVER w,FIRST_VALUE(v) OVER w,LAST_VALUE(v) OVER w,NTH_VALUE(v,2) OVER w FROM t WINDOW w AS(ORDER BY k ROWS BETWEEN 3 PRECEDING AND 2 FOLLOWING)")]
     [InlineData("SELECT \"aggregate name\"(v) OVER(ORDER BY k ROWS 2 PRECEDING) FROM t;")]
     [InlineData("CREATE VIEW v AS SELECT ROW_NUMBER() OVER w AS n FROM t WINDOW w AS(ORDER BY k);")]
+    [InlineData("SELECT SUM(v) OVER(ORDER BY k RANGE BETWEEN 1 PRECEDING AND 2 FOLLOWING EXCLUDE TIES) FROM t")]
+    [InlineData("SELECT FIRST_VALUE(v) IGNORE NULLS OVER(ORDER BY k GROUPS CURRENT ROW EXCLUDE GROUP) FROM t")]
+    [InlineData("SELECT LAST_VALUE(v) RESPECT NULLS OVER(ROWS CURRENT ROW EXCLUDE CURRENT ROW) FROM t")]
+    [InlineData("SELECT LEAD(v) IGNORE NULLS OVER(ROWS CURRENT ROW EXCLUDE NO OTHERS) FROM t")]
+    [InlineData("SELECT ROW_NUMBER() OVER(\"groups\" ORDER BY k) FROM t WINDOW \"groups\" AS(PARTITION BY p)")]
+    [InlineData("SELECT SUM(v) OVER(\"exclude\") FROM t WINDOW \"exclude\" AS()")]
     public void Parse_WindowForms_ShouldRoundTrip(string sql)
     {
         // Arrange / Act
@@ -43,13 +49,8 @@ public sealed class SqlWindowParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Windows: deferred frame modes and value modifiers identify their form")]
-    [InlineData("SELECT SUM(v) OVER(ORDER BY k RANGE 1 PRECEDING) FROM t", "RANGE with offsets")]
     [InlineData("SELECT NTH_VALUE(v,2) FROM LAST OVER() FROM t", "FROM LAST")]
     [InlineData("SELECT NTH_VALUE(v,2) FROM FIRST OVER() FROM t", "FROM FIRST")]
-    [InlineData("SELECT FIRST_VALUE(v) IGNORE NULLS OVER() FROM t", "IGNORE NULLS")]
-    [InlineData("SELECT LAST_VALUE(v) RESPECT NULLS OVER() FROM t", "RESPECT NULLS")]
-    [InlineData("SELECT ROW_NUMBER() OVER(GROUPS CURRENT ROW)", "GROUPS")]
-    [InlineData("SELECT ROW_NUMBER() OVER(EXCLUDE TIES)", "EXCLUDE")]
     public void Parse_DeferredForms_ShouldNameUnsupportedForm(string sql, string form)
     {
         // Arrange / Act
@@ -59,6 +60,10 @@ public sealed class SqlWindowParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Windows: incomplete grammar is a syntax error")]
+    [InlineData("SELECT ROW_NUMBER() OVER(EXCLUDE TIES)")]
+    [InlineData("SELECT SUM(v) OVER(ROWS CURRENT ROW EXCLUDE)")]
+    [InlineData("SELECT SUM(v) OVER(GROUPS BETWEEN 1 PRECEDING)")]
+    [InlineData("SELECT LAG(v) IGNORE NULLS RESPECT NULLS OVER()")]
     [InlineData("SELECT RANK() OVER")]
     [InlineData("SELECT RANK() OVER(")]
     [InlineData("SELECT RANK() OVER(PARTITION BY)")]

@@ -19,7 +19,11 @@ internal sealed partial class SqlPlanner
     private static string WindowFrameDetail(SqlWindowFunction function)
     {
         if (function.Frame is not { } frame) { return "RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW (default)"; }
-        return frame.Syntax.Mode.ToString().ToUpperInvariant() + " BETWEEN " + Bound(frame.Syntax.Start) + " AND " + Bound(frame.Syntax.End);
+        return frame.Syntax.Mode.ToString().ToUpperInvariant() + " BETWEEN " + Bound(frame.Syntax.Start) + " AND " + Bound(frame.Syntax.End) + (frame.Syntax.Exclusion switch
+        {
+            SqlWindowExclusion.CurrentRow => " EXCLUDE CURRENT ROW", SqlWindowExclusion.Group => " EXCLUDE GROUP",
+            SqlWindowExclusion.Ties => " EXCLUDE TIES", _ => "",
+        }) + (function.Expression.NullTreatment == SqlWindowNullTreatment.Default ? "" : " " + function.Expression.NullTreatment.ToString().ToUpperInvariant() + " NULLS");
         static string Bound(SqlWindowFrameBound bound) => bound.Kind switch
         {
             SqlWindowFrameBoundKind.UnboundedPreceding => "UNBOUNDED PRECEDING",
@@ -173,7 +177,10 @@ internal sealed partial class SqlPlanner
                             "; order=" + string.Join(", ", group.OrderSyntax.Select(key => SqlExpressionRenderer.Render(key.Expression) +
                                 (key.IsDescending ? " DESC" : " ASC") + (NullsFirst(key) ? " NULLS FIRST" : " NULLS LAST"))) +
                             "; frames=" + string.Join(", ", group.Functions.Select(function => function.Name + ":" + WindowFrameDetail(function))) +
-                            (metrics is null ? "" : "; frame_visits=" + group.Functions.Sum(function => metrics.ActualCandidates(function) ?? 0)) +
+                            (metrics is null ? "" : "; frame_visits=" + group.Functions.Sum(function => metrics.ActualCandidates(function) ?? 0) +
+                                "; transitions=" + group.Functions.Sum(function => metrics.Analysis(function)?.WindowTransitions ?? 0) +
+                                "; inverse_transitions=" + group.Functions.Sum(function => metrics.Analysis(function)?.WindowInverseTransitions ?? 0) +
+                                "; boundary_visits=" + group.Functions.Sum(function => metrics.Analysis(function)?.WindowBoundaryVisits ?? 0)) +
                             "; functions=" + string.Join(", ", group.Functions.Select(function => function.Name)) +
                             "; sort_shared=" + group.SortShared.ToString().ToLowerInvariant() +
                             (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : ""), actual: metrics?.ActualCandidates(group));

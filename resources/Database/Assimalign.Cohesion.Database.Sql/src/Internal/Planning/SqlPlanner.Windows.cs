@@ -114,9 +114,12 @@ internal sealed partial class SqlPlanner
 
     private void ValidateWindowDefinitions(SqlSelectExpression select, SqlExpressionEvaluator scope)
     {
+        if (select.Windows.Count == 0) { return; }
+        var names = NamedWindows(select);
         foreach (var definition in select.Windows)
         {
-            _ = BindFrame(definition.Specification.Frame, scope);
+            var keys = WindowKeysOf(definition.Specification, names);
+            _ = BindFrame(keys.Frame, scope, keys.Order);
             foreach (var key in definition.Specification.PartitionBy) { ValidateExpression(key, scope, _subqueryTypes); }
             foreach (var key in definition.Specification.OrderBy) { ValidateExpression(key.Expression, scope, _subqueryTypes); }
         }
@@ -140,10 +143,12 @@ internal sealed partial class SqlPlanner
             foreach (var key in keys.Order) { ValidateExpression(key.Expression, scope, _subqueryTypes); }
             SqlWindowFrameBinding? frame = null;
             if (keys.Frame is { } syntax && !frames.TryGetValue(syntax, out frame))
-            { frames.Add(syntax, frame = BindFrame(syntax, scope)!); }
+            { frames.Add(syntax, frame = BindFrame(syntax, scope, keys.Order)!); }
             var call = window.Function;
             string name = call.FunctionName.ToUpperInvariant();
             int count = call.Arguments.Count;
+            if (window.NullTreatment != SqlWindowNullTreatment.Default && name is not ("LAG" or "LEAD" or "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE"))
+            { throw new SqlPlanningException("CS05088", ErrorMessages.WindowNullTreatment, window.Location); }
             SqlGroupAggregate? aggregate = null;
             if (_functions.Catalog.IsAggregate(name)) { aggregate = BindWindowAggregate(call, scope); }
             else
@@ -268,10 +273,18 @@ internal sealed partial class SqlPlanner
         { throw new SqlPlanningException("CS05080", ErrorMessages.WindowFrameBounds); }
     }
 
-    private SqlWindowFrameBinding? BindFrame(SqlWindowFrame? frame, SqlExpressionEvaluator scope)
+    private SqlWindowFrameBinding? BindFrame(SqlWindowFrame? frame, SqlExpressionEvaluator scope, IReadOnlyList<SqlOrderByColumn> ordering)
     {
         ValidateFrameBounds(frame);
         if (frame is null) { return null; }
+        bool rangeOffset = frame.Mode == SqlWindowFrameMode.Range && (frame.Start.Offset is not null || frame.End.Offset is not null);
+        if (rangeOffset && ordering.Count != 1)
+        { throw new SqlPlanningException("CS05086", ErrorMessages.WindowRangeOrdering); }
+        if (frame.Mode == SqlWindowFrameMode.Groups && ordering.Count == 0)
+        { throw new SqlPlanningException("CS05087", ErrorMessages.WindowGroupsOrdering); }
+        var keyType = rangeOffset ? scope.StaticTypeOf(ordering[0].Expression) : DatabaseType.Null;
+        if (rangeOffset && !SqlWindowRange.Supports(keyType))
+        { throw new SqlPlanningException("CS02074", ErrorMessages.WindowRangeKeyType); }
         return new(frame, Offset(frame.Start.Offset), Offset(frame.End.Offset));
 
         SqlBoundExpression? Offset(SqlExpression? expression)
@@ -279,7 +292,10 @@ internal sealed partial class SqlPlanner
             if (expression is null) { return null; }
             Check(expression);
             ValidateExpression(expression, scope, _subqueryTypes);
-            if (scope.StaticTypeOf(expression) is not (DatabaseType.Null or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
+            var offsetType = scope.StaticTypeOf(expression);
+            if (rangeOffset && !SqlWindowRange.AcceptsOffset(keyType, offsetType))
+            { throw new SqlPlanningException("CS02075", ErrorMessages.WindowRangeOffsetType, expression.Location); }
+            if (!rangeOffset && offsetType is not (DatabaseType.Null or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64))
             { throw new SqlPlanningException("CS02070", ErrorMessages.WindowFrameInteger, expression.Location); }
             return scope.Bind(expression);
         }

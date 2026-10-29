@@ -242,6 +242,9 @@ internal static class Program
         Check("in process: ROWS frames, aggregate FILTER and value functions", await RowsAsync(session,
             "SELECT Id,SUM(Score) FILTER(WHERE Score>0) OVER w,FIRST_VALUE(Score) OVER w,LAST_VALUE(Score) OVER w,NTH_VALUE(Score,2) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
             [[1L,100m,100L,100L,null],[2L,300m,100L,200L,200L]]);
+        Check("in process: RANGE distances, GROUPS and exclusion", await RowsAsync(session,
+            "SELECT Id,SUM(Score) OVER(ORDER BY Id RANGE 1 PRECEDING EXCLUDE CURRENT ROW),AVG(Score) OVER(ORDER BY Id GROUPS 1 PRECEDING EXCLUDE TIES),LEAD(Score) IGNORE NULLS OVER(ORDER BY Id) FROM customers ORDER BY Id"),
+            [[1L,null,100m,200L],[2L,100m,150m,null]]);
         Check("in process: ordered native and application frame aggregates", await RowsAsync(session,
             "SELECT Id,SUM(Score ORDER BY Id DESC) FILTER(WHERE Score>0) OVER w,product(Score) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
             [[1L,100m,100L],[2L,300m,20000L]]);

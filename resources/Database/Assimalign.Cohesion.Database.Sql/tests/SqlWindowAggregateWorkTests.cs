@@ -167,9 +167,8 @@ public sealed class SqlWindowAggregateWorkTests
         await session.ExecuteAsync("INSERT INTO t VALUES " + string.Join(",", Enumerable.Range(0,count).Select(i => $"({i},1)")), cancellationToken: CancellationToken.None);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Window work: ordered strings and moving native frames obey the recomputation cap")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Window work: order-sensitive native frames obey the recomputation cap")]
     [InlineData("STRING_AGG('x',',' ORDER BY observe_input(id) DESC) OVER(ORDER BY id ROWS UNBOUNDED PRECEDING)", 1414, 1000000)]
-    [InlineData("SUM(observe_input(v)) OVER(ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)", 2000, 1002000)]
     public async Task Execute_NativeFallbackFrames_ShouldRefuseAtWorkCapAsync(string window, int count, int expectedCalls)
     {
         // Arrange
@@ -192,6 +191,53 @@ public sealed class SqlWindowAggregateWorkTests
         calls.ShouldBe(expectedCalls);
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         SqlWindowMemory.Current.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Window work: excluding an entire peer group visits no application inputs and shares one empty result")]
+    public async Task Execute_ExcludedPeerPartition_ShouldCacheTheEmptyFrameAsync()
+    {
+        // Arrange
+        int creations = 0, transitions = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("window-empty-exclusion-work");
+        builder.Functions.Add(SqlAggregateFunction.Create<long,int,long>("empty_sum", () => { creations++; return 0; }, (state,value) => { transitions++; return state+value; }, state => state));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var db = await engine.CreateDatabaseAsync("db",CancellationToken.None);
+        await using var session = await db.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session,10000);
+
+        // Act
+        var rows = await RowsAsync(session,"EXPLAIN ANALYZE SELECT empty_sum(v) OVER(ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING EXCLUDE GROUP) FROM t");
+
+        // Assert
+        creations.ShouldBe(1); transitions.ShouldBe(0);
+        rows.Single(row=>Equals(row[2],"WindowAgg"))[5]!.ToString()!.ShouldContain("frame_visits=0;",Case.Sensitive);
+        session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - Window work: the former 2,000-row shrinking-SUM refusal now evaluates exactly 2,000 inputs")]
+    public async Task Execute_PreviouslyCappedNativeSum_ShouldUseOneInputPerRowAsync()
+    {
+        // Arrange
+        int calls = 0;
+        var builder = SqlDatabaseEngine.CreateBuilder("window-native-inverse");
+        // The observer returns its input unchanged; volatility has its own restart tests.
+        builder.Functions.Add(SqlScalarFunction.Create<int,int>("observe_input", value => { calls++; return value; }, SqlFunctionVolatility.Stable));
+        await using var engine = await builder.BuildAsync(CancellationToken.None);
+        var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await db.CreateSessionAsync(CancellationToken.None);
+        await SeedAsync(session, 2000);
+
+        // Act
+        var analysis = await RowsAsync(session, "EXPLAIN ANALYZE SELECT SUM(observe_input(v)) OVER(ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM t LIMIT 1");
+        var rows = await RowsAsync(session, "SELECT id,SUM(v) OVER(ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM t ORDER BY id");
+
+        // Assert
+        string detail = analysis.Single(row => Equals(row[2], "WindowAgg"))[5]!.ToString()!;
+        _output.WriteLine($"Former refusal: {calls} inputs; {detail}");
+        calls.ShouldBe(2000);
+        detail.ShouldContain("frame_visits=2000; transitions=2000; inverse_transitions=1999;", Case.Sensitive);
+        rows[0].ShouldBe([0,2000L]); rows[^1].ShouldBe([1999,1L]);
+        session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
     }
 
     private static async Task<List<object?[]>> RowsAsync(SqlDatabaseSession session, string sql)

@@ -57,6 +57,9 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Window, "SELECT RANK() OVER w WINDOW w AS();")]
     [InlineData(SqlClauses.WindowRows, "SELECT SUM(v) OVER(ROWS 2 PRECEDING) FROM t;")]
+    [InlineData(SqlClauses.WindowGroups, "SELECT SUM(v) OVER(ORDER BY k GROUPS 1 PRECEDING) FROM t;")]
+    [InlineData(SqlClauses.WindowExclude, "SELECT SUM(v) OVER(ROWS CURRENT ROW EXCLUDE TIES) FROM t;")]
+    [InlineData(SqlClauses.WindowNullTreatment, "SELECT LAG(v) IGNORE NULLS OVER() FROM t;")]
     [InlineData(SqlClauses.WindowRange, "SELECT SUM(v) OVER(RANGE UNBOUNDED PRECEDING) FROM t;")]
     [InlineData(SqlClauses.Over, "SELECT RANK() OVER();")]
     [InlineData(SqlClauses.Partition, "SELECT RANK() OVER(PARTITION BY a) FROM t;")]
@@ -164,7 +167,7 @@ public class SqlLanguageProfileTests
         var options = new QueryParserOptions();
         options.Analyzers.Add(observer);
 
-        _ = new SqlQueryParser(options).Parse("SELECT SUM(id) OVER (GROUPS CURRENT ROW) FROM t;");
+        _ = new SqlQueryParser(options).Parse("SELECT NTH_VALUE(id,1) FROM LAST OVER (ORDER BY id GROUPS CURRENT ROW) FROM t;");
 
         observer.SawUnsupportedClause.ShouldBeTrue();
     }

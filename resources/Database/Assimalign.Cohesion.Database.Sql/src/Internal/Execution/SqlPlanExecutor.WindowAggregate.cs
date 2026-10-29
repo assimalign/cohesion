@@ -17,24 +17,43 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         using var memory = new SqlWindowMemory(statement.Metrics, _definitions.StatementMemoryBudget);
+        // WITH and independent subqueries can complete outside the window stage.
+        // Their caches remain reachable throughout it and belong to this grant too.
+        if (_subqueryValues is { } subqueries)
+        {
+            foreach (var values in subqueries.StatementValues.Values) { memory.AdoptResult(values); }
+        }
+        if (_materializedRelations is { } relations)
+        {
+            foreach (var relation in relations.Values)
+            { foreach (var row in relation) { memory.AdoptResult(row); } }
+        }
+        memory.Reserve(128L + 96L * (plan.InputWidth + plan.Projections.Count) + 64L * plan.OrderBy.Count);
         await using var input = (SqlMaterializedResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var rows = new List<object?[]>();
         int width = plan.InputWidth + plan.Groups.Sum(group => group.Functions.Count);
-        foreach (var source in input.Rows)
+        long inputBufferBytes = input.RowBufferBytes;
+        memory.Reserve(inputBufferBytes); // input and growing augmented list coexist
+        for (int index = 0; index < input.Rows.Count; index++)
         {
+            var source = input.Rows[index];
             cancellationToken.ThrowIfCancellationRequested();
-            memory.Reserve(96L + width * 8L);
             var row = new object?[width];
             Array.Copy(source, row, source.Length);
+            memory.Retain(row);
             rows.Add(row);
+            input.ClearRow(index);
+            memory.ReleaseRow(source);
         }
-        memory.Reserve(128L + 8L * rows.Count); // sort index plus growth/sort scratch
+        input.ClearRows();
+        memory.Release(inputBufferBytes);
+        memory.Reserve(128L + 4L * rows.Count); // exact sort index plus fixed sort scratch
         var sorted = Enumerable.Range(0, rows.Count).ToArray();
         object?[][]? keys = null;
         Collation[]? collations = null;
         long keyBytes = 0;
-        var frameOffsets = new Dictionary<SqlWindowFrameBinding, (long Start, long End)>();
+        var frameOffsets = new Dictionary<SqlWindowFrameBinding, (object Start, object End)>();
         foreach (var group in plan.Groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -42,7 +61,11 @@ internal sealed partial class SqlPlanExecutor
             var sortWork = statement.Metrics.Analysis(group.Functions);
             if (!group.SortShared)
             {
-                if (keyBytes > 0) { keys = null; collations = null; memory.Release(keyBytes); keyBytes = 0; }
+                if (keyBytes > 0)
+                {
+                    foreach (var key in keys!) { foreach (var value in key) { if (value is not null) { memory.ReleaseValue(value); } } }
+                    keys = null; collations = null; memory.Release(keyBytes); keyBytes = 0;
+                }
                 ReserveKeys(128L + (group.Partition.Count + group.Ordering.Count) * 64L + 8L * rows.Count);
                 var ordering = group.Partition.Concat(group.Ordering).ToArray();
                 keys = new object?[rows.Count][];
@@ -56,7 +79,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         await PrepareSubqueriesAsync(ordering[k].Key, rows[i], statement, cancellationToken).ConfigureAwait(false);
                         var value = evaluator.Evaluate(ordering[k].Key, rows[i]);
-                        if (value is not null) { ReserveKeys(SqlHashJoinTable.ValueBytes(value)); }
+                        if (value is not null) { memory.RetainValue(value); }
                         keys[i][k] = value;
                         collations[k] = ordering[k].Collation.Resolve(_subqueryValues);
                     }
@@ -84,7 +107,12 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var function in group.Functions)
                 {
                     if (function.Frame is { } frame && !frameOffsets.ContainsKey(frame))
-                    { frameOffsets.Add(frame, (await FrameOffsetAsync(frame.StartOffset).ConfigureAwait(false), await FrameOffsetAsync(frame.EndOffset).ConfigureAwait(false))); }
+                    {
+                        memory.Reserve(128);
+                        var offsets = (await FrameOffsetAsync(frame.StartOffset, frame.Syntax.Mode).ConfigureAwait(false), await FrameOffsetAsync(frame.EndOffset, frame.Syntax.Mode).ConfigureAwait(false));
+                        memory.RetainValue(offsets.Item1); memory.RetainValue(offsets.Item2);
+                        frameOffsets.Add(frame, offsets);
+                    }
                 }
             }
             int partitionStart = 0;
@@ -95,10 +123,16 @@ internal sealed partial class SqlPlanExecutor
                 while (partitionEnd < sorted.Length && SameKeys(partitionStart, partitionEnd, group.Partition.Count)) { partitionEnd++; }
                 // Partition scratch is admitted and released at the partition boundary. Output
                 // cells remain in the separately charged input/result rows until the stage ends.
-                long scratch = 256L + group.Functions.Count * 128L;
+                long scratch = 768L + group.Functions.Count * 128L;
                 memory.Reserve(scratch);
-                try { await ComputePartitionAsync(partitionStart, partitionEnd, group).ConfigureAwait(false); }
-                finally { memory.Release(scratch); }
+                memory.BeginPartition();
+                try { await ComputePartitionAsync(partitionStart, partitionEnd, group, bytes => { memory.Reserve(bytes); scratch += bytes; }).ConfigureAwait(false); }
+                finally
+                {
+                    if (_subqueryValues is { HasCorrelatedQueries: true } frame) { frame.BeginRow([]); }
+                    memory.EndPartition();
+                    memory.Release(scratch);
+                }
                 partitionStart = partitionEnd;
             }
         }
@@ -121,7 +155,7 @@ internal sealed partial class SqlPlanExecutor
             return true;
         }
 
-        async Task ComputePartitionAsync(int start, int end, SqlWindowGroup group)
+        async Task ComputePartitionAsync(int start, int end, SqlWindowGroup group, Action<long> reserveScratch)
         {
             int size = end - start;
             var buckets = new long?[group.Functions.Count];
@@ -130,6 +164,23 @@ internal sealed partial class SqlPlanExecutor
             var previousStarts = Enumerable.Repeat(-1, group.Functions.Count).ToArray();
             var previousEnds = Enumerable.Repeat(-1, group.Functions.Count).ToArray();
             var results = new object?[group.Functions.Count];
+            reserveScratch(96L + 8L * (size + 1) + 80L * group.Functions.Count);
+            var peerGroups = new int[size];
+            var groupStarts = new int[size + 1];
+            int groupCount = 0;
+            for (int at = start; at < end; at++)
+            {
+                if (at == start || !SameKeys(at - 1, at, group.Partition.Count + group.Ordering.Count)) { groupStarts[groupCount++] = at; }
+                peerGroups[at - start] = groupCount - 1;
+            }
+            groupStarts[groupCount] = end;
+            var rangeHeads = new int[group.Functions.Count];
+            var rangeTails = new int[group.Functions.Count];
+            Array.Fill(rangeHeads, start); Array.Fill(rangeTails, start);
+            var cached = new object?[group.Functions.Count][];
+            var evaluated = new bool[group.Functions.Count][];
+            var moving = new SqlMovingWindowState[group.Functions.Count][];
+            var previousFrames = new WindowMembers[group.Functions.Count];
             Array.Fill(nextInputs, start);
             for (int f = 0; f < group.Functions.Count; f++)
             {
@@ -155,11 +206,12 @@ internal sealed partial class SqlPlanExecutor
                     for (int f = 0; f < group.Functions.Count; f++)
                     {
                         var function = group.Functions[f];
-                        var (frameStart, frameEnd) = FrameBounds(function, position, start, end, peerStart, peerEnd);
+                        var (frameStart, frameEnd) = FrameBounds(function, f, position, start, end, peerStart, peerEnd);
+                        var members = Members(function, frameStart, frameEnd, position, peerStart, peerEnd);
                         object? result = function.Aggregate is not null
-                            ? await AggregateFrameAsync(function, f, frameStart, frameEnd).ConfigureAwait(false)
+                            ? await AggregateFrameAsync(function, f, members).ConfigureAwait(false)
                             : function.Name is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE"
-                                ? await ValueFrameAsync(function, position, frameStart, frameEnd).ConfigureAwait(false)
+                                ? await ValueFrameAsync(function, position, members).ConfigureAwait(false)
                                 : function.Name switch
                         {
                             "ROW_NUMBER" => (long)(position - start + 1),
@@ -170,21 +222,127 @@ internal sealed partial class SqlPlanExecutor
                             "NTILE" => buckets[f] is { } count ? Tile(position - start, size, count) : null,
                             _ => await NavigateAsync(function, position, start, end).ConfigureAwait(false),
                         };
-                        if (result is not null) { memory.Reserve(SqlHashJoinTable.ValueBytes(result)); }
+                        if (result is not null) { memory.RetainValue(result); }
                         row[function.Ordinal] = result;
                     }
                 }
                 peerStart = peerEnd;
             }
-            for (int i = 0; i < accumulators.Length; i++) { if (accumulators[i] is not null) { memory.Release(256); } }
-
-            async Task<object?> AggregateFrameAsync(SqlWindowFunction function, int index, int first, int last)
+            for (int i = 0; i < accumulators.Length; i++)
             {
-                if (previousStarts[index] == first && previousEnds[index] == last) { return results[index]; }
+                if (accumulators[i] is not null) { SqlStringAggregateFunction.ReleaseWindowState(accumulators[i]!); memory.Release(256); }
+                if (cached[i] is { } values) { foreach (var value in values) { if (value is not null) { memory.ReleaseValue(value); } } }
+            }
+
+            (int Start, int End) FrameBounds(SqlWindowFunction function, int index, int position, int partitionStart, int partitionEnd, int peerFirst, int peerLast)
+            {
+                if (function.Frame is not { } frame) { return (partitionStart, peerLast); }
+                var offsets = frameOffsets[frame];
+                return (Bound(frame.Syntax.Start, offsets.Start, false), Bound(frame.Syntax.End, offsets.End, true));
+
+                int Bound(SqlWindowFrameBound bound, object offset, bool ending)
+                {
+                    if (bound.Kind == SqlWindowFrameBoundKind.UnboundedPreceding) { return partitionStart; }
+                    if (bound.Kind == SqlWindowFrameBoundKind.UnboundedFollowing) { return partitionEnd; }
+                    if (bound.Kind == SqlWindowFrameBoundKind.CurrentRow)
+                    { return frame.Syntax.Mode == SqlWindowFrameMode.Rows ? position + (ending ? 1 : 0) : ending ? peerLast : peerFirst; }
+                    if (frame.Syntax.Mode == SqlWindowFrameMode.Range)
+                    {
+                        var ordering = group.Ordering[0];
+                        int key = group.Partition.Count;
+                        var basis = keys![sorted[position]][key];
+                        int cursor = ending ? rangeTails[index] : rangeHeads[index];
+                        bool subtract = (bound.Kind == SqlWindowFrameBoundKind.Preceding) != ordering.IsDescending;
+                        bool less = ending != ordering.IsDescending;
+                        while (cursor < partitionEnd)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (statement.Metrics.Analysis(function) is { } boundary) { boundary.WindowBoundaryVisits++; }
+                            var value = keys[sorted[cursor]][key];
+                            // NULL bases have a peer-only boundary. NULL candidates use
+                            // sort placement rather than the key domain's in_range.
+                            bool inRange = basis is null ? ending ? cursor < peerLast : cursor >= peerFirst
+                                : value is null ? ending ? ordering.NullsFirst : !ordering.NullsFirst
+                                : SqlWindowRange.InRange(value, basis, offset, subtract, less);
+                            if (ending ? !inRange : inRange) { break; }
+                            cursor++;
+                        }
+                        if (ending) { rangeTails[index] = cursor; } else { rangeHeads[index] = cursor; }
+                        return cursor;
+                    }
+                    decimal target = (frame.Syntax.Mode == SqlWindowFrameMode.Groups ? peerGroups[position - partitionStart] : position) +
+                        (bound.Kind == SqlWindowFrameBoundKind.Preceding ? -(decimal)(long)offset : (long)offset) + (ending ? 1 : 0);
+                    return frame.Syntax.Mode == SqlWindowFrameMode.Groups ? groupStarts[(int)Math.Clamp(target, 0, groupCount)]
+                        : (int)Math.Clamp(target, partitionStart, partitionEnd);
+                }
+            }
+
+            async Task<object?> MovingFrameAsync(SqlWindowFunction function, int index, WindowMembers members)
+            {
                 var aggregate = function.Aggregate!;
+                if (moving[index] is null)
+                {
+                    reserveScratch(120L + 8L * size + ((size + 7L) & ~7L));
+                    cached[index] = new object?[size]; evaluated[index] = new bool[size];
+                    int segments = function.Frame?.Syntax.Exclusion is null or SqlWindowExclusion.NoOthers ? 1 : 3;
+                    moving[index] = new SqlMovingWindowState[segments];
+                    for (int segment = 0; segment < segments; segment++)
+                    { moving[index][segment] = new SqlMovingWindowState(function.Name, aggregate.Collation.Resolve(_subqueryValues), cached[index], reserveScratch, aggregate.Function is SqlStatisticsFunction && function.Type is DatabaseType.Float32 or DatabaseType.Float64); }
+                }
+                for (int segment = 0; segment < moving[index].Length; segment++)
+                {
+                    var state = moving[index][segment];
+                    var (left, right) = members.Range(segment);
+                    left -= start; right -= start;
+                    while (state.First < Math.Min(left, state.Last))
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (statement.Metrics.Analysis(function) is { } inverse) { inverse.WindowInverseTransitions++; }
+                        state.Remove(state.First++);
+                    }
+                    if (state.Last < left) { state.First = state.Last = left; }
+                    while (state.Last < right)
+                    {
+                        int at = state.Last++;
+                        if (!evaluated[index][at])
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (statement.Metrics.Analysis(function) is { } work) { work.Candidates++; }
+                            var inputRow = rows[sorted[start + at]];
+                            await PrepareSubqueriesAsync(aggregate.Filter, inputRow, statement, cancellationToken).ConfigureAwait(false);
+                            if (evaluator.Matches(aggregate.Filter, inputRow))
+                            {
+                                foreach (var argument in aggregate.Arguments)
+                                { await PrepareSubqueriesAsync(argument, inputRow, statement, cancellationToken).ConfigureAwait(false); }
+                                object? value = aggregate.Arguments.Length == 0 ? SqlMovingWindowState.CountedRow : evaluator.Evaluate(aggregate.Arguments[0], inputRow);
+                                if (value is not null) { memory.RetainValue(value); }
+                                cached[index][at] = value;
+                            }
+                            evaluated[index][at] = true;
+                        }
+                        if (statement.Metrics.Analysis(function) is { } transition) { transition.WindowTransitions++; }
+                        state.Add(at);
+                    }
+                    state.First = left;
+                }
+                previousStarts[index] = members.First; previousEnds[index] = members.Last;
+                return results[index] = NormalizeGroupValue(SqlMovingWindowState.Result(moving[index]), function.Type);
+            }
+
+            async Task<object?> AggregateFrameAsync(SqlWindowFunction function, int index, WindowMembers members)
+            {
+                if (previousStarts[index] >= 0 && previousFrames[index] == members) { return results[index]; }
+                int first = members.First, last = members.Last;
+                previousFrames[index] = members;
+                var aggregate = function.Aggregate!;
+                // PostgreSQL nodeWindowAgg.c:3002-3033: inverse transitions must
+                // not suppress calls that the restart path would evaluate again.
+                bool restartSensitive = aggregate.Arguments.Any(WindowRestartSensitive) || WindowRestartSensitive(aggregate.Filter);
+                if (SqlStandardLibrary.IgnoresWindowOrdering(aggregate.Function) && !restartSensitive)
+                { return await MovingFrameAsync(function, index, members).ConfigureAwait(false); }
                 var collation = aggregate.Collation.Resolve(_subqueryValues);
                 bool orderedInput = aggregate.OrderBy.Count > 0 && !SqlStandardLibrary.IgnoresWindowOrdering(aggregate.Function);
-                bool incremental = !orderedInput && SqlStandardLibrary.Contains(aggregate.Function);
+                bool incremental = !orderedInput && SqlStandardLibrary.Contains(aggregate.Function) && function.Frame?.Syntax.Exclusion is not (SqlWindowExclusion.CurrentRow or SqlWindowExclusion.Group or SqlWindowExclusion.Ties);
                 bool recomputing = !incremental || previousStarts[index] >= 0 && previousStarts[index] != first;
                 SqlAggregateAccumulator accumulator;
                 if (incremental)
@@ -193,35 +351,46 @@ internal sealed partial class SqlPlanExecutor
                     // PRECEDING head clamped to the partition start. Without an inverse
                     // transition a moved head requires a fresh aggregate over the new frame.
                     if (accumulators[index] is not null && previousStarts[index] != first)
-                    { accumulators[index] = null; memory.Release(256); }
+                    { SqlStringAggregateFunction.ReleaseWindowState(accumulators[index]!); accumulators[index] = null; memory.Release(256); }
                     if (accumulators[index] is null) { nextInputs[index] = first; }
                     accumulator = accumulators[index] ??= Create();
                 }
                 else { accumulator = Create(); }
-                long retained = 0;
+                long retained = orderedInput ? 128L + 96L * aggregate.OrderBy.Count : 0;
+                memory.Reserve(retained);
+                object? completed = null;
                 try
                 {
                     var ordered = orderedInput ? new GroupAggregateState(accumulator, aggregate, _subqueryValues) : null;
-                    for (int inputPosition = incremental ? nextInputs[index] : first; inputPosition < last; inputPosition++)
+                    for (int segment = 0; segment < 3; segment++)
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        if (recomputing) { statement.Metrics.RecordWindowFrameRecomputation(); }
-                        if (statement.Metrics.Analysis(function) is { } work) { work.Candidates++; }
-                        var inputRow = rows[sorted[inputPosition]];
-                        await PrepareSubqueriesAsync(aggregate.Filter, inputRow, statement, cancellationToken).ConfigureAwait(false);
-                        if (!evaluator.Matches(aggregate.Filter, inputRow)) { continue; }
-                        foreach (var argument in aggregate.Arguments)
-                        { await PrepareSubqueriesAsync(argument, inputRow, statement, cancellationToken).ConfigureAwait(false); }
-                        if (orderedInput)
+                        var range = members.Range(segment);
+                        for (int inputPosition = Math.Max(range.First, incremental ? nextInputs[index] : range.First); inputPosition < range.Last; inputPosition++)
                         {
-                            foreach (var order in aggregate.OrderBy)
-                            { await PrepareSubqueriesAsync(order.Key, inputRow, statement, cancellationToken).ConfigureAwait(false); }
-                        }
-                        if (ordered is null) { AddRow(accumulator, aggregate, collation, evaluator, inputRow, cancellationToken, statement.TransactionStart); }
-                        else
-                        {
-                            retained += AddAggregateInput(ordered, aggregate, collation, evaluator, inputRow,
-                                cancellationToken, statement.TransactionStart, memory);
+                            cancellationToken.ThrowIfCancellationRequested();
+                            if (recomputing) { statement.Metrics.RecordWindowFrameRecomputation(); }
+                            if (statement.Metrics.Analysis(function) is { } work) { work.Candidates++; }
+                            var inputRow = rows[sorted[inputPosition]];
+                            // A restart can begin on the very row the preceding frame
+                            // visited last. Give its correlated subplans and prepared
+                            // branch predicates a fresh evaluation even in that case.
+                            if (recomputing && restartSensitive && _subqueryValues is { HasCorrelatedQueries: true } frame)
+                            { frame.BeginRow([]); }
+                            await PrepareSubqueriesAsync(aggregate.Filter, inputRow, statement, cancellationToken).ConfigureAwait(false);
+                            if (!evaluator.Matches(aggregate.Filter, inputRow)) { continue; }
+                            foreach (var argument in aggregate.Arguments)
+                            { await PrepareSubqueriesAsync(argument, inputRow, statement, cancellationToken).ConfigureAwait(false); }
+                            if (orderedInput)
+                            {
+                                foreach (var order in aggregate.OrderBy)
+                                { await PrepareSubqueriesAsync(order.Key, inputRow, statement, cancellationToken).ConfigureAwait(false); }
+                            }
+                            if (ordered is null) { AddRow(accumulator, aggregate, collation, evaluator, inputRow, cancellationToken, statement.TransactionStart); }
+                            else
+                            {
+                                retained += AddAggregateInput(ordered, aggregate, collation, evaluator, inputRow,
+                                    cancellationToken, statement.TransactionStart, memory);
+                            }
                         }
                     }
                     if (ordered?.Inputs is { } inputs)
@@ -232,47 +401,36 @@ internal sealed partial class SqlPlanExecutor
                     nextInputs[index] = Math.Max(first, last);
                     previousStarts[index] = first;
                     previousEnds[index] = last;
-                    return results[index] = NormalizeGroupValue((incremental ? accumulator.ReadWindowResult(cancellationToken) : accumulator.Finish(cancellationToken)).ToObject(), function.Type);
+                    completed = NormalizeGroupValue((incremental ? accumulator.ReadWindowResult(cancellationToken) : accumulator.Finish(cancellationToken)).ToObject(), function.Type);
+                    // The finished cell overlaps input/sort buffers and the native builder.
+                    // Admit that peak before releasing scratch; the caller retains its cell.
+                    if (completed is not null) { memory.RetainValue(completed); }
+                    return results[index] = completed;
                 }
                 finally
                 {
+                    if (completed is not null) { memory.ReleaseValue(completed); }
                     memory.Release(retained);
-                    if (!incremental) { memory.Release(256); }
+                    if (!incremental) { SqlStringAggregateFunction.ReleaseWindowState(accumulator); memory.Release(256); }
                 }
 
                 SqlAggregateAccumulator Create()
                 {
                     memory.Reserve(256);
-                    return aggregate.Function.CreateAccumulator(new SqlFunctionContext(aggregate.Database, collation, cancellationToken, statement.TransactionStart));
+                    return aggregate.Function is SqlStringAggregateFunction text
+                        ? text.CreateWindowAccumulator(memory)
+                        : aggregate.Function.CreateAccumulator(new SqlFunctionContext(aggregate.Database, collation, cancellationToken, statement.TransactionStart));
                 }
             }
         }
 
-        (int Start, int End) FrameBounds(SqlWindowFunction function, int position, int start, int end, int peerStart, int peerEnd)
-        {
-            if (function.Frame is not { } frame) { return (start, peerEnd); }
-            var offsets = frameOffsets[frame];
-            return (Bound(frame.Syntax.Start, offsets.Start, false), Bound(frame.Syntax.End, offsets.End, true));
-
-            int Bound(SqlWindowFrameBound bound, long offset, bool ending)
-            {
-                decimal target = bound.Kind switch
-                {
-                    SqlWindowFrameBoundKind.UnboundedPreceding => start,
-                    SqlWindowFrameBoundKind.UnboundedFollowing => end,
-                    SqlWindowFrameBoundKind.Preceding => (decimal)position - offset + (ending ? 1 : 0),
-                    SqlWindowFrameBoundKind.Following => (decimal)position + offset + (ending ? 1 : 0),
-                    _ => frame.Syntax.Mode == SqlWindowFrameMode.Range ? ending ? peerEnd : peerStart : position + (ending ? 1 : 0),
-                };
-                return (int)Math.Clamp(target, start, end);
-            }
-        }
-
-        async Task<long> FrameOffsetAsync(SqlBoundExpression? offset)
+        async Task<object> FrameOffsetAsync(SqlBoundExpression? offset, SqlWindowFrameMode mode)
         {
             if (offset is null) { return 0; }
             await PrepareSubqueriesAsync(offset, [], statement, cancellationToken).ConfigureAwait(false);
             var value = evaluator.Evaluate(offset, []);
+            if (value is null) { throw new SqlExecutionException("CS02071", ErrorMessages.WindowFrameNull); }
+            if (mode == SqlWindowFrameMode.Range) { SqlWindowRange.ValidateOffset(value); return value; }
             long number = value switch
             {
                 null => throw new SqlExecutionException("CS02071", ErrorMessages.WindowFrameNull),
@@ -283,7 +441,7 @@ internal sealed partial class SqlPlanExecutor
             return number;
         }
 
-        async Task<object?> ValueFrameAsync(SqlWindowFunction function, int position, int first, int last)
+        async Task<object?> ValueFrameAsync(SqlWindowFunction function, int position, WindowMembers members)
         {
             long nth = 1;
             if (function.Name == "NTH_VALUE")
@@ -295,11 +453,28 @@ internal sealed partial class SqlPlanExecutor
                 nth = WindowInteger(value, function);
                 if (nth <= 0) { throw new SqlExecutionException("CS05082", ErrorMessages.WindowNthPositive, location: function.Expression.Location); }
             }
-            if (first >= last || nth > last - first) { return null; }
-            int target = function.Name == "LAST_VALUE" ? last - 1 : first + (int)(nth - 1);
-            var row = rows[sorted[target]];
-            await PrepareSubqueriesAsync(function.Arguments[0], row, statement, cancellationToken).ConfigureAwait(false);
-            return NormalizeGroupValue(evaluator.Evaluate(function.Arguments[0], row), function.Type);
+            bool reverse = function.Name == "LAST_VALUE";
+            bool ignore = function.Expression.NullTreatment == SqlWindowNullTreatment.Ignore;
+            for (int part = reverse ? 2 : 0; reverse ? part >= 0 : part < 3; part += reverse ? -1 : 1)
+            {
+                var (first, last) = members.Range(part);
+                if (!ignore)
+                {
+                    if (nth > last - first) { nth -= last - first; continue; }
+                    int target = reverse ? last - (int)nth : first + (int)nth - 1;
+                    var row = rows[sorted[target]];
+                    await PrepareSubqueriesAsync(function.Arguments[0], row, statement, cancellationToken).ConfigureAwait(false);
+                    return NormalizeGroupValue(evaluator.Evaluate(function.Arguments[0], row), function.Type);
+                }
+                for (int at = reverse ? last - 1 : first; reverse ? at >= first : at < last; at += reverse ? -1 : 1)
+                {
+                    var row = rows[sorted[at]];
+                    await PrepareSubqueriesAsync(function.Arguments[0], row, statement, cancellationToken).ConfigureAwait(false);
+                    var value = evaluator.Evaluate(function.Arguments[0], row);
+                    if (value is not null && --nth == 0) { return NormalizeGroupValue(value, function.Type); }
+                }
+            }
+            return null;
         }
 
         async Task<object?> NavigateAsync(SqlWindowFunction function, int position, int start, int end)
@@ -317,6 +492,21 @@ internal sealed partial class SqlPlanExecutor
             // Decimal arithmetic prevents Int64.MinValue negation or index-add overflow.
             decimal target = position + (function.Name == "LEAD" ? (decimal)offset : -(decimal)offset);
             object? result;
+            if (function.Expression.NullTreatment == SqlWindowNullTreatment.Ignore && offset != 0)
+            {
+                decimal remaining = Math.Abs((decimal)offset);
+                int direction = (function.Name == "LEAD" ? 1 : -1) * (offset < 0 ? -1 : 1);
+                int at = position;
+                while (at + direction >= start && at + direction < end)
+                {
+                    at += direction;
+                    var candidate = rows[sorted[at]];
+                    await PrepareSubqueriesAsync(args[0], candidate, statement, cancellationToken).ConfigureAwait(false);
+                    var value = evaluator.Evaluate(args[0], candidate);
+                    if (value is not null && --remaining == 0) { return NormalizeGroupValue(value, function.Type); }
+                }
+                target = end;
+            }
             if (target >= start && target < end)
             {
                 var targetRow = rows[sorted[(int)target]];
@@ -331,6 +521,45 @@ internal sealed partial class SqlPlanExecutor
             else { result = null; }
             return NormalizeGroupValue(result, function.Type);
         }
+    }
+
+    private static bool WindowRestartSensitive(SqlBoundExpression? expression)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is null) { return false; }
+        if (expression is SqlBoundSequence or SqlBoundSubquery or SqlBoundInSubquery or SqlBoundQuantifiedComparison
+            or SqlBoundCall { Function.Volatility: SqlFunctionVolatility.Volatile }) { return true; }
+        if (expression is SqlBoundCase choice)
+        {
+            if (WindowRestartSensitive(choice.Input) || WindowRestartSensitive(choice.ElseResult)) { return true; }
+            foreach (var when in choice.Whens)
+            { if (WindowRestartSensitive(when.Condition) || WindowRestartSensitive(when.Result)) { return true; } }
+        }
+        if (expression is SqlBoundLogical logical && logical.Operands.Any(WindowRestartSensitive)) { return true; }
+        if (expression is SqlBoundCoalesce coalesce && coalesce.Arguments.Any(WindowRestartSensitive)) { return true; }
+        return BoundChildren(expression).Any(WindowRestartSensitive);
+    }
+
+    private static WindowMembers Members(SqlWindowFunction function, int first, int last, int position, int peerFirst, int peerLast)
+    {
+        last = Math.Max(first, last);
+        var exclusion = function.Frame?.Syntax.Exclusion ?? SqlWindowExclusion.NoOthers;
+        if (exclusion == SqlWindowExclusion.NoOthers) { return new(first, last, last, last, last, last); }
+        int excludedFirst = exclusion == SqlWindowExclusion.CurrentRow ? position : peerFirst;
+        int excludedLast = exclusion == SqlWindowExclusion.CurrentRow ? position + 1 : peerLast;
+        int middleFirst = exclusion == SqlWindowExclusion.Ties ? Math.Clamp(position, first, last) : last;
+        int middleLast = exclusion == SqlWindowExclusion.Ties ? Math.Clamp(position + 1, first, last) : last;
+        return new(first, last, Math.Clamp(excludedFirst, first, last), Math.Clamp(excludedLast, first, last), middleFirst, middleLast);
+    }
+
+    private readonly record struct WindowMembers(int First, int Last, int ExcludedFirst, int ExcludedLast, int MiddleFirst, int MiddleLast)
+    {
+        internal (int First, int Last) Range(int segment) => segment switch
+        {
+            0 => (First, ExcludedFirst),
+            1 => (MiddleFirst, MiddleLast),
+            _ => (ExcludedLast, Last),
+        };
     }
 
     private static long WindowInteger(object value, SqlWindowFunction function) => value switch

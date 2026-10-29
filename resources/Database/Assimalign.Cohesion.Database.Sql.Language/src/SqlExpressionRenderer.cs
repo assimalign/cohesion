@@ -372,7 +372,7 @@ public static partial class SqlExpressionRenderer
             => "EXTRACT(" + field.Value + " FROM " + Expression(function.Arguments[1]) + ")",
         SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null
             => "POSITION(" + Operand(function.Arguments[0], concatLevel) + " IN " + Expression(function.Arguments[1]) + ")",
-        SqlWindowExpression window => AggregateCall(window.Function, window: true) + " OVER " +
+        SqlWindowExpression window => AggregateCall(window.Function, window: true) + (window.NullTreatment == SqlWindowNullTreatment.Default ? "" : window.NullTreatment == SqlWindowNullTreatment.Ignore ? " IGNORE NULLS" : " RESPECT NULLS") + " OVER " +
             (window.WindowName is not null ? Identifier(window.WindowName) : "(" + WindowSpecification(window.Specification!) + ")"),
         SqlFunctionCallExpression function => AggregateCall(function),
         SqlCaseExpression caseExpression => Case(caseExpression),
@@ -382,14 +382,25 @@ public static partial class SqlExpressionRenderer
         _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlExpressionRendererNodeNotSupported, expression.GetType().Name)),
     };
 
+    private static string WindowIdentifier(string name) => name.ToUpperInvariant() is "ROWS" or "RANGE" or "GROUPS" or "EXCLUDE"
+        ? "\"" + name + "\"" : Identifier(name);
+
     private static string WindowSpecification(SqlWindowSpecification specification) => string.Join(" ", new[]
     {
-        specification.ExistingWindow is null ? "" : Identifier(specification.ExistingWindow),
+        specification.ExistingWindow is null ? "" : WindowIdentifier(specification.ExistingWindow),
         specification.PartitionBy.Count == 0 ? "" : "PARTITION BY " + List(specification.PartitionBy),
         specification.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", specification.OrderBy.Select(Ordering)),
-        specification.Frame is null ? "" : (specification.Frame.Mode == SqlWindowFrameMode.Rows ? "ROWS" : "RANGE") +
-            " BETWEEN " + FrameBound(specification.Frame.Start) + " AND " + FrameBound(specification.Frame.End),
+        specification.Frame is null ? "" : specification.Frame.Mode.ToString().ToUpperInvariant() +
+            " BETWEEN " + FrameBound(specification.Frame.Start) + " AND " + FrameBound(specification.Frame.End) + Exclusion(specification.Frame.Exclusion),
     }.Where(part => part.Length > 0));
+
+    private static string Exclusion(SqlWindowExclusion exclusion) => exclusion switch
+    {
+        SqlWindowExclusion.CurrentRow => " EXCLUDE CURRENT ROW",
+        SqlWindowExclusion.Group => " EXCLUDE GROUP",
+        SqlWindowExclusion.Ties => " EXCLUDE TIES",
+        _ => "",
+    };
 
     private static string FrameBound(SqlWindowFrameBound bound) => bound.Kind switch
     {
