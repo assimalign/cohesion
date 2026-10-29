@@ -475,7 +475,8 @@ the proposed stored values after coercion, defaults, expression defaults and ide
 allocation. An unqualified column common to both relations is ambiguous (CS01015).
 A target named or aliased excluded makes that qualifier ambiguous too. SET expressions
 all read the original target plus proposed row; SET c = DEFAULT uses the normal UPDATE
-default resolver. ALWAYS identity assignments retain CS03025. Identity values allocated
+default resolver, which allocates for identity columns of either kind; any other assignment to
+an ALWAYS identity retains CS03025 (PostgreSQL accepts only DEFAULT there). Identity values allocated
 for conflicting proposals are consumed, including skipped proposals. Each proposal and
 its conflict projection consume defaults before the next proposal (PostgreSQL
 src/backend/executor/nodeModifyTable.c:4497,2980); for example identity proposals 2 and 4
@@ -921,9 +922,9 @@ snapshot; their first-updater-wins diagnostic names the action. ReadCommitted SE
 validate outgoing references against current parents after a lock wait, including parents
 committed by the child writer. SET DEFAULT with no default
 supplies NULL; each expression default uses the delete transaction's clock. Unique NULLs
-remain equal. SET DEFAULT uses the ordinary assignment
-path for identity columns: BY DEFAULT allocates, and GENERATED ALWAYS retains its CS03025
-UPDATE refusal. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
+remain equal. SET DEFAULT uses the ordinary DEFAULT assignment
+path for identity columns: both BY DEFAULT and GENERATED ALWAYS identities allocate a new value
+from their owned sequence, as PostgreSQL's SET DEFAULT does. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
 report CK00001. Schema-owned typed foreign
 keys retain RESTRICT/CASCADE only. SQL record-space format 20 gates the new persisted
 referential-action values; format 19 and earlier are refused with the recreate remedy.
