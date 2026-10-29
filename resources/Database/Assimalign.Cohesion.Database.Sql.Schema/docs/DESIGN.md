@@ -10,6 +10,12 @@ fragment as authored, like CHECK declarations; it adds no SQL parser or engine r
 The existing single-member typed Index builder remains unconditional; constructing compiled
 metadata can declare a partial index. Runtime and SDK reject v9 and every earlier document.
 
+When an existing column changes storage type, length, precision, scale or declared SQL type,
+the planner drops partial indexes before ALTER and adds them afterward. This parser-free assembly
+conservatively rebuilds all partial indexes on that table because predicate fragments carry no
+column dependency vector here. Nullability/default-only changes do not trigger that rebuild.
+The runtime retains its existing migration-rendering limits for storage/domain/scale rewrites.
+
 
 ## Foreign-key update metadata and format v9 (#1723, SQ-F1)
 

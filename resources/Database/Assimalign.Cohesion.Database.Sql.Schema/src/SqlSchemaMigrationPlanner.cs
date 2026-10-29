@@ -89,7 +89,8 @@ public static class SqlSchemaMigrationPlanner
             var newIndexes = newTable.Indexes.ToDictionary(index => index.Name, identifiers);
             foreach (CompiledSchemaIndex oldIndex in oldTable.Indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
             {
-                if (!newIndexes.TryGetValue(oldIndex.Name, out CompiledSchemaIndex? newIndex) || !IndexEquals(oldIndex, newIndex, identifiers))
+                if (!newIndexes.TryGetValue(oldIndex.Name, out CompiledSchemaIndex? newIndex) || !IndexEquals(oldIndex, newIndex, identifiers) ||
+                    oldIndex.Predicate is not null && RetypesColumn(oldTable, newTable, identifiers))
                 {
                     operations.Add(new SqlSchemaMigrationOperation(
                         SqlSchemaMigrationOperationKind.DropIndex,
@@ -170,7 +171,8 @@ public static class SqlSchemaMigrationPlanner
             var oldIndexes = oldTable.Indexes.ToDictionary(index => index.Name, identifiers);
             foreach (CompiledSchemaIndex index in newTable.Indexes.OrderBy(value => value.Name, StringComparer.Ordinal))
             {
-                if (!oldIndexes.TryGetValue(index.Name, out CompiledSchemaIndex? previous) || !IndexEquals(previous, index, identifiers))
+                if (!oldIndexes.TryGetValue(index.Name, out CompiledSchemaIndex? previous) || !IndexEquals(previous, index, identifiers) ||
+                    index.Predicate is not null && RetypesColumn(oldTable, newTable, identifiers))
                 {
                     operations.Add(new SqlSchemaMigrationOperation(
                         SqlSchemaMigrationOperationKind.AddIndex,
@@ -272,6 +274,13 @@ public static class SqlSchemaMigrationPlanner
 
     private static bool DomainEquals(CompiledSchemaType left, CompiledSchemaType right)
         => left.StorageType == right.StorageType && left.Precision == right.Precision && left.Scale == right.Scale;
+
+    // Predicate fragments intentionally have no parser in this assembly. Conservatively
+    // rebuild every partial index on a retyped table rather than guessing dependencies.
+    private static bool RetypesColumn(CompiledSchemaTable previous, CompiledSchemaTable desired, StringComparer identifiers)
+        => desired.Columns.Any(column => previous.Columns.FirstOrDefault(old => identifiers.Equals(old.Name, column.Name)) is { } old &&
+            (old.Type != column.Type || old.MaxLength != column.MaxLength || old.Precision != column.Precision || old.Scale != column.Scale ||
+             !identifiers.Equals(old.CustomType, column.CustomType)));
 
     private static bool IndexEquals(
         CompiledSchemaIndex left,

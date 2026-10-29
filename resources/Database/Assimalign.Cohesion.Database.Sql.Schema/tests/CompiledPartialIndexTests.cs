@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 using Shouldly;
 using Xunit;
@@ -9,6 +10,24 @@ namespace Assimalign.Cohesion.Database.Sql.Schema.Tests;
 
 public sealed class CompiledPartialIndexTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Schema] - Partial indexes: predicate retyping drops before ALTER and recreates after (#1630)")]
+    public void Plan_PredicateColumnTypeChange_ShouldOrderIndexRebuild()
+    {
+        // Arrange
+        var before = Schema("active");
+        var oldTable = before.Tables[0];
+        var after = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "app", true, [],
+            [new("t", "Tests:Row", [new("k", DatabaseType.Int64, true), new("active", DatabaseType.Boolean, true)], null,
+                oldTable.Indexes, [])], []);
+
+        // Act
+        var plan = SqlSchemaMigrationPlanner.Plan(before, after);
+
+        // Assert: parser-free schema planning conservatively rebuilds every partial index on a retyped table.
+        plan.Operations.Select(operation => operation.Kind).ShouldBe([
+            SqlSchemaMigrationOperationKind.DropIndex, SqlSchemaMigrationOperationKind.AlterColumn, SqlSchemaMigrationOperationKind.AddIndex]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Schema] - Partial indexes: v10 persists predicates and migration detects predicate changes (#1630)")]
     public void Serialize_PartialPredicate_ShouldRoundTripAndAffectMigration()
     {

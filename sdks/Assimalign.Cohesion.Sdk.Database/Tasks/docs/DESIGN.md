@@ -6,6 +6,12 @@ The shared compiled index record adds optional Predicate text. SDK artifacts and
 use v10 and reject v9 and earlier formats through the existing gate. SDK extraction keeps its
 unconditional typed Index declarations; no extractor API or project boundary changes.
 
+The migration writer retains predicates on initial indexes and drop/add replacements. It parses
+the fragment both directly and inside parentheses, verifies the fixed SELECT carrier, and emits
+only the canonical expression AST. Identifier and string escaping therefore follow Sql.Language;
+trailing statements, clauses and comments cannot escape into the generated migration. Partial
+UNIQUE indexes retain their subset and NULL-distinct semantics when the script executes.
+
 
 ## Compiled SQL schema format v9 (#1723, SQ-F1)
 
