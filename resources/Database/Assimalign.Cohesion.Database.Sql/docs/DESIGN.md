@@ -79,7 +79,11 @@ category after its end, UNBOUNDED FOLLOWING starts and UNBOUNDED PRECEDING ends 
 with CS05080 (42P20). Two offsets in the same direction may describe an empty frame;
 their numeric values are not a planning-time ordering restriction. Offsets accept signed
 integer expressions and parameters, evaluated once per window execution and shared across
-partitions. Row variables, aggregates and windows are prohibited. Noninteger, NULL and
+partitions; a named specification shares initialization across its functions. Empty input
+does not initialize offsets. Current-query row variables, aggregate and window functions
+are prohibited; outer-query values remain constant for each child-window execution.
+Offsets use the engine's signed integer domain; numeric/text assignment coercions require
+an explicit CAST. PostgreSQL uses assignment coercion at this boundary. Noninteger, NULL and
 negative offsets report CS02070 (42804), CS02071 (22004) and CS02072 (22013).
 Offsets beyond the partition, including Int64.MaxValue, clamp without arithmetic overflow.
 
@@ -103,7 +107,8 @@ current row; NULL yields NULL and nonpositive values report CS05082 (22016), eve
 an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
 a noninteger index reports CS02073 (42804). Value types follow the first argument, including CHAR and its collation.
 
-Growing native frames reuse one accumulator and consume each qualifying input once,
+Native frames reuse one accumulator while their head stays fixed, including bounded
+PRECEDING heads clamped to the partition start. They consume each qualifying input once,
 reading a non-consuming native final result. Equal frames share the previously computed
 result. Ordinary application accumulator Finish remains once-only: those frames, moving
 frame heads and aggregate-local ordering recompute when necessary. String output cost is
