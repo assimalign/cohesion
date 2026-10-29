@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -33,6 +34,7 @@ internal sealed partial class SqlPlanExecutor
         object?[][]? keys = null;
         Collation[]? collations = null;
         long keyBytes = 0;
+        var frameOffsets = new Dictionary<SqlWindowFrameBinding, (long Start, long End)>();
         foreach (var group in plan.Groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -77,6 +79,14 @@ internal sealed partial class SqlPlanExecutor
                 { ExceptionDispatchInfo.Throw(failure.InnerException); throw; }
                 if (sortWork is not null) { sortWork.Candidates++; }
             }
+            if (rows.Count > 0)
+            {
+                foreach (var function in group.Functions)
+                {
+                    if (function.Frame is { } frame && !frameOffsets.ContainsKey(frame))
+                    { frameOffsets.Add(frame, (await FrameOffsetAsync(frame.StartOffset).ConfigureAwait(false), await FrameOffsetAsync(frame.EndOffset).ConfigureAwait(false))); }
+                }
+            }
             int partitionStart = 0;
             while (partitionStart < sorted.Length)
             {
@@ -85,7 +95,7 @@ internal sealed partial class SqlPlanExecutor
                 while (partitionEnd < sorted.Length && SameKeys(partitionStart, partitionEnd, group.Partition.Count)) { partitionEnd++; }
                 // Partition scratch is admitted and released at the partition boundary. Output
                 // cells remain in the separately charged input/result rows until the stage ends.
-                long scratch = 64L + group.Functions.Count * 32L;
+                long scratch = 256L + group.Functions.Count * 128L;
                 memory.Reserve(scratch);
                 try { await ComputePartitionAsync(partitionStart, partitionEnd, group).ConfigureAwait(false); }
                 finally { memory.Release(scratch); }
@@ -115,6 +125,12 @@ internal sealed partial class SqlPlanExecutor
         {
             int size = end - start;
             var buckets = new long?[group.Functions.Count];
+            var accumulators = new SqlAggregateAccumulator?[group.Functions.Count];
+            var nextInputs = new int[group.Functions.Count];
+            var previousStarts = Enumerable.Repeat(-1, group.Functions.Count).ToArray();
+            var previousEnds = Enumerable.Repeat(-1, group.Functions.Count).ToArray();
+            var results = new object?[group.Functions.Count];
+            Array.Fill(nextInputs, start);
             for (int f = 0; f < group.Functions.Count; f++)
             {
                 var function = group.Functions[f];
@@ -139,7 +155,12 @@ internal sealed partial class SqlPlanExecutor
                     for (int f = 0; f < group.Functions.Count; f++)
                     {
                         var function = group.Functions[f];
-                        object? result = function.Name switch
+                        var (frameStart, frameEnd) = FrameBounds(function, position, start, end, peerStart, peerEnd);
+                        object? result = function.Aggregate is not null
+                            ? await AggregateFrameAsync(function, f, frameStart, frameEnd).ConfigureAwait(false)
+                            : function.Name is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE"
+                                ? await ValueFrameAsync(function, position, frameStart, frameEnd).ConfigureAwait(false)
+                                : function.Name switch
                         {
                             "ROW_NUMBER" => (long)(position - start + 1),
                             "RANK" => (long)(peerStart - start + 1),
@@ -155,6 +176,126 @@ internal sealed partial class SqlPlanExecutor
                 }
                 peerStart = peerEnd;
             }
+            for (int i = 0; i < accumulators.Length; i++) { if (accumulators[i] is not null) { memory.Release(256); } }
+
+            async Task<object?> AggregateFrameAsync(SqlWindowFunction function, int index, int first, int last)
+            {
+                if (previousStarts[index] == first && previousEnds[index] == last) { return results[index]; }
+                var aggregate = function.Aggregate!;
+                var collation = aggregate.Collation.Resolve(_subqueryValues);
+                bool incremental = aggregate.OrderBy.Count == 0 && SqlStandardLibrary.Contains(aggregate.Function);
+                SqlAggregateAccumulator accumulator;
+                if (incremental)
+                {
+                    // Keep transitions while the frame head stays put, including a bounded
+                    // PRECEDING head clamped to the partition start. Without an inverse
+                    // transition a moved head requires a fresh aggregate over the new frame.
+                    if (accumulators[index] is not null && previousStarts[index] != first)
+                    { accumulators[index] = null; memory.Release(256); }
+                    if (accumulators[index] is null) { nextInputs[index] = first; }
+                    accumulator = accumulators[index] ??= Create();
+                }
+                else { accumulator = Create(); }
+                long retained = 0;
+                try
+                {
+                    var ordered = aggregate.OrderBy.Count == 0 ? null : new GroupAggregateState(accumulator, aggregate, _subqueryValues);
+                    for (int inputPosition = incremental ? nextInputs[index] : first; inputPosition < last; inputPosition++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (statement.Metrics.Analysis(function) is { } work) { work.Candidates++; }
+                        var inputRow = rows[sorted[inputPosition]];
+                        await PrepareSubqueriesAsync(aggregate.Filter, inputRow, statement, cancellationToken).ConfigureAwait(false);
+                        if (!evaluator.Matches(aggregate.Filter, inputRow)) { continue; }
+                        foreach (var argument in aggregate.Arguments)
+                        { await PrepareSubqueriesAsync(argument, inputRow, statement, cancellationToken).ConfigureAwait(false); }
+                        foreach (var order in aggregate.OrderBy)
+                        { await PrepareSubqueriesAsync(order.Key, inputRow, statement, cancellationToken).ConfigureAwait(false); }
+                        if (ordered is null) { AddRow(accumulator, aggregate, collation, evaluator, inputRow, cancellationToken, statement.TransactionStart); }
+                        else
+                        {
+                            long bytes = 128L + (aggregate.Arguments.Length + aggregate.OrderBy.Count) * 16L + SqlHashJoinTable.RowBytes(inputRow);
+                            memory.Reserve(bytes);
+                            retained += bytes;
+                            AddAggregateInput(ordered, aggregate, collation, evaluator, inputRow, cancellationToken, statement.TransactionStart);
+                        }
+                    }
+                    if (ordered?.Inputs is { } inputs)
+                    {
+                        foreach (var inputRow in SortRows(inputs, ordered.Ordering, evaluator, cancellationToken))
+                        { AddAggregateValues(accumulator, aggregate, collation, inputRow, cancellationToken, statement.TransactionStart); }
+                    }
+                    nextInputs[index] = Math.Max(first, last);
+                    previousStarts[index] = first;
+                    previousEnds[index] = last;
+                    return results[index] = NormalizeGroupValue((incremental ? accumulator.ReadWindowResult(cancellationToken) : accumulator.Finish(cancellationToken)).ToObject(), function.Type);
+                }
+                finally
+                {
+                    memory.Release(retained);
+                    if (!incremental) { memory.Release(256); }
+                }
+
+                SqlAggregateAccumulator Create()
+                {
+                    memory.Reserve(256);
+                    return aggregate.Function.CreateAccumulator(new SqlFunctionContext(aggregate.Database, collation, cancellationToken, statement.TransactionStart));
+                }
+            }
+        }
+
+        (int Start, int End) FrameBounds(SqlWindowFunction function, int position, int start, int end, int peerStart, int peerEnd)
+        {
+            if (function.Frame is not { } frame) { return (start, peerEnd); }
+            var offsets = frameOffsets[frame];
+            return (Bound(frame.Syntax.Start, offsets.Start, false), Bound(frame.Syntax.End, offsets.End, true));
+
+            int Bound(SqlWindowFrameBound bound, long offset, bool ending)
+            {
+                decimal target = bound.Kind switch
+                {
+                    SqlWindowFrameBoundKind.UnboundedPreceding => start,
+                    SqlWindowFrameBoundKind.UnboundedFollowing => end,
+                    SqlWindowFrameBoundKind.Preceding => (decimal)position - offset + (ending ? 1 : 0),
+                    SqlWindowFrameBoundKind.Following => (decimal)position + offset + (ending ? 1 : 0),
+                    _ => frame.Syntax.Mode == SqlWindowFrameMode.Range ? ending ? peerEnd : peerStart : position + (ending ? 1 : 0),
+                };
+                return (int)Math.Clamp(target, start, end);
+            }
+        }
+
+        async Task<long> FrameOffsetAsync(SqlBoundExpression? offset)
+        {
+            if (offset is null) { return 0; }
+            await PrepareSubqueriesAsync(offset, [], statement, cancellationToken).ConfigureAwait(false);
+            var value = evaluator.Evaluate(offset, []);
+            long number = value switch
+            {
+                null => throw new SqlExecutionException("CS02071", ErrorMessages.WindowFrameNull),
+                sbyte n => n, short n => n, int n => n, long n => n,
+                _ => throw new SqlExecutionException("CS02070", ErrorMessages.WindowFrameInteger),
+            };
+            if (number < 0) { throw new SqlExecutionException("CS02072", ErrorMessages.WindowFrameNegative); }
+            return number;
+        }
+
+        async Task<object?> ValueFrameAsync(SqlWindowFunction function, int position, int first, int last)
+        {
+            long nth = 1;
+            if (function.Name == "NTH_VALUE")
+            {
+                var current = rows[sorted[position]];
+                await PrepareSubqueriesAsync(function.Arguments[1], current, statement, cancellationToken).ConfigureAwait(false);
+                var value = evaluator.Evaluate(function.Arguments[1], current);
+                if (value is null) { return null; }
+                nth = WindowInteger(value, function);
+                if (nth <= 0) { throw new SqlExecutionException("CS05082", ErrorMessages.WindowNthPositive, location: function.Expression.Location); }
+            }
+            if (first >= last || nth > last - first) { return null; }
+            int target = function.Name == "LAST_VALUE" ? last - 1 : first + (int)(nth - 1);
+            var row = rows[sorted[target]];
+            await PrepareSubqueriesAsync(function.Arguments[0], row, statement, cancellationToken).ConfigureAwait(false);
+            return NormalizeGroupValue(evaluator.Evaluate(function.Arguments[0], row), function.Type);
         }
 
         async Task<object?> NavigateAsync(SqlWindowFunction function, int position, int start, int end)
@@ -191,7 +332,8 @@ internal sealed partial class SqlPlanExecutor
     private static long WindowInteger(object value, SqlWindowFunction function) => value switch
     {
         sbyte number => number, short number => number, int number => number, long number => number,
-        _ => throw new SqlExecutionException("CS02068", ErrorMessages.WindowIntegerArgument, location: function.Expression.Location),
+        _ => throw new SqlExecutionException(function.Name == "NTH_VALUE" ? "CS02073" : "CS02068",
+            function.Name == "NTH_VALUE" ? ErrorMessages.WindowNthInteger : ErrorMessages.WindowIntegerArgument, location: function.Expression.Location),
     };
 
     private static int Tile(int index, int rows, long buckets)

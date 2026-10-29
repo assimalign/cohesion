@@ -143,7 +143,7 @@ structured-carrier messages remain unprefixed.
 | New (#1720, SQ-H2) | CS01063 | Binding/grouping — GROUPING requires 1–31 non-star expression arguments (54023) |
 | New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42P20) |
 | New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
-| New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY or ORDER BY (42P20) |
+| New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY/ORDER BY or copies an explicit frame (42P20) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -165,6 +165,10 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R1) | CS02067 | Values/types — Recursive UNION changes or conflicts with the anchor collation; COLLATE hint (42P21) |
 | New (#1526, SQ-W1) | CS02068 | Non-integer navigation offset or bucket count (42804) |
 | New (#1526, SQ-W1) | CS02069 | Incompatible navigation value and default types (42804) |
+| New (#1526, SQ-W2) | CS02070 | Noninteger ROWS frame offset (42804) |
+| New (#1526, SQ-W2) | CS02071 | NULL frame offset (22004) |
+| New (#1526, SQ-W2) | CS02072 | Negative frame offset (22013) |
+| New (#1526, SQ-W2) | CS02073 | Noninteger NTH_VALUE index (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -254,6 +258,10 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W1) | CS05077 | Nested window function (42P20) |
 | New (#1526, SQ-W1) | CS05078 | Non-positive NTILE bucket count (22014) |
 | New (#1526, SQ-W1) | CS05079 | Window state exceeds statement memory grant (54000) |
+| New (#1526, SQ-W2) | CS05080 | Invalid frame boundary categories (42P20) |
+| New (#1526, SQ-W2) | CS05081 | Row variable, aggregate or window in frame offset (42P20) |
+| New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
+| New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

@@ -1,13 +1,15 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
-## Window stage (#1526, SQ-W1)
+## Window stage (#1526, SQ-W1/SQ-W2)
 
 SqlWindowExpression holds a function and either OVER name or an inline SqlWindowSpecification.
 SqlNamedWindow retains declaration order and a specification's inherited name. The SELECT
 node stores named definitions in an optional payload over its existing grouping-list reference,
 so ordinary SELECT nodes keep their allocation size. The profile advertises eight ranking and
-navigation functions plus OVER, PARTITION and WINDOW; explicit frames, aggregate windows and
-value functions retain CK00001. Canonical built-in window names render unquoted, and named
+navigation functions plus FIRST_VALUE/LAST_VALUE/NTH_VALUE, OVER, PARTITION, WINDOW,
+ROWS and offset-free RANGE. SqlWindowFrame and SqlWindowFrameBound retain explicit boundary
+kinds and offset expressions, participating in depth, canonical rendering and binding.
+RANGE with offsets, GROUPS, EXCLUDE and value-function modifiers retain CK00001. Canonical built-in window names render unquoted, and named
 keys participate in view traversal, structural equivalence and child-subquery binding.
 
 Binding, stage placement, diagnostics and memory ownership are described in Sql DESIGN and
@@ -389,7 +391,7 @@ SqlFunctionCallExpression.Filter retains the optional condition, including depth
 extent. Rendering, semantic child walks, aggregate-level correlation and persisted equality
 include it. FILTER adds one named clause and nine function names join the executable profile.
 The profile has 59 declared clauses, or 64 including the five documented exclusions.
-Window aggregates and window calls in FILTER retain CK00001. The catalog owns aggregate
+Aggregate windows and their FILTER execute; window calls inside FILTER fail placement binding. The catalog owns aggregate
 admission (CS05072 for FILTER on scalar calls); a same-scope aggregate in the condition is
 CS05073. Child queries bind independently. See DIALECT.md for types, NULLs and rounding.
 
@@ -430,7 +432,7 @@ arguments retain a reusable CK00001 rejection; malformed forms use CS00003.
 Function tokens share identifier/qualifier parsing, so additions preserve ordinary names.
 
 The profile's Functions list contains only executable built-ins, including the CAST special
-form. Non-executing window functions remain in SqlUnsupportedVocabulary and report named CK00001 diagnostics. Bare datetime forms execute and cannot bind unquoted columns.
+form. Deferred frame modes and value modifiers remain in SqlUnsupportedVocabulary and report named CK00001 diagnostics. Bare datetime forms execute and cannot bind unquoted columns.
 The engine's single function-coverage guard requires a passing live case for every declaration.
 
 `SqlLanguageProfile.RecognizedUnsupportedVocabulary` exposes a read-only snapshot of spellings
@@ -760,8 +762,8 @@ its ordinary bare output alias before SET.
 
 ## Non-goals (current dialect)
 
-CORRESPONDING, nested or data-modifying CTEs and recursive execution, window frames,
-aggregate windows and value-window functions, LATERAL,
+CORRESPONDING, nested or data-modifying CTEs and recursive execution, RANGE with offsets, GROUPS and EXCLUDE,
+FROM FIRST/LAST and IGNORE/RESPECT NULLS, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
 RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
@@ -874,8 +876,8 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   refused with `NotSupportedException`. A called function name is bare when it is a builtin
   or a plain word, except `CAST` and the reserved window function names. A window
   expression emits its function unquoted together with OVER; an ordinary function
-  node with a reserved window name retains quotes. Deferred value functions keep
-  the parse-time diagnostic boundary and ranking/navigation require OVER at binding.
+  node with a reserved window name retains quotes. Ranking, navigation and value
+  functions require OVER at binding.
 - **The invariant is tested, not assumed.** `SqlExpressionRendererTests` pins the
   canonical spelling of every form a CHECK accepts, proves that parsing the output
   yields the same tree (positions aside; a CAST target's whitespace is normalized)

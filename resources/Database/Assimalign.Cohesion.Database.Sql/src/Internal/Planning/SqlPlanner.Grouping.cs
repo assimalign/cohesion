@@ -173,7 +173,7 @@ internal sealed partial class SqlPlanner
             }
             if (expression is SqlWindowExpression window)
             {
-                foreach (var argument in window.Function.Arguments) { BindSlots(argument); }
+                foreach (var argument in Children(window.Function)) { if (argument is not SqlStarExpression) { BindSlots(argument); } }
                 var windowKeys = WindowKeysOf(window, NamedWindows(select));
                 foreach (var key in windowKeys.Partition) { BindSlots(key); }
                 foreach (var key in windowKeys.Order) { BindSlots(key.Expression); }

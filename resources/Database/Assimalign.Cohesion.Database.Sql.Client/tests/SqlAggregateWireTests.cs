@@ -367,7 +367,7 @@ public sealed class SqlAggregateWireTests
     /// <summary>Excluded aggregate forms fail through the capability diagnostic before planning.</summary>
     /// <param name="statement">The excluded aggregate form.</param>
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Aggregates: excluded forms report CK00001 over the wire")]
-    [InlineData("SELECT SUM(score) OVER (PARTITION BY name) FROM users")]
+    [InlineData("SELECT SUM(score) OVER (PARTITION BY name GROUPS CURRENT ROW) FROM users")]
     [InlineData("SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY score) FROM users")]
     public async Task QueryAsync_ExcludedAggregate_ShouldReportCapabilityDiagnosticOverTheWire(string statement)
     {

@@ -1,14 +1,14 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-## Window stage (#1526, SQ-W1)
+## Window stage (#1526, SQ-W1/SQ-W2)
 
 OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
 OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
 after HAVING and before the query tail. Names use the existing case-insensitive identifier
 rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
-has none. Definitions cannot reference themselves or later definitions. Explicit ROWS,
-RANGE, GROUPS and EXCLUDE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE remain
-CK00001, naming the deferred form. Frames are not silently approximated with ROWS.
+has none. Definitions cannot reference themselves or later definitions. ROWS frames,
+offset-free RANGE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute as
+described below; deferred frame forms retain named CK00001 refusals.
 
 ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
 WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
@@ -69,6 +69,70 @@ no live PostgreSQL comparison is claimed.
 | CS05077 | Nested windows |
 | CS05078 | Nonpositive NTILE count (22014) |
 | CS05079 | Statement window memory exceeded |
+
+### Frame execution (#1526, SQ-W2)
+
+ROWS accepts the short UNBOUNDED PRECEDING, n PRECEDING and CURRENT ROW forms, and
+BETWEEN bounds using UNBOUNDED/n PRECEDING, CURRENT ROW and n/UNBOUNDED FOLLOWING.
+The short form ends at CURRENT ROW. Boundary categories follow PostgreSQL: a start
+category after its end, UNBOUNDED FOLLOWING starts and UNBOUNDED PRECEDING ends fail
+with CS05080 (42P20). Two offsets in the same direction may describe an empty frame;
+their numeric values are not a planning-time ordering restriction. Offsets accept signed
+integer expressions and parameters, evaluated once per window execution and shared across
+partitions. Row variables, aggregates and windows are prohibited. Noninteger, NULL and
+negative offsets report CS02070 (42804), CS02071 (22004) and CS02072 (22013).
+Offsets beyond the partition, including Int64.MaxValue, clamp without arithmetic overflow.
+
+Without an explicit frame, ORDER BY uses RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
+including every current-row peer; without ORDER BY the frame is the whole partition.
+Explicit offset-free RANGE also executes, including CURRENT ROW peer boundaries and
+UNBOUNDED FOLLOWING. RANGE with offsets, GROUPS, EXCLUDE, FROM FIRST/LAST and
+IGNORE/RESPECT NULLS remain named CK00001 refusals. Explicit frames do not change
+ranking/navigation semantics. A named window with an explicit frame may be referenced
+by OVER name, but cannot be copied by OVER(name) or another named definition (CS01066).
+
+All catalog aggregates execute over frames, including FILTER, Boolean/statistical functions,
+STRING_AGG, LISTAGG and application aggregates. DISTINCT inside an aggregate window is
+CK00001. Existing engine aggregate-input ORDER BY and WITHIN GROUP execute as well;
+this extends PostgreSQL, which refuses aggregate-local ORDER BY with OVER. FILTER runs
+before input expressions. Empty frames return COUNT zero and other native aggregates NULL.
+The result type, collation, coercions and numeric rounding are the ordinary aggregate's.
+FIRST_VALUE, LAST_VALUE and NTH_VALUE respect NULLs and read the selected frame member;
+an empty frame or missing nth member returns NULL. NTH_VALUE's index is evaluated per
+current row; NULL yields NULL and nonpositive values report CS05082 (22016), even for
+an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
+a noninteger index reports CS02073 (42804). Value types follow the first argument, including CHAR and its collation.
+
+Growing native frames reuse one accumulator and consume each qualifying input once,
+reading a non-consuming native final result. Equal frames share the previously computed
+result. Ordinary application accumulator Finish remains once-only: those frames, moving
+frame heads and aggregate-local ordering recompute when necessary. String output cost is
+also proportional to the total returned text. Native ordered/string buffers and accumulator
+scratch charge CS05079's statement grant; complete retained-memory refinement remains SQ-W3.
+No public accumulator contract, disk version or wire format changes.
+EXPLAIN retains frame boundaries for each function and ANALYZE reports frame_visits,
+counting candidate aggregate inputs before FILTER. Frames do not split shared sort groups,
+and LIMIT applies after the complete window input. Generated tests enumerate every legal
+boundary-category pair, NULL/tied keys, both directions, explicit NULL placement, empty and
+singleton partitions, zero and oversize offsets, several windows, FILTER and value functions.
+Work-counter tests establish linear growing-frame transitions against a brute-force reference.
+
+References re-derived in the local PostgreSQL clone: parser/gram.y:16882-16933
+(bound categories), parser/parse_clause.c:2885-2902,3697-3719 (copies and ROWS offset types),
+executor/nodeWindowAgg.c:734-770,2233-2279 (incremental frames, NULL/negative offsets),
+utils/adt/windowfuncs.c:656-723 (frame value functions). No live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS02070 | Noninteger ROWS frame offset (42804) |
+| CS02071 | NULL frame offset (22004) |
+| CS02072 | Negative frame offset (22013) |
+| CS02073 | Noninteger NTH_VALUE index (42804) |
+| CS05080 | Invalid frame boundary categories (42P20) |
+| CS05081 | Row variable, aggregate or window in frame offset (42P20) |
+| CS05082 | Nonpositive NTH_VALUE index (22016) |
+| CS05083 | OVER on a scalar function (42809) |
+
 
 ## Owned identity sequences (#1717, SQ-S3)
 

@@ -51,7 +51,6 @@ public sealed class SqlReturningParserTests
     [InlineData("INSERT INTO t WITH c AS (SELECT id FROM u) SELECT id FROM c RETURNING (SELECT 1)", "SUBQUERY in RETURNING")]
     [InlineData("WITH c AS (SELECT id FROM u) INSERT INTO t SELECT id FROM c RETURNING (SELECT 1)", "SUBQUERY in RETURNING")]
     [InlineData("DELETE FROM t WHERE id = 1 RETURNING (SELECT 1)", "SUBQUERY in RETURNING")]
-    [InlineData("UPDATE t SET age = 1 RETURNING SUM(age) OVER ()", "OVER")]
     [InlineData("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d", "DELETE")]
     public void Parse_ExcludedReturning_ShouldNameConstruct(string sql, string construct)
     {
@@ -61,6 +60,16 @@ public sealed class SqlReturningParserTests
         // Assert
         var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct, Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - RETURNING: window placement is checked by binding")]
+    public void Parse_WindowReturning_ShouldRetainWindowForBinding()
+    {
+        // Arrange / Act
+        var statement = (SqlQueryStatement)new SqlQueryParser().Parse("UPDATE t SET age=1 RETURNING SUM(age) OVER();");
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        statement.SqlExpression.ShouldBeOfType<SqlUpdateExpression>().Returning!.ShouldHaveSingleItem().Expression.ShouldBeOfType<SqlWindowExpression>();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - RETURNING: incomplete lists and SELECT tails fail syntax")]

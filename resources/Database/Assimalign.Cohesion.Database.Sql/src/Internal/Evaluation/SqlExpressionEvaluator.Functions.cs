@@ -161,6 +161,9 @@ internal sealed partial class SqlExpressionEvaluator
         RuntimeHelpers.EnsureSufficientExecutionStack();
         return expression switch
         {
+            SqlWindowExpression window when window.Function.Arguments.Count > 0 &&
+                window.Function.FunctionName.ToUpperInvariant() is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE"
+                => OutputTypeInfo(window.Function.Arguments[0]),
             SqlColumnReferenceExpression column => ColumnMetadata(column).Type,
             SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage,
             SqlCollateExpression collate => OutputTypeInfo(collate.Operand),
@@ -214,6 +217,9 @@ internal sealed partial class SqlExpressionEvaluator
         // of type agreement, even when two domains share their base type/facets.
         switch (expression)
         {
+            case SqlWindowExpression window when window.Function.Arguments.Count > 0 &&
+                window.Function.FunctionName.ToUpperInvariant() is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE":
+                return OutputDomainName(window.Function.Arguments[0]);
             case SqlColumnReferenceExpression column: return ColumnMetadata(column).DomainName;
             case SqlCastExpression cast: return TryResolveCastTarget(cast) is { IsDomain: true } domain ? domain.Name : null;
             case SqlCollateExpression collate: return OutputDomainName(collate.Operand);

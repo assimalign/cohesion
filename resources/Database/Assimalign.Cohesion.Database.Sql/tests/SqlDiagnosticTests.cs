@@ -67,7 +67,7 @@ public sealed class SqlDiagnosticTests
     public async Task Execute_UnknownFunction_ShouldRejectOnlyAtPlanningAsync()
     {
         // Arrange
-        var unsupported = new SqlQueryParser().Parse("SELECT FIRST_VALUE() FROM t;");
+        var unsupported = new SqlQueryParser().Parse("SELECT FIRST_VALUE(a) IGNORE NULLS OVER() FROM t;");
         unsupported.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
         new SqlQueryParser().Parse("SELECT FOO(a) FROM t;").Diagnostics.ShouldBeEmpty();
         await using var engine = SqlDatabaseEngine.Create("diagnostics", new());

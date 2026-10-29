@@ -38,7 +38,9 @@ internal sealed record SqlWindowAggregatePlan(SqlPlan Input, IReadOnlyList<SqlCa
 }
 
 internal sealed record SqlWindowFunction(SqlWindowExpression Expression, string Name, int Ordinal,
-    IReadOnlyList<SqlBoundExpression> Arguments, DatabaseType Type);
+    IReadOnlyList<SqlBoundExpression> Arguments, DatabaseType Type, SqlWindowFrameBinding? Frame, SqlGroupAggregate? Aggregate);
+
+internal sealed record SqlWindowFrameBinding(SqlWindowFrame Syntax, SqlBoundExpression? StartOffset, SqlBoundExpression? EndOffset);
 
 [System.Diagnostics.DebuggerDisplay("SqlWindowGroup")]
 [System.Diagnostics.DebuggerTypeProxy(typeof(SqlWindowGroup.DebugView))]

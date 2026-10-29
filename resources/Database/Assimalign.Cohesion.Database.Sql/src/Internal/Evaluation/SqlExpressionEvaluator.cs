@@ -567,7 +567,8 @@ internal sealed partial class SqlExpressionEvaluator
         if (expression is SqlWindowExpression window)
         {
             var args = window.Function.Arguments;
-            return window.Function.FunctionName.ToUpperInvariant() is "LAG" or "LEAD" && args.Count > 0
+            if (_functions.Catalog.IsAggregate(window.Function.FunctionName)) { return FindCollation(window.Function, bound); }
+            return window.Function.FunctionName.ToUpperInvariant() is "LAG" or "LEAD" or "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" && args.Count > 0
                 ? SqlCollationCandidate.Fold(FindCollation(args[0], bound), args.Count > 2 ? FindCollation(args[2], bound) : default) : default;
         }
         if (expression is SqlFunctionCallExpression grouping && SqlStandardLibrary.IsGrouping(grouping.FunctionName)) { return default; }

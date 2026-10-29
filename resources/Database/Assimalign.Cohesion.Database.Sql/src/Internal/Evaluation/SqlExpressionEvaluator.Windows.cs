@@ -10,6 +10,12 @@ internal sealed partial class SqlExpressionEvaluator
     internal DatabaseType WindowType(SqlWindowExpression window)
     {
         string name = window.Function.FunctionName.ToUpperInvariant();
+        if (_functions.Catalog.IsAggregate(name)) { return StaticCallType(window.Function); }
+        if (name is "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE")
+        {
+            var valueType = window.Function.Arguments.Count == 0 ? DatabaseType.Null : StaticTypeOf(window.Function.Arguments[0]);
+            return valueType == DatabaseType.Null ? DatabaseType.String : valueType;
+        }
         if (name is "PERCENT_RANK" or "CUME_DIST") { return DatabaseType.Float64; }
         if (name == "NTILE") { return DatabaseType.Int32; }
         if (name is not ("LAG" or "LEAD")) { return DatabaseType.Int64; }

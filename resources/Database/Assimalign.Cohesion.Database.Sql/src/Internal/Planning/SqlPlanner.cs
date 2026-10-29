@@ -2024,8 +2024,7 @@ internal sealed partial class SqlPlanner
     /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
     {
-        SqlWindowExpression window => window.Function.Arguments.Concat(window.Specification?.PartitionBy ?? [])
-            .Concat(window.Specification?.OrderBy.Select(key => key.Expression) ?? []),
+        SqlWindowExpression window => WindowChildren(window),
         SqlGroupingSetExpression grouping => grouping.Items,
         SqlLogicalExpression logical => logical.Operands,
         SqlFunctionCallExpression { Filter: not null } function => FilterOperands(function),
@@ -2035,6 +2034,16 @@ internal sealed partial class SqlPlanner
             or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],
     };
+
+    private static IEnumerable<SqlExpression> WindowChildren(SqlWindowExpression window)
+    {
+        foreach (var child in Children(window.Function)) { yield return child; }
+        if (window.Specification is not { } specification) { yield break; }
+        foreach (var key in specification.PartitionBy) { yield return key; }
+        foreach (var key in specification.OrderBy) { yield return key.Expression; }
+        if (specification.Frame?.Start.Offset is { } start) { yield return start; }
+        if (specification.Frame?.End.Offset is { } end) { yield return end; }
+    }
 
     private static IEnumerable<SqlExpression> FilterOperands(SqlFunctionCallExpression call)
     {

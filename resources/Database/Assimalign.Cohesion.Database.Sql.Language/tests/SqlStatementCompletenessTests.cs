@@ -52,6 +52,8 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Over] = ["SELECT RANK() OVER()"],
         [SqlClauses.Partition] = ["SELECT RANK() OVER(PARTITION BY a) FROM t"],
         [SqlClauses.Window] = ["SELECT RANK() OVER w WINDOW w AS()"],
+        [SqlClauses.WindowRows] = ["SELECT SUM(v) OVER(ROWS 2 PRECEDING) FROM t", "SELECT NTH_VALUE(v,2) OVER(ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) FROM t"],
+        [SqlClauses.WindowRange] = ["SELECT LAST_VALUE(v) OVER(RANGE UNBOUNDED PRECEDING) FROM t"],
         [SqlClauses.Having] = ["SELECT a FROM t GROUP BY a HAVING COUNT(*) > 1"],
         [SqlClauses.OrderBy] = ["SELECT a FROM t ORDER BY a", "SELECT a FROM t ORDER BY a DESC, 2 ASC"],
         [SqlClauses.Fetch] = ["SELECT a FROM t OFFSET 1 ROW FETCH FIRST 2 ROWS ONLY", "SELECT a FROM t FETCH NEXT ROW ONLY"],
