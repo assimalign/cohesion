@@ -972,4 +972,5 @@
   <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
   <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
+  <data name="RecursiveReaderCountExceeded" xml:space="preserve"><value>The CTE '{0}' opened more readers than its execution plan counted.</value></data>
 </root>

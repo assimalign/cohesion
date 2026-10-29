@@ -14,7 +14,15 @@ internal sealed partial class SqlPlanExecutor
     {
         var counts = new Dictionary<SqlDerivedRelation, int>(ReferenceEqualityComparer.Instance);
         var definitions = new HashSet<SqlDerivedRelation>(ReferenceEqualityComparer.Instance);
+        bool unknown = false;
         Visit(plan, false);
+        if (unknown)
+        {
+            // An opaque node may hide another read of any CTE in this namespace.
+            // Disable reclamation for the whole scope, including earlier scans.
+            // Identities hidden entirely inside that node already default to -1.
+            foreach (var relation in counts.Keys) { counts[relation] = -1; }
+        }
         return counts;
 
         void Visit(SqlPlan current, bool rescan)
@@ -22,7 +30,10 @@ internal sealed partial class SqlPlanExecutor
             RuntimeHelpers.EnsureSufficientExecutionStack();
             switch (current)
             {
-                case SqlWithPlan with: Visit(with.Input, rescan); break;
+                case SqlWithPlan with:
+                    foreach (var relation in with.Relations) { counts.TryAdd(relation, 0); }
+                    Visit(with.Input, rescan);
+                    break;
                 case SqlSequenceScopePlan sequence: Visit(sequence.Input, rescan); break;
                 case SqlSubqueryPlan subquery:
                     Visit(subquery.Input, rescan);
@@ -70,6 +81,18 @@ internal sealed partial class SqlPlanExecutor
                 case SqlCreateTableAsPlan { Source: { } source }: Visit(source, rescan); break;
                 case SqlUpdatePlan { Source: { } source }: Visit(source.Associations, true); break;
                 case SqlDeletePlan { Source: { } source }: Visit(source.Associations, true); break;
+                case SqlMergePlan merge:
+                    Visit(merge.Source.Associations, true);
+                    foreach (var action in merge.Actions)
+                    {
+                        foreach (var query in action.Queries) { Visit(query.Query, true); }
+                    }
+                    break;
+                case SqlConstantPlan or SqlSelectPlan or SqlSystemViewPlan:
+                case SqlInsertPlan or SqlUpdatePlan or SqlDeletePlan:
+                case SqlCreateTableAsPlan { Source: null }:
+                    break;
+                default: unknown = true; break;
             }
         }
     }

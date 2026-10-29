@@ -194,6 +194,11 @@ internal sealed partial class SqlPlanExecutor
 
         internal RecursiveReader? OpenReader()
         {
+            if (_unopenedReaders == 0)
+            {
+                throw new SqlExecutionException("CS05090", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.RecursiveReaderCountExceeded, _relation.Name));
+            }
             if (_readers is null) { return null; }
             _memory.Reserve(128);
             var reader = new RecursiveReader();

@@ -1334,8 +1334,8 @@ immutable ranges of that buffer. This avoids duplicate payload storage while
 preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
 subquery can stop production early, including when a CTE has multiple readers.
 ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
-Windows, sorts and set operations consume completed inputs; an unbounded
-blocking input exhausts StatementMemoryBudget with CS05067. Grouping of native
+Windows, sorts and set operations consume completed inputs; blocking consumers
+that retain unbounded input exhaust StatementMemoryBudget with CS05067. Grouping of native
 COUNT, SUM and AVG consumes rows as they arrive and retains keys and aggregate
 state; other aggregates keep their accounted, completed inputs. Infinite pipelines
 with bounded retained state, such as COUNT or a top-K sort, require cancellation;
@@ -1375,6 +1375,11 @@ expire at iteration boundaries after the old producer closes, following PostgreS
 references and reuses its slots; DISTINCT keeps its own membership references.
 Logical scan positions use Int64; buffer capacities count only retained rows.
 Reader counts follow the normalized join tree and each view runtime namespace.
+MERGE source associations and action subqueries are rescans, like UPDATE/DELETE
+join sources. An unknown plan node conservatively marks every CTE in its scope
+rescannable; entirely hidden identities also default to retaining history. Opening
+a reader after a table has exhausted its counted readers reports the internal
+invariant diagnostic CS05090 before allocating a reader or reading released rows.
 Nested-loop or correlated rescans conservatively retain history, as PostgreSQL's
 rewindable tuplestore does (`src/backend/executor/nodeCtescan.c:185-196`). Container
 reservations precede growth and include old/new overlap. There is no spill or
@@ -1417,6 +1422,7 @@ parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table f
 | CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
 | CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
 | CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
+| CS05090 | Internal invariant: a CTE opens more readers than its plan counted | XX000 |
 
 ## Subquery and insert-source operators (#1021)
 
