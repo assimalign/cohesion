@@ -40,6 +40,7 @@ internal static class GqlPathRenderer
                     break;
                 case GqlFilterStage filter: Push("FILTER ", filter.Predicate); break;
                 case GqlForStage loop: Push("FOR ", Name(loop.Variable), " IN ", loop.List); break;
+                case GqlCompositeStage stage: Push("(", stage.Query, ")"); break;
                 case GqlNextStage: builder.Append("NEXT"); break;
                 case GqlReturnStage result:
                     if (result.Predicate is { } resultPredicate) { Push(" WHERE ", resultPredicate); }
@@ -161,6 +162,7 @@ internal static class GqlPathRenderer
             switch (expression)
             {
                 case GqlQueryExpression query:
+                    if (query.IsExplain) { builder.Append("EXPLAIN "); }
                     if (query.Composite is { } composite) { pending.Push(composite); }
                     else
                     {

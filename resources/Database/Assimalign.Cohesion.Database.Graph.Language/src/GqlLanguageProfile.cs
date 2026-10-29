@@ -62,6 +62,7 @@ public static class GqlLanguageProfile
         GqlClauses.Explain,
         GqlClauses.Return,
         GqlClauses.SetOperation,
+        GqlClauses.UnionDistinct,
         GqlClauses.UnionAll,
         GqlClauses.Next,
         GqlClauses.With,

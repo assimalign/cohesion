@@ -140,7 +140,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             else if (IsQueryStart() || Is("NEXT") || Current.Type == TokenType.LeftParen)
             {
-                expression = ParseCompositeQuery();
+                expression = ParseNextQuery();
                 expression.Explain();
             }
             else
@@ -150,7 +150,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
         }
         else if (catalogStatement) { expression = ParseCatalog(); }
-        else if (IsQueryStart() || Is("NEXT") || Current.Type == TokenType.LeftParen) { expression = ParseCompositeQuery(); }
+        else if (IsQueryStart() || Is("NEXT") || Current.Type == TokenType.LeftParen) { expression = ParseNextQuery(); }
         else
         {
             if (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT"))
@@ -217,6 +217,24 @@ public sealed partial class GqlQueryParser : QueryParser
         {
             var token = _tokens[i];
             if (token.Type == TokenType.Semicolon) { break; }
+            // Query groups start only in operand slots. Scan each body with fresh clause,
+            // value, label and update context, relative to its own delimiter depth.
+            if (!existsPattern && patternDepth == 0 && token.Type == TokenType.LeftParen &&
+                (i == start || i == start + 1 && IsWordAt(start, "EXPLAIN") ||
+                 IsWordAt(i - 1, "UNION") || IsWordAt(i - 1, "NEXT") ||
+                 i > 1 && IsWordAt(i - 2, "UNION") && (IsWordAt(i - 1, "ALL") || IsWordAt(i - 1, "DISTINCT"))))
+            {
+                if (!HasStackToNest(token)) { return; }
+                int body = i + 1;
+                int depth = 1;
+                while (++i < (endExclusive ?? _tokens.Count) && _tokens[i].Type != TokenType.Eof)
+                {
+                    if (_tokens[i].Type == TokenType.LeftParen) { depth++; }
+                    if (_tokens[i].Type == TokenType.RightParen && --depth == 0) { break; }
+                }
+                FindUnsupported(body, i);
+                continue;
+            }
             bool mapSeparator = token.Type == TokenType.Colon && containers.TryPeek(out var container) && container == TokenType.LeftBrace &&
                 i > 1 && _tokens[i - 2].Type is TokenType.LeftBrace or TokenType.Comma;
             if (mapSeparator) { mapSeparatorPosition = i; }
@@ -379,7 +397,7 @@ public sealed partial class GqlQueryParser : QueryParser
             if (valuePosition && value is "EXCEPT" or "INTERSECT" or "OTHERWISE" && !FollowsCompositeValue(i)) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 
-            bool first = i == 0;
+            bool first = i == start;
             var end = token;
             string construct = word.Construct;
             switch (word.Position)

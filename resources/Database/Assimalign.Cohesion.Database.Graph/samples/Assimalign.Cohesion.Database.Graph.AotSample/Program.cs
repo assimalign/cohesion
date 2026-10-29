@@ -41,6 +41,9 @@ await Check("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2]
 await Check("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,coalesce(n.m,0) ORDER BY n.k", [[2L,11L,21L],[4L,12L,0L]]);
 await Check("RETURN 7", [[7L]]);
 await Check("FOR x IN [1,1] RETURN x UNION FOR x IN [1,2] RETURN x", [[1L],[2L]]);
+await Check("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L],[2L]]);
+await Check("RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x", [[10L],[20L]]);
+await Check("(RETURN 1 AS x) UNION ALL (RETURN 2 AS x) NEXT (RETURN x*10 AS x) NEXT RETURN x+1 AS x", [[11L],[21L]]);
 await Check("RETURN 1 AS x UNION ALL (RETURN 1 AS x UNION ALL RETURN 2 AS x)", [[1L],[1L],[2L]]);
 await Check("FOR x IN [1,1,1] MERGE (n:MergeSmoke {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]]);
 await Check("MATCH (a:MergeSmoke {id:1}) MERGE (a)-[r:MergeEdge]-(b:MergeSmoke {id:2}) ON CREATE SET r.hit=1 ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[1L]]);
@@ -59,6 +62,7 @@ await Check("LET x=TRUE MATCH (n:N {k:1}) RETURN x AS old ORDER BY all(x IN [n] 
 await Check("LET x=TRUE MATCH (n:N {k:1}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[1L]]);
 await Check("LET x=[TRUE] MATCH (n:N {k:1}) RETURN x[0] AS old ORDER BY all(x IN [n] WHERE old)", [[1L]]);
 await Check("MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN size([r IN rs | type(r)]), [n IN [a,b] | n.k][1]", [[2L,3L]]);
+await Check("RETURN 0 AS x UNION ALL ((MATCH p=ANY SHORTEST (a:N)-[:T]->(b:N) RETURN count(*) AS x))", [[0L],[2L]]);
 await Check("MATCH (a:N)-[:T]->(b:N) RETURN a.k,b.k ORDER BY a.k", [[1L, 2L], [2L, 3L]]);
 await Check("MATCH (a:N) RETURN a.k,EXISTS { MATCH (a)-[:T]->(b) } ORDER BY a.k", [[1L,1L],[2L,1L],[3L,0L]]);
 await Check("MATCH (a:N) WHERE NOT EXISTS { (a)-[:T]->() } RETURN a.k", [[3L]]);

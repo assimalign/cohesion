@@ -9,8 +9,15 @@ internal sealed partial class GraphPlanner
     internal DatabasePlanDescription Describe(GraphCompositePlan plan, GraphPlanExecutor.ExpansionBudget? budget = null)
     {
         var nodes = new List<DatabasePlanNode>();
+        AppendCompositeDescription(plan, nodes, null, budget);
+        return DatabasePlanDescription.Create(nodes, plan.Warnings);
+    }
+
+    private void AppendCompositeDescription(GraphCompositePlan plan, List<DatabasePlanNode> nodes, int? parent,
+        GraphPlanExecutor.ExpansionBudget? budget)
+    {
         var pending = new Stack<(GqlQueryExpression Query, int? Parent)>();
-        pending.Push((plan.Query, null));
+        pending.Push((plan.Query, parent));
         int operand = 0;
         while (pending.TryPop(out var step))
         {
@@ -28,6 +35,5 @@ internal sealed partial class GraphPlanner
             }
             else { AppendDescription(plan.Operands[operand++], nodes, step.Parent, budget); }
         }
-        return DatabasePlanDescription.Create(nodes, plan.Warnings);
     }
 }

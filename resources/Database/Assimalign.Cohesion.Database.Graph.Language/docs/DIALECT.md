@@ -43,8 +43,12 @@ further statements. The engine's `GraphEngineFailureWireTests` supplies the faul
 `query UNION query` removes structurally equal rows; `query UNION ALL query` preserves all
 occurrences. Equality is the same as RETURN DISTINCT, including NULLs, numeric equivalence,
 list order, map entries, entity identities and ordered path identities. Chains associate left;
-parentheses group operands as a Cohesion extension. Linear NEXT/WITH stages bind within operands.
-Each operand starts with an isolated scope, must be read-only (CG05029), and must return matching
+parentheses group operands as a Cohesion extension. UNION binds more tightly than NEXT:
+`RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x` returns 10 and 20.
+NEXT inside a parenthesized operand stays within that group. Each NEXT segment may itself be a
+composite; its operands receive the preceding segment's complete projected binding table.
+WITH remains local to its operand.
+Each operand starts with an isolated copy of the NEXT segment's incoming scope, must be read-only (CG05029), and must return matching
 case-sensitive column names/order/count (CG01020) and compatible shapes (CG02017). Numeric kinds
 are compatible and NULL accepts any kind. Proven kinds are checked before execution, unknown kinds
 when rows arrive. Collection contents retain the existing heterogeneous value contract. Mixing
@@ -52,7 +56,8 @@ UNION and UNION ALL, including inside groups, is CG00016; a missing operand is C
 
 ORDER BY and OFFSET/SKIP/LIMIT apply to the RETURN of their operand. A tail after the last RETURN
 pages only that operand. A suffix after a grouped composite is CK00001; no global composite page
-is admitted. UNION's default is distinct; explicit UNION DISTINCT remains CK00001. EXCEPT,
+is admitted. UNION's default is distinct; explicit UNION DISTINCT is accepted and renders as UNION.
+UNION and UNION DISTINCT may mix; either mixed with UNION ALL is CG00016. EXCEPT,
 INTERSECT and OTHERWISE remain CK00001 naming the deferred form. The language DESIGN cites the
 Neo4j and GQL grammar evidence for these decisions.
 
@@ -60,8 +65,9 @@ Every operand is planned and statically wire-admitted before any operand execute
 statement snapshot and share work/memory limits and cancellation. UNION distinct state is charged
 to that budget (CG05030); output/operand memory and work retain CG05020/CG05004. UNION ALL has no
 distinct table or intermediate materialized operand result. Final results materialize under the
-existing API contract. Column metadata comes from the first operand; negotiated value encoding
-accounts for values from all operands. EXPLAIN retains grouping and shows every operand and its
+existing API contract. Column names come from the first operand. Types widen across every
+operand's numeric kinds, NULL is neutral, and dynamic values use the existing unknown type.
+Negotiated value encoding accounts for values from all operands. EXPLAIN retains grouping and shows every operand and its
 correlated subplans. The #1662 entity-list wire gate is checked for every operand, including empty
 ones, before execution. No disk or wire format changes are needed.
 

@@ -47,7 +47,7 @@ internal sealed partial class GraphPlanner
     private void AppendDescription(GraphPlan plan, List<DatabasePlanNode> nodes, int? rootParent, GraphPlanExecutor.ExpansionBudget? budget)
     {
         int descriptionRoot = nodes.Count;
-        bool pipeline = plan.Stages.Any(item => item.Stage is GqlMergeStage or GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
+        bool pipeline = plan.Stages.Any(item => item.Stage is GqlCompositeStage or GqlMergeStage or GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
             plan.Stages.Select((item, i) => item.Stage is GqlMatchStage && plan.Stages.Take(i).Any(earlier => earlier.Stage is GqlInsertStage or GqlDeleteStage)).Any(value => value) ||
             plan.Stages.Count(item => item.Stage is GqlInsertStage or GqlDeleteStage) > 1;
         if (pipeline)
@@ -55,6 +55,8 @@ internal sealed partial class GraphPlanner
             Add("Pipeline", rootParent, detail: $"stages={plan.Stages.Count}; writes={plan.Writes}");
             foreach (var item in plan.Stages)
             {
+                if (item is GraphCompositeStagePlan composite)
+                { AppendCompositeDescription(composite.Composite, nodes, descriptionRoot, budget); continue; }
                 int stageRoot = nodes.Count;
                 Append(item.Plan, descriptionRoot, StageName(item.Stage));
                 if (item.Stage is GqlMergeStage merge)

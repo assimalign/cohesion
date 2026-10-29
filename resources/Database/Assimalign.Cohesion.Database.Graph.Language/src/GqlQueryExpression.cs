@@ -57,11 +57,11 @@ public sealed class GqlQueryExpression : GqlExpression
         _body = composite;
     }
 
-    /// <summary>Gets the binary query composition, or null for a linear query.</summary>
+    /// <summary>Gets the binary query composition, or null when the query uses pipeline stages.</summary>
     public GqlCompositeQuery? Composite => _body as GqlCompositeQuery;
 
-    /// <summary>Initializes a source-ordered linear statement.</summary>
-    /// <param name="stages">The operations, including NEXT segment boundaries.</param>
+    /// <summary>Initializes a source-ordered query pipeline.</summary>
+    /// <param name="stages">The operations, including composite queries and NEXT segment boundaries.</param>
     /// <param name="location">The statement source span.</param>
     /// <exception cref="ArgumentNullException"><paramref name="stages"/> is null.</exception>
     public GqlQueryExpression(IReadOnlyList<GqlStage> stages, Location? location = null) : base(location)
@@ -82,7 +82,7 @@ public sealed class GqlQueryExpression : GqlExpression
         Limit = final?.Limit;
     }
 
-    /// <summary>Gets the linear operations in source order, or an empty list for a composite. Original constructors provide a single-segment facade.</summary>
+    /// <summary>Gets the pipeline operations, including composite and NEXT stages, or an empty list for a standalone composite. Original constructors provide a single-segment facade.</summary>
     public IReadOnlyList<GqlStage> Stages
     {
         get
@@ -103,12 +103,17 @@ public sealed class GqlQueryExpression : GqlExpression
         }
     }
 
+    /// <summary>Renders the semantic query tree with explicit composite grouping.</summary>
+    /// <returns>The normalized GQL query, including NEXT precedence.</returns>
+    public override string ToString() => CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
+        ? Text ?? base.ToString()! : Internal.GqlPathRenderer.RenderExpression(this);
+
     /// <summary>Gets SET items across all stages in source order.</summary>
     public IReadOnlyList<GqlSetItem> SetItems => Stages.OfType<GqlSetStage>().SelectMany(stage => stage.Items).ToArray();
     /// <summary>Gets REMOVE items across all stages in source order.</summary>
     public IReadOnlyList<GqlRemoveItem> RemoveItems => Stages.OfType<GqlRemoveStage>().SelectMany(stage => stage.Items).ToArray();
 
-    /// <summary>Gets the linear segments separated by explicit NEXT boundaries.</summary>
+    /// <summary>Gets the query segments separated by explicit NEXT boundaries.</summary>
     public IReadOnlyList<GqlQuerySegment> Segments
     {
         get

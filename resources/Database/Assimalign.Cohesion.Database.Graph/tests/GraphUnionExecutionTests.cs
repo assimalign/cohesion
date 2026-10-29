@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Types;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Protocol;
@@ -89,8 +90,26 @@ public sealed class GraphUnionExecutionTests
         (await GraphExistsTests.RowsAsync(reader, "MATCH (n:N) RETURN count(*)"))[0][0].ShouldBe(2L);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Graph] - UNION: first operand metadata and typed path delivery are preserved")]
-    public async Task ExecuteAsync_CompositeResult_ShouldUseFirstMetadataAndDeliverPathsAsync()
+    [Fact(DisplayName = "Cohesion Test [Graph] - UNION: NEXT keeps warnings in operand and stage source order")]
+    public async Task ExecuteAsync_NextWarnings_ShouldRetainSourceOrderAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("union-next-warnings", new());
+        var database = await engine.CreateDatabaseAsync("g", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        // Act
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(
+            "MATCH (a:FirstMissing) RETURN 1 AS x UNION ALL MATCH (b:SecondMissing) RETURN 2 AS x " +
+            "NEXT MATCH (c:ThirdMissing) RETURN x", cancellationToken: CancellationToken.None);
+        // Assert
+        result.Diagnostics.Count.ShouldBe(3);
+        result.Diagnostics[0].Message!.ShouldContain("FirstMissing", Case.Sensitive);
+        result.Diagnostics[1].Message!.ShouldContain("SecondMissing", Case.Sensitive);
+        result.Diagnostics[2].Message!.ShouldContain("ThirdMissing", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - UNION: reconciled metadata and typed path delivery are preserved")]
+    public async Task ExecuteAsync_CompositeResult_ShouldReconcileMetadataAndDeliverPathsAsync()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("union-results", new());
@@ -102,7 +121,8 @@ public sealed class GraphUnionExecutionTests
         await using var composite = (DatabaseResultSet)await session.ExecuteAsync("RETURN count(*) AS c UNION ALL RETURN CAST(2 AS FLOAT64) AS c", cancellationToken: CancellationToken.None);
         var paths = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql("MATCH p=()-[:T]->() RETURN p UNION MATCH p=()-[:T]->() RETURN p"), CancellationToken.None);
         // Assert
-        composite.Columns.Select(column => (column.Name, column.Type, column.IsNullable)).ShouldBe(ordinary.Columns.Select(column => (column.Name, column.Type, column.IsNullable)));
+        composite.Columns.Select(column => column.Name).ShouldBe(ordinary.Columns.Select(column => column.Name));
+        composite.Columns.ShouldHaveSingleItem().Type.ShouldBe(DatabaseType.Float64);
         paths.Paths.ShouldHaveSingleItem().Relationships.ShouldHaveSingleItem();
     }
 }

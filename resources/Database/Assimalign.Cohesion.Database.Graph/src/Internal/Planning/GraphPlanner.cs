@@ -50,9 +50,10 @@ internal sealed partial class GraphPlanner
     /// <param name="token">Cancellation observed while validating and indexing expression structure.</param>
     /// <param name="normalizedParameters">Whether these are the statement's already captured bindings for replanning.</param>
     /// <param name="resultShapes">Optional composite-only output shape collection.</param>
+    /// <param name="inputShapes">The projected bindings passed from an earlier NEXT segment.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="DatabaseException">The statement is invalid (<c>CG05001</c>, <c>CG03003</c>, <c>CG01015</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false, List<GraphBindingShape>? resultShapes = null)
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false, List<GraphBindingShape>? resultShapes = null, IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null)
     {
         try
         {
@@ -62,7 +63,7 @@ internal sealed partial class GraphPlanner
             if (_nativeExpressions is ReductionPlanningState previous) { previous.Work = null; }
             if (_nativeExpressions is CorrelatedPlanningState correlated) { correlated.Subplans = null; correlated.Anti = null; }
             GraphPlan? plan = null;
-            try { plan = PlanCore(query, paths, token, resultShapes: resultShapes); }
+            try { plan = PlanCore(query, paths, token, resultShapes: resultShapes, inputShapes: inputShapes); }
             catch (GraphPlanningException) when (query.Text is null && _nativeExpressions is CorrelatedPlanningState { Subplans: not null })
             {
                 // An unbound programmatic occurrence can report a scope error using a plan
@@ -74,7 +75,7 @@ internal sealed partial class GraphPlanner
                 // retain their exact planning path, allocations and malformed-AST refusals.
                 bindingState.Subplans = null; bindingState.Anti = null; bindingState.Work = null;
                 resultShapes?.Clear();
-                return PlanCore(query, paths, token, boundStages: GraphLexicalOccurrences.Bind(query.Stages, token), resultShapes: resultShapes);
+                return PlanCore(query, paths, token, boundStages: GraphLexicalOccurrences.Bind(query.Stages, token), resultShapes: resultShapes, inputShapes: inputShapes);
             }
             return plan!;
         }
@@ -85,15 +86,23 @@ internal sealed partial class GraphPlanner
     }
 
     private GraphPlan PlanCore(GqlQueryExpression statement, bool pathsRequest, CancellationToken token, CorrelationScope? correlation = null,
-        IReadOnlyList<GqlStage>? boundStages = null, List<GraphBindingShape>? resultShapes = null)
+        IReadOnlyList<GqlStage>? boundStages = null, List<GraphBindingShape>? resultShapes = null,
+        IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null)
     {
         if (_parameters is not null) { _parameters = new Dictionary<string, object?>(_parameters, StringComparer.Ordinal); }
         var query = statement;
         var stages = boundStages ?? statement.Stages;
         var planned = new List<GraphStagePlan>();
+        IReadOnlyList<GraphBindingShape>? compositeResultShapes = null;
+
         var deletedVariables = new HashSet<string>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, GraphBindingShape>(StringComparer.Ordinal);
         bool writes = stages.Any(stage => stage is GqlInsertStage or GqlMergeStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage);
+        bool hasComposite = false;
+        for (int i = 0; i < stages.Count; i++) { hasComposite |= stages[i] is GqlCompositeStage; }
+        if (hasComposite) { ValidateCompositeReadOnly(statement, token); }
+        var compositeWarnings = hasComposite ? new List<Diagnostic>() : null;
+        int reportedWarnings = 0;
         if (pathsRequest && writes)
         { throw new GraphPlanningException("CG05001", ErrorMessages.PathProjectionRequired, statement.Location); }
         var snapshotted = new HashSet<string>(StringComparer.Ordinal);
@@ -121,6 +130,18 @@ internal sealed partial class GraphPlanner
             mandatoryVariables.UnionWith(correlation.Mandatory);
             groupVariables.UnionWith(correlation.Groups);
         }
+        if (inputShapes is not null)
+        {
+            foreach (var pair in inputShapes)
+            {
+                variables.Add(pair.Key, ToBindingKind(pair.Value.EntityKinds[0].Kind));
+                shapes.Add(pair.Key, pair.Value);
+                declarations.Add(pair.Key);
+                boundVariables.Add(pair.Key);
+                if (!pair.Value.EntityKinds[0].Optional) { mandatoryVariables.Add(pair.Key); }
+                if (pair.Value.Group) { groupVariables.Add(pair.Key); }
+            }
+        }
         if (statement.MatchClauses is null)
         { throw new GraphPlanningException("CG05001", ErrorMessages.MatchClausePathsRequired, statement.Location); }
         if (stages.Count == 0 || statement.OrderBy is null || stages[^1] is GqlReturnStage { IsWith: true })
@@ -134,6 +155,36 @@ internal sealed partial class GraphPlanner
                 GqlSetStage { Items: null or { Count: 0 } } or GqlRemoveStage { Items: null or { Count: 0 } } or
                 GqlReturnStage { Projections: null } or GqlReturnStage { IsWith: false, Predicate: not null })
             { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
+            if (stage is GqlCompositeStage compositeStage)
+            {
+                if (stageIndex != 0 && stages[stageIndex - 1] is not GqlNextStage)
+                { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                var shared = ReductionState.SharedWork ??= ReductionState.Work ?? new GraphReductionWork(token);
+                var composite = PlanComposite(new GqlQueryExpression(compositeStage.Query, stage.Location), _parameters,
+                    pathsRequest && stageIndex == stages.Count - 1, token, new Dictionary<string, GraphBindingShape>(shapes, StringComparer.Ordinal), shared);
+                compositeWarnings!.AddRange(tokens.Warnings.Skip(reportedWarnings));
+                reportedWarnings = tokens.Warnings.Count;
+                compositeWarnings.AddRange(composite.Warnings);
+                ClearScope();
+                for (int i = 0; i < composite.Projections.Count; i++)
+                {
+                    var projection = composite.Projections[i];
+                    if (projection.BindingName is not { } name) { continue; }
+                    if (!variables.TryAdd(name, ToBindingKind(projection.Kind)))
+                    { throw new GraphPlanningException("CG01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.DuplicateResultColumn, name), stage.Location); }
+                    declarations.Add(name); boundVariables.Add(name);
+                    shapes.Add(name, composite.Shapes[i]);
+                    if (!projection.Optional) { mandatoryVariables.Add(name); }
+                    if (composite.Shapes[i].Group) { groupVariables.Add(name); }
+                }
+                var output = composite.Projections.Select(projection => projection with
+                    { Expression = new GqlVariableExpression(projection.Name) }).ToArray();
+                planned.Add(new GraphCompositeStagePlan(compositeStage,
+                    new GraphPlan(statement, []) { Projections = output, Parameters = _parameters, Warnings = composite.Warnings }, composite));
+                if (stageIndex == stages.Count - 1) { compositeResultShapes = composite.Shapes; }
+                continue;
+            }
             query = StageQuery(stage, statement.Location);
             orderAliases = null;
             orderProjections = null;
@@ -210,9 +261,9 @@ internal sealed partial class GraphPlanner
                 case GqlNextStage:
                     if (stageIndex == 0 || stageIndex == stages.Count - 1 ||
                         stages[stageIndex - 1] is GqlReturnStage { IsWith: true } ||
-                        stages[stageIndex - 1] is not GqlReturnStage && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlMergeStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage))
+                        stages[stageIndex - 1] is not (GqlReturnStage or GqlCompositeStage) && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlMergeStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage))
                     { throw new GraphPlanningException("CG05001", ErrorMessages.NextSegmentInvalid, stage.Location); }
-                    if (stages[stageIndex - 1] is not GqlReturnStage) { ClearScope(); }
+                    if (stages[stageIndex - 1] is not (GqlReturnStage or GqlCompositeStage)) { ClearScope(); }
                     break;
             }
             foreach (var clause in query.MatchClauses)
@@ -441,9 +492,13 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
+        compositeWarnings?.AddRange(tokens.Warnings.Skip(reportedWarnings));
         var final = planned[^1].Plan;
         if (resultShapes is not null)
-        { foreach (var projection in final.Projections) { resultShapes.Add(Shape(projection.Expression)); } }
+        {
+            if (compositeResultShapes is not null) { resultShapes.AddRange(compositeResultShapes); }
+            else { foreach (var projection in final.Projections) { resultShapes.Add(Shape(projection.Expression)); } }
+        }
         return final with
         {
             Query = statement,
@@ -451,7 +506,7 @@ internal sealed partial class GraphPlanner
             MatchesNothing = planned.Any(stage => stage.Plan.MatchesNothing),
             Stages = planned.AsReadOnly(), Writes = writes,
             Parameters = _parameters,
-            Warnings = writes ? [] : tokens.Warnings,
+            Warnings = writes ? [] : compositeWarnings is not null ? compositeWarnings.AsReadOnly() : tokens.Warnings,
             FunctionBindings = (_nativeExpressions as CorrelatedPlanningState)?.Subplans is { } subplans
                 ? new GraphCorrelatedBindings(_functions is null ? FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty : _functions, subplans, (_nativeExpressions as CorrelatedPlanningState)?.Anti)
                 : _functions is null ? FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty : _functions,

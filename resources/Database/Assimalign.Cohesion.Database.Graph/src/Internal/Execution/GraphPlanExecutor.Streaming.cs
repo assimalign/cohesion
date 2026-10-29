@@ -30,7 +30,9 @@ internal static partial class GraphPlanExecutor
             token.ThrowIfCancellationRequested();
             var stage = plan.Stages[i];
             if (stage.Stage is GqlReturnStage && i == plan.Stages.Count - 1) { continue; }
-            if (stage.Stage is GqlMatchStage)
+            if (stage is GraphCompositeStagePlan composite)
+            { source = StreamCompositeBindingsAsync(database, operation, composite.Composite, source, token); }
+            else if (stage.Stage is GqlMatchStage)
             {
                 foreach (var clause in stage.Plan.MatchClauses)
                 { source = StreamMatchClauseAsync(database, operation, clause, source, layout, budget, parameters, token); }
@@ -39,7 +41,7 @@ internal static partial class GraphPlanExecutor
             { source = StreamBoundaryAsync(stage.Plan, projection, source, layout, budget, operation, parameters, token); }
             else if (stage.Stage is GqlNextStage)
             {
-                if (i == 0 || plan.Stages[i - 1].Stage is not GqlReturnStage)
+                if (i == 0 || plan.Stages[i - 1].Stage is not (GqlReturnStage or GqlCompositeStage))
                 { source = ResetBindingAsync(source, layout, budget, token); }
             }
             else { source = StreamStageAsync(stage, source, layout, budget, operation, parameters, token); }

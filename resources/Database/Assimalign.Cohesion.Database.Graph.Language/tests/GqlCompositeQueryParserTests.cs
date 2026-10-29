@@ -27,7 +27,8 @@ public sealed class GqlCompositeQueryParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - UNION: supports linear and correlated operands and per-operand paging")]
-    [InlineData("RETURN 1 NEXT RETURN 2 UNION RETURN 3")]
+    [InlineData("(RETURN 1 NEXT RETURN 2) UNION RETURN 3")]
+    [InlineData("(RETURN 1 AS x NEXT RETURN x+1 AS x) UNION ALL (RETURN 2 AS x NEXT RETURN x+2 AS x)")]
     [InlineData("EXPLAIN (RETURN 1 AS x UNION ALL RETURN 2 AS x)")]
     [InlineData("FOR v IN [1,2] RETURN v ORDER BY v DESC SKIP 1 LIMIT 1 UNION ALL RETURN 3 AS v")]
     [InlineData("MATCH (a) WHERE EXISTS { (a)->(b) } RETURN [(a)->(b) | b.k] AS xs UNION RETURN [] AS xs")]
@@ -70,8 +71,8 @@ public sealed class GqlCompositeQueryParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - UNION: unsupported modifiers and global page suffixes remain named capabilities")]
-    [InlineData("RETURN 1 AS x UNION DISTINCT RETURN 2 AS x", "UNION DISTINCT")]
     [InlineData("(RETURN 1 AS x UNION RETURN 2 AS x) ORDER BY x", "COMPOSITE ORDER BY AND PAGE STATEMENT")]
+    [InlineData("(RETURN 1 AS x UNION RETURN 2 AS x NEXT RETURN x) ORDER BY x", "COMPOSITE ORDER BY AND PAGE STATEMENT")]
     [InlineData("RETURN 1 AS x UNION (RETURN 2 AS x EXCEPT RETURN 3 AS x)", "EXCEPT")]
     public void Parse_ExcludedCompositeForm_ShouldNameCapability(string source, string form)
     {

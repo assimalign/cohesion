@@ -192,7 +192,7 @@ The function table advertises the aggregates and core scalar functions listed be
 | `UNWIND` | Cypher spelling `UNWIND expression AS variable` | The same list expansion, with the scalar divergence below |
 | `NEXT` | Separates linear segments after RETURN or a modifying segment | Carries projected columns, or one empty binding after a modifying segment without RETURN |
 | `WITH` | Cypher projection spelling, including DISTINCT/ALL, star, GROUP BY, ordering/paging and WHERE | Projects a new scope; applies WHERE after ordering/paging |
-| `UNION` | Complete read-only operands with matching columns | Existing structural tuple equality removes duplicates; all operands are planned first |
+| `UNION [DISTINCT]` | Complete read-only operands with matching columns | Existing structural tuple equality removes duplicates; all operands are planned first |
 | `UNION ALL` | The same operands, without mixing modes | Streams every occurrence in operand order into the ordinary final result collector |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
 | `GROUP BY` | ISO names of non-aggregated RETURN items, equivalent input expressions, or the empty grouping set `()`; omission uses the same implicit keys | Bounded hash grouping before projection, DISTINCT, ordering and paging; aggregate placement and scope are validated before execution |
@@ -611,12 +611,16 @@ The parser describes only the metadata subject; it never accesses or caches cata
 
 A query may combine complete read-only operands with `UNION` or `UNION ALL`. Both
 have the same precedence and associate left; parentheses explicitly group operands (a Cohesion
-extension). Linear stages, including NEXT, bind within an operand before UNION. The immutable
+extension). NEXT has lower precedence: each of its segments is a complete composite expression.
+A NEXT inside a parenthesized operand remains in that operand. WITH stays operand-local. The immutable
 `GqlCompositeQuery(Left, Operator, Right)` tree retains that grouping; `GqlQueryExpression.Composite`
-is null for linear statements. Rendering uses the existing explicit-stack path/scalar renderer,
+is null for linear statements. A composite inside a NEXT pipeline is represented by the sealed
+`GqlCompositeStage`, with ordinary stages and GqlNextStage preserving source order. Rendering uses the existing explicit-stack path/scalar renderer,
 including read stages and per-operand projections. Unaliased parsed projections retain their
 normalized expression text so canonical quoting cannot rename a result column.
 The stage/body reference is shared with the composite body so ordinary AST object size is unchanged.
+Capability scanning recursively visits query groups with fresh query context and relative nesting
+depth. Pattern groups, scalar parentheses and EXISTS bodies keep their separate contexts.
 
 Every operand must be read-only and return the same ordinal, case-sensitive column names in the
 same order. Proven incompatible value kinds (including list/map and entity kinds) fail before
@@ -624,21 +628,27 @@ execution; all numeric kinds are compatible, NULL imposes no kind, and unknown p
 are checked when rows arrive. Runtime incompatible kinds also fail without publishing partial
 results. Collection contents retain the existing heterogeneous structural-value contract; proven
 incompatible nested entity kinds are refused. Mixing UNION and UNION ALL anywhere in one tree,
-including a parenthesized group, is refused. Bare UNION means distinct; explicit UNION DISTINCT
-remains CK00001 under this run's deliberately bounded surface. EXCEPT, INTERSECT and OTHERWISE
+including a parenthesized group, is refused. Bare UNION and explicit UNION DISTINCT both mean
+distinct and may mix; rendering normalizes UNION DISTINCT to UNION. EXCEPT, INTERSECT and OTHERWISE
 remain CK00001 naming the form until GQ-Q2. The deferred words remain contextual names in scalar/binding slots.
 
 ORDER BY, OFFSET/SKIP and LIMIT belong to each operand's RETURN. A tail after the final RETURN
 therefore affects only the last operand. There is no global composite ordering/page clause;
 a suffix after a parenthesized composite is CK00001. Output visits operands in source order;
 UNION keeps the first occurrence, and UNION ALL preserves all occurrences, although applications
-must not rely on an unspecified row order. Metadata is copied from the first operand.
-EXPLAIN plans every operand and preserves the binary grouping in Union/UnionAll nodes.
+must use ORDER BY when ordering is part of their query contract. Column names come from the first
+operand; numeric metadata widens across operands, NULL is neutral, and incompatible or dynamic
+values use the existing DatabaseType.Null (unknown). Actual values retain their CLR types.
+EXPLAIN plans every operand and preserves the binary grouping in Union/UnionAll nodes; NEXT
+pipelines place those groups alongside ordered Next and subsequent stage nodes.
 
 Local Neo4j reference (no code copied), relative to `C:/Source/repos/neo4j/neo4j`:
 `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticError.scala:735-737,755-763`
 supplies matching-column and mixed-mode refusals; the consulted v25 parser is
 `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:75-77,138-140,166-176`.
+NEXT precedence follows Neo4j's parser test
+`community/cypher/front-end/parser/parser-test/src/test/scala/org/neo4j/cypher/internal/ast/factory/query/NextStatementParserTest.scala:350-378`
+(P12) and `Cypher25Parser.g4:67-77`; line 76 also admits explicit DISTINCT.
 The independently maintained [TuGraph GQL grammar](https://github.com/TuGraph-family/gql-grammar/blob/main/GQLParser.g4#L665-L713)
 uses a left-recursive composite expression, and its
 [primitive result rule](https://github.com/TuGraph-family/gql-grammar/blob/main/GQLParser.g4#L790-L805)

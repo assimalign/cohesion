@@ -186,6 +186,7 @@ public sealed class GqlProfileExecutionTests
                     new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [[null]])),
             ],
             [GqlClauses.SetOperation] = [new("RETURN 1 AS x UNION RETURN 1 AS x", [[1L]])],
+            [GqlClauses.UnionDistinct] = [new("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L], [2L]])],
             [GqlClauses.UnionAll] = [new("RETURN 1 AS x UNION ALL RETURN 1 AS x", [[1L], [1L]])],
             [GqlClauses.Return] =
             [
@@ -210,6 +211,7 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Next] =
             [
+                new("RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x", [[10L], [20L]]),
                 new("LET x = $value RETURN x NEXT RETURN x + 1 AS y", [[6L]], Parameters: new Dictionary<string, object?> { ["value"] = 5L }),
             ],
             [GqlClauses.With] =
@@ -540,7 +542,7 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
-        GqlClauses.SetOperation => query.Composite is { Operator: GqlCompositeOperator.Union },
+        GqlClauses.SetOperation or GqlClauses.UnionDistinct => query.Composite is { Operator: GqlCompositeOperator.Union },
         GqlClauses.UnionAll => query.Composite is { Operator: GqlCompositeOperator.UnionAll },
         GqlClauses.Merge => query.Stages.Any(stage => stage is GqlMergeStage),
         GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),

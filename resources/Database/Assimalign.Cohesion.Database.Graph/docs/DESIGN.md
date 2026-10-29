@@ -841,7 +841,14 @@ the same GraphOperation snapshot. Parameter normalization occurs once. The exist
 across all operands and correlated passes. Binding scopes, native
 expression caches and correlated registries stay per operand, including reused source-free AST
 occurrences. The ordinary planner optionally reports result shapes to the composite reconciler;
-ordinary statements acquire no new plan/planner fields or shape allocations. All names, kinds,
+ordinary statements acquire no new plan/planner fields or shape allocations.
+NEXT binds above UNION: GqlCompositeStage carries a nested GraphCompositeStagePlan. Each
+operand plans against the same incoming projected shapes, with isolated lexical registries.
+The composite cursor captures the incoming table once under the statement memory budget and
+visits operands in source order. Later stages consume its combined projected bindings. Nested
+cursors restore the enclosing function registry before yielding, and all segments share the
+snapshot, cancellation and reduce planning cap. A prewalk refuses writes throughout a composite
+pipeline before any cursor opens. Ordinary linear pipelines retain their existing stage layout. All names, kinds,
 functions, parameters and wire capabilities are validated before opening an execution cursor.
 See the language DESIGN/DIALECT for associativity, grouping, local page semantics and references.
 
@@ -856,8 +863,11 @@ Unknown root result kinds are reconciled during execution, before a result can e
 kind-neutral; numeric representations are compatible. Collection values preserve heterogeneous
 contents, with proven incompatible nested entity kinds refused during planning.
 
-Result names/types/nullability come from the first operand, and composite-value encoding flags
-cover all operands. Static scalar/composite/entity-list admission visits every leaf, even an
+Result names come from the first operand; types and nullability cover every operand. Integral
+kinds widen to the largest kind, floating/integral mixtures to Float64, and decimal/integral
+mixtures to Decimal. Decimal/floating mixtures and other dynamic kinds use DatabaseType.Null
+(unknown), with NULL-only inputs neutral. Materialized values further reconcile the header
+without coercing cells. Composite-value encoding flags cover all operands. Static scalar/composite/entity-list admission visits every leaf, even an
 empty later operand. EXPLAIN uses explicit-stack traversal to retain each Union/UnionAll group
 and append every operand's complete plan, including correlated apply nodes. Warnings retain
 operand source order. No public interface, assembly reference, persisted format or wire change

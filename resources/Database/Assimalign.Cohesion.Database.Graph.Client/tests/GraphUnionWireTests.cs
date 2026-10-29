@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
@@ -35,6 +36,8 @@ public sealed class GraphUnionWireTests
             ("RETURN 1 AS x UNION RETURN 'a' AS x", "CG02017"),
             ("RETURN [1/0] AS x UNION MATCH (n:N) RETURN [n] AS x", "CG05001"),
             ("RETURN [] AS x UNION MATCH (n:Missing) RETURN [n] AS x", "CG05001"),
+            ("RETURN 0 AS k NEXT RETURN [] AS x UNION MATCH (n:Missing) RETURN [n] AS x", "CG05001"),
+            ("RETURN [] AS x UNION MATCH (n:Missing) RETURN [n] AS x NEXT RETURN x", "CG05001"),
             ("RETURN 1 AS x EXCEPT RETURN 2 AS x", "CK00001"),
             ("RETURN 1 AS x INTERSECT RETURN 2 AS x", "CK00001"),
             ("RETURN 1 AS x OTHERWISE RETURN 2 AS x", "CK00001"),
@@ -47,7 +50,8 @@ public sealed class GraphUnionWireTests
         (await connection.QueryAsync("MATCH (n:Forbidden) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
         var original = await connection.QueryAsync("RETURN count(*) AS c", cancellationToken: harness.Token);
         var joined = await connection.QueryAsync("RETURN count(*) AS c UNION ALL RETURN CAST(2 AS FLOAT64) AS c", cancellationToken: harness.Token);
-        joined.Columns.Select(column => (column.Name, column.Type)).ShouldBe(original.Columns.Select(column => (column.Name, column.Type)));
+        joined.Columns.Select(column => column.Name).ShouldBe(original.Columns.Select(column => column.Name));
+        joined.Columns.ShouldHaveSingleItem().Type.ShouldBe(DatabaseType.Float64);
         await connection.DisposeAsync();
         await using var again = await harness.Client.ConnectAsync(harness.Token);
         (await again.QueryAsync("RETURN 1 AS x UNION ALL RETURN 2 AS x", cancellationToken: harness.Token)).Count.ShouldBe(2);

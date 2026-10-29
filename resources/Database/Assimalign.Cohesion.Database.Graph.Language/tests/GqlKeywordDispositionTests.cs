@@ -68,7 +68,7 @@ public sealed class GqlKeywordDispositionTests
         ["EXCEPT"] = Rejects("RETURN 1 AS x EXCEPT RETURN 2 AS x", "EXCEPT"),
         ["INTERSECT"] = Rejects("RETURN 1 AS x INTERSECT RETURN 2 AS x", "INTERSECT"),
         ["OTHERWISE"] = Rejects("RETURN 1 AS x OTHERWISE RETURN 2 AS x", "OTHERWISE"),
-        ["DISTINCT"] = Parses("MATCH (a) RETURN DISTINCT a.name"),
+        ["DISTINCT"] = Parses("RETURN 1 AS x UNION DISTINCT RETURN 2 AS x"),
         ["ALL"] = Parses("MATCH (a) RETURN ALL a.name"),
         ["ANY"] = Parses("MATCH ANY (a)-[]->(b) RETURN a"),
         ["SHORTEST"] = Parses("MATCH SHORTEST 2 (a)-[]->(b) RETURN a"),
