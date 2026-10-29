@@ -46,10 +46,10 @@ public sealed class SqlSubqueryWireTests
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Recursive WITH: acyclic visibility executes and recursion retains its planning refusal")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Recursive WITH: acyclic visibility and recursive fixpoints execute")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task QueryAsync_RecursiveVisibility_ShouldPreservePlanningGate(bool tcp)
+    public async Task QueryAsync_RecursiveVisibility_ShouldExecuteFixpoint(bool tcp)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
@@ -57,19 +57,65 @@ public sealed class SqlSubqueryWireTests
 
         // Act
         var rows = await QueryAsync(connection, "WITH RECURSIVE picked AS (SELECT id FROM users) SELECT id FROM picked ORDER BY id");
-        var unsupported = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
-            "WITH RECURSIVE picked(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM picked WHERE id<3) SELECT id FROM picked"));
+        var recursive = await QueryAsync(connection,
+            "WITH RECURSIVE picked(id) AS (SELECT 1 UNION ALL SELECT id+1 FROM picked WHERE id<3) SELECT id FROM picked");
         var invalid = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection,
             "WITH RECURSIVE picked(id) AS (SELECT id FROM picked UNION ALL SELECT 1) SELECT id FROM picked"));
 
         // Assert
         rows.Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
-        unsupported.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
-        unsupported.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-        unsupported.ConnectionUsable.ShouldBeTrue();
+        recursive.Select(row => System.Convert.ToInt64(row[0])).ShouldBe(new long[] { 1, 2, 3 });
         invalid.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS01055");
         invalid.ConnectionUsable.ShouldBeTrue();
         (await QueryAsync(connection, "SELECT id FROM users ORDER BY id")).Select(row => row[0]).ShouldBe(new object?[] { 1, 2 });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Recursive fixpoint: demand, shared readers, DISTINCT and EXPLAIN cross both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_RecursiveDemand_ShouldConformOverWire(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act
+        var rows = await QueryAsync(connection, "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT a.n,b.n FROM r a CROSS JOIN r b LIMIT 10");
+        var cycle = await QueryAsync(connection, "WITH RECURSIVE r(n) AS (SELECT NULL UNION SELECT n FROM r) SELECT n FROM r");
+        var plan = await QueryAsync(connection, "EXPLAIN ANALYZE WITH RECURSIVE r(n) AS (SELECT 1 UNION SELECT n+1 FROM r WHERE n<3) SELECT n FROM r");
+
+        // Assert
+        rows.Select(row => System.Convert.ToInt64(row[0])).ShouldBe(Enumerable.Repeat(1L, 10));
+        rows.Select(row => System.Convert.ToInt64(row[1])).ShouldBe(Enumerable.Range(1, 10).Select(n => (long)n));
+        cycle.ShouldHaveSingleItem()[0].ShouldBeNull();
+        plan.ShouldContain(row => Equals(row[2], "RecursiveUnion") && row[5]!.ToString()!.Contains("iterations=3", System.StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Recursive fixpoint: memory and compatibility diagnostics preserve connection reuse")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_RecursiveRefusal_ShouldKeepConnectionUsable(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp, configureEngine: options => options.StatementMemoryBudget = 32_768);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+
+        // Act / Assert
+        foreach (var item in new[]
+        {
+            (Body: "SELECT 1 UNION ALL SELECT n+1 FROM r", Code: "CS05067"),
+            (Body: "SELECT 1 UNION SELECT CAST(n AS DECIMAL) FROM r", Code: "CS02066"),
+            (Body: "SELECT 'x' COLLATE binary UNION SELECT n COLLATE case_insensitive FROM r", Code: "CS02067"),
+            (Body: "SELECT 1 UNION ALL SELECT n+1 FROM r", Code: "CS05089"),
+        })
+        {
+            string consumer = item.Code == "CS05089" ? "SELECT ROW_NUMBER() OVER() FROM r LIMIT 10" : "SELECT n FROM r";
+            var error = await Should.ThrowAsync<SqlClientException>(() => QueryAsync(connection, $"WITH RECURSIVE r(n) AS ({item.Body}) {consumer}"));
+            error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == item.Code);
+            error.ConnectionUsable.ShouldBeTrue();
+            (await QueryAsync(connection, "SELECT 7")).ShouldHaveSingleItem()[0].ShouldBe(7);
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Client] - Derived tables: blank output names fail the statement and preserve the transaction")]
