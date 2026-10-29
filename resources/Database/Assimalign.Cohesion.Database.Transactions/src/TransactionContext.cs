@@ -53,6 +53,8 @@ public sealed class TransactionContext
 {
     private const byte snapshotPinFlag = 1;
     private const byte statementViewFlag = 2;
+    private const byte endingFlag = 1;
+    private const byte partialUndoFlag = 2;
 
     private readonly TransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
@@ -68,8 +70,9 @@ public sealed class TransactionContext
     private readonly object _endSync;
     private TransactionState _state;
     private int _applying;
-    private bool _ending;
-    private bool _partialUndoPending;
+    // Reuse the former end boolean's byte. A second boolean grows every statement pin
+    // by eight aligned bytes; lifecycle and pending-undo bits share this existing storage.
+    private byte _admission;
     private TaskCompletionSource? _drained;
 
     internal TransactionContext(
@@ -126,7 +129,7 @@ public sealed class TransactionContext
         get
         {
             if (_transaction is not null) { return _transaction.PartialUndoPending; }
-            lock (_endSync) { return _partialUndoPending; }
+            lock (_endSync) { return (_admission & partialUndoFlag) != 0; }
         }
     }
 
@@ -138,8 +141,8 @@ public sealed class TransactionContext
         if (_transaction is not null) { return _transaction.TryEnterPartialUndo(); }
         lock (_endSync)
         {
-            if (_ending || _applying != 0 || State != TransactionState.Active) { return false; }
-            _partialUndoPending = true;
+            if ((_admission & endingFlag) != 0 || _applying != 0 || State != TransactionState.Active) { return false; }
+            _admission |= partialUndoFlag;
             _applying++;
             return true;
         }
@@ -148,7 +151,7 @@ public sealed class TransactionContext
     internal void CompletePartialUndo()
     {
         if (_transaction is not null) { _transaction.CompletePartialUndo(); return; }
-        lock (_endSync) { _partialUndoPending = false; }
+        lock (_endSync) { _admission = (byte)(_admission & ~partialUndoFlag); }
     }
 
     /// <summary>
@@ -223,11 +226,11 @@ public sealed class TransactionContext
         lock (_endSync)
         {
             var owner = _transaction ?? this;
-            if (owner._ending || State != TransactionState.Active)
+            if ((owner._admission & endingFlag) != 0 || State != TransactionState.Active)
             { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
             if (owner._applying != 0)
             { throw new TransactionAbortedException(ErrorMessages.IsolationStatementRunning); }
-            if (owner._partialUndoPending)
+            if ((owner._admission & partialUndoFlag) != 0)
             { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
             return new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
         }
@@ -249,12 +252,12 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
-            if (_ending)
+            if ((_admission & endingFlag) != 0)
             {
                 return false;
             }
 
-            _ending = true;
+            _admission |= endingFlag;
             return true;
         }
     }
@@ -273,7 +276,7 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
-            if (_ending || _partialUndoPending || State != TransactionState.Active)
+            if (_admission != 0 || State != TransactionState.Active)
             {
                 return false;
             }

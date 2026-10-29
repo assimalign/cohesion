@@ -63,7 +63,9 @@ Markers allocate only on use. Each statement captures its ledger position withou
 after physical statement rollback its failed suffix is discarded, including before the first
 marker, so stale same-writer slot references cannot affect a later scope. Root completion
 removes marker state. Marker controls alone neither enroll a read-only writer nor append any
-lifecycle record. The context's pending bit shares the existing scalar padding; no per-context
+lifecycle record. The context's pending and ending bits share the former end boolean's byte, preserving its
+aligned size. A separate pending boolean added eight bytes per statement pin and tripped the
+SQL Release allocation guards; packing the flags keeps the existing budgets. No per-context
 object, delegate or collection is added to transactions that never set a marker.
 
 Markers have no durable identities. Partial undo uses the existing physical WAL operations and
