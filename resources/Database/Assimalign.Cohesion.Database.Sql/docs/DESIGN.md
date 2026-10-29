@@ -220,20 +220,30 @@ report CS05087. FROM FIRST/LAST has no implementation in the local PostgreSQL gr
 retains its named CK00001 refusals. Value-function NULL skipping scans the selected members;
 it does not promise the moving-aggregate complexity bound.
 
-Native SUM, COUNT, AVG, Boolean and statistical functions use inverse transitions. MIN/MAX
+Native SUM, COUNT, AVG, Boolean and statistical functions use inverse transitions when their
+arguments and FILTER contain neither volatile functions nor subqueries. Safe MIN/MAX inputs
 use monotonic queues. A frame after exclusion is represented by at most three intervals,
-whose endpoints advance monotonically. Each function evaluates FILTER once per visited input
-and evaluates its argument only when FILTER admits that input. Cached arguments, FILTER
+whose endpoints advance monotonically. For safe inputs, each function evaluates FILTER once
+per visited input and evaluates its argument only when FILTER admits that input. Cached
+arguments, FILTER
 outcomes and all interval states release at the partition boundary. Exact decimal SUM/AVG and
 statistics retain scaled BigInteger sums (and squares for statistics), rounding only the result;
 small decimal terms survive cancellation of large terms. Floating statistics use exact binary sums and squares
 in units of 2^-1074, rounding the final quotient to DOUBLE; nonfinite inputs are tracked
 separately so removing them restores finite results. Native aggregate-local ordering remains ignored.
 
+Volatile inputs (including nextval, setval, a registered random function and application
+functions unless marked Stable or Immutable) and subquery arguments/FILTER use the restart
+path. When the frame head
+moves, arguments and FILTER are evaluated again over the new frame, including correlated
+subplans and prepared branch predicates on a previously visited row. The existing CS05084
+recomputation cap applies. This follows PostgreSQL executor/nodeWindowAgg.c:3002-3033;
+inverse transitions and cached inputs remain enabled for safe expressions.
+
 EXPLAIN ANALYZE reports frame_visits (distinct evaluated native inputs; fallback candidate
 visits), transitions, inverse_transitions and boundary_visits. RANGE boundaries use advancing
-cursors; GROUPS uses a partition peer index. Native transition work is O(n), including exclusion;
-MIN/MAX queue comparisons are amortized O(n). The existing 1,000,000-visit CS05084 cap remains
+cursors; GROUPS uses a partition peer index. Safe native transition work is O(n), including
+exclusion; MIN/MAX queue comparisons are amortized O(n). The existing 1,000,000-visit CS05084 cap remains
 for application aggregates and order-sensitive recomputation, and application Finish stays
 once-only. Application accumulator internals remain application-owned; the engine accounts
 its fixed state handle, evaluated inputs and sort buffers without inspecting opaque user state.
@@ -252,7 +262,15 @@ builder accounting is enabled only by the window executor.
 Output cells remain charged until the stage ends. Reference-buffer capacity/growth and fixed
 operator scratch use explicit bounded allowances; these are logical retained-memory charges,
 not a claim that GC heap measurements equal the grant. The ownership ledger itself is charged.
-Final ordered collectors release discarded outputs and keys, including bounded LIMIT heaps.
+Final ordered collectors remove discarded outputs and keys from the partition cleanup owner
+before releasing their ledger charges, including bounded LIMIT heaps. Cleanup uses counted
+reference-identity membership with bounded dictionary-capacity allowances and O(1) removal.
+Previously materialized statement subquery vectors and CTE/relation rows are admitted when
+the window owner starts (CS05067 on failed admission); payload aliases remain charged once.
+Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plain children
+clear their owned source cells and buffers after copying the cached values, including unread
+EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
+inputs use normal expression evaluation and retention; ARRAY subqueries remain unsupported.
 There is no spill, and success/refusal/cancellation releases the entire grant. Window-free
 queries retain their existing layouts and allocation costs. No public accumulator contract,
 compiled-schema/catalog version or wire format changed.

@@ -30,7 +30,10 @@ Binding, stage placement, diagnostics and memory ownership are described in Sql 
 [DIALECT.md](DIALECT.md). Parser, profile, keyword and completeness corpora advance together.
 Native order-insensitive frame aggregates ignore local ordering during evaluation; fallback
 recomputation shares the fixed 1,000,000-input-visit statement cap (CS05084). The corpus includes
-ordered/filtered moving frames, RANGE/GROUPS/exclusion membership and NULL treatment.
+ordered/filtered moving frames, RANGE/GROUPS/exclusion membership and NULL treatment. Native
+moving states require arguments and FILTER without volatile calls or subqueries; otherwise
+frame-head movement restarts evaluation under CS05084
+(PostgreSQL executor/nodeWindowAgg.c:3002-3033).
 The profile adds three clauses (GROUPS, EXCLUDE, NULL treatment); the contextual unsupported
 word table removes GROUPS, EXCLUDE, IGNORE and RESPECT. Window-free AST layout is unchanged.
 PostgreSQL references: parser/parse_clause.c:2766-2902 and parser/parse_agg.c:879-994.

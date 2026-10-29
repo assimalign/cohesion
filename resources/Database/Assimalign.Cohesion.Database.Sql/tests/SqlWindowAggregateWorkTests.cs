@@ -220,7 +220,8 @@ public sealed class SqlWindowAggregateWorkTests
         // Arrange
         int calls = 0;
         var builder = SqlDatabaseEngine.CreateBuilder("window-native-inverse");
-        builder.Functions.Add(SqlScalarFunction.Create<int,int>("observe_input", value => { calls++; return value; }));
+        // The observer returns its input unchanged; volatility has its own restart tests.
+        builder.Functions.Add(SqlScalarFunction.Create<int,int>("observe_input", value => { calls++; return value; }, SqlFunctionVolatility.Stable));
         await using var engine = await builder.BuildAsync(CancellationToken.None);
         var db = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await db.CreateSessionAsync(CancellationToken.None);

@@ -20,8 +20,10 @@ internal sealed class SqlWindowMemory : IDisposable
     private int[] _buckets = [];
     private int _count;
     private int _free = -1;
-    private List<object?[]>? _partitionRows;
+    private Dictionary<object?[], int>? _partitionRows;
     private long _partitionRowBytes;
+    private int _partitionRowCapacity;
+    private bool _admittingChildren;
 
     internal SqlWindowMemory(SqlStatementMetrics metrics, long budget)
     {
@@ -38,7 +40,7 @@ internal sealed class SqlWindowMemory : IDisposable
 
     internal void Reserve(long bytes)
     {
-        if (bytes > _budget - _metrics.HashMemoryBytes)
+        if (!_admittingChildren && bytes > _budget - _metrics.HashMemoryBytes)
         { throw new SqlExecutionException("CS05079", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WindowMemoryBudget, _budget)); }
         _metrics.ReserveHashMemory(bytes, _budget);
         _reserved += bytes;
@@ -49,23 +51,37 @@ internal sealed class SqlWindowMemory : IDisposable
     // number of keys, navigation results or aggregate caches retaining a reference.
     internal void Retain(object?[] row) => RetainResult(row, transient: _partitionRows is not null);
 
+    // Independent children may have completed before this stage acquired its grant.
+    // Admission uses the statement's existing CS05067 budget condition; subsequent
+    // window work retains its window-specific CS05079 refusal.
+    internal void AdoptResult(object?[] row)
+    {
+        _admittingChildren = true;
+        try { RetainResult(row, transient: false); }
+        finally { _admittingChildren = false; }
+    }
+
     internal void RetainResult(object?[] row, bool transient)
     {
         RetainValue(row);
         foreach (var value in row) { if (value is not null) { RetainValue(value); } }
         if (transient && _partitionRows is { } rows)
         {
-            if (rows.Count == rows.Capacity)
+            if (rows.TryGetValue(row, out int references)) { rows[row] = references + 1; return; }
+            if (rows.Count == _partitionRowCapacity)
             {
-                int capacity = rows.Capacity == 0 ? 4 : checked(rows.Capacity * 2);
-                long next = 24L + 8L * capacity;
+                int capacity = _partitionRowCapacity == 0 ? 4 : checked(_partitionRowCapacity * 2);
+                // Dictionary entries/buckets use less than 64 B per requested slot,
+                // including prime-capacity rounding. Charge old/new overlap first.
+                long next = 64L * capacity;
                 Reserve(next);
-                long old = rows.Capacity == 0 ? 0 : 24L + 8L * rows.Capacity;
-                rows.Capacity = capacity;
+                long old = 64L * _partitionRowCapacity;
+                rows.EnsureCapacity(capacity);
+                _partitionRowCapacity = capacity;
                 Release(old);
                 _partitionRowBytes += next - old;
             }
-            rows.Add(row);
+            rows.Add(row, 1);
         }
     }
 
@@ -73,20 +89,32 @@ internal sealed class SqlWindowMemory : IDisposable
     {
         Reserve(64);
         _partitionRowBytes = 64;
-        _partitionRows = [];
+        _partitionRows = new(ReferenceEqualityComparer.Instance);
     }
 
     internal void EndPartition()
     {
-        foreach (var row in _partitionRows!) { ReleaseRow(row); }
+        var rows = _partitionRows!;
         _partitionRows = null;
+        foreach (var entry in rows)
+        {
+            rows.Remove(entry.Key);
+            for (int reference = 0; reference < entry.Value; reference++) { ReleaseRow(entry.Key); }
+        }
         Release(_partitionRowBytes);
         _partitionRowBytes = 0;
+        _partitionRowCapacity = 0;
     }
 
     internal void ReleaseRow(object?[] row)
     {
-        // A bounded collector can discard a transient before the partition sweep.
+        // Drop the cleanup owner's reference before releasing its ledger ownership.
+        // Removal is O(1), including bounded collectors repeatedly replacing rows.
+        if (_partitionRows is { } rows && rows.TryGetValue(row, out int references))
+        {
+            if (references == 1) { rows.Remove(row); }
+            else { rows[row] = references - 1; }
+        }
         if (Find(row) < 0) { return; }
         foreach (var value in row) { if (value is not null) { ReleaseValue(value); } }
         ReleaseValue(row);

@@ -17,6 +17,17 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken)
     {
         using var memory = new SqlWindowMemory(statement.Metrics, _definitions.StatementMemoryBudget);
+        // WITH and independent subqueries can complete outside the window stage.
+        // Their caches remain reachable throughout it and belong to this grant too.
+        if (_subqueryValues is { } subqueries)
+        {
+            foreach (var values in subqueries.StatementValues.Values) { memory.AdoptResult(values); }
+        }
+        if (_materializedRelations is { } relations)
+        {
+            foreach (var relation in relations.Values)
+            { foreach (var row in relation) { memory.AdoptResult(row); } }
+        }
         memory.Reserve(128L + 96L * (plan.InputWidth + plan.Projections.Count) + 64L * plan.OrderBy.Count);
         await using var input = (SqlMaterializedResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
@@ -323,9 +334,12 @@ internal sealed partial class SqlPlanExecutor
                 if (previousStarts[index] >= 0 && previousFrames[index] == members) { return results[index]; }
                 int first = members.First, last = members.Last;
                 previousFrames[index] = members;
-                if (SqlStandardLibrary.IgnoresWindowOrdering(function.Aggregate!.Function))
-                { return await MovingFrameAsync(function, index, members).ConfigureAwait(false); }
                 var aggregate = function.Aggregate!;
+                // PostgreSQL nodeWindowAgg.c:3002-3033: inverse transitions must
+                // not suppress calls that the restart path would evaluate again.
+                bool restartSensitive = aggregate.Arguments.Any(WindowRestartSensitive) || WindowRestartSensitive(aggregate.Filter);
+                if (SqlStandardLibrary.IgnoresWindowOrdering(aggregate.Function) && !restartSensitive)
+                { return await MovingFrameAsync(function, index, members).ConfigureAwait(false); }
                 var collation = aggregate.Collation.Resolve(_subqueryValues);
                 bool orderedInput = aggregate.OrderBy.Count > 0 && !SqlStandardLibrary.IgnoresWindowOrdering(aggregate.Function);
                 bool incremental = !orderedInput && SqlStandardLibrary.Contains(aggregate.Function) && function.Frame?.Syntax.Exclusion is not (SqlWindowExclusion.CurrentRow or SqlWindowExclusion.Group or SqlWindowExclusion.Ties);
@@ -357,6 +371,11 @@ internal sealed partial class SqlPlanExecutor
                             if (recomputing) { statement.Metrics.RecordWindowFrameRecomputation(); }
                             if (statement.Metrics.Analysis(function) is { } work) { work.Candidates++; }
                             var inputRow = rows[sorted[inputPosition]];
+                            // A restart can begin on the very row the preceding frame
+                            // visited last. Give its correlated subplans and prepared
+                            // branch predicates a fresh evaluation even in that case.
+                            if (recomputing && restartSensitive && _subqueryValues is { HasCorrelatedQueries: true } frame)
+                            { frame.BeginRow([]); }
                             await PrepareSubqueriesAsync(aggregate.Filter, inputRow, statement, cancellationToken).ConfigureAwait(false);
                             if (!evaluator.Matches(aggregate.Filter, inputRow)) { continue; }
                             foreach (var argument in aggregate.Arguments)
@@ -502,6 +521,23 @@ internal sealed partial class SqlPlanExecutor
             else { result = null; }
             return NormalizeGroupValue(result, function.Type);
         }
+    }
+
+    private static bool WindowRestartSensitive(SqlBoundExpression? expression)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is null) { return false; }
+        if (expression is SqlBoundSequence or SqlBoundSubquery or SqlBoundInSubquery or SqlBoundQuantifiedComparison
+            or SqlBoundCall { Function.Volatility: SqlFunctionVolatility.Volatile }) { return true; }
+        if (expression is SqlBoundCase choice)
+        {
+            if (WindowRestartSensitive(choice.Input) || WindowRestartSensitive(choice.ElseResult)) { return true; }
+            foreach (var when in choice.Whens)
+            { if (WindowRestartSensitive(when.Condition) || WindowRestartSensitive(when.Result)) { return true; } }
+        }
+        if (expression is SqlBoundLogical logical && logical.Operands.Any(WindowRestartSensitive)) { return true; }
+        if (expression is SqlBoundCoalesce coalesce && coalesce.Arguments.Any(WindowRestartSensitive)) { return true; }
+        return BoundChildren(expression).Any(WindowRestartSensitive);
     }
 
     private static WindowMembers Members(SqlWindowFunction function, int first, int last, int position, int peerFirst, int peerLast)

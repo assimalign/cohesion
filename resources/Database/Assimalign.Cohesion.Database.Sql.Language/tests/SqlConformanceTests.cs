@@ -56,6 +56,7 @@ public class SqlConformanceTests
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
     [InlineData("SELECT BOOL_AND(flag), BOOL_OR(flag), EVERY(flag), STDDEV(v), STDDEV_SAMP(v), STDDEV_POP(v), VARIANCE(v), VAR_SAMP(v), VAR_POP(v) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT SUM(v) FILTER(WHERE flag) OVER w,COUNT(*) OVER w,BOOL_AND(flag) OVER w,VAR_POP(v) OVER w,FIRST_VALUE(v) OVER w,LAST_VALUE(v) OVER w,NTH_VALUE(v,2) OVER w FROM t WINDOW w AS(PARTITION BY p ORDER BY k ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING);", SqlQueryCommandType.Select)]
+    [InlineData("SELECT SUM(nextval('s')) OVER(ORDER BY id ROWS 1 PRECEDING), SUM((SELECT t.id)) OVER(ORDER BY id ROWS 1 PRECEDING), SUM(id) FILTER(WHERE random()>0) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT LAST_VALUE(v) OVER(ORDER BY k),SUM(v) OVER(ORDER BY k RANGE UNBOUNDED PRECEDING) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT COUNT(*) FILTER (WHERE flag), SUM(DISTINCT v) FILTER (WHERE v>0), STRING_AGG(label, ',' ORDER BY id) FILTER (WHERE flag) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT SUM(amount ORDER BY id DESC) FILTER(WHERE flag) OVER(ORDER BY id ROWS UNBOUNDED PRECEDING) FROM t;", SqlQueryCommandType.Select)]

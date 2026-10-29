@@ -66,8 +66,9 @@ public sealed class SqlWindowMovingTests
         // Arrange
         int filters=0, arguments=0;
         var builder=SqlDatabaseEngine.CreateBuilder("window-moving-work");
-        builder.Functions.Add(SqlScalarFunction.Create<int,bool>("observe_filter",value=>{filters++;return value%2==0;}));
-        builder.Functions.Add(SqlScalarFunction.Create<int,int>("observe_input",value=>{arguments++;return value;}));
+        // Repeatable return values let these counters observe the safe moving path.
+        builder.Functions.Add(SqlScalarFunction.Create<int,bool>("observe_filter",value=>{filters++;return value%2==0;},SqlFunctionVolatility.Stable));
+        builder.Functions.Add(SqlScalarFunction.Create<int,int>("observe_input",value=>{arguments++;return value;},SqlFunctionVolatility.Immutable));
         await using var engine=await builder.BuildAsync(CancellationToken.None);
         var db=await engine.CreateDatabaseAsync("db",CancellationToken.None);
         await using var session=await db.CreateSessionAsync(CancellationToken.None);

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,6 +66,16 @@ internal sealed partial class SqlPlanExecutor
             }
             if (query.Kind == SqlSubqueryKind.Exists) { rows.Add(query.IsNegated ? !found : found); }
             else if (query.Kind == SqlSubqueryKind.Scalar && !found) { rows.Add(null); }
+            // Completed async frames can retain a disposed child, especially when
+            // EXISTS stopped enumeration early. Only the copied values belong to
+            // the statement cache; drop the child's owned source cells and buffer
+            // before a subsequent window acquires its grant.
+            if (result is SqlMaterializedResultSet materialized)
+            {
+                for (int index = 0; index < materialized.Rows.Count; index++)
+                { Array.Clear(materialized.Rows[index]); }
+                materialized.ClearRows();
+            }
             return rows.ToArray();
         }
         finally { _subqueryValues = parent; }
