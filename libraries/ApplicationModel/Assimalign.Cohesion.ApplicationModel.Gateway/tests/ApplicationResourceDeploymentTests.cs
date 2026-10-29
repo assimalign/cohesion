@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -7,7 +8,7 @@ using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
-namespace Assimalign.Cohesion.ApplicationModel.Definition.Tests;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class ApplicationResourceDeploymentTests
 {
@@ -210,5 +211,57 @@ public class ApplicationResourceDeploymentTests
 
         // Assert
         resource.Instances.Select(instance => instance.Key).ShouldBe(instances.Select(instance => instance.Key).Order());
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Setting outputs reports whether any was added, changed, or removed")]
+    public void SetOutputs_ShouldReportChanges()
+    {
+        // Arrange
+        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
+
+        // Act
+        bool added = resource.SetOutputs(Endpoint("http://orders-api.root.svc"));
+        bool same = resource.SetOutputs(Endpoint("http://orders-api.root.svc"));
+        bool moved = resource.SetOutputs(Endpoint("http://10.0.0.7:8080"));
+        string current = resource.Outputs[OutputName.Endpoint];
+        bool removed = resource.SetOutputs(new Dictionary<OutputName, string>());
+
+        // Assert
+        added.ShouldBeTrue();
+        same.ShouldBeFalse();
+        moved.ShouldBeTrue();
+        current.ShouldBe("http://10.0.0.7:8080");
+        removed.ShouldBeTrue();
+        resource.Outputs.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An output without a value is refused and changes nothing")]
+    public void SetOutputs_WithoutValue_ShouldThrow()
+    {
+        // Arrange
+        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi, outputs: Endpoint("http://orders-api.root.svc"));
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => resource.SetOutputs(Endpoint(null!)));
+        resource.Outputs[OutputName.Endpoint].ShouldBe("http://orders-api.root.svc");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Clearing a resource's state drops its snapshots, so a new instance restores none")]
+    public void ClearState_ShouldDropRecordedSnapshots()
+    {
+        // Arrange
+        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi, [TestManifests.LogLevelSnapshot("Debug")]);
+
+        // Act
+        resource.ClearState();
+
+        // Assert
+        resource.State.ShouldBeEmpty();
+        resource.Register(TestManifests.Instance()).ShouldBeEmpty();
+    }
+
+    private static Dictionary<OutputName, string> Endpoint(string value)
+    {
+        return new Dictionary<OutputName, string> { [OutputName.Endpoint] = value };
     }
 }

@@ -6,10 +6,11 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// such as the endpoint its platform gives it.
 /// </summary>
 /// <remarks>
-/// A descriptor creates it (<see cref="IApplicationResourceDefinition.Output"/>,
-/// <see cref="IApplicationResourceDefinition.Endpoint"/>). The gateway that runs the resource records
-/// the value its infrastructure provider reports, and fills it in where a dependent resource refers to
-/// it.
+/// A definition creates it for its own resource (<see cref="IApplicationResourceDefinition.Output"/>,
+/// <see cref="IApplicationResourceDefinition.Endpoint"/>), and a parent reference for one of the
+/// parent's resources (<see cref="IApplicationParent.Output"/>, <see cref="IApplicationParent.Endpoint"/>).
+/// The gateway that runs the resource records the value its infrastructure provider reports, fills
+/// it in where one of its resources refers to it, and hands it to a child gateway that joins.
 /// </remarks>
 /// <param name="Gateway">The gateway whose set declares the resource.</param>
 /// <param name="Provider">The resource's provider.</param>

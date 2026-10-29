@@ -15,26 +15,28 @@ using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
-/// A gateway: it reconciles what an application's model declares with what its infrastructure runs,
-/// receives the manifests its resources' instances publish, and keeps each resource's state until
-/// the resource is next redefined.
+/// A gateway: it reconciles what its model declares with what its infrastructure runs, receives the
+/// manifests its resources' instances publish, keeps each resource's state until the resource is next
+/// redefined, and lets child gateways join it.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="RunAsync"/> loads the gateway's record from its <see cref="IApplicationGatewayStore"/> and deploys
-/// in dependency order: a resource or child gateway deploys once everything it depends on is ready,
-/// and independent ones deploy at the same time. At that point the gateway fills in the resource's
-/// settings from the outputs of what it depends on and plans it with the infrastructure provider.
-/// Only the resources whose plan changes something are deployed; the others keep running. A
-/// resource is ready once an instance of its deployment has published and its outputs are read. A
-/// resource keeps its recorded state while its definition (the model's and the provider's revision)
-/// is unchanged, even when a value filled in from a dependency changes, and keeps its registered
-/// instances while the platform keeps them running. Until it is planned, a resource runs as the
-/// previous run left it. Every created or updated resource must have an instance publish within
-/// <see cref="StartupTimeout"/> of its deployment: a new one that does not is torn down, an updated
-/// one is left to the platform, what depends on it is not deployed, and the run fails with
-/// <see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>. After startup the gateway tears down the
-/// resources and child gateways its record holds but the model no longer declares, then runs until
+/// <see cref="RunAsync"/> loads the gateway's record from its <see cref="IApplicationGatewayStore"/>.
+/// A gateway whose model names a parent then joins it and waits, within <see cref="StartupTimeout"/>,
+/// until the parent reports every output of its resources that the gateway's settings use. The
+/// gateway then deploys in dependency order: a resource deploys once everything it depends on is
+/// ready, and independent ones deploy at the same time. At that point the gateway fills in the
+/// resource's settings from the outputs of what it depends on, or from its parent's answer, and plans
+/// it with the infrastructure provider. Only the resources whose plan changes something are deployed;
+/// the others keep running. A resource is ready once an instance of its deployment has published and
+/// its outputs are read. A resource keeps its recorded state while its definition (the model's and
+/// the provider's revision) is unchanged, even when a value filled in from a dependency changes, and
+/// keeps its registered instances while the platform keeps them running. Until it is planned, a
+/// resource runs as the previous run left it. Every created or updated resource must have an
+/// instance publish within <see cref="StartupTimeout"/> of its deployment: a new one that does not is
+/// torn down, an updated one is left to the platform, what depends on it is not deployed, and the run
+/// fails with <see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>. After startup the gateway
+/// tears down the resources its record holds but the model no longer declares, then runs until
 /// cancelled. Cancellation stops the gateway; it does not tear down what the gateway deployed.
 /// </para>
 /// <para>
@@ -47,61 +49,101 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// <see cref="PublishAsync"/>, and an in-process resource can publish to the gateway directly,
 /// because it is an <see cref="IApplicationInstancePublisher"/>.
 /// </para>
+/// <para>
+/// A child gateway joins through <see cref="JoinAsync"/>, which this gateway implements as an
+/// <see cref="IApplicationParentGateway"/>; the child joins again three times per lease, and one that
+/// stops is dropped once its lease lapses. The gateway knows nothing of a child before it joins, so
+/// each gateway deploys on its own. A value a child read changes for the child on its next run.
+/// </para>
 /// </remarks>
-[DebuggerDisplay("{Model}")]
+[DebuggerDisplay("{Name}")]
 [DebuggerTypeProxy(typeof(DebugView))]
-public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstancePublisher
+public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstancePublisher, IApplicationParentGateway
 {
     private const int idle = 0;
     private const int running = 1;
     private const int stopped = 2;
 
-    private static readonly TimeSpan _defaultStartupTimeout = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan _defaultLeaseDuration = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan _minimumExpiryInterval = TimeSpan.FromMilliseconds(10);
+    private static readonly TimeSpan _maximumJoinRetryInterval = TimeSpan.FromMilliseconds(250);
 
+    private readonly IApplicationModel _model;
     private readonly IInfrastructureProvider _infrastructure;
     private readonly IApplicationGatewayStore _store;
+    private readonly IApplicationParentGateway? _parent;
     private readonly SemaphoreSlim _saves = new(1, 1);
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Dictionary<GatewayName, (ApplicationManifest Manifest, long Renewed)> _children = [];
     private FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? _resources;
     private FrozenDictionary<ApplicationResourceOutput, string> _received = FrozenDictionary<ApplicationResourceOutput, string>.Empty;
     private GatewayResource[] _ordered = [];
     private ApplicationResourceRecord[] _retiredResources = [];
-    private GatewayName[] _retiredGateways = [];
     private ReadOnlyCollection<IApplicationResourceDeployment> _aggregates = ReadOnlyCollection<IApplicationResourceDeployment>.Empty;
-    private IApplicationModel? _model;
     private int _lifecycle;
 
-    private ApplicationGateway(IInfrastructureProvider infrastructure, IApplicationGatewayStore store, TimeSpan startupTimeout, TimeSpan leaseDuration)
+    internal ApplicationGateway(
+        IApplicationModel model,
+        IInfrastructureProvider infrastructure,
+        IApplicationGatewayStore store,
+        IApplicationParentGateway? parent,
+        TimeSpan startupTimeout,
+        TimeSpan leaseDuration)
     {
+        _model = model;
         _infrastructure = infrastructure;
         _store = store;
+        _parent = parent;
         StartupTimeout = startupTimeout;
         LeaseDuration = leaseDuration;
     }
 
     /// <summary>
+    /// Gets the gateway's name, which its model declares.
+    /// </summary>
+    public GatewayName Name => _model.Name;
+
+    /// <summary>
+    /// Gets the model the gateway runs.
+    /// </summary>
+    public IApplicationModel Model => _model;
+
+    /// <summary>
     /// Gets how long every created or updated resource has to publish its first manifest once its
-    /// deployment starts.
+    /// deployment starts, and how long the gateway waits for its parent's outputs.
     /// </summary>
     public TimeSpan StartupTimeout { get; }
 
     /// <summary>
-    /// Gets how long an instance stays registered without renewing its lease.
+    /// Gets how long an instance or a child gateway stays registered without renewing its lease.
     /// </summary>
     public TimeSpan LeaseDuration { get; }
 
     /// <summary>
-    /// Gets the model the gateway runs, or <see langword="null"/> before <see cref="RunAsync"/>.
-    /// </summary>
-    public IApplicationModel? Model => Volatile.Read(ref _model);
-
-    /// <summary>
     /// Gets the aggregates of the resources the gateway runs, in dependency order, each after the
-    /// resources of this gateway it depends on; empty before <see cref="RunAsync"/>.
+    /// resources it depends on; empty before <see cref="RunAsync"/>.
     /// </summary>
     public IReadOnlyCollection<IApplicationResourceDeployment> Resources => Volatile.Read(ref _aggregates);
+
+    /// <summary>
+    /// Gets the manifests of the child gateways that joined this one and whose leases have not
+    /// lapsed.
+    /// </summary>
+    public IReadOnlyCollection<ApplicationManifest> Children
+    {
+        get
+        {
+            lock (_children)
+            {
+                var children = new List<ApplicationManifest>(_children.Count);
+                foreach ((ApplicationManifest Manifest, long Renewed) child in _children.Values)
+                {
+                    children.Add(child.Manifest);
+                }
+
+                return children.AsReadOnly();
+            }
+        }
+    }
 
     /// <summary>
     /// Gets a task that completes when every created or updated resource has published and the
@@ -111,86 +153,36 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     public Task Started => _started.Task;
 
     /// <summary>
-    /// Creates a gateway that deploys through the specified infrastructure provider and keeps its
-    /// record in memory, so a new gateway object starts without one.
+    /// Creates a builder that declares a gateway's application and configures the gateway.
     /// </summary>
-    /// <param name="infrastructure">The infrastructure the gateway deploys onto.</param>
-    /// <param name="startupTimeout">
-    /// How long every created or updated resource has to publish its first manifest; five minutes
-    /// when <see langword="null"/>.
-    /// </param>
-    /// <returns>The gateway.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="infrastructure"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="infrastructure"/> names no platform.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="startupTimeout"/> is not positive.</exception>
-    public static ApplicationGateway Create(IInfrastructureProvider infrastructure, TimeSpan? startupTimeout = null)
+    /// <param name="name">The gateway's name.</param>
+    /// <returns>The builder.</returns>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
+    public static ApplicationBuilder CreateBuilder(GatewayName name)
     {
-        return Create(infrastructure, new InMemoryApplicationGatewayStore(), startupTimeout);
-    }
-
-    /// <summary>
-    /// Creates a gateway that deploys through the specified infrastructure provider and keeps its
-    /// record in a store, so a restarted gateway reconciles against it.
-    /// </summary>
-    /// <param name="infrastructure">The infrastructure the gateway deploys onto.</param>
-    /// <param name="store">Where the gateway keeps its record.</param>
-    /// <param name="startupTimeout">
-    /// How long every created or updated resource has to publish its first manifest; five minutes
-    /// when <see langword="null"/>.
-    /// </param>
-    /// <param name="leaseDuration">
-    /// How long an instance stays registered without renewing; thirty seconds when <see langword="null"/>.
-    /// </param>
-    /// <returns>The gateway.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="infrastructure"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="infrastructure"/> names no platform.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="startupTimeout"/> or <paramref name="leaseDuration"/> is not positive.</exception>
-    public static ApplicationGateway Create(IInfrastructureProvider infrastructure, IApplicationGatewayStore store, TimeSpan? startupTimeout = null, TimeSpan? leaseDuration = null)
-    {
-        ArgumentNullException.ThrowIfNull(infrastructure);
-        ArgumentNullException.ThrowIfNull(store);
-
-        if (infrastructure.Platform.Value is null)
-        {
-            throw new ArgumentException(ErrorMessages.GatewayPlatformMissing, nameof(infrastructure));
-        }
-
-        TimeSpan timeout = startupTimeout ?? _defaultStartupTimeout;
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero, nameof(startupTimeout));
-
-        TimeSpan lease = leaseDuration ?? _defaultLeaseDuration;
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lease, TimeSpan.Zero, nameof(leaseDuration));
-
-        return new ApplicationGateway(infrastructure, store, timeout, lease);
+        return new ApplicationBuilder(name);
     }
 
     /// <summary>
     /// Reconciles the model with the infrastructure and runs the gateway until cancellation.
     /// </summary>
-    /// <param name="model">The model of what the gateway deploys.</param>
     /// <param name="cancellationToken">Signals that the gateway should stop.</param>
     /// <returns>A task that completes when the gateway stops.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">
-    /// The gateway, or a gateway below it, cannot deploy its part: a child gateway deploys as one step,
-    /// so it cannot both wait for one of its parent's steps and be waited for by it; or a resource's
-    /// setting uses an output its gateway cannot get, one of a resource neither in that gateway nor
-    /// above it, or one from above this gateway that its deployment manifest does not carry. Nothing
-    /// has been deployed.
-    /// </exception>
+    /// <exception cref="ArgumentException">The parent refuses this gateway's manifest. Nothing has been deployed.</exception>
     /// <exception cref="InvalidOperationException">
     /// The gateway has already run, or the infrastructure provider returned no action list, no plan,
     /// or no outputs.
     /// </exception>
     /// <exception cref="ApplicationGatewayException">
-    /// A created or updated resource published no manifest within <see cref="StartupTimeout"/> of its
-    /// deployment (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>), or a setting uses an
-    /// output its resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>).
+    /// The parent did not accept this gateway, or did not report an output its settings use, within
+    /// <see cref="StartupTimeout"/> (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/> or
+    /// <see cref="ApplicationGatewayErrorCode.OutputMissing"/>); a created or updated resource
+    /// published no manifest within <see cref="StartupTimeout"/> of its deployment
+    /// (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>); or a setting uses an output its
+    /// resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>).
     /// </exception>
-    public async Task RunAsync(IApplicationModel model, CancellationToken cancellationToken = default)
+    public async Task RunAsync(CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(model);
-
         if (Interlocked.CompareExchange(ref _lifecycle, running, idle) != idle)
         {
             throw new InvalidOperationException(ErrorMessages.ApplicationGatewayAlreadyRun);
@@ -198,16 +190,21 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
         try
         {
-            // Every gateway of this part must be able to deploy in order, and to fill in its
-            // resources' settings, before anything deploys.
-            GatewayStep[] steps = GatewayStep.Order(model.Deployment);
-            ThrowIfUnordered(model.Deployment.Gateways);
-            FrozenDictionary<ApplicationResourceOutput, string> received = Receive(model);
-            ThrowIfUnresolvable(model, received);
-            _received = received;
+            IApplicationModel model = _model;
+            GatewayStep[] steps = GatewayStep.Order(model.Manifest);
 
             ApplicationGatewayRecord? record = await _store.LoadAsync(model.Name, cancellationToken).ConfigureAwait(false);
             CreateResources(model, record, steps);
+
+            // A child fills its settings in from its parent's outputs, so it joins before anything
+            // deploys; its restarted instances can publish meanwhile.
+            ApplicationGatewayMembership? membership = null;
+            if (_parent is not null)
+            {
+                membership = await JoinParentAsync(model, _parent, cancellationToken).ConfigureAwait(false);
+                _received = Receive(membership);
+            }
+
             await DeployAsync(model, steps, cancellationToken).ConfigureAwait(false);
 
             // Retire what the model no longer declares only once the deployment has started, so a
@@ -222,7 +219,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
             _started.TrySetResult();
 
-            await ExpireAsync(cancellationToken).ConfigureAwait(false);
+            Task renewals = membership is null
+                ? Task.CompletedTask
+                : RenewMembershipAsync(model, _parent!, membership.Lease, cancellationToken);
+            await Task.WhenAll(ExpireAsync(cancellationToken), renewals).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -305,6 +305,62 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     }
 
     /// <summary>
+    /// Registers a child gateway, or renews its registration, and answers with the values of this
+    /// gateway's outputs that the child's settings use.
+    /// </summary>
+    /// <remarks>
+    /// The answer holds every value recorded so far; an output whose resource is not ready yet is
+    /// absent, and the child joins again. A child that joins under the name of one already joined
+    /// replaces it.
+    /// </remarks>
+    /// <param name="child">The child's manifest: its name, this gateway as its parent, and its resources.</param>
+    /// <param name="cancellationToken">Unused; joining completes synchronously.</param>
+    /// <returns>The values the child uses, and a lease of <see cref="LeaseDuration"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="child"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// The manifest breaks a rule of <see cref="ApplicationModel.Create(ApplicationManifest)"/>, or
+    /// names another gateway as its parent.
+    /// </exception>
+    /// <exception cref="ApplicationGatewayException">
+    /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>).
+    /// </exception>
+    public ValueTask<ApplicationGatewayMembership> JoinAsync(ApplicationManifest child, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+
+        ApplicationModel joined = ApplicationModel.Create(child);
+        if (joined.Parent != Name)
+        {
+            throw new ArgumentException(Format(ErrorMessages.GatewayParentMismatch, joined.Name, joined.Parent?.ToString() ?? string.Empty, Name), nameof(child));
+        }
+
+        if (Volatile.Read(ref _resources) is null || Volatile.Read(ref _lifecycle) != running)
+        {
+            throw new ApplicationGatewayException(ApplicationGatewayErrorCode.PublicationsClosed, ErrorMessages.GatewayPublicationsClosed);
+        }
+
+        lock (_children)
+        {
+            _children[joined.Name] = (joined.Manifest, Stopwatch.GetTimestamp());
+        }
+
+        var values = new List<ApplicationResourceOutputValue>();
+        var named = new HashSet<ApplicationResourceOutput>();
+        foreach (ApplicationResourceManifest resource in joined.Manifest.Resources)
+        {
+            foreach (ApplicationResourceSetting setting in resource.Settings)
+            {
+                if (setting.Output is { } output && output.Gateway == Name && named.Add(output) && TryGetOutput(output, out string? value))
+                {
+                    values.Add(new ApplicationResourceOutputValue(output, value));
+                }
+            }
+        }
+
+        return ValueTask.FromResult(new ApplicationGatewayMembership(values.AsReadOnly(), LeaseDuration));
+    }
+
+    /// <summary>
     /// Records the snapshot a stateful write left on one instance of a resource, saves the gateway's
     /// record, and returns the other instances that must restore the snapshot.
     /// </summary>
@@ -334,6 +390,32 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         return SaveRecordingAsync(targets, cancellationToken);
     }
 
+    /// <summary>
+    /// Gets the value recorded for one output of a resource this gateway runs.
+    /// </summary>
+    /// <param name="output">The placeholder for the output.</param>
+    /// <param name="value">The recorded value, or <see langword="null"/> when there is none.</param>
+    /// <returns>
+    /// <see langword="true"/> when the gateway runs the resource and recorded the output;
+    /// <see langword="false"/> when the resource belongs to another gateway, the gateway has not read
+    /// its outputs yet, or the platform reported no such output.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="output"/> is <see langword="null"/>.</exception>
+    public bool TryGetOutput(ApplicationResourceOutput output, [NotNullWhen(true)] out string? value)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+
+        value = null;
+        FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? resources = Volatile.Read(ref _resources);
+        if (resources is null || output.Gateway != Name)
+        {
+            return false;
+        }
+
+        return resources.TryGetValue((output.Provider, output.Name), out GatewayResource? resource)
+            && resource.Aggregate.Outputs.TryGetValue(output.Output, out value);
+    }
+
     private async ValueTask<ApplicationInstancePublication> SaveRegistrationAsync(
         GatewayResource resource,
         InstanceKey key,
@@ -354,8 +436,154 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         return new ApplicationInstancePublication(restore, LeaseDuration);
     }
 
-    // Unregisters every instance whose lease lapsed, three times per lease, until the run is
-    // cancelled.
+    private async ValueTask<IReadOnlyList<InstanceKey>> SaveRecordingAsync(IReadOnlyList<InstanceKey> targets, CancellationToken cancellationToken)
+    {
+        await SaveAsync(cancellationToken).ConfigureAwait(false);
+        return targets;
+    }
+
+    // Joins the parent until it reports every output of its resources that the gateway's settings
+    // use, retrying while the parent is not running or a resource of its is not ready yet, within the
+    // startup window.
+    private async Task<ApplicationGatewayMembership> JoinParentAsync(IApplicationModel model, IApplicationParentGateway parent, CancellationToken cancellationToken)
+    {
+        var needed = new List<(ApplicationResourceManifest Resource, ApplicationResourceSetting Setting, ApplicationResourceOutput Output)>();
+        foreach (ApplicationResourceManifest resource in model.Manifest.Resources)
+        {
+            foreach (ApplicationResourceSetting setting in resource.Settings)
+            {
+                if (setting.Output is { } output && output.Gateway != model.Name)
+                {
+                    needed.Add((resource, setting, output));
+                }
+            }
+        }
+
+        TimeSpan retry = StartupTimeout / 4;
+        if (retry > _maximumJoinRetryInterval)
+        {
+            retry = _maximumJoinRetryInterval;
+        }
+
+        if (retry < _minimumExpiryInterval)
+        {
+            retry = _minimumExpiryInterval;
+        }
+
+        long started = Stopwatch.GetTimestamp();
+        (ApplicationResourceManifest Resource, ApplicationResourceSetting Setting, ApplicationResourceOutput Output)? missing = null;
+        bool joined = false;
+        while (true)
+        {
+            try
+            {
+                ApplicationGatewayMembership membership = await parent.JoinAsync(model.Manifest, cancellationToken).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException(Format(ErrorMessages.GatewayParentMembershipNull, parent.Name));
+                joined = true;
+                missing = FindMissing(needed, membership);
+                if (missing is null)
+                {
+                    return membership;
+                }
+            }
+            catch (ApplicationGatewayException exception) when (exception.ErrorCode == ApplicationGatewayErrorCode.PublicationsClosed)
+            {
+                // The parent is not running yet.
+            }
+
+            if (Stopwatch.GetElapsedTime(started) >= StartupTimeout)
+            {
+                break;
+            }
+
+            await Task.Delay(retry, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!joined)
+        {
+            throw new ApplicationGatewayException(
+                ApplicationGatewayErrorCode.StartupTimedOut,
+                Format(ErrorMessages.GatewayParentUnavailable, model.Name, parent.Name, StartupTimeout));
+        }
+
+        (ApplicationResourceManifest unresolved, ApplicationResourceSetting waiting, ApplicationResourceOutput absent) = missing!.Value;
+        throw new ApplicationGatewayException(
+            ApplicationGatewayErrorCode.OutputMissing,
+            Format(ErrorMessages.GatewayParentOutputMissing, waiting.Name, unresolved.Provider, unresolved.Name, model.Name, absent.Output, absent.Provider, absent.Name, absent.Gateway, StartupTimeout));
+    }
+
+    private static (ApplicationResourceManifest Resource, ApplicationResourceSetting Setting, ApplicationResourceOutput Output)? FindMissing(
+        List<(ApplicationResourceManifest Resource, ApplicationResourceSetting Setting, ApplicationResourceOutput Output)> needed,
+        ApplicationGatewayMembership membership)
+    {
+        if (membership.Outputs is null)
+        {
+            return needed.Count == 0 ? null : needed[0];
+        }
+
+        var reported = new HashSet<ApplicationResourceOutput>();
+        foreach (ApplicationResourceOutputValue? value in membership.Outputs)
+        {
+            if (value?.Output is not null && value.Value is not null)
+            {
+                reported.Add(value.Output);
+            }
+        }
+
+        foreach ((ApplicationResourceManifest Resource, ApplicationResourceSetting Setting, ApplicationResourceOutput Output) entry in needed)
+        {
+            if (!reported.Contains(entry.Output))
+            {
+                return entry;
+            }
+        }
+
+        return null;
+    }
+
+    // The values the parent reported, by output.
+    private static FrozenDictionary<ApplicationResourceOutput, string> Receive(ApplicationGatewayMembership membership)
+    {
+        var received = new Dictionary<ApplicationResourceOutput, string>();
+        foreach (ApplicationResourceOutputValue? value in membership.Outputs ?? [])
+        {
+            if (value?.Output is not null && value.Value is not null)
+            {
+                received[value.Output] = value.Value;
+            }
+        }
+
+        return received.ToFrozenDictionary();
+    }
+
+    // Joins the parent again three times per lease, so it keeps this gateway registered. A parent
+    // that is unreachable, or not running, is retried on the next tick; a value that changed applies
+    // on the gateway's next run.
+    private static async Task RenewMembershipAsync(IApplicationModel model, IApplicationParentGateway parent, TimeSpan lease, CancellationToken cancellationToken)
+    {
+        TimeSpan interval = lease / 3;
+        if (interval < _minimumExpiryInterval)
+        {
+            interval = _minimumExpiryInterval;
+        }
+
+        using var timer = new PeriodicTimer(interval);
+        while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+        {
+            try
+            {
+                await parent.JoinAsync(model.Manifest, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Deliberately broad: each transport reports an unreachable or refusing parent in its
+                // own terms. The gateway keeps running and joins again on the next tick.
+            }
+        }
+    }
+
+    // Unregisters every instance and drops every child gateway whose lease lapsed, three times per
+    // lease, until the run is cancelled.
     private async Task ExpireAsync(CancellationToken cancellationToken)
     {
         TimeSpan interval = LeaseDuration / 3;
@@ -367,6 +595,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         using var timer = new PeriodicTimer(interval);
         while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
         {
+            ExpireChildren();
+
             int expired = 0;
             foreach (GatewayResource resource in _ordered)
             {
@@ -380,37 +610,25 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
     }
 
-    private async ValueTask<IReadOnlyList<InstanceKey>> SaveRecordingAsync(IReadOnlyList<InstanceKey> targets, CancellationToken cancellationToken)
+    // Children are not recorded: a child that is still running joins a restarted parent again.
+    private void ExpireChildren()
     {
-        await SaveAsync(cancellationToken).ConfigureAwait(false);
-        return targets;
-    }
-
-    /// <summary>
-    /// Gets the value recorded for one output of a resource this gateway runs.
-    /// </summary>
-    /// <param name="output">The placeholder for the output.</param>
-    /// <param name="value">The recorded value, or <see langword="null"/> when there is none.</param>
-    /// <returns>
-    /// <see langword="true"/> when the gateway runs the resource and recorded the output;
-    /// <see langword="false"/> when the resource belongs to another gateway, the gateway has not read
-    /// its outputs yet, or the platform reported no such output.
-    /// </returns>
-    /// <exception cref="ArgumentNullException"><paramref name="output"/> is <see langword="null"/>.</exception>
-    public bool TryGetOutput(ApplicationResourceOutput output, [NotNullWhen(true)] out string? value)
-    {
-        ArgumentNullException.ThrowIfNull(output);
-
-        value = null;
-        IApplicationModel? model = Model;
-        FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? resources = Volatile.Read(ref _resources);
-        if (model is null || resources is null || output.Gateway != model.Name)
+        lock (_children)
         {
-            return false;
-        }
+            var lapsed = new List<GatewayName>();
+            foreach (KeyValuePair<GatewayName, (ApplicationManifest Manifest, long Renewed)> child in _children)
+            {
+                if (Stopwatch.GetElapsedTime(child.Value.Renewed) >= LeaseDuration)
+                {
+                    lapsed.Add(child.Key);
+                }
+            }
 
-        return resources.TryGetValue((output.Provider, output.Name), out GatewayResource? resource)
-            && resource.Aggregate.Outputs.TryGetValue(output.Output, out value);
+            foreach (GatewayName name in lapsed)
+            {
+                _children.Remove(name);
+            }
+        }
     }
 
     private GatewayResource GetResource(ProviderName provider, ResourceName name)
@@ -425,115 +643,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         {
             throw new ApplicationGatewayException(
                 ApplicationGatewayErrorCode.ResourceUnknown,
-                Format(ErrorMessages.GatewayResourceUnknown, Model!.Name, provider, name));
+                Format(ErrorMessages.GatewayResourceUnknown, Name, provider, name));
         }
 
         return resource;
-    }
-
-    // Refuses a part with a child gateway, at any depth, that cannot deploy its own part in order.
-    private static void ThrowIfUnordered(IReadOnlyList<ApplicationManifest> gateways)
-    {
-        foreach (ApplicationManifest gateway in gateways)
-        {
-            GatewayStep.Order(gateway);
-            ThrowIfUnordered(gateway.Gateways);
-        }
-    }
-
-    // The output values the gateway above passed down, by output.
-    private static FrozenDictionary<ApplicationResourceOutput, string> Receive(IApplicationModel model)
-    {
-        var received = new Dictionary<ApplicationResourceOutput, string>();
-        foreach (ApplicationResourceOutputValue value in model.Outputs)
-        {
-            received.Add(value.Output, value.Value);
-        }
-
-        return received.ToFrozenDictionary();
-    }
-
-    // Refuses a setting, in this gateway or any below it, whose output its gateway cannot get. A
-    // gateway learns its own resources' outputs and receives the values its parent passes down, so an
-    // output must belong to the setting's gateway or one above it; one from above this gateway must
-    // be among the values this gateway received.
-    private static void ThrowIfUnresolvable(IApplicationModel model, FrozenDictionary<ApplicationResourceOutput, string> received)
-    {
-        var parents = new Dictionary<GatewayName, GatewayName>();
-        MapParents(model.Manifest, parents);
-        var part = new HashSet<GatewayName>();
-        AddNames(model.Deployment, part);
-        ThrowIfUnresolvable(model, model.Deployment, parents, part, received);
-    }
-
-    private static void ThrowIfUnresolvable(
-        IApplicationModel model,
-        ApplicationManifest gateway,
-        Dictionary<GatewayName, GatewayName> parents,
-        HashSet<GatewayName> part,
-        FrozenDictionary<ApplicationResourceOutput, string> received)
-    {
-        foreach (ApplicationResourceManifest resource in gateway.Resources)
-        {
-            foreach (ApplicationResourceSetting setting in resource.Settings)
-            {
-                if (setting.Output is not { } output)
-                {
-                    continue;
-                }
-
-                if (!IsSelfOrAbove(output.Gateway, gateway.Name, parents))
-                {
-                    throw new ArgumentException(
-                        Format(ErrorMessages.GatewaySettingUnresolvable, setting.Name, resource.Provider, resource.Name, gateway.Name, output.Output, output.Provider, output.Name, output.Gateway),
-                        "model");
-                }
-
-                if (!part.Contains(output.Gateway) && !received.ContainsKey(output))
-                {
-                    throw new ArgumentException(
-                        Format(ErrorMessages.GatewaySettingOutputNotPassed, setting.Name, resource.Provider, resource.Name, gateway.Name, output.Output, output.Provider, output.Name, output.Gateway, model.Name),
-                        "model");
-                }
-            }
-        }
-
-        foreach (ApplicationManifest child in gateway.Gateways)
-        {
-            ThrowIfUnresolvable(model, child, parents, part, received);
-        }
-    }
-
-    private static void MapParents(ApplicationManifest gateway, Dictionary<GatewayName, GatewayName> parents)
-    {
-        foreach (ApplicationManifest child in gateway.Gateways)
-        {
-            parents.Add(child.Name, gateway.Name);
-            MapParents(child, parents);
-        }
-    }
-
-    private static void AddNames(ApplicationManifest gateway, HashSet<GatewayName> names)
-    {
-        names.Add(gateway.Name);
-        foreach (ApplicationManifest child in gateway.Gateways)
-        {
-            AddNames(child, names);
-        }
-    }
-
-    private static bool IsSelfOrAbove(GatewayName candidate, GatewayName gateway, Dictionary<GatewayName, GatewayName> parents)
-    {
-        GatewayName current = gateway;
-        while (current != candidate)
-        {
-            if (!parents.TryGetValue(current, out current))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private void CreateResources(IApplicationModel model, ApplicationGatewayRecord? record, GatewayStep[] steps)
@@ -545,7 +658,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
 
         var lookup = new Dictionary<(ProviderName Provider, ResourceName Name), GatewayResource>();
-        foreach (ApplicationResourceManifest manifest in model.Deployment.Resources)
+        foreach (ApplicationResourceManifest manifest in model.Manifest.Resources)
         {
             // The provider sees a resource as declared for its platform: no other platform's
             // extensions reach it.
@@ -565,12 +678,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         var aggregates = new List<IApplicationResourceDeployment>();
         foreach (GatewayStep step in steps)
         {
-            if (step.Resource is not null)
-            {
-                GatewayResource resource = lookup[(step.Resource.Provider, step.Resource.Name)];
-                ordered.Add(resource);
-                aggregates.Add(resource.Aggregate);
-            }
+            GatewayResource resource = lookup[(step.Resource.Provider, step.Resource.Name)];
+            ordered.Add(resource);
+            aggregates.Add(resource.Aggregate);
         }
 
         // What the record holds and the model no longer declares is retired after startup.
@@ -583,28 +693,11 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             }
         }
 
-        var declaredGateways = new HashSet<GatewayName>();
-        foreach (ApplicationManifest gateway in model.Deployment.Gateways)
-        {
-            declaredGateways.Add(gateway.Name);
-        }
-
-        var retiredGateways = new List<GatewayName>();
-        foreach (GatewayName gateway in record?.Gateways ?? [])
-        {
-            if (!declaredGateways.Contains(gateway))
-            {
-                retiredGateways.Add(gateway);
-            }
-        }
-
         _ordered = [.. ordered];
         Volatile.Write(ref _retiredResources, [.. retiredResources]);
-        Volatile.Write(ref _retiredGateways, [.. retiredGateways]);
-        Volatile.Write(ref _model, model);
         Volatile.Write(ref _aggregates, aggregates.AsReadOnly());
 
-        // Publications are accepted from here, before any resource is deployed.
+        // Publications and joins are accepted from here, before any resource is deployed.
         Volatile.Write(ref _resources, lookup.ToFrozenDictionary());
     }
 
@@ -632,7 +725,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             {
                 skipped.Add(step.Name);
             }
-            else if (step.Resource is not null && Find(step.Resource).IsClosed)
+            else if (Find(step.Resource).IsClosed)
             {
                 missed.Add(step.Name);
             }
@@ -666,16 +759,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             }
 
             walk.Token.ThrowIfCancellationRequested();
-            if (step.Resource is null)
-            {
-                await _infrastructure.DeployGatewayAsync(model, CreateDeployment(model, step.Gateway!), walk.Token).ConfigureAwait(false);
-                await SaveAsync(walk.Token).ConfigureAwait(false);
-                ready = true;
-            }
-            else
-            {
-                ready = await RunResourceAsync(model, Find(step.Resource), walk.Token).ConfigureAwait(false);
-            }
+            ready = await RunResourceAsync(model, Find(step.Resource), walk.Token).ConfigureAwait(false);
         }
         catch
         {
@@ -704,9 +788,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
         // The definition is the manifest as declared for this platform (settings as declared, and
         // only this platform's extensions) and the provider's revision. A value filled in from a
-        // dependency is not part of it, so a dependency that moved does not cost this resource its
-        // recorded state, and neither does an extension for another platform. Planned before the
-        // call: an in-process provider's instances publish before it returns.
+        // dependency or the parent is not part of it, so a dependency that moved does not cost this
+        // resource its recorded state, and neither does an extension for another platform. Planned
+        // before the call: an in-process provider's instances publish before it returns.
         resource.Plan(plan.Change, string.Concat(Fingerprint(manifest), ":", plan.Revision));
         if (plan.Change != InfrastructureChange.None)
         {
@@ -754,11 +838,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     // The values of one of this gateway's resources' settings, by name.
     private IReadOnlyDictionary<SettingName, string> ResolveSettings(ApplicationResourceManifest manifest)
     {
-        GatewayName gateway = Model!.Name;
         var settings = new Dictionary<SettingName, string>(manifest.Settings.Count);
         foreach (ApplicationResourceSetting setting in manifest.Settings)
         {
-            settings.Add(setting.Name, setting.Output is { } output ? ResolveOutput(gateway, manifest, setting, output) : setting.Value!);
+            settings.Add(setting.Name, setting.Output is { } output ? ResolveOutput(manifest, setting, output) : setting.Value!);
         }
 
         return settings.AsReadOnly();
@@ -766,10 +849,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     // The value of an output a setting uses. One of this gateway's resources is ready by the time
     // anything that depends on it is planned or deployed, so its outputs have been read; any other is
-    // from above, and the gateway above passed it down.
-    private string ResolveOutput(GatewayName gateway, ApplicationResourceManifest resource, ApplicationResourceSetting setting, ApplicationResourceOutput output)
+    // the parent's, which reported it when this gateway joined.
+    private string ResolveOutput(ApplicationResourceManifest resource, ApplicationResourceSetting setting, ApplicationResourceOutput output)
     {
-        if (output.Gateway != Model!.Name)
+        if (output.Gateway != Name)
         {
             return _received[output];
         }
@@ -778,42 +861,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         {
             throw new ApplicationGatewayException(
                 ApplicationGatewayErrorCode.OutputMissing,
-                Format(ErrorMessages.GatewaySettingOutputMissing, setting.Name, resource.Provider, resource.Name, gateway, output.Output, output.Provider, output.Name));
+                Format(ErrorMessages.GatewaySettingOutputMissing, setting.Name, resource.Provider, resource.Name, Name, output.Output, output.Provider, output.Name));
         }
 
         return value;
-    }
-
-    // A child gateway's deployment manifest: the whole hierarchy, the child's name, and the values of
-    // the outputs from this gateway and those above that settings in the child's part use. The child
-    // fills in those settings, or passes the values further down; outputs of its own part are its own
-    // to read. The provider adds where the child runs.
-    private ApplicationDeploymentManifest CreateDeployment(IApplicationModel model, ApplicationManifest child)
-    {
-        var part = new HashSet<GatewayName>();
-        AddNames(child, part);
-        var outputs = new Dictionary<ApplicationResourceOutput, ApplicationResourceOutputValue>();
-        AddOutputs(child, part, outputs);
-        return new ApplicationDeploymentManifest(child.Name, model.Manifest, [.. outputs.Values], null);
-    }
-
-    private void AddOutputs(ApplicationManifest gateway, HashSet<GatewayName> part, Dictionary<ApplicationResourceOutput, ApplicationResourceOutputValue> outputs)
-    {
-        foreach (ApplicationResourceManifest resource in gateway.Resources)
-        {
-            foreach (ApplicationResourceSetting setting in resource.Settings)
-            {
-                if (setting.Output is { } output && !part.Contains(output.Gateway) && !outputs.ContainsKey(output))
-                {
-                    outputs.Add(output, new ApplicationResourceOutputValue(output, ResolveOutput(gateway.Name, resource, setting, output)));
-                }
-            }
-        }
-
-        foreach (ApplicationManifest child in gateway.Gateways)
-        {
-            AddOutputs(child, part, outputs);
-        }
     }
 
     private GatewayResource Find(ApplicationResourceManifest manifest)
@@ -827,13 +878,6 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         {
             await _infrastructure.TeardownResourceAsync(model, new ApplicationResourceManifest(retired.Provider, retired.Name, [], [], []), cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref _retiredResources, Array.FindAll(Volatile.Read(ref _retiredResources), entry => !ReferenceEquals(entry, retired)));
-            await SaveAsync(cancellationToken).ConfigureAwait(false);
-        }
-
-        foreach (GatewayName retired in Volatile.Read(ref _retiredGateways))
-        {
-            await _infrastructure.TeardownGatewayAsync(model, retired, cancellationToken).ConfigureAwait(false);
-            Volatile.Write(ref _retiredGateways, Array.FindAll(Volatile.Read(ref _retiredGateways), name => name != retired));
             await SaveAsync(cancellationToken).ConfigureAwait(false);
         }
     }
@@ -854,8 +898,6 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     private ApplicationGatewayRecord CreateRecord()
     {
-        IApplicationModel model = Model!;
-
         var resources = new List<ApplicationResourceRecord>();
         foreach (GatewayResource resource in _ordered)
         {
@@ -886,19 +928,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
                 aggregate.Outputs));
         }
 
-        // A retired resource or gateway stays recorded until its teardown succeeds, so a failed
-        // run retries it.
+        // A retired resource stays recorded until its teardown succeeds, so a failed run retries it.
         resources.AddRange(Volatile.Read(ref _retiredResources));
 
-        var gateways = new List<GatewayName>();
-        foreach (ApplicationManifest gateway in model.Deployment.Gateways)
-        {
-            gateways.Add(gateway.Name);
-        }
-
-        gateways.AddRange(Volatile.Read(ref _retiredGateways));
-
-        return new ApplicationGatewayRecord(model.Name, gateways.AsReadOnly(), resources.AsReadOnly());
+        return new ApplicationGatewayRecord(Name, resources.AsReadOnly());
     }
 
     // The resource's definition in the model, as the JSON of its manifest as declared for this
@@ -937,7 +970,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
         return new ApplicationGatewayException(
             ApplicationGatewayErrorCode.ResourceTornDown,
-            Format(format, Model!.Name, manifest.Provider, manifest.Name));
+            Format(format, Name, manifest.Provider, manifest.Name));
     }
 
     private static string Format(string format, params object?[] arguments)
@@ -954,10 +987,12 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             _gateway = gateway;
         }
 
-        public IApplicationModel? Model => _gateway.Model;
+        public IApplicationModel Model => _gateway.Model;
 
         public TimeSpan StartupTimeout => _gateway.StartupTimeout;
 
         public IReadOnlyCollection<IApplicationResourceDeployment> Resources => _gateway.Resources;
+
+        public IReadOnlyCollection<ApplicationManifest> Children => _gateway.Children;
     }
 }

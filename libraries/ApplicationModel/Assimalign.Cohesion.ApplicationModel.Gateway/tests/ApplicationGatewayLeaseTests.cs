@@ -107,8 +107,8 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
 
     private Task<RunningGateway> StartAsync(IApplicationGatewayStore store)
     {
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "orders-api");
-        return RunningGateway.StartAsync(_infrastructure, store, builder.Build().Model, leaseDuration: _lease);
+        return RunningGateway.StartAsync(_infrastructure, store, builder.Build(), leaseDuration: _lease);
     }
 }

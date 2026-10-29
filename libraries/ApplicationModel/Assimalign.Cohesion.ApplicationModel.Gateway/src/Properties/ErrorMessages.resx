@@ -12,18 +12,36 @@
   <data name="GatewayStartupTimedOutWithSkipped" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) published no manifest within {2}: {3}. New resources were torn down; updated resources keep whatever instances the platform still runs. Not deployed, because something they depend on did not start: {4}.</value></data>
   <data name="GatewayDeploymentCycle" xml:space="preserve"><value>Gateway '{0}' cannot deploy its part in dependency order: {1}. A gateway deploys each child gateway, with everything below it, as one step; move one of these resources into the other's gateway.</value></data>
   <data name="GatewayStepWaits" xml:space="preserve"><value>{0} waits for {1}, because {2} depends on {3}</value></data>
-  <data name="GatewayStepGateway" xml:space="preserve"><value>gateway '{0}'</value></data>
   <data name="GatewayResourceUpdateMissed" xml:space="preserve"><value>Gateway '{0}' stopped accepting resource '{1}/{2}' after its update missed the startup window.</value></data>
   <data name="GatewayResourceOutputsNull" xml:space="preserve"><value>The infrastructure provider returned no outputs for resource '{0}/{1}'.</value></data>
   <data name="GatewayResourcePlanNull" xml:space="preserve"><value>The infrastructure provider returned no plan, or a plan without a revision, for resource '{0}/{1}'.</value></data>
   <data name="GatewayPlatformMissing" xml:space="preserve"><value>The infrastructure provider names no platform.</value></data>
-  <data name="GatewaySettingUnresolvable" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in gateway '{7}', which is neither that gateway nor one above it. A gateway fills settings in only from its own resources' outputs and those the gateways above pass down, until gateways publish outputs to each other.</value></data>
-  <data name="GatewaySettingOutputNotPassed" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in gateway '{7}', which the deployment manifest of gateway '{8}' does not carry.</value></data>
   <data name="GatewaySettingOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}', which its infrastructure provider did not report.</value></data>
   <data name="ApplicationGatewayStoreDirectoryInvalid" xml:space="preserve"><value>A gateway store directory is a non-empty path.</value></data>
   <data name="ApplicationGatewayRecordNull" xml:space="preserve"><value>The gateway record file '{0}' holds the JSON literal null.</value></data>
   <data name="ApplicationGatewayRecordSnapshotInvalid" xml:space="preserve"><value>A recorded snapshot is a JSON object with a string 'action' and a non-empty base64 'value'.</value></data>
   <data name="GatewayNameMissing" xml:space="preserve"><value>A gateway name is required.</value></data>
   <data name="GatewayResourceActionsNull" xml:space="preserve"><value>The infrastructure provider returned no action list for resource '{0}/{1}'.</value></data>
-  <data name="ApplicationDeploymentManifestNull" xml:space="preserve"><value>The deployment manifest is the JSON literal null.</value></data>
+  <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="ApplicationResourceOutputsNull" xml:space="preserve"><value>Resource '{0}/{1}' was given null outputs, an output without a name, or an output without a value.</value></data>
+  <data name="InstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
+  <data name="ApplicationInstanceManifestActionsMissing" xml:space="preserve"><value>The instance manifest has no action list.</value></data>
+  <data name="ApplicationResourceMismatch" xml:space="preserve"><value>An instance of resource '{0}/{1}' cannot register with resource '{2}/{3}'.</value></data>
+  <data name="ApplicationResourceInstanceUnknown" xml:space="preserve"><value>Instance '{0}' is not registered with resource '{1}/{2}'.</value></data>
+  <data name="ApplicationResourceActionNotStateful" xml:space="preserve"><value>Instance '{0}' declares no stateful action '{1}'.</value></data>
+  <data name="ApplicationResourceStateNull" xml:space="preserve"><value>The initial state contains a null snapshot.</value></data>
+  <data name="ApplicationResourceStateDuplicate" xml:space="preserve"><value>The initial state has more than one snapshot for action '{0}'.</value></data>
+  <data name="ActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
+  <data name="ApplicationResourceActionNull" xml:space="preserve"><value>The infrastructure action list contains null.</value></data>
+  <data name="ApplicationResourceActionKindInvalid" xml:space="preserve"><value>Infrastructure action '{0}' must accept Read, Write, or both, and nothing else.</value></data>
+  <data name="ApplicationResourceActionDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' has more than one infrastructure action named '{2}'.</value></data>
+  <data name="ApplicationResourceActionResultNull" xml:space="preserve"><value>Infrastructure action '{0}' returned null instead of a result.</value></data>
+  <data name="GatewayParentMismatch" xml:space="preserve"><value>Gateway '{0}' names '{1}' as its parent, not '{2}'.</value></data>
+  <data name="GatewayParentMembershipNull" xml:space="preserve"><value>Parent gateway '{0}' answered a join with null.</value></data>
+  <data name="GatewayParentUnavailable" xml:space="preserve"><value>Gateway '{0}' could not join parent '{1}' within {2}: the parent was not running.</value></data>
+  <data name="GatewayParentOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in parent gateway '{7}', which the parent did not report within {8}.</value></data>
+  <data name="GatewayInfrastructureMissing" xml:space="preserve"><value>Gateway '{0}' has no infrastructure provider; call UseInfrastructure before Build.</value></data>
+  <data name="GatewayParentMissing" xml:space="preserve"><value>The model of gateway '{0}' joins parent '{1}', but the gateway has no connection to it; call UseParent with the parent gateway.</value></data>
+  <data name="ApplicationGatewayAlreadyBuilt" xml:space="preserve"><value>The gateway is already built; its builder accepts no changes.</value></data>
 </root>

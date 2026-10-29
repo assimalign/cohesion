@@ -1,18 +1,19 @@
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// A gateway's position in an application's hierarchy.
+/// Whether a gateway stands alone or joins a parent gateway.
 /// </summary>
 public enum ApplicationGatewayRole
 {
     /// <summary>
-    /// The gateway at the top of the hierarchy. A deployment pipeline deploys it, and it deploys the
-    /// rest.
+    /// A gateway that joins no parent. Its own deployment pipeline deploys it, and child gateways
+    /// may join it.
     /// </summary>
     Root,
 
     /// <summary>
-    /// A gateway another gateway deploys. It deploys its own set's resources and child gateways.
+    /// A gateway that joins a parent. Its own deployment pipeline deploys it too; it registers with
+    /// the parent and reads the parent's outputs its settings use.
     /// </summary>
     Composite,
 }

@@ -7,37 +7,27 @@ using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
-// One step of a gateway's deployment: one of its own resources, or one of its child gateways with
-// everything below it, and the steps that must be ready before it deploys. Order builds a gateway's
-// steps in dependency order; the gateway then runs each one once the steps it waits for are ready,
-// and Completion tells the steps waiting for it whether it became ready.
-//
-// A child gateway is one step: the gateway cannot see the readiness of what the child deploys, so
-// everything below the child is ordered as a whole.
+// One step of a gateway's deployment: one of its resources, and the steps that must be ready before
+// it deploys. Order builds a gateway's steps in dependency order; the gateway then runs each one once
+// the steps it waits for are ready, and Completion tells the steps waiting for it whether it became
+// ready. A gateway orders only its own resources: a child gateway deploys on its own and joins.
 [DebuggerDisplay("{Name,nq}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayStep
 {
     private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly List<GatewayStep> _dependencies = [];
-    private readonly List<(ApplicationResourceDependency Dependency, string Dependent)> _reasons = [];
-    private readonly List<(GatewayName Gateway, ApplicationResourceManifest Resource)> _members = [];
+    private readonly List<ApplicationResourceDependency> _reasons = [];
     private int _skipped;
 
-    private GatewayStep(ApplicationResourceManifest? resource, ApplicationManifest? gateway)
+    private GatewayStep(ApplicationResourceManifest resource)
     {
         Resource = resource;
-        Gateway = gateway;
-        Name = resource is null
-            ? Format(ErrorMessages.GatewayStepGateway, gateway!.Name)
-            : string.Concat(resource.Provider.ToString(), "/", resource.Name.ToString());
+        Name = string.Concat(resource.Provider.ToString(), "/", resource.Name.ToString());
     }
 
-    // The resource the step deploys, or null for a child gateway.
-    public ApplicationResourceManifest? Resource { get; }
-
-    // The child gateway the step deploys, or null for a resource.
-    public ApplicationManifest? Gateway { get; }
+    // The resource the step deploys.
+    public ApplicationResourceManifest Resource { get; }
 
     public string Name { get; }
 
@@ -58,47 +48,31 @@ internal sealed class GatewayStep
         _completion.TrySetResult(ready);
     }
 
-    // The steps of one gateway of a hierarchy, each after every step it waits for; independent
-    // steps keep their declaration order, own resources first, then child gateways.
+    // The steps of a gateway, each after every step it waits for; independent steps keep their
+    // declaration order.
     public static GatewayStep[] Order(ApplicationManifest gateway)
     {
         var steps = new List<GatewayStep>();
-        var owners = new Dictionary<(GatewayName Gateway, ProviderName Provider, ResourceName Name), GatewayStep>();
+        var owners = new Dictionary<(ProviderName Provider, ResourceName Name), GatewayStep>();
         foreach (ApplicationResourceManifest resource in gateway.Resources)
         {
-            var step = new GatewayStep(resource, null);
-            step._members.Add((gateway.Name, resource));
-            owners.Add((gateway.Name, resource.Provider, resource.Name), step);
+            var step = new GatewayStep(resource);
+            owners.Add((resource.Provider, resource.Name), step);
             steps.Add(step);
         }
 
-        foreach (ApplicationManifest child in gateway.Gateways)
-        {
-            var step = new GatewayStep(null, child);
-            AddMembers(step, child);
-            foreach ((GatewayName Gateway, ApplicationResourceManifest Resource) member in step._members)
-            {
-                owners.Add((member.Gateway, member.Resource.Provider, member.Resource.Name), step);
-            }
-
-            steps.Add(step);
-        }
-
-        // A step waits for the steps that own what its resources depend on. A dependency outside the
-        // gateway's part is an ancestor gateway's to order, which deploys this gateway after it.
+        // A step waits for the steps of the resources it depends on.
         foreach (GatewayStep step in steps)
         {
-            foreach ((GatewayName Gateway, ApplicationResourceManifest Resource) member in step._members)
+            foreach (ApplicationResourceDependency dependency in step.Resource.Dependencies)
             {
-                foreach (ApplicationResourceDependency dependency in member.Resource.Dependencies)
+                if (dependency.Gateway == gateway.Name
+                    && owners.TryGetValue((dependency.Provider, dependency.Name), out GatewayStep? owner)
+                    && owner != step
+                    && !step._dependencies.Contains(owner))
                 {
-                    if (owners.TryGetValue((dependency.Gateway, dependency.Provider, dependency.Name), out GatewayStep? owner)
-                        && owner != step
-                        && !step._dependencies.Contains(owner))
-                    {
-                        step._dependencies.Add(owner);
-                        step._reasons.Add((dependency, Describe(member.Gateway, member.Resource.Provider, member.Resource.Name)));
-                    }
+                    step._dependencies.Add(owner);
+                    step._reasons.Add(dependency);
                 }
             }
         }
@@ -106,21 +80,9 @@ internal sealed class GatewayStep
         return Sort(gateway, steps);
     }
 
-    private static void AddMembers(GatewayStep step, ApplicationManifest gateway)
-    {
-        foreach (ApplicationResourceManifest resource in gateway.Resources)
-        {
-            step._members.Add((gateway.Name, resource));
-        }
-
-        foreach (ApplicationManifest child in gateway.Gateways)
-        {
-            AddMembers(step, child);
-        }
-    }
-
     // Places every step whose dependencies are placed, in declaration order, until none is left. A
-    // step that never becomes free waits, through its dependencies, for itself.
+    // step that never becomes free waits, through its dependencies, for itself. A model refuses such
+    // a cycle, so this guards a model that was not validated.
     private static GatewayStep[] Sort(ApplicationManifest gateway, List<GatewayStep> steps)
     {
         var placed = new HashSet<GatewayStep>();
@@ -160,12 +122,12 @@ internal sealed class GatewayStep
         {
             GatewayStep from = path[index];
             GatewayStep to = index + 1 < path.Count ? path[index + 1] : current;
-            (ApplicationResourceDependency dependency, string dependent) = from._reasons[from._dependencies.IndexOf(to)];
+            ApplicationResourceDependency dependency = from._reasons[from._dependencies.IndexOf(to)];
             edges.Add(Format(
                 ErrorMessages.GatewayStepWaits,
                 from.Name,
                 to.Name,
-                dependent,
+                Describe(gateway.Name, from.Resource.Provider, from.Resource.Name),
                 Describe(dependency.Gateway, dependency.Provider, dependency.Name)));
         }
 

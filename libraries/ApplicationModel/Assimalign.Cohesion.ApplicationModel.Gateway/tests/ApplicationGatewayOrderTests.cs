@@ -12,8 +12,8 @@ using Assimalign.Cohesion.ApplicationModel.Hosting;
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 /// <summary>
-/// A gateway deploying in dependency order: each resource or child gateway once what it depends on
-/// is ready, independent ones at the same time.
+/// A gateway deploying in dependency order: each resource once what it depends on is ready,
+/// independent ones at the same time.
 /// </summary>
 public sealed class ApplicationGatewayOrderTests : IDisposable
 {
@@ -39,7 +39,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     public async Task RunAsync_WithDependencies_ShouldDeployEachResourceAfterItsDependencies()
     {
         // Arrange: web depends on api, which depends on db and cache.
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition web = builder.AddResource("Web", "web");
         IApplicationResourceDefinition api = builder.AddResource("Web", "api");
         IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
@@ -48,7 +48,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         api.DependsOn(database, "data.read").DependsOn(cache);
 
         // Act
-        await using RunningGateway running = await StartAsync(builder.Build().Model);
+        await using RunningGateway running = await StartAsync(builder.Build());
 
         // Assert
         ShouldPrecede("outputs:db", "deploy:api");
@@ -62,17 +62,17 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     {
         // Arrange: api waits for db, whose instance starts only when the test lets it; cache waits
         // for nothing.
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
         builder.AddResource("Caching", "cache");
         builder.AddResource("Web", "api").DependsOn(database);
         var release = new TaskCompletionSource();
         _infrastructure.Delayed["db"] = () => release.Task;
-        ApplicationGateway gateway = CreateGateway(TimeSpan.FromSeconds(10));
+        ApplicationGateway gateway = CreateGateway(builder.Build(), TimeSpan.FromSeconds(10));
         using var stop = new CancellationTokenSource();
 
         // Act
-        Task run = gateway.RunAsync(builder.Build().Model, stop.Token);
+        Task run = gateway.RunAsync(stop.Token);
         await Eventually.WaitUntilAsync(() => _infrastructure.IndexOf("outputs:cache") >= 0);
         string[] beforeRelease = _infrastructure.Events();
         release.SetResult();
@@ -90,16 +90,16 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     public async Task RunAsync_WhenDependencyMissesItsWindow_ShouldSkipWhatDependsOnIt()
     {
         // Arrange: db never starts; api depends on db and web on api; cache depends on nothing.
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
         builder.AddResource("Caching", "cache");
         IApplicationResourceDefinition api = builder.AddResource("Web", "api").DependsOn(database);
         builder.AddResource("Web", "web").DependsOn(api);
         _infrastructure.Silent.Add("db");
-        ApplicationGateway gateway = CreateGateway(_shortWindow);
+        ApplicationGateway gateway = CreateGateway(builder.Build(), _shortWindow);
 
         // Act
-        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.RunAsync(builder.Build().Model));
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.RunAsync());
 
         // Assert
         exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.StartupTimedOut);
@@ -127,7 +127,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         _infrastructure.Revisions["db"] = "2";
         _infrastructure.Revisions["api"] = "2";
         _infrastructure.Silent.Add("db");
-        await Should.ThrowAsync<ApplicationGatewayException>(() => CreateGateway(_shortWindow).RunAsync(model));
+        await Should.ThrowAsync<ApplicationGatewayException>(() => CreateGateway(model, _shortWindow).RunAsync());
 
         // Assert
         ApplicationResourceRecord after = (await _store.LoadAsync("root"))!.Resources.Single(resource => resource.Name.Value == "api");
@@ -152,8 +152,8 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         var release = new TaskCompletionSource();
         _infrastructure.Delayed["db"] = () => release.Task;
         _infrastructure.Silent.Add("api");
-        ApplicationGateway gateway = CreateGateway(TimeSpan.FromSeconds(1));
-        Task run = gateway.RunAsync(model);
+        ApplicationGateway gateway = CreateGateway(model, TimeSpan.FromSeconds(1));
+        Task run = gateway.RunAsync();
 
         // Act: an instance of the api the platform still runs restarts while api waits for db.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
@@ -184,103 +184,23 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         running.Gateway.Resources.ShouldAllBe(resource => resource.Instances.Count == 1);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A child gateway deploys once the gateway's resources its part depends on are ready")]
-    public async Task RunAsync_WithChildGatewayDependingOnParent_ShouldDeployItAfterThem()
-    {
-        // Arrange: orders-api, two levels below the root, uses the root's identity provider, which
-        // starts after a delay; west depends on nothing.
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
-        builder.AddGateway("east").AddGateway("east-edge").AddResource("Web", "orders-api").DependsOn(identity, "tokens.issue");
-        builder.AddGateway("west");
-        _infrastructure.Delayed["identity"] = () => Task.Delay(200);
-
-        // Act
-        await using RunningGateway running = await StartAsync(builder.Build().Model);
-
-        // Assert
-        ShouldPrecede("outputs:identity", "gateway:east");
-        ShouldPrecede("gateway:west", "outputs:identity");
-        _infrastructure.DeployedGateways.Select(name => name.Value).ShouldBe(["west", "east"]);
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A resource that depends on a child gateway's resource deploys once that child gateway has started")]
-    public async Task RunAsync_WithResourceDependingOnChild_ShouldDeployItAfterTheChildGateway()
-    {
-        // Arrange
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDefinition ordersApi = builder.AddGateway("east").AddResource("Web", "orders-api");
-        builder.AddResource("Web", "app-gateway").DependsOn(ordersApi);
-
-        // Act
-        await using RunningGateway running = await StartAsync(builder.Build().Model);
-
-        // Assert
-        ShouldPrecede("gateway:east", "deploy:app-gateway");
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A part with a child gateway that is both waited for and waiting is refused before anything deploys")]
-    public async Task RunAsync_WhenChildGatewayCannotBeOrdered_ShouldRefuseBeforeDeploying()
-    {
-        // Arrange: the root's app-gateway routes to east's orders-api, and east's orders-worker calls
-        // through app-gateway, so east would deploy both before and after app-gateway.
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationSet east = builder.AddGateway("east");
-        IApplicationResourceDefinition ordersApi = east.AddResource("Web", "orders-api");
-        IApplicationResourceDefinition appGateway = builder.AddResource("Web", "app-gateway").DependsOn(ordersApi);
-        east.AddResource("Web", "orders-worker").DependsOn(appGateway);
-        ApplicationGateway gateway = CreateGateway(_shortWindow);
-
-        // Act
-        ArgumentException exception = await Should.ThrowAsync<ArgumentException>(() => gateway.RunAsync(builder.Build().Model));
-
-        // Assert
-        exception.Message.ShouldContain("Gateway 'root' cannot deploy its part in dependency order", Case.Sensitive);
-        exception.Message.ShouldContain("Web/app-gateway waits for gateway 'east', because root/Web/app-gateway depends on east/Web/orders-api", Case.Sensitive);
-        exception.Message.ShouldContain("gateway 'east' waits for Web/app-gateway, because east/Web/orders-worker depends on root/Web/app-gateway", Case.Sensitive);
-        _infrastructure.Events().ShouldBeEmpty();
-        await Should.ThrowAsync<ArgumentException>(() => gateway.Started);
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A part is refused when a gateway below it cannot deploy its own part in order")]
-    public async Task RunAsync_WhenDescendantCannotBeOrdered_ShouldRefuseBeforeDeploying()
-    {
-        // Arrange: inside east, ingress depends on east-edge's cache, and east-edge's edge-api depends
-        // on ingress.
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationSet east = builder.AddGateway("east");
-        IApplicationSet edge = east.AddGateway("east-edge");
-        IApplicationResourceDefinition ingress = east.AddResource("Web", "ingress").DependsOn(edge.AddResource("Caching", "cache"));
-        edge.AddResource("Web", "edge-api").DependsOn(ingress);
-        ApplicationGateway gateway = CreateGateway(_shortWindow);
-
-        // Act
-        ArgumentException exception = await Should.ThrowAsync<ArgumentException>(() => gateway.RunAsync(builder.Build().Model));
-
-        // Assert
-        exception.Message.ShouldContain("Gateway 'east' cannot deploy its part in dependency order", Case.Sensitive);
-        _infrastructure.Events().ShouldBeEmpty();
-    }
-
     private Task<RunningGateway> StartAsync(IApplicationModel model, TimeSpan? startupTimeout = null)
     {
         return RunningGateway.StartAsync(_infrastructure, _store, model, startupTimeout);
     }
 
-    private ApplicationGateway CreateGateway(TimeSpan startupTimeout)
+    private ApplicationGateway CreateGateway(IApplicationModel model, TimeSpan startupTimeout)
     {
-        ApplicationGateway gateway = ApplicationGateway.Create(_infrastructure, _store, startupTimeout);
-        _infrastructure.Gateway = gateway;
-        return gateway;
+        return RunningGateway.Create(_infrastructure, _store, model, startupTimeout);
     }
 
     // api depends on db.
     private static IApplicationModel CreateChain()
     {
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
         builder.AddResource("Web", "api").DependsOn(database, "data.read");
-        return builder.Build().Model;
+        return builder.Build();
     }
 
     // Writes the level on the platform's first instance of the resource and records it through the

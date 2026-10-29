@@ -2,7 +2,7 @@ using System.Text;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
-namespace Assimalign.Cohesion.ApplicationModel.Definition.Tests;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 /// <summary>
 /// Declarations and instance manifests of <c>Web/orders-api</c>.

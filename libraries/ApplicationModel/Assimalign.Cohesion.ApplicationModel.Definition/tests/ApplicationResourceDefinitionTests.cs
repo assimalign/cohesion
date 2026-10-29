@@ -14,7 +14,7 @@ public class ApplicationResourceDefinitionTests
     public void DependsOn_WithSameResourceTwice_ShouldMergePermissions()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition database = root.AddResource("Database.Sql", "orders-db");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
 
@@ -26,13 +26,13 @@ public class ApplicationResourceDefinitionTests
         dependency.Permissions.Select(permission => permission.Value).ShouldBe(["data.read", "data.write"]);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A dependency names the gateway whose set declares the resource")]
-    public void DependsOn_WithResourceInAnotherGateway_ShouldRecordThatGateway()
+    [Fact(DisplayName = DisplayPrefix + "A dependency names the gateway whose set declares both resources")]
+    public void DependsOn_WithResourceOfTheSet_ShouldRecordTheGateway()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("east");
         IApplicationResourceDefinition identity = root.AddResource("IdentityHub", "identity");
-        IApplicationResourceDefinition api = root.AddGateway("east").AddResource("Web", "orders-api");
+        IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
 
         // Act
         api.DependsOn(identity, "tokens.issue");
@@ -48,7 +48,7 @@ public class ApplicationResourceDefinitionTests
     public void DependsOn_WithItself_ShouldThrow()
     {
         // Arrange
-        IApplicationResourceDefinition api = Application.CreateBuilder("root", []).AddResource("Web", "orders-api");
+        IApplicationResourceDefinition api = ApplicationModel.CreateBuilder("root").AddResource("Web", "orders-api");
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => api.DependsOn(api));
@@ -58,10 +58,10 @@ public class ApplicationResourceDefinitionTests
     public void DependsOn_ClosingCycle_ShouldThrowAndRecordNothing()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition web = root.AddResource("Web", "web");
         IApplicationResourceDefinition api = root.AddResource("Web", "api");
-        IApplicationResourceDefinition database = root.AddGateway("east").AddResource("Database.Sql", "db");
+        IApplicationResourceDefinition database = root.AddResource("Database.Sql", "db");
         web.DependsOn(api);
         api.DependsOn(database, "data.read");
 
@@ -69,17 +69,17 @@ public class ApplicationResourceDefinitionTests
         ArgumentException exception = Should.Throw<ArgumentException>(() => database.DependsOn(web));
 
         // Assert
-        exception.Message.ShouldContain("east/Database.Sql/db -> root/Web/web -> root/Web/api -> east/Database.Sql/db", Case.Sensitive);
+        exception.Message.ShouldContain("root/Database.Sql/db -> root/Web/web -> root/Web/api -> root/Database.Sql/db", Case.Sensitive);
         database.Dependencies.ShouldBeEmpty();
         Should.NotThrow(() => root.Build());
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A resource of another hierarchy is refused")]
-    public void DependsOn_WithResourceOfAnotherHierarchy_ShouldThrow()
+    [Fact(DisplayName = DisplayPrefix + "A resource of another gateway's set is refused")]
+    public void DependsOn_WithResourceOfAnotherSet_ShouldThrow()
     {
         // Arrange
-        IApplicationResourceDefinition api = Application.CreateBuilder("contoso", []).AddResource("Web", "orders-api");
-        IApplicationResourceDefinition database = Application.CreateBuilder("fabrikam", []).AddResource("Database.Sql", "orders-db");
+        IApplicationResourceDefinition api = ApplicationModel.CreateBuilder("contoso").AddResource("Web", "orders-api");
+        IApplicationResourceDefinition database = ApplicationModel.CreateBuilder("fabrikam").AddResource("Database.Sql", "orders-db");
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => api.DependsOn(database, "data.read"));
@@ -90,7 +90,7 @@ public class ApplicationResourceDefinitionTests
     public void DependsOn_WithDefaultPermission_ShouldThrow()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition database = root.AddResource("Database.Sql", "orders-db");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
 

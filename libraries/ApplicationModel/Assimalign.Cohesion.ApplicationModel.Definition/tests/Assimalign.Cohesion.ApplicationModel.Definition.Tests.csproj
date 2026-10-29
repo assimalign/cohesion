@@ -12,7 +12,5 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
-		<!-- The tests' instances run the real control plane. -->
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 	</ItemGroup>
 </Project>

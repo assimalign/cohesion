@@ -66,7 +66,7 @@ public class ApplicationIdentityTests
     public void Id_OnSet_ShouldDeriveFromName()
     {
         // Arrange
-        IApplicationSet set = Application.CreateBuilder("root", []);
+        IApplicationSet set = ApplicationModel.CreateBuilder("root");
 
         // Act & Assert
         set.Id.ShouldBe(GatewayId.FromName("root"));

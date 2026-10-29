@@ -31,7 +31,7 @@ public class ApplicationResourceExtensionTests
     public void WithExtension_ShouldKeepOnePerPlatformAndName()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
 
         // Act
@@ -40,7 +40,7 @@ public class ApplicationResourceExtensionTests
             .WithExtension("kubernetes", "autoscaler", Json("""{"maxReplicas":10}"""));
 
         // Assert
-        root.Build().Model.Manifest.Resources.Single().Extensions
+        root.Build().Manifest.Resources.Single().Extensions
             .Select(extension => $"{extension.Platform}/{extension.Name}={extension.Value.GetRawText()}")
             .ShouldBe(["kubernetes/autoscaler={\"maxReplicas\":10}", "docker/autoscaler={\"replicas\":2}"]);
     }
@@ -49,7 +49,7 @@ public class ApplicationResourceExtensionTests
     public void WithExtension_ThenDisposeDocument_ShouldKeepTheValue()
     {
         // Arrange
-        IApplicationResourceDefinition api = Application.CreateBuilder("root", []).AddResource("Web", "orders-api");
+        IApplicationResourceDefinition api = ApplicationModel.CreateBuilder("root").AddResource("Web", "orders-api");
 
         // Act
         using (JsonDocument document = JsonDocument.Parse("""{"maxReplicas":5}"""))
@@ -65,7 +65,7 @@ public class ApplicationResourceExtensionTests
     public void WithExtension_WithMissingPartOrAfterBuild_ShouldThrow()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
         JsonElement value = Json("{}");
 
@@ -86,7 +86,7 @@ public class ApplicationResourceExtensionTests
 
         ApplicationManifest With(params ApplicationResourceExtension[] extensions)
         {
-            return new ApplicationManifest("root", [new("Web", "orders-api", [], [], extensions)], []);
+            return new ApplicationManifest("root", null, [new("Web", "orders-api", [], [], extensions)]);
         }
 
         // Act & Assert

@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
-namespace Assimalign.Cohesion.ApplicationModel.Definition.Tests;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 /// <summary>
 /// A stateful control, shaped like an area's: a read reports the level, a write sets it.

@@ -42,8 +42,8 @@ flowchart LR
 **C1 — Only what both sides exchange.** A type belongs here when the logical and the physical side
 both use it, or when it crosses between them. `IApplicationResourceInstance`, the control plane, and
 health contributors stay with the instance (ApplicationModel.Hosting) because no gateway uses them;
-the definition, the model, and the deployment stay with the logical side (ApplicationModel.Definition)
-because no instance does. A contract that only one side needs is a dependency the other side carries
+the definition and the model stay with ApplicationModel.Definition, and the deployment with
+ApplicationModel.Gateway, because no instance uses them. A contract that only one side needs is a dependency the other side carries
 for nothing.
 
 **C2 — One copy of each type.** Both sides reference this assembly instead of compiling shared
@@ -64,7 +64,7 @@ followed by the concept it is: `ApplicationActionResult`, `IApplicationContentSe
 
 Value objects carry no prefix, only the noun they identify and `Name`, `Id`, or `Key`: `ResourceName`,
 `InstanceKey`, `ActionName`, `Permission`. The same rule names the definition's and the gateway's
-types (`ApplicationGatewayRole`, `ApplicationDeploymentManifest`, `IApplicationGatewayStore`). Until
+types (`ApplicationGatewayRole`, `ApplicationGatewayRecord`, `IApplicationGatewayStore`). Until
 this decision the contracts and the instance side were `Resource`-prefixed (`ResourceManifest`,
 `IResourceControlPlane`), beside the `IApplicationResource` family.
 

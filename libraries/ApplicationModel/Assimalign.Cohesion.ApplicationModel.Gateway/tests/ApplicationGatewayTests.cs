@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
@@ -16,57 +17,39 @@ public class ApplicationGatewayTests
 
     private static readonly TimeSpan _shortWindow = TimeSpan.FromMilliseconds(300);
 
-    [Fact(DisplayName = DisplayPrefix + "A root gateway deploys its child gateways and only its own resources")]
-    public async Task RunAsync_AsRoot_ShouldDeployItsOwnPart()
+    [Fact(DisplayName = DisplayPrefix + "A gateway deploys the resources its model declares")]
+    public async Task RunAsync_WithModel_ShouldDeployItsResources()
     {
         // Arrange
-        IApplicationModel model = CreateHierarchy().Build().Model;
-        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway();
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("IdentityHub", "identity");
+        IApplicationModel model = builder.Build();
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(model);
         using var stop = new CancellationTokenSource();
 
         // Act
-        Task run = gateway.RunAsync(model, stop.Token);
+        Task run = gateway.RunAsync(stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         stop.Cancel();
         await run;
 
         // Assert
+        gateway.Name.ShouldBe(new GatewayName("root"));
+        gateway.Model.ShouldBeSameAs(model);
         model.Role.ShouldBe(ApplicationGatewayRole.Root);
-        infrastructure.DeployedGateways.Select(name => name.Value).ShouldBe(["east", "west"]);
         infrastructure.Deployed.ShouldBe(["root:IdentityHub/identity"]);
         gateway.Resources.ShouldHaveSingleItem().Instances.Count.ShouldBe(1);
         infrastructure.TornDown.ShouldBeEmpty();
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A composite gateway deploys only its part of the hierarchy")]
-    public async Task RunAsync_AsComposite_ShouldDeployOnlyItsPart()
-    {
-        // Arrange
-        ApplicationManifest manifest = CreateHierarchy().GetManifest();
-        IApplicationModel model = ApplicationModel.Create(manifest, "east");
-        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway();
-        using var stop = new CancellationTokenSource();
-
-        // Act
-        Task run = gateway.RunAsync(model, stop.Token);
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        stop.Cancel();
-        await run;
-
-        // Assert
-        model.Role.ShouldBe(ApplicationGatewayRole.Composite);
-        infrastructure.DeployedGateways.Select(name => name.Value).ShouldBe(["east-edge"]);
-        infrastructure.Deployed.ShouldBe(["east:Database.Sql/orders-db", "east:Web/orders-api"]);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A resource that misses the startup window is torn down and fails the run")]
     public async Task RunAsync_WhenResourceMissesStartupWindow_ShouldTearItDownAndFail()
     {
         // Arrange
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "orders-api");
         builder.AddResource("Web", "customers-api");
-        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(_shortWindow);
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build(), _shortWindow);
         infrastructure.Silent.Add("customers-api");
         ApplicationGatewayException? lateInstance = null;
         infrastructure.OnTeardown = async resource =>
@@ -76,7 +59,7 @@ public class ApplicationGatewayTests
         };
 
         // Act
-        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.RunAsync(builder.Build().Model));
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.RunAsync());
 
         // Assert
         exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.StartupTimedOut);
@@ -90,14 +73,14 @@ public class ApplicationGatewayTests
     public async Task RunAsync_CancelledDuringStartup_ShouldStopWithoutTeardown()
     {
         // Arrange
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "orders-api");
-        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(TimeSpan.FromMinutes(5));
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build(), TimeSpan.FromMinutes(5));
         infrastructure.Silent.Add("orders-api");
         using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
 
         // Act
-        await gateway.RunAsync(builder.Build().Model, stop.Token);
+        await gateway.RunAsync(stop.Token);
 
         // Assert
         infrastructure.TornDown.ShouldBeEmpty();
@@ -108,13 +91,13 @@ public class ApplicationGatewayTests
     public async Task PublishAsync_OutsideRun_ShouldThrowPublicationsClosed()
     {
         // Arrange
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "orders-api");
-        (ApplicationGateway gateway, _) = CreateGateway();
+        (ApplicationGateway gateway, _) = CreateGateway(builder.Build());
         var manifest = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), []);
         ApplicationGatewayException before = Should.Throw<ApplicationGatewayException>(() => gateway.PublishAsync(manifest));
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(builder.Build().Model, stop.Token);
+        Task run = gateway.RunAsync(stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         stop.Cancel();
         await run;
@@ -131,10 +114,11 @@ public class ApplicationGatewayTests
     public async Task PublishAsync_ForUnknownResource_ShouldThrowResourceUnknown()
     {
         // Arrange
-        IApplicationModel model = CreateHierarchy().Build().Model;
-        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway();
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("IdentityHub", "identity");
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(model, stop.Token);
+        Task run = gateway.RunAsync(stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Act
@@ -143,7 +127,7 @@ public class ApplicationGatewayTests
         stop.Cancel();
         await run;
 
-        // Assert: orders-api runs in east, not in the root gateway.
+        // Assert: the root gateway does not run orders-api.
         exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.ResourceUnknown);
     }
 
@@ -151,11 +135,11 @@ public class ApplicationGatewayTests
     public async Task PublishAsync_AfterRecordedWrite_ShouldRestoreEveryInstance()
     {
         // Arrange
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "orders-api");
-        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway();
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(builder.Build().Model, stop.Token);
+        Task run = gateway.RunAsync(stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         TestInstance second = await infrastructure.StartInstanceAsync("Web", "orders-api");
         IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
@@ -184,11 +168,11 @@ public class ApplicationGatewayTests
     public async Task Resources_WithInfrastructureActions_ShouldDispatchThem()
     {
         // Arrange
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "orders-api");
-        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway();
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(builder.Build().Model, stop.Token);
+        Task run = gateway.RunAsync(stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
 
@@ -213,41 +197,19 @@ public class ApplicationGatewayTests
     public async Task RunAsync_Twice_ShouldThrow()
     {
         // Arrange
-        IApplicationModel model = Application.CreateBuilder("root", []).Build().Model;
-        (ApplicationGateway gateway, _) = CreateGateway();
+        (ApplicationGateway gateway, _) = CreateGateway(ApplicationModel.CreateBuilder("root").Build());
         using var stop = new CancellationTokenSource();
         stop.Cancel();
-        await gateway.RunAsync(model, stop.Token);
+        await gateway.RunAsync(stop.Token);
 
         // Act & Assert
-        await Should.ThrowAsync<InvalidOperationException>(() => gateway.RunAsync(model, CancellationToken.None));
+        await Should.ThrowAsync<InvalidOperationException>(() => gateway.RunAsync(CancellationToken.None));
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A startup window must be positive")]
-    public void Create_WithNonPositiveStartupTimeout_ShouldThrow()
-    {
-        // Arrange, Act & Assert
-        Should.Throw<ArgumentOutOfRangeException>(() => ApplicationGateway.Create(new TestInfrastructure(), TimeSpan.Zero));
-    }
-
-    // root runs the identity provider; east runs orders-db and orders-api and a child of its own.
-    private static ApplicationBuilder CreateHierarchy()
-    {
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
-        IApplicationSet east = builder.AddGateway("east");
-        IApplicationResourceDefinition database = east.AddResource("Database.Sql", "orders-db");
-        east.AddResource("Web", "orders-api").DependsOn(database, "data.read").DependsOn(identity);
-        east.AddGateway("east-edge");
-        builder.AddGateway("west");
-        return builder;
-    }
-
-    private static (ApplicationGateway Gateway, TestInfrastructure Infrastructure) CreateGateway(TimeSpan? startupTimeout = null)
+    private static (ApplicationGateway Gateway, TestInfrastructure Infrastructure) CreateGateway(IApplicationModel model, TimeSpan? startupTimeout = null)
     {
         var infrastructure = new TestInfrastructure();
-        ApplicationGateway gateway = ApplicationGateway.Create(infrastructure, startupTimeout ?? TimeSpan.FromSeconds(10));
-        infrastructure.Gateway = gateway;
+        ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, startupTimeout);
         return (gateway, infrastructure);
     }
 }

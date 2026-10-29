@@ -31,14 +31,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     public ScaleAction Scale { get; } = new();
 
     public List<string> Deployed { get; } = [];
-
-    public List<GatewayName> DeployedGateways { get; } = [];
-
-    /// <summary>The deployment manifest each child gateway was last deployed with.</summary>
-    public ConcurrentDictionary<GatewayName, ApplicationDeploymentManifest> GatewayDeployments { get; } = new();
-
-    public List<GatewayName> TornDownGateways { get; } = [];
-
+
     public List<ResourceName> TornDown { get; } = [];
 
     public Func<ApplicationResourceManifest, Task>? OnTeardown { get; set; }
@@ -135,15 +128,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
         await StartInstanceAsync(resource.Provider, resource.Name, cancellationToken);
     }
-
-    public ValueTask DeployGatewayAsync(IApplicationModel model, ApplicationDeploymentManifest deployment, CancellationToken cancellationToken = default)
-    {
-        GatewayDeployments[deployment.Gateway] = deployment;
-        Record(DeployedGateways, deployment.Gateway);
-        Record($"gateway:{deployment.Gateway}");
-        return ValueTask.CompletedTask;
-    }
-
+
     public async ValueTask TeardownResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
     {
         Record(TornDown, resource.Name);
@@ -154,16 +139,10 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
             await OnTeardown.Invoke(resource);
         }
     }
-
-    public ValueTask TeardownGatewayAsync(IApplicationModel model, GatewayName gateway, CancellationToken cancellationToken = default)
-    {
-        Record(TornDownGateways, gateway);
-        return ValueTask.CompletedTask;
-    }
-
+
     /// <summary>
     /// The calls in the order they were made: <c>plan:</c>, <c>deploy:</c>, <c>outputs:</c> and
-    /// <c>teardown:</c> with a resource name, <c>gateway:</c> with a child gateway's.
+    /// <c>teardown:</c> with a resource name.
     /// </summary>
     public string[] Events()
     {

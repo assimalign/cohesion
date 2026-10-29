@@ -7,7 +7,7 @@ using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
-namespace Assimalign.Cohesion.ApplicationModel.Definition.Tests;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class ApplicationResourceReplicationTests
 {
@@ -17,10 +17,10 @@ public class ApplicationResourceReplicationTests
     public async Task ExecuteAsync_WithRecordedStatefulWrite_ShouldReachEveryInstance()
     {
         // Arrange: a deployment declares orders-api, and the gateway builds its aggregate from the manifest.
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         root.AddResource("Web", "orders-api");
-        IApplication application = root.Build();
-        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(application.Model.Manifest.Resources[0]);
+        IApplicationModel model = root.Build();
+        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(model.Manifest.Resources[0]);
         var publisher = new ApplicationResourcePublisher(resource);
         var instances = new Dictionary<InstanceKey, (TestResource Resource, ApplicationInstanceControlPlane ControlPlane)>();
 

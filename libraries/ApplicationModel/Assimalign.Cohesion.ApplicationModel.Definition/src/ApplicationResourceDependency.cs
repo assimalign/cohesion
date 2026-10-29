@@ -3,9 +3,10 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// One resource's dependency on another, and the permissions it needs there.
+/// One resource's dependency on another of its gateway's resources, and the permissions it needs
+/// there.
 /// </summary>
-/// <param name="Gateway">The gateway whose set declares the resource depended on.</param>
+/// <param name="Gateway">The gateway whose set declares both resources.</param>
 /// <param name="Provider">The provider of the resource depended on.</param>
 /// <param name="Name">The name of the resource depended on.</param>
 /// <param name="Permissions">

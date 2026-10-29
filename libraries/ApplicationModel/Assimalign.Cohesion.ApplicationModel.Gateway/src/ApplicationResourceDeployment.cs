@@ -7,7 +7,7 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
 /// A gateway's view of one application resource: its registered instances and the state recorded

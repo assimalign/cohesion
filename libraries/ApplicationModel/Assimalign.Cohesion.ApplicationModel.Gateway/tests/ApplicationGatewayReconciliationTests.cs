@@ -76,11 +76,11 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         second.Gateway.Resources.Single().Instances.Count.ShouldBe(2);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "Resources and child gateways the model no longer declares are torn down after startup")]
-    public async Task RunAsync_WhenModelDropsResourcesAndGateways_ShouldRetireThem()
+    [Fact(DisplayName = DisplayPrefix + "Resources the model no longer declares are torn down after startup")]
+    public async Task RunAsync_WhenModelDropsResources_ShouldRetireThem()
     {
         // Arrange
-        await using (await StartAsync(CreateModel(["orders-api", "customers-api"], ["east"])))
+        await using (await StartAsync(CreateModel(["orders-api", "customers-api"])))
         {
         }
 
@@ -89,10 +89,8 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
         // Assert
         _infrastructure.TornDown.Select(name => name.Value).ShouldBe(["customers-api"]);
-        _infrastructure.TornDownGateways.Select(name => name.Value).ShouldBe(["east"]);
         ApplicationGatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
         record.Resources.Select(resource => resource.Name.Value).ShouldBe(["orders-api"]);
-        record.Gateways.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = DisplayPrefix + "A new revision redeploys the resource without the state recorded for the previous one")]
@@ -152,11 +150,10 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
         _infrastructure.Revisions["orders-api"] = "2";
         _infrastructure.Silent.Add("orders-api");
-        ApplicationGateway gateway = ApplicationGateway.Create(_infrastructure, _store, _shortWindow);
-        _infrastructure.Gateway = gateway;
+        ApplicationGateway gateway = RunningGateway.Create(_infrastructure, _store, model, _shortWindow);
 
         // Act
-        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.RunAsync(model));
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.RunAsync());
 
         // Assert
         exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.StartupTimedOut);
@@ -202,19 +199,14 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         }
     }
 
-    private static IApplicationModel CreateModel(string[] resources, string[]? gateways = null)
+    private static IApplicationModel CreateModel(string[] resources)
     {
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         foreach (string resource in resources)
         {
             builder.AddResource("Web", resource);
         }
 
-        foreach (string gateway in gateways ?? [])
-        {
-            builder.AddGateway(gateway);
-        }
-
-        return builder.Build().Model;
+        return builder.Build();
     }
 }

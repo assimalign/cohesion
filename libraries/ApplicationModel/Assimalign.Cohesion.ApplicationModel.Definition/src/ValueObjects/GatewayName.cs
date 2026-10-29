@@ -1,13 +1,13 @@
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// Names a gateway: the root gateway of an application set, or a child gateway it deploys, such
-/// as <c>east</c>.
+/// Names a gateway, such as <c>east</c>: a root gateway, or a child gateway that joins a parent.
 /// </summary>
 /// <remarks>
 /// A gateway name is an RFC 1035 label, so a platform can name its objects after it: 1 to 63
 /// lowercase ASCII letters, digits, or hyphens, starting with a letter and ending with a letter or
-/// digit. Gateway names are unique across one application set's whole hierarchy.
+/// digit. A child joins its parent under its name, so the gateways that join one parent have
+/// different names.
 /// </remarks>
 public readonly partial struct GatewayName
 {

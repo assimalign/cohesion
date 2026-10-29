@@ -44,14 +44,14 @@ public class ApplicationResourceSettingTests
     public void WithSetting_WithValue_ShouldRecordIt()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
 
         // Act
         api.WithSetting("Logging:LogLevel:Default", "Debug");
 
         // Assert
-        ApplicationResourceSetting setting = root.Build().Model.Manifest.Resources.ShouldHaveSingleItem().Settings.ShouldHaveSingleItem();
+        ApplicationResourceSetting setting = root.Build().Manifest.Resources.ShouldHaveSingleItem().Settings.ShouldHaveSingleItem();
         setting.ShouldBe(new ApplicationResourceSetting("Logging:LogLevel:Default", "Debug", null));
         api.Dependencies.ShouldBeEmpty();
     }
@@ -60,9 +60,9 @@ public class ApplicationResourceSettingTests
     public void WithSetting_WithOutput_ShouldDependOnTheOutputsResource()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition store = root.AddResource("ConfigurationStore", "settings");
-        IApplicationResourceDefinition api = root.AddGateway("east").AddResource("Web", "orders-api");
+        IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
 
         // Act
         api.WithSetting("ConfigurationStore:Endpoint", store.Endpoint);
@@ -78,7 +78,7 @@ public class ApplicationResourceSettingTests
     public void WithSetting_WithOutputOfDependency_ShouldKeepItsPermissions()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition database = root.AddResource("Database.Sql", "orders-db");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api").DependsOn(database, "data.read");
 
@@ -93,7 +93,7 @@ public class ApplicationResourceSettingTests
     public void WithSetting_WithSameName_ShouldReplaceTheValue()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition database = root.AddResource("Database.Sql", "orders-db");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
 
@@ -112,18 +112,18 @@ public class ApplicationResourceSettingTests
     public void WithSetting_WithOwnOutput_ShouldThrow()
     {
         // Arrange
-        IApplicationResourceDefinition api = Application.CreateBuilder("root", []).AddResource("Web", "orders-api");
+        IApplicationResourceDefinition api = ApplicationModel.CreateBuilder("root").AddResource("Web", "orders-api");
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => api.WithSetting("Self:Endpoint", api.Endpoint));
         api.Settings.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = DisplayPrefix + "An output of a resource the hierarchy does not declare is refused")]
+    [Fact(DisplayName = DisplayPrefix + "An output of a resource this gateway does not declare is refused")]
     public void WithSetting_WithUndeclaredOutput_ShouldThrow()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
         var output = new ApplicationResourceOutput("root", "Database.Sql", "orders-db", OutputName.Endpoint);
 
@@ -132,11 +132,28 @@ public class ApplicationResourceSettingTests
         api.Dependencies.ShouldBeEmpty();
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A value from the parent's output is recorded without a dependency")]
+    public void WithSetting_WithParentOutput_ShouldRecordItWithoutDependency()
+    {
+        // Arrange
+        IApplicationModelBuilder east = ApplicationModel.CreateBuilder("east");
+        IApplicationParent root = east.UseParent("root");
+        IApplicationResourceDefinition api = east.AddResource("Web", "orders-api");
+
+        // Act
+        api.WithSetting("Identity:Endpoint", root.Endpoint("IdentityHub", "identity"));
+
+        // Assert
+        api.Settings.ShouldHaveSingleItem().Output.ShouldBe(new ApplicationResourceOutput("root", "IdentityHub", "identity", OutputName.Endpoint));
+        api.Dependencies.ShouldBeEmpty();
+        east.Build().Manifest.Resources.ShouldHaveSingleItem().Dependencies.ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = DisplayPrefix + "An output whose resource depends on this one is refused, and nothing is recorded")]
     public void WithSetting_WithOutputClosingCycle_ShouldThrowAndRecordNothing()
     {
         // Arrange: the database already depends on the api.
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
         IApplicationResourceDefinition database = root.AddResource("Database.Sql", "orders-db").DependsOn(api);
 
@@ -153,7 +170,7 @@ public class ApplicationResourceSettingTests
     public void WithSetting_AfterBuild_ShouldThrow()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         IApplicationResourceDefinition api = root.AddResource("Web", "orders-api");
         root.Build();
 
@@ -168,8 +185,8 @@ public class ApplicationResourceSettingTests
         var output = new ApplicationResourceOutput("root", "Database.Sql", "orders-db", OutputName.Endpoint);
         var manifest = new ApplicationManifest(
             "root",
-            [new("Database.Sql", "orders-db", [], [], []), new("Web", "orders-api", [], [new ApplicationResourceSetting("Database:Endpoint", null, output)], [])],
-            []);
+            null,
+            [new("Database.Sql", "orders-db", [], [], []), new("Web", "orders-api", [], [new ApplicationResourceSetting("Database:Endpoint", null, output)], [])]);
 
         // Act
         ArgumentException exception = Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
@@ -188,7 +205,7 @@ public class ApplicationResourceSettingTests
 
         ApplicationManifest With(params ApplicationResourceSetting[] settings)
         {
-            return new ApplicationManifest("root", [database, new("Web", "orders-api", [dependency], settings, [])], []);
+            return new ApplicationManifest("root", null, [database, new("Web", "orders-api", [dependency], settings, [])]);
         }
 
         // Act & Assert
@@ -197,19 +214,5 @@ public class ApplicationResourceSettingTests
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(With(new ApplicationResourceSetting("Feature:Mode", null, null))));
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(With(new ApplicationResourceSetting("Database:Endpoint", "http://localhost", output))));
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(With(new ApplicationResourceSetting("Self:Endpoint", null, new ApplicationResourceOutput("root", "Web", "orders-api", OutputName.Endpoint)))));
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "Clearing a resource's state drops its snapshots, so a new instance restores none")]
-    public void ClearState_ShouldDropRecordedSnapshots()
-    {
-        // Arrange
-        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi, [TestManifests.LogLevelSnapshot("Debug")]);
-
-        // Act
-        resource.ClearState();
-
-        // Assert
-        resource.State.ShouldBeEmpty();
-        resource.Register(TestManifests.Instance()).ShouldBeEmpty();
     }
 }

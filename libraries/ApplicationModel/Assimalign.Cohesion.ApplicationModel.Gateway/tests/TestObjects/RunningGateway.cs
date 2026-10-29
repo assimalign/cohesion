@@ -12,13 +12,36 @@ internal sealed class RunningGateway : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _run;
 
-    private RunningGateway(ApplicationGateway gateway, IApplicationModel model)
+    private RunningGateway(ApplicationGateway gateway)
     {
         Gateway = gateway;
-        _run = gateway.RunAsync(model, _stop.Token);
+        _run = gateway.RunAsync(_stop.Token);
     }
 
     public ApplicationGateway Gateway { get; }
+
+    /// <summary>
+    /// Creates a gateway over the platform with a model built elsewhere, as its builder would, without
+    /// running it.
+    /// </summary>
+    public static ApplicationGateway Create(
+        TestInfrastructure infrastructure,
+        IApplicationGatewayStore store,
+        IApplicationModel model,
+        TimeSpan? startupTimeout = null,
+        TimeSpan? leaseDuration = null,
+        IApplicationParentGateway? parent = null)
+    {
+        var gateway = new ApplicationGateway(
+            model,
+            infrastructure,
+            store,
+            parent,
+            startupTimeout ?? TimeSpan.FromSeconds(10),
+            leaseDuration ?? TimeSpan.FromSeconds(30));
+        infrastructure.Gateway = gateway;
+        return gateway;
+    }
 
     /// <summary>Starts a gateway over the platform and waits until its startup completes.</summary>
     public static async Task<RunningGateway> StartAsync(
@@ -26,13 +49,11 @@ internal sealed class RunningGateway : IAsyncDisposable
         IApplicationGatewayStore store,
         IApplicationModel model,
         TimeSpan? startupTimeout = null,
-        TimeSpan? leaseDuration = null)
+        TimeSpan? leaseDuration = null,
+        IApplicationParentGateway? parent = null)
     {
-        ApplicationGateway gateway = ApplicationGateway.Create(infrastructure, store, startupTimeout ?? TimeSpan.FromSeconds(10), leaseDuration);
-        infrastructure.Gateway = gateway;
-
-        var running = new RunningGateway(gateway, model);
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        var running = new RunningGateway(Create(infrastructure, store, model, startupTimeout, leaseDuration, parent));
+        await running.Gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         return running;
     }
 

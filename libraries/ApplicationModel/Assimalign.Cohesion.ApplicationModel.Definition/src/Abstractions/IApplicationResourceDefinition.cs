@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 /// <remarks>
 /// The resource's <see cref="IApplicationResource.Id"/> is unique within <see cref="Set"/>. Across
-/// the hierarchy, a resource is identified by its set's <see cref="IApplicationSet.Id"/> and that id
+/// gateways, a resource is identified by its set's <see cref="IApplicationSet.Id"/> and that id
 /// together.
 /// </remarks>
 public interface IApplicationResourceDefinition : IApplicationResource
@@ -64,16 +64,17 @@ public interface IApplicationResourceDefinition : IApplicationResource
     /// depends on does so at run time, through an action that resource exposes. The gateway also
     /// registers the permissions with the tenant's identity provider, which issues this resource
     /// credentials for them when it runs. Declaring the same dependency again adds the new
-    /// permissions to it. The other resource may belong to any set of the same hierarchy.
+    /// permissions to it. The other resource belongs to the same set: a gateway orders only its own
+    /// resources, and a resource uses its parent gateway's resources through their outputs.
     /// </remarks>
     /// <param name="resource">The resource depended on.</param>
     /// <param name="permissions">The permissions this resource needs on it; none to depend without access.</param>
-    /// <returns>This descriptor.</returns>
+    /// <returns>This definition.</returns>
     /// <exception cref="System.ArgumentNullException">
     /// <paramref name="resource"/> or <paramref name="permissions"/> is <see langword="null"/>.
     /// </exception>
     /// <exception cref="System.ArgumentException">
-    /// <paramref name="resource"/> is this resource, belongs to another hierarchy, or already depends
+    /// <paramref name="resource"/> is this resource, belongs to another set, or already depends
     /// on this resource, directly or through others; or a permission is <see langword="default"/>.
     /// </exception>
     IApplicationResourceDefinition DependsOn(IApplicationResourceDefinition resource, params Permission[] permissions);
@@ -87,7 +88,7 @@ public interface IApplicationResourceDefinition : IApplicationResource
     /// </remarks>
     /// <param name="name">The configuration key, such as <c>Logging:LogLevel:Default</c>.</param>
     /// <param name="value">The value.</param>
-    /// <returns>This descriptor.</returns>
+    /// <returns>This definition.</returns>
     /// <exception cref="System.ArgumentNullException"><paramref name="value"/> is <see langword="null"/>.</exception>
     /// <exception cref="System.ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
     IApplicationResourceDefinition WithSetting(SettingName name, string value);
@@ -97,18 +98,22 @@ public interface IApplicationResourceDefinition : IApplicationResource
     /// output, such as the endpoint of a store it uses.
     /// </summary>
     /// <remarks>
-    /// The resource depends on the output's resource, with no permissions unless
-    /// <see cref="DependsOn"/> grants them, so the gateway deploys it once that resource runs and
-    /// its outputs are known, then fills the value in. Setting a name again replaces its value.
+    /// For an output of the set's own resources, the resource depends on the output's resource, with
+    /// no permissions unless <see cref="DependsOn"/> grants them, so the gateway deploys it once that
+    /// resource runs and its outputs are known, then fills the value in. For an output of the parent
+    /// gateway's resources (<see cref="IApplicationParent.Output"/>), the parent hands the value over
+    /// when the gateway joins it, and the model checks that the output's gateway is the parent. Setting
+    /// a name again replaces its value.
     /// </remarks>
     /// <param name="name">The configuration key, such as <c>ConfigurationStore:Endpoint</c>.</param>
-    /// <param name="output">The placeholder for the output, from the other resource's descriptor.</param>
-    /// <returns>This descriptor.</returns>
+    /// <param name="output">The placeholder for the output, from the other resource's definition or the parent.</param>
+    /// <returns>This definition.</returns>
     /// <exception cref="System.ArgumentNullException"><paramref name="output"/> is <see langword="null"/>.</exception>
     /// <exception cref="System.ArgumentException">
     /// <paramref name="name"/> or the output's name is <see langword="default"/>; the output is this
-    /// resource's own, which exists only once it is deployed; the output's resource is not declared
-    /// in this hierarchy; or that resource already depends on this one, directly or through others.
+    /// resource's own, which exists only once it is deployed; the output's resource is in this gateway
+    /// but not declared in its set; or that resource already depends on this one, directly or through
+    /// others.
     /// </exception>
     IApplicationResourceDefinition WithSetting(SettingName name, ApplicationResourceOutput output);
 
@@ -126,7 +131,7 @@ public interface IApplicationResourceDefinition : IApplicationResource
     /// <param name="platform">The platform the extension applies on, such as <c>kubernetes</c>.</param>
     /// <param name="name">The extension's name, such as <c>autoscaler</c>.</param>
     /// <param name="value">The extension's options, as JSON that platform's provider reads.</param>
-    /// <returns>This descriptor.</returns>
+    /// <returns>This definition.</returns>
     /// <exception cref="System.ArgumentException">
     /// <paramref name="platform"/> or <paramref name="name"/> is <see langword="default"/>, or
     /// <paramref name="value"/> is the default <see cref="JsonElement"/>.

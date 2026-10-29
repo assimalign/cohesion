@@ -5,30 +5,45 @@ using System.Globalization;
 
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
-// One set's resources and child gateways, and the rules for adding them. The application builder
-// (the root set) and each child set own one.
+// One gateway's resources, the rules for adding them, and whether the model has been built. The
+// model builder owns one, and each resource definition reaches it to look up the resources its
+// dependencies and settings name.
 [DebuggerDisplay("{Owner.Name}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ApplicationSetComposition
 {
     private readonly List<ApplicationResourceDefinition> _resources = [];
-    private readonly List<ApplicationSet> _gateways = [];
 
-    public ApplicationSetComposition(IApplicationSet owner, ApplicationHierarchy hierarchy)
+    public ApplicationSetComposition(IApplicationSet owner)
     {
         Owner = owner;
-        Hierarchy = hierarchy;
         Resources = _resources.AsReadOnly();
-        Gateways = _gateways.AsReadOnly();
     }
 
     public IApplicationSet Owner { get; }
 
-    public ApplicationHierarchy Hierarchy { get; }
+    // The parent gateway the model joins, once named.
+    public GatewayName? Parent { get; set; }
 
     public IReadOnlyCollection<IApplicationResourceDefinition> Resources { get; }
 
-    public IReadOnlyCollection<IApplicationSet> Gateways { get; }
+    // Every resource by provider and name, so a setting can find the resource its output belongs to.
+    public Dictionary<(ProviderName Provider, ResourceName Name), ApplicationResourceDefinition> Index { get; } = [];
+
+    public bool IsBuilt { get; private set; }
+
+    public void MarkBuilt()
+    {
+        IsBuilt = true;
+    }
+
+    public void ThrowIfBuilt()
+    {
+        if (IsBuilt)
+        {
+            throw new InvalidOperationException(ErrorMessages.ApplicationCompositionClosed);
+        }
+    }
 
     public IApplicationResourceDefinition AddResource(ProviderName provider, ResourceName name)
     {
@@ -42,39 +57,17 @@ internal sealed class ApplicationSetComposition
             throw new ArgumentException(ErrorMessages.ResourceNameMissing, nameof(name));
         }
 
-        Hierarchy.ThrowIfBuilt();
+        ThrowIfBuilt();
 
-        foreach (ApplicationResourceDefinition resource in _resources)
+        if (Index.ContainsKey((provider, name)))
         {
-            if (resource.Provider == provider && resource.Name == name)
-            {
-                throw new InvalidOperationException(Format(ErrorMessages.ApplicationResourceDuplicate, Owner.Name, provider, name));
-            }
+            throw new InvalidOperationException(Format(ErrorMessages.ApplicationResourceDuplicate, Owner.Name, provider, name));
         }
 
-        var descriptor = new ApplicationResourceDefinition(this, provider, name);
-        _resources.Add(descriptor);
-        Hierarchy.Resources.Add((Owner.Name, provider, name), descriptor);
-        return descriptor;
-    }
-
-    public IApplicationSet AddGateway(GatewayName name)
-    {
-        if (name.Value is null)
-        {
-            throw new ArgumentException(ErrorMessages.GatewayNameMissing, nameof(name));
-        }
-
-        Hierarchy.ThrowIfBuilt();
-
-        if (!Hierarchy.GatewayNames.Add(name))
-        {
-            throw new InvalidOperationException(Format(ErrorMessages.ApplicationGatewayDuplicate, name));
-        }
-
-        var gateway = new ApplicationSet(name, Owner, Hierarchy);
-        _gateways.Add(gateway);
-        return gateway;
+        var definition = new ApplicationResourceDefinition(this, provider, name);
+        _resources.Add(definition);
+        Index.Add((provider, name), definition);
+        return definition;
     }
 
     public ApplicationManifest GetManifest()
@@ -85,13 +78,7 @@ internal sealed class ApplicationSetComposition
             resources[index] = _resources[index].ToManifest();
         }
 
-        var gateways = new ApplicationManifest[_gateways.Count];
-        for (int index = 0; index < gateways.Length; index++)
-        {
-            gateways[index] = _gateways[index].GetManifest();
-        }
-
-        return new ApplicationManifest(Owner.Name, Array.AsReadOnly(resources), Array.AsReadOnly(gateways));
+        return new ApplicationManifest(Owner.Name, Parent, Array.AsReadOnly(resources));
     }
 
     private static string Format(string format, params object?[] arguments)
@@ -111,7 +98,5 @@ internal sealed class ApplicationSetComposition
         public IApplicationSet Owner => _composition.Owner;
 
         public IReadOnlyCollection<IApplicationResourceDefinition> Resources => _composition.Resources;
-
-        public IReadOnlyCollection<IApplicationSet> Gateways => _composition.Gateways;
     }
 }

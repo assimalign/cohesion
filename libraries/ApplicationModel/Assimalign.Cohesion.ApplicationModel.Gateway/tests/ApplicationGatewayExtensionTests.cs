@@ -93,11 +93,11 @@ public sealed class ApplicationGatewayExtensionTests : IDisposable
     // verbs would declare them.
     private static IApplicationModel CreateModel(int testReplicas, int kubernetesReplicas)
     {
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "api")
             .WithExtension("test", "autoscaler", Json($$"""{"replicas":{{testReplicas}}}"""))
             .WithExtension("kubernetes", "autoscaler", Json($$"""{"maxReplicas":{{kubernetesReplicas}}}"""));
-        return builder.Build().Model;
+        return builder.Build();
     }
 
     // Writes the level on api's instance and records it through the gateway.

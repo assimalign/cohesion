@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 
 using Shouldly;
 using Xunit;
@@ -26,13 +25,11 @@ public class ApplicationResourceOutputTests
         OutputName.TryCreate(value, out _).ShouldBe(expected);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A descriptor's output placeholder names its gateway, resource, and output")]
+    [Fact(DisplayName = DisplayPrefix + "A definition's output placeholder names its gateway, resource, and output")]
     public void Output_WithName_ShouldReferenceTheResource()
     {
         // Arrange
-        ApplicationBuilder root = Application.CreateBuilder("root", []);
-        IApplicationSet east = root.AddGateway("east");
-        IApplicationResourceDefinition store = east.AddResource("ConfigurationStore", "settings");
+        IApplicationResourceDefinition store = ApplicationModel.CreateBuilder("east").AddResource("ConfigurationStore", "settings");
 
         // Act
         ApplicationResourceOutput endpoint = store.Endpoint;
@@ -47,93 +44,36 @@ public class ApplicationResourceOutputTests
     public void Output_WithDefaultName_ShouldThrow()
     {
         // Arrange
-        IApplicationResourceDefinition store = Application.CreateBuilder("root", []).AddResource("ConfigurationStore", "settings");
+        IApplicationResourceDefinition store = ApplicationModel.CreateBuilder("root").AddResource("ConfigurationStore", "settings");
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => store.Output(default));
     }
 
-    [Fact(DisplayName = DisplayPrefix + "Setting outputs reports whether any was added, changed, or removed")]
-    public void SetOutputs_ShouldReportChanges()
+    [Fact(DisplayName = DisplayPrefix + "The parent's output placeholder names the parent, its resource, and the output")]
+    public void ParentOutput_WithNames_ShouldReferenceTheParentsResource()
     {
         // Arrange
-        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
+        IApplicationParent root = ApplicationModel.CreateBuilder("east").UseParent("root");
 
         // Act
-        bool added = resource.SetOutputs(Endpoint("http://orders-api.root.svc"));
-        bool same = resource.SetOutputs(Endpoint("http://orders-api.root.svc"));
-        bool moved = resource.SetOutputs(Endpoint("http://10.0.0.7:8080"));
-        string current = resource.Outputs[OutputName.Endpoint];
-        bool removed = resource.SetOutputs(new Dictionary<OutputName, string>());
+        ApplicationResourceOutput endpoint = root.Endpoint("IdentityHub", "identity");
+        ApplicationResourceOutput adminEndpoint = root.Output("IdentityHub", "identity", "admin-endpoint");
 
         // Assert
-        added.ShouldBeTrue();
-        same.ShouldBeFalse();
-        moved.ShouldBeTrue();
-        current.ShouldBe("http://10.0.0.7:8080");
-        removed.ShouldBeTrue();
-        resource.Outputs.ShouldBeEmpty();
+        endpoint.ShouldBe(new ApplicationResourceOutput("root", "IdentityHub", "identity", OutputName.Endpoint));
+        adminEndpoint.ShouldBe(new ApplicationResourceOutput("root", "IdentityHub", "identity", "admin-endpoint"));
     }
 
-    [Fact(DisplayName = DisplayPrefix + "An output without a value is refused and changes nothing")]
-    public void SetOutputs_WithoutValue_ShouldThrow()
+    [Fact(DisplayName = DisplayPrefix + "The parent's output placeholder needs a provider, a name, and an output")]
+    public void ParentOutput_WithDefaultNames_ShouldThrow()
     {
         // Arrange
-        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi, outputs: Endpoint("http://orders-api.root.svc"));
+        IApplicationParent root = ApplicationModel.CreateBuilder("east").UseParent("root");
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => resource.SetOutputs(Endpoint(null!)));
-        resource.Outputs[OutputName.Endpoint].ShouldBe("http://orders-api.root.svc");
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A child gateway's model carries the output values passed down from above")]
-    public void Create_WithValuesFromAbove_ShouldCarryThem()
-    {
-        // Arrange
-        ApplicationManifest manifest = CreateHierarchy(out ApplicationResourceOutput identity, out _);
-        var value = new ApplicationResourceOutputValue(identity, "http://identity.root.svc");
-
-        // Act
-        ApplicationModel zone = ApplicationModel.Create(manifest, "zone", [value]);
-        ApplicationModel root = ApplicationModel.Create(manifest);
-
-        // Assert
-        zone.Outputs.ShouldHaveSingleItem().ShouldBe(value);
-        root.Outputs.ShouldBeEmpty();
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "Only values of outputs above the gateway, declared once and complete, are accepted")]
-    public void Create_WithInvalidValues_ShouldThrow()
-    {
-        // Arrange: identity is above zone; orders-db is in zone itself.
-        ApplicationManifest manifest = CreateHierarchy(out ApplicationResourceOutput identity, out ApplicationResourceOutput database);
-        var undeclared = new ApplicationResourceOutput("root", "Caching", "cache", OutputName.Endpoint);
-
-        // Act & Assert
-        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(database, "http://orders-db.zone.svc")]));
-        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "root", [new(identity, "http://identity.root.svc")]));
-        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(undeclared, "http://cache.root.svc")]));
-        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(identity, "a"), new(identity, "b")]));
-        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(identity, null!)]));
-    }
-
-    // root runs identity; zone, below east, runs orders-db and an api that reads both endpoints.
-    private static ApplicationManifest CreateHierarchy(out ApplicationResourceOutput identity, out ApplicationResourceOutput database)
-    {
-        ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDefinition identityProvider = builder.AddResource("IdentityHub", "identity");
-        IApplicationSet zone = builder.AddGateway("east").AddGateway("zone");
-        IApplicationResourceDefinition ordersDb = zone.AddResource("Database.Sql", "orders-db");
-        zone.AddResource("Web", "orders-api")
-            .WithSetting("Identity:Authority", identityProvider.Endpoint)
-            .WithSetting("Database:Endpoint", ordersDb.Endpoint);
-        identity = identityProvider.Endpoint;
-        database = ordersDb.Endpoint;
-        return builder.Build().Model.Manifest;
-    }
-
-    private static Dictionary<OutputName, string> Endpoint(string value)
-    {
-        return new Dictionary<OutputName, string> { [OutputName.Endpoint] = value };
+        Should.Throw<ArgumentException>(() => root.Output(default, "identity", OutputName.Endpoint));
+        Should.Throw<ArgumentException>(() => root.Output("IdentityHub", default, OutputName.Endpoint));
+        Should.Throw<ArgumentException>(() => root.Output("IdentityHub", "identity", default));
     }
 }

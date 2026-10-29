@@ -3,13 +3,18 @@ using System.Collections.Generic;
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// One application set as manifest data: its gateway, the resources the gateway runs, and the
-/// manifests of its child gateways. The root set's manifest is the global manifest.
+/// One gateway's application as manifest data: the gateway, the parent gateway it joins, and the
+/// resources it runs.
 /// </summary>
-/// <param name="Name">The name of the gateway that deploys the set.</param>
+/// <remarks>
+/// Each gateway has a manifest of its own. A child gateway names its parent here and sends the
+/// manifest when it joins, so the parent learns what the child runs and which of its own outputs the
+/// child's settings use.
+/// </remarks>
+/// <param name="Name">The name of the gateway that runs the resources.</param>
+/// <param name="Parent">The gateway this one joins, or <see langword="null"/> for a root gateway.</param>
 /// <param name="Resources">The resources the gateway runs, in declaration order.</param>
-/// <param name="Gateways">The manifests of the child gateways, in declaration order.</param>
 public sealed record ApplicationManifest(
     GatewayName Name,
-    IReadOnlyList<ApplicationResourceManifest> Resources,
-    IReadOnlyList<ApplicationManifest> Gateways);
+    GatewayName? Parent,
+    IReadOnlyList<ApplicationResourceManifest> Resources);

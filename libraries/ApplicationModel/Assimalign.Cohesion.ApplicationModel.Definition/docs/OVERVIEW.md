@@ -2,19 +2,18 @@
 
 ## Purpose
 
-Declares what each gateway in a hierarchy deploys, as application sets of resources and child
-gateways with permission-carrying dependencies, and projects the hierarchy as the global manifest.
-It also supplies a gateway's deployment of one resource: its instances and the state written to
-them. The design record is [DESIGN.md](DESIGN.md).
+Declares what one gateway runs: an application set of resources with permission-carrying
+dependencies and settings, and the parent gateway it joins. It validates the declarations into an
+immutable model. The design record is [DESIGN.md](DESIGN.md).
 
 ## Scope
 
-- In scope: `IApplication`, `IApplicationBuilder`, and `IApplicationModel` with their
-  implementations; the `IApplicationGateway` seam; `IApplicationSet`; `IApplicationResourceDefinition`
-  with `DependsOn`, `WithSetting`, `WithExtension`, and its output placeholders; the manifest records; and
-  `IApplicationResourceDeployment` and `ApplicationResourceDeployment`.
-- Out of scope: gateways, platforms, infrastructure actions, and the deployment manifest's wire
-  format (ApplicationModel.Gateway); the identity provider; area verbs such as `AddWeb`.
+- In scope: `IApplicationModelBuilder` and `IApplicationModel` with their implementations;
+  `IApplicationSet`; `IApplicationParent`; `IApplicationResourceDefinition` with `DependsOn`,
+  `WithSetting`, `WithExtension`, and its output placeholders; and the manifest records.
+- Out of scope: gateways, their deployments of resources, platforms, and infrastructure actions
+  (ApplicationModel.Gateway); running instances (ApplicationModel.Hosting); the identity provider;
+  area verbs such as `AddWeb`.
 
 ## Dependencies
 
@@ -23,19 +22,17 @@ running instances.
 
 ## Usage
 
-Compose the hierarchy in the root gateway's program, build it, and run it:
+Declare one gateway's model. A child gateway names its parent and reads the parent's outputs:
 
 ```csharp
-ApplicationBuilder builder = Application.CreateBuilder("root", args);   // the root set
-IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
+IApplicationModelBuilder east = ApplicationModel.CreateBuilder("east");
+IApplicationParent root = east.UseParent("root");
 
-IApplicationSet east = builder.AddGateway("east");
 IApplicationResourceDefinition database = east.AddResource("Database.Sql", "orders-db");
 IApplicationResourceDefinition ordersApi = east.AddResource("Web", "orders-api")
     .DependsOn(database, "data.read", "data.write")
-    .DependsOn(identity)
-    .WithSetting("Database:Endpoint", database.Endpoint)        // filled in when east deploys it
-    .WithSetting("Identity:Authority", identity.Endpoint)       // passed down by the root gateway
+    .WithSetting("Database:Endpoint", database.Endpoint)                            // filled in when east deploys it
+    .WithSetting("Identity:Authority", root.Endpoint("IdentityHub", "identity"))    // the root answers east's join with it
     .WithSetting("Logging:LogLevel:Default", "Information");
 
 // A platform package's verb, here a Kubernetes package's, records how its platform deploys the
@@ -43,29 +40,14 @@ IApplicationResourceDefinition ordersApi = east.AddResource("Web", "orders-api")
 // WithExtension("kubernetes", "autoscaler", JsonSerializer.SerializeToElement(options, context)).
 ordersApi.ConfigureHpa(hpa => hpa.MaxReplicas = 10);
 
-Application application = builder.UseGateway(gateway).Build();   // composition closes here
-ApplicationManifest manifest = application.Model.Manifest;       // the global manifest
-await application.RunAsync();
+IApplicationModel model = east.Build();          // composition closes here
+ApplicationManifest manifest = model.Manifest;   // what east sends the root when it joins
 ```
 
-A gateway that receives a manifest as data, rather than composing one, builds the same model:
+A gateway program uses ApplicationModel.Gateway's `ApplicationBuilder`, which declares the model this
+way and builds the gateway that runs it. Manifest data, such as the manifest a child sends its
+parent, becomes the same model:
 
 ```csharp
-ApplicationModel model = ApplicationModel.Create(manifestFromArguments);
-```
-
-A gateway builds one aggregate per resource it runs, answers each publication, and records each
-stateful write:
-
-```csharp
-ApplicationResourceDeployment ordersApi = ApplicationResourceDeployment.Create(model.Manifest.Gateways[0].Resources[1]);
-
-// An instance published its manifest: answer with the state it must restore.
-IReadOnlyList<ApplicationActionSnapshot> restore = ordersApi.Register(published);
-
-// A stateful write succeeded on one instance: restore its snapshot on the others.
-foreach (InstanceKey target in ordersApi.Record(source, write.State!))
-{
-    // Send write.State to the target instance's control plane (RestoreAsync).
-}
+ApplicationModel model = ApplicationModel.Create(manifest);
 ```

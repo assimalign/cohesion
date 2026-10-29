@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
-namespace Assimalign.Cohesion.ApplicationModel.Definition.Tests;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 /// <summary>
 /// Publishes straight into an application resource, as an in-process gateway would: the

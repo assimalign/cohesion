@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
 /// An infrastructure action on an application resource, such as scaling it or restarting an

@@ -52,8 +52,8 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
             throw new ArgumentException(Format(ErrorMessages.ApplicationDependencySelf, Provider, Name), nameof(resource));
         }
 
-        // Only a descriptor this hierarchy created can be located again from the manifest.
-        if (resource is not ApplicationResourceDefinition target || target._composition.Hierarchy != _composition.Hierarchy)
+        // Only a definition of this gateway's set can be located again from the manifest.
+        if (resource is not ApplicationResourceDefinition target || target._composition != _composition)
         {
             throw new ArgumentException(Format(ErrorMessages.ApplicationDependencyForeign, resource.Provider, resource.Name), nameof(resource));
         }
@@ -66,7 +66,7 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
             }
         }
 
-        _composition.Hierarchy.ThrowIfBuilt();
+        _composition.ThrowIfBuilt();
 
         GatewayName gateway = target.Set.Name;
         for (int index = 0; index < _dependencies.Count; index++)
@@ -112,7 +112,7 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
 
         ArgumentNullException.ThrowIfNull(value);
 
-        _composition.Hierarchy.ThrowIfBuilt();
+        _composition.ThrowIfBuilt();
 
         AddOrReplace(new ApplicationResourceSetting(name, value, null));
         return this;
@@ -137,7 +137,16 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
             throw new ArgumentException(Format(ErrorMessages.ApplicationSettingOutputSelf, name, Provider, Name, output.Output), nameof(output));
         }
 
-        if (!_composition.Hierarchy.Resources.TryGetValue((output.Gateway, output.Provider, output.Name), out ApplicationResourceDefinition? target))
+        if (output.Gateway != Set.Name)
+        {
+            // An output of the parent's resources. The parent answers this gateway's join with its
+            // value, so it orders nothing here; the model checks that the gateway is the parent.
+            _composition.ThrowIfBuilt();
+            AddOrReplace(new ApplicationResourceSetting(name, null, output));
+            return this;
+        }
+
+        if (!_composition.Index.TryGetValue((output.Provider, output.Name), out ApplicationResourceDefinition? target))
         {
             throw new ArgumentException(
                 Format(ErrorMessages.ApplicationSettingOutputUnknown, name, Provider, Name, output.Provider, output.Name, output.Gateway),
@@ -168,7 +177,7 @@ internal sealed class ApplicationResourceDefinition : IApplicationResourceDefini
             throw new ArgumentException(ErrorMessages.ExtensionValueMissing, nameof(value));
         }
 
-        _composition.Hierarchy.ThrowIfBuilt();
+        _composition.ThrowIfBuilt();
 
         // A copy outlives the document the caller may dispose. A platform and name declared again
         // keep their place and take the new value.

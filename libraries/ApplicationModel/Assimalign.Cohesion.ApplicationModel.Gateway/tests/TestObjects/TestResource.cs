@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
-namespace Assimalign.Cohesion.ApplicationModel.Definition.Tests;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 /// <summary>
 /// One running instance of <c>Web/orders-api</c> with a log-level control.

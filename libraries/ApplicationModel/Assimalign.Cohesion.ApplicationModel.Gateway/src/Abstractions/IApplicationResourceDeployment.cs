@@ -2,7 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace Assimalign.Cohesion.ApplicationModel;
+namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
 /// A gateway's deployment of one application resource: the instances running its definition and the

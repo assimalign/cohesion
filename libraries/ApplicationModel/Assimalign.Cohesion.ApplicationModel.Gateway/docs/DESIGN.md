@@ -5,17 +5,20 @@
 > (chunk 2) and the shared contracts of
 > [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md). The instance side,
 > [ApplicationModel.Hosting](../../Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md)
-> (chunk 1, formerly Hosting.Resources), is not a dependency. The previous implementation (Local
-> gateway, records, credentials, certificates) is retired; its source is at commit `6576e7c64`.
+> (chunk 1, formerly Hosting.Resources), is not a dependency. Since 2026-10-29 (G26, G27) each
+> gateway runs a model of its own and a child joins its parent; the deployment view and the gateway
+> seam moved here from ApplicationModel.Definition. The previous implementation (Local gateway,
+> records, credentials, certificates) is retired; its source is at commit `6576e7c64`.
 
 ## Purpose
 
-A gateway runs an application model. It deploys its part of the hierarchy through an
+A gateway runs one gateway's application model. It deploys the model's resources through an
 infrastructure provider, receives the manifests the deployed resources' instances publish, keeps
 each resource's deployment (its instances and the state written since the gateway was deployed),
-and exposes each resource's infrastructure actions. The library is transport-neutral and
-platform-neutral: a transport binds its endpoints, and an infrastructure provider supplies the
-platform.
+and exposes each resource's infrastructure actions. A child gateway joins its parent and fills its
+settings in from the parent's outputs; the parent knows nothing of a child before it joins. The
+library is transport-neutral and platform-neutral: a transport binds its endpoints, and an
+infrastructure provider supplies the platform.
 
 The arrow below means "references". A platform package, such as a Kubernetes provider, references
 the gateway; the gateway references the definitions, which reference the shared contracts. The
@@ -32,34 +35,40 @@ flowchart LR
 
 ## Startup: reconcile, then run
 
-`RunAsync` first orders its part of the hierarchy, and refuses a part that it, or a gateway below
-it, cannot deploy in dependency order (G19) or whose settings it cannot fill in (G22). It loads the
-gateway's record from its `IApplicationGatewayStore`, creates one aggregate per resource as the previous run
-left it (G23), and opens publications. It then deploys in dependency order (G17): each resource and
-child gateway is a step that runs once the steps it waits for are ready, and independent steps run
-at the same time. A resource's step fills in its settings from the outputs of what it depends on,
-plans it with the infrastructure provider, keeps what the plan leaves in place (G12), deploys it
-only when the plan creates or updates it, waits for an instance of that deployment to publish within
-the startup window, and reads its outputs (G18). After startup it tears down what the record holds
-but the model no longer declares, and runs until cancelled. A gateway restarted with the same model
-and the same outputs plans no change, so it deploys nothing and waits for no publication: it adopts
-what runs.
+`RunAsync` orders the gateway's resources (G17), loads its record from its
+`IApplicationGatewayStore`, creates one aggregate per resource as the previous run left it (G23),
+and opens publications and joins. A gateway whose model names a parent then joins it, and waits
+within the startup window until the parent reports every output of its resources that the
+gateway's settings use (G26). It then deploys in dependency order: each resource is a step that runs
+once the steps it waits for are ready, and independent steps run at the same time. A resource's step
+fills in its settings from the outputs of what it depends on or from the parent's answer, plans it
+with the infrastructure provider, keeps what the plan leaves in place (G12), deploys it only when the
+plan creates or updates it, waits for an instance of that deployment to publish within the startup
+window, and reads its outputs (G18). After startup it tears down what the record holds but the model
+no longer declares, renews its membership with its parent, and runs until cancelled. A gateway
+restarted with the same model and the same outputs plans no change, so it deploys nothing and waits
+for no publication: it adopts what runs.
 
 ```mermaid
 sequenceDiagram
-    participant Caller as Pipeline or parent gateway
+    participant Caller as Pipeline
     participant GW as ApplicationGateway
+    participant Parent as Parent gateway
     participant Store as Gateway store
     participant Infra as Infrastructure provider
     participant Inst as Resource instance
-    Caller->>GW: RunAsync(model)
-    GW->>GW: order the part, refuse one it cannot deploy in order or configure
+    Caller->>GW: RunAsync()
+    GW->>GW: order the resources
     GW->>Store: LoadAsync(gateway)
-    GW->>GW: seed aggregates from the record, open publications
+    GW->>GW: seed aggregates from the record, open publications and joins
+    opt the model names a parent
+        GW->>Parent: JoinAsync(manifest), again until every output it uses is reported
+        Parent-->>GW: the outputs' values, and a lease
+    end
     loop Each step once the steps it waits for are ready, independent steps at once
-        GW->>GW: fill in the settings from the outputs of what it depends on
+        GW->>GW: fill in the settings from what it depends on, or from the parent
         GW->>Infra: PlanResourceAsync with the settings
-        GW->>Infra: DeployResourceAsync if created or updated, or DeployGatewayAsync
+        GW->>Infra: DeployResourceAsync if created or updated
         GW->>Store: SaveAsync(record)
         Infra->>Inst: start or replace the workload
         Inst->>GW: PublishAsync(manifest)
@@ -68,8 +77,9 @@ sequenceDiagram
         GW->>Infra: GetResourceOutputsAsync
     end
     alt every created or updated resource published within its window
-        GW->>Infra: TeardownResourceAsync and TeardownGatewayAsync for what the model dropped
+        GW->>Infra: TeardownResourceAsync for what the model dropped
         GW-->>Caller: Started completes, the gateway runs until cancelled
+        GW->>Parent: JoinAsync again three times per lease
     else a resource published nothing
         GW->>Infra: TeardownResourceAsync, for a created resource only
         GW-->>Caller: RunAsync fails with StartupTimedOut, naming what it did not deploy
@@ -78,47 +88,41 @@ sequenceDiagram
 
 ## Deployment order
 
-A gateway's steps are its own resources and its child gateways, each child with everything below
-it. A step waits for the steps that own what its resources depend on. In the hierarchy below,
-`orders-api` waits for `orders-db`. The child gateway `east` waits for the root's `identity`, because
-a resource in its part depends on it. The root's `app-gateway` waits for `east`, because it routes to
-a resource in east's part. An arrow means "waits for".
+A gateway's steps are its own resources. A step waits for the steps of the resources it depends
+on. Nothing waits on another gateway's steps: a child waits for its parent's outputs before it
+deploys anything (G26), and a parent never waits for a child. In gateway east below, `orders-api`
+waits for `orders-db` and `orders-cache`. An arrow means "waits for".
 
 ```mermaid
 flowchart LR
-    subgraph root["Steps of the root gateway"]
-        App["Web/app-gateway"]
-        East["gateway east, with everything below it"]
-        Identity["IdentityHub/identity"]
-    end
-    subgraph east["Steps of gateway east"]
+    subgraph east["Steps of gateway east, once it has joined root"]
         Api["Web/orders-api"]
         Db["Database.Sql/orders-db"]
+        Cache["Caching/orders-cache"]
     end
-    App --> East
-    East --> Identity
     Api --> Db
+    Api --> Cache
 ```
 
-The root therefore deploys `identity`, waits until it is ready, then deploys `east`, and deploys
-`app-gateway` once `east` has started. East deploys `orders-db`, then `orders-api` once
-`orders-db` is ready.
+East therefore deploys `orders-db` and `orders-cache` at the same time, then `orders-api` once both
+are ready.
 
 ## The types
 
 | Type | Role |
 | --- | --- |
-| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic). `RecordAsync` records a write's snapshot and saves the record. Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
-| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys resources with those values and child gateways, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears down resources and child gateways, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
+| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`Model`, `RunAsync`), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationParentGateway` (`JoinAsync`, a child's join). `RecordAsync` records a write's snapshot and saves the record. Exposes `Name`, `Resources` (the aggregates), `Children`, `StartupTimeout`, `LeaseDuration`, and `Started`. `CreateBuilder(name)` creates its builder. |
+| `ApplicationBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure (`UseInfrastructure`), the record store (`UseStore`), the parent (`UseParent`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
+| `IApplicationParentGateway`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
+| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
-| `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
+| `IApplicationResourceDeployment`, `ApplicationResourceDeployment`, `IApplicationResourceAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
+| `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read. Children are not recorded. |
 | `JsonFileApplicationGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
-| `ApplicationDeploymentManifest` | What a gateway deploys (the whole hierarchy, the gateway's name, and the values of the outputs from above that its part's settings use) and where (opaque provider settings). UTF-8 JSON with camel-case names. The parent gateway writes the "what" and its provider adds the "where". `ToModel()` creates the gateway's model, values included. |
-| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`, or `OutputMissing` for a setting whose output the provider did not report). |
+| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `OutputMissing` for a setting whose output the provider or the parent did not report). |
 
-In ApplicationModel: `IApplicationModel.Role` and `ApplicationGatewayRole` say whether a model's gateway is the
-root or a composite; `IApplicationResourceAction` is an infrastructure action, and
-`IApplicationResourceDeployment.Actions` and `ExecuteAsync` expose and dispatch them.
+In ApplicationModel.Definition: `IApplicationModel.Role` and `ApplicationGatewayRole` say whether a
+gateway joins a parent, and `IApplicationParent` names the parent's outputs a model's settings use.
 
 ## Decisions
 
@@ -134,12 +138,9 @@ adapts it, and an in-process resource publishes to the gateway object directly, 
 is an `IApplicationInstancePublisher`. Each refusal has an error code a transport can map without
 parsing text: `PublicationsClosed` to 503, `ResourceUnknown` to 404, `ResourceTornDown` to 410.
 
-**G3 — What and where travel together, and "what" is the whole hierarchy.** A deployment manifest
-names its gateway and carries the global manifest, so a child gateway resolves a dependency outside
-its own part (east's `orders-api` on the root's `identity`), and the values of the outputs from
-above that its settings use (G24). "Where" is opaque JSON that only the gateway's infrastructure
-provider reads. The parent gateway writes the rest of a child's manifest, and its provider adds
-"where" when it deploys the child.
+**G3 — What and where travel together, and "what" is the whole hierarchy — superseded by G26.** A
+child no longer receives a deployment manifest from its parent: its own pipeline deploys it with its
+own model, and its provider's configuration says where it runs.
 
 **G4 — One startup window per resource, decided atomically.** A created or updated resource's
 window opens when its deployment starts and lasts `StartupTimeout`, so a resource deep in a
@@ -160,10 +161,10 @@ but does not make the resource ready (G18).
 after, and leaves what it deployed running. Teardown happens only to a resource that missed its
 startup window.
 
-**G7 — Root and composite deploy the same way, for now.** A gateway's role comes from its model's
-position: the root's model is for the hierarchy's top gateway, a composite's for any other. Both
-deploy their own resources and their child gateways. What only a root does, such as serving the
-tenant's management entry or hosting the identity provider, arrives with those chunks.
+**G7 — Root and composite deploy the same way.** A gateway's role comes from its model: a composite
+names a parent, a root names none. Both deploy only their own resources; a composite joins its
+parent first (G26). What only a root does, such as serving the tenant's management entry or hosting
+the identity provider, arrives with those chunks.
 
 **G8 — Infrastructure actions belong to the provider and keep no state.** The provider supplies each
 resource's actions when the gateway starts, such as `scale`. They act on the platform, which keeps
@@ -207,8 +208,8 @@ down (G4). An updated one is not: its previous instances are the platform's to k
 a rolling update does. Its later publications are refused, and the run fails with
 `StartupTimedOut`.
 
-**G14 — Retire after startup.** Resources and child gateways the record holds but the model no
-longer declares are torn down only after the deployment has started. A failed deployment therefore
+**G14 — Retire after startup.** Resources the record holds but the model no longer declares are
+torn down only after the deployment has started. A failed deployment therefore
 leaves the previous one running. They stay in the record until their teardown succeeds, so a failed
 run retries them.
 
@@ -233,8 +234,8 @@ resolve here yet: it needs gateway-to-gateway publication. *Superseded:* one rea
 resource's outputs after the whole startup.
 
 **G17 — Deploy in dependency order, independent steps at once (owner request, 2026-10-28).** A
-dependency orders deployment (ApplicationModel D4), so the gateway deploys each resource and child
-gateway once everything it waits for is ready, and starts the steps that do not wait for each other
+dependency orders deployment (ApplicationModel.Definition D4), so the gateway deploys each resource
+once everything it waits for is ready, and starts the steps that do not wait for each other
 at the same time, as ARM does with `dependsOn`. A chain therefore takes the sum of its steps, and
 independent resources the longest of theirs. The provider may consequently be called concurrently
 for different resources, never for the same one. `Resources` lists the aggregates in that order.
@@ -245,29 +246,18 @@ thirty seconds. *Superseded:* child gateways first, then resources, each in decl
 
 **G18 — Ready means an instance of the deployment published and the outputs are read.** A created
 or updated resource is ready once an instance has published after its deployment started, and the
-gateway has read its outputs (G16). An adopted resource is ready once its outputs are read. A child
-gateway is ready once `DeployGatewayAsync` returns. A first publication is the whole gate for now:
+gateway has read its outputs (G16). An adopted resource is ready once its outputs are read. A first
+publication is the whole gate for now:
 health checks and "every instance" readiness need the gateway-to-instance channel. The plan marks
 the resource current before the gateway calls the provider to deploy it, because an in-process
 provider's instances publish before the call returns; an instance that published earlier runs the
 previous definition and is registered without opening the gate. An instance manifest does not say
 which revision it runs, so an old instance that publishes during the rollout still opens it.
 
-**G19 — A child gateway is one step.** A gateway cannot see the readiness of what its child deploys,
-so it orders the child with everything below it as one step. The child waits for the gateway's own
-resources that anything in its part depends on: the root's identity provider is ready before a child
-whose resources use it is deployed, and readiness below follows from that, because the child deploys
-its own part after it starts. In the other directions the guarantee is deployment order only. A
-resource that depends on something in a child's part waits until that child has started, not until
-the resource it depends on is ready, and a child that depends on a sibling's part waits until the
-sibling has started. Both need gateway-to-gateway publication to wait for readiness. A child that
-both waits for one of the gateway's steps and is waited for by it cannot be ordered: for example, the
-root's `app-gateway` routes to `east/orders-api` while `east/orders-worker` calls through
-`app-gateway`. `RunAsync` refuses such a part with an `ArgumentException` that names each wait and
-the dependency behind it. It checks the gateway and every gateway below it before it loads its
-record, so nothing is deployed. The model accepts the hierarchy, because no resource depends on
-itself; the limit is this gateway's, and it lifts once a child can wait for its parent's resources
-itself.
+**G19 — A child gateway is one step — superseded by G26.** A parent no longer deploys its
+children, so they are not steps of its deployment. A child waits for its parent's resources itself,
+before it deploys anything, which lifts the limit this decision recorded: a child that both waited
+for and was waited for by its parent's steps could not be ordered.
 
 **G20 — A step that fails stops only what depends on it.** When a resource misses its window, the
 steps that wait for it, directly or through others, are skipped: they are not deployed, and a
@@ -287,12 +277,12 @@ platform never replaced the workload. Without this, the first save of a run woul
 definition's empty state for resources still waiting for their dependencies. A write recorded on an
 instance before its resource is planned is held in memory and saved once the plan keeps it.
 
-**G22 — Settings are filled in at the step, from this gateway's outputs and those passed down
-(owner request, 2026-10-29).** A resource's settings (ApplicationModel D17) are configuration values
-its instances receive with their deployment. At the resource's step, everything it depends on is
-ready and its outputs are read (G16), so the gateway fills in each output-valued setting from the
-aggregate of the resource it names, or, for a resource above this gateway, from the values its
-deployment manifest carried (G24). It then plans the resource with the values
+**G22 — Settings are filled in at the step, from this gateway's outputs and its parent's (owner
+request, 2026-10-29).** A resource's settings (ApplicationModel.Definition D17) are configuration
+values its instances receive with their deployment. At the resource's step, everything it depends
+on is ready and its outputs are read (G16), so the gateway fills in each output-valued setting from
+the aggregate of the resource it names, or, for one of the parent's resources, from the values the
+parent answered the join with (G26). It then plans the resource with the values
 (`PlanResourceAsync`), because the platform needs an update when it runs other values, and deploys
 with the same values (`DeployResourceAsync`); the provider delivers them, for example as
 environment variables. The
@@ -300,11 +290,9 @@ values are not part of the resource's definition: the gateway fingerprints the s
 and the provider's revision leaves the values out. A redeployed dependency with a new address
 therefore updates its dependents, which keep their operator changes (G12). A setting whose output the
 provider did not report fails the run with `OutputMissing`, naming the setting and the output, as a
-provider failure does (G20). A gateway learns its own resources' outputs and receives those from
-above, so a setting that uses an output of a resource in a child's or a sibling's part is refused
-before anything deploys, for this gateway and every gateway below it, as G19 refuses an unorderable
-part (open question 11). So is a setting whose value from above the deployment manifest lacks.
-*Superseded:*
+provider failure does (G20). A gateway learns its own resources' outputs and its parent's from the
+join, so its model refuses a setting that uses any other gateway's output (ApplicationModel.Definition
+D21). *Superseded:*
 planning every resource before the first step (open question 9), which planned a dependent before
 the values it would deploy with existed. *Rejected:* recording the values in the gateway's record
 and upgrading a `None` plan to `Update` when they changed. The provider could then plan before the
@@ -322,21 +310,12 @@ proved it runs stays registered through an update, so it does not have to publis
 not open the startup gate either. *Rejected:* refusing publications until the resource is planned. An
 instance restarted while a long chain deploys would fail its start until the gateway reached it.
 
-**G24 — Outputs from above travel down in deployment manifests (owner request, 2026-10-29).** A
-gateway deploys a child once the resources the child's part depends on are ready (G19), so by then it
-has their outputs. It writes the child's deployment manifest itself: the whole hierarchy, the child's
-name, and the values of the outputs from this gateway and those above that settings in the child's
-part use. Values of the gateway's own resources come from their aggregates; the others are values it
-received from above and passes on. `DeployGatewayAsync` takes that manifest, and the provider adds
-only where the child runs. The child fills in its settings from the values (ApplicationModel D18)
-and passes on those a grandchild's part uses; outputs inside the child's own part are the child's
-to read. A changed output changes the manifest, so the child is deployed again and replans what
-uses the value, the same way a dependency that moved updates a resource in the gateway's own part
-(G22). The values follow the declaration order of the settings, so a manifest with unchanged values
-is byte-for-byte unchanged. *Superseded:* `DeployGatewayAsync(model, gateway)`, where the provider
-built the manifest and knew nothing of the values. *Rejected:* the child reading its parent's
-outputs at run time (ApplicationModel D18), and the provider looking the values up itself, which
-would make every provider walk the settings of the hierarchy.
+**G24 — Outputs from above travel down in deployment manifests — superseded by G26.** A parent no
+longer deploys its children, so it writes no deployment manifest and `DeployGatewayAsync` is gone; a
+child reads the values when it joins. This decision had rejected the child reading its parent's
+outputs at run time because it tied the child's start to the parent being reachable. G26 accepts
+that: a child that names a parent needs the parent running to start, and in return deploys on its
+own.
 
 **G25 — A provider sees only its own platform's extensions (owner direction, 2026-10-28; built
 2026-10-29).** `IInfrastructureProvider.Platform` names the platform a provider deploys onto, and
@@ -354,16 +333,91 @@ provider's to refuse when it plans. *Rejected:* passing every extension and leav
 filter by name. The filter would be correct only in the providers that remember it, and the
 definition would change when another platform's extension did.
 
+**G26 — Children join their parent (owner decision, 2026-10-29).** Each gateway runs a model of
+its own and is deployed by its own pipeline. A child's model names its parent
+(ApplicationModel.Definition D21), and its builder connects to the parent (`UseParent`). The parent
+is an `IApplicationParentGateway`:
+- **Join.** Once its aggregates exist, a child calls `JoinAsync` with its manifest. The parent
+  validates it, refuses one that names another parent, records the child under its name with a
+  lease, and answers with the value of every output of its own resources that the child's settings
+  use, as far as it has recorded them.
+- **Wait.** The child joins again while the parent is not running or an output is missing, until its
+  startup window closes. A parent that never accepted the join fails the run with
+  `StartupTimedOut`; a missing output fails it with `OutputMissing`, naming the setting. Nothing
+  deploys before the join succeeds, so the child waits for the parent's resources the way a
+  resource waits for a dependency.
+- **Renew.** After startup the child joins again three times per lease: joining is how it renews. An
+  unreachable or stopped parent is retried on the next tick, and the child keeps running.
+- **Expire.** The parent drops a child whose lease lapses, in the loop that expires instances.
+  Children are not recorded: one still running joins a restarted parent again.
+- **Change.** A value a child read applies until the child's next run, which replans what uses it
+  (G22).
+
+A parent knows nothing of a child before it joins, so a parent's resource cannot depend on a
+child's, and the order across gateways is the child waiting for its parent, never the reverse. This
+replaces G3, G19, and G24, and their refusals of parts that could not be ordered or configured.
+*Rejected:* the parent deploying its children (G19, G24). A child could not be deployed on its own,
+and the parent needed every child's infrastructure and credentials. *Open:* a child applying a
+changed value while it runs (question 13), and the transport for joins (G9).
+
+**G27 — A gateway is built with its model (owner decision, 2026-10-29).** `ApplicationBuilder`
+implements ApplicationModel.Definition's `IApplicationModelBuilder` and this library's
+`IApplicationGatewayBuilder` side by side: one object declares the model and configures the gateway,
+the way an area's application builder implements its area's builder beside the host's.
+- Its model half is a builder of `ApplicationModel.CreateBuilder`, so a model follows one set of
+  rules however it is built. A resource definition's `Set` is therefore that wrapped builder, not
+  this object.
+- `Build()` builds the model, unless the model builder already did, and the gateway, which holds the
+  model for its one run. `RunAsync` takes no model, so a host can run the gateway without arguments.
+- A parent named only through the model builder has no connection to join it by, so `Build()`
+  refuses the model.
+- `ApplicationGateway.Create` is gone: the builder is the one way to make a gateway.
+
+*Rejected:* keeping `RunAsync(model)`, which left a gateway without a model until it ran.
+
+**G28 — `Register` and `Record` are atomic with respect to each other (formerly
+ApplicationModel.Definition D5).** Each runs under one lock and returns its answer from the state
+that lock protects. An instance that registers before a write is recorded is in the write's restore
+list; one that registers after it gets the snapshot in its registration answer. Every instance
+therefore receives every recorded snapshot exactly once. The alternative, a gateway that lists the
+instances and then records, lets an instance that registers in between miss the write.
+
+**G29 — Version skew is filtered, not refused (formerly ApplicationModel.Definition D6).** An
+instance receives only snapshots for actions its own manifest declares stateful, and `Record`
+accepts a snapshot only from an instance that declares the action stateful. During a rollout, an
+instance of another version neither receives nor reports state it does not understand.
+
+**G30 — Durability belongs to the gateway (formerly ApplicationModel.Definition D7).** The aggregate
+keeps its state in memory for the life of one deployment. A gateway that restarts within the same
+deployment seeds a new aggregate through `ApplicationResourceDeployment.Create(manifest, state)`. A
+gateway should persist a recorded snapshot before it acknowledges the write, or a restart can lose a
+write that running instances already apply. A gateway seeds the aggregate before it knows whether
+the run redefines the resource, and calls `ClearState()` when it does; instances already registered
+keep what they restored.
+
+**G31 — Reads take no lock (formerly ApplicationModel.Definition D8).** `Instances` and `State`
+return read-only copies that each change replaces, so a management read never waits on a
+registration, and a debugger never deadlocks on a held lock.
+
+**G32 — Infrastructure actions sit on the aggregate (formerly ApplicationModel.Definition D15).** A
+gateway's provider supplies each resource's infrastructure actions to
+`ApplicationResourceDeployment.Create`, and `ExecuteAsync` dispatches them with the statuses a
+control plane uses (`NotFound`, `NotSupported`, `Rejected` for input that does not bind). Until
+2026-10-29 the contract lived in ApplicationModel.Definition, so a transport could expose the
+actions without referencing a gateway package; it moved here once the definitions held only
+definitions.
+
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
 today. The options are: serve HTTP from this library tier with `Http.Connections`, as the retired
 gateway did; move the endpoint contracts into ApplicationModel and bind them in `Web.ApplicationModel`;
 or relax one of the guards. That choice is open, so this chunk stops at transport-neutral logic.
+Joins have no transport either: a child joins a parent in the same process directly (G26).
 
 ## AOT
 
-No reflection or runtime code generation. The deployment manifest and the record file are read and
-written through source-generated JSON contexts.
+No reflection or runtime code generation. The record file is read and written through
+source-generated JSON contexts.
 
 ## Diagnostics
 
@@ -372,7 +426,7 @@ candidates for an event source.
 
 ## Open questions
 
-1. **HTTP binding** (G9): which of the three options.
+1. **HTTP binding** (G9): which of the three options, for publications and for joins.
 2. **Instance liveness.** Resolved by leases (G15). A lease only bounds how long a dead instance stays
    registered; asking the platform which instances run would detect a death sooner.
 3. **Startup failure scope.** Only missed new resources are torn down (G13). Should a failed startup
@@ -388,18 +442,25 @@ candidates for an event source.
    a local gateway.
 7. **Build-time infrastructure actions.** Actions a program declares at build time need a slot on
    the descriptor and the manifest.
-8. **Deployment order — settled.** Dependencies order deployment (G17), child gateways included
-   (G19).
+8. **Deployment order — settled.** Dependencies order deployment within a gateway (G17); across
+   gateways a child waits for its parent (G26).
 9. **Plans before outputs — settled.** Each resource is planned at its step, with its settings'
    values (G22); until then it runs as the previous run left it, so early publications are accepted
    (G23).
-10. **Readiness across gateways.** A parent waits for a child gateway to start, not for the
-    resources it deploys (G19). Waiting for them needs a child to publish its resources' readiness
-    and outputs to its parent, the gateway-to-gateway publication already needed for outputs.
-11. **Settings across gateways — settled downward.** Outputs from above travel down in deployment
-    manifests (G24), so east's `orders-api` reads the root's identity provider endpoint. A setting
-    that uses an output of a resource in a child's or a sibling's part is still refused (G22): it
-    needs that child to publish its outputs to its parent (question 10).
+10. **Readiness across gateways — settled for children.** A child waits for the parent's outputs it
+    uses (G26). A parent's resource cannot wait for a child's, because the parent does not know the
+    child in advance; a downstream resource changes an upstream one at run time through an action
+    instead.
+11. **Settings across gateways — settled by joining.** A child reads its parent's outputs when it
+    joins (G26), so east's `orders-api` reads the root's identity provider endpoint. A grandparent's
+    outputs are not reachable yet (ApplicationModel.Definition open question 3).
 12. **One platform per provider.** A provider names one platform (G25). A provider that wants
     another platform's extensions too, such as a Compose provider reading Docker's, would need a
     list of platforms, and an order for when two of them configure the same thing.
+13. **A parent's changed value while the child runs.** It applies on the child's next run (G26). The
+    renewals already carry the current values, so a child could replan the resources whose values
+    changed without waiting for its pipeline.
+14. **The record file on Windows.** A save replaces the file with `File.Move`, which Windows refuses
+    while another handle has the file open, so a reader polling the record during a save fails that
+    save, and the expiry loop's failure ends the run. The lease test that polls the record shows it
+    locally; the suite runs on Linux in CI.
