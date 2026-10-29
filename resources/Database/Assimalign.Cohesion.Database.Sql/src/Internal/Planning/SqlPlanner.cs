@@ -126,8 +126,7 @@ internal sealed partial class SqlPlanner
             var referenced = FindReferencedCommonTables(expression);
             _commonTableState = referenced is null ? null : new CommonTableState(referenced);
             var plan = PlanCore(expression);
-            if (_commonTableState?.HasRecursion == true && ViewDefinitionBinding is null)
-            { throw new SqlUnsupportedQueryException(ErrorMessages.CteRecursiveExecution, location: expression.Location); }
+            plan.ContainsRecursion = _commonTableState?.HasRecursion == true;
             plan.ContainsLike = _containsLike;
             if (SequenceUsage is { } usage)
             { usage.Evaluator = null; plan = new SqlSequenceScopePlan(plan, usage) { ContainsLike = _containsLike }; }

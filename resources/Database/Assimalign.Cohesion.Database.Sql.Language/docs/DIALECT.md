@@ -884,7 +884,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), the profile has **80 of 82 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), the profile has **80 of 82 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -943,7 +943,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `NATURAL JOIN` | Recognized, not supported | rejected with `CK00001` |
 | `UNION` / `INTERSECT` / `EXCEPT` | Supported, measured | Each accepts ALL or DISTINCT (default); available in every query position, with parenthesized operands and combined ordering/paging. See [Set operations](#set-operations-1114). |
 | `WITH` (CTEs) | Supported subset, measured | Ordered non-recursive SELECT bodies before SELECT, INSERT, UPDATE, DELETE or MERGE; optional output column lists; also INSERT INTO t WITH ... SELECT |
-| `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute except before MERGE. |
+| `WITH RECURSIVE` | Supported subset, measured | Anchor-typed UNION ALL and DISTINCT fixpoints, demand-driven shared scans, budget/cancellation and EXPLAIN; unbounded window input uses CS05089. WITH RECURSIVE before MERGE remains excluded. |
 | `WITH RECURSIVE ... MERGE` | Recognized, not supported | CK00001 at RECURSIVE even for acyclic lists; plain WITH ... MERGE binds and executes. |
 | `SELECT ... FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` / `FOR KEY SHARE` | Recognized, not supported | Complete locking strengths in the SELECT tail report CK00001, including in subqueries and CTE bodies. Deliberate change from CS00003 in #1719; qualified identifiers and implicit aliases retain their ordinary meaning. |
 | Window functions / `OVER` / `WINDOW` | Ranking, navigation, aggregate and value functions execute | See Window stage; ROWS, RANGE offsets, GROUPS, EXCLUDE and NULL treatment execute, including the peer-based default |
@@ -1040,7 +1040,7 @@ refuses a larger record before publishing anything.
 
 MATERIALIZED, RECURSIVE, TEMP/TEMPORARY, IF NOT EXISTS, WITH (options), and
 WITH [LOCAL|CASCADED] CHECK OPTION are excluded with CK00001 at CREATE.
-Recursive, materialized and updatable views remain future work. DROP VIEW CASCADE
+CREATE RECURSIVE VIEW, materialized and updatable views remain future work. Ordinary views may contain WITH RECURSIVE. DROP VIEW CASCADE
 is included by the owner ruling for this item, superseding the original T2 exclusion.
 
 ## SQL namespaces (#1030)
@@ -2678,7 +2678,7 @@ materialize both operands and a hash membership/count table in O(L+R). Every rem
 execution level checks the stack and reports CS05004. Sorting adds O(N log N); streaming
 and spilling remain excluded.
 CORRESPONDING (including BY forms) remains T2 and reports one contextual CK00001.
-Nested WITH, recursive execution and LATERAL and outer ORDER BY keys bound to derived outputs retain their
+Nested WITH, LATERAL and outer ORDER BY keys bound to derived outputs retain their
 existing exclusions.
 
 Reference anchors in the local PostgreSQL clone: `src/backend/parser/gram.y:845-846,13103-13115`
@@ -2820,7 +2820,7 @@ clauses nest below it, so the [expression nesting limit](#expression-nesting-lim
 (256 levels by default) bounds the statement as a whole, subqueries included. The
 32-level subquery limit is fixed; it does not follow the configured expression limit.
 
-Nested WITH, recursive CTE execution, lateral joins,
+Nested WITH, lateral joins,
 and subqueries in UPDATE SET, INSERT VALUES, CHECK/DEFAULT,
 or LIMIT/OFFSET/FETCH/TOP expressions remain excluded with `CK00001`. Ordinary numeric
 LIMIT/OFFSET/FETCH/TOP clauses on queries containing subqueries do execute. CHECK remains
@@ -2879,7 +2879,7 @@ A WITH list followed by another command kind reports `CS00003`.
 Capability scanning continues through advertised WITH lists, OVER and WINDOW;
 NATURAL JOIN and deferred window forms retain their capability diagnostics.
 
-## WITH RECURSIVE binding (#1719, SQ-R1)
+## WITH RECURSIVE binding and fixpoints (#1719, SQ-R1/SQ-R2)
 
 WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
 entries bind in dependency order and keep ordinary reachable-only materialization.
@@ -2903,13 +2903,34 @@ ORDER BY subqueries over grouped recursive inputs (PostgreSQL
 LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
 VIEW, nested WITH and modifying CTE bodies remain CK00001.
 
-Valid recursive definitions bind all entries and the consuming statement, then
-planning, EXPLAIN and execution return CK00001 until SQ-R2, even for an unused
-recursive definition. No working-table operator or depth limit is introduced here.
-Binding defers count/seek and constant-fold evaluation once recursion is identified.
-CREATE VIEW with a recursive query body freezes ordinary anchor metadata without
-executing it; cached and reopened view use propagates the same planning refusal.
-No catalog, storage or wire format changes are needed.
+SQ-R2 executes the anchor once, then evaluates the recursive term over only the
+previous iteration's accepted rows until an iteration is empty. UNION ALL retains
+every row; UNION compares against every accepted row, with NULLs equal and the
+anchor's SQL collation and CHAR equality. Conversion to anchor types precedes
+membership checks. There is no implicit recursion-depth limit.
+
+CTE scans pull on demand. Each reader owns a position in one shared buffer; the
+furthest reader advances its producer. Working and intermediate tables are disjoint
+immutable ranges of that buffer. This avoids duplicate payload storage while
+preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
+subquery can stop production early, including when a CTE has multiple readers.
+ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
+A window over an unbounded recursive input reports CS05089 before reading it;
+limit the input in a derived query before applying windows. This explicit demand
+refusal avoids exhausting the budget for a window that PostgreSQL could stream.
+
+The working/intermediate ranges, shared buffer, DISTINCT hash state and retained
+query scratch share StatementMemoryBudget (default 64 MiB). Reservations include
+container growth and reference-identity payload accounting; CS05067 refuses an
+over-budget recursive operation. Cancellation is checked on every produced or
+scanned row and at each iteration. All grants unwind on completion, early stop,
+refusal or cancellation. EXPLAIN shows RecursiveUnion and WorkTableScan;
+EXPLAIN ANALYZE adds iteration, accepted-row and candidate counters.
+
+Binding still defers count/seek and constant-fold evaluation once recursion is
+identified. Ordinary CREATE VIEW definitions containing WITH RECURSIVE freeze the
+anchor metadata, execute on demand and rebind after reopen. CREATE RECURSIVE VIEW
+remains excluded. No catalog, storage or wire format changes are needed.
 
 IsRecursiveScope records the list modifier on each AST definition, independently
 of whether it self-references. Binding retains the existing case-insensitive name
@@ -2932,7 +2953,7 @@ References re-derived from the local PostgreSQL clone: src/backend/parser/parse_
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
 (dependencies), 915-1019 (form/tails), 1027-1199 (references and joins), 1209-1277
 (set operands); parse_collate.c:807-860 (implicit default and conflicts);
-parse_agg.c:1327-1334 (aggregates). No reference code is copied.
+parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table fixpoint) and nodeCtescan.c:74-129 (shared read pointers and demand). No reference code is copied.
 
 | Code | Condition | PostgreSQL SQLSTATE |
 | --- | --- | --- |
@@ -2947,6 +2968,8 @@ parse_agg.c:1327-1334 (aggregates). No reference code is copied.
 | CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
 | CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
 | CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
+| CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
+| CS05089 | Window over an unbounded recursive input cannot preserve demand; bound its input first | 0A000 |
 
 ## Derived tables and DML predicates (#1113, part b)
 

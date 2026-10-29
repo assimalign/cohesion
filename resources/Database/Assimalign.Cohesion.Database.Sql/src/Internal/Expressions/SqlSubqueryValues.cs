@@ -39,6 +39,7 @@ internal sealed class SqlSubqueryValues
     }
 
     internal Dictionary<int, SqlSubqueryBinding> Queries { get; }
+    internal SqlSubqueryValues? Parent => _parent;
     internal Dictionary<int, object?[]> StatementValues { get; }
     internal bool HasCorrelatedQueries { get; }
     internal object?[]? Row { get; private set; }

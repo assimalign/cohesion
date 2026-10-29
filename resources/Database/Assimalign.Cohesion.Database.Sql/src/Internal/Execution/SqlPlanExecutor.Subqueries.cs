@@ -36,7 +36,8 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private Task<object?[]> MaterializeSubqueryAsync(SqlSubqueryBinding query, SqlStatementContext statement, CancellationToken cancellationToken)
-        => SqlWindowMemory.For(statement.Metrics) is { } memory
+        => RecursiveState is not null ? MaterializeRecursiveSubqueryAsync(query, statement, cancellationToken)
+            : SqlWindowMemory.For(statement.Metrics) is { } memory
             ? MaterializeWindowSubqueryAsync(query, statement, cancellationToken, memory)
             : MaterializePlainSubqueryAsync(query, statement, cancellationToken);
 

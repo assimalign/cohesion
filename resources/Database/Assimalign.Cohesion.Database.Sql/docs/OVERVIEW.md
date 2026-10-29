@@ -1,5 +1,10 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+WITH RECURSIVE uses anchor-typed working-table iteration and shared demand-driven scans.
+Outer LIMIT and subquery demand can stop an infinite producer. The statement memory grant
+bounds retained rows and DISTINCT state, and cancellation releases every buffer (#1719).
+A window over unbounded recursive input reports CS05089; bound its input before the window.
+
 Foreign keys execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
 and MERGE, including self-references and mixed delete/update chains. RESTRICT checks immediately;
 NO ACTION accepts final-parent substitution. Conflicting cascade assignments report CS05085;
@@ -82,7 +87,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
   projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates, including GROUPING SETS, ROLLUP, CUBE and GROUPING masks;
   `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE
-  (recursive bodies bind and refuse planning with CK00001 until SQ-R2; WITH RECURSIVE
+  (recursive bodies execute demand-driven UNION ALL/DISTINCT fixpoints; WITH RECURSIVE
   before MERGE reports CK00001 at RECURSIVE), with ordered SELECT definitions
   materialized once per statement and optional complete output column lists;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);

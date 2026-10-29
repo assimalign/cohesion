@@ -11,6 +11,7 @@ internal abstract record SqlPlan
 {
     // Set once before publication, including cached view bodies.
     internal bool ContainsLike { get; set; }
+    internal bool ContainsRecursion { get; set; }
     internal bool ContainsSequences => this is SqlSequenceScopePlan;
     internal SqlSequenceUsage? SequenceUsage => (this as SqlSequenceScopePlan)?.Usage;
 }

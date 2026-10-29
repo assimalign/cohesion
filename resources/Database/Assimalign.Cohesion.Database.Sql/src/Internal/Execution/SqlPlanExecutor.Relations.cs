@@ -15,6 +15,13 @@ internal sealed partial class SqlPlanExecutor
     private async Task<List<object?[]>> MaterializeRelationAsync(SqlDerivedRelation relation,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (RecursiveState is { } recursive)
+        {
+            var recursiveRows = new List<object?[]>();
+            await foreach (var row in ReadRecursiveRelationAsync(relation, _subqueryValues, statement, cancellationToken).ConfigureAwait(false))
+            { recursive.Memory.Retain(row); recursive.Memory.Reserve(32); recursiveRows.Add(row); }
+            return recursiveRows;
+        }
         if (!relation.IsCorrelated && _materializedRelations?.TryGetValue(relation, out var cached) == true) { return cached; }
         var parent = _subqueryValues;
         var previousRelations = _materializedRelations;
@@ -49,7 +56,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // Optional relation state keeps ordinary stored-table execution allocation-neutral.
-    private sealed class RelationRows : Dictionary<SqlDerivedRelation, List<object?[]>>
+    private class RelationRows : Dictionary<SqlDerivedRelation, List<object?[]>>
     {
         internal RelationRows(DateTimeOffset? transactionStart = null) : base(ReferenceEqualityComparer.Instance)
         { TransactionStart = transactionStart; }

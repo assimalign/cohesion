@@ -83,6 +83,8 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (plan.ContainsRecursion && RecursiveState is null)
+        { return ExecuteRecursiveStatementAsync(plan, statement, cancellationToken); }
         // Set before WITH and subquery materialization, and retain it in every child read.
         _isDml |= StatementInput(plan) is SqlInsertPlan or SqlInsertSelectPlan or SqlUpdatePlan or SqlDeletePlan or SqlMergePlan;
         return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null
@@ -116,6 +118,8 @@ internal sealed partial class SqlPlanExecutor
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         _containsLike |= plan.ContainsLike;
         _metrics = statement.Metrics;
+        if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
+        { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
@@ -135,7 +139,7 @@ internal sealed partial class SqlPlanExecutor
                     constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
                     evaluator, constant.OrderByProjections, cancellationToken);
             case SqlWithPlan with:
-                foreach (var relation in with.Relations)
+                foreach (var relation in RecursiveState is null ? with.Relations : Array.Empty<SqlDerivedRelation>())
                 {
                     await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false);
                 }

@@ -106,7 +106,7 @@ existing kind; table-on-table collisions retain their existing identity. The eng
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
 syntax is delivered by SQ-S2 as described above.
 
-## WITH RECURSIVE binding (#1719, SQ-R1)
+## WITH RECURSIVE binding and fixpoints (#1719, SQ-R1/SQ-R2)
 
 WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
 entries bind in dependency order and keep ordinary reachable-only materialization.
@@ -130,13 +130,34 @@ ORDER BY subqueries over grouped recursive inputs (PostgreSQL
 LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
 VIEW, nested WITH and modifying CTE bodies remain CK00001.
 
-Valid recursive definitions bind all entries and the consuming statement, then
-planning, EXPLAIN and execution return CK00001 until SQ-R2, even for an unused
-recursive definition. No working-table operator or depth limit is introduced here.
-Binding defers count/seek and constant-fold evaluation once recursion is identified.
-CREATE VIEW with a recursive query body freezes ordinary anchor metadata without
-executing it; cached and reopened view use propagates the same planning refusal.
-No catalog, storage or wire format changes are needed.
+SQ-R2 executes the anchor once, then evaluates the recursive term over only the
+previous iteration's accepted rows until an iteration is empty. UNION ALL retains
+every row; UNION compares against every accepted row, with NULLs equal and the
+anchor's SQL collation and CHAR equality. Conversion to anchor types precedes
+membership checks. There is no implicit recursion-depth limit.
+
+CTE scans pull on demand. Each reader owns a position in one shared buffer; the
+furthest reader advances its producer. Working and intermediate tables are disjoint
+immutable ranges of that buffer. This avoids duplicate payload storage while
+preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
+subquery can stop production early, including when a CTE has multiple readers.
+ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
+A window over an unbounded recursive input reports CS05089 before reading it;
+limit the input in a derived query before applying windows. This explicit demand
+refusal avoids exhausting the budget for a window that PostgreSQL could stream.
+
+The working/intermediate ranges, shared buffer, DISTINCT hash state and retained
+query scratch share StatementMemoryBudget (default 64 MiB). Reservations include
+container growth and reference-identity payload accounting; CS05067 refuses an
+over-budget recursive operation. Cancellation is checked on every produced or
+scanned row and at each iteration. All grants unwind on completion, early stop,
+refusal or cancellation. EXPLAIN shows RecursiveUnion and WorkTableScan;
+EXPLAIN ANALYZE adds iteration, accepted-row and candidate counters.
+
+Binding still defers count/seek and constant-fold evaluation once recursion is
+identified. Ordinary CREATE VIEW definitions containing WITH RECURSIVE freeze the
+anchor metadata, execute on demand and rebind after reopen. CREATE RECURSIVE VIEW
+remains excluded. No catalog, storage or wire format changes are needed.
 
 IsRecursiveScope records the list modifier on each AST definition, independently
 of whether it self-references. Binding retains the existing case-insensitive name
@@ -157,7 +178,7 @@ References re-derived from the local PostgreSQL clone: src/backend/parser/parse_
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
 (dependencies), 915-1019 (form/tails), 1027-1199 (references and joins), 1209-1277
 (set operands); parse_collate.c:807-860 (implicit default and conflicts);
-parse_agg.c:1327-1334 (aggregates). No reference code is copied.
+parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table fixpoint) and nodeCtescan.c:74-129 (shared read pointers and demand). No reference code is copied.
 
 | Code | Condition | PostgreSQL SQLSTATE |
 | --- | --- | --- |
@@ -172,6 +193,8 @@ parse_agg.c:1327-1334 (aggregates). No reference code is copied.
 | CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
 | CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
 | CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
+| CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
+| CS05089 | Window over an unbounded recursive input cannot preserve demand; bound its input first | 0A000 |
 
 ## Joined-DML statement memory (#1715, #1751)
 

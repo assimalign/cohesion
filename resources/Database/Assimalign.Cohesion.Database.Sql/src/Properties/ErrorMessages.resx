@@ -177,7 +177,7 @@
   <data name="CteRecursiveColumnCount" xml:space="preserve"><value>Recursive query '{0}' must have the same number of anchor, recursive and declared output columns.</value></data>
   <data name="CteRecursiveType" xml:space="preserve"><value>Recursive query '{0}' column {1} has type {2} in its non-recursive term but type {3} in its recursive UNION. Cast the output of the non-recursive term to the correct type.</value></data>
   <data name="CteRecursiveCollation" xml:space="preserve"><value>Recursive query '{0}' column {1} has collation '{2}' in its non-recursive term, conflicting with recursive UNION collation '{3}'. Use COLLATE to set the collation of the non-recursive term.</value></data>
-  <data name="CteRecursiveExecution" xml:space="preserve"><value>Recursive CTE planning and execution are not supported.</value></data>
+  <data name="CteRecursiveWindowDemand" xml:space="preserve"><value>A window stage over an unbounded recursive input cannot preserve demand-driven evaluation. Limit the input in a derived query before applying window functions.</value></data>
   <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
   <data name="ConstantQueryWildcard" xml:space="preserve"><value>A SELECT without FROM cannot project a wildcard.</value></data>
   <data name="CountNonNegative" xml:space="preserve"><value>{0} requires a non-negative integer.</value></data>
