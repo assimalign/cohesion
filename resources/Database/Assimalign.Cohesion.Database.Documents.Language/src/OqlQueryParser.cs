@@ -298,7 +298,7 @@ public sealed partial class OqlQueryParser : QueryParser
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
             // An unsupported source expansion owns the remainder of UPDATE. Syntax parsing
             // locates it after the destination, rather than guessing from expression names.
-            if (index == updateHeaderEnd && updateClause < 0 && IsUnnestClause(index)) { break; }
+            if (index == updateHeaderEnd && updateClause < 0 && (IsUnnestClause(index) || IsJoinClause(index))) { break; }
 
             // The ORDER BY parser owns NULLS options, including malformed quantifiers.
             if (value is "FIRST" or "LAST" or "ALL" or "DISTINCT" && index > 0 && IsWord(_tokens[index - 1], "NULLS")) { continue; }
@@ -504,7 +504,8 @@ public sealed partial class OqlQueryParser : QueryParser
                 _diagnostics.Add(QueryDiagnostics.UnsupportedClause("EXISTS", Profile.Language, Span(token, token)));
                 break;
             }
-            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value != "RETURNING")
+            if (value is "JOIN" or "NEST" && selectHead >= statementStart) { continue; }
+            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value is not ("RETURNING" or "JOIN" or "NEST"))
             {
                 continue;
             }
@@ -527,6 +528,9 @@ public sealed partial class OqlQueryParser : QueryParser
             {
                 continue;
             }
+
+            if (value is "JOIN" or "NEST")
+            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + " in UPDATE or DELETE", Profile.Language, Span(token, token))); break; }
 
             // UNION ALL and UNION DISTINCT are one set operation, not a set operation plus the
             // ALL or DISTINCT word.

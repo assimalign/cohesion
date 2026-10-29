@@ -73,9 +73,9 @@ internal sealed partial class DocumentPlanner
             // compared, including in transitive captures and nested ORDER BY.
             if (select.Source is not null ? !Same(select.Source, local) : !SameName(select.Collection, local)) { return false; }
             var source = new DocumentBindingScope(select.Alias ?? select.Collection, local);
-            foreach (var binding in select.Unnest)
+            foreach (var binding in select.Bindings)
             {
-                if (!Same(binding.Collection, source)) { return false; }
+                if (!Same(binding.Expression, source)) { return false; }
                 source = new DocumentBindingScope(binding.Variable, source);
             }
             if (select.Predicate is not null && !Same(select.Predicate, source)) { return false; }
@@ -134,9 +134,9 @@ internal sealed partial class DocumentPlanner
                 { Visit(new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location), local); }
             }
             var source = new DocumentBindingScope(select.Alias ?? select.Collection, local);
-            foreach (var binding in select.Unnest)
+            foreach (var binding in select.Bindings)
             {
-                Visit(binding.Collection, source);
+                Visit(binding.Expression, source);
                 source = new DocumentBindingScope(binding.Variable, source);
             }
             if (select.Predicate is not null) { Visit(select.Predicate, source); }

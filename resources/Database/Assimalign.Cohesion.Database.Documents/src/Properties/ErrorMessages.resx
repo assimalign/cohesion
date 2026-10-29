@@ -90,6 +90,9 @@
   <data name="IndexPredicateConstantInvalid" xml:space="preserve"><value>An array index predicate constant must be null, Boolean, integral, Decimal or String.</value></data>
   <data name="IndexPredicateTooLarge" xml:space="preserve"><value>An array index predicate must have at most 32 levels and 128 nodes.</value></data>
   <data name="BindingNameMissing" xml:space="preserve"><value>An OQL binding variable requires a nonempty name.</value></data>
+  <data name="JoinBindingInvalid" xml:space="preserve"><value>Key joins require distinct explicit aliases and key references to earlier source bindings.</value></data>
+  <data name="JoinMetadataInvalid" xml:space="preserve"><value>META in a joined query requires an explicit source alias and id or version.</value></data>
+  <data name="JoinKeyInvalid" xml:space="preserve"><value>A document join key must be a string, NULL or MISSING; key lists are not supported.</value></data>
   <data name="FromSourceAliasRequired" xml:space="preserve"><value>A FROM expression requires an explicit alias or an implicit field name.</value></data>
   <data name="FromVariableUnbound" xml:space="preserve"><value>Unbound FROM expression variable '{0}'.</value></data>
   <data name="ComprehensionBindingInvalid" xml:space="preserve">

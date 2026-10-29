@@ -23,6 +23,7 @@ internal sealed partial class DocumentPlanner
 
     private static DocumentLogicalPlan QueryLogical(DocumentStatementPlan plan) => plan switch
     {
+        DocumentJoinPlan join => join.Logical,
         DocumentPlan select => select.Logical,
         DocumentFromPlan source => source.Logical,
         DocumentSystemCollectionPlan system => system.Logical,

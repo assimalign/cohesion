@@ -24,6 +24,8 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
     private readonly Dictionary<OqlSubqueryExpression, JsonElement> _cache = new(ReferenceEqualityComparer.Instance);
     private readonly DocumentAggregateMemory.Reservation _retained;
     private long _work;
+    private Dictionary<(Guid Collection, string Id), DocumentEvaluationContext?>? _lookups;
+    private Dictionary<JsonElement, JsonElement>? _nests;
 
     internal long RetainedBytes => _retained.Bytes;
     internal DocumentVariableBinding? Bindings { get; private set; }
@@ -37,6 +39,40 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
         if (_work == _database.Engine.EngineOptions.StatementWorkBudget)
         { throw new DocumentPlanningException("CD05020", ErrorMessages.NestedWorkExceeded); }
         _work++;
+    }
+
+    internal DocumentEvaluationContext? Lookup(Guid collection, string id, CancellationToken cancellationToken)
+    {
+        ConsumeWork(cancellationToken);
+        _lookups ??= new();
+        if (_lookups.TryGetValue((collection, id), out var cached)) { return cached; }
+        _retained.Charge(256L + 2L * id.Length);
+        _operation.Session.LastQueryKeyLookups++;
+        var entry = _database.Catalog.FindDocument(collection, id, _operation.Context.Snapshot);
+        DocumentEvaluationContext? result = null;
+        if (entry is { } found)
+        {
+            _retained.Charge(384L + found.Length * 3L);
+            var document = ReadDocument(found);
+            using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
+            _retained.Retain(json.RootElement);
+            result = new DocumentEvaluationContext(json.RootElement.Clone(), found.Id, found.Version);
+        }
+        _lookups.Add((collection, id), result);
+        return result;
+    }
+
+    internal JsonElement Nest(DocumentEvaluationContext? match, CancellationToken cancellationToken)
+    {
+        ConsumeWork(cancellationToken);
+        var key = match?.Content ?? default;
+        _nests ??= new();
+        if (_nests.TryGetValue(key, out var cached)) { return cached; }
+        var memory = _operation.GetStatementMemory(cancellationToken);
+        _retained.Charge(512L + (match is { } document ? 3L * memory.ValueBytes(document.Content) : 0));
+        var array = DocumentJsonValue.Array(match is { } row ? [row.Content] : []);
+        _nests.Add(key, array);
+        return array;
     }
 
     internal Document ReadDocument(DocumentCatalogEntry entry)
@@ -108,7 +144,9 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
             object? value;
             if (expression.Query.IsValue)
             { value = row.GetValue(0); }
-            else if (expression.Query.Projections.Count == 1 && expression.Query.Projections[0].Expression is OqlStarExpression &&
+            else if (expression.Query.Projections.Count == 1 && expression.Query.Projections[0].Expression is OqlUnaryExpression { Operator: ".*" })
+            { value = row.IsMissing(0) ? DocumentMissing.Instance : row.GetValue(0); }
+            else if (DocumentRowWriter.WritesBareValue(expression.Query) &&
                 row.GetValue(0) is JsonElement { ValueKind: JsonValueKind.Object } document)
             { value = document; }
             else
@@ -131,6 +169,8 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
     public void Dispose()
     {
         _cache.Clear();
+        _lookups?.Clear();
+        _nests?.Clear();
         _retained.Dispose();
     }
 

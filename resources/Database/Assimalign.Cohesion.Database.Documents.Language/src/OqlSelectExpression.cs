@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -27,14 +28,15 @@ public sealed class OqlSelectExpression : OqlExpression
     /// <param name="unnest">The ordered array bindings applied before WHERE.</param>
     /// <param name="groupAliases">The optional aliases parallel to <paramref name="groupBy"/>; null entries leave terms unnamed.</param>
     /// <param name="groupAs">The optional GROUP AS binding for the array of input binding wrappers.</param>
+    /// <param name="bindings">The ordered UNNEST, JOIN and NEST bindings; null uses <paramref name="unnest"/>.</param>
     /// <param name="source">The FROM expression, including a subquery for a derived source; null selects <paramref name="collection"/>.</param>
     public OqlSelectExpression(string collection, string? alias, IReadOnlyList<OqlProjection> projections,
         OqlExpression? predicate, IReadOnlyList<OqlExpression> groupBy, OqlExpression? having,
         IReadOnlyList<OqlOrdering> orderBy, bool isDistinct, bool isValue, OqlExpression? limit = null,
         OqlExpression? offset = null, Location? location = null, IReadOnlyList<OqlUnnestExpression>? unnest = null,
-        IReadOnlyList<string?>? groupAliases = null, string? groupAs = null, OqlExpression? source = null) : base(location)
+        IReadOnlyList<string?>? groupAliases = null, string? groupAs = null, OqlExpression? source = null, IReadOnlyList<OqlSourceBindingExpression>? bindings = null) : base(location)
     {
-        _from = source is null ? collection : source;
+        _from = bindings is null ? source is null ? collection : source : new Sources(source is null ? collection : source, bindings);
         Alias = alias;
         Projections = projections;
         Predicate = predicate;
@@ -45,7 +47,7 @@ public sealed class OqlSelectExpression : OqlExpression
         IsValue = isValue;
         Limit = limit;
         Offset = offset;
-        Unnest = unnest ?? [];
+        Unnest = bindings is null ? unnest ?? [] : bindings.OfType<OqlUnnestExpression>().ToArray();
     }
 
     /// <summary>Gets whether duplicate projected values are eliminated.</summary>
@@ -54,9 +56,11 @@ public sealed class OqlSelectExpression : OqlExpression
     public bool IsValue { get; }
 
     /// <summary>Gets the collection name, or an empty string for an expression source.</summary>
-    public string Collection => _from as string ?? string.Empty;
+    public string Collection => ((_from as Sources)?.From ?? _from) as string ?? string.Empty;
     /// <summary>Gets the FROM expression, or null for a collection source.</summary>
-    public OqlExpression? Source => _from as OqlExpression;
+    public OqlExpression? Source => ((_from as Sources)?.From ?? _from) as OqlExpression;
+    /// <summary>Gets all source bindings in their evaluation order.</summary>
+    public IReadOnlyList<OqlSourceBindingExpression> Bindings => (_from as Sources)?.Bindings ?? Unnest;
     /// <summary>Gets the optional iteration variable.</summary>
     public string? Alias { get; }
     /// <summary>Gets the array bindings in expansion order.</summary>
@@ -79,6 +83,8 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Limit { get; }
     /// <summary>Gets the optional number of rows to skip.</summary>
     public OqlExpression? Offset { get; }
+
+    private sealed record Sources(object From, IReadOnlyList<OqlSourceBindingExpression> Bindings);
 
     // Keep ordinary SELECT nodes and their allocation measurements unchanged. Optional
     // grouping metadata travels with the existing key list, including planner copies.
@@ -109,6 +115,7 @@ public sealed class OqlSelectExpression : OqlExpression
         public bool IsValue => _target.IsValue;
         public string Collection => _target.Collection;
         public OqlExpression? Source => _target.Source;
+        public IReadOnlyList<OqlSourceBindingExpression> Bindings => _target.Bindings;
         public string? Alias => _target.Alias;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlUnnestExpression> Unnest => _target.Unnest;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Documents.Language.OqlProjection> Projections => _target.Projections;

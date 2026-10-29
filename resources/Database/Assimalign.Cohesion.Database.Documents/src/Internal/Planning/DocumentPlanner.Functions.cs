@@ -24,6 +24,7 @@ internal sealed partial class DocumentPlanner
         OqlSubqueryExpression or OqlArrayExpression or OqlObjectExpression or OqlStarExpression => DatabaseType.Json,
         OqlComprehensionExpression comprehension => comprehension.IsFirst ? StaticType(comprehension.Projection, functions) : DatabaseType.Json,
         OqlMetaExpression meta => meta.Member == "id" ? DatabaseType.String : DatabaseType.Decimal,
+        OqlUnaryExpression { Operator: ".*" } => DatabaseType.Json,
         OqlUnaryExpression unary when unary.Operator is "+" or "-" => DatabaseType.Decimal,
         OqlUnaryExpression => DatabaseType.Boolean,
         OqlBinaryExpression binary => binary.Operator is "+" or "-" or "*" or "/" or "%" ? DatabaseType.Decimal : DatabaseType.Boolean,

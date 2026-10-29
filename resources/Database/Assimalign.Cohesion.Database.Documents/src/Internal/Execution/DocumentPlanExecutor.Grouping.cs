@@ -51,7 +51,7 @@ internal static partial class DocumentPlanExecutor
             for (var binding = member.Bindings; binding is not null; binding = binding.Parent)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                yield return new(binding.Name, binding.Value);
+                yield return new(binding.Name, binding.Value is DocumentEvaluationContext source ? source.Content : binding.Value);
             }
         }
     }

@@ -48,7 +48,7 @@ public sealed partial class OqlQueryParser
     }
 
     private bool IsUpdateAlias() => Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
-        (!IsUnnestClause() || _position + 1 < _tokens.Count &&
+        (!IsSourceBindingClause() || _position + 1 < _tokens.Count &&
             (IsWord(_tokens[_position + 1], "SET") || IsWord(_tokens[_position + 1], "UNSET"))) &&
         !Is("LIMIT") && !(Is("USE") && _position + 1 < _tokens.Count && IsWord(_tokens[_position + 1], "KEYS")) &&
         (!IsReturningClause() || Is("RETURNING") && _position + 1 < _tokens.Count &&
@@ -66,7 +66,7 @@ public sealed partial class OqlQueryParser
             alias = Identifier();
         }
         else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
-            (!IsUnnestClause() || _position + 1 < _tokens.Count &&
+            (!IsSourceBindingClause() || _position + 1 < _tokens.Count &&
                 (IsWord(_tokens[_position + 1], "WHERE") || _tokens[_position + 1].Type is TokenType.Eof or TokenType.Semicolon)) &&
             !Is("LIMIT") && !IsReturningClause())
         {
@@ -86,10 +86,10 @@ public sealed partial class OqlQueryParser
 
     private void RejectDmlUnnest()
     {
-        if (Failed || !IsUnnestClause()) { return; }
+        if (Failed || !IsSourceBindingClause()) { return; }
         if (Take("LEFT")) { Take("OUTER"); }
         else { Take("INNER"); }
-        _diagnostics.Add(QueryDiagnostics.UnsupportedClause("UNNEST in UPDATE or DELETE", Profile.Language, Span(Current, Current)));
+        _diagnostics.Add(QueryDiagnostics.UnsupportedClause(Current.Text.ToUpperInvariant() + " in UPDATE or DELETE", Profile.Language, Span(Current, Current)));
     }
 
     private OqlExpression ParseWrite(bool upsert = false)
