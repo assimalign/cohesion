@@ -4316,7 +4316,7 @@ parses inside a supported clause or reports exactly one `CK00001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
 such as `NATURAL` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
-rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
+rejects with `CK00001`: `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /
 `FOR KEY SHARE`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, and
@@ -4326,7 +4326,8 @@ rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
 including `MATERIALIZED`, `SEARCH`, `percent` and `ties`,
 render quoted in canonical SQL. `WITH` remains a profile keyword; its nested-form
-refusal is a dedicated parser rule. Executable GROUPS/EXCLUDE and IGNORE/RESPECT NULLS use contextual parser rules;
+refusal is a dedicated parser rule. RECURSIVE is a profile keyword, rejected with
+`CK00001` only before MERGE. Executable GROUPS/EXCLUDE and IGNORE/RESPECT NULLS use contextual parser rules;
 executable window and datetime names live in the profile. Profile keywords
 that start an unsupported form by another rule, such as `LEFT` or `CROSS`, need no entry.
 A recognized construct is skipped once it is reported, so the text after it adds

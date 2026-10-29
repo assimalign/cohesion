@@ -9,6 +9,29 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Recursive docs: bounded-state consumers run until cancellation (#1719)")]
+    public void Documentation_RecursiveConsumers_ShouldDescribeCancellation()
+    {
+        // Arrange
+        string client = ReadDocumentation("Sql.Client", "DESIGN.md");
+
+        // Act / Assert
+        client.ShouldNotContain("unbounded blocking input refuses with CS05067", Case.Sensitive);
+        client.ShouldContain("bounded-state consumers run until cancellation", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Recursive docs: RECURSIVE is a profile keyword refused before MERGE (#1719)")]
+    public void Documentation_RecursiveKeyword_ShouldDescribeMergeRestriction()
+    {
+        // Arrange
+        string disposition = ReadDialect().Split("**Keyword disposition (#1101).**")[1].Split("A recognized construct is skipped")[0];
+
+        // Act / Assert
+        disposition.ShouldNotContain("`CK00001`: `RECURSIVE`", Case.Sensitive);
+        disposition.ShouldContain("RECURSIVE is a profile keyword", Case.Sensitive);
+        disposition.ShouldContain("only before MERGE", Case.Sensitive);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Recursive scope: documentation describes executed fixpoints consistently (#1719)")]
     [InlineData("Sql.Language", "DESIGN.md", "and recursive execution")]
     [InlineData("Sql", "DESIGN.md", "nested CTEs, recursive execution")]
