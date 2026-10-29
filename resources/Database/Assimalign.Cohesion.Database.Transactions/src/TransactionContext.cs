@@ -49,6 +49,9 @@ namespace Assimalign.Cohesion.Database.Transactions;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionContext.DebugView))]
 public sealed class TransactionContext
 {
+    private const byte snapshotPinFlag = 1;
+    private const byte statementViewFlag = 2;
+
     private readonly TransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
 
@@ -57,7 +60,9 @@ public sealed class TransactionContext
     // signal below live on the transaction's own context only: a view forwards every member
     // that touches them, so one lock always guards one set of state.
     private readonly TransactionContext? _transaction;
-    private readonly bool _isStatementView;
+    // Share the existing pin-kind byte: another boolean grows this hot context by eight
+    // bytes after alignment, including every auto-commit context and statement pin.
+    private readonly byte _kind;
     private readonly object _endSync;
     private TransactionState _state;
     private int _applying;
@@ -78,7 +83,7 @@ public sealed class TransactionContext
         Sequence = sequence;
         IsolationLevel = isolationLevel;
         _beginSnapshot = beginSnapshot;
-        IsSnapshotPin = isSnapshotPin;
+        _kind = isSnapshotPin ? snapshotPinFlag : (byte)0;
         _state = TransactionState.Active;
     }
 
@@ -88,13 +93,12 @@ public sealed class TransactionContext
     {
         _manager = transaction._manager;
         _transaction = transaction._transaction ?? transaction;
-        _isStatementView = isStatementView;
+        _kind = (byte)((transaction.IsSnapshotPin ? snapshotPinFlag : 0) | (isStatementView ? statementViewFlag : 0));
         _endSync = transaction._endSync;
         Id = transaction.Id;
         Sequence = transaction.Sequence;
         IsolationLevel = isolationLevel;
         _beginSnapshot = snapshot;
-        IsSnapshotPin = transaction.IsSnapshotPin;
     }
 
     /// <summary>
@@ -107,10 +111,10 @@ public sealed class TransactionContext
     /// Gets whether this context is a statement view (<see cref="PinStatementSnapshot"/>) rather
     /// than the context the manager began. A manager ends only its own contexts, never a view.
     /// </summary>
-    internal bool IsStatementView => _isStatementView;
+    internal bool IsStatementView => (_kind & statementViewFlag) != 0;
 
     /// <summary>Gets whether this context only holds a statement snapshot horizon.</summary>
-    internal bool IsSnapshotPin { get; }
+    internal bool IsSnapshotPin => (_kind & snapshotPinFlag) != 0;
 
     /// <summary>
     /// Gets the external identity of the transaction.
@@ -148,7 +152,7 @@ public sealed class TransactionContext
     /// view's snapshot is the one fixed when it was pinned.
     /// </summary>
     public TransactionSnapshot Snapshot =>
-        !_isStatementView && IsolationLevel == IsolationLevel.ReadCommitted && State == TransactionState.Active
+        !IsStatementView && IsolationLevel == IsolationLevel.ReadCommitted && State == TransactionState.Active
             ? _manager.CaptureSnapshot(Sequence)
             : _beginSnapshot;
 

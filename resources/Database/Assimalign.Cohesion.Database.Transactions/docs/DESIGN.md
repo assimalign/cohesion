@@ -9,6 +9,8 @@ end latch follows manager lock, as in ClaimEnd. Stale, pinned, applying or endin
 replacement. Callers exclude data statements and transaction ends, retain a begin snapshot pin
 while READ COMMITTED may still change to Snapshot, and release it when configuration closes.
 This takes no new engine locks, writes no log records and changes no lifecycle rates or formats.
+Statement-view and snapshot-pin kind share one byte so replacement support preserves the
+context's existing aligned size, including auto-commit contexts and per-statement pins.
 
 ## Intent
 
