@@ -870,8 +870,8 @@ budget (CG05004). Sources, output buffers and nested results share the retained-
 back writes. Constructed-value depth/count/byte bounds retain CG02013. Ordinary expressions
 keep their existing allocation path. No wire or persisted format changes are needed.
 
-Reduce and ALL/ANY/NONE/SINGLE execute as described below. Pattern comprehensions remain
-CK00001 until GQ-C3/#1537.
+Reduce and ALL/ANY/NONE/SINGLE execute as described below.
+[Pattern comprehensions](#pattern-comprehensions-1736-gq-c3) collect correlated matches.
 Map comprehensions and allReduce are outside this plan.
 
 Reference evidence (local Neo4j clone, paths relative to its root):
@@ -895,7 +895,10 @@ subplan in match order. Duplicates and NULL projections are retained. No matches
 an existing NULL node/relationship argument, produce an empty list. The optional path name
 is a new local binding and may shadow an outer name; other existing pattern names correlate.
 Names introduced inside do not escape. Parsed and hand-built AST occurrences bind separately.
-Fixed chains and existing relationship quantifiers (ISO and Cypher bracketed forms) are accepted; path selectors,
+Fixed chains and existing relationship quantifiers (ISO and Cypher bracketed forms) are accepted.
+Lookahead recognizes all MATCH relationship directions, including abbreviated `->`, `<-`, `-`
+and touching `<->` followed by `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+` or `*`.
+The path parser validates their bounds after the comprehension is recognized. Path selectors,
 explicit path modes and parenthesized quantified path groups are outside this expression form.
 A relationship quantified to zero still satisfies the syntactically nonempty requirement.
 

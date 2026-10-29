@@ -496,7 +496,9 @@ Malformed components are ProtocolViolation. Path result encoding is unchanged.
 
 `[ [p =] (a)-[r:T]->(b) [WHERE predicate] | projection ]` returns one ordered list per
 outer row, retaining duplicate matches and NULL projections. It accepts nonempty relationship
-chains and the existing ISO/Cypher relationship quantifiers. The optional path name binds the
+chains and the existing ISO/Cypher relationship quantifiers. All MATCH directions accept
+ISO postfix quantifiers on both bracketed and abbreviated connectors (`->`, `<-`, `-`, `<->`),
+including `->{1,2}`, `->+` and `->*`. The optional path name binds the
 whole matched path locally and can shadow an outer name. Other existing pattern names
 correlate; new names stay local. NULL correlated entities and zero matches return `[]`.
 WHERE keeps TRUE only. Projection is required and cannot aggregate over the inner matches.

@@ -61,6 +61,40 @@ public sealed class GraphPatternComprehensionTests
         session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
     }
 
+    public static IEnumerable<object[]> QuantifiedRelationshipCases
+    {
+        get
+        {
+            foreach (string edge in new[] { "->", "<-", "-", "<->", "-[r]->", "<-[r]-", "-[r]-", "<-[r]->" })
+            {
+                bool directed = edge is "->" or "<-" or "-[r]->" or "<-[r]-";
+                foreach (var (suffix, directedCount, eitherCount) in new (string, long, long)[]
+                { ("{1,2}", 5, 14), ("{2}", 2, 8), ("{1,}", 5, 18), ("{,2}", 9, 18), ("{,}", 9, 22), ("+", 5, 18), ("*", 9, 22) })
+                { yield return [edge, suffix, directed ? directedCount : eitherCount]; }
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Pattern comprehensions: quantified relationships collect the same paths as MATCH (#1736)")]
+    [MemberData(nameof(QuantifiedRelationshipCases))]
+    public async Task ExecuteAsync_QuantifiedPatternCollection_ShouldMatchCountAsync(string edge, string quantifier, long expected)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("pattern-quantified", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync(GraphExistsTests.Seed, cancellationToken: CancellationToken.None);
+        string pattern = "(a)" + edge + quantifier + "(b)";
+        var match = await GraphExistsTests.RowsAsync(session, "MATCH p=" + pattern + " RETURN count(*)");
+        match.ShouldHaveSingleItem().ShouldHaveSingleItem().ShouldBe(expected);
+        // Act
+        var rows = await GraphExistsTests.RowsAsync(session, "RETURN size([p=" + pattern + " | p]), size([" + pattern + " | b])");
+        // Assert
+        rows.ShouldHaveSingleItem().ShouldBe(new object?[] { expected, expected });
+        session.LastStatementMetrics!.Memory.RetainedBytes.ShouldBe(0);
+        session.LastStatementMetrics.Memory.ActiveLeases.ShouldBe(0);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Graph] - Pattern comprehensions: shared AST binds separately in each occurrence")]
     public async Task ExecuteAsync_SharedPatternAst_ShouldBindPerOccurrenceAsync()
     {

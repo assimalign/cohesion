@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.CompilerServices;
 using Shouldly;
 using Xunit;
 using Assimalign.Cohesion.Database.Graph.Language.Tests.TestObjects;
@@ -26,6 +29,52 @@ public sealed class GqlPatternComprehensionParserTests
         var second = (GqlQueryStatement)new GqlQueryParser().Parse("RETURN " + expression);
         second.Diagnostics.ShouldBeEmpty();
         GqlSemanticTree.Expression(second.GqlExpression.Projections[0].Expression).ShouldBe(GqlSemanticTree.Expression(expression));
+    }
+
+    public static IEnumerable<object[]> QuantifiedRelationshipCases
+    {
+        get
+        {
+            foreach (string edge in new[] { "->", "<-", "-", "<->", "-[r]->", "<-[r]-", "-[r]-", "<-[r]->" })
+            {
+                foreach (string quantifier in new[] { "{1,2}", "{2}", "{1,}", "{,2}", "{,}", "+", "*" })
+                { yield return [edge, quantifier]; }
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [GQL] - Pattern comprehensions: every quantified relationship matches the MATCH grammar (#1736)")]
+    [MemberData(nameof(QuantifiedRelationshipCases))]
+    public void Parse_QuantifiedPatternCollection_ShouldMatchAndRoundTrip(string edge, string quantifier)
+    {
+        // Arrange
+        string pattern = "(a)" + edge + quantifier + "(b)";
+        var match = (GqlQueryStatement)new GqlQueryParser().Parse("MATCH p=" + pattern + " RETURN p");
+        match.Diagnostics.ShouldBeEmpty();
+        var expected = match.GqlExpression.MatchClauses[0].Paths.ShouldHaveSingleItem();
+        foreach (bool named in new[] { true, false })
+        {
+            // Act
+            var statement = (GqlQueryStatement)new GqlQueryParser().Parse("RETURN [" + (named ? "p=" : "") + pattern + " | b]");
+            // Assert
+            statement.Diagnostics.ShouldBeEmpty();
+            var expression = statement.GqlExpression.Projections[0].Expression.ShouldBeOfType<GqlPatternComprehensionExpression>();
+            GqlSemanticTree.Path(expression.Pattern).ShouldBe(GqlSemanticTree.Path(expected with { Variable = named ? "p" : null }));
+            var rendered = (GqlQueryStatement)new GqlQueryParser().Parse("RETURN " + expression);
+            rendered.Diagnostics.ShouldBeEmpty();
+            GqlSemanticTree.Expression(rendered.GqlExpression.Projections[0].Expression).ShouldBe(GqlSemanticTree.Expression(expression));
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [GQL] - Pattern comprehensions: the design summary links to the implemented contract (#1736)")]
+    public void Documentation_PatternCollection_ShouldLinkToImplementedSection()
+    {
+        // Arrange / Act
+        string design = File.ReadAllText(Path.Combine(TestDirectory(), "..", "docs", "DESIGN.md"));
+        // Assert
+        design.ShouldNotContain("Pattern comprehensions remain", Case.Sensitive);
+        design.ShouldContain("[Pattern comprehensions](#pattern-comprehensions-1736-gq-c3)", Case.Sensitive);
+        design.ShouldContain("### Pattern comprehensions (#1736, GQ-C3)", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - Pattern comprehensions: collection property storage retains its capability refusal")]
@@ -64,4 +113,6 @@ public sealed class GqlPatternComprehensionParserTests
         // Assert
         statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
     }
+
+    private static string TestDirectory([CallerFilePath] string source = "") => Path.GetDirectoryName(source)!;
 }

@@ -151,6 +151,9 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a:Person {name:'Alice'}) RETURN [(a)-[:KNOWS]->(b) | b.name]", [[new object?[] { "Bob" }]]),
                 new("RETURN [p=(:Person {name:'Alice'})-[:KNOWS]->(b) WHERE b.age < 18 | size(nodes(p))]", [[new object?[] { 2L }]]),
                 new("OPTIONAL MATCH (a:MissingPattern) RETURN [(a)->(b) | b.name]", [[Array.Empty<object?>()]]),
+                new("RETURN [p=(a)->{1,2}(b) | path_length(p)]", [[new object?[] { 1L, 1L }]]),
+                new("RETURN [p=(a)<-+(b) | path_length(p)]", [[new object?[] { 1L, 1L }]]),
+                new("RETURN [p=(a)<->*(b) WHERE path_length(p)>0 | path_length(p)]", [[new object?[] { 1L, 1L, 1L, 1L }]]),
             ],
             [GqlClauses.ListComprehension] =
             [
