@@ -214,8 +214,9 @@ CD01035. General ON predicates, reversed equality, ON KEYS, expression/derived r
 sources, comma joins and joins on UPDATE/DELETE remain named CK00001 refusals.
 INSERT/UPSERT SELECT and expression subqueries may contain the supported SELECT joins.
 
-Every source in a SELECT containing JOIN or NEST requires an explicit alias, including FROM
-and each UNNEST. AS is optional for collection, JOIN/NEST and UNNEST aliases; existing expression
+Every FROM and UNNEST source in every SELECT scope of a statement containing JOIN or NEST
+requires an explicit alias, including nested SELECTs without their own joins. DML targets keep their
+existing alias rules. AS is optional for collection, JOIN/NEST and UNNEST aliases; existing expression
 FROM rules still apply. An inferred UNNEST/path alias does not satisfy this rule (CD00016).
 This temporary restriction avoids deciding the open unaliased-collection rule in #1767.
 Aliases are ordinal and unique within the SELECT (CD00010; CD01023 for direct ASTs).

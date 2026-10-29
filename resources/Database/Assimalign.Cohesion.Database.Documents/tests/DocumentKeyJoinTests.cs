@@ -11,6 +11,7 @@ using Xunit;
 using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Documents.Internal;
+using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Execution;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
@@ -19,6 +20,25 @@ public sealed class DocumentKeyJoinTests
 {
     private readonly ITestOutputHelper _output;
     public DocumentKeyJoinTests(ITestOutputHelper output) { _output = output; }
+
+    [Fact(DisplayName = "Cohesion Test [Documents] - Key joins: direct AST requests require aliases on every SELECT scope")]
+    public async Task ExecuteAsync_UnaliasedOuterAst_ShouldRefuseBeforeReadingAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("join-ast-aliases", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await DocumentSubqueryTests.SeedAsync(session);
+        var original = DocumentQueryRequest.FromOql("SELECT RAW (SELECT RAW b.n FROM [1] AS s JOIN items AS b ON META(b).id = 'a') FROM items AS a")
+            .Statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>();
+        var query = new OqlSelectExpression(original.Collection, null, original.Projections, original.Predicate,
+            original.GroupBy, original.Having, original.OrderBy, original.IsDistinct, original.IsValue, location: original.Location);
+        // Act
+        var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(new DocumentQueryRequest(new OqlQueryStatement(query)), CancellationToken.None));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD01035");
+        session.LastQueryDocumentsRead.ShouldBe(0);
+    }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Key joins: generated collections match a nested-loop oracle")]
     [InlineData("JOIN", false, false)]

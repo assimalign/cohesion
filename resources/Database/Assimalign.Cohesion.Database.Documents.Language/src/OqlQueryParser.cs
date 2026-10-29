@@ -22,6 +22,8 @@ public sealed partial class OqlQueryParser : QueryParser
     private bool[] _comprehensionTails = [];
     private int _position;
     private int _depth;
+    private bool _hasKeyJoin;
+    private int _unaliasedSource;
 
     /// <summary>Initializes an OQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
@@ -56,6 +58,8 @@ public sealed partial class OqlQueryParser : QueryParser
         _parameterFormPositions.Clear();
         _position = 0;
         _depth = 0;
+        _hasKeyJoin = false;
+        _unaliasedSource = -1;
         int line = 1;
         int scanned = 0;
         while (lexer.MoveNext())
@@ -201,6 +205,16 @@ public sealed partial class OqlQueryParser : QueryParser
             else if (Current.Type != TokenType.Eof)
             {
                 Error("CD00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParseCoreVoid7, Current.Text), Current);
+            }
+        }
+
+        if (!Failed && _hasKeyJoin && _unaliasedSource >= 0)
+        {
+            foreach (var token in _tokens)
+            {
+                if (token.Start != _unaliasedSource) { continue; }
+                Error("CD00016", ErrorMessages.JoinAliasesRequired, token);
+                break;
             }
         }
 

@@ -91,6 +91,7 @@ internal sealed partial class DocumentPlanner
 
     private DocumentNestedPlan PlanNested(OqlExpression expression)
     {
+        if (ContainsKeyJoin(expression)) { ValidateJoinedAliases(expression); }
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
         var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
         var free = new HashSet<string>(StringComparer.Ordinal);
@@ -214,6 +215,24 @@ internal sealed partial class DocumentPlanner
             }
             return NestedChildren(node).All(CanCache);
         }
+    }
+
+    private static bool ContainsKeyJoin(OqlExpression node)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (node is OqlSelectExpression query && query.Bindings != query.Unnest) { return true; }
+        if (node is OqlLiteralExpression or OqlMissingExpression or OqlPathExpression or OqlParameterExpression or OqlStarExpression) { return false; }
+        foreach (var child in NestedChildren(node)) { if (ContainsKeyJoin(child)) { return true; } }
+        return false;
+    }
+
+    private static void ValidateJoinedAliases(OqlExpression node)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (node is OqlSelectExpression query && string.IsNullOrEmpty(query.Alias))
+        { throw new DocumentPlanningException("CD01035", ErrorMessages.JoinBindingInvalid, query.Location); }
+        if (node is OqlLiteralExpression or OqlMissingExpression or OqlPathExpression or OqlParameterExpression or OqlStarExpression) { return; }
+        foreach (var child in NestedChildren(node)) { ValidateJoinedAliases(child); }
     }
 
     internal static IEnumerable<OqlExpression> NestedChildren(OqlExpression node)

@@ -327,7 +327,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
 | New (#1731, OQ-Q1) | CD00014 | Language/syntax — direct IN subquery requires SELECT RAW or SELECT VALUE |
 | New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
-| New (#1732) | CD00016 | Language/syntax — a joined SELECT source lacks an explicit alias |
+| New (#1732) | CD00016 | Language/syntax — a statement containing JOIN/NEST has a SELECT source without an explicit alias |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |

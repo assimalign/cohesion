@@ -7,6 +7,19 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlKeyJoinParserTests
 {
+    [Fact(DisplayName = "Cohesion Test [OQL] - Key joins: statement-wide alias requirements reset when the parser is reused")]
+    public void Parse_JoinedThenOrdinary_ShouldResetAliasRequirement()
+    {
+        // Arrange
+        var parser = new OqlQueryParser();
+        // Act
+        var joined = parser.Parse("SELECT (SELECT RAW 1 FROM a AS a JOIN b AS b ON META(b).id = 'k') FROM c");
+        var ordinary = parser.Parse("SELECT * FROM c UNNEST tags");
+        // Assert
+        joined.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD00016");
+        ordinary.Diagnostics.ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [OQL] - Source bindings: an array-only direct AST retains the ordinary UNNEST representation")]
     public void Construct_ArrayOnlyBindings_ShouldPreserveOrdinarySourceRepresentation()
     {
@@ -57,6 +70,10 @@ public sealed class OqlKeyJoinParserTests
     [InlineData("SELECT * FROM a AS a JOIN b ON META(b).id = 'k'")]
     [InlineData("SELECT * FROM a AS a UNNEST a.keys JOIN b AS b ON META(b).id = 'k'")]
     [InlineData("SELECT * FROM a AS a JOIN b AS b ON META(b).id = 'k' UNNEST b.tags")]
+    [InlineData("SELECT (SELECT RAW 1 FROM a AS a JOIN b AS b ON META(b).id = 'k') FROM c")]
+    [InlineData("SELECT (SELECT RAW n FROM c) FROM a AS a JOIN b AS b ON META(b).id = 'k'")]
+    [InlineData("SELECT * FROM (SELECT * FROM c) AS a JOIN b AS b ON META(b).id = 'k'")]
+    [InlineData("SELECT (SELECT RAW 1 FROM a AS a JOIN b AS b ON META(b).id = 'k') FROM c AS c UNNEST c.tags")]
     public void Parse_UnaliasedSource_ShouldRefuseWithLocatedCode(string text)
     {
         // Arrange / Act

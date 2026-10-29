@@ -45,6 +45,7 @@ public sealed partial class OqlQueryParser
         if (!Failed && source is OqlSubqueryExpression && alias is null)
         { Error("CD00015", ErrorMessages.DerivedSourceAliasRequired, sourceToken); }
         bool explicitFromAlias = alias is not null;
+        if (!explicitFromAlias) { RecordUnaliasedSource(sourceToken); }
         if (source is OqlPathExpression { Segments.Count: > 0 } sourcePath && alias is null)
         { alias = sourcePath.Segments[^1].Name; }
 
@@ -62,6 +63,7 @@ public sealed partial class OqlQueryParser
             else { Take("INNER"); }
             if (Is("JOIN") || Is("NEST"))
             {
+                _hasKeyJoin = true;
                 bindings ??= new List<OqlSourceBindingExpression>(unnest);
                 var joinToken = Current;
                 bool nest = Take("NEST");
@@ -112,6 +114,7 @@ public sealed partial class OqlQueryParser
             if (!Failed && variable is null) { Error("CD00002", ErrorMessages.OqlQueryParserParseSelectVoid3, variableToken); }
             if (!Failed && !variables.Add(variable!)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, variableToken); }
             explicitAliases &= explicitVariable;
+            if (!explicitVariable) { RecordUnaliasedSource(variableToken); }
             if (bindings is not null && !explicitVariable) { Error("CD00016", ErrorMessages.JoinAliasesRequired, variableToken); }
             var expansion = new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous));
             unnest.Add(expansion);
@@ -199,6 +202,11 @@ public sealed partial class OqlQueryParser
 
     private void UnsupportedKeyJoin(Lexeme token, string suffix = " general ON predicate")
         => _diagnostics.Add(QueryDiagnostics.UnsupportedClause(token.Text.ToUpperInvariant() + suffix, Profile.Language, Span(token, token)));
+
+    private void RecordUnaliasedSource(Lexeme token)
+    {
+        if (_unaliasedSource < 0 || token.Start < _unaliasedSource) { _unaliasedSource = token.Start; }
+    }
 
     private bool IsSourceBindingClause() => IsUnnestClause() || IsJoinClause(_position);
 

@@ -14,7 +14,7 @@ public sealed class OqlSelectExpression : OqlExpression
 
     /// <summary>Initializes a query over a collection or expression source.</summary>
     /// <param name="collection">The unqualified collection name or reserved COHESION_SCHEMA system collection name; ignored when <paramref name="source"/> is supplied.</param>
-    /// <param name="alias">The optional iteration variable.</param>
+    /// <param name="alias">The iteration variable; required in every SELECT scope of a statement containing JOIN or NEST.</param>
     /// <param name="projections">The projected expressions.</param>
     /// <param name="predicate">The optional document filter.</param>
     /// <param name="groupBy">The grouping expressions.</param>
@@ -62,7 +62,7 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Source => ((_from as Sources)?.From ?? _from) as OqlExpression;
     /// <summary>Gets all source bindings in their evaluation order.</summary>
     public IReadOnlyList<OqlSourceBindingExpression> Bindings => (_from as Sources)?.Bindings ?? Unnest;
-    /// <summary>Gets the optional iteration variable.</summary>
+    /// <summary>Gets the iteration variable; joined statements require one in every SELECT scope.</summary>
     public string? Alias { get; }
     /// <summary>Gets the array bindings in expansion order.</summary>
     public IReadOnlyList<OqlUnnestExpression> Unnest { get; }

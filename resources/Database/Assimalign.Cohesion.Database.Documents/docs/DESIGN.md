@@ -511,7 +511,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | Direct IN subquery requires RAW/VALUE |
 | `CD00015` | Derived FROM subquery requires an alias |
-| `CD00016` | Every joined SELECT source requires an explicit alias |
+| `CD00016` | Every SELECT source in a joined statement requires an explicit alias |
 | `CD01033` | FROM expression has no explicit alias or implicit field name |
 | `CD01034` | Unbound variable in a FROM expression without an input-row scope |
 | `CD01035` | Invalid key-join binding scope or ambiguous/invalid joined META receiver |
@@ -778,7 +778,8 @@ Release plan, native-query and selective-scan allocation measurements retain the
 DocumentJoinPlan wraps the initial stored, virtual, derived or expression source plan and resolves
 each right-hand stored collection against the planning snapshot. Ordered source bindings share the
 streaming expression-source pipeline, including left-to-right UNNEST cursors, correlation, grouped
-captures and ORDER BY aliases. Every joined source requires an explicit alias pending #1767.
+captures and ORDER BY aliases. Every SELECT source in a statement containing a key join requires an explicit alias pending #1767,
+including nested scopes without their own joins and direct AST requests.
 The language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#key-join-and-nest-1732-oq-j1)
 records all defaults, including the NULL/MISSING lookup-NEST table, qualified stars, metadata
 ambiguity and selected-window headers. Ordinary queries keep their existing execution path.

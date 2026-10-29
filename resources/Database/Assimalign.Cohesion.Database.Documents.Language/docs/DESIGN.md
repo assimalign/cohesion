@@ -593,6 +593,9 @@ retains their evaluation order; Unnest remains the array-only view. SELECT's exi
 holds an optional wrapper only for joined queries, preserving ordinary node size and allocations.
 The parser accepts only right-hand META(alias).id equality and keeps JOIN/NEST contextual.
 General forms, ON KEYS and DML source joins retain CK00001; explicit aliases avoid #1767.
+A joined statement requires aliases in every SELECT scope. The parser tracks actual join clauses
+and unaliased sources across recursive parsing, then resets this state for its next statement.
+The engine validates the same rule for direct ASTs before source planning.
 The [dialect](DIALECT.md#key-join-and-nest-1732-oq-j1) records scalar/unknown keys, metadata,
 star shape, paging, cache/budget defaults and pinned SQL++ references. OqlKeyJoinParserTests,
 keyword disposition and the engine's profile-driven conformance corpus cover the four capabilities.
@@ -773,7 +776,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
 | `CD00014` | Direct IN subquery requires SELECT RAW or SELECT VALUE |
 | `CD00015` | Derived FROM subquery requires an alias |
-| `CD00016` | Every source in a joined SELECT requires an explicit alias |
+| `CD00016` | Every SELECT source in a joined statement requires an explicit alias |
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |
 | `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
 
