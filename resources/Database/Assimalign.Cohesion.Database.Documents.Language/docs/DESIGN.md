@@ -549,6 +549,12 @@ there is no separate OQL AST renderer. The engine renders nested plans in EXPLAI
 The [dialect](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records every default,
 cache policy, scope, retention and deferred form. OqlSubqueryParserTests and the engine's
 advertised-clause corpus cover the syntax together with the runtime and transport suites.
+Correlation retains the resolved binding for index constraints, ordering proofs and META receiver
+equivalence. Captures are constants inside an invocation, and every enclosing grouped query still
+enforces group-key visibility (CD05001), including nested FROM and inner aggregate inputs.
+An enclosing aggregate may capture its source-row inputs; its GROUP AS binding remains unavailable
+there (CD01031). Local metadata alone permits identity paging. The engine parity and conformance
+corpora cover these scope distinctions alongside shadowing and group bindings.
 
 ## FROM source expressions (#1731, OQ-Q2)
 

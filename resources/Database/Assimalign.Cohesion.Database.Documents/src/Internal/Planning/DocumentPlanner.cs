@@ -75,12 +75,13 @@ internal sealed partial class DocumentPlanner
         var logical = CreateLogicalPlan(query, _cancellationToken, _parameters, _functions, outerNames);
         var collection = ResolveCollection(query.Collection, query.Location);
         var indexes = _catalog.GetIndexes(collection.Id, _snapshot);
-        var access = ChooseAccess(query.Predicate, query.Alias, indexes, out var accessCandidates, logical.UnnestVariables, query.Unnest);
+        var nonSourceNames = NonSourceNames(logical.UnnestVariables, outerNames);
+        var access = ChooseAccess(query.Predicate, query.Alias, indexes, out var accessCandidates, nonSourceNames, query.Unnest, outerNames);
         if (logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
             access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Unnest.Count == 0 &&
             logical.Query.OrderBy.All(order => order.Expression is OqlPathExpression)))
         {
-            access = AnalyzeOrdering(logical, access, indexes, accessCandidates);
+            access = AnalyzeOrdering(logical, access, indexes, accessCandidates, nonSourceNames);
             if (access is DocumentOrderingPath { Consumed: not null })
             {
                 // Type inference observes every match before paging. Only fixed result
@@ -261,7 +262,8 @@ internal sealed partial class DocumentPlanner
             if (query.GroupAs is not null) { ValidateGroupArrayInput(order.Expression, query, scopes!, functions); }
         }
         bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
-            query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" }) &&
+            query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" } identity &&
+                IsLocalMetadata(identity, query.Alias)) &&
             projections.All(projection => (projection.Expression is not OqlStarExpression || query.Unnest.Count > 0) &&
                 (projection.Type != DatabaseType.Null || projection.Expression is
                     OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression));
@@ -276,7 +278,7 @@ internal sealed partial class DocumentPlanner
 
     private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes,
         out List<(DocumentIndexPath Path, int Prefix, bool Range)> analyzed,
-        IReadOnlySet<string>? variables = null, IReadOnlyList<OqlUnnestExpression>? unnest = null)
+        IReadOnlySet<string>? variables = null, IReadOnlyList<OqlUnnestExpression>? unnest = null, IReadOnlySet<string>? outerNames = null)
     {
         var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
         if (predicate is not null) { Collect(predicate); }
@@ -286,7 +288,7 @@ internal sealed partial class DocumentPlanner
         long bestCost = long.MaxValue;
         var candidates = new List<(DocumentIndexPath Path, int Prefix, bool Range)>();
         var scopes = unnest is { Count: > 0 } || HasArrayPredicate(predicate)
-            ? ArrayScopes(predicate, alias, variables, unnest).ToArray() : null;
+            ? ArrayScopes(predicate, alias, variables, unnest, outerNames).ToArray() : null;
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -659,7 +661,12 @@ internal sealed partial class DocumentPlanner
     private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query, IReadOnlySet<string>? variables,
         DocumentBindingScopes scopes, DocumentFunctionCatalog functions, DocumentBindingScope? bound = null, IReadOnlySet<string>? outerNames = null)
     {
-        if (expression is OqlSubqueryExpression) { return; }
+        if (expression is OqlSubqueryExpression subquery)
+        {
+            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias, variables, scopes, rightScope: bound))) { return; }
+            ValidateGroupedCaptures(subquery.Query, query, variables, scopes, functions, bound, outerNames);
+            return;
+        }
         if (expression is OqlMetaExpression { Arguments.Count: 1 } meta &&
             meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } metadataSource &&
             metadataSource.Segments[0].Name is string metadataName && outerNames?.Contains(metadataName) == true) { return; }
@@ -748,7 +755,8 @@ internal sealed partial class DocumentPlanner
         (OqlStarExpression, OqlStarExpression) => true,
         (OqlArrayExpression a, OqlArrayExpression b) => a.Elements.Count == b.Elements.Count &&
             a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth)),
-        (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member,
+        (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member &&
+            EquivalentMetadataSource(a, b, alias, variables, leftScope, rightScope, localDepth),
         (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
             a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&
                 EquivalentExpression(pair.First.Value, pair.Second.Value, alias, variables, scopes, leftScope, rightScope, localDepth)),

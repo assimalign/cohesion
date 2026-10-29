@@ -72,11 +72,22 @@ public sealed class DocumentSubqueryParityTests
         // Field/index navigation has a path-only AST; bind the equivalent operand locally.
         yield return ["FIRST q.a[0] FOR q IN [{a:[1]}] END", "FIRST q.a[0] FOR q IN (SELECT RAW {a:[1]} FROM items LIMIT 1) END"];
         yield return ["META().id", "CASE WHEN EXISTS (SELECT RAW 1 FROM items) THEN META().id END"];
+        foreach (string form in new[] { "ANY v IN [1,2] SATISFIES EXISTS {v} END", "EVERY v IN [1,2] SATISFIES EXISTS {v} END",
+            "ARRAY v FOR v IN [1,2] WHEN EXISTS {v} END", "FIRST v FOR v IN [1,2] WHEN EXISTS {v} END",
+            "1 IN (ARRAY_LENGTH({v}), 2)", "CASE WHEN EXISTS {v} THEN TRUE END", "{a:EXISTS {v}, b:EXISTS {v}}" })
+        {
+            yield return [form.Replace("{v}", "[tick(1)]", StringComparison.Ordinal),
+                form.Replace("{v}", "(SELECT RAW tick(1) FROM [1] AS s)", StringComparison.Ordinal)];
+        }
 
     }
 
     public static IEnumerable<object[]> QueryPositions()
     {
+        yield return ["SELECT RAW [META(d).id] FROM items d LIMIT 1", "SELECT RAW (SELECT RAW META(s).id FROM items s ORDER BY META(d).id DESC LIMIT 1) FROM items d LIMIT 1", 1];
+        yield return ["SELECT RAW [d.n] FROM items d GROUP BY d.n", "SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM items d GROUP BY d.n", 3];
+        yield return ["SELECT RAW [d.n + 1] FROM items d GROUP BY d.n + 1", "SELECT RAW (SELECT RAW d.n + 1 FROM [1] AS s) FROM items d GROUP BY d.n + 1", 3];
+        yield return ["SELECT RAW [1,2,3] FROM items d LIMIT 1", "SELECT RAW (SELECT RAW s.n FROM items s WHERE d.n = 1 ORDER BY s.n) FROM items d LIMIT 1", 1];
         yield return ["SELECT {n:-d.n} AS d FROM items d WHERE TRUE ORDER BY d.n", "SELECT {n:-d.n} AS d FROM items d WHERE EXISTS (SELECT RAW 1 FROM items) ORDER BY d.n", 1];
         yield return ["SELECT n AS p FROM items ORDER BY [[-n]]", "SELECT n AS p FROM items ORDER BY ARRAY (SELECT RAW p FROM [1] AS s) FOR p IN [-n] END", 3];
         yield return ["SELECT [n] AS v FROM items d", "SELECT (SELECT RAW d.n FROM [1] AS s) AS v FROM items d", 3];

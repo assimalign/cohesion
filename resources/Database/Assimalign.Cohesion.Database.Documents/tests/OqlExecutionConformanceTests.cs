@@ -116,6 +116,11 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Subquery] =
             [
+                new("SELECT RAW (SELECT RAW META(s).id FROM items s ORDER BY META(d).id DESC LIMIT 1) FROM items d LIMIT 1", [[Json("[\"a\"]")]]),
+                new("SELECT RAW (SELECT RAW d.category FROM [1] AS s) FROM items d GROUP BY d.category ORDER BY d.category", [[Json("[\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT RAW (SELECT RAW META(s).id FROM items s WHERE d.category = 'a' ORDER BY META(s).id) FROM items d WHERE name = 'alpha'",
+                    [[Json("[\"a\",\"b\",\"c\",\"d\"]")]], ["CREATE INDEX captured ON items (d.category)"]),
+                new("SELECT RAW 1 FROM [1] AS d WHERE EVERY v IN [1,2,3] SATISFIES EXISTS (SELECT RAW v FROM [1] AS s) END", [[1m]]),
                 new("SELECT (SELECT RAW d.name FROM [1] AS s) AS names FROM items d WHERE name = 'alpha'", [[Json("[\"alpha\"]")]]),
                 new("SELECT (SELECT RAW META(d).id FROM [1] AS s) AS ids FROM items d WHERE name = 'alpha'", [[Json("[\"a\"]")]]),
                 new("SELECT (SELECT d.name AS n, COUNT(*) AS c FROM [1,2] AS s HAVING d.name = 'alpha') AS a FROM items d WHERE name = 'alpha'", [[Json("[{\"n\":\"alpha\",\"c\":2}]")]]),

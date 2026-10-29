@@ -605,6 +605,18 @@ There is no cross-statement plan cache in Documents: a reused request rebuilds r
 plans against the current operation snapshot, so CREATE/DROP INDEX cannot retain stale access.
 Captured outer paths are constant within one inner grouping invocation; grouping validation
 permits them in projection, HAVING and ordering while preserving local grouping restrictions.
+Scalar/array access constraints and ordered-index presence/domain proofs exclude resolved outer
+bindings. An outer path cannot constrain or prove ordering of the inner stored document.
+Identity paging recognizes only local-source META().id or META(local_alias).id; captured metadata
+is constant and keeps ascending inner identity ties. Metadata equivalence compares receiver bindings.
+Captured expressions are also checked against every enclosing grouped scope, including captures
+under inner aggregates and in FROM. Only group keys, group bindings and the enclosing aggregate's
+row inputs remain visible; hidden source paths use the direct-reference CD05001 refusal. GROUP AS
+captures in that aggregate's row input retain CD01031. The visitor matches complete group keys
+before their components and preserves inner source, comprehension and projection-alias shadowing.
+This follows the SQL++ rule that grouping hides original objects
+([GROUP BY](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/groupby.html#group-as-clause))
+and PostgreSQL src/backend/parser/parse_agg.c:1427-1514's level-aware grouping check.
 ORDER BY exports charged projection-alias frames only to nested scopes, preserving ordinary
 path evaluation. Comprehension/quantifier frames inside the ordering expression shadow those aliases.
 Captured source frames carry their existing row content and identity; path evaluation exposes only

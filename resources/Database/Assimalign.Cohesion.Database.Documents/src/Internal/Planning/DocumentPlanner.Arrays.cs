@@ -15,7 +15,8 @@ internal sealed partial class DocumentPlanner
     };
 
     private static IEnumerable<(OqlPathExpression Source, string Variable, OqlExpression Predicate)> ArrayScopes(
-        OqlExpression? predicate, string? alias, IReadOnlySet<string>? variables, IReadOnlyList<OqlUnnestExpression>? unnest)
+        OqlExpression? predicate, string? alias, IReadOnlySet<string>? variables, IReadOnlyList<OqlUnnestExpression>? unnest,
+        IReadOnlySet<string>? outerNames)
     {
         foreach (var conjunct in Conjuncts(predicate))
         {
@@ -29,7 +30,7 @@ internal sealed partial class DocumentPlanner
         {
             // A direct document source is independent of preceding expansions. An
             // element comparison rejects LEFT's synthetic MISSING row as well.
-            if (binding.Collection is OqlPathExpression source && !IsVariablePath(source, preceding) &&
+            if (binding.Collection is OqlPathExpression source && !IsVariablePath(source, preceding) && !IsVariablePath(source, outerNames) &&
                 IndexPath(source, alias) is not null)
             { yield return (source, binding.Variable, predicate); }
             preceding.Add(binding.Variable);

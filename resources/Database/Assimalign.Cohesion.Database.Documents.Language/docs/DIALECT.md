@@ -133,6 +133,14 @@ projection aliases in ORDER BY. Inner declarations shadow outer names by ordinal
 An unqualified field binds to the inner source.
 Outer captures are constant within each invocation of an inner grouped query, including its
 projection, HAVING and ORDER BY; local fields still require the normal grouping rules.
+Every enclosing grouped scope also checks the capture: group keys and group bindings are visible,
+while an ungrouped source path gives CD05001 just as a direct reference does. The enclosing
+aggregate's row inputs may capture source fields; GROUP AS is unavailable in those inputs (CD01031).
+Inner aggregates do not restore an enclosing query's hidden fields. This follows SQL++'s
+[grouped-object visibility](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/groupby.html#group-as-clause).
+Captured paths never constrain local indexes or prove local index ordering. Only local-source
+META().id / META(local_alias).id permits identity paging; ordering by captured metadata keeps
+ascending inner document identity for equal keys. Metadata equivalence includes its receiver.
 META(outer_alias).id/version follows a captured stored source's identity. Captured expression,
 derived and local-value bindings have no stored identity and return NULL for metadata.
 A nested `FROM d.items AS i`, or `FROM d AS i`
