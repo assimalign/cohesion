@@ -185,13 +185,13 @@ internal sealed partial class DocumentPlanner
             if (!variables!.Add(binding.Variable))
             { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameDuplicate, binding.Location); }
             Validate(binding.Collection, allowAggregate: false, functions: functions);
-            ValidateMetadata(binding.Collection, query.Alias, DocumentSystemCollections.Find(query.Collection) is null, outerNames);
+            ValidateMetadata(binding.Collection, query.Alias ?? query.Collection, DocumentSystemCollections.Find(query.Collection) is null, outerNames);
         }
         foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
             .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null, outerNames);
+            ValidateMetadata(expression, query.Alias ?? query.Collection, DocumentSystemCollections.Find(query.Collection) is null, outerNames);
         }
         if (query.Projections.Count == 0) { throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerCreateLogicalPlanFailure, query.Location); }
         if (query.IsValue && (query.Projections.Count != 1 || query.Projections[0].Alias is not null ||
@@ -263,7 +263,7 @@ internal sealed partial class DocumentPlanner
         }
         bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
             query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" } identity &&
-                IsLocalMetadata(identity, query.Alias)) &&
+                IsLocalMetadata(identity, query.Alias ?? query.Collection)) &&
             projections.All(projection => (projection.Expression is not OqlStarExpression || query.Unnest.Count > 0) &&
                 (projection.Type != DatabaseType.Null || projection.Expression is
                     OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression));
@@ -663,19 +663,21 @@ internal sealed partial class DocumentPlanner
     {
         if (expression is OqlSubqueryExpression subquery)
         {
-            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias, variables, scopes, rightScope: bound))) { return; }
+            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias ?? query.Collection, variables, scopes, rightScope: bound))) { return; }
             ValidateGroupedCaptures(subquery.Query, query, variables, scopes, functions, bound, outerNames);
             return;
         }
         if (expression is OqlMetaExpression { Arguments.Count: 1 } meta &&
             meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } metadataSource &&
-            metadataSource.Segments[0].Name is string metadataName && outerNames?.Contains(metadataName) == true) { return; }
+            metadataSource.Segments[0].Name is string metadataName && metadataName != (query.Alias ?? query.Collection) &&
+            variables?.Contains(metadataName) != true && outerNames?.Contains(metadataName) == true) { return; }
         if (expression is OqlPathExpression { Segments.Count: > 0 } path &&
             (DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null ||
-             path.Segments[0].Name is string outerName && outerNames?.Contains(outerName) == true)) { return; }
+             path.Segments[0].Name is string outerName && outerName != (query.Alias ?? query.Collection) &&
+                variables?.Contains(outerName) != true && outerNames?.Contains(outerName) == true)) { return; }
         // PostgreSQL parse_agg.c:1439-1452 adjusts grouping expressions to the current
         // scope before matching. An inner t must never stand in for an outer field t.
-        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias, variables, scopes, rightScope: bound))) { return; }
+        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias ?? query.Collection, variables, scopes, rightScope: bound))) { return; }
         if (expression is OqlComprehensionExpression comprehension)
         {
             ValidateGrouped(comprehension.Collection, query, variables, scopes, functions, bound, outerNames);

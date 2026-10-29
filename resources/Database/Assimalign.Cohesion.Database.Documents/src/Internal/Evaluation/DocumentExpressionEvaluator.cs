@@ -349,8 +349,11 @@ internal sealed partial class DocumentExpressionEvaluator
     private object? ReadMetadata(OqlMetaExpression expression, DocumentEvaluationContext document)
     {
         var source = document;
+        // With no nested scope or alias, planning has already checked the implicit
+        // collection receiver. There is no outer binding to resolve on this path.
         if (expression.Arguments.Count == 1 && expression.Arguments[0] is OqlPathExpression { Segments.Count: 1 } path &&
-            path.Segments[0].Name is string name && name != (_alias ?? (_state as NestedEvaluationState)?.SourceName))
+            path.Segments[0].Name is string name && name != (_alias ?? (_state as NestedEvaluationState)?.SourceName) &&
+            (_alias is not null || _state is NestedEvaluationState))
         {
             DocumentVariableBinding? found = null;
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)

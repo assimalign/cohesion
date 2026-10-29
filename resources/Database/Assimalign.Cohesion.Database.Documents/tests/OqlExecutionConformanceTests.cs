@@ -116,6 +116,11 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Subquery] =
             [
+                new("SELECT RAW (SELECT RAW items.category FROM [1] AS s) FROM items GROUP BY category ORDER BY category", [[Json("[\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT RAW (SELECT RAW META(items).id FROM [1] AS s) FROM items GROUP BY META().id ORDER BY META().id", [[Json("[\"a\"]")], [Json("[\"b\"]")], [Json("[\"c\"]")], [Json("[\"d\"]")]]),
+                new("SELECT RAW (SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM [1] AS t) FROM [{n:10}] AS d GROUP BY (SELECT RAW d.n FROM [1] AS s)", [[Json("[[10]]")]]),
+                new("SELECT RAW (SELECT s.amount AS d FROM items s ORDER BY d.amount) FROM items d WHERE name = 'alpha'", [[Json("[{\"d\":2},{\"d\":6},{\"d\":4},{\"d\":null}]")]],
+                    ["CREATE INDEX collision ON items (d.amount INCLUDE MISSING)"]),
                 new("SELECT RAW (SELECT RAW META(s).id FROM items s ORDER BY META(d).id DESC LIMIT 1) FROM items d LIMIT 1", [[Json("[\"a\"]")]]),
                 new("SELECT RAW (SELECT RAW d.category FROM [1] AS s) FROM items d GROUP BY d.category ORDER BY d.category", [[Json("[\"a\"]")], [Json("[\"b\"]")]]),
                 new("SELECT RAW (SELECT RAW META(s).id FROM items s WHERE d.category = 'a' ORDER BY META(s).id) FROM items d WHERE name = 'alpha'",
@@ -272,6 +277,7 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Limit] =
             [
+                new("SELECT RAW META(items).id FROM items ORDER BY META(items).id LIMIT 2", [["a"], ["b"]]),
                 new("SELECT RAW v FROM [1/0] AS v ORDER BY v LIMIT 0", []),
                 new("SELECT DISTINCT RAW v FROM [1/0] AS v LIMIT 0", []),
                 new("SELECT COUNT(*) FROM [1/0] AS v LIMIT 0", []),

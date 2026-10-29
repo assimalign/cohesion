@@ -607,7 +607,9 @@ Captured outer paths are constant within one inner grouping invocation; grouping
 permits them in projection, HAVING and ordering while preserving local grouping restrictions.
 Scalar/array access constraints and ordered-index presence/domain proofs exclude resolved outer
 bindings. An outer path cannot constrain or prove ordering of the inner stored document.
-Identity paging recognizes only local-source META().id or META(local_alias).id; captured metadata
+Source identity uses the explicit alias or, when absent, the collection name in metadata,
+group-key matching and grouped-capture validation. Identity paging recognizes only local-source
+META().id or META(local_source).id; EXPLAIN reports identity_paging=True for that path. Captured metadata
 is constant and keeps ascending inner identity ties. Metadata equivalence compares receiver bindings.
 Captured expressions are also checked against every enclosing grouped scope, including captures
 under inner aggregates and in FROM. Only group keys, group bindings and the enclosing aggregate's
@@ -619,8 +621,12 @@ identical text cannot prove a key after a captured UNNEST/comprehension binding 
 This follows the SQL++ rule that grouping hides original objects
 ([GROUP BY](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/groupby.html#group-as-clause))
 and PostgreSQL src/backend/parser/parse_agg.c:1427-1514's level-aware grouping check.
-ORDER BY exports charged projection-alias frames only to nested scopes, preserving ordinary
-path evaluation. Comprehension/quantifier frames inside the ordering expression shadow those aliases.
+One planning visitor rule mirrors ORDER BY execution: a standalone projection alias substitutes
+its projection expression, other direct expressions use the grouped row scope, and only nested
+SELECTs receive projection aliases. Comprehension/quantifier frames inside the ordering expression
+shadow those aliases. Captured names that are also this query's own source or UNNEST variable
+remain subject to local grouping validation. Array-scope planning carries outer-name iterator
+state only for correlated queries; ordinary ANY and UNNEST plans retain their original allocation bytes.
 Captured source frames carry their existing row content and identity; path evaluation exposes only
 the content, while META resolves stored id/version. Expression/derived rows and scalar bindings
 carry no identity, preserving their NULL metadata behavior.

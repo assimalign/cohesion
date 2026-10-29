@@ -8,6 +8,26 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentPlanner
 {
+    // The executor substitutes only a standalone projection alias. Direct paths use
+    // the grouped row scope; only nested SELECTs receive the projection bindings.
+    // Visitors carry both scopes through local quantifier/comprehension declarations.
+    private static bool VisitOrdering<TScope>(OqlSelectExpression query, TScope grouped,
+        Func<TScope, string, TScope> bind, Func<OqlExpression, TScope, TScope, bool> visit)
+    {
+        var nested = grouped;
+        foreach (var projection in query.Projections)
+        { if (projection.Alias is string name) { nested = bind(nested, name); } }
+        foreach (var order in query.OrderBy)
+        {
+            var expression = order.Expression;
+            if (expression is OqlPathExpression { Segments.Count: 1 } path &&
+                query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection)
+            { expression = projection.Expression; }
+            if (!visit(expression, grouped, nested)) { return false; }
+        }
+        return true;
+    }
+
     private static IReadOnlySet<string>? NonSourceNames(IReadOnlySet<string>? variables, IReadOnlySet<string>? outerNames)
     {
         if (outerNames is not { Count: > 0 }) { return variables; }
@@ -66,33 +86,26 @@ internal sealed partial class DocumentPlanner
             if (select.GroupAs is not null) { grouped = new DocumentBindingScope(select.GroupAs, grouped); }
             foreach (var projection in select.Projections) { if (!Same(projection.Expression, grouped)) { return false; } }
             if (select.Having is not null && !Same(select.Having, grouped)) { return false; }
-            var ordered = grouped;
-            foreach (var projection in select.Projections)
-            { if (projection.Alias is not null) { ordered = new DocumentBindingScope(projection.Alias, ordered); } }
-            foreach (var order in select.OrderBy)
-            {
-                if (order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
-                    select.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection)
-                { if (!Same(projection.Expression, grouped)) { return false; } }
-                else if (!Same(order.Expression, ordered)) { return false; }
-            }
-            return true;
+            return VisitOrdering(select, grouped, (scope, name) => new DocumentBindingScope(name, scope),
+                (expression, scope, nested) => Same(expression, scope, nested));
         }
 
-        bool Same(OqlExpression expression, DocumentBindingScope? local)
+        bool Same(OqlExpression expression, DocumentBindingScope? local, DocumentBindingScope? nestedOrder = null)
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (expression is OqlSubqueryExpression subquery) { return SameQuery(subquery.Query, local); }
+            if (expression is OqlSubqueryExpression subquery) { return SameQuery(subquery.Query, nestedOrder ?? local); }
             if (expression is OqlPathExpression { Segments.Count: > 0 } path) { return SameName(path.Segments[0].Name, local); }
             if (expression is OqlComprehensionExpression comprehension)
             {
                 var inner = new DocumentBindingScope(comprehension.Variable, local);
-                return Same(comprehension.Collection, local) && Same(comprehension.Projection, inner) &&
-                    (comprehension.Predicate is null || Same(comprehension.Predicate, inner));
+                var orderedInner = nestedOrder is null ? null : new DocumentBindingScope(comprehension.Variable, nestedOrder);
+                return Same(comprehension.Collection, local, nestedOrder) && Same(comprehension.Projection, inner, orderedInner) &&
+                    (comprehension.Predicate is null || Same(comprehension.Predicate, inner, orderedInner));
             }
             if (expression is OqlQuantifiedExpression quantified)
-            { return Same(quantified.Collection, local) && Same(quantified.Predicate, new DocumentBindingScope(quantified.Variable, local)); }
-            foreach (var child in NestedChildren(expression)) { if (!Same(child, local)) { return false; } }
+            { return Same(quantified.Collection, local, nestedOrder) && Same(quantified.Predicate, new DocumentBindingScope(quantified.Variable, local),
+                nestedOrder is null ? null : new DocumentBindingScope(quantified.Variable, nestedOrder)); }
+            foreach (var child in NestedChildren(expression)) { if (!Same(child, local, nestedOrder)) { return false; } }
             return true;
         }
     }
@@ -134,31 +147,23 @@ internal sealed partial class DocumentPlanner
             if (select.GroupAs is not null) { grouped = new DocumentBindingScope(select.GroupAs, grouped); }
             foreach (var projection in select.Projections) { Visit(projection.Expression, grouped); }
             if (select.Having is not null) { Visit(select.Having, grouped); }
-            var ordered = grouped;
-            foreach (var projection in select.Projections)
-            { if (projection.Alias is not null) { ordered = new DocumentBindingScope(projection.Alias, ordered); } }
-            foreach (var order in select.OrderBy)
-            {
-                var expression = order.Expression;
-                if (expression is OqlPathExpression { Segments.Count: 1 } path &&
-                    select.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection)
-                { Visit(projection.Expression, grouped); }
-                else { Visit(expression, ordered); }
-            }
+            VisitOrdering(select, grouped, (scope, name) => new DocumentBindingScope(name, scope),
+                (expression, scope, nested) => { Visit(expression, scope, nested); return true; });
         }
 
-        void Visit(OqlExpression expression, DocumentBindingScope? local)
+        void Visit(OqlExpression expression, DocumentBindingScope? local, DocumentBindingScope? nestedOrder = null)
         {
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-            if (expression is OqlSubqueryExpression subquery) { VisitQuery(subquery.Query, local); return; }
             // Match complete keys before their components, while retaining every
             // inner binding's identity so shadowed names cannot prove a group key.
-            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias, variables, scopes, rightScope: local))) { return; }
+            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias ?? query.Collection, variables, scopes,
+                rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local))) { return; }
+            if (expression is OqlSubqueryExpression subquery) { VisitQuery(subquery.Query, nestedOrder ?? local); return; }
             if (expression is OqlMetaExpression meta)
             {
                 if (meta.Arguments.Count == 1 && meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } receiver &&
                     SourceName(receiver.Segments[0].Name) && DocumentBindingScope.Resolve(local, receiver.Segments[0].Name, out _) is null)
-                { ValidateGrouped(meta, query, variables, scopes, functions, bound, outerNames); }
+                { ValidateGrouped(meta, query, variables, scopes, functions, bound, null); }
                 return;
             }
             if (expression is OqlPathExpression { Segments.Count: > 0 } path)
@@ -166,25 +171,27 @@ internal sealed partial class DocumentPlanner
                 if (SourceName(path.Segments[0].Name) && DocumentBindingScope.Resolve(local, path.Segments[0].Name, out _) is null)
                 {
                     if (groupArrayInput) { ValidateGroupArrayInput(path, query, scopes, functions, aggregateInput: true); }
-                    else { ValidateGrouped(path, query, variables, scopes, functions, bound, outerNames); }
+                    else { ValidateGrouped(path, query, variables, scopes, functions, bound, null); }
                 }
                 return;
             }
             if (expression is OqlComprehensionExpression comprehension)
             {
-                Visit(comprehension.Collection, local);
+                Visit(comprehension.Collection, local, nestedOrder);
                 var inner = scopes.Enter(comprehension, comprehension.Variable, local);
-                Visit(comprehension.Projection, inner);
-                if (comprehension.Predicate is not null) { Visit(comprehension.Predicate, inner); }
+                var orderedInner = nestedOrder is null ? null : scopes.Enter(comprehension, comprehension.Variable, nestedOrder);
+                Visit(comprehension.Projection, inner, orderedInner);
+                if (comprehension.Predicate is not null) { Visit(comprehension.Predicate, inner, orderedInner); }
                 return;
             }
             if (expression is OqlQuantifiedExpression quantified)
             {
-                Visit(quantified.Collection, local);
-                Visit(quantified.Predicate, scopes.Enter(quantified, quantified.Variable, local));
+                Visit(quantified.Collection, local, nestedOrder);
+                Visit(quantified.Predicate, scopes.Enter(quantified, quantified.Variable, local),
+                    nestedOrder is null ? null : scopes.Enter(quantified, quantified.Variable, nestedOrder));
                 return;
             }
-            foreach (var child in NestedChildren(expression)) { Visit(child, local); }
+            foreach (var child in NestedChildren(expression)) { Visit(child, local, nestedOrder); }
         }
     }
 }

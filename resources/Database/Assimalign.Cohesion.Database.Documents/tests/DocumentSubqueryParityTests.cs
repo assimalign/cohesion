@@ -48,6 +48,9 @@ public sealed class DocumentSubqueryParityTests
             "{v} IS NULL", "{v} IS NOT NULL", "{v} IS MISSING", "{v} IS NOT MISSING", "{v} IS VALUED", "{v} IS NOT VALUED",
             "SUM(ARRAY_LENGTH([{v}]))", "ARRAY_AGG({v})", "COUNT(DISTINCT {v})", "MIN({v})", "MAX({v})",
             "[@deep, tick(1), {v}]", "{a:@deep, b:tick(1), c:{v}}",
+            "{a:{v}} = {a:{v}}", "[{v}] = [{v}]",
+            "(ARRAY {v} FOR x IN [1,2] END) = (ARRAY {v} FOR x IN [1,2] END)",
+            "(FIRST {v} FOR x IN [1,2] END) = (FIRST {v} FOR x IN [1,2] END)",
             "ARRAY CASE WHEN x = 1 THEN @deep ELSE tick(1) END FOR x IN [{v},2] END"];
         string[] values = ["0", "1", "NULL", "TRUE", "FALSE", "'abc'", "[]", "[1]", "{a:1}", "[NULL]", "[1,NULL]", "[{a:1},{}]", "[[1],[]]", "[{a:[NULL]}]"];
         foreach (string form in forms)
@@ -84,6 +87,14 @@ public sealed class DocumentSubqueryParityTests
 
     public static IEnumerable<object[]> QueryPositions()
     {
+        yield return ["SELECT RAW [n] FROM items GROUP BY n", "SELECT RAW (SELECT RAW items.n FROM [1] AS s) FROM items GROUP BY n", 3];
+        yield return ["SELECT RAW [META().id] FROM items GROUP BY META().id", "SELECT RAW (SELECT RAW META(items).id FROM [1] AS s) FROM items GROUP BY META().id", 3];
+        yield return ["SELECT RAW [[n]] FROM items GROUP BY n", "SELECT RAW (SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM [1] AS t) FROM items d GROUP BY (SELECT RAW d.n FROM [1] AS s)", 9];
+        yield return ["SELECT RAW META().id FROM items ORDER BY META().id LIMIT 2", "SELECT RAW META(items).id FROM items WHERE EXISTS (SELECT RAW 1 FROM [1] AS s) ORDER BY META(items).id LIMIT 2", 1];
+        yield return ["SELECT RAW [{d:1},{d:2},{d:3}] FROM items d WHERE d.n = 1", "SELECT RAW (SELECT s.n AS d FROM items s ORDER BY d.n) FROM items d WHERE d.n = 1", 1];
+        yield return ["SELECT RAW [{d:2},{d:1},{d:3}] FROM items d WHERE d.n = 2", "SELECT RAW (SELECT s.n AS d FROM items s ORDER BY ABS(d.n-s.n),s.n) FROM items d WHERE d.n = 2", 1];
+        yield return ["SELECT RAW [{p:1},{p:2},{p:3}] FROM items LIMIT 1", "SELECT RAW (SELECT s.n AS p FROM items s ORDER BY p) FROM items LIMIT 1", 1];
+        yield return ["SELECT RAW [{p:-3},{p:-2},{p:-1}] FROM items LIMIT 1", "SELECT RAW (SELECT -s.n AS p FROM items s ORDER BY (SELECT RAW p FROM [1] AS t)) FROM items LIMIT 1", 4];
         yield return ["SELECT RAW ARRAY [d.n] FOR s IN [0] END FROM items d GROUP BY d.n", "SELECT RAW ARRAY (SELECT RAW d.n FROM [1] AS s) FOR s IN [0] END FROM items d GROUP BY (SELECT RAW d.n FROM [1] AS s)", 6];
         yield return ["SELECT RAW [META(d).id] FROM items d LIMIT 1", "SELECT RAW (SELECT RAW META(s).id FROM items s ORDER BY META(d).id DESC LIMIT 1) FROM items d LIMIT 1", 1];
         yield return ["SELECT RAW [d.n] FROM items d GROUP BY d.n", "SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM items d GROUP BY d.n", 3];

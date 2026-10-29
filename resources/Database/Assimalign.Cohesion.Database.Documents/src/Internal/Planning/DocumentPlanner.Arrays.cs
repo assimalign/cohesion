@@ -17,6 +17,19 @@ internal sealed partial class DocumentPlanner
     private static IEnumerable<(OqlPathExpression Source, string Variable, OqlExpression Predicate)> ArrayScopes(
         OqlExpression? predicate, string? alias, IReadOnlySet<string>? variables, IReadOnlyList<OqlUnnestExpression>? unnest,
         IReadOnlySet<string>? outerNames)
+        => outerNames is { Count: > 0 } ? CapturedArrayScopes(predicate, alias, variables, unnest, outerNames) :
+            ArrayScopes(predicate, alias, variables, unnest);
+
+    private static IEnumerable<(OqlPathExpression Source, string Variable, OqlExpression Predicate)> CapturedArrayScopes(
+        OqlExpression? predicate, string? alias, IReadOnlySet<string>? variables, IReadOnlyList<OqlUnnestExpression>? unnest,
+        IReadOnlySet<string> outerNames)
+    {
+        foreach (var scope in ArrayScopes(predicate, alias, variables, unnest))
+        { if (!IsVariablePath(scope.Source, outerNames)) { yield return scope; } }
+    }
+
+    private static IEnumerable<(OqlPathExpression Source, string Variable, OqlExpression Predicate)> ArrayScopes(
+        OqlExpression? predicate, string? alias, IReadOnlySet<string>? variables, IReadOnlyList<OqlUnnestExpression>? unnest)
     {
         foreach (var conjunct in Conjuncts(predicate))
         {
@@ -30,7 +43,7 @@ internal sealed partial class DocumentPlanner
         {
             // A direct document source is independent of preceding expansions. An
             // element comparison rejects LEFT's synthetic MISSING row as well.
-            if (binding.Collection is OqlPathExpression source && !IsVariablePath(source, preceding) && !IsVariablePath(source, outerNames) &&
+            if (binding.Collection is OqlPathExpression source && !IsVariablePath(source, preceding) &&
                 IndexPath(source, alias) is not null)
             { yield return (source, binding.Variable, predicate); }
             preceding.Add(binding.Variable);

@@ -553,7 +553,11 @@ Correlation retains the resolved binding for index constraints, ordering proofs 
 equivalence. Captures are constants inside an invocation, and every enclosing grouped query still
 enforces group-key visibility (CD05001), including nested FROM and inner aggregate inputs.
 An enclosing aggregate may capture its source-row inputs; its GROUP AS binding remains unavailable
-there (CD01031). Local metadata alone permits identity paging. The engine parity and conformance
+there (CD01031). An absent alias uses the collection name as the source for group keys and META.
+Local metadata alone permits identity paging, identified in EXPLAIN by identity_paging=True.
+ORDER BY's standalone alias substitution, direct grouped-row paths and nested projection-alias
+captures share one planning rule; reused source and UNNEST names keep local grouping restrictions.
+The engine parity and conformance
 corpora cover these scope distinctions alongside shadowing and group bindings.
 Subquery group-key equivalence includes free binding identity, retaining inner declarations that
 mask outer names while refusing a proof after an enclosing capture is shadowed.

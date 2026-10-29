@@ -132,6 +132,16 @@ without executing and shows each SubqueryExpression, owning clause/span, nested 
 `cached_for_statement` or `per_evaluation` policy, plus captured names in `correlation`. Plans are statement-local and rebuilt on the
 next execution, including a reused request after CREATE/DROP INDEX.
 
+An unaliased FROM exports the collection name to nested SELECTs and recognizes it as the local
+META receiver. Group-key matching compares captured qualified paths with unqualified keys.
+Local META identity ordering retains identity paging; EXPLAIN
+reports identity_paging=True when this path applies. A source alias or UNNEST variable that reuses
+a captured name still obeys its own query's grouping restrictions. Complete group keys are matched
+before descending into their subqueries at every depth.
+In ORDER BY only a standalone projection alias substitutes its projection. Direct paths inside
+other expressions resolve through row and outer bindings; nested SELECTs inside ORDER BY can
+capture projection aliases. Their own lexical variables retain precedence over those aliases.
+
 Correlated subqueries capture outer FROM/UNNEST, group and comprehension bindings, and outer
 projection aliases in ORDER BY. Inner declarations shadow outer names by ordinal spelling.
 An unqualified field binds to the inner source.

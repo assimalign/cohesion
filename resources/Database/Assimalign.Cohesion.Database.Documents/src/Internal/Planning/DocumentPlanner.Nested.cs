@@ -145,22 +145,13 @@ internal sealed partial class DocumentPlanner
             if (select.GroupAs is string group) { grouped[group] = false; }
             foreach (var projection in select.Projections) { Visit(projection.Expression, "projection", grouped, outer, free); }
             Visit(select.Having, "HAVING", grouped, outer, free);
-            var ordered = new Dictionary<string, bool>(grouped, StringComparer.Ordinal);
-            foreach (var projection in select.Projections)
-            { if (projection.Alias is string name) { ordered[name] = false; } }
-            foreach (var order in select.OrderBy)
-            {
-                // ORDER BY's standalone projection aliases take precedence over source
-                // names, exactly as CreateLogicalPlan rewrites them before binding.
-                var expression = order.Expression;
-                if (expression is OqlPathExpression { Segments.Count: 1 } path &&
-                    select.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection)
-                { expression = projection.Expression; }
-                Visit(expression, "ORDER BY", ordered, outer, free);
-            }
+            VisitOrdering(select, grouped,
+                (scope, name) => new Dictionary<string, bool>(scope, StringComparer.Ordinal) { [name] = false },
+                (expression, scope, nested) => { Visit(expression, "ORDER BY", scope, outer, free, nested); return true; });
         }
 
-        void Visit(OqlExpression? node, string owner, Dictionary<string, bool> local, Dictionary<string, bool> outer, HashSet<string> free)
+        void Visit(OqlExpression? node, string owner, Dictionary<string, bool> local, Dictionary<string, bool> outer, HashSet<string> free,
+            Dictionary<string, bool>? nestedOrder = null)
         {
             _cancellationToken.ThrowIfCancellationRequested();
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -177,11 +168,11 @@ internal sealed partial class DocumentPlanner
             {
                 if (queries.ContainsKey(subquery)) { return; }
                 var enclosing = new Dictionary<string, bool>(outer, StringComparer.Ordinal);
-                foreach (var declaration in local) { enclosing[declaration.Key] = declaration.Value; }
+                foreach (var declaration in nestedOrder ?? local) { enclosing[declaration.Key] = declaration.Value; }
                 var outerNames = new HashSet<string>(StringComparer.Ordinal);
                 VisitQuery(subquery.Query, enclosing, outerNames);
                 foreach (var dependency in outerNames)
-                { if (!local.ContainsKey(dependency)) { free.Add(dependency); } }
+                { if (!(nestedOrder ?? local).ContainsKey(dependency)) { free.Add(dependency); } }
                 var select = subquery.Query;
                 if (select.Source is null && enclosing.TryGetValue(select.Collection, out bool keyspace) && !keyspace)
                 {
@@ -195,19 +186,21 @@ internal sealed partial class DocumentPlanner
             }
             if (node is OqlComprehensionExpression comprehension)
             {
-                Visit(comprehension.Collection, owner, local, outer, free);
+                Visit(comprehension.Collection, owner, local, outer, free, nestedOrder);
                 var inner = new Dictionary<string, bool>(local, StringComparer.Ordinal) { [comprehension.Variable] = false };
-                Visit(comprehension.Projection, owner, inner, outer, free);
-                Visit(comprehension.Predicate, owner, inner, outer, free);
+                var orderedInner = nestedOrder is null ? null : new Dictionary<string, bool>(nestedOrder, StringComparer.Ordinal) { [comprehension.Variable] = false };
+                Visit(comprehension.Projection, owner, inner, outer, free, orderedInner);
+                Visit(comprehension.Predicate, owner, inner, outer, free, orderedInner);
                 return;
             }
             if (node is OqlQuantifiedExpression quantified)
             {
-                Visit(quantified.Collection, owner, local, outer, free);
-                Visit(quantified.Predicate, owner, new Dictionary<string, bool>(local, StringComparer.Ordinal) { [quantified.Variable] = false }, outer, free);
+                Visit(quantified.Collection, owner, local, outer, free, nestedOrder);
+                Visit(quantified.Predicate, owner, new Dictionary<string, bool>(local, StringComparer.Ordinal) { [quantified.Variable] = false }, outer, free,
+                    nestedOrder is null ? null : new Dictionary<string, bool>(nestedOrder, StringComparer.Ordinal) { [quantified.Variable] = false });
                 return;
             }
-            foreach (var child in NestedChildren(node)) { Visit(child, owner, local, outer, free); }
+            foreach (var child in NestedChildren(node)) { Visit(child, owner, local, outer, free, nestedOrder); }
         }
 
         bool CanCache(OqlExpression node)
