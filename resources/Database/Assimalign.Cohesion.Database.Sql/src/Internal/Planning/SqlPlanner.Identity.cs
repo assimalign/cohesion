@@ -53,24 +53,29 @@ internal sealed partial class SqlPlanner
         (SequenceUsage ??= new()).AddIdentity(_catalog.IdentitySequence(table.ObjectId, column.Name).ObjectId);
     }
 
-    private void RecordReferentialSequenceUsage(SqlCatalogTable table)
+    private void RecordReferentialSequenceUsage(SqlCatalogTable table, bool deleting = true)
     {
-        if (!_catalog.HasSequenceDefaults || !_catalog.HasIncomingReferences(table)) { return; }
-        var visited = new HashSet<ulong> { table.ObjectId };
-        var pending = new Queue<SqlCatalogTable>();
-        pending.Enqueue(table);
-        while (pending.TryDequeue(out var parent))
+        if (!_catalog.HasSequenceDefaults || !_catalog.HasIncomingReferences(table, changingUpdates: !deleting)) { return; }
+        var visited = new HashSet<(ulong, bool)> { (table.ObjectId, deleting) };
+        var pending = new Queue<(SqlCatalogTable Table, bool Deleting)>();
+        pending.Enqueue((table, deleting));
+        while (pending.TryDequeue(out var entry))
         {
             foreach (var child in _catalog.Tables)
             {
                 foreach (var constraint in child.Constraints)
                 {
                     if (constraint.Kind != SqlCatalogConstraintKind.Reference ||
-                        !string.Equals(constraint.ReferencedSchema, parent.Schema, StringComparison.OrdinalIgnoreCase) ||
-                        !string.Equals(constraint.ReferencedTable, parent.Name, StringComparison.OrdinalIgnoreCase)) { continue; }
-                    if (constraint.OnDelete == SqlCatalogReferentialAction.SetDefault)
+                        !string.Equals(constraint.ReferencedSchema, entry.Table.Schema, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(constraint.ReferencedTable, entry.Table.Name, StringComparison.OrdinalIgnoreCase)) { continue; }
+                    var action = entry.Deleting ? constraint.OnDelete : constraint.OnUpdate;
+                    if (action == SqlCatalogReferentialAction.SetDefault)
                     { foreach (string name in constraint.Columns) { RecordColumnSequenceUsage(child, child.FindColumn(name)!); } }
-                    if (constraint.OnDelete == SqlCatalogReferentialAction.Cascade && visited.Add(child.ObjectId)) { pending.Enqueue(child); }
+                    if (action is SqlCatalogReferentialAction.Cascade or SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)
+                    {
+                        bool deleteChild = entry.Deleting && action == SqlCatalogReferentialAction.Cascade;
+                        if (visited.Add((child.ObjectId, deleteChild))) { pending.Enqueue((child, deleteChild)); }
+                    }
                 }
             }
         }

@@ -27,9 +27,9 @@ public sealed class SqlOnUpdateRegressionTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: collation-equal representation changes refuse atomically on every update path (#1723)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: collation-equal representation changes execute actions on every update path (#1723)")]
     [MemberData(nameof(CollatedChanges))]
-    public async Task ExecuteAsync_CollationEqualKeyChange_ShouldRefuseBeforeWrites(
+    public async Task ExecuteAsync_CollationEqualKeyChange_ShouldApplyActions(
         string action, int path, bool self, string collation, string oldKey, string newKey)
     {
         // Arrange
@@ -39,13 +39,12 @@ public sealed class SqlOnUpdateRegressionTests
         await SeedAsync(session, action, self, collation, oldKey);
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, UpdateSql(path, oldKey, newKey)));
+        await ExecuteAsync(session, UpdateSql(path, oldKey, newKey));
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-        error.Message.ShouldContain($"ON UPDATE {action} action execution", Case.Sensitive);
-        (await RowsAsync(session, "SELECT id,v FROM p ORDER BY v,id")).ShouldBe([[oldKey, 0], ["Zed", 0]]);
-        (await RowsAsync(session, self ? $"SELECT pid FROM p WHERE id='{oldKey}'" : "SELECT pid FROM c")).ShouldBe([[oldKey]]);
+        (await RowsAsync(session, $"SELECT id,v FROM p WHERE id='{newKey}'")).ShouldBe([[newKey, 1]]);
+        object? expected = action switch { "CASCADE" => newKey, "SET DEFAULT" => "Zed", _ => null };
+        (await RowsAsync(session, self ? $"SELECT pid FROM p WHERE id='{newKey}'" : "SELECT pid FROM c")).ShouldBe([[expected]]);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: identical stored keys still pass on every update path (#1723)")]
@@ -91,6 +90,13 @@ public sealed class SqlOnUpdateRegressionTests
         await SeedAsync(session, action, self, collation, oldKey);
 
         // Act
+        if (action == "RESTRICT")
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, UpdateSql(path, oldKey, newKey)));
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03039");
+            (await RowsAsync(session, $"SELECT id,v FROM p WHERE id='{oldKey}'")).ShouldBe([[oldKey, 0]]);
+            return;
+        }
         await ExecuteAsync(session, UpdateSql(path, oldKey, newKey));
 
         // Assert
@@ -109,9 +115,9 @@ public sealed class SqlOnUpdateRegressionTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: delete action chains refuse before another group's outgoing FK validation (#1723)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: delete action chains compose with update actions (#1723)")]
     [MemberData(nameof(DeleteChains))]
-    public async Task ExecuteAsync_DeleteActionChain_ShouldRefuseStoredUpdateActionBeforeForeignKeyViolation(
+    public async Task ExecuteAsync_DeleteActionChain_ShouldComposeUpdateActions(
         string deleteAction, string updateAction, int path)
     {
         // Arrange: a is visited before b, but only b's incoming key needs an update action.
@@ -133,15 +139,21 @@ public sealed class SqlOnUpdateRegressionTests
         };
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+        if (deleteAction == "SET NULL" && updateAction == "SET DEFAULT")
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+            error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03039");
+            (await RowsAsync(session, "SELECT id FROM p ORDER BY id")).ShouldBe([[1], [2]]);
+            return;
+        }
+        await ExecuteAsync(session, sql);
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-        error.Message.ShouldContain($"ON UPDATE {updateAction} action execution", Case.Sensitive);
-        error.Message.ShouldContain("fk_b", Case.Sensitive);
-        (await RowsAsync(session, "SELECT id FROM p ORDER BY id")).ShouldBe([[1], [2]]);
-        (await RowsAsync(session, "SELECT ppid,bpid FROM a")).ShouldBe([[1, 1]]);
-        (await RowsAsync(session, "SELECT pid FROM b")).ShouldBe([[1]]);
+        object? parent = deleteAction == "SET NULL" ? null : 2;
+        object? child = updateAction == "SET NULL" ? null : parent;
+        (await RowsAsync(session, "SELECT id FROM p ORDER BY id")).ShouldBe([[2]]);
+        (await RowsAsync(session, "SELECT ppid,bpid FROM a")).ShouldBe([[parent, child]]);
+        (await RowsAsync(session, "SELECT pid FROM b")).ShouldBe([[parent]]);
     }
 
     private static async Task SeedAsync(SqlDatabaseSession session, string action, bool self, string collation, string oldKey)

@@ -1,13 +1,14 @@
 # Database.Sql.Client — Design
 
-## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
 
-InMemory and TCP carry all five ON UPDATE declarations and truthful UPDATE_RULE through the
-existing exchanges, including views over INFORMATION_SCHEMA. The omitted update action is
-NO ACTION. Changing a referenced parent key under CASCADE/SET NULL/SET DEFAULT reports CK00001
-naming ON UPDATE action execution on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE,
-with unchanged parent/child rows and a usable connection. RESTRICT/NO ACTION retain their
-statement-end behavior until SQ-F2. No public client or wire format change is required.
+InMemory and TCP execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
+and MERGE, for separate and self-referencing tables. The omitted action is NO ACTION. RESTRICT
+rejects existing children immediately, without final-parent substitution; NO ACTION accepts a
+replacement final parent. CASCADE/SET NULL/SET DEFAULT compose before final validation, and
+conflicting assignments preserve CS05085 through the existing diagnostic exchange. Failures leave
+rows unchanged and connections usable. UPDATE_RULE retains truthful metadata, including views over
+INFORMATION_SCHEMA. No public client or wire format change is required.
 
 ## Window ranking, navigation and frames (#1526, SQ-W1/SQ-W2)
 
@@ -148,8 +149,8 @@ protocol version, frame or metadata format changes.
 ## UPDATE final foreign-key state (#1667)
 
 Both transports pin dangling-reference rejection without writes, moving self-references,
-and consistent mutually referenced key swaps, with NO ACTION and RESTRICT under Snapshot
-and ReadCommitted. Tests begin through the existing server-session API to choose isolation;
+and consistent mutually referenced key swaps with NO ACTION under Snapshot and ReadCommitted.
+RESTRICT now refuses existing references immediately, including direct self-reference reassignment (#1723). Tests begin through the existing server-session API to choose isolation;
 the UPDATE, error, result and COMMIT exchanges all use the wire. No protocol changes.
 
 ## INSERT ... ON CONFLICT (#1118)

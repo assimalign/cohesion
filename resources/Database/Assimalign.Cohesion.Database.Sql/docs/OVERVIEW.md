@@ -1,9 +1,9 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
-Foreign keys persist all five ON UPDATE actions and report truthful UPDATE_RULE metadata.
-SQL format 30 and compiled-schema v9 refuse earlier formats. Changing referenced keys under
-CASCADE/SET NULL/SET DEFAULT reports CK00001 before row writes until SQ-F2; RESTRICT/NO ACTION
-retain statement-end checks (#1723, SQ-F1).
+Foreign keys execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
+and MERGE, including self-references and mixed delete/update chains. RESTRICT checks immediately;
+NO ACTION accepts final-parent substitution. Conflicting cascade assignments report CS05085;
+all writes in a failed closure roll back (#1723). UPDATE_RULE exposes the persisted action.
 
 Ranking, distribution, NTILE and LAG/LEAD execute in a budgeted WindowAgg stage between
 HAVING and DISTINCT/ORDER BY/pagination, with named windows and shared compatible sorts

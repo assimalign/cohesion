@@ -63,7 +63,7 @@ public sealed partial class SqlCatalog
     }
 
     // Avoid allocating a table snapshot/closure on sequence-free DML without references.
-    internal bool HasIncomingReferences(SqlCatalogTable table)
+    internal bool HasIncomingReferences(SqlCatalogTable table, bool changingUpdates = false)
     {
         lock (_sync)
         {
@@ -73,6 +73,7 @@ public sealed partial class SqlCatalog
                 {
                     var constraint = slot.Table.Constraints[index];
                     if (constraint.Kind == SqlCatalogConstraintKind.Reference &&
+                        (!changingUpdates || constraint.OnUpdate is SqlCatalogReferentialAction.Cascade or SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault) &&
                         string.Equals(constraint.ReferencedSchema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(constraint.ReferencedTable, table.Name, StringComparison.OrdinalIgnoreCase)) { return true; }
                 }

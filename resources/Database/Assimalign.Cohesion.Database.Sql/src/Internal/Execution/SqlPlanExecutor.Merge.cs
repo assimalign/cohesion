@@ -343,7 +343,13 @@ internal sealed partial class SqlPlanExecutor
         ExceptionDispatchInfo? referentialFailure = null;
         try
         {
-            using var finalPending = (SqlMergeConstraintUpdates)await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
+            // Check immediate update restrictions before changing actions, but retain
+            // MERGE's deferred error delivery after direct uniqueness validation.
+            foreach (var row in updates.Values)
+            { if (row.Location.PageId.Value >= 0) { ValidateParentUpdate(row.Table, row.OldValues, row.NewValues, statement, cancellationToken, restrictOnly: true); } }
+            foreach (var row in cascadedUpdates)
+            { ValidateParentUpdate(row.Table, row.OldValues, row.NewValues, statement, cancellationToken, restrictOnly: true); }
+            using var finalPending = (SqlMergeConstraintUpdates)await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates, removedUpdates: cascadedUpdates).ConfigureAwait(false);
             pending = finalPending;
             ValidateRestrictedDeletes(deletions, pending, statement, cancellationToken);
             // UPDATE's old-key NO ACTION check survives an AFTER-style cascade of its
@@ -379,6 +385,10 @@ internal sealed partial class SqlPlanExecutor
             // Direct uniqueness precedes AFTER-style FK actions, including constraints
             // on their SET rows (nodeModifyTable.c:2371-2383). No statement writes
             // after a captured failure, so it needs no further parent-row locks.
+            referentialFailure = ExceptionDispatchInfo.Capture(failure);
+        }
+        catch (SqlExecutionException failure) when (failure.Diagnostics is [{ Code: SqlExecutionException.ReferentialAssignmentConflictCode }])
+        {
             referentialFailure = ExceptionDispatchInfo.Capture(failure);
         }
         catch (SqlPlanningException failure) when (failure.Diagnostics is [{ Code: "CS03025" }])

@@ -42,6 +42,7 @@ internal sealed partial class SqlPlanExecutor
         var statementMark = locks.MarkStatement(owner);
         var mark = statementMark;
         bool applyStarted = false;
+        int cascadeRefusals = 0;
         try
         {
             var arbiters = indexes.Where(index => plan.Arbiters.Any(arbiter => arbiter.Name == index.Metadata.Name)).ToList();
@@ -179,7 +180,37 @@ internal sealed partial class SqlPlanExecutor
             await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
             var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
             var pendingUpdates = BuildConstraintUpdates(table,
-                replacements.Select(write => (write.OldLocation!.Value, write.OldValues!, write.Values)), plan.Assignments);
+                writes.Select((write, index) => (write.OldLocation ?? SqlRecordLocation.Pack(new PageId(-1L - index), 0), write.OldValues ?? [], write.Values)), plan.Assignments);
+            if (_catalog.HasIncomingReferences(table, changingUpdates: true))
+            {
+                try
+                {
+                    applyStarted = true;
+                    return await ExecuteReferentialUpsertAsync(table, writes, plan, returning, statement, cancellationToken, statementMark).ConfigureAwait(false);
+                }
+                catch (SqlCascadeLockRetry refused)
+                {
+                    applyStarted = false;
+                    if (++cascadeRefusals < 3)
+                    { mark = await WaitForUpsertRowAsync(refused.Resource, refused.Mode, mark, statement, null, cancellationToken).ConfigureAwait(false); }
+                    else
+                    {
+                        // Match #1420's retained phase: closure grants stop backing off,
+                        // while real cycles still go through the lock manager's detector.
+                        await locks.AcquireAsync(owner, refused.Resource, refused.Mode, cancellationToken).ConfigureAwait(false);
+                        mark = locks.MarkStatement(owner);
+                    }
+                    statement.References.ClearAfterCascadeRetry();
+                    goto RetryArbitration;
+                }
+            }
+            foreach (var write in writes)
+            {
+                if (write.OldValues is not null)
+                {
+                    ValidateParentUpdate(table, write.OldValues, write.Values, statement, cancellationToken, updates: pendingUpdates);
+                }
+            }
             var references = new List<SqlParentReference>();
             // An RC arbiter wait can reach a new row and its parent committed together after the
             // original statement snapshot. Refresh committed visibility, never the all-writers
@@ -206,13 +237,6 @@ internal sealed partial class SqlPlanExecutor
             }
             await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
-            foreach (var write in writes)
-            {
-                if (write.OldValues is not null)
-                {
-                    ValidateParentUpdate(table, write.OldValues, write.Values, statement, cancellationToken, updates: pendingUpdates);
-                }
-            }
             var returned = returning is null ? null : new List<object?[]>(writes.Count);
             if (HasSequenceProjection(returning))
             {
@@ -231,6 +255,12 @@ internal sealed partial class SqlPlanExecutor
                         TombstoneVersion(statement, bracket, pageId, slotIndex);
                         await TombstoneIndexEntriesAsync(statement, indexes, table, write.OldValues!, oldReference, cancellationToken).ConfigureAwait(false);
                     }
+                }
+                // Release all replaced unique mappings before publishing any replacement.
+                // NO ACTION can therefore accept a different final parent in an upsert swap.
+                foreach (var write in writes)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var location = _storage.InsertRow(bracket, table.ObjectId, write.Record);
                     if (write.OldLocation is { } predecessor)
                     { _storage.RowVersionLinks.Add(predecessor, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence); }

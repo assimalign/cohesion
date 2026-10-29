@@ -9,9 +9,10 @@ same normalized OnUpdate property. Malformed/repeated actions use the existing C
 syntax diagnostic; action column lists retain CK00001. NO and ACTION stay contextual.
 The constraint renderer emits explicit ON DELETE then ON UPDATE actions, independently of
 source ordering, and ALTER ADD CONSTRAINT uses that renderer. The profile gains ON UPDATE
-(+1 clause); parser/completeness and live engine conformance cover metadata and the interim
-execution refusal. PostgreSQL src/backend/parser/gram.y:4581-4689 supplies the ordering,
-default and action vocabulary. Execution of changing actions belongs to SQ-F2; see DIALECT.
+(+1 clause); parser/completeness and live engine conformance cover metadata and action execution
+on every update path. PostgreSQL src/backend/parser/gram.y:4581-4689 supplies the ordering,
+default and action vocabulary. SQ-F2 executes the changing actions and distinguishes immediate
+RESTRICT from statement-end NO ACTION; see DIALECT.
 
 ## Window stage (#1526, SQ-W1/SQ-W2)
 
@@ -846,7 +847,7 @@ INDEX` and `CompiledSchemaIndex(IsUnique: true)`. This keeps compiled schemas,
 SQL DDL, persistence, and concurrent uniqueness enforcement on one path.
 Foreign keys and checks remain constraint catalog records. `ON DELETE` accepts
 CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT; an omitted action is NO ACTION.
-`ON UPDATE` accepts the same five actions in either order beside ON DELETE; changing a parent key under CASCADE/SET NULL/SET DEFAULT reports CK00001 until SQ-F2 executes them.
+`ON UPDATE` accepts the same five actions in either order beside ON DELETE. The engine executes CASCADE/SET NULL/SET DEFAULT through the statement closure on every update path; RESTRICT is immediate and NO ACTION checks final state. Conflicting cascade assignments report CS05085.
 
 ## Canonical rendering (`SqlExpressionRenderer`)
 

@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
 
 SQL catalog format advances 29 -> 30 and table extension 7 -> 8. Each constraint stores a
 mandatory OnUpdate byte beside OnDelete. All five actions survive decode, CHECK call-vector
@@ -23,24 +23,55 @@ the omitted NO ACTION default. Persistent views and declared provisioning script
 metadata. No wire frame or client contract changes. InMemory/TCP conformance covers metadata,
 refusals and usable connections.
 
-All update paths share ValidateParentUpdate before physical row application. A changed referenced
-key under CASCADE/SET NULL/SET DEFAULT throws structured CK00001 naming ON UPDATE action
-execution, before considering child presence or final-parent substitution. Self-references check
-changing actions before outgoing FK validation can mistake the pending key change for an orphan.
-Action eligibility compares the binary stored key representation through the row codec, so case-only,
-accent-only and other representation changes cannot disappear under key collation. Both refusal
-sites share this predicate (PostgreSQL src/backend/utils/adt/ri_triggers.c:4237-4250,
-datum_image_eq). Parent-presence and RESTRICT/NO ACTION checks retain collation-aware equality.
-DELETE, DELETE USING and MERGE compose their SET NULL/DEFAULT updates and check every incoming
-update action before any table group's outgoing FK validation; chain order cannot mask CK00001.
-That branch inspects pending rows only for changing actions; ordinary DML gains no allocation. Unchanged keys and
-unrelated-column changes remain executable. RESTRICT/NO ACTION deliberately keep today's
-statement-end parent validation until SQ-F2 adds immediate RESTRICT and action closure; no stored
-changing action silently becomes RESTRICT. Sequence-before-table lock ordering and ordinary-DML
-Release allocation guards are retained. No new diagnostic identity is needed: unsupported action
-execution uses CK00001; syntax and metadata errors keep their existing owning conditions.
-PostgreSQL src/backend/parser/gram.y:4581-4689 defines ordering/defaults; ri_triggers.c:897-955
-records the future RESTRICT/NO ACTION distinction. See Sql.Language DIALECT for the interim contract.
+UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE execute CASCADE, SET NULL and SET DEFAULT
+through one pre-apply worklist. Delete SET actions seed the same worklist when they change a
+key another table references. Matching uses the pre-action child state, so a key swap does not
+reassociate already-cascaded children with another parent's old key. Composed assignments retain
+all untouched columns; a different assignment to an already assigned column fails with CS05085,
+including conflicting diamonds and cycles. Equal revisits converge without recursion. A subsequent
+delete of the same physical parent row through the same edge composes with its update; independent
+parent replacements still conflict. MERGE also
+retains key events for proposed updates subsequently removed by a delete cascade and revisits
+delete edges after updates, completing the combined closure before deferred validation. Re-keyed
+pending inserts use their initial proposal as the old key image, allowing actions to reach their
+pending descendants without inventing a physical predecessor.
+
+Action eligibility uses F1's single ReferencedKeyChanged predicate: binary stored key images
+through the row codec (PostgreSQL src/backend/utils/adt/ri_triggers.c:4237-4250, datum_image_eq).
+Thus case/accent changes fire actions even under an equality collation; unchanged stored keys do
+not. A NULL component of the old key matches no children (MATCH SIMPLE). RESTRICT checks existing
+referencing rows immediately, before accepting final-parent substitution or referential updates;
+this includes a self-reference directly reassigned by the same statement. NO ACTION validates the
+whole final state and accepts a different final parent supplying the old key. This implements the
+owner's immediate distinction, following ri_triggers.c:897-904,945-955; PostgreSQL itself uses a
+nondeferrable AFTER trigger for RESTRICT. Parent/child matching remains collation-aware.
+
+SET DEFAULT evaluates the bound default per affected row, including sequence and identity defaults;
+a missing default assigns NULL. Normal coercion, domain, NOT NULL, CHECK, unique and final FK checks
+apply to the complete closure. Fixed-snapshot child crosschecks and stale update versions retain
+structured CS04064 and name the actual ON UPDATE action; delete diagnostics keep their prior contract.
+Sequence grant discovery follows reachable update actions and mixed
+delete/update chains before taking any table lock; a newly published sequence-backed action without
+its planned grant retains retryable CS04067. Sequence allocations retain their existing nontransactional
+gap semantics on abandoned preparation attempts. No format bump beyond F1's catalog 30 / compiled v9,
+new public interface, protocol frame or client API is required.
+
+Lock/latch order is sequence objects, adjacent table IS in ObjectId order and own IX, sorted target
+rows, discovered rows before reading their children, acquired/released parent shares, sorted unique
+keys, apply gate, then storage/index latches. No latch or catalog monitor spans a wait. Discovered
+closure inversions use #1420's first-two-refusal release/retry and retained waits thereafter; upsert
+restarts its existing unwritten arbitration and retains completed wait grants. Its metadata intents
+preceding the arbitration mark retain their existing transaction duration. Failure/cancellation
+before apply releases preparation grants; admitted physical writes roll back in one statement bracket.
+Ordinary DML keeps the existing Release allocation guards. Nonparallel tests record actual waits,
+exercise success, constraint failure, cancellation and session teardown, and race parent updates
+against child inserts/deletes until update/insert/delete/wait counters advance. Both transports
+cover every action/path, self-references, immediate/final timing, coded conflicts and usable connections.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS05085 | Conflicting replacement of one column through referential actions; PostgreSQL nodeModifyTable.c:2607-2630 uses triggered_data_change_violation for conflicting triggered writes | 27000 |
+
 
 ## Window stage (#1526, SQ-W1/SQ-W2)
 
@@ -3376,8 +3407,7 @@ resolve those columns to the primary key first (including the legacy fallback),
 then to a matching unique index ordered deterministically by name. Foreign keys
 report `MATCH_OPTION = 'NONE'`; UPDATE_RULE and DELETE_RULE each report the stored
 RESTRICT, CASCADE, NO ACTION, SET NULL or SET DEFAULT action. Omitted SQL actions default
-to NO ACTION. Constraints are not deferrable; SQ-F1 retains statement-end parent-key
-checks for RESTRICT and NO ACTION updates until SQ-F2 implements immediate RESTRICT.
+to NO ACTION. Constraints are not deferrable; RESTRICT checks updates immediately and NO ACTION checks the complete statement state.
 
 Constraint names remain unique within a table, as the catalog already requires,
 rather than within the entire SQL schema. Consequently `CHECK_CONSTRAINTS` and
@@ -5728,8 +5758,7 @@ transitive closure of child deletions into the same statement apply bracket (see
 snapshot fixed at the transaction's begin, every child version in that closure must
 be one the snapshot sees
 ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)). Parent key
-updates under RESTRICT/NO ACTION retain statement-end checks in SQ-F1. ON UPDATE changing
-actions are persisted; execution refuses with CK00001 before row writes until SQ-F2.
+updates execute their stored ON UPDATE action through the same statement closure; RESTRICT is immediate and NO ACTION sees its final state.
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts

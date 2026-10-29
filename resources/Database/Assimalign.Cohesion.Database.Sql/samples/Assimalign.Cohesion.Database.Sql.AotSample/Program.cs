@@ -405,17 +405,17 @@ internal static class Program
                 $"SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_NAME='update_fk_{actionIndex}'"), [[action]]);
             if (actionIndex < 3)
             {
-                CheckFailure("in process: ON UPDATE refusal " + action, await FailureAsync(async () =>
-                    await session.ExecuteAsync("UPDATE update_parent SET id=2", cancellationToken: CancellationToken.None)), "CK00001: ON UPDATE " + action + " action execution");
-                Check("in process: ON UPDATE atomicity " + action, await RowsAsync(session, "SELECT id FROM update_parent"), [[1]]);
+                await session.ExecuteAsync($"INSERT INTO update_child_{actionIndex} VALUES(1)", cancellationToken:CancellationToken.None);
+                await session.ExecuteAsync("UPDATE update_parent SET id=2", cancellationToken:CancellationToken.None);
+                Check("in process: ON UPDATE action " + action, await RowsAsync(session,$"SELECT pid FROM update_child_{actionIndex}"), action == "CASCADE" ? [[2]] : [[null]]);
+                await session.ExecuteAsync("UPDATE update_parent SET id=1", cancellationToken:CancellationToken.None);
             }
             await session.ExecuteAsync($"DROP TABLE update_child_{actionIndex}", cancellationToken: CancellationToken.None);
         }
         await session.ExecuteAsync("CREATE TABLE update_self (id INT PRIMARY KEY, pid INT REFERENCES update_self(id) ON UPDATE CASCADE)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO update_self VALUES (1,1)", cancellationToken: CancellationToken.None);
-        CheckFailure("in process: self ON UPDATE refusal", await FailureAsync(async () =>
-            await session.ExecuteAsync("UPDATE update_self SET id=2", cancellationToken: CancellationToken.None)), "CK00001: ON UPDATE CASCADE action execution");
-        Check("in process: self ON UPDATE atomicity", await RowsAsync(session, "SELECT id,pid FROM update_self"), [[1,1]]);
+        await session.ExecuteAsync("UPDATE update_self SET id=2", cancellationToken:CancellationToken.None);
+        Check("in process: self ON UPDATE action", await RowsAsync(session,"SELECT id,pid FROM update_self"), [[2,2]]);
         await session.ExecuteAsync("CREATE TABLE expression_clock (id INT DEFAULT CAST('3' AS INT), stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO expression_clock DEFAULT VALUES", cancellationToken: CancellationToken.None);

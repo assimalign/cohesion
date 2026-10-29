@@ -22,6 +22,8 @@ internal sealed partial class SqlPlanExecutor
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure3 = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure3;
 
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
+    private static readonly string _updateActionRowUnavailable = ErrorMessages.UpdateActionRowUnavailable;
+    private static readonly string _updateActionSnapshotConflict = ErrorMessages.UpdateActionSnapshotConflict;
 
     private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values, object?[]? EffectiveValues = null);
     [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdate")]
@@ -552,15 +554,6 @@ internal sealed partial class SqlPlanExecutor
         return !oldImage.WrittenSpan.SequenceEqual(newImage.WrittenSpan);
     }
 
-    private static void ValidateUpdateAction(SqlBoundConstraintKey key, SqlCatalogConstraint constraint,
-        object?[] oldValues, object?[] newValues, SqlStatementMetrics metrics)
-    {
-        if (constraint.OnUpdate is SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction ||
-            !ReferencedKeyChanged(key, oldValues, newValues, metrics)) { return; }
-        throw new SqlExecutionException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture,
-            ErrorMessages.UpdateActionExecutionUnsupported, ReferentialActionText(constraint.OnUpdate), constraint.Name));
-    }
-
     private static object? SafeValue(object?[] values)
         => values.Length == 1 && values[0] is byte or sbyte or short or ushort or int or uint or long or ulong or decimal or float or double or bool
             ? values[0] : null;
@@ -683,18 +676,6 @@ internal sealed partial class SqlPlanExecutor
             if (parent.ObjectId == table.ObjectId)
             {
                 int[] ordinals = reference.ParentKey.Ordinals;
-                // A self-reference can lose its old parent during outgoing validation,
-                // before ValidateParentUpdate runs. Refuse the stored changing action
-                // first, rather than diagnosing that temporarily orphaned child as RESTRICT.
-                if (updates is not null && constraint.OnUpdate is not (SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction))
-                {
-                    foreach (var update in updates.Values)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        if (update.Table.ObjectId != table.ObjectId || update.Location.PageId.Value < 0) { continue; }
-                        ValidateUpdateAction(reference.ParentKey, constraint, update.OldValues, update.NewValues, statement.Metrics);
-                    }
-                }
                 selfKeys = new(new GroupKeyComparer(reference.ParentKey.Collations, statement.Metrics));
                 foreach (var candidate in rows)
                 {
@@ -761,12 +742,23 @@ internal sealed partial class SqlPlanExecutor
     private void ValidateParentUpdate(SqlCatalogTable table, object?[] oldValues, object?[] newValues,
         SqlStatementContext statement, CancellationToken cancellationToken,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
-        SqlConstraintUpdates? updates = null)
+        SqlConstraintUpdates? updates = null, bool restrictOnly = false)
     {
         foreach (var reference in IncomingReferences(table, statement, cancellationToken))
         {
             var (child, constraint) = reference;
-            ValidateUpdateAction(reference.ParentKey, constraint, oldValues, newValues, statement.Metrics);
+            if (restrictOnly && constraint.OnUpdate != SqlCatalogReferentialAction.Restrict) { continue; }
+            if (!ReferencedKeyChanged(reference.ParentKey, oldValues, newValues, statement.Metrics)) { continue; }
+            if (constraint.OnUpdate == SqlCatalogReferentialAction.Restrict)
+            {
+                // Immediate RESTRICT observes existing children and never substitutes
+                // another final parent (ri_triggers.c:897-904,945-955).
+                if (FindConstraintRows(reference.ChildKey, reference.ParentKey.Read(oldValues), statement,
+                    cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
+                { throw Violation(child, constraint, reference.ParentKey.Read(oldValues)); }
+                continue;
+            }
+            if (restrictOnly || constraint.OnUpdate != SqlCatalogReferentialAction.NoAction) { continue; }
             var keys = reference.ParentKey.Read(oldValues);
             if (keys.Any(value => value is null))
             {
@@ -776,8 +768,7 @@ internal sealed partial class SqlPlanExecutor
                 reference.ParentKey.Collations[i], statement.Metrics)).Any(value => value);
             // A different replacement may retain the old referenced key (a swap). Only
             // removing that key from the final parent state can orphan an incoming child.
-            if (changed && updates?.Find(reference.ParentKey, keys,
-                statement.Metrics, cancellationToken).Any() == true) { continue; }
+            if (changed && updates is not null && HasPendingParent(reference.ParentKey, keys, updates, deletions, statement.Metrics, cancellationToken)) { continue; }
             if (changed && FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
                 deletions, updates, ConstraintCurrentSnapshot(statement)).Any())
             {
@@ -971,10 +962,11 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="location">The child row's location, exclusively locked by the statement.</param>
     /// <param name="statement">The executing statement.</param>
     /// <param name="action">The referential action named by a snapshot conflict.</param>
+    /// <param name="updating">Whether to name ON UPDATE and retain the coded serialization failure.</param>
     /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer, or the version is gone.</exception>
     /// <exception cref="StorageCorruptionException">The slot holds a record too short for its version stamps (#1362).</exception>
     private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement,
-        string action = "CASCADE")
+        string action = "CASCADE", bool updating = false)
     {
         if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
         {
@@ -984,8 +976,10 @@ internal sealed partial class SqlPlanExecutor
         statement.Metrics.RecordRowRead();
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
-            throw new TransactionAbortedException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure, table.Schema, table.Name, action));
+            var conflict = new TransactionAbortedException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, updating ? _updateActionRowUnavailable : _errorEnsureSnapshotSeesCascadeRowFailure, table.Schema, table.Name, action));
+            if (updating) { throw SqlExecutionException.SerializationFailure(conflict); }
+            throw conflict;
         }
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
@@ -998,8 +992,10 @@ internal sealed partial class SqlPlanExecutor
         var (writer, _) = SqlRowCodec.ReadStamps(record.Span);
         if (!statement.Snapshot.IsVisible(writer))
         {
-            throw new TransactionAbortedException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure3, table.Schema, table.Name, action, writer));
+            var conflict = new TransactionAbortedException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, updating ? _updateActionSnapshotConflict : _errorEnsureSnapshotSeesCascadeRowFailure3, table.Schema, table.Name, action, writer));
+            if (updating) { throw SqlExecutionException.SerializationFailure(conflict); }
+            throw conflict;
         }
     }
 

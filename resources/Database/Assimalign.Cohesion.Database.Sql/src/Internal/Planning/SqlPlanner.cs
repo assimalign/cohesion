@@ -962,6 +962,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanUpdate(SqlUpdateExpression update)
     {
         var (table, evaluator, source, queries) = BindDmlSources(update.Table, update.From, update.Where, update);
+        RecordReferentialSequenceUsage(table, deleting: false);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         var assigned = new HashSet<int>();

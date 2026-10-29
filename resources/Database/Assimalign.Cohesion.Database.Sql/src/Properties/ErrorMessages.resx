@@ -258,7 +258,9 @@
   <data name="VolatileDefaultBackfill" xml:space="preserve"><value>Column '{0}': ADD COLUMN with a VOLATILE DEFAULT on a populated table requires a table rewrite (#1447).</value></data>
   <data name="CompiledUpdateActionInvalid" xml:space="preserve"><value>Unknown foreign-key ON UPDATE action '{0}' in the compiled snapshot.</value></data>
   <data name="CompiledDeleteActionInvalid" xml:space="preserve"><value>Schema-owned foreign keys cannot use ON DELETE {0}; compiled schemas support RESTRICT and CASCADE.</value></data>
-  <data name="UpdateActionExecutionUnsupported" xml:space="preserve"><value>ON UPDATE {0} action execution is not supported yet (foreign key '{1}'); no rows were written.</value></data>
+  <data name="UpdateActionConflict" xml:space="preserve">
+    <value>Referential action '{0}' conflicts with an earlier assignment to '{1}.{2}.{3}'.</value>
+  </data>
   <data name="DeleteActionUnknown" xml:space="preserve"><value>Unknown referential action.</value></data>
   <data name="RenameTableCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists.</value></data>
   <data name="RenameColumnCollision" xml:space="preserve"><value>Column '{0}' already exists on '{1}'.</value></data>
@@ -653,8 +655,10 @@
   <data name="SqlMaterializedRowGetBytesDatabase" xml:space="preserve"><value>Field {0} is not binary.</value></data>
   <data name="MaterializedRowRequireValueDatabase" xml:space="preserve"><value>Field {0} is NULL.</value></data>
   <data name="ExecuteAlterColumnAsyncSqlPlanning" xml:space="preserve"><value>ALTER COLUMN '{0}' changes DEFAULT through a full definition; use SET/DROP DEFAULT separately, and TYPE for value conversions.</value></data>
+  <data name="UpdateActionRowUnavailable" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON UPDATE {2} reached a row version that was rolled back after the walk found it, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="EnsureSnapshotSeesCascadeRowFailure" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON DELETE {2} reached a row version that was rolled back after the walk found it, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="EnsureSnapshotSeesCascadeRowFailure2" xml:space="preserve"><value>The row record in slot {0} of page {1} of table '{2}.{3}' holds {4} bytes, fewer than its {5}-byte version-stamp header.</value></data>
+  <data name="UpdateActionSnapshotConflict" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON UPDATE {2} reached a row version written by transaction {3}, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="EnsureSnapshotSeesCascadeRowFailure3" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON DELETE {2} reached a row version written by transaction {3}, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="ExecutorEnsureLatestVersionFailure" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': the row was modified by concurrently committed transaction {2} (first-updater-wins). Retry the transaction.</value></data>
   <data name="ExecutorCoerceForColumnSqlEvaluation" xml:space="preserve"><value>value '{0}' does not fit column '{1}' of type {2}.</value></data>

@@ -1,8 +1,9 @@
 # Assimalign.Cohesion.Database.Sql.Language — Overview
 
 Foreign keys retain and render all five ON UPDATE actions beside ON DELETE, in either order.
-Omitted actions default to NO ACTION. The profile advertises declaration support; changing-action
-execution reports CK00001 until SQ-F2 (#1723). See [DIALECT.md](DIALECT.md).
+Omitted actions default to NO ACTION. All five actions execute on UPDATE, UPDATE FROM,
+ON CONFLICT DO UPDATE and MERGE; RESTRICT checks immediately and NO ACTION checks the final
+statement state (#1723, SQ-F2). See [DIALECT.md](DIALECT.md).
 
 The SQL language front-end of the Cohesion Data Platform: a recursive-descent
 parser (`SqlQueryParser`) producing a full clause-level AST over the shared lexer
