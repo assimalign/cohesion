@@ -1135,6 +1135,11 @@ public sealed class SqlLanguageConformanceTests
                 await ExecuteAsync(session, "UPDATE t SET id=9 WHERE id=1;");
                 await ExpectRowsAsync(session, "SELECT pid FROM c;", [[9]]);
                 await ExpectRowsAsync(session, "SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;", [["CASCADE"]]);
+                await ExecuteAsync(session, "TRUNCATE t,c;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES(1,'replacement',1);");
+                await ExecuteAsync(session, "INSERT INTO c VALUES(1);");
+                await ExecuteAsync(session, "UPDATE t SET id=2;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[2]]);
                 await ExecuteAsync(session, "CREATE TABLE p_image(id TEXT COLLATE case_insensitive PRIMARY KEY);");
                 await ExecuteAsync(session, "CREATE TABLE c_image(pid TEXT COLLATE case_insensitive REFERENCES p_image(id) ON UPDATE CASCADE);");
                 await ExecuteAsync(session, "INSERT INTO p_image VALUES('Ada');");

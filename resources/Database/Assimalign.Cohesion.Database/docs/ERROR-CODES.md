@@ -254,7 +254,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state and rewrite/backfill chunks; sequence sorting follows ordinary, uncharged sort accounting |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); sequence sorting follows ordinary, uncharged sort accounting |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |

@@ -244,6 +244,20 @@ internal sealed partial class SqlPlanExecutor
         SqlUpdateActionState? actionState = null;
         try
         {
+            // Freeze direct inputs before the first DELETE SET write. Every SET
+            // origin participates, including competition with direct MERGE updates.
+            // SET-only closures keep their one-pass path and mutable final projection.
+            foreach (var deletion in deletions.Values)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var reference in IncomingReferences(deletion.Table, statement, cancellationToken))
+                {
+                    if (reference.Constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
+                    actionState = CreateUpdateActionState(updates, statement, cancellationToken);
+                    break;
+                }
+                if (actionState is not null) { break; }
+            }
             HashSet<(ulong, ulong, SqlCatalogConstraint, ulong)>? appliedSets = null;
             bool expanded;
             do
@@ -344,6 +358,9 @@ internal sealed partial class SqlPlanExecutor
             } while (expanded);
             if (actionState is not null)
             {
+                // Composite parent keys can revise an origin over several hops. Only
+                // completed proposals decide whether independent origins disagree.
+                ValidateActionProposals(actionState, updates, cancellationToken);
                 var current = final ?? new SqlConstraintUpdates(updates);
                 foreach (var deletion in deletions.Keys)
                 {

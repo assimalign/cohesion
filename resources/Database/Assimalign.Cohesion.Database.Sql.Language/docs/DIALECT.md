@@ -24,7 +24,11 @@ Actions match child keys after the statement's own assignments. A directly assig
 still matches the old parent receives the action; a key assigned elsewhere keeps that value.
 A later proposal from the same parent row and constraint replaces that origin's earlier proposal.
 Different action origins proposing different values for one column report CS05085, independent
-of traversal order. RETURNING reports the statement's own row image before subsequent actions,
+of traversal order. An unchanged cell adds no proposal; conflicts compare completed values after
+same-origin revisions converge. First-pass ON DELETE SET writes participate with their origins:
+different DELETE/UPDATE replacements raise CS05085, while equal replacements converge. This mixed
+action rule is explicit rather than depending on PostgreSQL trigger order.
+RETURNING reports the statement's own row image before subsequent actions,
 on every update path. Closure memory on every path, including plain DELETE, obeys the statement
 budget (CS05067); abandoned lock-retry attempts release their retained buffers and reservations.
 

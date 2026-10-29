@@ -26,10 +26,28 @@ internal sealed partial class SqlPlanExecutor
 
     private sealed record SqlUpdateActionState(SqlConstraintUpdates Inputs,
         Dictionary<(ulong, ulong, SqlCatalogConstraint), byte[]> Visited,
-        Dictionary<(ulong, ulong, int), (ulong Parent, ulong Location, SqlCatalogConstraint Constraint)> Origins)
+        Dictionary<(ulong, ulong, int), ((ulong Parent, ulong Location, SqlCatalogConstraint Constraint) Origin, object? Value)> Origins)
     {
         public long Generation { get; set; }
-        public HashSet<(ulong, ulong, int)>? SharedOrigins { get; set; }
+        public Dictionary<((ulong, ulong, int) Cell, (ulong Parent, ulong Location, SqlCatalogConstraint Constraint) Origin), object?>? SharedProposals { get; set; }
+    }
+
+    private SqlUpdateActionState CreateUpdateActionState(Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> updates,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget);
+        var inputs = new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
+        foreach (var (key, row) in updates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var values = (object?[])row.NewValues.Clone();
+            inputs.Add(key, row with { NewValues = values });
+            memory?.Retain(values);
+            memory?.Reserve(256);
+        }
+        SqlConstraintUpdates projectedInputs = memory is null ? new SqlConstraintUpdates(inputs)
+            : new SqlMergeConstraintUpdates(inputs, memory);
+        return new(projectedInputs, [], []);
     }
 
     private bool HasChangingUpdateReferences(SqlCatalogTable table, SqlStatementContext statement, CancellationToken cancellationToken)
@@ -66,27 +84,10 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             var memory = statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget);
-            var inputs = state is null ? new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>() : null;
-            if (inputs is not null)
-            {
-                foreach (var (key, row) in updates)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var values = (object?[])row.NewValues.Clone();
-                    inputs.Add(key, row with { NewValues = values });
-                    memory?.Retain(values);
-                    memory?.Reserve(256);
-                }
-            }
             // Match the pre-action child state. A key swap must not feed one parent's
             // replacement into another parent's old-key action. Retaining these inputs
             // also makes conflicting diamond/cycle visits observable rather than order-dependent.
-            if (state is null)
-            {
-                SqlConstraintUpdates projectedInputs = memory is null ? new SqlConstraintUpdates(inputs!)
-                    : new SqlMergeConstraintUpdates(inputs!, memory);
-                state = new SqlUpdateActionState(projectedInputs, [], []);
-            }
+            state ??= CreateUpdateActionState(updates, statement, cancellationToken);
             var inputRows = state.Inputs;
             var pending = new Queue<SqlConstraintUpdate>(updates.Values);
             if (removed is not null) { foreach (var row in removed) { pending.Enqueue(row); } }
@@ -205,21 +206,35 @@ internal sealed partial class SqlPlanExecutor
         var cell = (key.Item1, key.Item2, ordinal);
         if (!state.Origins.TryGetValue(cell, out var previous))
         {
+            if (StoredAssignmentEqual(child.Columns[ordinal], previousValue, value)) { return; }
             memory?.Reserve(128);
-            state.Origins.Add(cell, origin);
+            state.Origins.Add(cell, (origin, value));
             return;
         }
-        // All admitted origins agree on the current stored value. Remember when more
-        // than one origin owns it; only an exclusive origin may revise its proposal.
-        if (previous != origin || state.SharedOrigins?.Contains(cell) == true)
+        if (previous.Origin == origin) { state.Origins[cell] = (origin, value); return; }
+        var shared = (cell, origin);
+        if (state.SharedProposals?.ContainsKey(shared) != true)
         {
-            if (!StoredAssignmentEqual(child.Columns[ordinal], previousValue, value))
-            { throw SqlExecutionException.ReferentialAssignmentConflict(origin.Constraint.Name, child.Schema, child.Name, child.Columns[ordinal].Name); }
-            if (previous != origin)
-            {
-                state.SharedOrigins ??= [];
-                if (state.SharedOrigins.Add(cell)) { memory?.Reserve(128); }
-            }
+            // An unchanged cell is no new proposal. A previously admitted origin must
+            // still revise its value even when another origin already wrote that value.
+            if (StoredAssignmentEqual(child.Columns[ordinal], previousValue, value)) { return; }
+            memory?.Reserve(128);
+            state.SharedProposals ??= [];
+        }
+        state.SharedProposals![shared] = value;
+    }
+
+    private static void ValidateActionProposals(SqlUpdateActionState state,
+        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate> updates, CancellationToken cancellationToken)
+    {
+        if (state.SharedProposals is null) { return; }
+        foreach (var (proposal, value) in state.SharedProposals)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var cell = proposal.Cell;
+            var child = updates[(cell.Item1, cell.Item2)].Table;
+            if (!StoredAssignmentEqual(child.Columns[cell.Item3], state.Origins[cell].Value, value))
+            { throw SqlExecutionException.ReferentialAssignmentConflict(proposal.Origin.Constraint.Name, child.Schema, child.Name, child.Columns[cell.Item3].Name); }
         }
     }
 

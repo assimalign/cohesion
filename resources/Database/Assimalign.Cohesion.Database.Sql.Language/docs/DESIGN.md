@@ -15,6 +15,9 @@ default and action vocabulary. SQ-F2 executes the changing actions and distingui
 RESTRICT from statement-end NO ACTION; see DIALECT. Actions match the completed direct child
 assignments; same-origin revisions converge, different-origin disagreements retain CS05085, and
 RETURNING preserves the direct row image before later actions (ri_triggers.c:1274-1313).
+Unchanged cells introduce no action proposal. Disagreements compare completed per-origin values,
+including first-pass DELETE SET origins, so composite-key intermediate states do not create false
+CS05085 failures and mixed DELETE/UPDATE actions cannot silently choose different replacements.
 
 ## Window stage (#1526, SQ-W1/SQ-W2)
 

@@ -29,7 +29,12 @@ key another table references. Matching uses the pre-action child state, so a key
 reassociate already-cascaded children with another parent's old key. Composed assignments retain
 all untouched columns. Each parent-row/constraint origin can revise its earlier proposal as a
 composite key moves in multiple hops; different origins proposing different stored values fail
-with CS05085, including conflicting diamonds and cycles. Equal revisits converge without recursion.
+with CS05085, including conflicting diamonds and cycles. An unchanged cell introduces no proposal;
+conflicts compare each origin's completed value after expansion, allowing intermediate composite-key
+revisions to converge. First-pass DELETE SET writes retain their origins and match subsequent update
+actions against the direct inputs from before those SET writes. Different DELETE/UPDATE replacements
+therefore fail with CS05085; equal replacements converge without recursion. This explicit conflict
+rule differs from PostgreSQL's trigger-order-dependent result for mixed DELETE/UPDATE actions.
 Direct assignments are the child image used for action matching: a key still equal to the old
 parent key receives the action, including an explicit self-assignment; a directly moved key keeps
 its assigned value. This follows PostgreSQL src/backend/utils/adt/ri_triggers.c:1274-1313's
@@ -77,12 +82,21 @@ DELETE maintains one mutable projection directory and refreshes changed rows inc
 pass runs only when visible key actions or newly reached deletes can expose further work. Final
 foreign-key validation uses a fresh committed READ COMMITTED snapshot (ri_triggers.c:2800-2822),
 never the all-writers snapshot used for lock-protected child discovery. Action eligibility metadata
-is cached once per catalog generation; unrelated assignments and insert-only upserts retain their
+is cached by case-insensitive schema/table name once per catalog generation, so TRUNCATE and physical
+rewrite owner changes preserve eligibility, memory charging and sequence admission. The immutable
+directory is built under the catalog monitor and published with Volatile.Write. Other SQ-F1/SQ-F2
+object-id directories are statement-local and expire before storage bindings can change. Unrelated assignments and insert-only upserts retain their
 ordinary execution path. Ordinary DML keeps the existing Release allocation guards. Large depth/work acceptance fixtures
 request an explicit memory grant; separate small-budget cases verify refusal and cleanup. Nonparallel tests record actual waits,
 exercise success, constraint failure, cancellation and session teardown, and race parent updates
 against child inserts/deletes until update/insert/delete/wait counters advance. Both transports
 cover every action/path, self-references, immediate/final timing, coded conflicts and usable connections.
+
+Plain ON DELETE CASCADE closures now obey StatementMemoryBudget too. The conservative charge is
+about 840 bytes per two-column row, so the default 64 MiB grant caps such a closure at about
+79,900 rows (other retained statement work can lower that cap). The 100,000-row chain from #1164
+needs about 84 MB and an explicitly larger StatementMemoryBudget. The worklist still has no depth
+limit; CS05067 refuses an over-budget closure before physical writes and releases its grant.
 
 | Code | Condition | SQLSTATE |
 |---|---|---|

@@ -68,16 +68,16 @@ public sealed partial class SqlCatalog
     internal bool HasIncomingReferences(SqlCatalogTable table, bool changingUpdates = false)
     {
         var actions = IncomingActions();
-        return actions.Tables.TryGetValue(table.ObjectId, out var incoming) &&
+        return actions.Tables.TryGetValue((table.Schema, table.Name), out var incoming) &&
             (changingUpdates ? incoming.UpdateColumns.Count != 0 : incoming.Any);
     }
 
     internal IReadOnlySet<string>? ReferencedUpdateColumns(SqlCatalogTable table, bool changingOnly)
-        => IncomingActions().Tables.TryGetValue(table.ObjectId, out var incoming)
+        => IncomingActions().Tables.TryGetValue((table.Schema, table.Name), out var incoming)
             ? changingOnly ? incoming.UpdateColumns : incoming.ReferencedColumns : null;
 
     internal bool HasDeleteActions(SqlCatalogTable table)
-        => IncomingActions().Tables.TryGetValue(table.ObjectId, out var incoming) && incoming.DeleteActions;
+        => IncomingActions().Tables.TryGetValue((table.Schema, table.Name), out var incoming) && incoming.DeleteActions;
 
     private IncomingActionDirectory IncomingActions()
     {
@@ -87,7 +87,9 @@ public sealed partial class SqlCatalog
         {
             cached = _incomingActions;
             if (cached is not null && cached.Generation == _ddlGeneration) { return cached; }
-            var tables = new Dictionary<ulong, IncomingActionSet>();
+            // Storage replacement changes ObjectId without changing the DDL generation.
+            // Names identify this definition across TRUNCATE and physical rewrites.
+            var tables = new Dictionary<(string Schema, string Name), IncomingActionSet>(TableNameComparer.Instance);
             foreach (var slot in _tables.Values)
             {
                 for (int index = 0; index < slot.Table.Constraints.Count; index++)
@@ -95,13 +97,14 @@ public sealed partial class SqlCatalog
                     var constraint = slot.Table.Constraints[index];
                     if (constraint.Kind != SqlCatalogConstraintKind.Reference ||
                         !_tables.TryGetValue((constraint.ReferencedSchema!, constraint.ReferencedTable!), out var parent)) { continue; }
-                    if (!tables.TryGetValue(parent.Table.ObjectId, out var incoming))
-                    { tables.Add(parent.Table.ObjectId, incoming = new(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase), false, true)); }
+                    var key = (parent.Table.Schema, parent.Table.Name);
+                    if (!tables.TryGetValue(key, out var incoming))
+                    { tables.Add(key, incoming = new(new(StringComparer.OrdinalIgnoreCase), new(StringComparer.OrdinalIgnoreCase), false, true)); }
                     foreach (string column in constraint.ReferencedColumns) { incoming.ReferencedColumns.Add(column); }
                     if (constraint.OnUpdate is SqlCatalogReferentialAction.Cascade or SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)
                     { foreach (string column in constraint.ReferencedColumns) { incoming.UpdateColumns.Add(column); } }
                     if (constraint.OnDelete is SqlCatalogReferentialAction.Cascade or SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)
-                    { tables[parent.Table.ObjectId] = incoming with { DeleteActions = true }; }
+                    { tables[key] = incoming with { DeleteActions = true }; }
                 }
             }
             cached = new(_ddlGeneration, tables);
@@ -110,7 +113,7 @@ public sealed partial class SqlCatalog
         }
     }
 
-    private sealed record IncomingActionDirectory(ulong Generation, Dictionary<ulong, IncomingActionSet> Tables);
+    private sealed record IncomingActionDirectory(ulong Generation, Dictionary<(string Schema, string Name), IncomingActionSet> Tables);
     private sealed record IncomingActionSet(HashSet<string> UpdateColumns, HashSet<string> ReferencedColumns, bool DeleteActions, bool Any);
 
     internal SqlCatalogSequence IdentitySequence(ulong tableId, string column)
