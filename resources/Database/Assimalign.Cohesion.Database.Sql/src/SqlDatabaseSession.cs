@@ -906,8 +906,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
-        if (control.IsolationLevels.Contains(SqlTransactionIsolationLevel.Serializable))
-        { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
+        bool serializable = control.IsolationLevels.Contains(SqlTransactionIsolationLevel.Serializable);
         var isolationLevel = control.IsolationLevels.Count == 0 ? _isolationLevel : control.IsolationLevels[^1] switch
         {
             SqlTransactionIsolationLevel.RepeatableRead => IsolationLevel.Snapshot,
@@ -917,6 +916,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         {
             if (transaction is null) { return TransactionDiagnostic("CS04071", ErrorMessages.TransactionIsolationOutside); }
             ThrowIfTransactionRefuses();
+            if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
             return transaction.TrySetIsolationLevel(isolationLevel)
                 ? new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0)
                 : TransactionDiagnostic("CS04072", ErrorMessages.TransactionIsolationLate);
@@ -939,6 +939,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 return TransactionDiagnostic("CS04001", ErrorMessages.TransactionControlAsyncDatabaseResult);
             }
 
+            if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
             await BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
         else

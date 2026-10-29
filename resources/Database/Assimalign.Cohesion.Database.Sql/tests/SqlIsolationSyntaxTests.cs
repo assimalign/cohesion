@@ -121,10 +121,14 @@ public sealed class SqlIsolationSyntaxTests
         // Act / Assert
         (await session.ExecuteAsync("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", cancellationToken: CancellationToken.None))
             .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04071");
+        (await session.ExecuteAsync("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE", cancellationToken: CancellationToken.None))
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04071");
         (await session.ExecuteAsync("BEGIN ISOLATION LEVEL SERIALIZABLE", cancellationToken: CancellationToken.None))
             .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04073");
         session.CurrentTransaction.ShouldBeNull();
         await using var transaction = await session.BeginTransactionAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+        (await session.ExecuteAsync("BEGIN ISOLATION LEVEL SERIALIZABLE", cancellationToken: CancellationToken.None))
+            .Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04001");
         foreach (string mode in new[] { "READ ONLY", "READ WRITE", "DEFERRABLE", "NOT DEFERRABLE" })
         {
             var failure = await Should.ThrowAsync<DatabaseParseException>(async () =>

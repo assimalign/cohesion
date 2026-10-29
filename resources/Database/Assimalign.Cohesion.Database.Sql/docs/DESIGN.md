@@ -5655,6 +5655,8 @@ use the last level; any SERIALIZABLE mode is refused. CS04071 identifies SET out
 CS04072 identifies late/running configuration, and CS04073 identifies unsupported SERIALIZABLE.
 Other modes retain CK00001. These refusals preserve transaction usability. Savepoints remain
 unimplemented (#1726); future savepoint admission must join the same CS04072 check.
+Existing nested-BEGIN and aborted-scope checks, and SET's missing-block check, precede the
+SERIALIZABLE refusal, preserving state diagnostics before unsupported-level validation.
 
 | Code | Isolation condition | SQLSTATE |
 |---|---|---|

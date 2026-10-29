@@ -304,8 +304,8 @@ MERGE's advertised clause is measured through action execution and RETURNING.
 `BEGIN [WORK|TRANSACTION] [ISOLATION LEVEL level [, ...]]`, `START TRANSACTION
 [ISOLATION LEVEL level [, ...]]` and `SET TRANSACTION ISOLATION LEVEL level [, ...]`
 execute through the existing request and Ready frames. READ COMMITTED maps to ReadCommitted,
-REPEATABLE READ to Snapshot, and READ UNCOMMITTED to ReadCommitted. SERIALIZABLE anywhere
-in a mode list is refused with CS04073 (0A000). Commas are optional between complete modes;
+REPEATABLE READ to Snapshot, and READ UNCOMMITTED to ReadCommitted. A state-valid control with
+SERIALIZABLE anywhere in its mode list is refused with CS04073 (0A000). Commas are optional between complete modes;
 repeated supported levels use the last mode. All mode words remain contextual identifiers.
 READ ONLY, READ WRITE, DEFERRABLE and NOT DEFERRABLE report CK00001 naming the form.
 Incomplete or malformed isolation modes report CS00012 (42601).
@@ -313,7 +313,8 @@ Incomplete or malformed isolation modes report CS00012 (42601).
 SET requires an active block (CS04071, 25000), before its first admitted data statement
 (CS04072, 25001), including SELECT, plain EXPLAIN and unsuccessful data/DDL attempts.
 Malformed or refused control statements and pre-canceled requests do not consume that first
-statement. Repeated early SET is allowed. Even an idempotent SET after data is refused;
+statement. SET outside a block and nested BEGIN retain their state errors before checking
+SERIALIZABLE; an aborted transaction retains its existing refusal. Repeated early SET is allowed. Even an idempotent SET after data is refused;
 PostgreSQL permits that exception, but the owner rule here does not. A failed SET leaves the
 transaction usable. Savepoints remain unavailable (#1726); when introduced they must refuse
 isolation changes inside a savepoint using the same timing condition.
