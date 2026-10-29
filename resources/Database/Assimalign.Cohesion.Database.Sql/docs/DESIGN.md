@@ -110,8 +110,17 @@ a noninteger index reports CS02073 (42804). Value types follow the first argumen
 Native frames reuse one accumulator while their head stays fixed, including bounded
 PRECEDING heads clamped to the partition start. They consume each qualifying input once,
 reading a non-consuming native final result. Equal frames share the previously computed
-result. Ordinary application accumulator Finish remains once-only: those frames, moving
-frame heads and aggregate-local ordering recompute when necessary. String output cost is
+result. SUM, COUNT, MIN, MAX, AVG, Boolean and statistical native aggregates ignore
+aggregate-local ORDER BY when evaluating frames, including its key expressions, so ordering
+does not disable incremental transitions. FILTER still runs before argument evaluation.
+Application aggregates and ordered string aggregates preserve their specified input order.
+Ordinary application accumulator Finish remains once-only. Recomputed frames (including
+native frames whose head moves) charge each candidate input visit before FILTER or any
+input expression/transition against a fixed 1,000,000-visit statement cap. CS05084 (54000)
+refuses the next visit and releases all reservations. The cap spans functions, partitions
+and window stages sharing the statement, including under LIMIT; equal cached frames spend
+no visits. SQL has no general statement work budget, so this fixed cap bounds otherwise
+quadratic fallback work without changing the public accumulator contract. String output cost is
 also proportional to the total returned text. Native ordered/string buffers and accumulator
 scratch charge CS05079's statement grant. Ordered aggregate inputs evaluate their arguments
 and keys once after FILTER; their actual retained payload and conservative stable-sort scratch
@@ -140,6 +149,7 @@ utils/adt/windowfuncs.c:656-723 (frame value functions). No live PostgreSQL comp
 | CS05081 | Row variable, aggregate or window in frame offset (42P20) |
 | CS05082 | Nonpositive NTH_VALUE index (22016) |
 | CS05083 | OVER on a scalar function (42809) |
+| CS05084 | Statement window frame recomputation exceeds 1,000,000 input visits (54000) |
 
 
 ## Owned identity sequences (#1717, SQ-S3)

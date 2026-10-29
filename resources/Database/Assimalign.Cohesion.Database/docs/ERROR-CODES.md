@@ -262,6 +262,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W2) | CS05081 | Row variable, aggregate or window in frame offset (42P20) |
 | New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
 | New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
+| New (#1526, SQ-W2 fixes) | CS05084 | Window frame recomputation exceeds 1,000,000 candidate input visits per statement (54000) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

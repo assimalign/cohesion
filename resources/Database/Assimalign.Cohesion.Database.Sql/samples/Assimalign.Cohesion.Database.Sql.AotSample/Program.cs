@@ -241,6 +241,9 @@ internal static class Program
         Check("in process: ROWS frames, aggregate FILTER and value functions", await RowsAsync(session,
             "SELECT Id,SUM(Score) FILTER(WHERE Score>0) OVER w,FIRST_VALUE(Score) OVER w,LAST_VALUE(Score) OVER w,NTH_VALUE(Score,2) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
             [[1L,100m,100L,100L,null],[2L,300m,100L,200L,200L]]);
+        Check("in process: ordered native and application frame aggregates", await RowsAsync(session,
+            "SELECT Id,SUM(Score ORDER BY Id DESC) FILTER(WHERE Score>0) OVER w,product(Score) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
+            [[1L,100m,100L],[2L,300m,20000L]]);
         Check("in process: persisted view with pinned call", await RowsAsync(session, "SELECT n FROM native_view"), [[5]]);
         Check("in process: VIEWS metadata", await RowsAsync(session, "SELECT CHECK_OPTION, IS_UPDATABLE FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'native_view'"), [["NONE", "NO"]]);
         await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");

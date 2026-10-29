@@ -183,7 +183,9 @@ internal sealed partial class SqlPlanExecutor
                 if (previousStarts[index] == first && previousEnds[index] == last) { return results[index]; }
                 var aggregate = function.Aggregate!;
                 var collation = aggregate.Collation.Resolve(_subqueryValues);
-                bool incremental = aggregate.OrderBy.Count == 0 && SqlStandardLibrary.Contains(aggregate.Function);
+                bool orderedInput = aggregate.OrderBy.Count > 0 && !SqlStandardLibrary.IgnoresWindowOrdering(aggregate.Function);
+                bool incremental = !orderedInput && SqlStandardLibrary.Contains(aggregate.Function);
+                bool recomputing = !incremental || previousStarts[index] >= 0 && previousStarts[index] != first;
                 SqlAggregateAccumulator accumulator;
                 if (incremental)
                 {
@@ -199,18 +201,22 @@ internal sealed partial class SqlPlanExecutor
                 long retained = 0;
                 try
                 {
-                    var ordered = aggregate.OrderBy.Count == 0 ? null : new GroupAggregateState(accumulator, aggregate, _subqueryValues);
+                    var ordered = orderedInput ? new GroupAggregateState(accumulator, aggregate, _subqueryValues) : null;
                     for (int inputPosition = incremental ? nextInputs[index] : first; inputPosition < last; inputPosition++)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        if (recomputing) { statement.Metrics.RecordWindowFrameRecomputation(); }
                         if (statement.Metrics.Analysis(function) is { } work) { work.Candidates++; }
                         var inputRow = rows[sorted[inputPosition]];
                         await PrepareSubqueriesAsync(aggregate.Filter, inputRow, statement, cancellationToken).ConfigureAwait(false);
                         if (!evaluator.Matches(aggregate.Filter, inputRow)) { continue; }
                         foreach (var argument in aggregate.Arguments)
                         { await PrepareSubqueriesAsync(argument, inputRow, statement, cancellationToken).ConfigureAwait(false); }
-                        foreach (var order in aggregate.OrderBy)
-                        { await PrepareSubqueriesAsync(order.Key, inputRow, statement, cancellationToken).ConfigureAwait(false); }
+                        if (orderedInput)
+                        {
+                            foreach (var order in aggregate.OrderBy)
+                            { await PrepareSubqueriesAsync(order.Key, inputRow, statement, cancellationToken).ConfigureAwait(false); }
+                        }
                         if (ordered is null) { AddRow(accumulator, aggregate, collation, evaluator, inputRow, cancellationToken, statement.TransactionStart); }
                         else
                         {

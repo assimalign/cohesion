@@ -14,6 +14,9 @@ keys participate in view traversal, structural equivalence and child-subquery bi
 
 Binding, stage placement, diagnostics and memory ownership are described in Sql DESIGN and
 [DIALECT.md](DIALECT.md). Parser, profile, keyword and completeness corpora advance together.
+Native order-insensitive frame aggregates ignore local ordering during evaluation; fallback
+recomputation shares the fixed 1,000,000-input-visit statement cap (CS05084). The corpus includes
+ordered, filtered growing frames; syntax and the window-free AST layout are unchanged.
 PostgreSQL references: parser/parse_clause.c:2766-2902 and parser/parse_agg.c:879-994.
 
 ## Owned identity syntax (#1717, SQ-S3)

@@ -58,6 +58,7 @@ public class SqlConformanceTests
     [InlineData("SELECT SUM(v) FILTER(WHERE flag) OVER w,COUNT(*) OVER w,BOOL_AND(flag) OVER w,VAR_POP(v) OVER w,FIRST_VALUE(v) OVER w,LAST_VALUE(v) OVER w,NTH_VALUE(v,2) OVER w FROM t WINDOW w AS(PARTITION BY p ORDER BY k ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING);", SqlQueryCommandType.Select)]
     [InlineData("SELECT LAST_VALUE(v) OVER(ORDER BY k),SUM(v) OVER(ORDER BY k RANGE UNBOUNDED PRECEDING) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT COUNT(*) FILTER (WHERE flag), SUM(DISTINCT v) FILTER (WHERE v>0), STRING_AGG(label, ',' ORDER BY id) FILTER (WHERE flag) FROM t;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT SUM(amount ORDER BY id DESC) FILTER(WHERE flag) OVER(ORDER BY id ROWS UNBOUNDED PRECEDING) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a FULL JOIN b USING(id);", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM a LEFT OUTER JOIN b ON a.id = b.id FULL OUTER JOIN c ON b.id = c.id;", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM ((SELECT * FROM a) d RIGHT JOIN b ON d.id = b.id);", SqlQueryCommandType.Select)]

@@ -856,7 +856,7 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[1L],[1L]]),
         [SqlClauses.Window] = Query("SELECT ROW_NUMBER() OVER w FROM t WINDOW w AS(ORDER BY id) ORDER BY id;",
             expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L],[2L],[3L]]),
-        [SqlClauses.WindowRows] = Query("SELECT SUM(age) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t ORDER BY id;",
+        [SqlClauses.WindowRows] = Query("SELECT SUM(age ORDER BY id DESC) FILTER(WHERE age>0) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Rows }, [[36m],[81m],[86m]]),
         [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE UNBOUNDED PRECEDING) FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Range }, [[36],[45],[41]]),
