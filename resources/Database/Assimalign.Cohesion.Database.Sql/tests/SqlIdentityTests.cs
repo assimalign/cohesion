@@ -54,13 +54,14 @@ public sealed class SqlIdentityTests
         await ExecAsync(session, "INSERT INTO ids DEFAULT VALUES");
 
         // Act / Assert
-        foreach (string sql in new[] { "INSERT INTO ids VALUES (8)", "INSERT INTO ids VALUES (NULL)", "UPDATE ids SET id = 9", "UPDATE ids SET id = DEFAULT", "INSERT INTO ids (id) SELECT id FROM ids WHERE 1 = 0" })
+        foreach (string sql in new[] { "INSERT INTO ids VALUES (8)", "INSERT INTO ids VALUES (NULL)", "UPDATE ids SET id = 9", "INSERT INTO ids (id) SELECT id FROM ids WHERE 1 = 0" })
         {
             var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, sql));
             failure.Message.ShouldContain("id", Case.Sensitive);
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
         }
-        (await IdsAsync(session)).ShouldBe([1L]);
+        await ExecAsync(session, "UPDATE ids SET id = DEFAULT");
+        (await IdsAsync(session)).ShouldBe([2L]);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Identity: BY DEFAULT explicit values leave the counter unchanged")]
@@ -100,7 +101,7 @@ public sealed class SqlIdentityTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "INSERT INTO ids (label) VALUES (1), (2), (3)"));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02002");
         long limit = increment < 0 ? type == "TINYINT" ? sbyte.MinValue : long.MinValue : start;
         failure.Message.ShouldBe($"Identity column 'id' has exhausted its {type} range ({limit}).");
         failure.InnerException.ShouldBeOfType<SqlCatalogException>().Message.ShouldBe(failure.Message);
@@ -141,9 +142,9 @@ public sealed class SqlIdentityTests
         await ExecAsync(session, "INSERT INTO ids VALUES (1)");
 
         // Act / Assert
-        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY"));
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03025");
-        failure.Message.ShouldBe("Identity column 'id': ADD COLUMN IDENTITY requires a table with no live rows.");
+        await ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY");
+        (await IdsAsync(session)).ShouldBe([1L]);
+        await ExecAsync(session, "ALTER TABLE ids DROP COLUMN id");
         await ExecAsync(session, "DELETE FROM ids");
         await ExecAsync(session, "ALTER TABLE ids ADD id INT IDENTITY(100,5)");
         await ExecAsync(session, "INSERT INTO ids (label) VALUES (2), (3)");

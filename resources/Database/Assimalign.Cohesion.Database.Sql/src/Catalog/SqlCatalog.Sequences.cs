@@ -20,21 +20,24 @@ public sealed partial class SqlCatalog
     private readonly Dictionary<ulong, SqlSequenceCounter> _sequenceCounters = new();
     private readonly Dictionary<ulong, SqlCatalogSequence> _sequencesById = new();
 
+    internal bool HasSequences
+    { get { lock (_sync) { ThrowIfOffline(); return _sequences.Count != 0; } } }
+
     internal IReadOnlyList<SqlCatalogSequence> Sequences
-    { get { lock (_sync) { ThrowIfOffline(); return Array.AsReadOnly(_sequences.Values.Select(slot => slot.Value).ToArray()); } } }
+    { get { lock (_sync) { ThrowIfOffline(); return Array.AsReadOnly(_sequences.Values.Select(slot => slot.Value).Where(sequence => sequence.OwnerTableId == 0 || !_pendingReclamations.ContainsKey(sequence.OwnerTableId)).ToArray()); } } }
 
     internal SqlCatalogSequence? FindSequence(string schema, string name)
     {
         lock (_sync)
         {
             ThrowIfOffline();
-            return _sequences.TryGetValue((schema, name), out var slot) ? slot.Value : null;
+            return _sequences.TryGetValue((schema, name), out var slot) && (slot.Value.OwnerTableId == 0 || !_pendingReclamations.ContainsKey(slot.Value.OwnerTableId)) ? slot.Value : null;
         }
     }
 
     internal SqlCatalogSequence? FindSequence(ulong objectId)
     {
-        lock (_sync) { ThrowIfOffline(); return _sequencesById.GetValueOrDefault(objectId); }
+        lock (_sync) { ThrowIfOffline(); return _sequencesById.TryGetValue(objectId, out var sequence) && (sequence.OwnerTableId == 0 || !_pendingReclamations.ContainsKey(sequence.OwnerTableId)) ? sequence : null; }
     }
 
     internal long AllocateSequence(ulong objectId)
@@ -44,7 +47,7 @@ public sealed partial class SqlCatalog
     }
 
     internal ValueTask<SqlCatalogSequence> CreateSequenceAsync(string schema, string name, SqlSequenceOptions options,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, ulong ownerTableId = 0, string? ownerColumn = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(schema);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -56,11 +59,13 @@ public sealed partial class SqlCatalog
             cancellationToken.ThrowIfCancellationRequested();
             if (!_namespaces.ContainsKey(schema)) { throw new SqlCatalogException("CS03071", ErrorMessages.SequenceNamespaceMissing); }
             if (RelationExists(schema, name)) { throw RelationNameCollision(schema, name); }
-            var sequence = new SqlCatalogSequence(_nextObjectId, schema, name, options);
+            var sequence = new SqlCatalogSequence(_nextObjectId, schema, name, options, ownerTableId, ownerColumn);
             byte[] record = EncodeSequence(sequence);
             using var transaction = _storage.BeginTransaction();
+            var orphan = StageOrphanSequenceName(transaction, schema, name);
             var location = _storage.InsertRow(transaction, record);
             CommitCatalogChange(transaction, checked(_nextObjectId + 1));
+            if (orphan is not null) { RemoveSequence(orphan); }
             _sequences.Add((schema, name), new(sequence, location));
             _sequencesById.Add(sequence.ObjectId, sequence);
             return ValueTask.FromResult(sequence);
@@ -70,7 +75,7 @@ public sealed partial class SqlCatalog
     // Existence and option validation share the publication monitor. PostgreSQL
     // sequence.c:135-159 skips an occupied relation before init_params runs.
     internal ValueTask<SqlCatalogSequence?> CreateSequenceIfAbsentAsync(string schema, string name,
-        Func<SqlSequenceOptions> options, bool ifNotExists, CancellationToken cancellationToken)
+        Func<SqlSequenceOptions> options, bool ifNotExists, CancellationToken cancellationToken, Func<(ulong Table, string? Column)>? ownership = null)
     {
         lock (_sync)
         {
@@ -81,7 +86,8 @@ public sealed partial class SqlCatalog
                 if (ifNotExists) { return ValueTask.FromResult<SqlCatalogSequence?>(null); }
                 throw RelationNameCollision(schema, name);
             }
-            return ValueTask.FromResult<SqlCatalogSequence?>(CreateSequenceAsync(schema, name, options(), cancellationToken).Result);
+            var owner = ownership?.Invoke() ?? default;
+            return ValueTask.FromResult<SqlCatalogSequence?>(CreateSequenceAsync(schema, name, options(), cancellationToken, owner.Table, owner.Column).Result);
         }
     }
 
@@ -89,7 +95,7 @@ public sealed partial class SqlCatalog
     // replacement retains the last fetched value and discards its unused reservation;
     // explicit restart is transactional and may deliberately reissue old values.
     internal ValueTask<SqlCatalogSequence> AlterSequenceAsync(SqlCatalogSequence expected, SqlSequenceOptions options,
-        long? restart = null, CancellationToken cancellationToken = default)
+        long? restart = null, CancellationToken cancellationToken = default, (ulong Table, string? Column)? ownership = null)
     {
         ArgumentNullException.ThrowIfNull(expected);
         ArgumentNullException.ThrowIfNull(options);
@@ -100,6 +106,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             var previous = RequireSequence(expected);
+            bool ownershipOnly = ownership is not null && restart is null && ReferenceEquals(options, expected.Options);
             _sequenceCounters.TryGetValue(expected.ObjectId, out var oldCounter);
             bool called = restart is null && oldCounter is { IsCalled: true };
             // PostgreSQL sequence.c:479,513,1558-1570: ALTER validates and keeps
@@ -108,17 +115,19 @@ public sealed partial class SqlCatalog
             long reserved = restart ?? (called ? (long)(oldCounter!.Next - expected.Options.Increment) :
                 oldCounter?.Reserved ?? expected.Options.Start);
             options.ValidateRestart(reserved);
-            var updated = new SqlCatalogSequence(expected.ObjectId, expected.Schema, expected.Name, options);
+            var updated = new SqlCatalogSequence(expected.ObjectId, expected.Schema, expected.Name, options, ownership?.Table ?? expected.OwnerTableId, ownership is null ? expected.OwnerColumn : ownership.Value.Column, expected.IsIdentity);
             byte[] record = EncodeSequence(updated);
             using var transaction = _storage.BeginTransaction();
             var location = UpsertRecord(transaction, previous.Location, record);
-            var counterLocation = UpsertRecord(transaction, oldCounter?.Location,
-                EncodeAllocation(sequenceCounterRecordKind, expected.ObjectId, reserved, called));
+            var counterLocation = oldCounter?.Location;
+            if (!ownershipOnly) { counterLocation = UpsertRecord(transaction, oldCounter?.Location,
+                EncodeAllocation(sequenceCounterRecordKind, expected.ObjectId, reserved, called)); }
             CommitCatalogChange(transaction);
             _sequences[(expected.Schema, expected.Name)] = new(updated, location);
             _sequencesById[expected.ObjectId] = updated;
-            _sequenceCounters[expected.ObjectId] = new SqlSequenceCounter
-            { Next = RecoverAllocation(reserved, options.Increment, called), Reserved = reserved, IsCalled = called, Location = counterLocation };
+            if (updated.IsIdentity) { _identitySequences[updated.OwnerTableId] = updated; }
+            if (!ownershipOnly) { _sequenceCounters[expected.ObjectId] = new SqlSequenceCounter
+            { Next = RecoverAllocation(reserved, options.Increment, called), Reserved = reserved, IsCalled = called, Location = counterLocation }; }
             return ValueTask.FromResult(updated);
         }
     }
@@ -132,7 +141,9 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             var slot = RequireSequence(expected);
+            EnsureSequenceDroppable(expected);
             using var transaction = _storage.BeginTransaction();
+            StageSequenceDefaults(transaction, [expected], false);
             DeleteSequence(transaction, slot);
             CommitCatalogChange(transaction);
             _sequences.Remove((expected.Schema, expected.Name));
@@ -148,6 +159,13 @@ public sealed partial class SqlCatalog
         AllocationEntering?.Invoke();
         lock (_sync)
         {
+            return AllocateSequenceCore(sequence);
+        }
+    }
+
+    // Caller owns _sync. Identity and standalone entry points share this allocator.
+    private long AllocateSequenceCore(SqlCatalogSequence sequence)
+    {
             ObjectDisposedException.ThrowIf(_allocationClosed, this);
             ThrowIfOffline();
             RequireSequence(sequence);
@@ -159,21 +177,30 @@ public sealed partial class SqlCatalog
             }
             if (!TryAllocate(counter, sequence.ObjectId, sequenceCounterRecordKind, options.Increment,
                 options.Minimum, options.Maximum, options.Cycle, out long value))
-            { throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceExhausted, sequence.Schema, sequence.Name)); }
+            {
+                if (sequence.IsIdentity)
+                {
+                    string type = options.Type switch { DatabaseType.Int8 => "TINYINT", DatabaseType.Int16 => "SMALLINT", DatabaseType.Int32 => "INT", _ => "BIGINT" };
+                    throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.IdentityRangeExhausted,
+                        sequence.OwnerColumn, type, options.Increment > 0 ? options.Maximum : options.Minimum));
+                }
+                throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceExhausted, sequence.Schema, sequence.Name));
+            }
             return value;
-        }
     }
 
-    internal ValueTask DropSequencesAsync(IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken)
+    internal ValueTask DropSequencesAsync(IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken, bool cascade = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
             ThrowIfOffline();
-            foreach (var sequence in sequences) { RequireSequence(sequence); }
+            foreach (var sequence in sequences) { RequireSequence(sequence); EnsureSequenceDroppable(sequence); }
             using var transaction = _storage.BeginTransaction();
+            var changed = StageSequenceDefaults(transaction, sequences, cascade);
             foreach (var sequence in sequences) { DeleteSequence(transaction, RequireSequence(sequence)); }
             CommitCatalogChange(transaction);
+            foreach (var slot in changed) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
             foreach (var sequence in sequences)
             { _sequences.Remove((sequence.Schema, sequence.Name)); _sequencesById.Remove(sequence.ObjectId); _sequenceCounters.Remove(sequence.ObjectId); }
             return default;
@@ -200,8 +227,65 @@ public sealed partial class SqlCatalog
         }
     }
 
+    private TableSlot[] StageSequenceDefaults(StorageTransaction transaction, IReadOnlyList<SqlCatalogSequence> sequences,
+        bool cascade, IReadOnlySet<ulong>? removedTables = null, IReadOnlyDictionary<ulong, SqlCatalogTable>? overrides = null)
+    {
+        var dependencies = sequences.Select(sequence => "S:" + sequence.ObjectId.ToString(CultureInfo.InvariantCulture)).ToHashSet(StringComparer.Ordinal);
+        var changed = new List<TableSlot>();
+        foreach (var tableSlot in _tables.Values)
+        {
+            var table = overrides?.GetValueOrDefault(tableSlot.Table.ObjectId) ?? tableSlot.Table;
+            if (removedTables?.Contains(table.ObjectId) == true) { continue; }
+            var dependent = table.Columns.FirstOrDefault(column => column.DefaultFunctionCalls.Any(dependencies.Contains));
+            if (dependent is null) { continue; }
+            if (!cascade)
+            {
+                var sequence = sequences.First(sequence => dependent.DefaultFunctionCalls.Contains("S:" + sequence.ObjectId.ToString(CultureInfo.InvariantCulture)));
+                throw new SqlCatalogException("CS03080", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceDefaultDependent,
+                    sequence.Schema, sequence.Name, table.Schema, table.Name, dependent.Name));
+            }
+            var columns = table.Columns.Select(column => column.DefaultFunctionCalls.Any(dependencies.Contains)
+                ? new SqlCatalogColumn(column.Name, column.Type, column.IsNullable, null, column.Collation, column.DomainName,
+                    [], column.Identity, column.MissingValueLiteral) : column).ToArray();
+            var replacement = new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
+                table.Owner, table.OwningSchema, table.Constraints, table.DroppedColumnOrdinals);
+            changed.Add(new TableSlot(replacement, UpsertRecord(transaction, tableSlot.Location, EncodeTable(replacement))));
+        }
+        return changed.ToArray();
+    }
+
+    private void EnsureSequenceDroppable(SqlCatalogSequence sequence)
+    {
+        if (sequence.IsIdentity)
+        {
+            var table = FindTableByObjectId(sequence.OwnerTableId)!;
+            throw new SqlCatalogException("CS03080", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceIdentityDependent,
+                sequence.Schema, sequence.Name, table.Schema, table.Name, sequence.OwnerColumn));
+        }
+    }
+
+    internal bool RelationNameExists(string schema, string name)
+    { lock (_sync) { ThrowIfOffline(); return RelationExists(schema, name); } }
+
     private bool RelationExists(string schema, string name)
-        => _tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)) || _sequences.ContainsKey((schema, name));
+        => _tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)) || SequenceNameExists(schema, name);
+
+    // Prepared owners can still publish and reserve their names. Permanently abandoned
+    // owners are invisible and may surrender their sequence metadata in the new owner's
+    // publication transaction; their data pages and reclamation intent remain untouched.
+    private bool IsOrphanSequence(SqlCatalogSequence sequence)
+        => sequence.OwnerTableId != 0 && _pendingReclamations.ContainsKey(sequence.OwnerTableId) &&
+            !_preparedTruncateOwners.Contains(sequence.OwnerTableId);
+
+    private bool SequenceNameExists(string schema, string name)
+        => _sequences.TryGetValue((schema, name), out var slot) && !IsOrphanSequence(slot.Value);
+
+    private SqlCatalogSequence? StageOrphanSequenceName(StorageTransaction transaction, string schema, string name)
+    {
+        if (!_sequences.TryGetValue((schema, name), out var slot) || !IsOrphanSequence(slot.Value)) { return null; }
+        DeleteSequence(transaction, slot);
+        return slot.Value;
+    }
 
     private SqlCatalogException RelationNameCollision(string schema, string name)
     {
@@ -229,7 +313,8 @@ public sealed partial class SqlCatalog
         byte[] record = new DatabaseKeyWriter().AppendInt32(sequenceRecordKind).AppendInt64((long)sequence.ObjectId)
             .AppendString(sequence.Schema, Collation.Binary).AppendString(sequence.Name, Collation.Binary)
             .AppendInt32((int)options.Type).AppendInt64(options.Start).AppendInt64(options.Increment)
-            .AppendInt64(options.Minimum).AppendInt64(options.Maximum).AppendInt64(options.Cache).AppendBoolean(options.Cycle).ToArray();
+            .AppendInt64(options.Minimum).AppendInt64(options.Maximum).AppendInt64(options.Cache).AppendBoolean(options.Cycle)
+            .AppendInt64((long)sequence.OwnerTableId).AppendString(sequence.OwnerColumn ?? "", Collation.Binary).AppendBoolean(sequence.IsIdentity).ToArray();
         if (record.Length > SlottedPage.MaxRecordSize) { throw new SqlCatalogException("CS03072", ErrorMessages.SequenceRecordTooLarge); }
         return record;
     }
@@ -241,12 +326,17 @@ public sealed partial class SqlCatalog
         int type = reader.ReadInt32();
         // DatabaseType has a byte backing type: refuse high bits before a cast can
         // silently turn damaged metadata into a supported integer type.
-        if (type != (int)DatabaseType.Int16 && type != (int)DatabaseType.Int32 && type != (int)DatabaseType.Int64)
+        if (type != (int)DatabaseType.Int8 && type != (int)DatabaseType.Int16 && type != (int)DatabaseType.Int32 && type != (int)DatabaseType.Int64)
         { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
-        var options = new SqlSequenceOptions((DatabaseType)type, reader.ReadInt64(), reader.ReadInt64(),
-            reader.ReadInt64(), reader.ReadInt64(), reader.ReadInt64(), reader.ReadBoolean());
+        long start = reader.ReadInt64(), increment = reader.ReadInt64(), minimum = reader.ReadInt64(), maximum = reader.ReadInt64(), cache = reader.ReadInt64();
+        bool cycle = reader.ReadBoolean();
+        ulong owner = (ulong)reader.ReadInt64();
+        string column = reader.ReadString(out _);
+        bool identity = reader.ReadBoolean();
+        var options = new SqlSequenceOptions((DatabaseType)type, start, increment, minimum, maximum, cache, cycle, identity);
+        if ((owner == 0) != (column.Length == 0) || identity && owner == 0) { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
         if (!reader.IsAtEnd || id == 0 || id == ulong.MaxValue || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(name) ||
-            !_sequences.TryAdd((schema, name), new(new SqlCatalogSequence(id, schema, name, options), location)))
+            !_sequences.TryAdd((schema, name), new(new SqlCatalogSequence(id, schema, name, options, owner, column.Length == 0 ? null : column, identity), location)))
         { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
         _nextObjectId = Math.Max(_nextObjectId, id + 1);
     }
@@ -267,10 +357,30 @@ public sealed partial class SqlCatalog
         foreach (var slot in _sequences.Values)
         {
             var sequence = slot.Value;
+            // Validate global identities before classifying provisional orphans. Cleanup
+            // must never remove a live reservation through a colliding orphan id.
             if (!ids.TryAdd(sequence.ObjectId, sequence) || !_sequencesById.TryAdd(sequence.ObjectId, sequence) || tables.ContainsKey(sequence.ObjectId) || _pendingReclamations.ContainsKey(sequence.ObjectId) ||
                 _tables.ContainsKey((sequence.Schema, sequence.Name)) || _views.ContainsKey(SqlObjectIdentity.View(sequence.Schema, sequence.Name)) ||
-                !_namespaces.ContainsKey(sequence.Schema))
+                sequence.OwnerTableId == 0 && !_namespaces.ContainsKey(sequence.Schema))
             { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
+            if (sequence.OwnerTableId != 0 && (!tables.TryGetValue(sequence.OwnerTableId, out var owner) || !owner.Schema.Equals(sequence.Schema, StringComparison.OrdinalIgnoreCase) ||
+                owner.FindColumn(sequence.OwnerColumn!) is not { } column || sequence.IsIdentity && column.Identity is null))
+            {
+                if (_pendingReclamations.ContainsKey(sequence.OwnerTableId)) { continue; }
+                throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed);
+            }
+            if (sequence.IsIdentity && !_identitySequences.TryAdd(sequence.OwnerTableId, sequence)) { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
+        }
+        foreach (var table in tables.Values)
+        {
+            foreach (var column in table.Columns)
+            {
+                if (column.Identity is not null && (!_identitySequences.TryGetValue(table.ObjectId, out var sequence) ||
+                    !string.Equals(sequence.OwnerColumn, column.Name, StringComparison.OrdinalIgnoreCase)))
+                { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
+                foreach (var dependency in column.DefaultFunctionCalls.Where(value => value.StartsWith("S:", StringComparison.Ordinal)))
+                { if (!ulong.TryParse(dependency.AsSpan(2), out ulong id) || FindSequence(id) is null) { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); } }
+            }
         }
         foreach (var (id, counter) in _sequenceCounters)
         {
@@ -278,5 +388,7 @@ public sealed partial class SqlCatalog
             { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
             counter.Next = RecoverAllocation(counter.Reserved, sequence.Options.Increment, counter.IsCalled);
         }
+        // Loading is read-only. The published database's reclamation worker removes
+        // invisible orphan sequences atomically with their retired owner's intent.
     }
 }

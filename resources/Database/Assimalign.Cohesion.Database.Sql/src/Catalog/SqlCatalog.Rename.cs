@@ -190,7 +190,11 @@ public sealed partial class SqlCatalog
             using var transaction = _storage.BeginTransaction();
             var tableSlots = tables.Select(item => new TableSlot(item.Table, UpsertRecord(transaction, item.Old.Location, item.Record))).ToArray();
             var indexSlots = indexes.Select(item => new IndexSlot(item.Index, UpsertRecord(transaction, item.Old.Location, item.Record))).ToArray();
+            ulong next = _nextObjectId;
+            var owned = StageOwnedSequences(transaction, expected, tableSlots.Single(slot => slot.Table.ObjectId == expected.ObjectId).Table,
+                ref next, renamedColumn: columnName, newColumn: newName);
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(expected.Schema, expected.Name));
+            owned();
             _tables.Remove((expected.Schema, expected.Name));
             foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
             foreach (var slot in indexSlots) { _indexes[(slot.Index.TableObjectId, slot.Index.Name)] = slot; }

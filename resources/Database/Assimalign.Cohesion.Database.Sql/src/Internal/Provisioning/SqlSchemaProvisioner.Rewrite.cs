@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -81,8 +82,20 @@ internal sealed partial class SqlSchemaProvisioner
             // A configured engine lock timeout also bounds a caller holding the blocker.
             var timeout = _database.Engine.EngineOptions.LockTimeout;
             using var scope = timeout == TimeSpan.Zero ? null : _database.Coordinator.LockManager.EnterLockTimeout(timeout);
+            // Sequence grants precede the old table X grant; the worker reacquires only
+            // grants already held by this same owner. Catalog/storage latches are innermost.
+            var owned = _database.Catalog.Sequences.Where(sequence => sequence.OwnerTableId == table.ObjectId).OrderBy(sequence => sequence.ObjectId).ToArray();
+            foreach (var sequence in owned)
+            {
+                await _database.Coordinator.LockManager.AcquireAsync(transaction.Sequence,
+                    LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            }
             await _database.Coordinator.LockManager.AcquireAsync(transaction.Sequence,
                 LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            if (transaction.State != TransactionState.Active)
+            { _database.Coordinator.LockManager.ReleaseAll(transaction.Sequence); throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
+            if (_database.Catalog.Sequences.Any(sequence => sequence.OwnerTableId == table.ObjectId && !owned.Any(previous => previous.ObjectId == sequence.ObjectId)))
+            { throw new SqlCatalogException("CS04067", ErrorMessages.SequenceChanged); }
             return transaction;
         }
         catch (Exception failure)

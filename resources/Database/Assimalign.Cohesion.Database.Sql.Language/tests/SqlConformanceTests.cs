@@ -35,6 +35,13 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
+    [InlineData("CREATE TABLE t(id SERIAL2);", SqlQueryCommandType.Create)]
+    [InlineData("CREATE TABLE t(id SERIAL4);", SqlQueryCommandType.Create)]
+    [InlineData("CREATE TABLE t(id SERIAL8);", SqlQueryCommandType.Create)]
+    [InlineData("ALTER TABLE t ALTER id RESTART WITH 10;", SqlQueryCommandType.Alter)]
+    [InlineData("ALTER TABLE t ALTER id SET GENERATED ALWAYS;", SqlQueryCommandType.Alter)]
+    [InlineData("INSERT INTO t OVERRIDING USER VALUE VALUES(8);", SqlQueryCommandType.Insert)]
+    [InlineData("CREATE SEQUENCE s OWNED BY t.id;", SqlQueryCommandType.Create)]
     [InlineData("DISCARD ALL;", SqlQueryCommandType.Discard)]
     [InlineData("ALTER TABLE t ALTER v TYPE \"a space\" USING v;", SqlQueryCommandType.Alter)]
     [InlineData("ALTER TABLE t ALTER v TYPE \"a\"\"quote\";", SqlQueryCommandType.Alter)]

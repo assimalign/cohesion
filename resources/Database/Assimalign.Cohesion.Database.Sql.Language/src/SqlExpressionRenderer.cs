@@ -33,15 +33,27 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// </remarks>
 public static partial class SqlExpressionRenderer
 {
-    /// <summary>Renders an ALTER COLUMN TYPE statement as canonical SQL without a terminator.</summary>
+    /// <summary>Renders an ALTER COLUMN TYPE or identity operation as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
-    /// <returns>The target type, optional collation and original-row conversion.</returns>
+    /// <returns>The canonical type alteration or identity operation.</returns>
     /// <exception cref="ArgumentNullException">The query is null.</exception>
-    /// <exception cref="NotSupportedException">The action is not ALTER COLUMN TYPE.</exception>
+    /// <exception cref="NotSupportedException">The action is not a type or identity alteration.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
     public static string Render(SqlAlterTableExpression query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        if (query.Action is SqlAlterIdentityAction identity)
+        {
+            return "ALTER TABLE " + SequenceName(query.Table) + " ALTER COLUMN " + Identifier(identity.ColumnName) + " " +
+                (identity.Operation switch
+                {
+                    "ADD" => "ADD GENERATED " + (identity.Identity!.IsAlways ? "ALWAYS" : "BY DEFAULT") + " AS IDENTITY" +
+                        (identity.Identity.Options.Count == 0 ? "" : " (" + SequenceOptions(identity.Identity.Options).TrimStart() + ")"),
+                    "DROP" => "DROP IDENTITY" + (identity.IfExists ? " IF EXISTS" : ""),
+                    "SET GENERATED" => "SET GENERATED " + (identity.IsAlways == true ? "ALWAYS" : "BY DEFAULT"),
+                    _ => (identity.IsAlways is null ? "" : "SET GENERATED " + (identity.IsAlways == true ? "ALWAYS " : "BY DEFAULT ")) + string.Join(" ", identity.Options.Select(option => (option.Name == "RESTART" ? "" : "SET ") + SequenceOptions([option]).TrimStart())),
+                });
+        }
         if (query.Action is not SqlAlterColumnTypeAction change)
         {
             throw new NotSupportedException(ErrorMessages.AlterTypeRenderingRequired);
@@ -51,6 +63,9 @@ public static partial class SqlExpressionRenderer
             " TYPE " + AlterTypeTarget(change.Column) + (change.Column.CollationName is { } collation ? " COLLATE " + Identifier(collation) : "") +
             (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
     }
+
+    private static void AppendOverride(StringBuilder builder, SqlIdentityOverride value)
+    { if (value != SqlIdentityOverride.None) { builder.Append(value == SqlIdentityOverride.User ? " OVERRIDING USER VALUE" : " OVERRIDING SYSTEM VALUE"); } }
 
     private static string AlterTypeTarget(SqlColumnDefinition column)
     {
@@ -175,6 +190,7 @@ public static partial class SqlExpressionRenderer
         builder.Append("INSERT INTO ").Append(Table(query.Table));
         if (query.Columns is { } columns)
         { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+        AppendOverride(builder, query.Overriding);
         if (query.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
         else if (query.SelectSource is { } source) { builder.Append(' ').Append(Select(source)); }
         else
@@ -255,6 +271,7 @@ public static partial class SqlExpressionRenderer
                 case SqlMergeAction.Insert:
                     builder.Append("INSERT");
                     if (action.Columns is { } columns) { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+                    AppendOverride(builder, action.Overriding);
                     if (action.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
                     else { builder.Append(" VALUES (").Append(string.Join(", ", action.Values!.Select(Expression))).Append(')'); }
                     break;

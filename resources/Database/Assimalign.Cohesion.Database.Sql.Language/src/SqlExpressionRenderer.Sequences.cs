@@ -34,6 +34,7 @@ public static partial class SqlExpressionRenderer
     private static string SequenceOptions(IReadOnlyList<SqlSequenceOption> options)
         => string.Concat(options.Select(option => " " + (option.Name switch
         {
+            "OWNED" => "OWNED BY " + (option.OwnerTable is null ? "NONE" : SequenceName(option.OwnerTable) + "." + Identifier(option.OwnerColumn!)),
             "AS" => "AS " + option.TypeName,
             "CYCLE" => option.Value == 0 ? "NO CYCLE" : "CYCLE",
             "MINVALUE" or "MAXVALUE" when option.Value is null => "NO " + option.Name,

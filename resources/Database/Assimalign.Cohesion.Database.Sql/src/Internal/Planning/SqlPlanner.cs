@@ -769,6 +769,7 @@ internal sealed partial class SqlPlanner
         }
 
         var table = ResolveTable(insert.Table);
+        RecordIdentityUsage(table);
 
         IReadOnlyList<int> targetOrdinals;
 
@@ -794,7 +795,7 @@ internal sealed partial class SqlPlanner
         for (int index = 0; index < targetOrdinals.Count && !insert.IsDefaultValues; index++)
         {
             var column = table.Columns[targetOrdinals[index]];
-            if (column.Identity is not { IsAlways: true }) { continue; }
+            if (column.Identity is not { IsAlways: true } || insert.Overriding != SqlIdentityOverride.None) { continue; }
             if (insert.SelectSource is not null)
             {
                 throw SqlPlanningException.IdentityViolation(column.Name, ErrorMessages.IdentityInsertForbidden);
@@ -811,14 +812,14 @@ internal sealed partial class SqlPlanner
         var onConflict = BindOnConflict(insert, table);
         if (insert.SelectSource is not null)
         {
-            var plan = PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
+            var plan = PlanInsertSelect(table, targetOrdinals, insert.SelectSource, insert.Overriding);
             return plan with { Returning = returning, OnConflict = onConflict };
         }
 
         if (insert.IsDefaultValues)
         {
             // Validate any column list above, then omit every column through the shared INSERT path.
-            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]) { Returning = returning, OnConflict = onConflict };
+            return InsertPlan(table, [], [Array.Empty<SqlBoundExpression>()], insert.Overriding, returning, onConflict);
         }
 
         foreach (var row in insert.Values!)
@@ -853,14 +854,20 @@ internal sealed partial class SqlPlanner
             var bound = new SqlBoundExpression[row.Count];
             for (int ordinal = 0; ordinal < bound.Length; ordinal++)
             {
-                bound[ordinal] = row[ordinal] is SqlDefaultExpression
-                    ? SqlBoundDefaultItem.Instance : ScopelessEvaluator.Bind(row[ordinal]);
+                var expression = row[ordinal];
+                var value = expression is SqlDefaultExpression ? SqlBoundDefaultItem.Instance : ScopelessEvaluator.Bind(expression);
+                if (insert.Overriding == SqlIdentityOverride.User && table.Columns[targetOrdinals[ordinal]].Identity is not null && expression is not SqlDefaultExpression)
+                {
+                    ValidateIgnoredIdentityInput(table.Columns[targetOrdinals[ordinal]], ScopelessEvaluator.StaticTypeOf(expression), value, expression);
+                    value = SqlBoundDefaultItem.Instance;
+                }
+                bound[ordinal] = value;
             }
 
             rows[index] = bound;
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, rows) { Returning = returning, OnConflict = onConflict };
+        return InsertPlan(table, targetOrdinals, rows, insert.Overriding, returning, onConflict);
     }
 
     /// <summary>
@@ -965,12 +972,13 @@ internal sealed partial class SqlPlanner
                 throw new SqlPlanningException("CS01019", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.DuplicateAssignment, assignment.ColumnName), assignment.Value.Location);
             }
-            if (table.Columns[ordinal].Identity is { IsAlways: true })
+            if (table.Columns[ordinal].Identity is { IsAlways: true } && assignment.Value is not SqlDefaultExpression)
             {
                 throw SqlPlanningException.IdentityViolation(assignment.ColumnName, ErrorMessages.IdentityUpdateForbidden);
             }
             if (assignment.Value is SqlDefaultExpression)
             {
+                RecordColumnSequenceUsage(table, table.Columns[ordinal]);
                 assignments.Add((ordinal, SqlBoundDefaultItem.Instance));
                 continue;
             }
@@ -1006,6 +1014,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanDelete(SqlDeleteExpression delete)
     {
         var (table, evaluator, source, queries) = BindDmlSources(delete.Table, delete.Using, delete.Where, delete);
+        RecordReferentialSequenceUsage(table);
 
         SqlBoundExpression? where = null;
         if (delete.Where is not null)
@@ -1105,6 +1114,15 @@ internal sealed partial class SqlPlanner
 
     private string? ResolveDefaultLiteral(SqlExpression expression, SqlType type, string columnName, string table)
     {
+        if (SqlSequenceDefault.IsCandidate(expression))
+        {
+            var sequence = SqlSequenceDefault.Resolve(_catalog, expression);
+            (SequenceUsage ??= new()).Names.Add(sequence.ObjectId);
+            if (!CanAssignInsertType(DatabaseType.Int64, type.Storage.Type))
+            { throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultTypeIncompatible, columnName, DatabaseType.Int64, type.Storage.Type), expression.Location); }
+            if (expression is SqlNextValueExpression) { return SqlExpressionRenderer.Render(expression); }
+            return "nextval(" + sequence.ObjectId.ToString(CultureInfo.InvariantCulture) + ")";
+        }
         if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
         {
             return type.DefaultLiteral is null ? null : "NULL";
@@ -1178,6 +1196,12 @@ internal sealed partial class SqlPlanner
     {
         if (text is null) { return []; }
         var expression = SqlPersistedExpression.Load(text, "DEFAULT");
+        if (SqlSequenceDefault.IsCandidate(expression))
+        {
+            var sequence = SqlSequenceDefault.Resolve(_catalog, expression);
+            (SequenceUsage ??= new()).Names.Add(sequence.ObjectId);
+            return [SqlSequenceDefault.Dependency(sequence.ObjectId)];
+        }
         var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }
@@ -1264,6 +1288,7 @@ internal sealed partial class SqlPlanner
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
+            SqlAlterIdentityAction change => new SqlAlterIdentityPlan(ResolveTable(alter.Table), change),
             SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
             SqlAlterColumnTypeAction change => PlanAlterColumnType(alter.Table, change),
             SqlAlterRenameTableAction rename => new SqlRenamePlan(ResolveTable(alter.Table), null, rename.NewName),
@@ -1365,6 +1390,7 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("CS01014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, table));
         }
         var identity = ResolveIdentity(add.Column, type.Storage, current.Columns.Any(column => column.Identity is not null));
+        if (identity is not null) { SequenceUsage ??= new(); }
         string? defaultLiteral = identity is null ? ResolveDefaultLiteral(add.Column, $"{schema}.{table}") : null;
         return new SqlAddColumnPlan(
             schema,

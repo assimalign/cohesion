@@ -49,6 +49,7 @@ public sealed partial class SqlQueryParser
             IReadOnlyList<string>? columns = null;
             IReadOnlyList<SqlExpression>? values = null;
             bool defaults = false;
+            var overriding = SqlIdentityOverride.None;
             if (IsKeyword(ref lexer, "UPDATE") && kind != SqlMergeMatchKind.NotMatchedByTarget)
             {
                 action = SqlMergeAction.Update;
@@ -69,6 +70,7 @@ public sealed partial class SqlQueryParser
                 action = SqlMergeAction.Insert;
                 Advance(ref lexer);
                 if (lexer.Current.Type == TokenType.LeftParen) { columns = ParseInsertColumnList(ref lexer); }
+                overriding = ParseIdentityOverride(ref lexer);
                 if (IsKeyword(ref lexer, "DEFAULT"))
                 {
                     Advance(ref lexer);
@@ -99,7 +101,7 @@ public sealed partial class SqlQueryParser
                 if (!clauseLexer.MoveNext()) { break; }
             }
             actions.Add(new(kind, filter, action, assignments, columns, values, defaults, explicitTarget,
-                Location.Create(1, 1, clauseStart, clauseEnd)));
+                Location.Create(1, 1, clauseStart, clauseEnd)) { Overriding = overriding });
         }
         if (actions.Count == 0) { AddExpectedDiagnostic(ref lexer, "at least one WHEN clause"); }
         var returning = ParseReturning(ref lexer, table, sources: [source]);

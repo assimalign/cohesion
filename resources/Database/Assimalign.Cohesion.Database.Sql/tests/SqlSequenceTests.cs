@@ -123,7 +123,7 @@ public sealed class SqlSequenceTests
 
         // Assert
         total.ShouldBe(230);
-        allocated.ShouldBe(identity ? lookupBytes : 0);
+        allocated.ShouldBe(0);
         _output.WriteLine($"identity={identity}: cached bytes={allocated}, T1 facet lookup bytes={lookupBytes}, values=20");
     }
 

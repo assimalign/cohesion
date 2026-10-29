@@ -24,6 +24,8 @@ internal sealed partial class SqlPlanner
         var actions = new List<SqlMergeActionPlan>();
         foreach (var clause in merge.Actions)
         {
+            if (clause.Action == SqlMergeAction.Insert) { RecordIdentityUsage(table); }
+            if (clause.Action == SqlMergeAction.Delete) { RecordReferentialSequenceUsage(table); }
             if (!Enum.IsDefined(clause.MatchKind) || !Enum.IsDefined(clause.Action) ||
                 clause.MatchKind == SqlMergeMatchKind.NotMatchedByTarget && clause.Action is SqlMergeAction.Update or SqlMergeAction.Delete ||
                 clause.MatchKind != SqlMergeMatchKind.NotMatchedByTarget && clause.Action == SqlMergeAction.Insert) { throw Invalid(); }
@@ -71,8 +73,14 @@ internal sealed partial class SqlPlanner
             {
                 for (int i = 0; i < insertValues.Count; i++)
                 {
-                    ValidateIdentity(ordinals[i], insertValues[i], update: false);
-                    values.Add(BindValue(ordinals[i], insertValues[i], scope));
+                    if (clause.Overriding == SqlIdentityOverride.None) { ValidateIdentity(ordinals[i], insertValues[i], update: false); }
+                    var value = BindValue(ordinals[i], insertValues[i], scope);
+                    if (clause.Overriding == SqlIdentityOverride.User && table.Columns[ordinals[i]].Identity is not null && insertValues[i] is not SqlDefaultExpression)
+                    {
+                        ValidateIgnoredIdentityInput(table.Columns[ordinals[i]], scope.StaticTypeOf(insertValues[i]), value, insertValues[i]);
+                        value = SqlBoundDefaultItem.Instance;
+                    }
+                    values.Add(value);
                 }
             }
             actions.Add(new(clause.MatchKind, clause.Action, condition, assignments, ordinals, values, clause.IsDefaultValues, actionQueries));
@@ -134,13 +142,14 @@ internal sealed partial class SqlPlanner
 
         void ValidateIdentity(int ordinal, SqlExpression expression, bool update)
         {
-            if (table.Columns[ordinal].Identity is { IsAlways: true } && (update || expression is not SqlDefaultExpression))
+            if (table.Columns[ordinal].Identity is { IsAlways: true } && expression is not SqlDefaultExpression)
             { throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, update ? ErrorMessages.IdentityUpdateForbidden : ErrorMessages.IdentityInsertForbidden); }
         }
 
         SqlBoundExpression BindValue(int ordinal, SqlExpression expression, SqlExpressionEvaluator scope)
         {
-            if (expression is SqlDefaultExpression) { return SqlBoundDefaultItem.Instance; }
+            if (expression is SqlDefaultExpression)
+            { RecordColumnSequenceUsage(table, table.Columns[ordinal]); return SqlBoundDefaultItem.Instance; }
             ValidateMergeValue(expression, scope);
             var type = scope.StaticTypeOf(expression);
             var target = table.Columns[ordinal];

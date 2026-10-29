@@ -25,6 +25,8 @@ public sealed class SqlSequenceParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Sequences: every option round trips canonically")]
+    [InlineData("CREATE SEQUENCE s OWNED BY t.id;")]
+    [InlineData("ALTER SEQUENCE s OWNED BY NONE;")]
     [InlineData("CREATE SEQUENCE s;")]
     [InlineData("CREATE SEQUENCE IF NOT EXISTS dbo.s AS SMALLINT START 3 INCREMENT 2 MINVALUE -5 MAXVALUE 100 CACHE 9 CYCLE;")]
     [InlineData("CREATE SEQUENCE s AS INTEGER NO MINVALUE NO MAXVALUE NO CYCLE;")]
@@ -61,7 +63,7 @@ public sealed class SqlSequenceParserTests
     [InlineData("CREATE SEQUENCE s RESTART")][InlineData("CREATE SEQUENCE s CACHE 1.5")]
     [InlineData("CREATE SEQUENCE s START 9223372036854775808")][InlineData("ALTER SEQUENCE s RESTART WITH")]
     [InlineData("CREATE SEQUENCE s NO CACHE")][InlineData("DROP SEQUENCE s,")]
-    [InlineData("SELECT NEXT VALUE s")][InlineData("CREATE SEQUENCE s OWNED BY t.id")]
+    [InlineData("SELECT NEXT VALUE s")][InlineData("CREATE SEQUENCE s NO OWNED BY t.id")]
     public void Parse_MalformedSequence_ShouldRefuse(string sql)
     {
         // Arrange / Act / Assert

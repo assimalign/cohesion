@@ -256,7 +256,18 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "a column name");
         }
 
-        string dataType = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorColumnSubject, columnName), out var resolvedType);
+        Assimalign.Cohesion.Database.Types.DatabaseTypeInfo? parsedType = null;
+        string serialType = CurrentText(ref lexer).ToUpperInvariant();
+        bool serial = serialType is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL" or "SERIAL2" or "SERIAL4" or "SERIAL8";
+        string dataType = serial ? serialType is "SMALLSERIAL" or "SERIAL2" ? "SMALLINT" : serialType is "BIGSERIAL" or "SERIAL8" ? "BIGINT" : "INT" : ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorColumnSubject, columnName), out parsedType);
+        Assimalign.Cohesion.Database.Types.DatabaseTypeInfo? resolvedType = parsedType;
+        if (serial)
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.Serial);
+            Advance(ref lexer);
+            SqlTypeNames.TryResolve(dataType, null, null, null, out var builtinType);
+            resolvedType = builtinType;
+        }
 
         // Parse optional constraints
         bool isNullable = true;
@@ -265,7 +276,7 @@ public sealed partial class SqlQueryParser
         bool isPrimaryKey = false;
         SqlExpression? defaultValue = null;
         string? collationName = null;
-        SqlIdentityDefinition? identity = null;
+        SqlIdentityDefinition? identity = serial ? new SqlIdentityDefinition(false, 1, 1) : null;
         var constraints = new List<SqlConstraintDefinition>();
 
         while (!IsAtEnd(ref lexer) &&
@@ -462,10 +473,6 @@ public sealed partial class SqlQueryParser
 
         // Action: ADD/DROP, RENAME, a column facet, or a complete ALTER COLUMN definition.
         SqlAlterAction? action;
-        if (TryRejectIdentityAlter(ref lexer))
-        {
-            return new SqlQueryExpression(SqlQueryCommandType.Alter, null, Location.Create(1, 1, pos, _lastTokenEnd));
-        }
         if (IsWord(ref lexer, "RENAME"))
         {
             action = ParseRenameAction(ref lexer);
@@ -597,6 +604,7 @@ public sealed partial class SqlQueryParser
         }
         if (IsWord(ref lexer, "COLUMN")) { Advance(ref lexer); }
         string column = ReadAlterName(ref lexer, "column name after ALTER");
+        if (ParseIdentityAlter(ref lexer, column) is { } identity) { return identity; }
         bool set = IsWord(ref lexer, "SET");
         bool drop = IsWord(ref lexer, "DROP");
         if (set || drop)
@@ -687,7 +695,7 @@ public sealed partial class SqlQueryParser
             return false;
         }
         Next(ref lexer);
-        return CurrentText(ref lexer).ToUpperInvariant() is not ("TYPE" or "SET" or "DROP");
+        return CurrentText(ref lexer).ToUpperInvariant() is not ("TYPE" or "SET" or "DROP" or "ADD" or "RESTART");
 
         static void Next(ref TokenLexer tokens)
         {

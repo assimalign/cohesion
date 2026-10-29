@@ -62,6 +62,7 @@ internal sealed partial class SqlPlanExecutor
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                 LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
+        SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
         using var metadata = statement.DdlInterlock is { } interlock
             ? statement.ProvisioningSchema is not null
                 ? await interlock.EnterMetadataAsync(definition: true, cancellationToken).ConfigureAwait(false)
@@ -127,6 +128,8 @@ internal sealed partial class SqlPlanExecutor
         var tables = new List<SqlCatalogTable>();
         var affected = new List<SqlCatalogTable>();
         var indexes = new List<SqlCatalogIndex>();
+        var sequenceDependencies = snapshot.Sequences.Where(sequence => sequence.Schema.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .Select(sequence => SqlSequenceDefault.Dependency(sequence.ObjectId)).ToHashSet(StringComparer.Ordinal);
         foreach (var table in snapshot.Tables)
         {
             if (table.Schema.Equals(name, StringComparison.OrdinalIgnoreCase))
@@ -136,7 +139,8 @@ internal sealed partial class SqlPlanExecutor
                 indexes.AddRange(snapshot.GetIndexes(table.ObjectId));
             }
             else if (table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
-                name.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase)))
+                name.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase)) ||
+                table.Columns.Any(column => column.DefaultFunctionCalls.Any(sequenceDependencies.Contains)))
             {
                 affected.Add(table);
             }

@@ -7,6 +7,14 @@ navigation, named definitions and EXPLAIN. Tests pin BIGINT ranks, DOUBLE PRECIS
 distributions, INTEGER tiles, numeric navigation default unification, coded placement/name/
 bucket and CS05079 budget refusals and reusable connections. No client surface or protocol format changes.
 
+## Owned identity wire surface (#1717, SQ-S3)
+
+InMemory and TCP tests cover SERIAL, populated ADD identity, sequence session state,
+SET GENERATED, RESTART, both override policies, protected owned-sequence drops and
+TRUNCATE RESTART IDENTITY. Identity/backfill allocations report retained session state so
+the existing pool reset clears currval/lastval on physical connection reuse. No client API
+or protocol changes are required.
+
 ## Sequence wire surface (#1717, SQ-S2)
 
 The ordinary execute exchange carries sequence DDL, functions, NEXT VALUE FOR, EXPLAIN and INFORMATION_SCHEMA.SEQUENCES on InMemory and TCP. Undefined session state and explicit-transaction DDL refusals remain structured execution failures with usable connections. Session currval/lastval survive rollback and remain isolated between logical connections: pool return clears them with the family-declared DISCARD ALL only when Ready reports retained state, after any required rollback. The two-byte Ready reports transaction state and retained state. A one-slot pool and queued waiter exercise exact exchange counts on both transports: idle 0, SELECT 1, BEGIN plus return 2, nextval plus reset 2, and nextval plus user DISCARD 2. Existing client methods and protocol identifiers remain unchanged.

@@ -266,14 +266,11 @@ internal sealed partial class SqlPlanExecutor
                             }
                             updates.Add(key, update);
                         }
+                        using var sequenceRow = SqlSequenceExecution.Current?.BeginRow(update.SequenceValues);
                         bool changed = added;
                         foreach (int ordinal in reference.ChildKey.Ordinals)
                         {
                             string name = child.Columns[ordinal].Name;
-                            if (constraint.OnDelete == SqlCatalogReferentialAction.SetDefault && child.Columns[ordinal].Identity is { IsAlways: true })
-                            {
-                                throw SqlPlanningException.IdentityViolation(name, ErrorMessages.IdentityUpdateForbidden);
-                            }
                             object? value = constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? null
                                 : ResolveColumnDefault(child, ordinal, bound.DefaultValues[ordinal], statement, cancellationToken);
                             if (value is null && !child.Columns[ordinal].IsNullable) { throw Violation(child, constraint, keys); }
@@ -282,6 +279,7 @@ internal sealed partial class SqlPlanExecutor
                             update.NewValues[ordinal] = value;
                             update.Assigned.Add(ordinal);
                         }
+                        update.SequenceValues = SqlSequenceExecution.Current?.CaptureRow();
                         statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewValues);
                         if (changed) { final?.Refresh(update, added); }
                     }

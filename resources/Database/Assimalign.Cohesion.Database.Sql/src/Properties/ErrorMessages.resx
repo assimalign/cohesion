@@ -8,6 +8,7 @@
   <data name="MergeAggregate" xml:space="preserve"><value>Aggregates are not allowed in MERGE conditions or action values; use a source query.</value></data>
   <data name="MergeStar" xml:space="preserve"><value>A wildcard is not allowed in MERGE conditions or action values.</value></data>
   <data name="MergeAssignmentType" xml:space="preserve"><value>MERGE value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
+  <data name="IdentityOverrideAssignmentType" xml:space="preserve"><value>Value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
   <data name="MergeRepeatedRow" xml:space="preserve"><value>MERGE cannot affect a target row a second time.</value></data>
   <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
   <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>
@@ -335,6 +336,11 @@
 
   <data name="IdentityIntegerRequired" xml:space="preserve"><value>An identity column requires an integer storage type.</value></data>
 
+  <data name="IdentityNotNullRequired" xml:space="preserve"><value>The column must be NOT NULL before ADD GENERATED AS IDENTITY.</value></data>
+  <data name="IdentityRequired" xml:space="preserve"><value>The column is not an identity column.</value></data>
+  <data name="SequenceIdentityDependent" xml:space="preserve"><value>Sequence '{0}.{1}' is required by identity column '{2}.{3}.{4}'.</value></data>
+  <data name="SequenceOwnershipInvalid" xml:space="preserve"><value>OWNED BY requires a column of a table in the sequence's schema; an identity sequence cannot change ownership.</value></data>
+  <data name="SequenceDefaultDependent" xml:space="preserve"><value>Sequence '{0}.{1}' is required by the default of column '{2}.{3}.{4}'.</value></data>
   <data name="IdentityCounterMalformed" xml:space="preserve"><value>Malformed or duplicate identity counter record.</value></data>
 
   <data name="IdentityCounterOrphaned" xml:space="preserve"><value>An identity counter has no owning identity column.</value></data>

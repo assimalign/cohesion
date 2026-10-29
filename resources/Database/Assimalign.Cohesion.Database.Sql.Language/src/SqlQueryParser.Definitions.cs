@@ -275,10 +275,10 @@ public sealed partial class SqlQueryParser
     {
         Advance(ref lexer);
         string name = ParseDefinitionName(ref lexer, "a domain name");
-        if (name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL")
+        if (name.ToUpperInvariant() is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL" or "SERIAL2" or "SERIAL4" or "SERIAL8")
         {
-            string? error = SqlTypeModifiers.GetError(name, null, null, out string code);
-            AddTypeModifierDiagnostic(string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorDomainSubject, name), error!, pos, _lastTokenEnd, code);
+            string error = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SerialTypeUnsupported, name.ToUpperInvariant());
+            AddTypeModifierDiagnostic(string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorDomainSubject, name), error, pos, _lastTokenEnd, "CK00001");
         }
         ExpectKeyword(ref lexer, "AS", "AS and a base type");
         string type = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorDomainSubject, name));

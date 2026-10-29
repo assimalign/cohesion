@@ -78,6 +78,17 @@ Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK070
 two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
 clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
 
+Identity integration corrections (#1717) preserve CS02002 for allocator exhaustion, including
+column-context wrapping, and CS04067 for an identity incarnation removed during planning.
+CS06061 remains a persisted sequence metadata failure; live/retired owner collisions retain
+their existing catalog refusal, and admission is read-only even on malformed images. OVERRIDING
+USER performs binding and assignment checks before discarding an input, retaining their existing
+diagnostics; typed numeric casts that are discarded are not executed.
+CS05067 also bounds rewrite/backfill chunk rows and conversion buffers; refusal leaves the old
+table published and releases retained charges. Hidden sequence names/snapshots, conditional DML
+grants, allocation reductions and metadata precision corrections add no diagnostic, persisted
+format or wire change.
+
 SQL UPDATE ... FROM and DELETE ... USING execute (#1714). Multiple source associations for
 one UPDATE target report CS05068 before any mutation; DELETE deduplicates physical targets.
 Quantified comparisons (#1718) reuse CS01015 for name binding, CS02055 for incompatible
@@ -183,6 +194,10 @@ structured-carrier messages remain unprefixed.
 | New (#1717, SQ-S2) | CS03075 | Schema/catalog — setval value is outside the sequence bounds (22003) |
 | New (#1717, SQ-S2) | CS03076 | Schema/expression — sequence value in an unsupported evaluation context, including NEXT VALUE FOR in RETURNING, or detached from execution (0A000) |
 | New (#1717, SQ-S2) | CS03077 | Schema/expression — malformed sequence reference or runtime sequence-call argument (22023) |
+| New (#1717, SQ-S3) | CS03078 | Schema/identity — ADD GENERATED requires NOT NULL (55000) |
+| New (#1717, SQ-S3) | CS03079 | Schema/identity — column has no identity (55000) |
+| New (#1717, SQ-S3) | CS03080 | Schema/dependency — sequence required by identity or column default (2BP01) |
+| New (#1717, SQ-S3) | CS03081 | Schema/ownership — invalid sequence OWNED BY target or identity ownership change (55000) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -224,7 +239,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state; deferred sequence sorting is not charged |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state and rewrite/backfill chunks; sequence sorting follows ordinary, uncharged sort accounting |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -463,7 +478,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK07004 | Session is closed | — |
 | CS06059 | Persisted SQL catalog metadata is malformed | XX001 |
 | CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
-| CS06061 | Standalone sequence catalog definition or reservation is malformed | XX001 |
+| CS06061 | Sequence catalog definition, reservation or ownership is malformed | XX001 |
 | CD04102 | Catalog snapshot conflict | — |
 | CD04103 | Expected document version differs | — |
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
