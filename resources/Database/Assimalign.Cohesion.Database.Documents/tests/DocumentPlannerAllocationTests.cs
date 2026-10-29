@@ -22,8 +22,8 @@ public sealed class DocumentPlannerAllocationTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - ANY and UNNEST plans without subqueries keep their original allocation bytes")]
-    [InlineData("SELECT RAW 1 FROM items d WHERE ANY v IN d.tags SATISFIES v.n = 1 END", 8680L)]
-    [InlineData("SELECT RAW 1 FROM items d UNNEST d.tags AS v WHERE v.n = 1", 9880L)]
+    [InlineData("SELECT RAW 1 FROM items d WHERE ANY v IN d.tags SATISFIES v.n = 1 END", 8608L)]
+    [InlineData("SELECT RAW 1 FROM items d UNNEST d.tags AS v WHERE v.n = 1", 9808L)]
     public async Task Plan_ArrayScopeWithoutSubqueries_ShouldKeepExactAllocationBytesAsync(string query, long expected)
     {
         // Arrange

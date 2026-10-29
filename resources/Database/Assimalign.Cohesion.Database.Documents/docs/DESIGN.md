@@ -627,6 +627,8 @@ SELECTs receive projection aliases. Comprehension/quantifier frames inside the o
 shadow those aliases. Captured names that are also this query's own source or UNNEST variable
 remain subject to local grouping validation. Array-scope planning carries outer-name iterator
 state only for correlated queries; ordinary ANY and UNNEST plans retain their original allocation bytes.
+Documents tests disable tiered compilation, like Transactions and Hosting, so exact allocation
+guards compare one optimized JIT shape in isolated and full-suite execution.
 Captured source frames carry their existing row content and identity; path evaluation exposes only
 the content, while META resolves stored id/version. Expression/derived rows and scalar bindings
 carry no identity, preserving their NULL metadata behavior.
