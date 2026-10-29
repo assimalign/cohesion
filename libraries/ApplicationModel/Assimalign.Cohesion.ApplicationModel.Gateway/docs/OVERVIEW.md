@@ -28,18 +28,22 @@ ApplicationGateway gateway = ApplicationGateway.Create(infrastructure, startupTi
 ApplicationBuilder builder = Application.CreateBuilder("root", args).UseGateway(gateway);
 IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
 
-// east deploys once identity has published and its outputs are read. Inside east, orders-api
-// deploys once orders-db is ready, with the database's endpoint in its configuration.
+// east deploys once identity has published and its outputs are read, with identity's endpoint in
+// its deployment manifest. Inside east, orders-api deploys once orders-db is ready, with both
+// endpoints in its configuration.
 IApplicationSet east = builder.AddGateway("east");
 IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
 east.AddResource("Web", "orders-api")
     .DependsOn(identity, "tokens.issue")
+    .WithSetting("Identity:Authority", identity.Endpoint)
     .WithSetting("Database:Endpoint", database.Endpoint);
 
 await builder.Build().RunAsync();
 ```
 
-A child gateway starts from the deployment manifest its parent's provider passed it:
+A child gateway starts from the deployment manifest its parent wrote and its parent's provider
+passed it. The manifest carries the values of the parent's outputs that settings in the child's part
+use, such as the identity provider's endpoint:
 
 ```csharp
 GatewayDeploymentManifest deployment = GatewayDeploymentManifest.Parse(json);

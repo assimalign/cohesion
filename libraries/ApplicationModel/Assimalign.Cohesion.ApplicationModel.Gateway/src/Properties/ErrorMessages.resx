@@ -16,8 +16,9 @@
   <data name="GatewayResourceUpdateMissed" xml:space="preserve"><value>Gateway '{0}' stopped accepting resource '{1}/{2}' after its update missed the startup window.</value></data>
   <data name="GatewayResourceOutputsNull" xml:space="preserve"><value>The infrastructure provider returned no outputs for resource '{0}/{1}'.</value></data>
   <data name="GatewayResourcePlanNull" xml:space="preserve"><value>The infrastructure provider returned no plan, or a plan without a revision, for resource '{0}/{1}'.</value></data>
-  <data name="GatewaySettingUnresolvable" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in gateway '{7}'. A gateway fills settings in only from the outputs of its own resources, until gateways pass outputs to each other.</value></data>
-  <data name="GatewaySettingOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' uses output '{3}' of '{4}/{5}', which its infrastructure provider did not report.</value></data>
+  <data name="GatewaySettingUnresolvable" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in gateway '{7}', which is neither that gateway nor one above it. A gateway fills settings in only from its own resources' outputs and those the gateways above pass down, until gateways publish outputs to each other.</value></data>
+  <data name="GatewaySettingOutputNotPassed" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in gateway '{7}', which the deployment manifest of gateway '{8}' does not carry.</value></data>
+  <data name="GatewaySettingOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}', which its infrastructure provider did not report.</value></data>
   <data name="GatewayStoreDirectoryInvalid" xml:space="preserve"><value>A gateway store directory is a non-empty path.</value></data>
   <data name="GatewayRecordNull" xml:space="preserve"><value>The gateway record file '{0}' holds the JSON literal null.</value></data>
   <data name="GatewayRecordSnapshotInvalid" xml:space="preserve"><value>A recorded snapshot is a JSON object with a string 'action' and a non-empty base64 'value'.</value></data>

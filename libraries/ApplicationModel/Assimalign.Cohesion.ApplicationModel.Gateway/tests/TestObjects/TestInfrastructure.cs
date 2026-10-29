@@ -34,6 +34,9 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
     public List<GatewayName> DeployedGateways { get; } = [];
 
+    /// <summary>The deployment manifest each child gateway was last deployed with.</summary>
+    public ConcurrentDictionary<GatewayName, GatewayDeploymentManifest> GatewayDeployments { get; } = new();
+
     public List<GatewayName> TornDownGateways { get; } = [];
 
     public List<ResourceName> TornDown { get; } = [];
@@ -117,10 +120,11 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         await StartInstanceAsync(resource.Provider, resource.Name, cancellationToken);
     }
 
-    public ValueTask DeployGatewayAsync(IApplicationModel model, GatewayName gateway, CancellationToken cancellationToken = default)
+    public ValueTask DeployGatewayAsync(IApplicationModel model, GatewayDeploymentManifest deployment, CancellationToken cancellationToken = default)
     {
-        Record(DeployedGateways, gateway);
-        Record($"gateway:{gateway}");
+        GatewayDeployments[deployment.Gateway] = deployment;
+        Record(DeployedGateways, deployment.Gateway);
+        Record($"gateway:{deployment.Gateway}");
         return ValueTask.CompletedTask;
     }
 

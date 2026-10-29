@@ -86,6 +86,52 @@ public class ApplicationResourceOutputTests
         resource.Outputs[OutputName.Endpoint].ShouldBe("http://orders-api.root.svc");
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A child gateway's model carries the output values passed down from above")]
+    public void Create_WithValuesFromAbove_ShouldCarryThem()
+    {
+        // Arrange
+        ApplicationManifest manifest = CreateHierarchy(out ApplicationResourceOutput identity, out _);
+        var value = new ApplicationResourceOutputValue(identity, "http://identity.root.svc");
+
+        // Act
+        ApplicationModel zone = ApplicationModel.Create(manifest, "zone", [value]);
+        ApplicationModel root = ApplicationModel.Create(manifest);
+
+        // Assert
+        zone.Outputs.ShouldHaveSingleItem().ShouldBe(value);
+        root.Outputs.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Only values of outputs above the gateway, declared once and complete, are accepted")]
+    public void Create_WithInvalidValues_ShouldThrow()
+    {
+        // Arrange: identity is above zone; orders-db is in zone itself.
+        ApplicationManifest manifest = CreateHierarchy(out ApplicationResourceOutput identity, out ApplicationResourceOutput database);
+        var undeclared = new ApplicationResourceOutput("root", "Caching", "cache", OutputName.Endpoint);
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(database, "http://orders-db.zone.svc")]));
+        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "root", [new(identity, "http://identity.root.svc")]));
+        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(undeclared, "http://cache.root.svc")]));
+        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(identity, "a"), new(identity, "b")]));
+        Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest, "zone", [new(identity, null!)]));
+    }
+
+    // root runs identity; zone, below east, runs orders-db and an api that reads both endpoints.
+    private static ApplicationManifest CreateHierarchy(out ApplicationResourceOutput identity, out ApplicationResourceOutput database)
+    {
+        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor identityProvider = builder.AddResource("IdentityHub", "identity");
+        IApplicationSet zone = builder.AddGateway("east").AddGateway("zone");
+        IApplicationResourceDescriptor ordersDb = zone.AddResource("Database.Sql", "orders-db");
+        zone.AddResource("Web", "orders-api")
+            .WithSetting("Identity:Authority", identityProvider.Endpoint)
+            .WithSetting("Database:Endpoint", ordersDb.Endpoint);
+        identity = identityProvider.Endpoint;
+        database = ordersDb.Endpoint;
+        return builder.Build().Model.Manifest;
+    }
+
     private static Dictionary<OutputName, string> Endpoint(string value)
     {
         return new Dictionary<OutputName, string> { [OutputName.Endpoint] = value };

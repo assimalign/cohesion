@@ -66,6 +66,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     private readonly SemaphoreSlim _saves = new(1, 1);
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? _resources;
+    private FrozenDictionary<ApplicationResourceOutput, string> _received = FrozenDictionary<ApplicationResourceOutput, string>.Empty;
     private GatewayResource[] _ordered = [];
     private GatewayResourceRecord[] _retiredResources = [];
     private GatewayName[] _retiredGateways = [];
@@ -167,7 +168,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// <exception cref="ArgumentException">
     /// The gateway, or a gateway below it, cannot deploy its part: a child gateway deploys as one step,
     /// so it cannot both wait for one of its parent's steps and be waited for by it; or a resource's
-    /// setting uses an output of another gateway's resource. Nothing has been deployed.
+    /// setting uses an output its gateway cannot get, one of a resource neither in that gateway nor
+    /// above it, or one from above this gateway that its deployment manifest does not carry. Nothing
+    /// has been deployed.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// The gateway has already run, or the infrastructure provider returned no action list, no plan,
@@ -193,7 +196,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             // resources' settings, before anything deploys.
             GatewayStep[] steps = GatewayStep.Order(model.Deployment);
             ThrowIfUnordered(model.Deployment.Gateways);
-            ThrowIfUnresolvable(model.Deployment);
+            FrozenDictionary<ApplicationResourceOutput, string> received = Receive(model);
+            ThrowIfUnresolvable(model, received);
+            _received = received;
 
             GatewayRecord? record = await _store.LoadAsync(model.Name, cancellationToken).ConfigureAwait(false);
             CreateResources(model, record, steps);
@@ -430,18 +435,58 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         }
     }
 
-    // Refuses a setting, in this gateway or any below it, that uses an output of another gateway's
-    // resource: a gateway learns only its own resources' outputs.
-    private static void ThrowIfUnresolvable(ApplicationManifest gateway)
+    // The output values the gateway above passed down, by output.
+    private static FrozenDictionary<ApplicationResourceOutput, string> Receive(IApplicationModel model)
+    {
+        var received = new Dictionary<ApplicationResourceOutput, string>();
+        foreach (ApplicationResourceOutputValue value in model.Outputs)
+        {
+            received.Add(value.Output, value.Value);
+        }
+
+        return received.ToFrozenDictionary();
+    }
+
+    // Refuses a setting, in this gateway or any below it, whose output its gateway cannot get. A
+    // gateway learns its own resources' outputs and receives the values its parent passes down, so an
+    // output must belong to the setting's gateway or one above it; one from above this gateway must
+    // be among the values this gateway received.
+    private static void ThrowIfUnresolvable(IApplicationModel model, FrozenDictionary<ApplicationResourceOutput, string> received)
+    {
+        var parents = new Dictionary<GatewayName, GatewayName>();
+        MapParents(model.Manifest, parents);
+        var part = new HashSet<GatewayName>();
+        AddNames(model.Deployment, part);
+        ThrowIfUnresolvable(model, model.Deployment, parents, part, received);
+    }
+
+    private static void ThrowIfUnresolvable(
+        IApplicationModel model,
+        ApplicationManifest gateway,
+        Dictionary<GatewayName, GatewayName> parents,
+        HashSet<GatewayName> part,
+        FrozenDictionary<ApplicationResourceOutput, string> received)
     {
         foreach (ApplicationResourceManifest resource in gateway.Resources)
         {
             foreach (ApplicationResourceSetting setting in resource.Settings)
             {
-                if (setting.Output is { } output && output.Gateway != gateway.Name)
+                if (setting.Output is not { } output)
+                {
+                    continue;
+                }
+
+                if (!IsSelfOrAbove(output.Gateway, gateway.Name, parents))
                 {
                     throw new ArgumentException(
                         Format(ErrorMessages.GatewaySettingUnresolvable, setting.Name, resource.Provider, resource.Name, gateway.Name, output.Output, output.Provider, output.Name, output.Gateway),
+                        "model");
+                }
+
+                if (!part.Contains(output.Gateway) && !received.ContainsKey(output))
+                {
+                    throw new ArgumentException(
+                        Format(ErrorMessages.GatewaySettingOutputNotPassed, setting.Name, resource.Provider, resource.Name, gateway.Name, output.Output, output.Provider, output.Name, output.Gateway, model.Name),
                         "model");
                 }
             }
@@ -449,8 +494,40 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
 
         foreach (ApplicationManifest child in gateway.Gateways)
         {
-            ThrowIfUnresolvable(child);
+            ThrowIfUnresolvable(model, child, parents, part, received);
         }
+    }
+
+    private static void MapParents(ApplicationManifest gateway, Dictionary<GatewayName, GatewayName> parents)
+    {
+        foreach (ApplicationManifest child in gateway.Gateways)
+        {
+            parents.Add(child.Name, gateway.Name);
+            MapParents(child, parents);
+        }
+    }
+
+    private static void AddNames(ApplicationManifest gateway, HashSet<GatewayName> names)
+    {
+        names.Add(gateway.Name);
+        foreach (ApplicationManifest child in gateway.Gateways)
+        {
+            AddNames(child, names);
+        }
+    }
+
+    private static bool IsSelfOrAbove(GatewayName candidate, GatewayName gateway, Dictionary<GatewayName, GatewayName> parents)
+    {
+        GatewayName current = gateway;
+        while (current != candidate)
+        {
+            if (!parents.TryGetValue(current, out current))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void CreateResources(IApplicationModel model, GatewayRecord? record, GatewayStep[] steps)
@@ -582,7 +659,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             walk.Token.ThrowIfCancellationRequested();
             if (step.Resource is null)
             {
-                await _infrastructure.DeployGatewayAsync(model, step.Gateway!.Name, walk.Token).ConfigureAwait(false);
+                await _infrastructure.DeployGatewayAsync(model, CreateDeployment(model, step.Gateway!), walk.Token).ConfigureAwait(false);
                 await SaveAsync(walk.Token).ConfigureAwait(false);
                 ready = true;
             }
@@ -664,31 +741,69 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         return true;
     }
 
-    // The values of a resource's settings by name. Each output belongs to a resource of this gateway
-    // the resource depends on, which is ready, so its outputs have been read.
+    // The values of one of this gateway's resources' settings, by name.
     private IReadOnlyDictionary<SettingName, string> ResolveSettings(ApplicationResourceManifest manifest)
     {
-        FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource> resources = Volatile.Read(ref _resources)!;
+        GatewayName gateway = Model!.Name;
         var settings = new Dictionary<SettingName, string>(manifest.Settings.Count);
         foreach (ApplicationResourceSetting setting in manifest.Settings)
         {
-            if (setting.Output is not { } output)
-            {
-                settings.Add(setting.Name, setting.Value!);
-                continue;
-            }
-
-            if (!resources[(output.Provider, output.Name)].Aggregate.Outputs.TryGetValue(output.Output, out string? value))
-            {
-                throw new ApplicationGatewayException(
-                    ApplicationGatewayErrorCode.OutputMissing,
-                    Format(ErrorMessages.GatewaySettingOutputMissing, setting.Name, manifest.Provider, manifest.Name, output.Output, output.Provider, output.Name));
-            }
-
-            settings.Add(setting.Name, value);
+            settings.Add(setting.Name, setting.Output is { } output ? ResolveOutput(gateway, manifest, setting, output) : setting.Value!);
         }
 
         return settings.AsReadOnly();
+    }
+
+    // The value of an output a setting uses. One of this gateway's resources is ready by the time
+    // anything that depends on it is planned or deployed, so its outputs have been read; any other is
+    // from above, and the gateway above passed it down.
+    private string ResolveOutput(GatewayName gateway, ApplicationResourceManifest resource, ApplicationResourceSetting setting, ApplicationResourceOutput output)
+    {
+        if (output.Gateway != Model!.Name)
+        {
+            return _received[output];
+        }
+
+        if (!Volatile.Read(ref _resources)![(output.Provider, output.Name)].Aggregate.Outputs.TryGetValue(output.Output, out string? value))
+        {
+            throw new ApplicationGatewayException(
+                ApplicationGatewayErrorCode.OutputMissing,
+                Format(ErrorMessages.GatewaySettingOutputMissing, setting.Name, resource.Provider, resource.Name, gateway, output.Output, output.Provider, output.Name));
+        }
+
+        return value;
+    }
+
+    // A child gateway's deployment manifest: the whole hierarchy, the child's name, and the values of
+    // the outputs from this gateway and those above that settings in the child's part use. The child
+    // fills in those settings, or passes the values further down; outputs of its own part are its own
+    // to read. The provider adds where the child runs.
+    private GatewayDeploymentManifest CreateDeployment(IApplicationModel model, ApplicationManifest child)
+    {
+        var part = new HashSet<GatewayName>();
+        AddNames(child, part);
+        var outputs = new Dictionary<ApplicationResourceOutput, ApplicationResourceOutputValue>();
+        AddOutputs(child, part, outputs);
+        return new GatewayDeploymentManifest(child.Name, model.Manifest, [.. outputs.Values], null);
+    }
+
+    private void AddOutputs(ApplicationManifest gateway, HashSet<GatewayName> part, Dictionary<ApplicationResourceOutput, ApplicationResourceOutputValue> outputs)
+    {
+        foreach (ApplicationResourceManifest resource in gateway.Resources)
+        {
+            foreach (ApplicationResourceSetting setting in resource.Settings)
+            {
+                if (setting.Output is { } output && !part.Contains(output.Gateway) && !outputs.ContainsKey(output))
+                {
+                    outputs.Add(output, new ApplicationResourceOutputValue(output, ResolveOutput(gateway.Name, resource, setting, output)));
+                }
+            }
+        }
+
+        foreach (ApplicationManifest child in gateway.Gateways)
+        {
+            AddOutputs(child, part, outputs);
+        }
     }
 
     private GatewayResource Find(ApplicationResourceManifest manifest)

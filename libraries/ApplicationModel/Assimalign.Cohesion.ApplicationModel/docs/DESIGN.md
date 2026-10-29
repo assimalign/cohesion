@@ -67,13 +67,13 @@ flowchart TB
 | --- | --- |
 | `IApplicationBuilder`, `ApplicationBuilder` | The root set, plus `Args`, `UseGateway`, and `Build`. `Application.CreateBuilder(name, args)` creates it. |
 | `IApplication`, `Application` | A built application: `Model` and `RunAsync`, which runs the selected gateway with the model, once. |
-| `IApplicationModel`, `ApplicationModel` | The immutable model for one gateway: `Manifest` (the whole hierarchy, validated and read-only), `Name` and `Deployment` (that gateway and its part), and `Role`. `ApplicationModel.Create(manifest, gateway)` builds one from data. |
+| `IApplicationModel`, `ApplicationModel` | The immutable model for one gateway: `Manifest` (the whole hierarchy, validated and read-only), `Name` and `Deployment` (that gateway and its part), `Role`, and `Outputs` (the values passed down from the gateways above). `ApplicationModel.Create(manifest, gateway, outputs)` builds one from data. |
 | `GatewayRole` | `Root` for the hierarchy's top gateway, `Composite` for any other. |
 | `IApplicationResourceAction` | An infrastructure action on a resource, such as `scale`, executed against the platform. Same invocation and result types as a control. |
 | `IApplicationGateway` | The seam ApplicationModel.Gateway implements: `RunAsync(model)`. Deliberately minimal until chunk 3. |
 | `IApplicationSet` | One gateway's scope. The builder is the root; `AddGateway` makes a child; `AddResource` declares a resource. |
 | `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency, which also orders deployment; declaring it again adds the new permissions, and one that would close a cycle is refused. `WithSetting(name, value)` and `WithSetting(name, output)` give its instances a configuration value; the second depends on the output's resource. `Endpoint` and `Output(name)` hand out its own output placeholders. |
-| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting` | The hierarchy as data. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. |
+| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting`, `ApplicationResourceOutputValue` | The hierarchy as data. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. An output value is an output with the value a gateway passes down. |
 | `IApplicationResource`, `ApplicationResource` | A gateway's aggregate of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`. The gateway also sets its `Outputs` and clears its state when a deployment redefines it. |
 | `GatewayName`, `GatewayId`, `ResourcePermission`, `OutputName`, `SettingName` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. `SettingName` is a configuration key and compares case-insensitively. |
 
@@ -163,7 +163,8 @@ endpoint and the infrastructure provider live there.
 hierarchy, so a dependency outside the gateway's own part resolves; `Name` and `Deployment` say
 which gateway the model is for and what that gateway deploys, and `Role` follows from them. A model
 built in code is for the root; `ApplicationModel.Create(manifest, gateway)` creates a child gateway's.
-This settled what a child gateway receives: the whole manifest plus its own name, not its subtree.
+This settled what a child gateway receives: the whole manifest plus its own name, not its subtree,
+and, since D18, the output values its parent passed down.
 
 **D15 — Infrastructure actions sit on the aggregate.** A gateway's provider supplies each resource's
 infrastructure actions to `ApplicationResource.Create`, and `ExecuteAsync` dispatches them with the
@@ -202,6 +203,19 @@ before an output can be used. It adds a call that can only ever be required, and
 would be an error instead of the ordering the setting needs anyway. *Not chosen:* the name
 "inputs". It pairs well with outputs, but the instance reads these values as configuration, and the
 owner's direction treats configuration as the instance's settings model.
+
+**D18 — A child gateway's model carries the output values from above (owner request,
+2026-10-29).** A setting may use an output of a resource in its own gateway or in one above it, such
+as east's `orders-api` reading the root identity provider's endpoint. The gateway that runs the
+resource fills in its own resources' outputs. A value from above arrives with the child's
+deployment manifest, because the parent deploys the child only once those resources are ready
+(ApplicationModel.Gateway G19, G24). `IApplicationModel.Outputs` holds those values, and
+`ApplicationModel.Create(manifest, gateway, outputs)` accepts only values for outputs of resources
+the manifest declares in a gateway above `gateway`, each once; the root's model has none. The
+values are run-time data, so they sit beside `Manifest` and `Deployment` rather than in them, and
+the hierarchy rules do not depend on them. *Rejected:* a child reading its parent's outputs back at
+run time. That needs a gateway-to-gateway channel and ties the child's start to the parent being
+reachable, while the parent already has every value when it deploys the child.
 
 ## Threading
 

@@ -108,7 +108,7 @@ The root therefore deploys `identity`, waits until it is ready, then deploys `ea
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IGatewayStore`, `GatewayRecord`, `GatewayResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
 | `JsonFileGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
-| `GatewayDeploymentManifest` | What a gateway deploys (the whole hierarchy plus the gateway's name) and where (opaque provider settings). UTF-8 JSON with camel-case names. `ToModel()` creates the gateway's model. |
+| `GatewayDeploymentManifest` | What a gateway deploys (the whole hierarchy, the gateway's name, and the values of the outputs from above that its part's settings use) and where (opaque provider settings). UTF-8 JSON with camel-case names. The parent gateway writes the "what" and its provider adds the "where". `ToModel()` creates the gateway's model, values included. |
 | `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`, or `OutputMissing` for a setting whose output the provider did not report). |
 
 In ApplicationModel: `IApplicationModel.Role` and `GatewayRole` say whether a model's gateway is the
@@ -131,8 +131,10 @@ parsing text: `PublicationsClosed` to 503, `ResourceUnknown` to 404, `ResourceTo
 
 **G3 — What and where travel together, and "what" is the whole hierarchy.** A deployment manifest
 names its gateway and carries the global manifest, so a child gateway resolves a dependency outside
-its own part (east's `orders-api` on the root's `identity`). "Where" is opaque JSON that only the
-gateway's infrastructure provider reads. The provider writes it for each child gateway it deploys.
+its own part (east's `orders-api` on the root's `identity`), and the values of the outputs from
+above that its settings use (G24). "Where" is opaque JSON that only the gateway's infrastructure
+provider reads. The parent gateway writes the rest of a child's manifest, and its provider adds
+"where" when it deploys the child.
 
 **G4 — One startup window per resource, decided atomically.** A created or updated resource's
 window opens when its deployment starts and lasts `StartupTimeout`, so a resource deep in a
@@ -279,20 +281,23 @@ platform never replaced the workload. Without this, the first save of a run woul
 definition's empty state for resources still waiting for their dependencies. A write recorded on an
 instance before its resource is planned is held in memory and saved once the plan keeps it.
 
-**G22 — Settings are filled in at the step, from this gateway's own outputs (owner request,
-2026-10-29).** A resource's settings (ApplicationModel D17) are configuration values its instances
-receive with their deployment. At the resource's step, everything it depends on is ready and its
-outputs are read (G16), so the gateway fills in each output-valued setting from the aggregate of the
-resource it names. It then plans the resource with the values (`PlanResourceAsync`), because the
+**G22 — Settings are filled in at the step, from this gateway's outputs and those passed down
+(owner request, 2026-10-29).** A resource's settings (ApplicationModel D17) are configuration values
+its instances receive with their deployment. At the resource's step, everything it depends on is
+ready and its outputs are read (G16), so the gateway fills in each output-valued setting from the
+aggregate of the resource it names, or, for a resource above this gateway, from the values its
+deployment manifest carried (G24). It then plans the resource with the values (`PlanResourceAsync`), because the
 platform needs an update when it runs other values, and deploys with the same values
 (`DeployResourceAsync`); the provider delivers them, for example as environment variables. The
 values are not part of the resource's definition: the gateway fingerprints the settings as declared,
 and the provider's revision leaves the values out. A redeployed dependency with a new address
 therefore updates its dependents, which keep their operator changes (G12). A setting whose output the
 provider did not report fails the run with `OutputMissing`, naming the setting and the output, as a
-provider failure does (G20). A gateway learns only its own resources' outputs, so a setting that uses
-an output of another gateway's resource is refused before anything deploys, for this gateway and
-every gateway below it, as G19 refuses an unorderable part (open question 11). *Superseded:*
+provider failure does (G20). A gateway learns its own resources' outputs and receives those from
+above, so a setting that uses an output of a resource in a child's or a sibling's part is refused
+before anything deploys, for this gateway and every gateway below it, as G19 refuses an unorderable
+part (open question 11). So is a setting whose value from above the deployment manifest lacks.
+*Superseded:*
 planning every resource before the first step (open question 9), which planned a dependent before
 the values it would deploy with existed. *Rejected:* recording the values in the gateway's record
 and upgrading a `None` plan to `Update` when they changed. The provider could then plan before the
@@ -309,6 +314,22 @@ because the platform replaces the workload; a new definition also clears the sta
 proved it runs stays registered through an update, so it does not have to publish again, and it does
 not open the startup gate either. *Rejected:* refusing publications until the resource is planned. An
 instance restarted while a long chain deploys would fail its start until the gateway reached it.
+
+**G24 — Outputs from above travel down in deployment manifests (owner request, 2026-10-29).** A
+gateway deploys a child once the resources the child's part depends on are ready (G19), so by then it
+has their outputs. It writes the child's deployment manifest itself: the whole hierarchy, the child's
+name, and the values of the outputs from this gateway and those above that settings in the child's
+part use. Values of the gateway's own resources come from their aggregates; the others are values it
+received from above and passes on. `DeployGatewayAsync` takes that manifest, and the provider adds
+only where the child runs. The child fills in its settings from the values (ApplicationModel D18)
+and passes on those a grandchild's part uses; outputs inside the child's own part are the child's
+to read. A changed output changes the manifest, so the child is deployed again and replans what
+uses the value, the same way a dependency that moved updates a resource in the gateway's own part
+(G22). The values follow the declaration order of the settings, so a manifest with unchanged values
+is byte-for-byte unchanged. *Superseded:* `DeployGatewayAsync(model, gateway)`, where the provider
+built the manifest and knew nothing of the values. *Rejected:* the child reading its parent's
+outputs at run time (ApplicationModel D18), and the provider looking the values up itself, which
+would make every provider walk the settings of the hierarchy.
 
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
@@ -352,10 +373,7 @@ candidates for an event source.
 10. **Readiness across gateways.** A parent waits for a child gateway to start, not for the
     resources it deploys (G19). Waiting for them needs a child to publish its resources' readiness
     and outputs to its parent, the gateway-to-gateway publication already needed for outputs.
-11. **Settings across gateways.** A setting may use only an output of its own gateway's resources
-    (G22), so east's `orders-api` cannot yet read the root's identity provider endpoint. That
-    direction needs no new channel: the root deploys east only once the identity provider is ready
-    (G19), so it could pass the value down in east's deployment manifest, and east fill it in from
-    there. That changes `DeployGatewayAsync` to take the deployment manifest the gateway builds. A
-    setting that uses an output of a resource in a child's or a sibling's part needs that child to
-    publish its outputs to its parent (question 10).
+11. **Settings across gateways — settled downward.** Outputs from above travel down in deployment
+    manifests (G24), so east's `orders-api` reads the root's identity provider endpoint. A setting
+    that uses an output of a resource in a child's or a sibling's part is still refused (G22): it
+    needs that child to publish its outputs to its parent (question 10).

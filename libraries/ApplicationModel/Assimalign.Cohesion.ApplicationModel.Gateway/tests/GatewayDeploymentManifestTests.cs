@@ -16,7 +16,7 @@ public class GatewayDeploymentManifestTests
     {
         // Arrange
         using JsonDocument settings = JsonDocument.Parse("""{"namespace":"east"}""");
-        var manifest = new GatewayDeploymentManifest("east", CreateManifest(), settings.RootElement.Clone());
+        var manifest = new GatewayDeploymentManifest("east", CreateManifest(), null, settings.RootElement.Clone());
 
         // Act
         byte[] json = manifest.ToUtf8Json();
@@ -34,7 +34,7 @@ public class GatewayDeploymentManifestTests
     public void ToModel_ForChildGateway_ShouldSelectItsPart()
     {
         // Arrange
-        var manifest = new GatewayDeploymentManifest("east", CreateManifest(), null);
+        var manifest = new GatewayDeploymentManifest("east", CreateManifest(), null, null);
 
         // Act
         ApplicationModel model = manifest.ToModel();
@@ -46,11 +46,30 @@ public class GatewayDeploymentManifestTests
         model.Deployment.Resources.ShouldHaveSingleItem().Name.Value.ShouldBe("orders-api");
     }
 
+    [Fact(DisplayName = DisplayPrefix + "Output values from the gateways above round-trip and reach the child's model")]
+    public void ToModel_WithOutputs_ShouldCarryThemToTheModel()
+    {
+        // Arrange
+        var identity = new ApplicationResourceOutput("root", "IdentityHub", "identity", OutputName.Endpoint);
+        var value = new ApplicationResourceOutputValue(identity, "http://identity.root.svc");
+        var manifest = new GatewayDeploymentManifest("east", CreateManifest(), [value], null);
+
+        // Act
+        byte[] json = manifest.ToUtf8Json();
+        ApplicationModel model = GatewayDeploymentManifest.Parse(json).ToModel();
+
+        // Assert
+        Encoding.UTF8.GetString(json).ShouldContain(
+            "\"outputs\":[{\"output\":{\"gateway\":\"root\",\"provider\":\"IdentityHub\",\"name\":\"identity\",\"output\":\"endpoint\"},\"value\":\"http://identity.root.svc\"}]",
+            Case.Sensitive);
+        model.Outputs.ShouldHaveSingleItem().ShouldBe(value);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "A manifest for a gateway the hierarchy does not declare is refused")]
     public void ToModel_ForUnknownGateway_ShouldThrow()
     {
         // Arrange
-        var manifest = new GatewayDeploymentManifest("north", CreateManifest(), null);
+        var manifest = new GatewayDeploymentManifest("north", CreateManifest(), null, null);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => manifest.ToModel());

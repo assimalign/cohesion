@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -16,10 +17,11 @@ public sealed class ApplicationModel : IApplicationModel
     // The parameter of Create that every validation failure blames.
     private const string manifestParameter = "manifest";
 
-    private ApplicationModel(ApplicationManifest manifest, ApplicationManifest deployment)
+    private ApplicationModel(ApplicationManifest manifest, ApplicationManifest deployment, IReadOnlyList<ApplicationResourceOutputValue> outputs)
     {
         Manifest = manifest;
         Deployment = deployment;
+        Outputs = outputs;
     }
 
     /// <inheritdoc/>
@@ -30,6 +32,9 @@ public sealed class ApplicationModel : IApplicationModel
 
     /// <inheritdoc/>
     public ApplicationManifest Deployment { get; }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<ApplicationResourceOutputValue> Outputs { get; }
 
     /// <summary>
     /// Creates the model of the root gateway from manifest data.
@@ -69,7 +74,34 @@ public sealed class ApplicationModel : IApplicationModel
     /// </exception>
     public static ApplicationModel Create(ApplicationManifest manifest, GatewayName gateway)
     {
+        return Create(manifest, gateway, []);
+    }
+
+    /// <summary>
+    /// Creates the model of one gateway of a hierarchy from manifest data, with the values of the
+    /// outputs from the gateways above it that settings in its part use, as the gateway above passed
+    /// them in its deployment manifest.
+    /// </summary>
+    /// <remarks>
+    /// The manifest follows the rules of <see cref="Create(ApplicationManifest, GatewayName)"/>. Each
+    /// value names an output of a resource the manifest declares in a gateway above
+    /// <paramref name="gateway"/>, at most once.
+    /// </remarks>
+    /// <param name="manifest">The manifest of the whole hierarchy, from the root gateway down.</param>
+    /// <param name="gateway">The gateway the model is for.</param>
+    /// <param name="outputs">The values the gateway above passed down; empty for none.</param>
+    /// <returns>The model.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="manifest"/> or <paramref name="outputs"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// The manifest breaks a rule, the message naming the entry; it declares no gateway named
+    /// <paramref name="gateway"/>; or a value is missing its output or value, names an output of a
+    /// resource the manifest does not declare or that is not in a gateway above
+    /// <paramref name="gateway"/>, or repeats an output.
+    /// </exception>
+    public static ApplicationModel Create(ApplicationManifest manifest, GatewayName gateway, IEnumerable<ApplicationResourceOutputValue> outputs)
+    {
         ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(outputs);
 
         if (gateway.Value is null)
         {
@@ -80,29 +112,90 @@ public sealed class ApplicationModel : IApplicationModel
         Index(manifest, [], resources);
         ApplicationManifest copy = Copy(manifest, resources);
         ThrowIfCyclic(copy);
-        ApplicationManifest deployment = Find(copy, gateway)
-            ?? throw new ArgumentException(Format(ErrorMessages.ApplicationModelGatewayUnknown, gateway), nameof(gateway));
 
-        return new ApplicationModel(copy, deployment);
+        var path = new List<ApplicationManifest>();
+        if (!FindPath(copy, gateway, path))
+        {
+            throw new ArgumentException(Format(ErrorMessages.ApplicationModelGatewayUnknown, gateway), nameof(gateway));
+        }
+
+        var above = new HashSet<GatewayName>();
+        for (int index = 0; index < path.Count - 1; index++)
+        {
+            above.Add(path[index].Name);
+        }
+
+        return new ApplicationModel(copy, path[^1], CopyOutputs(outputs, gateway, above, resources));
     }
 
-    private static ApplicationManifest? Find(ApplicationManifest manifest, GatewayName gateway)
+    // The gateways from the root down to the one named, both included; false when there is none.
+    private static bool FindPath(ApplicationManifest manifest, GatewayName gateway, List<ApplicationManifest> path)
     {
+        path.Add(manifest);
         if (manifest.Name == gateway)
         {
-            return manifest;
+            return true;
         }
 
         foreach (ApplicationManifest child in manifest.Gateways)
         {
-            ApplicationManifest? found = Find(child, gateway);
-            if (found is not null)
+            if (FindPath(child, gateway, path))
             {
-                return found;
+                return true;
             }
         }
 
-        return null;
+        path.RemoveAt(path.Count - 1);
+        return false;
+    }
+
+    // The values the gateway received, each for an output of a resource in a gateway above it.
+    private static ReadOnlyCollection<ApplicationResourceOutputValue> CopyOutputs(
+        IEnumerable<ApplicationResourceOutputValue> outputs,
+        GatewayName gateway,
+        HashSet<GatewayName> above,
+        HashSet<(GatewayName Gateway, ProviderName Provider, ResourceName Name)> resources)
+    {
+        var named = new HashSet<ApplicationResourceOutput>();
+        var copy = new List<ApplicationResourceOutputValue>();
+        foreach (ApplicationResourceOutputValue? value in outputs)
+        {
+            if (value?.Output is null || value.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.ApplicationOutputValueMissing, nameof(outputs));
+            }
+
+            ApplicationResourceOutput output = value.Output;
+            if (output.Output.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.OutputNameMissing, nameof(outputs));
+            }
+
+            if (!resources.Contains((output.Gateway, output.Provider, output.Name)))
+            {
+                throw new ArgumentException(
+                    Format(ErrorMessages.ApplicationOutputUnknown, output.Output, output.Provider, output.Name, output.Gateway),
+                    nameof(outputs));
+            }
+
+            if (!above.Contains(output.Gateway))
+            {
+                throw new ArgumentException(
+                    Format(ErrorMessages.ApplicationOutputNotAbove, output.Output, output.Provider, output.Name, output.Gateway, gateway),
+                    nameof(outputs));
+            }
+
+            if (!named.Add(output))
+            {
+                throw new ArgumentException(
+                    Format(ErrorMessages.ApplicationOutputDuplicate, output.Output, output.Provider, output.Name, output.Gateway),
+                    nameof(outputs));
+            }
+
+            copy.Add(value);
+        }
+
+        return copy.AsReadOnly();
     }
 
     // First pass: every gateway and resource, so a dependency can point anywhere in the hierarchy.

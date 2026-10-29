@@ -34,6 +34,7 @@ east.AddResource("Web", "orders-api")
     .DependsOn(database, "data.read", "data.write")
     .DependsOn(identity)
     .WithSetting("Database:Endpoint", database.Endpoint)        // filled in when east deploys it
+    .WithSetting("Identity:Authority", identity.Endpoint)       // passed down by the root gateway
     .WithSetting("Logging:LogLevel:Default", "Information");
 
 Application application = builder.UseGateway(gateway).Build();   // composition closes here

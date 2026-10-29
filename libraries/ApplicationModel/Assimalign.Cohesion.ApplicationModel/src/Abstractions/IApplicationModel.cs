@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
@@ -6,8 +8,9 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <remarks>
 /// <para>
 /// A model is built from code, by <see cref="IApplicationBuilder.Build"/>, or from manifest data a
-/// gateway received, by <see cref="ApplicationModel.Create(ApplicationManifest, GatewayName)"/>. Both
-/// paths enforce the same rules, so a gateway treats the two alike.
+/// gateway received, by
+/// <see cref="ApplicationModel.Create(ApplicationManifest, GatewayName, IEnumerable{ApplicationResourceOutputValue})"/>.
+/// Both paths enforce the same rules, so a gateway treats the two alike.
 /// </para>
 /// <para>
 /// <see cref="Manifest"/> is always the whole hierarchy, so a dependency that points outside this
@@ -43,4 +46,10 @@ public interface IApplicationModel
     /// gateways.
     /// </summary>
     ApplicationManifest Deployment { get; }
+
+    /// <summary>
+    /// Gets the values of outputs of resources in the gateways above this one that settings in its
+    /// part use, as the gateway above passed them; empty for the root gateway's model.
+    /// </summary>
+    IReadOnlyList<ApplicationResourceOutputValue> Outputs { get; }
 }

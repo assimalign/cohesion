@@ -18,6 +18,10 @@
   <data name="ApplicationSettingOutputUnknown" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' uses an output of '{3}/{4}' in gateway '{5}', which this hierarchy does not declare.</value></data>
   <data name="ApplicationSettingValueMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' must have exactly one of a value and an output.</value></data>
   <data name="ApplicationSettingDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' declares setting '{3}' more than once.</value></data>
+  <data name="ApplicationOutputValueMissing" xml:space="preserve"><value>An output value needs an output and a value.</value></data>
+  <data name="ApplicationOutputUnknown" xml:space="preserve"><value>The model is given a value for output '{0}' of '{1}/{2}' in gateway '{3}', which the manifest does not declare.</value></data>
+  <data name="ApplicationOutputNotAbove" xml:space="preserve"><value>The model is given a value for output '{0}' of '{1}/{2}' in gateway '{3}', which is not above gateway '{4}'. A gateway receives values only for outputs of the gateways above it.</value></data>
+  <data name="ApplicationOutputDuplicate" xml:space="preserve"><value>The model is given more than one value for output '{0}' of '{1}/{2}' in gateway '{3}'.</value></data>
   <data name="ApplicationSettingNotDependency" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses an output of '{4}/{5}' in gateway '{6}', which the resource does not depend on.</value></data>
   <data name="ApplicationResourceOutputsNull" xml:space="preserve"><value>Resource '{0}/{1}' was given null outputs, an output without a name, or an output without a value.</value></data>
   <data name="ResourceInstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>

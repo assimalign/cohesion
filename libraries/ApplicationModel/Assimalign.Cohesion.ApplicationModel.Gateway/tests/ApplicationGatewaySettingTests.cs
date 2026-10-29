@@ -24,6 +24,8 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
 
     private const string MovedEndpoint = "http://db-moved.root.svc";
 
+    private static readonly ApplicationResourceOutput IdentityEndpoint = new("root", "IdentityHub", "identity", OutputName.Endpoint);
+
     private readonly TemporaryDirectory _directory = new();
     private readonly TestInfrastructure _infrastructure = new();
     private readonly JsonFileGatewayStore _store;
@@ -107,32 +109,118 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
 
         // Assert
         exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.OutputMissing);
-        exception.Message.ShouldContain("Setting 'Db:Endpoint' of resource 'Web/api' uses output 'endpoint' of 'Database.Sql/db'", Case.Sensitive);
+        exception.Message.ShouldContain("Setting 'Db:Endpoint' of resource 'Web/api' in gateway 'root' uses output 'endpoint' of 'Database.Sql/db'", Case.Sensitive);
         _infrastructure.Deployed.ShouldBe(["root:Database.Sql/db"]);
         _infrastructure.IndexOf("plan:api").ShouldBe(-1);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A setting that uses another gateway's output is refused before anything deploys")]
-    public async Task RunAsync_WithSettingFromAnotherGateway_ShouldRefuseBeforeDeploying()
+    [Fact(DisplayName = DisplayPrefix + "A parent passes the outputs a child's settings use in its deployment manifest, and the child fills them in")]
+    public async Task RunAsync_WithSettingFromParentGateway_ShouldPassTheValueDown()
     {
-        // Arrange: east's orders-api reads the root's identity provider endpoint.
+        // Arrange: east's orders-api reads the root's identity provider endpoint and east's database's.
+        var east = new TestInfrastructure();
+
+        // Act: the root deploys east, then east runs from the manifest it was given, read back from JSON.
+        await using (await StartAsync(CreateHierarchy()))
+        {
+        }
+
+        GatewayDeploymentManifest deployment = GatewayDeploymentManifest.Parse(_infrastructure.GatewayDeployments["east"].ToUtf8Json());
+        await using RunningGateway child = await RunningGateway.StartAsync(east, _store, deployment.ToModel());
+
+        // Assert: only the root's output travels; east reads its own database's endpoint itself.
+        deployment.Outputs.ShouldHaveSingleItem().ShouldBe(new ApplicationResourceOutputValue(IdentityEndpoint, "http://identity.root.svc"));
+        TestInstance api = east.Instances.Values.Select(entry => entry.Instance).Single(instance => instance.Name.Value == "orders-api");
+        api.Settings["Identity:Authority"].ShouldBe("http://identity.root.svc");
+        api.Settings["Database:Endpoint"].ShouldBe("http://orders-db.east.svc");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A gateway passes on the values it received to the child whose part uses them")]
+    public async Task RunAsync_ThroughIntermediateGateway_ShouldPassTheValueOn()
+    {
+        // Arrange: zone, below east, runs an api that reads the root's identity provider endpoint.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
         IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
-        builder.AddGateway("east").AddResource("Web", "orders-api").WithSetting("Identity:Authority", identity.Endpoint);
-        IApplicationModel root = builder.Build().Model;
-        ApplicationModel east = ApplicationModel.Create(root.Manifest, "east");
+        builder.AddGateway("east").AddGateway("zone").AddResource("Web", "orders-api").WithSetting("Identity:Authority", identity.Endpoint);
+        var east = new TestInfrastructure();
 
         // Act
-        ArgumentException fromRoot = await Should.ThrowAsync<ArgumentException>(() => CreateGateway().RunAsync(root));
-        ArgumentException fromEast = await Should.ThrowAsync<ArgumentException>(() => ApplicationGateway.Create(_infrastructure).RunAsync(east));
+        await using (await StartAsync(builder.Build().Model))
+        {
+        }
+
+        await using RunningGateway child = await RunningGateway.StartAsync(east, _store, _infrastructure.GatewayDeployments["east"].ToModel());
 
         // Assert
-        fromRoot.Message.ShouldContain(
-            "Setting 'Identity:Authority' of resource 'Web/orders-api' in gateway 'east' uses output 'endpoint' of 'IdentityHub/identity' in gateway 'root'",
+        var expected = new ApplicationResourceOutputValue(IdentityEndpoint, "http://identity.root.svc");
+        _infrastructure.GatewayDeployments["east"].Outputs.ShouldHaveSingleItem().ShouldBe(expected);
+        east.GatewayDeployments["zone"].Outputs.ShouldHaveSingleItem().ShouldBe(expected);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A parent output that changes reaches the child as a changed deployment manifest")]
+    public async Task RunAsync_WhenParentOutputChanges_ShouldDeployTheChildWithTheNewValue()
+    {
+        // Arrange
+        IApplicationModel model = CreateHierarchy();
+        await using (await StartAsync(model))
+        {
+        }
+
+        GatewayDeploymentManifest first = _infrastructure.GatewayDeployments["east"];
+        _infrastructure.Outputs["identity"] = new Dictionary<OutputName, string> { [OutputName.Endpoint] = "http://identity-moved.root.svc" };
+
+        // Act
+        await using (await StartAsync(model))
+        {
+        }
+
+        // Assert: identity kept running, and east was deployed again with its new address.
+        _infrastructure.Deployed.Count(call => call == "root:IdentityHub/identity").ShouldBe(1);
+        first.Outputs.ShouldHaveSingleItem().Value.ShouldBe("http://identity.root.svc");
+        _infrastructure.GatewayDeployments["east"].Outputs.ShouldHaveSingleItem().Value.ShouldBe("http://identity-moved.root.svc");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A setting that uses an output of a child's or a sibling's part is refused before anything deploys")]
+    public async Task RunAsync_WithSettingFromBelowOrBeside_ShouldRefuseBeforeDeploying()
+    {
+        // Arrange: west's worker reads east's api endpoint (a sibling's part), and so does the root's
+        // portal (a child's part).
+        ApplicationBuilder sibling = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor siblingApi = sibling.AddGateway("east").AddResource("Web", "orders-api");
+        sibling.AddGateway("west").AddResource("Web", "worker").WithSetting("Orders:Endpoint", siblingApi.Endpoint);
+        ApplicationBuilder child = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor childApi = child.AddGateway("east").AddResource("Web", "orders-api");
+        child.AddResource("Web", "portal").WithSetting("Orders:Endpoint", childApi.Endpoint);
+
+        // Act
+        ArgumentException fromSibling = await Should.ThrowAsync<ArgumentException>(() => CreateGateway().RunAsync(sibling.Build().Model));
+        ArgumentException fromChild = await Should.ThrowAsync<ArgumentException>(() => CreateGateway().RunAsync(child.Build().Model));
+
+        // Assert
+        fromSibling.Message.ShouldContain(
+            "Setting 'Orders:Endpoint' of resource 'Web/worker' in gateway 'west' uses output 'endpoint' of 'Web/orders-api' in gateway 'east', which is neither that gateway nor one above it",
             Case.Sensitive);
-        fromEast.Message.ShouldBe(fromRoot.Message);
+        fromChild.Message.ShouldContain(
+            "Setting 'Orders:Endpoint' of resource 'Web/portal' in gateway 'root' uses output 'endpoint' of 'Web/orders-api' in gateway 'east', which is neither that gateway nor one above it",
+            Case.Sensitive);
         _infrastructure.Events().ShouldBeEmpty();
         (await _store.LoadAsync("root")).ShouldBeNull();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A child whose deployment manifest lacks a value its settings use is refused before anything deploys")]
+    public async Task RunAsync_WhenDeploymentManifestLacksValue_ShouldRefuseBeforeDeploying()
+    {
+        // Arrange: east's model, created without the identity provider's endpoint.
+        ApplicationModel east = ApplicationModel.Create(CreateHierarchy().Manifest, "east");
+
+        // Act
+        ArgumentException exception = await Should.ThrowAsync<ArgumentException>(() => CreateGateway().RunAsync(east));
+
+        // Assert
+        exception.Message.ShouldContain(
+            "Setting 'Identity:Authority' of resource 'Web/orders-api' in gateway 'east' uses output 'endpoint' of 'IdentityHub/identity' in gateway 'root', which the deployment manifest of gateway 'east' does not carry",
+            Case.Sensitive);
+        _infrastructure.Events().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = DisplayPrefix + "An instance that publishes before its resource is planned restores the recorded state")]
@@ -230,6 +318,20 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         builder.AddResource("Web", "api")
             .WithSetting("Db:Endpoint", database.Endpoint)
             .WithSetting("Feature:Mode", mode);
+        return builder.Build().Model;
+    }
+
+    // The root runs the identity provider; east's orders-api reads its endpoint and that of east's
+    // own database.
+    private static IApplicationModel CreateHierarchy()
+    {
+        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+        IApplicationSet east = builder.AddGateway("east");
+        IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
+        east.AddResource("Web", "orders-api")
+            .WithSetting("Identity:Authority", identity.Endpoint)
+            .WithSetting("Database:Endpoint", database.Endpoint);
         return builder.Build().Model;
     }
 
