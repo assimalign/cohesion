@@ -210,7 +210,10 @@ binds and validates assignment coercion before ignoring supplied identity values
 generation mode. Invalid types, literal text and unknown functions still fail before identity
 allocation (PostgreSQL parser/analyze.c:1146, parse_target.c:582-594, parse_merge.c:352).
 Discarded typed numeric casts are not executed (parser/parse_coerce.c:233-249). This applies to VALUES,
-INSERT SELECT, ON CONFLICT and MERGE's INSERT action. SELECT sources materialize normally
+INSERT SELECT, ON CONFLICT and MERGE's INSERT action. A concurrent FK change that introduces
+a SET DEFAULT sequence dependency absent from a DELETE or MERGE plan raises CS04067
+(40001) before allocation or row mutation; retrying replans with the required sequence grants.
+SELECT sources materialize normally
 before defaults. UPDATE, ON CONFLICT UPDATE and MERGE UPDATE of ALWAYS identities accept
 only DEFAULT; BY DEFAULT also accepts ordinary explicit assignments. Identity allocation
 sets the session's currval and lastval, including populated-table ADD COLUMN backfill, and

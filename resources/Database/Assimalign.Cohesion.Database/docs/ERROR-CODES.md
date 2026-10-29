@@ -217,7 +217,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
-| New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation (40001) |
+| New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation, or live referential default requires an unplanned sequence grant (40001) |
 | New (#1717, SQ-S2) | CS04068 | Transactions/session state — currval is undefined for this sequence in this session (55000) |
 | New (#1717, SQ-S2) | CS04069 | Transactions/session state — lastval is undefined or its sequence was dropped (55000) |
 | New (#1717, SQ-S2 fix) | CS04070 | Transactions/session state — DISCARD ALL inside an explicit transaction (25001) |

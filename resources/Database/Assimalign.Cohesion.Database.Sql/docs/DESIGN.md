@@ -13,6 +13,12 @@ CS02002 through the column context. A
 disappearing identity incarnation uses retryable CS04067, never the persisted-metadata
 corruption condition CS06061.
 
+Referential actions read the live FK graph during execution. Before resolving a column
+default, execution verifies that its sequence grants were captured by the plan; a newly
+introduced SET DEFAULT dependency raises retryable CS04067 (40001) before allocation or
+row mutation. The caller replans the statement. This keeps sequence grants ahead of table
+and row grants without a new FK-generation dependency or an evaluation-time lock wait.
+
 Catalog load is read-only. It validates live/retired owner disjointness, every ownership edge,
 default dependency and reservation before open publication; the reclamation worker later deletes
 orphan sequence definitions and reservations with their retired owner's intent. Abandoned owners

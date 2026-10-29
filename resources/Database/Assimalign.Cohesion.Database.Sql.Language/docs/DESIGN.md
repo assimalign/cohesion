@@ -7,6 +7,8 @@ discarded, across VALUES, SELECT and MERGE. The dialect also records preserved r
 through identity type changes, bounded backfill refusal, hidden orphan names and snapshots,
 and the intentional inclusion of identity generators in INFORMATION_SCHEMA.SEQUENCES with
 8/16/32/64-bit precision. Existing diagnostic identities and grammar remain unchanged.
+If a live FK action introduces an unplanned SET DEFAULT sequence dependency, execution
+returns retryable CS04067 (40001) before allocation or row mutation so the caller can replan.
 
 The identity AST retains explicit sequence options, SERIAL aliases lower to built-in integer
 BY DEFAULT identities, and ALTER identity actions are separate sealed leaves. INSERT and
