@@ -124,7 +124,7 @@ CK00001. Existing engine aggregate-input ORDER BY and WITHIN GROUP execute as we
 this extends PostgreSQL, which refuses aggregate-local ORDER BY with OVER. FILTER runs
 before input expressions. Empty frames return COUNT zero and other native aggregates NULL.
 The result type, collation, coercions and numeric rounding are the ordinary aggregate's.
-FIRST_VALUE, LAST_VALUE and NTH_VALUE respect NULLs and read the selected frame member;
+FIRST_VALUE, LAST_VALUE and NTH_VALUE default to RESPECT NULLS and read the selected frame member;
 an empty frame or missing nth member returns NULL. NTH_VALUE's index is evaluated per
 current row; NULL yields NULL and nonpositive values report CS05082 (22016), even for
 an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
@@ -918,7 +918,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute except before MERGE. |
 | `WITH RECURSIVE ... MERGE` | Recognized, not supported | CK00001 at RECURSIVE even for acyclic lists; plain WITH ... MERGE binds and executes. |
 | `SELECT ... FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` / `FOR KEY SHARE` | Recognized, not supported | Complete locking strengths in the SELECT tail report CK00001, including in subqueries and CTE bodies. Deliberate change from CS00003 in #1719; qualified identifiers and implicit aliases retain their ordinary meaning. |
-| Window functions / `OVER` / `WINDOW` | Ranking, navigation, aggregate and value functions execute | See Window stage; ROWS and offset-free RANGE execute, including the peer-based default |
+| Window functions / `OVER` / `WINDOW` | Ranking, navigation, aggregate and value functions execute | See Window stage; ROWS, RANGE offsets, GROUPS, EXCLUDE and NULL treatment execute, including the peer-based default |
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
@@ -4065,7 +4065,7 @@ existing compiled schema with newly quoted function-named columns is a no-op.
 
 COUNT/SUM/AVG/MIN/MAX keep their existing signatures: COUNT(*)/COUNT(value),
 SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
-ROWS, offset-free RANGE, aggregate windows and value-window functions execute as described under Window stage.
+ROWS, RANGE offsets, GROUPS, EXCLUDE, aggregate windows and value-window functions execute as described under Window stage.
 Ranking and LAG/LEAD require OVER and execute as described under Window stage. LOG(base, x), trig,
 regex functions, TO_CHAR and other unknown names remain CS01016.
 

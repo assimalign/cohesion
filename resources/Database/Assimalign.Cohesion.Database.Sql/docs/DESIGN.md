@@ -143,7 +143,7 @@ CK00001. Existing engine aggregate-input ORDER BY and WITHIN GROUP execute as we
 this extends PostgreSQL, which refuses aggregate-local ORDER BY with OVER. FILTER runs
 before input expressions. Empty frames return COUNT zero and other native aggregates NULL.
 The result type, collation, coercions and numeric rounding are the ordinary aggregate's.
-FIRST_VALUE, LAST_VALUE and NTH_VALUE respect NULLs and read the selected frame member;
+FIRST_VALUE, LAST_VALUE and NTH_VALUE default to RESPECT NULLS and read the selected frame member;
 an empty frame or missing nth member returns NULL. NTH_VALUE's index is evaluated per
 current row; NULL yields NULL and nonpositive values report CS05082 (22016), even for
 an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
@@ -256,13 +256,10 @@ There is no spill, and success/refusal/cancellation releases the entire grant. W
 queries retain their existing layouts and allocation costs. No public accumulator contract,
 compiled-schema/catalog version or wire format changed.
 
-For the committed full-output fixture, the two-window query peaks at 6,968,704 B for
-10,000 rows (696.8704 B/row) and admits 138,961 rows under the default 64 MiB grant;
-moving AVG peaks at 4,152,800 B (415.28 B/row) and admits 162,448 rows. Both next rows
-refuse and release the grant. Ledger capacity steps make bytes/row depend on row count;
-these are logical peaks, not GC allocation measurements. The Release guards retain
-4,280 / 12,472 / 18,112 / 21,672 B/query for window-free shapes. The former 2,000-row
-shrinking-SUM cap refusal now succeeds with 2,000 input visits and 1,999 inverse transitions.
+The committed full-output fixture admits 138,961 two-window rows and 162,448 moving-AVG
+rows under the default 64 MiB grant, with the next row refused and the grant released.
+The former 2,000-row shrinking-SUM cap refusal now succeeds with 2,000 input visits and
+1,999 inverse transitions, while Release guards retain the window-free allocation costs.
 
 Independent membership tests cover every legal bound category and all exclusions in ROWS,
 GROUPS and all twelve supported RANGE key types, both directions and NULL placements;
