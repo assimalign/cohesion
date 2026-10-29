@@ -1,11 +1,11 @@
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
-/// <summary>Identifies the action applied when a referenced parent row is deleted.</summary>
+/// <summary>Identifies the configured action when a referenced parent row is deleted or its key is updated.</summary>
 public enum SqlCatalogReferentialAction : byte
 {
-    /// <summary>Refuses deletion while dependent rows exist.</summary>
+    /// <summary>Refuses a parent change while dependent rows exist.</summary>
     Restrict = 0,
-    /// <summary>Deletes dependent rows in the same transaction.</summary>
+    /// <summary>Propagates a parent deletion or key change in the same transaction.</summary>
     Cascade,
     /// <summary>Checks dependent rows at statement end.</summary>
     NoAction,

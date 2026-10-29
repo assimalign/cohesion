@@ -83,11 +83,11 @@ public sealed class SqlCatalogFunctionCallCorruptionTests
         if (check) { writer.AppendNull(); }
         else { writer.AppendString("ABS(1)", Collation.Binary); }
         writer.AppendInt32(0).AppendInt8((sbyte)DatabaseObjectOwner.Adhoc).AppendNull()
-            .AppendInt32(7).AppendInt32(check ? 1 : 0);
+            .AppendInt32(8).AppendInt32(check ? 1 : 0);
         if (check)
         {
             writer.AppendString("ck", Collation.Binary).AppendInt8((sbyte)SqlCatalogConstraintKind.Check)
-                .AppendInt32(0).AppendNull().AppendNull().AppendInt32(0).AppendString("ABS(1)", Collation.Binary).AppendInt8(0);
+                .AppendInt32(0).AppendNull().AppendNull().AppendInt32(0).AppendString("ABS(1)", Collation.Binary).AppendInt8(0).AppendInt8((sbyte)SqlCatalogReferentialAction.NoAction);
         }
         writer.AppendInt32(-1).AppendInt32(0).AppendNull();
         if (check) { writer.AppendInt32(0); }

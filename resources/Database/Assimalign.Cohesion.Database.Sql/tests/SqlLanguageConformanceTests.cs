@@ -250,7 +250,8 @@ public sealed class SqlLanguageConformanceTests
         // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
         // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
         // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(74);
+        // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(75);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -1118,6 +1119,16 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
             }),
         [SqlClauses.ForeignKey] = ForeignKeyCase("CREATE TABLE c (pid INT, CONSTRAINT fk_parent FOREIGN KEY(pid) REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
+        [SqlClauses.OnUpdate] = new("CREATE TABLE c (pid INT REFERENCES t(id) ON UPDATE CASCADE);", _seed,
+            expression => expression is SqlCreateTableExpression create && create.Constraints.Single().OnUpdate == SqlReferentialAction.Cascade,
+            async (session, _) =>
+            {
+                await ExecuteAsync(session, "INSERT INTO c VALUES (1);");
+                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET id=9 WHERE id=1;"));
+                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[1]]);
+                await ExpectRowsAsync(session, "SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;", [["CASCADE"]]);
+            }),
         [SqlClauses.References] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
         [SqlClauses.Cascade] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE CASCADE);", SqlReferentialAction.Cascade,
             async (session, result) =>

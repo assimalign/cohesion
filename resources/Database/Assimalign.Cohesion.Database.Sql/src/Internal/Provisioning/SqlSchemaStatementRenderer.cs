@@ -104,6 +104,15 @@ internal static class SqlSchemaStatementRenderer
                     CompiledSchemaReferentialAction.Cascade => "CASCADE",
                     _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererAppendConstraintDatabase, constraint.Name)),
                 });
+                builder.Append(" ON UPDATE ").Append(constraint.OnUpdate switch
+                {
+                    CompiledSchemaReferentialAction.Restrict => "RESTRICT",
+                    CompiledSchemaReferentialAction.Cascade => "CASCADE",
+                    CompiledSchemaReferentialAction.NoAction => "NO ACTION",
+                    CompiledSchemaReferentialAction.SetNull => "SET NULL",
+                    CompiledSchemaReferentialAction.SetDefault => "SET DEFAULT",
+                    _ => throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RendererAppendConstraintDatabase, constraint.Name)),
+                });
                 break;
             case CompiledSchemaConstraintKind.Check:
                 string expression = constraint.Expression?.CanonicalText

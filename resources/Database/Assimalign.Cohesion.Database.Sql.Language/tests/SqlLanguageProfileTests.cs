@@ -70,6 +70,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Collate, "SELECT name FROM t WHERE name = 'Alice' COLLATE case_insensitive;")]
     [InlineData(SqlClauses.Constraint, "CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0));")]
     [InlineData(SqlClauses.ForeignKey, "CREATE TABLE t (parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));")]
+    [InlineData(SqlClauses.OnUpdate, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON UPDATE CASCADE);")]
     [InlineData(SqlClauses.References, "CREATE TABLE t (parent_id INT REFERENCES parent(id));")]
     [InlineData(SqlClauses.Check, "CREATE TABLE t (id INT CHECK (id > 0));")]
     [InlineData(SqlClauses.UniqueConstraint, "CREATE TABLE t (email TEXT UNIQUE);")]

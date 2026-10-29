@@ -100,7 +100,7 @@ public sealed class SqlCatalogDroppedColumnTests
         // Arrange: the dropped count, then the ordinals, after two live columns.
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "damaged");
         var record = TableRecordPrefix(1, "dbo", "damaged", ("id", false), ("note", true))
-            .AppendInt32(7).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
+            .AppendInt32(8).AppendInt32(0).AppendInt32(-1).AppendInt32(-1);
         foreach (int value in persisted)
         {
             record.AppendInt32(value);

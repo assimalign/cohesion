@@ -45,6 +45,10 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// Runtime and SDK documents share this format and reject earlier documents.
 /// </para>
 /// <para>
+/// <b>Format <c>v9</c> (#1723).</b> Foreign-key constraints carry explicit ON UPDATE metadata,
+/// defaulting to NO ACTION. Runtime and SDK reject earlier artifacts, including v8.
+/// </para>
+/// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
 /// is read, and kept: the schema is immutable, so they never change.
 /// </para>
@@ -54,7 +58,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v8";
+    public const string CurrentFormat = "cohesion/database-schema/v9";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.

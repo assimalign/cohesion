@@ -308,6 +308,7 @@ public static class SqlSchemaMigrationPlanner
         => identifiers.Equals(first.Name, second.Name)
         && first.Kind == second.Kind
         && first.OnDelete == second.OnDelete
+        && first.OnUpdate == second.OnUpdate
         && (first.Kind == CompiledSchemaConstraintKind.Check || first.Columns.SequenceEqual(second.Columns, identifiers))
         && identifiers.Equals(first.ReferencedObject, second.ReferencedObject)
         && first.ReferencedColumns.SequenceEqual(second.ReferencedColumns, identifiers)

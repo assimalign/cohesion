@@ -130,6 +130,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.DropIndex] = ["DROP INDEX ix ON t", "DROP INDEX IF EXISTS ix ON dbo.t"],
         [SqlClauses.Constraint] = ["CREATE TABLE c (a INT, CONSTRAINT uq UNIQUE (a))"],
         [SqlClauses.ForeignKey] = ["CREATE TABLE c (p INT, FOREIGN KEY (p) REFERENCES t (id))"],
+        [SqlClauses.OnUpdate] = ["CREATE TABLE c (p INT REFERENCES t (id) ON UPDATE CASCADE)", "ALTER TABLE c ADD FOREIGN KEY(p) REFERENCES t(id) ON UPDATE NO ACTION ON DELETE SET NULL"],
         [SqlClauses.References] = ["CREATE TABLE c (p INT REFERENCES t (id))"],
         [SqlClauses.SetNull] = ["CREATE TABLE c (p INT REFERENCES t (id) ON DELETE SET NULL)"],
         [SqlClauses.SetDefault] = ["CREATE TABLE c (p INT REFERENCES t (id) ON DELETE SET DEFAULT)"],

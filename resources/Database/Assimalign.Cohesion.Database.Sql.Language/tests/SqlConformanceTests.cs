@@ -84,6 +84,7 @@ public class SqlConformanceTests
     [InlineData("DELETE FROM dbo.users AS u WHERE u.id = @id AND EXISTS (SELECT a.id FROM admins a WHERE a.id = u.id) RETURNING id;", SqlQueryCommandType.Delete)]
     [InlineData("DELETE FROM users;", SqlQueryCommandType.Delete)]
     [InlineData("CREATE TABLE IF NOT EXISTS users (id BIGINT PRIMARY KEY, name VARCHAR(100) NOT NULL, balance DECIMAL(18, 4) DEFAULT 0, created TIMESTAMP);", SqlQueryCommandType.Create)]
+    [InlineData("CREATE TABLE update_actions (pid INT REFERENCES parent(id) ON UPDATE CASCADE ON DELETE SET NULL);", SqlQueryCommandType.Create)]
     [InlineData("CREATE TABLE national (a NATIONAL CHAR(10), b NATIONAL CHARACTER(10), c NCHAR(10), d NATIONAL CHAR VARYING(10), e NATIONAL CHARACTER VARYING(10), varying NCHAR VARYING(10));", SqlQueryCommandType.Create)]
     [InlineData("CREATE DOMAIN national AS NATIONAL CHAR(10);", SqlQueryCommandType.Create)]
     [InlineData("CREATE DOMAIN national AS NATIONAL CHAR VARYING(10);", SqlQueryCommandType.Create)]

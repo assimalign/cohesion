@@ -1221,14 +1221,6 @@ public sealed partial class SqlQueryParser : QueryParser
 
             if (lexer.Current.Type == TokenType.Keyword)
             {
-                if (token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) &&
-                    previousToken?.Equals("ON", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    clause = "ON UPDATE";
-                    location = Location.Create(1, 1, previousPosition, lexer.Current.Position + lexer.Current.Value.Length);
-                    return true;
-                }
-
                 if (token.Equals(SqlClauses.All, StringComparison.OrdinalIgnoreCase) &&
                     previousToken?.Equals(SqlClauses.Select, StringComparison.OrdinalIgnoreCase) == true)
                 {

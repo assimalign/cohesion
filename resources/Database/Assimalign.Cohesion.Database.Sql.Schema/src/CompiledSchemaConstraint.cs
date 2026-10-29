@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// <param name="ReferencedColumns">The referenced columns.</param>
 /// <param name="Expression">The SQL scalar-expression text for a check, when applicable.</param>
 /// <param name="OnDelete">The foreign-key delete action, defaulting to restriction.</param>
+/// <param name="OnUpdate">The foreign-key update action, defaulting to NO ACTION.</param>
 public sealed record CompiledSchemaConstraint(
     string Name,
     CompiledSchemaConstraintKind Kind,
@@ -21,7 +22,8 @@ public sealed record CompiledSchemaConstraint(
     IReadOnlyList<string> ReferencedColumns,
     CompiledSchemaExpression? Expression = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    CompiledSchemaReferentialAction OnDelete = CompiledSchemaReferentialAction.Restrict)
+    CompiledSchemaReferentialAction OnDelete = CompiledSchemaReferentialAction.Restrict,
+    CompiledSchemaReferentialAction OnUpdate = CompiledSchemaReferentialAction.NoAction)
 {
     /// <summary>
     /// What created this object. Objects from a compiled schema are

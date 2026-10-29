@@ -256,8 +256,10 @@
   <data name="DefaultExpressionFailure" xml:space="preserve"><value>Column '{0}': {1}</value></data>
   <data name="DefaultStorageFailure" xml:space="preserve"><value>Column '{0}': DEFAULT value cannot be stored as {1}</value></data>
   <data name="VolatileDefaultBackfill" xml:space="preserve"><value>Column '{0}': ADD COLUMN with a VOLATILE DEFAULT on a populated table requires a table rewrite (#1447).</value></data>
+  <data name="CompiledUpdateActionInvalid" xml:space="preserve"><value>Unknown foreign-key ON UPDATE action '{0}' in the compiled snapshot.</value></data>
   <data name="CompiledDeleteActionInvalid" xml:space="preserve"><value>Schema-owned foreign keys cannot use ON DELETE {0}; compiled schemas support RESTRICT and CASCADE.</value></data>
-  <data name="DeleteActionUnknown" xml:space="preserve"><value>Unknown referential delete action.</value></data>
+  <data name="UpdateActionExecutionUnsupported" xml:space="preserve"><value>ON UPDATE {0} action execution is not supported yet (foreign key '{1}'); no rows were written.</value></data>
+  <data name="DeleteActionUnknown" xml:space="preserve"><value>Unknown referential action.</value></data>
   <data name="RenameTableCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists.</value></data>
   <data name="RenameColumnCollision" xml:space="preserve"><value>Column '{0}' already exists on '{1}'.</value></data>
   <data name="MissingValueConversion" xml:space="preserve"><value>Column '{0}': frozen missing value cannot be stored as {1}</value></data>

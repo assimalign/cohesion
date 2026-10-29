@@ -1,5 +1,28 @@
 # The Declared SQL Dialect
 
+## Foreign-key update declarations (#1723, SQ-F1)
+
+Foreign keys accept ON UPDATE { CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION }
+in CREATE TABLE column REFERENCES/table constraints and ALTER TABLE ADD CONSTRAINT/ADD COLUMN.
+ON DELETE and ON UPDATE can appear in either order, once each; omitted actions independently
+mean NO ACTION. Canonical constraint SQL renders ON DELETE before ON UPDATE. Duplicate actions
+and incomplete actions report CS00003. Action column lists remain CK00001.
+
+Catalog format 30 and compiled-schema v9 retain OnUpdate; INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+and views over it report the stored UPDATE_RULE. CompiledSchemaConstraint exposes the action;
+the typed References builder keeps its existing declaration and defaults update metadata to NO ACTION.
+Declared provisioning scripts may carry the SQL clause and persistent views over its metadata.
+
+SQ-F1 does not execute update actions. Changing any referenced parent key under CASCADE,
+SET NULL or SET DEFAULT refuses with CK00001 naming ON UPDATE action execution, even when
+no child currently refers to that key or another final parent retains it. UPDATE, UPDATE FROM,
+ON CONFLICT DO UPDATE and MERGE refuse before any row mutation. Self-referencing updates report
+the action-execution refusal before an outgoing orphan check. Unchanged referenced keys
+and unrelated-column updates execute normally. RESTRICT and NO ACTION both retain the existing
+statement-end parent-key check, including substitution by another final parent; SQ-F2 will
+make RESTRICT immediate and implement action closure. PostgreSQL references:
+src/backend/parser/gram.y:4581-4689 and src/backend/utils/adt/ri_triggers.c:897-955.
+
 ## Window stage (#1526, SQ-W1)
 
 OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
@@ -120,7 +143,7 @@ accepted metadata: the shared allocator still reserves 32 values durably and doe
 not keep independent per-session caches. This makes setval immediately visible to
 other sessions' next allocation. Type/option errors use CS03069 (22023); exhaustion
 keeps the shared identity CS02002 (22003), deliberately differing from PostgreSQL's
-2200H. Bounds, cycling and reservations reuse SQ-S1 and SQL format 29.
+2200H. Bounds, cycling and reservations reuse SQ-S1 and SQL format 30.
 
 nextval(name), currval(name), setval(name, integer [, is_called]) and lastval()
 return BIGINT. NEXT VALUE FOR also returns BIGINT; AS controls allocation bounds and metadata, without narrowing the result. This stable output type avoids stale projection metadata across a concurrent ALTER AS and differs from SQL Server's declared-sequence return type. Names may be schema-qualified text (with doubled quotes in quoted
@@ -315,7 +338,7 @@ pg_get_serial_sequence remain excluded, as do generated stored expressions.
 
 PostgreSQL references: sequence.c:1598-1694 (ownership), tablecmds.c:8322-8680 (ALTER identity),
 rewriteHandler.c:930-972,1015-1027 (overrides and UPDATE DEFAULT), and tablecmds.c:2016-2093
-(TRUNCATE restart). SQL format 29 refuses format 28 and earlier, without a legacy reader.
+(TRUNCATE restart). SQL format 30 refuses format 28 and earlier, without a legacy reader.
 
 ## RETURNING contract (#1117)
 
@@ -629,7 +652,7 @@ between builder commit and publication therefore sees the complete table after p
 Statement and BEGIN admission proceed normally through that interval. No snapshot sees a partial
 row set. Conversion, domain, budget, cancellation and storage failures before
 publication leave no table. Crash recovery sees no table or the complete table, and reclaims
-abandoned owners. SQL remains format 29; existing kind-14 reclamation records suffice.
+abandoned owners. SQL remains format 30; existing kind-14 reclamation records suffice.
 
 CTAS holds the shared metadata lease for its entire source query and build, following CREATE
 INDEX's precedent. Other sessions' CREATE/DROP of views, functions, domains and schemas fail
@@ -659,7 +682,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions (#1526) and identity, SERIAL and OVERRIDING forms (#1717), the profile has **74 of 76 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions (#1526), identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), the profile has **75 of 77 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -725,7 +748,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
-| `ON UPDATE` | Recognized, not supported | absent from the profile; rejected with `CK00001` |
+| `ON UPDATE` | Metadata supported | CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION; defaults to NO ACTION. Either order beside ON DELETE, once each. UPDATE_RULE reports the stored action. Changing parent keys under CASCADE/SET NULL/SET DEFAULT refuses with CK00001 before row writes until SQ-F2. RESTRICT/NO ACTION retain statement-end checks in SQ-F1. |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
@@ -916,9 +939,9 @@ committed by the child writer. SET DEFAULT with no default
 supplies NULL; each expression default uses the delete transaction's clock. Unique NULLs
 remain equal. SET DEFAULT uses the ordinary assignment
 path for identity columns: BY DEFAULT allocates, and GENERATED ALWAYS retains its CS03025
-UPDATE refusal. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
-report CK00001. Schema-owned typed foreign
-keys retain RESTRICT/CASCADE only. SQL record-space format 20 gates the new persisted
+UPDATE refusal. PostgreSQL-style column lists after SET NULL/SET DEFAULT
+report CK00001. Compiled foreign keys retain RESTRICT/CASCADE for ON DELETE and expose all five
+ON UPDATE metadata actions. SQL record-space format 20 gates the new persisted
 referential-action values; format 19 and earlier are refused with the recreate remedy.
 
 ## Statement completeness (#1068)
@@ -1341,7 +1364,7 @@ Failed builds expose their abandoned owner through pending reclamations until it
 Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
 Populated-table provisioning handoff and expanded crash/wire coverage follow in SQ-A3.
 SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
-refuse without an upgrade reader. Compiled-schema v8 is unchanged.
+refuse without an upgrade reader. Compiled-schema v9 is current.
 CS02064 names a missing assignment pathway for the value, USING result or default (42804).
 Reference anchors: PostgreSQL tablecmds.c:14949-14998,15142-15199,15269-15304,15612-15624 and
 utils/adt/varchar.c:620-648 in the local clone.
@@ -1908,7 +1931,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases use format 29, which adds owned-sequence metadata to format 28's shared sequence records and retains TYPE default assignment coercion; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. New databases use format 30, which adds owned-sequence metadata to format 28's shared sequence records and retains TYPE default assignment coercion; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -2702,7 +2725,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 74/76 declared-clause count.
+These contextual exclusions do not change the 75/77 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -2948,7 +2971,7 @@ conventions, not the complete ISO view layouts. Columns below are listed in
 | `INFORMATION_SCHEMA.COLUMNS` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `COLUMN_DEFAULT`, `IS_NULLABLE`, `DATA_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `CHARACTER_OCTET_LENGTH`, `NUMERIC_PRECISION`, `NUMERIC_PRECISION_RADIX`, `NUMERIC_SCALE`, `DATETIME_PRECISION`, `IS_IDENTITY`, `IDENTITY_GENERATION`, `IDENTITY_START`, `IDENTITY_INCREMENT`, `IDENTITY_MAXIMUM`, `IDENTITY_MINIMUM`, `IDENTITY_CYCLE` | One row per live table or view column; view names, types, domains and collations are frozen, and every view column reports IS_NULLABLE = YES without body binding. Ordinals start at one and have no gap where a table column was dropped. All 19 DATA_TYPE names parse in DDL and CAST; aliases report canonical identity and modifiers. COLUMN_DEFAULT renders resolved temporal and binary literal values with typed prefixes, including defaults declared as plain strings; other defaults retain canonical SQL |
 | `INFORMATION_SCHEMA.TABLE_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `CONSTRAINT_TYPE`, `IS_DEFERRABLE`, `INITIALLY_DEFERRED` | Primary keys, unique indexes/constraints, foreign keys, and explicit checks; both deferral fields are `NO` |
 | `INFORMATION_SCHEMA.KEY_COLUMN_USAGE` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION` | One row per primary, unique, or foreign-key column, in constraint order |
-| `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`, `UPDATE_RULE = 'RESTRICT'`, delete rule `RESTRICT`, `CASCADE`, `NO ACTION`, `SET NULL` or `SET DEFAULT` |
+| `INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `UNIQUE_CONSTRAINT_CATALOG`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`, `MATCH_OPTION`, `UPDATE_RULE`, `DELETE_RULE` | Foreign keys with the referenced key identity; `MATCH_OPTION = 'NONE'`; update and delete rules report the stored `RESTRICT`, `CASCADE`, `NO ACTION`, `SET NULL` or `SET DEFAULT` action. Omitted SQL actions default to `NO ACTION` |
 | `INFORMATION_SCHEMA.CHECK_CONSTRAINTS` | `CONSTRAINT_CATALOG`, `CONSTRAINT_SCHEMA`, `CONSTRAINT_NAME`, `CHECK_CLAUSE` | Explicit checks; `CHECK_CLAUSE` is the persisted canonical predicate (see [Persisted definitions are canonical](#persisted-definitions-are-canonical)) |
 | `COHESION_SCHEMA.INDEXES` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `INDEX_NAME`, `COLUMN_NAME`, `ORDINAL_POSITION`, `IS_UNIQUE`, `IS_PRIMARY_KEY` | Cohesion extension: one row per index key column |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `TABLE_CATALOG`, `TABLE_SCHEMA`, `TABLE_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | Cohesion extension: one row per table, view or index; `OWNER` is `Adhoc` or `Schema` |
@@ -3169,7 +3192,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 29 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 30 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
@@ -4119,7 +4142,7 @@ values use `TRUE`/`FALSE`, and null uses `NULL`. Temporal values and GUIDs use i
 text converted to the column type. Enums use their numeric storage values.
 `table.DefaultSql(selector, sqlLiteral)` is the escape hatch for a raw supported SQL literal,
 for example `DefaultSql(row => row.Placed, "DATE '2026-01-01'")`. All supported typed literal forms are accepted. Both declarations store the rendered literal text in the
-`cohesion/database-schema/v8` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
+`cohesion/database-schema/v9` document, so equal text gives the same hash. This format records CHAR separately from VARCHAR and normalizes
 an omitted decimal scale to zero when precision is present. Earlier artifacts, applied markers
 and pending targets are refused before hash comparison (SqlSchemaValidationException,
 InvalidDocument at schema.format; COHDBSDK206 for SDK migration input). Rebuild artifacts and
@@ -4178,7 +4201,7 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 29, with no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 30, with no compatibility reader.
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
@@ -4231,7 +4254,7 @@ TABLE against a typed table, and DROP INDEX against a typed index (including its
 are refused before Build opens or changes the database. Scripts may create and later alter their
 own tables, create their own indexes on typed tables, and run DML against typed tables.
 Scripts run inline, including data-scaling DDL, and force preceding typed migrations inline.
-SDK v8 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
+SDK v9 artifacts do not carry scripts; extraction refuses Script calls with COHDBSDK110.
 
 ## Quoted calls (#1103 review)
 
@@ -4342,7 +4365,7 @@ SQL does not infer it from a CLR exception type. This follows PostgreSQL datetim
 REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
-Catalog format 29 and compiled-schema v8 refuse earlier definitions rather than reinterpret
+Catalog format 30 and compiled-schema v9 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,

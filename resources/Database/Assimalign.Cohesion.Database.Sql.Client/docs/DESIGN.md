@@ -1,5 +1,14 @@
 # Database.Sql.Client — Design
 
+## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+
+InMemory and TCP carry all five ON UPDATE declarations and truthful UPDATE_RULE through the
+existing exchanges, including views over INFORMATION_SCHEMA. The omitted update action is
+NO ACTION. Changing a referenced parent key under CASCADE/SET NULL/SET DEFAULT reports CK00001
+naming ON UPDATE action execution on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE,
+with unchanged parent/child rows and a usable connection. RESTRICT/NO ACTION retain their
+statement-end behavior until SQ-F2. No public client or wire format change is required.
+
 ## Window ranking and navigation (#1526, SQ-W1)
 
 InMemory and TCP use the existing result and diagnostic exchanges for window rankings,

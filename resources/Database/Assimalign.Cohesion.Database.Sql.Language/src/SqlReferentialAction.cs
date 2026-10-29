@@ -1,11 +1,11 @@
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
-/// <summary>Identifies the supported action when a referenced parent row is deleted.</summary>
+/// <summary>Identifies the supported action when a referenced parent row is deleted or its key is updated.</summary>
 public enum SqlReferentialAction
 {
-    /// <summary>Refuse deletion while children reference the parent.</summary>
+    /// <summary>Refuses a parent change while children reference it.</summary>
     Restrict,
-    /// <summary>Delete referencing children with their parent.</summary>
+    /// <summary>Propagates a parent deletion or key change to referencing children.</summary>
     Cascade,
     /// <summary>Checks dependent rows at statement end.</summary>
     NoAction,

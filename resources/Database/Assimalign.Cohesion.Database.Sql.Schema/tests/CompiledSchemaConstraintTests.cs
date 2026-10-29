@@ -76,6 +76,47 @@ public sealed class CompiledSchemaConstraintTests
             .Errors.ShouldContain(error => error.Declaration.EndsWith("onDelete", StringComparison.Ordinal));
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Schema] - ON UPDATE: public metadata persists and changes migration identity (#1723)")]
+    [InlineData(CompiledSchemaReferentialAction.Restrict)]
+    [InlineData(CompiledSchemaReferentialAction.Cascade)]
+    [InlineData(CompiledSchemaReferentialAction.NoAction)]
+    [InlineData(CompiledSchemaReferentialAction.SetNull)]
+    [InlineData(CompiledSchemaReferentialAction.SetDefault)]
+    public void Serialize_OnUpdateAction_ShouldRoundTripAndPlanReplacement(CompiledSchemaReferentialAction action)
+    {
+        // Arrange
+        var before = Schema(Table("child", [Reference("fk", "parent")]), Table("parent", []));
+        var after = Schema(Table("child", [Reference("fk", "parent") with { OnUpdate = action }]), Table("parent", []));
+
+        // Act
+        var reopened = SqlCompiledSchemaSerializer.Deserialize(after.CanonicalDocument);
+        var plan = SqlSchemaMigrationPlanner.Plan(before, reopened);
+
+        // Assert
+        before.Tables[0].Constraints[0].OnUpdate.ShouldBe(CompiledSchemaReferentialAction.NoAction);
+        reopened.Tables[0].Constraints[0].OnUpdate.ShouldBe(action);
+        reopened.Hash.ShouldBe(after.Hash);
+        if (action == CompiledSchemaReferentialAction.NoAction) { plan.Operations.ShouldBeEmpty(); }
+        else
+        {
+            reopened.Hash.ShouldNotBe(before.Hash);
+            plan.Operations.Select(operation => operation.Kind).ShouldBe([
+                SqlSchemaMigrationOperationKind.DropConstraint, SqlSchemaMigrationOperationKind.AddConstraint]);
+            plan.Operations[1].Constraint!.OnUpdate.ShouldBe(action);
+        }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Schema] - ON UPDATE: invalid enum and CHECK action metadata fail validation (#1723)")]
+    public void Construct_InvalidUpdateAction_ShouldRefuse()
+    {
+        // Arrange / Act / Assert
+        Should.Throw<SqlSchemaValidationException>(() => Schema(Table("child", [Reference("fk", "parent") with { OnUpdate = (CompiledSchemaReferentialAction)99 }]), Table("parent", [])))
+            .Errors.ShouldContain(error => error.Declaration.EndsWith("onUpdate", StringComparison.Ordinal));
+        var check = new CompiledSchemaConstraint("ck", CompiledSchemaConstraintKind.Check, [], null, [], new("id > 0"), OnUpdate: CompiledSchemaReferentialAction.Cascade);
+        Should.Throw<SqlSchemaValidationException>(() => Schema(Table("t", [check])))
+            .Errors.ShouldContain(error => error.Declaration.EndsWith("onUpdate", StringComparison.Ordinal));
+    }
+
     private static CompiledSchemaConstraint Reference(string name, string parent)
         => new(name, CompiledSchemaConstraintKind.Reference, ["id"], parent, ["id"]);
 

@@ -245,7 +245,7 @@ public sealed class SqlNullOrderingTests
             await reopened.OpenDatabaseAsync("db", CancellationToken.None));
         // Assert
         error.Message.ShouldContain("uses data-storage format 23", Case.Sensitive);
-        error.Message.ShouldContain("supports only format 29", Case.Sensitive);
+        error.Message.ShouldContain("supports only format 30", Case.Sensitive);
     }
 
     private static async Task SeedAsync(SqlDatabaseSession session)

@@ -652,6 +652,30 @@ internal sealed partial class SqlPlanExecutor
             if (parent.ObjectId == table.ObjectId)
             {
                 int[] ordinals = reference.ParentKey.Ordinals;
+                // A self-reference can lose its old parent during outgoing validation,
+                // before ValidateParentUpdate runs. Refuse the stored changing action
+                // first, rather than diagnosing that temporarily orphaned child as RESTRICT.
+                if (updates is not null && constraint.OnUpdate is not (SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction))
+                {
+                    foreach (var update in updates.Values)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (update.Table.ObjectId != table.ObjectId || update.Location.PageId.Value < 0) { continue; }
+                        bool changed = false, hasNull = false;
+                        for (int key = 0; key < ordinals.Length; key++)
+                        {
+                            int ordinal = ordinals[key];
+                            if (update.OldValues[ordinal] is null) { hasNull = true; break; }
+                            changed |= !ValuesEqual(update.NewValues[ordinal], update.OldValues[ordinal],
+                                reference.ParentKey.Collations[key], statement.Metrics);
+                        }
+                        if (changed && !hasNull)
+                        {
+                            throw new SqlExecutionException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                                ErrorMessages.UpdateActionExecutionUnsupported, ReferentialActionText(constraint.OnUpdate), constraint.Name));
+                        }
+                    }
+                }
                 selfKeys = new(new GroupKeyComparer(reference.ParentKey.Collations, statement.Metrics));
                 foreach (var candidate in rows)
                 {
@@ -730,6 +754,11 @@ internal sealed partial class SqlPlanExecutor
             }
             bool changed = reference.ParentKey.Ordinals.Select((ordinal, i) => !ValuesEqual(newValues[ordinal], keys[i],
                 reference.ParentKey.Collations[i], statement.Metrics)).Any(value => value);
+            if (changed && constraint.OnUpdate is not (SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction))
+            {
+                throw new SqlExecutionException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.UpdateActionExecutionUnsupported, ReferentialActionText(constraint.OnUpdate), constraint.Name));
+            }
             // A different replacement may retain the old referenced key (a swap). Only
             // removing that key from the final parent state can orphan an incoming child.
             if (changed && updates?.Find(reference.ParentKey, keys,
@@ -1259,6 +1288,14 @@ internal sealed partial class SqlPlanExecutor
 
             result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Reference, definition.Columns, schema, referenced.TableName,
                 definition.ReferencedColumns, onDelete: definition.OnDelete switch
+                {
+                    SqlReferentialAction.Restrict => SqlCatalogReferentialAction.Restrict,
+                    SqlReferentialAction.Cascade => SqlCatalogReferentialAction.Cascade,
+                    SqlReferentialAction.NoAction => SqlCatalogReferentialAction.NoAction,
+                    SqlReferentialAction.SetNull => SqlCatalogReferentialAction.SetNull,
+                    SqlReferentialAction.SetDefault => SqlCatalogReferentialAction.SetDefault,
+                    _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
+                }, onUpdate: definition.OnUpdate switch
                 {
                     SqlReferentialAction.Restrict => SqlCatalogReferentialAction.Restrict,
                     SqlReferentialAction.Cascade => SqlCatalogReferentialAction.Cascade,

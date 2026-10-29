@@ -1,5 +1,21 @@
 # Assimalign.Cohesion.Database.Sql.Schema — Design
 
+## Foreign-key update metadata and format v9 (#1723, SQ-F1)
+
+The current canonical document advances from v8 to v9. CompiledSchemaConstraint.OnUpdate
+is public constructor/with metadata, defaults to NoAction and is always serialized. The compiled
+referential-action enum gains NoAction, SetNull and SetDefault; all five values are valid for
+foreign-key updates. CHECK constraints require the neutral NoAction metadata; unknown enum
+values are InvalidDocument at onUpdate. Existing ON DELETE restrictions remain Restrict/Cascade.
+SqlTableBuilder.References retains its existing signature and emits the default NoAction.
+Constraint migration equality includes OnUpdate, so a metadata-only change is a drop/add operation.
+
+The runtime and Sdk.Database share v9; every earlier artifact, applied marker and pending target,
+including v8 with foreign keys, is refused before identity/hash comparison. Rebuild artifacts and
+recreate affected databases. There is no compatibility reader. SQL renders and persists the action;
+actual CASCADE/SET NULL/SET DEFAULT update execution belongs to SQ-F2. No new interface or
+cross-assembly access seam is introduced.
+
 ## SQL type aliases (#1108)
 
 All three national names accept optional VARYING: NATIONAL CHAR VARYING, NATIONAL CHARACTER
@@ -18,7 +34,7 @@ length. Migration DDL uses these names. SQL format 13 independently refuses earl
 
 ## Fixed-length schema columns (#1437)
 
-The current canonical document is **cohesion/database-schema/v8**, shared with Sdk.Database.
+The current canonical document is **cohesion/database-schema/v9**, shared with Sdk.Database.
 CLR char maps to Character with length one; a string member declared with CHAR(n)/CHARACTER(n)
 normalizes to Character and n (bare CHAR means one). Explicit lengths use the existing shared
 SqlTypeModifiers rule. A CHAR/VARCHAR change is an AlterColumn type change, requiring the existing
@@ -63,7 +79,7 @@ computes `CanonicalDocument` and `Hash` once, on first read (the schema is immut
 the first read costs only duplicate work). Dropping `Model` changed the document, so the format moved to
 `cohesion/database-schema/v2` at the time (a `v1` document no longer deserialized, and a database
 whose recorded state was `v1` was replanned from its catalog snapshot). The format is now
-`v8`: #1422 changes temporal default text; #1108 adds NCHAR normalization after #1437 adds Character identity after #1438 normalized an omitted decimal scale, which changes the canonical document, so every
+`v9`: #1723 adds ON UPDATE metadata; #1422 changes temporal default text; #1108 adds NCHAR normalization after #1437 adds Character identity after #1438 normalized an omitted decimal scale, which changes the canonical document, so every
 earlier document — an SDK artifact, an applied marker or a pending migration target — is refused
 by the format check rather than replanned. The root's `SchemaMigrationResult` moved here as `SqlSchemaMigrationResult`.
 The C# lambda `Function<…>` and `Trigger<…>` declarations, the `Extension` value, their compiled
@@ -174,7 +190,7 @@ The optional `defaultLiteral` member is omitted when null. Adding it changes the
 contract, so B2 introduced `cohesion/database-schema/v4` for every schema, with or without defaults.
 Earlier documents are refused; no v3 compatibility reader or upgrade is provided. Provisioning
 refuses their recorded documents before any hash comparison or catalog reconstruction. The SDK compiler
-and migration baseline writer share the current v8 format with runtime schema compilation.
+and migration baseline writer share the current v9 format with runtime schema compilation.
 `NULL` text remains part of a declaration's identity even
 though SQL gives it the same database behavior as an absent default. Adding or removing a
 default changes column equivalence, so the planner carries both definitions in `AlterColumn`
@@ -293,7 +309,7 @@ keeps runtime provisioning and SDK migration rendering on the same default. Name
 and their SQL ownership are catalog metadata and add no members to the compiled document.
 
 SqlDatabaseBuilder.Script belongs to the database declaration after typed apply. SqlCompiledSchema
-uses v8 and typed defaults remain literal-only. Script history has its own ordered-set digest
+uses v9 and typed defaults remain literal-only. Script history has its own ordered-set digest
 and catalog-generation marker, so unchanged reconciliation hashes nothing. Script-created tables
 and indexes are excluded from typed snapshot reconstruction; deleting script code undoes nothing.
 See Database.Sql's E4 section for recovery and the inline-execution/SDK owner-review decisions.
@@ -326,7 +342,7 @@ The shared `NormalizeScale` rule also serves typed builders, the validator, SQL 
 provisioning and SDK extraction. An omitted scale and explicit zero therefore have the same
 canonical document and hash; a bare decimal keeps both fields null.
 
-The current format is `cohesion/database-schema/v8`, shared with Sdk.Database. Although the JSON
+The current format is `cohesion/database-schema/v9`, shared with Sdk.Database. Although the JSON
 members are unchanged, Character identity distinguishes v6 from v5; decimal normalization
 already changed the identity of a v4 raw NUMERIC(p) column whose
 precision was set and scale was null. Deserialization checks the format before constructing any
@@ -365,7 +381,7 @@ An existing application must rebuild its compiled artifact; applying or verifyin
 artifact, applied marker or pending target is refused by InvalidDocument at schema.format
 before hashes are compared. Opening an earlier catalog is refused too: export with its writing
 engine, recreate, and reapply the rebuilt declaration. There is no upgrade or compatibility
-reader (#1152). Raw defaults and their typed equivalents share the v8 document and hash.
+reader (#1152). Raw defaults and their typed equivalents share the v9 document and hash.
 
 ## Sql diagnostic conventions (#1470)
 
@@ -386,7 +402,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v9`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated
@@ -399,7 +415,7 @@ format with the current culture. Successful type validation adds no resource loo
 Assembly-local Defaults/Types resource bindings live under Internal while preserving their
 linked owning namespaces. SqlSchemaMigrationResult lives in ValueObjects with the same public
 namespace, positional properties and construction. Canonical documents, hashes and format
-cohesion/database-schema/v8 are unchanged.
+cohesion/database-schema/v9 are unchanged.
 
 ## Debugger inspection
 
