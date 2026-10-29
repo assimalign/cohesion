@@ -193,46 +193,48 @@ internal sealed partial class DocumentPlanner
         return logical;
     }
 
-    private static void ValidateMetadata(OqlExpression expression, string? alias, bool storedSource)
+    private static void ValidateMetadata(OqlExpression expression, string? alias, bool storedSource, IReadOnlySet<string>? outerNames = null)
     {
         switch (expression)
         {
             case OqlComprehensionExpression comprehension:
-                ValidateMetadata(comprehension.Collection, alias, storedSource);
-                ValidateMetadata(comprehension.Projection, comprehension.Variable == alias ? null : alias, storedSource);
+                ValidateMetadata(comprehension.Collection, alias, storedSource, outerNames);
+                ValidateMetadata(comprehension.Projection, comprehension.Variable == alias ? null : alias, storedSource, outerNames);
                 if (comprehension.Predicate is not null)
-                { ValidateMetadata(comprehension.Predicate, comprehension.Variable == alias ? null : alias, storedSource); }
+                { ValidateMetadata(comprehension.Predicate, comprehension.Variable == alias ? null : alias, storedSource, outerNames); }
                 break;
             case OqlQuantifiedExpression quantified:
-                ValidateMetadata(quantified.Collection, alias, storedSource);
-                ValidateMetadata(quantified.Predicate, quantified.Variable == alias ? null : alias, storedSource);
+                ValidateMetadata(quantified.Collection, alias, storedSource, outerNames);
+                ValidateMetadata(quantified.Predicate, quantified.Variable == alias ? null : alias, storedSource, outerNames);
                 break;
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
-                foreach (var child in PredicateChildren(expression)) { ValidateMetadata(child, alias, storedSource); }
+                foreach (var child in PredicateChildren(expression)) { ValidateMetadata(child, alias, storedSource, outerNames); }
                 break;
             case OqlMetaExpression meta:
-                if (!storedSource || meta.Member is not ("id" or "version") || meta.Arguments.Count > 1 ||
+                bool captured = meta.Arguments.Count == 1 && meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } capturedSource &&
+                    capturedSource.Segments[0].Name is string capturedName && outerNames?.Contains(capturedName) == true;
+                if (meta.Member is not ("id" or "version") || meta.Arguments.Count > 1 || !captured && (!storedSource ||
                     meta.Arguments.Count == 1 && (alias is null || meta.Arguments[0] is not OqlPathExpression { Segments.Count: 1 } path ||
-                        path.Segments[0].Name != alias))
+                        path.Segments[0].Name != alias)))
                 {
                     throw new DocumentPlanningException("CD05001", ErrorMessages.MetaContextInvalid, meta.Location);
                 }
                 break;
             case OqlBinaryExpression binary:
-                ValidateMetadata(binary.Left, alias, storedSource);
-                ValidateMetadata(binary.Right, alias, storedSource);
+                ValidateMetadata(binary.Left, alias, storedSource, outerNames);
+                ValidateMetadata(binary.Right, alias, storedSource, outerNames);
                 break;
             case OqlUnaryExpression unary:
-                ValidateMetadata(unary.Operand, alias, storedSource);
+                ValidateMetadata(unary.Operand, alias, storedSource, outerNames);
                 break;
             case OqlCallExpression call:
-                foreach (var argument in call.Arguments) { ValidateMetadata(argument, alias, storedSource); }
+                foreach (var argument in call.Arguments) { ValidateMetadata(argument, alias, storedSource, outerNames); }
                 break;
             case OqlArrayExpression array:
-                foreach (var element in array.Elements) { ValidateMetadata(element, alias, storedSource); }
+                foreach (var element in array.Elements) { ValidateMetadata(element, alias, storedSource, outerNames); }
                 break;
             case OqlObjectExpression obj:
-                foreach (var member in obj.Members) { ValidateMetadata(member.Value, alias, storedSource); }
+                foreach (var member in obj.Members) { ValidateMetadata(member.Value, alias, storedSource, outerNames); }
                 break;
         }
     }

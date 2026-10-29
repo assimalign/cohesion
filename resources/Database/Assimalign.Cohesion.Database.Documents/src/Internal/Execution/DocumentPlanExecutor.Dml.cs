@@ -119,7 +119,7 @@ internal static partial class DocumentPlanExecutor
         var keys = new HashSet<string>(StringComparer.Ordinal);
         if (select is { } sourcePlan)
         {
-            await using var result = (DatabaseResultSet)(nested is not null ? await ExecuteNestedQueryAsync(database, operation, sourcePlan.Source, parameters, cancellationToken, nested).ConfigureAwait(false) : sourcePlan.Source switch
+            await using var result = (DatabaseResultSet)(nested is not null ? await ExecuteNestedQueryAsync(database, operation, sourcePlan.Source, parameters, cancellationToken, nested, verb).ConfigureAwait(false) : sourcePlan.Source switch
             {
                 DocumentPlan source => await ExecuteSelectAsync(database, operation, source, parameters, cancellationToken, writeVerb: verb).ConfigureAwait(false),
                 DocumentSystemCollectionPlan source => ExecuteSystemCollection(database, operation, source, parameters, cancellationToken, writeVerb: verb),

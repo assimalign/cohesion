@@ -15,6 +15,28 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class DocumentDmlSubqueryTests
 {
+    [Fact(DisplayName = "Cohesion Test [Documents] - DML subqueries: INSERT SELECT keeps the storage constructor depth diagnostic")]
+    public async Task ExecuteAsync_WriteConstructorDepth_ShouldMatchSynchronousFailureAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("write-depth-parity", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await DocumentSubqueryTests.SeedAsync(session);
+        await session.CreateCollectionAsync("target", CancellationToken.None);
+        string? expected = null;
+        // Act / Assert
+        foreach (string extra in new[] { "", " AND EXISTS (SELECT RAW 1 FROM items)" })
+        {
+            var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
+                "INSERT INTO target (KEY k, VALUE v) SELECT 'x' AS k, {a:@deep} AS v FROM items WHERE n = 1" + extra,
+                DocumentSubqueryRegressionTests.DeepParameters(), CancellationToken.None));
+            expected ??= error.Diagnostics.Single().Code;
+            error.Diagnostics.Single().Code.ShouldBe(expected);
+        }
+        (await DocumentSubqueryTests.RowsAsync(session, "SELECT * FROM target")).ShouldBeEmpty();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - DML subqueries: pending VALUES owns its charges until staging ends")]
     public async Task ExecuteAsync_ValuesOwnership_ShouldReleaseExactlyOnceAsync()
     {
@@ -57,6 +79,7 @@ public sealed class DocumentDmlSubqueryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Subqueries: mutation parity includes predicates values sources and RETURNING")]
+    [InlineData("UPDATE items d SET n = n RETURNING [d.n] AS a", "UPDATE items d SET n = n RETURNING (SELECT RAW d.n FROM [1] AS s) AS a")]
     [InlineData("UPDATE items d SET n = n + 10 WHERE n > 1 RETURNING n", "UPDATE items d SET n = (FIRST v FOR v IN (SELECT RAW d.n + 10 FROM [1] AS s) END) WHERE EXISTS (SELECT RAW s.n FROM items s WHERE s.n = d.n AND s.n > 1) RETURNING n")]
     [InlineData("DELETE FROM items WHERE n = 2 RETURNING n", "DELETE FROM items d WHERE d.n IN (SELECT RAW s.n FROM items s WHERE s.n = 2) RETURNING n")]
     [InlineData("INSERT INTO target (KEY, VALUE) VALUES ('x', {a:[1]}) RETURNING a", "INSERT INTO target (KEY, VALUE) VALUES ('x', {a:(SELECT RAW n FROM items WHERE n = 1)}) RETURNING a")]
@@ -112,10 +135,14 @@ public sealed class DocumentDmlSubqueryTests
         await session.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('d', {n:4})", cancellationToken: CancellationToken.None);
         // Act
         var rows = await DocumentSubqueryTests.RowsAsync(session,
-            "UPDATE items SET n = n + 10 RETURNING n, (SELECT RAW s.n FROM items s ORDER BY s.n DESC LIMIT 1) AS old");
+            "UPDATE items SET n = n + 10 RETURNING n, (SELECT RAW s.n FROM items s ORDER BY s.n DESC LIMIT 1) AS old, META().version AS version, (SELECT RAW META(items).version FROM [1] AS s) AS nested_version");
         // Assert
         rows.Count.ShouldBe(4);
-        foreach (var row in rows) { ((JsonElement)row.GetValue(1)!).GetRawText().ShouldBe("[4]"); }
+        foreach (var row in rows)
+        {
+            ((JsonElement)row.GetValue(1)!).GetRawText().ShouldBe("[4]");
+            ((JsonElement)row.GetValue(3)!)[0].GetDecimal().ShouldBe((decimal)row.GetValue(2)!);
+        }
         await transaction.RollbackAsync(CancellationToken.None);
         (await DocumentSubqueryTests.RowsAsync(session, "SELECT n FROM items")).Select(row => row.GetValue(0)).ShouldBe(new object?[] { 1m, 2m, 3m });
     }

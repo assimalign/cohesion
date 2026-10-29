@@ -117,6 +117,8 @@ public sealed class OqlExecutionConformanceTests
             [OqlClauses.Subquery] =
             [
                 new("SELECT (SELECT RAW d.name FROM [1] AS s) AS names FROM items d WHERE name = 'alpha'", [[Json("[\"alpha\"]")]]),
+                new("SELECT (SELECT RAW META(d).id FROM [1] AS s) AS ids FROM items d WHERE name = 'alpha'", [[Json("[\"a\"]")]]),
+                new("SELECT (SELECT d.name AS n, COUNT(*) AS c FROM [1,2] AS s HAVING d.name = 'alpha') AS a FROM items d WHERE name = 'alpha'", [[Json("[{\"n\":\"alpha\",\"c\":2}]")]]),
                 new("SELECT (SELECT RAW v FROM d.tags AS v) AS tags FROM items d WHERE name = 'alpha'", [[Json("[\"blue\"]")]]),
                 new("UPDATE items d SET names = (SELECT RAW d.name FROM [1] AS s) WHERE EXISTS (SELECT RAW s.name FROM items s WHERE s.name = d.name)",
                     [[Json("[\"alpha\"]")]], VerificationStatement: "SELECT names FROM items WHERE name = 'alpha'", ExpectedAffectedCount: 4),

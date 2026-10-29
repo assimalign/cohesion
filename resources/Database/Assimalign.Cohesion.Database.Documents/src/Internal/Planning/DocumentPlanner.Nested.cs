@@ -190,7 +190,7 @@ internal sealed partial class DocumentPlanner
                         select.Limit, select.Offset, select.Location, select.Unnest, select.GroupAliases, select.GroupAs,
                         new OqlPathExpression([new OqlPathSegment(select.Collection, null)], select.Location));
                 }
-                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(select, queries), outerNames.Count == 0 && CanCache(select), owner, outerNames));
+                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(select, queries, outerNames), outerNames.Count == 0 && CanCache(select), owner, outerNames));
                 return;
             }
             if (node is OqlComprehensionExpression comprehension)

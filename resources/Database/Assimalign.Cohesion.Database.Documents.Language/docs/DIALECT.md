@@ -130,7 +130,12 @@ next execution, including a reused request after CREATE/DROP INDEX.
 
 Correlated subqueries capture outer FROM/UNNEST, group and comprehension bindings, and outer
 projection aliases in ORDER BY. Inner declarations shadow outer names by ordinal spelling.
-An unqualified field binds to the inner source. A nested `FROM d.items AS i`, or `FROM d AS i`
+An unqualified field binds to the inner source.
+Outer captures are constant within each invocation of an inner grouped query, including its
+projection, HAVING and ORDER BY; local fields still require the normal grouping rules.
+META(outer_alias).id/version follows a captured stored source's identity. Captured expression,
+derived and local-value bindings have no stored identity and return NULL for metadata.
+A nested `FROM d.items AS i`, or `FROM d AS i`
 where d is an explicit outer alias, iterates that outer value per row. An implicit collection name
 in a bare FROM continues to name the collection. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
 Qualified stars (`d.*`) retain their existing CK00001 refusal.

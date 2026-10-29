@@ -20,6 +20,32 @@ public sealed class DocumentCorrelatedSubqueryTests
 
     public DocumentCorrelatedSubqueryTests(ITestOutputHelper output) { _output = output; }
 
+    [Fact(DisplayName = "Cohesion Test [Documents] - Correlation: outer stored metadata survives grouping and lexical shadowing")]
+    public async Task ExecuteAsync_CapturedMetadata_ShouldPreserveStoredIdentityAsync()
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("metadata-correlation", new());
+        var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await DocumentSubqueryTests.SeedAsync(session);
+        // Act
+        var rows = await DocumentSubqueryTests.RowsAsync(session,
+            "SELECT META(d).id AS id, META(d).version AS v, (SELECT RAW [META(d).id,META(d).version] FROM [1] AS s) AS m, (SELECT META(d).id AS id, COUNT(*) AS c FROM [1,2] AS s) AS g FROM items d");
+        // Assert
+        foreach (var row in rows)
+        {
+            var metadata = (JsonElement)row.GetValue(2)!;
+            metadata[0][0].GetString().ShouldBe(row.GetString(0));
+            metadata[0][1].GetDecimal().ShouldBe((decimal)row.GetValue(1)!);
+            ((JsonElement)row.GetValue(3)!)[0].GetProperty("id").GetString().ShouldBe(row.GetString(0));
+        }
+        var source = await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW (SELECT RAW v FROM [META(d).id] AS v) FROM items d");
+        source.Select(row => ((JsonElement)row.GetValue(0)!).GetRawText()).ShouldBe(new[] { "[\"a\"]", "[\"b\"]", "[\"c\"]" });
+        var shadowed = await DocumentSubqueryTests.RowsAsync(session,
+            "SELECT RAW ARRAY (SELECT RAW META(d).id FROM [1] AS s) FOR d IN [{}] END FROM items d");
+        shadowed.All(row => ((JsonElement)row.GetValue(0)!).GetRawText() == "[[null]]").ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Documents] - Subquery work budget: positive configuration is frozen at engine creation")]
     public async Task Create_WorkBudget_ShouldValidateAndSnapshotOptionAsync()
     {
@@ -62,6 +88,8 @@ public sealed class DocumentCorrelatedSubqueryTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Correlation: FROM and expression scopes preserve local shadowing and outer values")]
+    [InlineData("SELECT RAW (SELECT d.n AS n, COUNT(*) AS c FROM [1,2] AS s HAVING d.n > 0 ORDER BY d.n) FROM [{n:7}] AS d", "[{\"n\":7,\"c\":2}]")]
+    [InlineData("SELECT RAW (SELECT d.n AS n, COUNT(*) AS c FROM [] AS s HAVING d.n > 0) FROM [{n:7}] AS d", "[{\"n\":7,\"c\":0}]")]
     [InlineData("SELECT RAW (SELECT RAW i FROM d.tags AS i) FROM [{n:7,tags:[1,2]}] AS d", "[1,2]")]
     [InlineData("SELECT RAW (SELECT RAW i FROM d.tags) FROM [{tags:[1,2]}] AS d", "[null,null]")]
     [InlineData("SELECT RAW (SELECT RAW tags FROM d.tags) FROM [{tags:[1,2]}] AS d", "[1,2]")]
@@ -69,6 +97,7 @@ public sealed class DocumentCorrelatedSubqueryTests
     [InlineData("SELECT RAW (SELECT RAW d.n FROM d) FROM [{n:7}] AS d", "[7]")]
     [InlineData("SELECT RAW (SELECT RAW n FROM [{n:2}] AS s) FROM [{n:7}] AS d", "[2]")]
     [InlineData("SELECT RAW (SELECT RAW d.n FROM [{n:2}] AS d) FROM [{n:7}] AS d", "[2]")]
+    [InlineData("SELECT RAW (SELECT RAW (SELECT RAW d.n FROM d) FROM d) FROM [{n:7}] AS d", "[[7]]")]
     [InlineData("SELECT RAW (SELECT RAW x FROM [d.n] AS x) FROM [{n:7}] AS d", "[7]")]
     [InlineData("SELECT RAW (SELECT RAW x FROM (SELECT RAW d.n FROM [1] AS v) AS x) FROM [{n:7}] AS d", "[7]")]
     [InlineData("SELECT RAW (SELECT RAW u FROM [1] AS v) FROM [{tags:[7]}] AS d UNNEST d.tags AS u", "[7]")]
@@ -77,6 +106,7 @@ public sealed class DocumentCorrelatedSubqueryTests
     [InlineData("SELECT RAW (SELECT RAW v FROM d.tags AS v) FROM [{}] AS d", "[]")]
     [InlineData("SELECT RAW (SELECT RAW d.tags FROM [1] AS v) FROM [{}] AS d", "[null]")]
     [InlineData("SELECT RAW (SELECT * FROM [1] AS v) FROM [{n:7}] AS d", "[{\"v\":1}]")]
+    [InlineData("SELECT RAW (SELECT RAW META(d).id FROM [1] AS s) FROM [{n:7}] AS d", "[null]")]
     public async Task ExecuteAsync_CorrelatedScopes_ShouldPreserveExpectedArrayAsync(string query, string expected)
     {
         // Arrange
@@ -138,6 +168,7 @@ public sealed class DocumentCorrelatedSubqueryTests
             await using (var result = (DatabaseResultSet)await DocumentPlanExecutor.ExecuteAsync(database, operation, request.Statement, null, CancellationToken.None))
             { await foreach (var row in result.GetRowsAsync(CancellationToken.None)) { throw new InvalidOperationException("No row should survive NOT EXISTS."); } }
             session.LastQuerySubqueriesExecuted.ShouldBe(count);
+            session.LastQueryDocumentsRead.ShouldBe(count);
             last.ShouldBe(first);
             memory.Bytes.ShouldBe(0);
             _output.WriteLine($"Outer rows={count}; first/last retained peak={first}/{last} B; final={memory.Bytes} B.");

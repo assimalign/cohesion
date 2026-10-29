@@ -15,15 +15,15 @@ internal static partial class DocumentPlanExecutor
 {
     internal static ValueTask<DatabaseResult> ExecuteNestedQueryAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentStatementPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken,
-        DocumentNestedExecutionContext nested)
+        DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
         var logical = SourceLogical(plan);
         if (logical.Limit == 0) { return ValueTask.FromResult<DatabaseResult>(CreateResult(logical, [], cancellationToken)); }
         return plan switch
         {
-            DocumentFromPlan source => ExecuteFromAsync(database, operation, source, parameters, cancellationToken, nested),
-            DocumentPlan select => ExecuteNestedSelectAsync(database, operation, select, parameters, cancellationToken, null, nested),
-            DocumentSystemCollectionPlan system => ExecuteNestedSystemCollectionAsync(database, operation, system, parameters, cancellationToken, null, nested),
+            DocumentFromPlan source => ExecuteFromAsync(database, operation, source, parameters, cancellationToken, nested, writeVerb),
+            DocumentPlan select => ExecuteNestedSelectAsync(database, operation, select, parameters, cancellationToken, writeVerb, nested),
+            DocumentSystemCollectionPlan system => ExecuteNestedSystemCollectionAsync(database, operation, system, parameters, cancellationToken, writeVerb, nested),
             _ => throw new DocumentPlanningException("CD05001", ErrorMessages.PlanExecutorExecuteAsyncFailure),
         };
     }
@@ -270,6 +270,18 @@ internal static partial class DocumentPlanExecutor
                 foreach (var row in output)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    using var aliases = memory.Reserve();
+                    var previousBindings = nested.ProjectionBindings;
+                    var previousBase = nested.ProjectionBase;
+                    var projectionBindings = (DocumentVariableBinding?)null;
+                    for (int index = 0; index < query.Projections.Count; index++)
+                    {
+                        if (query.Projections[index].Alias is not string name) { continue; }
+                        aliases.Charge(64);
+                        projectionBindings = new DocumentVariableBinding(name, row.Values[index], projectionBindings);
+                    }
+                    nested.ProjectionBindings = projectionBindings;
+                    nested.ProjectionBase = row.Document.Bindings;
                     long before = memory.Bytes - nested.RetainedBytes;
                     try
                     {
@@ -278,7 +290,12 @@ internal static partial class DocumentPlanExecutor
                         { row.OrderKeys[index] = query.IsValue && logical.ProjectedOrdering[index] ? row.Values[0] :
                             await evaluator.EvaluateAsync(query.OrderBy[index].Expression, row.Document, row.Group, nested).ConfigureAwait(false); }
                     }
-                    finally { memory.Release(memory.Bytes - nested.RetainedBytes - before); }
+                    finally
+                    {
+                        nested.ProjectionBindings = previousBindings;
+                        nested.ProjectionBase = previousBase;
+                        memory.Release(memory.Bytes - nested.RetainedBytes - before);
+                    }
                     memory.Charge(32L + row.OrderKeys.Length * 16L);
                     orderBytes += 32L + row.OrderKeys.Length * 16L;
                     for (int index = 0; index < row.OrderKeys.Length; index++)
@@ -325,16 +342,6 @@ internal static partial class DocumentPlanExecutor
             if (query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression)
             { memory.Charge(document.RawContent.Length); bytes += document.RawContent.Length; }
             foreach (var value in values) { bytes += memory.Retain(value); }
-            if (query.OrderBy.Count > 0)
-            {
-                for (int index = 0; index < values.Length; index++)
-                {
-                    if (logical.Projections[index].Expression is OqlStarExpression) { continue; }
-                    memory.Charge(64);
-                    bytes += 64;
-                    document = document.Bind(logical.Projections[index].Name, values[index]);
-                }
-            }
             output.Add(new EvaluatedRow(values, document, group, output.Count) { RetainedBytes = bytes });
         }
     }

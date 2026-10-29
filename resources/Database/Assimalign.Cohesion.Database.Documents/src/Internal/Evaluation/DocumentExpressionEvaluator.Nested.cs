@@ -18,12 +18,12 @@ internal sealed partial class DocumentExpressionEvaluator
             nested.ConsumeWork(_cancellationToken);
             return expression switch
             {
-                OqlSubqueryExpression subquery => await nested.EvaluateAsync(subquery, CaptureBindings(document), _cancellationToken).ConfigureAwait(false),
+                OqlSubqueryExpression subquery => await nested.EvaluateAsync(subquery, CaptureBindings(document, nested.ProjectionBindings, nested.ProjectionBase), _cancellationToken).ConfigureAwait(false),
                 OqlLiteralExpression literal => Normalize(literal.Value),
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Star(document),
-                OqlMetaExpression meta => document.Id is null ? null : meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlMetaExpression meta => ReadMetadata(meta, document),
                 OqlArrayExpression or OqlObjectExpression => (await ConstructAsync(expression, document, group, nested).ConfigureAwait(false)),
                 OqlPathExpression path => ReadPath(path, document),
                 OqlUnaryExpression unary => Unary(unary.Operator, (await EvaluateAsync(unary.Operand, document, group, nested).ConfigureAwait(false))),

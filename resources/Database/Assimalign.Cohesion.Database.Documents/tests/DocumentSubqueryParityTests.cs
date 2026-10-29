@@ -77,6 +77,8 @@ public sealed class DocumentSubqueryParityTests
 
     public static IEnumerable<object[]> QueryPositions()
     {
+        yield return ["SELECT {n:-d.n} AS d FROM items d WHERE TRUE ORDER BY d.n", "SELECT {n:-d.n} AS d FROM items d WHERE EXISTS (SELECT RAW 1 FROM items) ORDER BY d.n", 1];
+        yield return ["SELECT n AS p FROM items ORDER BY [[-n]]", "SELECT n AS p FROM items ORDER BY ARRAY (SELECT RAW p FROM [1] AS s) FOR p IN [-n] END", 3];
         yield return ["SELECT [n] AS v FROM items d", "SELECT (SELECT RAW d.n FROM [1] AS s) AS v FROM items d", 3];
         yield return ["SELECT n FROM items d WHERE n IN [n]", "SELECT n FROM items d WHERE n IN (SELECT RAW d.n FROM [1] AS s)", 3];
         yield return ["SELECT n FROM items d ORDER BY [-n]", "SELECT n FROM items d ORDER BY (SELECT RAW -d.n FROM [1] AS s)", 3];

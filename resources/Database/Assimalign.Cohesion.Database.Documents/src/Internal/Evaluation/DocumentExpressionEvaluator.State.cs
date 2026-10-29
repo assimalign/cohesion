@@ -7,16 +7,30 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 
 internal sealed partial class DocumentExpressionEvaluator
 {
-    internal DocumentVariableBinding? CaptureBindings(DocumentEvaluationContext document)
+    internal DocumentVariableBinding? CaptureBindings(DocumentEvaluationContext document, DocumentVariableBinding? projections, DocumentVariableBinding? projectionBase)
     {
         var state = _state as NestedEvaluationState;
         var bindings = state?.Outer;
         if ((state?.SourceName ?? _alias) is string source)
-        { bindings = new DocumentVariableBinding(source, ReadJson(document.Content), bindings); }
+        { bindings = new DocumentVariableBinding(source, new DocumentEvaluationContext(document.Content, document.Id, document.Version), bindings); }
         var frames = new Stack<DocumentVariableBinding>();
-        for (var frame = document.Bindings; frame is not null; frame = frame.Parent) { frames.Push(frame); }
-        foreach (var frame in frames) { bindings = new DocumentVariableBinding(frame.Name, frame.Value, bindings); }
+        bool containsBase = projectionBase is null;
+        for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
+        { if (ReferenceEquals(frame, projectionBase)) { containsBase = true; break; } }
+        var boundary = containsBase ? projectionBase : null;
+        // Projection aliases outrank row bindings in ORDER BY. Expression-local
+        // comprehension/quantifier frames still outrank those projection aliases.
+        Append(boundary, null);
+        Append(projections, null);
+        Append(document.Bindings, boundary);
         return bindings;
+
+        void Append(DocumentVariableBinding? first, DocumentVariableBinding? stop)
+        {
+            frames.Clear();
+            for (var frame = first; frame is not null && !ReferenceEquals(frame, stop); frame = frame.Parent) { frames.Push(frame); }
+            foreach (var frame in frames) { bindings = new DocumentVariableBinding(frame.Name, frame.Value, bindings); }
+        }
     }
 
     private sealed class NestedEvaluationState : EvaluationState

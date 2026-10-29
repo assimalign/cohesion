@@ -27,6 +27,8 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
 
     internal long RetainedBytes => _retained.Bytes;
     internal DocumentVariableBinding? Bindings { get; private set; }
+    internal DocumentVariableBinding? ProjectionBindings { get; set; }
+    internal DocumentVariableBinding? ProjectionBase { get; set; }
 
     internal void ConsumeWork(CancellationToken cancellationToken)
     {
@@ -64,15 +66,21 @@ internal sealed class DocumentNestedExecutionContext : IDisposable
         var memory = _operation.GetStatementMemory(cancellationToken);
         long before = memory.Bytes - RetainedBytes;
         var previous = Bindings;
+        var previousProjections = ProjectionBindings;
+        var previousProjectionBase = ProjectionBase;
         JsonElement array;
         try
         {
             Bindings = outer;
+            ProjectionBindings = null;
+            ProjectionBase = null;
             array = await MaterializeAsync(expression, plan, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             Bindings = previous;
+            ProjectionBindings = previousProjections;
+            ProjectionBase = previousProjectionBase;
             memory.Release(memory.Bytes - RetainedBytes - before);
         }
         if (plan.CacheForStatement)

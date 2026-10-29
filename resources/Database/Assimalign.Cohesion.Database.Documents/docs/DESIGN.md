@@ -603,6 +603,13 @@ OqlSubqueryExpression to DocumentNestedQueryPlan. Planning binds every nested SE
 with its own grouping, metadata and lexical scope. The scoped visitor records free outer names, preserves inner shadowing and propagates transitive captures to deeper queries; only deterministic queries with no outer dependencies cache.
 There is no cross-statement plan cache in Documents: a reused request rebuilds root and nested
 plans against the current operation snapshot, so CREATE/DROP INDEX cannot retain stale access.
+Captured outer paths are constant within one inner grouping invocation; grouping validation
+permits them in projection, HAVING and ordering while preserving local grouping restrictions.
+ORDER BY exports charged projection-alias frames only to nested scopes, preserving ordinary
+path evaluation. Comprehension/quantifier frames inside the ordering expression shadow those aliases.
+Captured source frames carry their existing row content and identity; path evaluation exposes only
+the content, while META resolves stored id/version. Expression/derived rows and scalar bindings
+carry no identity, preserving their NULL metadata behavior.
 The wrapper exists only for statements containing subqueries; ordinary plan records stay unchanged.
 
 DocumentNestedExecutionContext borrows the statement's DocumentOperation and database, parameter
@@ -686,6 +693,8 @@ server supplies the statement span and retains a reusable session after a termin
 Nested array/object materialization retains the same depth guard and located subquery failure.
 Release measurements preserve the baseline allocations for ordinary plans, native queries and
 selective scans; the statement wrapper adds no ordinary-plan fields.
+Constant binding uses explicit child loops, avoiding a captured-scope allocation whose escape
+behavior could otherwise change after mixed correlated workloads. Allocation guards keep their existing limits.
 
 ### Derived and expression sources (#1731, OQ-Q2)
 

@@ -14,10 +14,10 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal static partial class DocumentPlanExecutor
 {
     private static DocumentExpressionEvaluator SourceEvaluator(DocumentDatabase database, DocumentOperation operation,
-        DocumentLogicalPlan logical, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext nested)
+        DocumentLogicalPlan logical, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
         var query = logical.Query;
-        return new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart,
+        return new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb: writeVerb, transactionStart: operation.TransactionStart,
             starSourceName: query.Source is not null || query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null,
             functions: database.Engine.Functions, databaseName: database.Name, operation: operation, nested: nested, sourceName: query.Alias ?? query.Collection);
     }
@@ -35,10 +35,10 @@ internal static partial class DocumentPlanExecutor
 
     private static async ValueTask<DatabaseResult> ExecuteFromAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentFromPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken,
-        DocumentNestedExecutionContext nested)
+        DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
         var logical = plan.Logical;
-        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken, nested);
+        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken, nested, writeVerb);
         var memory = evaluator.Memory;
         if (!Streams(logical))
         {
@@ -159,8 +159,8 @@ internal static partial class DocumentPlanExecutor
                 if (value is JsonElement { ValueKind: JsonValueKind.Array } array && array.GetArrayLength() > 0)
                 {
                     // Path views borrow the current input or an active parent frame;
-                    // nested arrays have the Q1 statement owner. Other expressions
-                    // may create independent arrays that this cursor must retain.
+                    // other expressions, including uncached subqueries, produce
+                    // independent arrays that this cursor must retain and charge.
                     if (binding.Collection is not OqlPathExpression) { retained.Retain(value); }
                     var items = array.EnumerateArray();
                     items.MoveNext();
