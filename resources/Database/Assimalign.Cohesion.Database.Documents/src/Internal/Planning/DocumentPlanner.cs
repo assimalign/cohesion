@@ -45,7 +45,14 @@ internal sealed partial class DocumentPlanner
         _estimateSinglePath = estimateSinglePath;
     }
 
-    internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
+    internal DocumentStatementPlan Plan(OqlExpression expression)
+    {
+        if (HasSubquery(expression, _cancellationToken)) { return PlanNested(expression); }
+        _cancellationToken.ThrowIfCancellationRequested();
+        return PlanCore(expression);
+    }
+
+    private DocumentStatementPlan PlanCore(OqlExpression expression) => expression switch
     {
         OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName),
         OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName),
@@ -570,6 +577,7 @@ internal sealed partial class DocumentPlanner
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate, functions: functions); }
                 return;
+            case OqlSubqueryExpression:
             case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression or OqlMetaExpression:
                 return;
             case OqlArrayExpression array:
@@ -580,11 +588,13 @@ internal sealed partial class DocumentPlanner
                 return;
             case OqlStarExpression when allowStar:
                 return;
-            case OqlBinaryExpression binary when binary.Operator is "AND" or "OR" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%":
+            case OqlBinaryExpression binary when binary.Operator is "IS DISTINCT FROM" or "IS NOT DISTINCT FROM" or "AND" or "OR" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%":
                 Validate(binary.Left, allowAggregate, functions: functions);
                 Validate(binary.Right, allowAggregate, functions: functions);
                 return;
-            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "IS NULL" or "IS NOT NULL" or "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
+            case OqlUnaryExpression { Operator: ".*" }:
+                throw new DocumentPlanningException("CK00001", ErrorMessages.QualifiedStarDeferred, expression.Location);
+            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "EXISTS" or "IS NULL" or "IS NOT NULL" or "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
                 Validate(unary.Operand, allowAggregate, functions: functions);
                 return;
             case OqlCallExpression call:
@@ -628,6 +638,7 @@ internal sealed partial class DocumentPlanner
     private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query, IReadOnlySet<string>? variables,
         DocumentBindingScopes scopes, DocumentFunctionCatalog functions, DocumentBindingScope? bound = null)
     {
+        if (expression is OqlSubqueryExpression) { return; }
         if (expression is OqlPathExpression { Segments.Count: > 0 } path &&
             DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null) { return; }
         // PostgreSQL parse_agg.c:1439-1452 adjusts grouping expressions to the current
@@ -688,6 +699,7 @@ internal sealed partial class DocumentPlanner
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables,
         DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0) => (left, right) switch
     {
+        (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(a.Query, b.Query),
         (OqlComprehensionExpression a, OqlComprehensionExpression b) => a.IsFirst == b.IsFirst && a.Variable == b.Variable &&
             (a.Predicate is null) == (b.Predicate is null) &&
             EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&

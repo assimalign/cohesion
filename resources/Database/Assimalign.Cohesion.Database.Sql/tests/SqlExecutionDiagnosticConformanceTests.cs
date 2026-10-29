@@ -19,6 +19,13 @@ public sealed class SqlExecutionDiagnosticConformanceTests
 {
     public static IEnumerable<object[]> Cases()
     {
+        foreach (string expression in new[] { "CAST('abc' AS INT)", "ABS(-9223372036854775808)" })
+        {
+            string code = expression.StartsWith("CAST", StringComparison.Ordinal) ? "CS02022" : "CS02002";
+            const string setup = "CREATE TABLE target(id INT GENERATED ALWAYS AS IDENTITY,k INT)";
+            yield return [setup, "INSERT INTO target OVERRIDING USER VALUE VALUES(" + expression + ",1)", code];
+            yield return [setup, "MERGE INTO target USING (SELECT 1 AS k) s ON target.k=s.k WHEN NOT MATCHED THEN INSERT(id,k) OVERRIDING USER VALUE VALUES(" + expression + ",1)", code];
+        }
         yield return ["", "SELECT (SELECT id FROM t)", "CS02046"];
         yield return ["", "INSERT INTO t VALUES (3, 'bad')", "CS02022"];
         yield return ["CREATE TABLE target (v DATE)", "INSERT INTO target VALUES ('bad')", "CS02047"];

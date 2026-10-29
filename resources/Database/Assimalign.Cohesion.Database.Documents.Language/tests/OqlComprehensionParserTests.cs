@@ -79,7 +79,6 @@ public sealed class OqlComprehensionParserTests
     [InlineData("SELECT ARRAY x FOR x IN [1]«,» y IN [2] END FROM c", "CK00001")]
     [InlineData("SELECT FIRST x FOR i«:»x IN [1] END FROM c", "CK00001")]
     [InlineData("SELECT ARRAY x FOR x «WITHIN» [1] END FROM c", "CK00001")]
-    [InlineData("SELECT ARRAY («SELECT» x FROM c) FOR x IN [1] END FROM c", "CK00001")]
     public void Parse_InvalidComprehension_ShouldLocateFailure(string marked, string code)
     {
         // Arrange

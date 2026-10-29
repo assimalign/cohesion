@@ -138,11 +138,23 @@ internal sealed partial class SqlSchemaProvisioner
                     tables.Add(referenced.ObjectId);
                 }
             }
+            // Retained owned-sequence X grants precede all retained table X grants.
+            // Worker DDL reuses this owner; catalog/apply/storage latches remain innermost.
+            var owned = _catalog.Sequences.Where(sequence => tables.Contains(sequence.OwnerTableId)).OrderBy(sequence => sequence.ObjectId).ToArray();
+            foreach (var sequence in owned)
+            {
+                await _database.Coordinator.LockManager.AcquireAsync(locks.Sequence,
+                    LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                if (locks.State != TransactionState.Active) { throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
+            }
             foreach (ulong table in tables)
             {
                 await _database.Coordinator.LockManager.AcquireAsync(locks.Sequence, LockResource.Object(table),
                     LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
             }
+            if (locks.State != TransactionState.Active) { throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
+            if (_catalog.Sequences.Any(sequence => tables.Contains(sequence.OwnerTableId) && !owned.Any(previous => previous.ObjectId == sequence.ObjectId)))
+            { throw new SqlCatalogException("CS04067", ErrorMessages.SequenceChanged); }
             var migration = new SqlDeferredMigration(this, schema, steps, intent, locks, tables);
             PublishProgress(intent.Steps[0], intent.StepCount, running: false);
             Volatile.Write(ref _deferred, migration);

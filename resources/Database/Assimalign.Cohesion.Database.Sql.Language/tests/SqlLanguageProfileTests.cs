@@ -29,6 +29,10 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.UpdateFrom, "UPDATE t SET id=s.id FROM s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.DeleteUsing, "DELETE FROM t USING s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
+    [InlineData(SqlClauses.AlterIdentity, "ALTER TABLE t ALTER id RESTART;")]
+    [InlineData(SqlClauses.Serial, "CREATE TABLE t(id SERIAL);")]
+    [InlineData(SqlClauses.Overriding, "INSERT INTO t OVERRIDING USER VALUE VALUES(9);")]
+    [InlineData(SqlClauses.OwnedBy, "CREATE SEQUENCE s OWNED BY t.id;")]
     [InlineData(SqlClauses.CreateSequence, "CREATE SEQUENCE s;")]
     [InlineData(SqlClauses.AlterSequence, "ALTER SEQUENCE s RESTART;")]
     [InlineData(SqlClauses.DropSequence, "DROP SEQUENCE s;")]
@@ -51,6 +55,9 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Rollup, "SELECT a FROM t GROUP BY ROLLUP(a);")]
     [InlineData(SqlClauses.Cube, "SELECT a FROM t GROUP BY CUBE(a);")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
+    [InlineData(SqlClauses.Window, "SELECT RANK() OVER w WINDOW w AS();")]
+    [InlineData(SqlClauses.Over, "SELECT RANK() OVER();")]
+    [InlineData(SqlClauses.Partition, "SELECT RANK() OVER(PARTITION BY a) FROM t;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.OrderBy, "SELECT * FROM t ORDER BY id;")]
     [InlineData(SqlClauses.Fetch, "SELECT * FROM t FETCH NEXT 1 ROWS ONLY;")]
@@ -116,9 +123,6 @@ public class SqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(SqlClauses.Window)]
-    [InlineData(SqlClauses.Over)]
-    [InlineData(SqlClauses.Partition)]
     [InlineData(SqlClauses.All)]
     [InlineData(SqlClauses.Natural)]
     public void Profile_UnsupportedClause_IsNotDeclared(string clause)
@@ -127,9 +131,6 @@ public class SqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(SqlClauses.Window, "SELECT * FROM t WINDOW w AS ();")]
-    [InlineData(SqlClauses.Over, "SELECT ROW_NUMBER() OVER () FROM t;")]
-    [InlineData(SqlClauses.Partition, "SELECT ROW_NUMBER() PARTITION BY id FROM t;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
     [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
     public void Parse_UnsupportedClause_EmitsModelSpecificDiagnostic(string clause, string sql)
@@ -160,7 +161,7 @@ public class SqlLanguageProfileTests
         var options = new QueryParserOptions();
         options.Analyzers.Add(observer);
 
-        _ = new SqlQueryParser(options).Parse("SELECT * FROM t WINDOW w AS ();");
+        _ = new SqlQueryParser(options).Parse("SELECT SUM(id) OVER () FROM t;");
 
         observer.SawUnsupportedClause.ShouldBeTrue();
     }

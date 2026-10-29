@@ -33,15 +33,27 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// </remarks>
 public static partial class SqlExpressionRenderer
 {
-    /// <summary>Renders an ALTER COLUMN TYPE statement as canonical SQL without a terminator.</summary>
+    /// <summary>Renders an ALTER COLUMN TYPE or identity operation as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
-    /// <returns>The target type, optional collation and original-row conversion.</returns>
+    /// <returns>The canonical type alteration or identity operation.</returns>
     /// <exception cref="ArgumentNullException">The query is null.</exception>
-    /// <exception cref="NotSupportedException">The action is not ALTER COLUMN TYPE.</exception>
+    /// <exception cref="NotSupportedException">The action is not a type or identity alteration.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
     public static string Render(SqlAlterTableExpression query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        if (query.Action is SqlAlterIdentityAction identity)
+        {
+            return "ALTER TABLE " + SequenceName(query.Table) + " ALTER COLUMN " + Identifier(identity.ColumnName) + " " +
+                (identity.Operation switch
+                {
+                    "ADD" => "ADD GENERATED " + (identity.Identity!.IsAlways ? "ALWAYS" : "BY DEFAULT") + " AS IDENTITY" +
+                        (identity.Identity.Options.Count == 0 ? "" : " (" + SequenceOptions(identity.Identity.Options).TrimStart() + ")"),
+                    "DROP" => "DROP IDENTITY" + (identity.IfExists ? " IF EXISTS" : ""),
+                    "SET GENERATED" => "SET GENERATED " + (identity.IsAlways == true ? "ALWAYS" : "BY DEFAULT"),
+                    _ => (identity.IsAlways is null ? "" : "SET GENERATED " + (identity.IsAlways == true ? "ALWAYS " : "BY DEFAULT ")) + string.Join(" ", identity.Options.Select(option => (option.Name == "RESTART" ? "" : "SET ") + SequenceOptions([option]).TrimStart())),
+                });
+        }
         if (query.Action is not SqlAlterColumnTypeAction change)
         {
             throw new NotSupportedException(ErrorMessages.AlterTypeRenderingRequired);
@@ -51,6 +63,9 @@ public static partial class SqlExpressionRenderer
             " TYPE " + AlterTypeTarget(change.Column) + (change.Column.CollationName is { } collation ? " COLLATE " + Identifier(collation) : "") +
             (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
     }
+
+    private static void AppendOverride(StringBuilder builder, SqlIdentityOverride value)
+    { if (value != SqlIdentityOverride.None) { builder.Append(value == SqlIdentityOverride.User ? " OVERRIDING USER VALUE" : " OVERRIDING SYSTEM VALUE"); } }
 
     private static string AlterTypeTarget(SqlColumnDefinition column)
     {
@@ -175,6 +190,7 @@ public static partial class SqlExpressionRenderer
         builder.Append("INSERT INTO ").Append(Table(query.Table));
         if (query.Columns is { } columns)
         { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+        AppendOverride(builder, query.Overriding);
         if (query.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
         else if (query.SelectSource is { } source) { builder.Append(' ').Append(Select(source)); }
         else
@@ -255,6 +271,7 @@ public static partial class SqlExpressionRenderer
                 case SqlMergeAction.Insert:
                     builder.Append("INSERT");
                     if (action.Columns is { } columns) { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+                    AppendOverride(builder, action.Overriding);
                     if (action.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
                     else { builder.Append(" VALUES (").Append(string.Join(", ", action.Values!.Select(Expression))).Append(')'); }
                     break;
@@ -351,6 +368,8 @@ public static partial class SqlExpressionRenderer
             => "EXTRACT(" + field.Value + " FROM " + Expression(function.Arguments[1]) + ")",
         SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null
             => "POSITION(" + Operand(function.Arguments[0], concatLevel) + " IN " + Expression(function.Arguments[1]) + ")",
+        SqlWindowExpression window => AggregateCall(window.Function, window: true) + " OVER " +
+            (window.WindowName is not null ? Identifier(window.WindowName) : "(" + WindowSpecification(window.Specification!) + ")"),
         SqlFunctionCallExpression function => AggregateCall(function),
         SqlCaseExpression caseExpression => Case(caseExpression),
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
@@ -359,10 +378,17 @@ public static partial class SqlExpressionRenderer
         _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlExpressionRendererNodeNotSupported, expression.GetType().Name)),
     };
 
+    private static string WindowSpecification(SqlWindowSpecification specification) => string.Join(" ", new[]
+    {
+        specification.ExistingWindow is null ? "" : Identifier(specification.ExistingWindow),
+        specification.PartitionBy.Count == 0 ? "" : "PARTITION BY " + List(specification.PartitionBy),
+        specification.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", specification.OrderBy.Select(Ordering)),
+    }.Where(part => part.Length > 0));
+
     private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
         (key.NullPlacement switch { SqlNullPlacement.First => " NULLS FIRST", SqlNullPlacement.Last => " NULLS LAST", _ => "" });
 
-    private static string AggregateCall(SqlFunctionCallExpression call)
+    private static string AggregateCall(SqlFunctionCallExpression call, bool window = false)
     {
         string quantifier = call.Quantifier switch { SqlSetQuantifier.Distinct => "DISTINCT ", SqlSetQuantifier.All => "ALL ", _ => "" };
         string ordering = call.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", call.OrderBy.Select(key =>
@@ -373,7 +399,7 @@ public static partial class SqlExpressionRenderer
         // With no WITHIN GROUP keys it must stay delimited on a round trip.
         bool specialForm = SqlUnsupportedVocabulary.IsNiladicFunction(call.FunctionName) ||
             call.FunctionName.ToUpperInvariant() is "EXTRACT" or "POSITION" or "SUBSTRING" or "TRIM";
-        string name = (listaggName && !listagg) || (specialForm &&
+        string name = window ? call.FunctionName.ToUpperInvariant() : (listaggName && !listagg) || (specialForm &&
             (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0 || call.Filter is not null))
             ? "\"" + call.FunctionName + "\"" : FunctionName(call.FunctionName);
         return name + "(" + quantifier + Arguments(call.Arguments) +
@@ -657,6 +683,11 @@ public static partial class SqlExpressionRenderer
         {
             builder.Append(" HAVING ").Append(Expression(select.Having));
         }
+        if (select.Windows.Count > 0)
+        {
+            builder.Append(" WINDOW ").Append(string.Join(", ", select.Windows.Select(window =>
+                Identifier(window.Name) + " AS (" + WindowSpecification(window.Specification) + ")")));
+        }
         AppendQueryTail(builder, select);
         return builder.ToString();
     }
@@ -781,7 +812,7 @@ public static partial class SqlExpressionRenderer
     /// Spells a function name bare when the bare word parses as a call to it: a builtin
     /// function, or a plain identifier. <c>CAST</c> and every other keyword are delimited,
     /// because the bare keyword starts its own construct, and so are the window function names,
-    /// whose bare call the parser rejects.
+    /// whose ordinary call retains its quoted spelling; window expressions render OVER separately.
     /// </summary>
     private static string FunctionName(string name)
     {

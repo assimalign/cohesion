@@ -15,6 +15,8 @@ internal sealed partial class DocumentPlanner
 {
     internal static string DescribeOperator(object plan) => plan switch
     {
+        DocumentNestedPlan => "SelectWithSubqueries",
+        DocumentNestedQueryPlan => "Subquery",
         DocumentPlan => "Select",
         DocumentLogicalPlan { Query.IsValue: true, IsGrouped: false } => "ProjectValue",
         DocumentLogicalPlan { IsGrouped: true } => "Group",
@@ -34,6 +36,12 @@ internal sealed partial class DocumentPlanner
     };
 
     internal static DatabasePlanDescription Describe(DocumentStatementPlan plan, IEnumerable<Diagnostic>? diagnostics = null)
+    {
+        if (plan is DocumentNestedPlan nested) { return DescribeNested(nested, diagnostics); }
+        return DatabasePlanDescription.Create(DescribeNodes(plan), diagnostics);
+    }
+
+    private static IReadOnlyList<DatabasePlanNode> DescribeNodes(DocumentStatementPlan plan)
     {
         var nodes = new List<DatabasePlanNode>();
         string? target = plan switch
@@ -140,7 +148,7 @@ internal sealed partial class DocumentPlanner
             Add(DescribeOperator(systemSelect.Logical), parent, detail: AggregateDetail(systemSelect.Logical));
             Add("SystemCollectionScan", AddBindings(systemSelect.Logical, projectionId));
         }
-        return DatabasePlanDescription.Create(nodes, diagnostics);
+        return nodes;
 
         int AddBindings(DocumentLogicalPlan sourceLogical, int parent)
         {

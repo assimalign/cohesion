@@ -90,6 +90,9 @@ public static class OqlClauses
     /// <summary>Tests whether every array element satisfies a predicate.</summary>
     public const string Every = "EVERY ... SATISFIES";
 
+    /// <summary>Tests whether an array is nonempty, preserving MISSING.</summary>
+    public const string Exists = "EXISTS";
+
     /// <summary>Tests structural membership in an explicit value list or array value.</summary>
     public const string In = "IN";
 

@@ -18,6 +18,7 @@ internal sealed partial class SqlPlanner
     // family and exercise this switch, so a new record cannot silently disappear from EXPLAIN.
     internal static string DescribeOperator(SqlPlan plan) => plan switch
     {
+        SqlWindowAggregatePlan => "Window",
         SqlSequenceScopePlan => "Sequences",
         SqlSelectPlan => "Select",
         SqlSetOperationPlan p => p.Operator.ToString(),
@@ -49,6 +50,7 @@ internal sealed partial class SqlPlanner
         SqlAddColumnPlan => "AddColumn",
         SqlRenamePlan => "Rename",
         SqlAlterColumnPlan => "AlterColumn",
+        SqlAlterIdentityPlan => "AlterIdentity",
         SqlDropColumnPlan => "DropColumn",
         SqlAddConstraintPlan => "AddConstraint",
         SqlDropConstraintPlan => "DropConstraint",
@@ -92,6 +94,7 @@ internal sealed partial class SqlPlanner
                 SqlSequencePlan p => SequencePlanTarget(p.Expression),
                 SqlDropTablePlan p => p.Schema + "." + p.Name,
                 SqlDropSchemaPlan p => p.Name,
+                SqlAlterIdentityPlan p => p.Table.Schema + "." + p.Table.Name,
                 SqlAddColumnPlan p => p.Schema + "." + p.Name,
                 SqlDropColumnPlan p => p.Schema + "." + p.Name,
                 SqlRenamePlan p => Target(p.Table),
@@ -108,6 +111,7 @@ internal sealed partial class SqlPlanner
             };
             string? detail = current switch
             {
+                SqlWindowAggregatePlan p => QueryDetail(false, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlSetOperationPlan p => QueryDetail(false, p.OrderBy, !p.IsAll, p.Limit, p.Offset),
@@ -144,6 +148,24 @@ internal sealed partial class SqlPlanner
             Add(DescribeOperator(current), parent, target, indexName, detail, actual: metrics?.ActualCandidates(current));
             switch (current)
             {
+                case SqlWindowAggregatePlan window:
+                    int windowParent = id;
+                    // Parents describe later stages; the first execution group is nearest its input.
+                    for (int groupIndex = window.Groups.Count - 1; groupIndex >= 0; groupIndex--)
+                    {
+                        var group = window.Groups[groupIndex];
+                        int groupId = nodes.Count;
+                        Add("WindowAgg", windowParent, null, null,
+                            "partition=" + string.Join(", ", group.PartitionSyntax.Select(SqlExpressionRenderer.Render)) +
+                            "; order=" + string.Join(", ", group.OrderSyntax.Select(key => SqlExpressionRenderer.Render(key.Expression) +
+                                (key.IsDescending ? " DESC" : " ASC") + (NullsFirst(key) ? " NULLS FIRST" : " NULLS LAST"))) +
+                            "; functions=" + string.Join(", ", group.Functions.Select(function => function.Name)) +
+                            "; sort_shared=" + group.SortShared.ToString().ToLowerInvariant() +
+                            (metrics?.ActualCandidates(group.Functions) is { } sorts ? "; sort_count=" + sorts : ""), actual: metrics?.ActualCandidates(group));
+                        windowParent = groupId;
+                    }
+                    Visit(window.Input, windowParent);
+                    break;
                 case SqlSequenceScopePlan sequence:
                     Visit(sequence.Input, id);
                     break;

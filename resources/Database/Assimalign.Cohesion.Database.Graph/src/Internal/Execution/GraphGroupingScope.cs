@@ -33,7 +33,8 @@ internal sealed class GraphGroupingScope
     }
 
     internal void Validate(GqlExpression root, IReadOnlyDictionary<string, int>? aliases = null,
-        IReadOnlySet<GqlExpression>? reusable = null, IReadOnlySet<string>? iterators = null)
+        IReadOnlySet<GqlExpression>? reusable = null, IReadOnlySet<string>? iterators = null,
+        IReadOnlyDictionary<GqlExpression, GraphCorrelatedSubplan>? subplans = null)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         var pending = new Stack<GqlExpression>();
@@ -43,30 +44,41 @@ internal sealed class GraphGroupingScope
             _token.ThrowIfCancellationRequested();
             if ((iterators is null || !GraphValueExpressions.ReferencesAny(expression, iterators, _token)) &&
                 (_keys.Contains(expression) && (reusable is null || reusable.Contains(expression)) || _aggregates.Contains(expression))) { continue; }
+            if (expression is GqlExistsExpression exists)
+            {
+                if (subplans is null || !subplans.TryGetValue(exists, out var subplan))
+                { throw new GraphPlanningException("CG05027", ErrorMessages.CorrelatedPlanRequired, exists.Location); }
+                foreach (string correlated in subplan.CorrelatedVariables)
+                {
+                    if (iterators?.Contains(correlated) == true || _variables.Contains(correlated) || aliases?.ContainsKey(correlated) == true) { continue; }
+                    throw new GraphPlanningException("CG05001", ErrorMessages.GroupedExpressionRequired, exists.Location);
+                }
+                continue;
+            }
             if (expression is GqlReduceExpression reduce)
             {
-                Validate(reduce.List, aliases, reusable, iterators);
-                Validate(reduce.Initial, aliases, reusable, iterators);
+                Validate(reduce.List, aliases, reusable, iterators, subplans);
+                Validate(reduce.Initial, aliases, reusable, iterators, subplans);
                 var inner = iterators is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(iterators, StringComparer.Ordinal);
                 inner.Add(reduce.Variable); inner.Add(reduce.Accumulator);
-                Validate(reduce.Body, aliases, reusable, inner);
+                Validate(reduce.Body, aliases, reusable, inner, subplans);
                 continue;
             }
             if (expression is GqlListPredicateExpression predicate)
             {
-                Validate(predicate.List, aliases, reusable, iterators);
+                Validate(predicate.List, aliases, reusable, iterators, subplans);
                 var inner = iterators is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(iterators, StringComparer.Ordinal);
                 inner.Add(predicate.Variable);
-                Validate(predicate.Predicate, aliases, reusable, inner);
+                Validate(predicate.Predicate, aliases, reusable, inner, subplans);
                 continue;
             }
             if (expression is GqlListComprehensionExpression comprehension)
             {
-                Validate(comprehension.List, aliases, reusable, iterators);
+                Validate(comprehension.List, aliases, reusable, iterators, subplans);
                 var inner = iterators is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(iterators, StringComparer.Ordinal);
                 inner.Add(comprehension.Variable);
-                if (comprehension.Predicate is not null) { Validate(comprehension.Predicate, aliases, reusable, inner); }
-                if (comprehension.Projection is not null) { Validate(comprehension.Projection, aliases, reusable, inner); }
+                if (comprehension.Predicate is not null) { Validate(comprehension.Predicate, aliases, reusable, inner, subplans); }
+                if (comprehension.Projection is not null) { Validate(comprehension.Projection, aliases, reusable, inner, subplans); }
                 continue;
             }
             string? name = expression switch

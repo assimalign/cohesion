@@ -21,6 +21,7 @@ internal static class OqlUnsupportedVocabulary
         new("DEFINE", "DEFINE", OqlWordPosition.Statement),
         new("ELEMENT", "ELEMENT", OqlWordPosition.Function),
         new("FLATTEN", "FLATTEN", OqlWordPosition.Function),
+        // Enabled as a collection operator; retained for reserved non-expression positions.
         new("EXISTS", "EXISTS", OqlWordPosition.Anywhere),
         new("FOR", "FOR", OqlWordPosition.Anywhere),
         new("SOME", "SOME", OqlWordPosition.Anywhere),

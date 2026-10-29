@@ -1,5 +1,40 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Window stage (#1526, SQ-W1)
+
+SqlWindowExpression holds a function and either OVER name or an inline SqlWindowSpecification.
+SqlNamedWindow retains declaration order and a specification's inherited name. The SELECT
+node stores named definitions in an optional payload over its existing grouping-list reference,
+so ordinary SELECT nodes keep their allocation size. The profile advertises eight ranking and
+navigation functions plus OVER, PARTITION and WINDOW; explicit frames, aggregate windows and
+value functions retain CK00001. Canonical built-in window names render unquoted, and named
+keys participate in view traversal, structural equivalence and child-subquery binding.
+
+Binding, stage placement, diagnostics and memory ownership are described in Sql DESIGN and
+[DIALECT.md](DIALECT.md). Parser, profile, keyword and completeness corpora advance together.
+PostgreSQL references: parser/parse_clause.c:2766-2902 and parser/parse_agg.c:879-994.
+
+## Owned identity syntax (#1717, SQ-S3)
+
+OVERRIDING USER inputs bind and pass assignment checks before their identity values are
+discarded, across VALUES, SELECT and MERGE. The dialect also records preserved restart state
+through identity type changes, bounded backfill refusal, hidden orphan names and snapshots,
+and the intentional inclusion of identity generators in INFORMATION_SCHEMA.SEQUENCES with
+8/16/32/64-bit precision. Existing diagnostic identities and grammar remain unchanged.
+If a live FK action introduces an unplanned SET DEFAULT sequence dependency, execution
+returns retryable CS04067 (40001) before evaluating that default or mutating rows so the caller can replan.
+Ignored VALUES and MERGE INSERT inputs also convert unknown literals under CAST and report
+existing constant-fold failures before discard; typed numeric casts and volatile inputs
+remain unevaluated. The parser corpus retains these CAST forms for engine validation.
+
+The identity AST retains explicit sequence options, SERIAL aliases lower to built-in integer
+BY DEFAULT identities, and ALTER identity actions are separate sealed leaves. INSERT and
+MERGE INSERT retain an explicit override enum, and sequence options retain structured owning
+table/column references. Renderer and capability profile cover the new forms; contextual
+names remain usable. The dialect records one identity per table, root constant sequence
+defaults, repeated-option limits and all owner choices. Catalog linkage and crash recovery
+belong to Sql; no compiled typed-schema declaration changed.
+
 ## Sequence grammar (#1717, SQ-S2)
 
 NEXT VALUE FOR is selected only after lookahead recognizes all three words. Unquoted
@@ -31,11 +66,11 @@ grouping-set deferral retains every group that passes HAVING, and deferred colla
 retention. Grouping-set group/aggregate state retains its existing statement-budget charge on
 both sequence and sequence-free paths; sequence deferral adds none.
 
-CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
+CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY is represented by its owning table and column, or NONE. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 28's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 29's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -673,10 +708,10 @@ CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING
   CAST may make is the engine's cast registry's question too, so every built-in type
   is a valid CAST target here.
 - **Recognized clause tokens stay in the lexer tables.** `RECURSIVE` is now
-  advertised for binding; window functions are lexed so diagnostics can
-  say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
+  advertised for binding; window clauses are lexed and parsed for their executable
+  stage, with named unsupported diagnostics for deferred frames and value functions. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
-  while window and NATURAL clauses remain absent. Nested WITH and recursive
+  including OVER/WINDOW/PARTITION, while NATURAL remains absent. Nested WITH and recursive
   execution retain positional capability checks. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `CK00001` with the token location and the `SQL`
@@ -725,7 +760,8 @@ its ordinary bare output alias before SET.
 
 ## Non-goals (current dialect)
 
-CORRESPONDING, nested or data-modifying CTEs and recursive execution, window functions, LATERAL,
+CORRESPONDING, nested or data-modifying CTEs and recursive execution, window frames,
+aggregate windows and value-window functions, LATERAL,
 UPDATE SET subqueries, `ON UPDATE`,
 RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
@@ -836,10 +872,10 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   or a name the lexer would not read as one word is quoted. Embedded `"` characters
   are doubled inside those delimiters. A node type the parser does not produce is
   refused with `NotSupportedException`. A called function name is bare when it is a builtin
-  or a plain word, except `CAST` and the nine window function names (`ROW_NUMBER`,
-  `RANK`, ...): a bare call to one of those parses as the window function, which the
-  dialect rejects, so an error-free tree that calls one named a delimited user
-  function and keeps the quotes (`"rank"(x)`).
+  or a plain word, except `CAST` and the reserved window function names. A window
+  expression emits its function unquoted together with OVER; an ordinary function
+  node with a reserved window name retains quotes. Deferred value functions keep
+  the parse-time diagnostic boundary and ranking/navigation require OVER at binding.
 - **The invariant is tested, not assumed.** `SqlExpressionRendererTests` pins the
   canonical spelling of every form a CHECK accepts, proves that parsing the output
   yields the same tree (positions aside; a CAST target's whitespace is normalized)

@@ -251,7 +251,7 @@ public sealed class SqlFunctionArityTests : IDisposable
 
         // Assert
         functions.Select(function => function.Name).Distinct().ShouldBe(
-            declared.Except(SqlStandardLibrary.SpecialForms, StringComparer.OrdinalIgnoreCase), ignoreOrder: true);
+            declared.Where(name => !SqlPlanner.IsWindowFunction(name)).Except(SqlStandardLibrary.SpecialForms, StringComparer.OrdinalIgnoreCase), ignoreOrder: true);
         functions.Distinct().Count().ShouldBe(functions.Length);
         SqlFunctionCatalog.Standard.GetOverloads("COALESCE").ShouldBeEmpty();
         foreach (var function in functions)

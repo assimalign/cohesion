@@ -1,5 +1,72 @@
 # The Declared SQL Dialect
 
+## Window stage (#1526, SQ-W1)
+
+OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
+OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
+after HAVING and before the query tail. Names use the existing case-insensitive identifier
+rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
+has none. Definitions cannot reference themselves or later definitions. Explicit ROWS,
+RANGE, GROUPS and EXCLUDE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE remain
+CK00001, naming the deferred form. Frames are not silently approximated with ROWS.
+
+ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
+WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
+and ORDER BY are the only legal positions at each query level. Window arguments and keys
+may contain grouped expressions, aggregates and GROUPING, but cannot contain windows.
+RANK leaves peer gaps; DENSE_RANK does not. PERCENT_RANK is (rank-1)/(partition rows-1),
+or zero for a singleton. CUME_DIST includes the last peer. Without window ORDER BY, all rows
+are peers and navigation/ROW_NUMBER use an unspecified order. Ranking outputs are BIGINT,
+distribution outputs DOUBLE PRECISION and NTILE outputs INTEGER. They retain the engine's NULL
+placement (ascending NULLS FIRST, descending NULLS LAST) unless overridden, following
+the existing engine rule. This differs from PostgreSQL's defaults.
+
+NTILE evaluates its integer bucket argument once on the first row of each ordered partition;
+NULL returns NULL and nonpositive counts report CS05078 (22014). Larger buckets precede
+smaller ones. Counts larger than the partition leave trailing buckets empty. LAG/LEAD use
+offset 1 and default NULL when omitted, respect NULL values, accept per-row signed integer
+offsets (negative reverses direction), and return NULL for NULL offsets. Offset zero reads the
+current row; an out-of-partition target uses that row's default. Value/default expressions use
+the engine's common-type implicit-cast rules and registered casts; unknown text constants coerce to
+the selected value type during binding, including unused defaults, with ordinary CAST diagnostics. Offsets and bucket counts accept the engine's signed integer types,
+including BIGINT, with overflow-safe navigation through the full Int64 range.
+NEXT VALUE FOR retains its existing CS03076 exclusion in window arguments and keys;
+PostgreSQL-style nextval() keeps its ordinary per-call evaluation.
+If the first NTILE argument is NULL, the entire partition returns NULL even when later
+rows' bucket expressions differ. This follows the SQ-W1 contract; PostgreSQL can retry
+initialization after a NULL argument (windowfuncs.c:424-440).
+
+The WindowAgg stage groups equal partition/order specifications and processes longer orderings
+before compatible prefixes so those groups share a sort. EXPLAIN names partition/order keys,
+functions and sort_shared for each group. Window inputs, augmented result rows, sort indexes,
+key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
+an excess and every reservation unwinds on success, error or cancellation. Whole input and
+output rows remain charged until the stage ends; scratch releases at each partition boundary.
+Accounting is deliberately conservative for aliased values and retained intermediate outputs;
+SQ-W3 refines full retained-memory accounting. There is no spill. LIMIT cannot truncate the
+input partitions. Window-free queries retain their existing plan and object layouts.
+
+Views render, compare and reload window expressions and named definitions through canonical SQL;
+no disk or wire version changes. Reference semantics were re-derived from PostgreSQL
+src/backend/parser/parse_clause.c:2766-2902, parser/parse_agg.c:879-994,
+utils/adt/windowfuncs.c:139-154,264-285,334-369,416-482,534-575 and
+optimizer/plan/planner.c:6252-6395. Tests compare generated data with independent computations;
+no live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS00011 | Window argument count or call modifier |
+| CS01064 | Duplicate WINDOW name |
+| CS01065 | Unknown or forward window reference |
+| CS01066 | Invalid copied PARTITION BY or ORDER BY |
+| CS02068 | Non-integer offset or bucket argument |
+| CS02069 | Incompatible navigation value/default types |
+| CS05076 | Invalid window placement or missing OVER |
+| CS05077 | Nested windows |
+| CS05078 | Nonpositive NTILE count (22014) |
+| CS05079 | Statement window memory exceeded |
+
+
 Double-quoted identifiers use doubled `""` for an embedded double quote: `"a""b"` names
 `a"b` in tables, columns, aliases and function names. Rendering escapes it the same way.
 An escaped final quote without a closing delimiter is CS00003 (#1235).
@@ -53,7 +120,7 @@ accepted metadata: the shared allocator still reserves 32 values durably and doe
 not keep independent per-session caches. This makes setval immediately visible to
 other sessions' next allocation. Type/option errors use CS03069 (22023); exhaustion
 keeps the shared identity CS02002 (22003), deliberately differing from PostgreSQL's
-2200H. Bounds, cycling and reservations reuse SQ-S1 and SQL format 28.
+2200H. Bounds, cycling and reservations reuse SQ-S1 and SQL format 29.
 
 nextval(name), currval(name), setval(name, integer [, is_called]) and lastval()
 return BIGINT. NEXT VALUE FOR also returns BIGINT; AS controls allocation bounds and metadata, without narrowing the result. This stable output type avoids stale projection metadata across a concurrent ALTER AS and differs from SQL Server's declared-sequence return type. Names may be schema-qualified text (with doubled quotes in quoted
@@ -115,11 +182,9 @@ and [Microsoft's NEXT VALUE FOR contract](https://learn.microsoft.com/en-us/sql/
 Session/setval behavior follows local PostgreSQL src/backend/commands/sequence.c:867-1044;
 option defaults and restart follow :1415-1587. Privileges remain out of scope (#177).
 
-Sequence calls and REGCLASS are refused in persisted DEFAULT, CHECK, domain, view and SQL
-function expressions with CS03074 (0A000), including typed defaults. Thus this run
-creates no default dependency for CASCADE to remove; RESTRICT and CASCADE have the
-same effect for standalone sequences. OWNED BY, SERIAL aliases and identity
-restart/overriding/backfill remain SQ-S3 work. Compiled schemas do not declare
+Sequence calls and REGCLASS remain refused in persisted CHECK, domain, view and SQL
+function expressions with CS03074 (0A000). Column sequence defaults use the early-bound
+dependency path below: RESTRICT refuses and CASCADE removes dependent defaults. OWNED BY, SERIAL aliases, identity restart/overriding and backfill execute through the SQ-S3 owned-sequence path. Compiled schemas do not declare
 standalone sequences, and declared provisioning scripts refuse sequence DDL with
 CS03074 until their receipt/ownership model can represent it.
 
@@ -146,9 +211,15 @@ retains sequence locks after a failed statement under the existing lock contract
 INFORMATION_SCHEMA.SEQUENCES is read-only and participates in the ordinary immutable
 catalog snapshot. Columns are SEQUENCE_CATALOG, SEQUENCE_SCHEMA, SEQUENCE_NAME,
 DATA_TYPE, NUMERIC_PRECISION, NUMERIC_PRECISION_RADIX, NUMERIC_SCALE, START_VALUE,
-MINIMUM_VALUE, MAXIMUM_VALUE, INCREMENT and CYCLE_OPTION. Precision is 16/32/64,
+MINIMUM_VALUE, MAXIMUM_VALUE, INCREMENT and CYCLE_OPTION. Precision is 8/16/32/64,
 radix 2, scale 0; option values are invariant text and CYCLE_OPTION is YES/NO.
-Identity-owned generators are not listed until SQ-S3. Existing result framing carries
+Identity-owned generators are listed alongside standalone sequences so their generated names
+are discoverable for currval. This deliberately differs from PostgreSQL, which excludes identity
+sequences (src/backend/catalog/information_schema.sql:1696); this engine has no pg_sequences.
+Prepared and abandoned generators are hidden, including in retained TRUNCATE snapshots.
+Abandoned generators do not reserve relation names; reuse retires their metadata atomically
+with the new relation. Catalog loading validates metadata without committing cleanup writes.
+Existing result framing carries
 all DDL, functions, EXPLAIN and metadata over InMemory and TCP. LIMIT/OFFSET sequence calls evaluate once at execution before the input rows; EXPLAIN still has no effects. Detached evaluation without a statement scope refuses CS03076 (0A000). NEXT VALUE FOR is limited to row value positions: predicates, aggregate arguments, grouping keys, direct ordering expressions and row counts refuse CS03076 before allocation; ordering by a projected alias remains valid.
 Subqueries at any depth, derived tables, CTE definitions (including unused ones), and
 CASE/COALESCE/NULLIF arguments also refuse NEXT VALUE FOR with CS03076 during planning,
@@ -158,56 +229,100 @@ assigns a distinct value to each row while sharing repeated standard occurrences
 RETURNING lists containing sequence calls evaluate before the global apply gate, keeping
 durable reservation and setval commits outside that gate. Sequence effects remain nontransactional.
 
-## Identity columns (#1123)
+## Identity columns and owned sequences (#1123, #1717 SQ-S3)
 
-`id BIGINT GENERATED ALWAYS AS IDENTITY` and `GENERATED BY DEFAULT AS IDENTITY`
-execute in CREATE TABLE and ALTER TABLE ADD [COLUMN]. Options are
-`(START [WITH] n INCREMENT [BY] m)` in either order; both are optional, and negative
-increments are supported. The SQL Server lexical spellings `IDENTITY`, `IDENTITY(seed,
-increment)` map to ALWAYS. Words such as identity, generated, start and increment remain
-contextual and usable as unquoted column names. Identity adds one advertised clause.
+CREATE TABLE and ALTER TABLE ADD [COLUMN] accept built-in integer columns declared
+GENERATED ALWAYS AS IDENTITY or GENERATED BY DEFAULT AS IDENTITY. Parenthesized
+sequence options are START [WITH], INCREMENT [BY], MINVALUE, MAXVALUE, CACHE, CYCLE,
+NO MINVALUE, NO MAXVALUE and NO CYCLE. Each option occurs once; empty parentheses
+are invalid. The defaults are increment 1, minimum 1, the integer type's maximum,
+START at the directional bound, CACHE 1 and NO CYCLE. Descending generation defaults
+to the type minimum through -1. CACHE is metadata; the shared allocator durably reserves
+up to 32 values regardless of CACHE. The IDENTITY(seed,increment) lexical alias is ALWAYS.
 
-Identity requires a built-in integer type, implies NOT NULL, allows one column per table,
-and excludes DEFAULT. Explicit NULL conflicts with NOT NULL, PRIMARY KEY or IDENTITY in either
-order, including table primary keys and CREATE/ADD/ALTER column definitions; `CS00003` names
-the column. START must fit the generator bounds; INCREMENT must be a nonzero signed Int64.
-Absent START, the first value is 1 for ascending generation and -1 for descending generation.
-Ascending bounds are 1 through the type maximum; descending bounds are the type minimum
-through -1, following PostgreSQL `src/backend/commands/sequence.c:1462,1494,1529`.
-Generation never cycles.
-Definition errors use `CS03025`, naming the column, before catalog mutation. ADD identity
-checks for no live rows under the existing DDL lock; deleted historical versions do not prevent it.
-Typed schema-owned tables refuse identity metadata with `SqlSchemaMigrationException` /
-`CS03105` and "Nothing was changed." because compiled schemas cannot represent it;
-SQL script-created tables retain their SQL definitions.
+SERIAL and SERIAL4 mean INTEGER GENERATED BY DEFAULT AS IDENTITY; SMALLSERIAL and
+SERIAL2 mean SMALLINT, and BIGSERIAL and SERIAL8 mean BIGINT. This identity interpretation
+is an owner decision and deliberately differs from PostgreSQL's implicit sequence/default
+expansion (parse_utilcmd.c:389-563). Serial aliases are column declarations; they cannot
+name domain declarations. Identity implies NOT NULL, excludes DEFAULT and domains, and
+retains the existing one-identity-column-per-table restriction. Definition errors retain
+CS03025. Conflicting explicit NULL uses CS00003. Compiled typed schemas have no identity
+metadata and remain version 8; declared SQL scripts use ordinary identity publication.
 
-Omitted INSERT columns, DEFAULT VALUES, and whole-item DEFAULT allocate one value per row,
-including INSERT SELECT. BY DEFAULT accepts explicit non-null values without advancing its
-counter; a generated collision then uses the existing primary-key/unique violation.
-An explicit NULL fails NOT NULL. ALWAYS rejects explicit INSERT values and every UPDATE
-assignment, including DEFAULT, with `CS03025`. BY DEFAULT UPDATE SET id = DEFAULT
-allocates a new value. Range exhaustion fails the whole statement without partial row writes.
+Every identity owns a shared catalog sequence in its table's schema, named table_column_seq,
+with numeric collision suffixes (table_column_seq1, then 2, and so on). It appears in
+INFORMATION_SCHEMA.SEQUENCES. Renaming a table or column preserves the sequence name.
+DROP TABLE or DROP COLUMN removes owned sequences in the same catalog commit; dependent
+external defaults must first be removed. DROP SEQUENCE refuses an identity-owned sequence,
+including CASCADE, naming the required column (CS03080). CREATE/ALTER SEQUENCE OWNED BY
+[schema.]table.column attaches a standalone sequence to a column in the same schema;
+OWNED BY NONE detaches it. Invalid targets or identity ownership changes use CS03081.
+Schema CASCADE also removes external defaults depending on removed sequences.
 
-Allocation reserves up to 32 values durably before returning any, independently of the data
-transaction. Rollback, failed constraints and restart can leave gaps; values are unique among
-generated allocations, never reused after a crash, and not ordered by commit. Explicit values
-can still collide. Dropping and recreating the table resets generation to START.
+ALTER TABLE t ALTER [COLUMN] c accepts ADD GENERATED { ALWAYS | BY DEFAULT } AS IDENTITY
+with optional sequence options, SET GENERATED { ALWAYS | BY DEFAULT }, SET followed by
+a sequence option, with SET repeated before additional options, RESTART [[WITH] n], and DROP IDENTITY [IF EXISTS]. ADD GENERATED
+requires an already NOT NULL column (CS03078), retains all existing values, and refuses an
+existing identity or default. Other forms require an identity (CS03079), except guarded DROP.
+Sequence options and SET GENERATED may be combined in any order.
+DROP IDENTITY preserves NOT NULL and stored values. RESTART without a value uses START;
+SET START only changes future restart metadata. A following identity TYPE change preserves
+the live last value and called flag, including pending RESTART and setval(false) positions
+(PostgreSQL parse_utilcmd.c:3700-3727; sequence.c:479-480,513-514). Each ALTER statement self-commits and is
+refused within an explicit transaction (CS04003).
 
-INFORMATION_SCHEMA.COLUMNS appends IS_IDENTITY, IDENTITY_GENERATION, IDENTITY_START,
-IDENTITY_INCREMENT, IDENTITY_MAXIMUM, IDENTITY_MINIMUM and IDENTITY_CYCLE after
-DATETIME_PRECISION, preserving existing ordinals. Identity option fields are nullable text,
-with invariant integer spellings. IS_IDENTITY is YES/NO; generation is ALWAYS/BY DEFAULT;
-cycle is NO for identity columns. Nonidentity columns have null option fields, and an identity
-column's COLUMN_DEFAULT is null.
+Omitted values and DEFAULT allocate through the shared sequence allocator. ALWAYS rejects
+supplied INSERT values unless OVERRIDING SYSTEM VALUE is present. OVERRIDING USER VALUE
+binds and validates assignment coercion before ignoring supplied identity values for either
+generation mode. Invalid types, literal text and unknown functions still fail before identity
+allocation (PostgreSQL parser/analyze.c:1146, parse_target.c:582-594, parse_merge.c:352).
+Unknown string literals and folded text operands under CAST undergo input conversion before discard
+(parser/parse_coerce.c:233-249); CAST('abc' AS INT) fails with CS02022 (22P02).
+VALUES and MERGE INSERT also report failures from immutable-call and signed-constant
+folding before discard. Typed numeric casts and volatile inputs remain unevaluated.
+The assignment policy applies to VALUES,
+INSERT SELECT, ON CONFLICT and MERGE's INSERT action. A concurrent FK change that introduces
+a SET DEFAULT sequence dependency absent from a DELETE or MERGE plan raises CS04067
+(40001) before evaluating that default or mutating rows; retrying replans with the required sequence grants.
+SELECT sources materialize normally
+before defaults. UPDATE, ON CONFLICT UPDATE and MERGE UPDATE of ALWAYS identities accept
+only DEFAULT; BY DEFAULT also accepts ordinary explicit assignments. Identity allocation
+sets the session's currval and lastval, including populated-table ADD COLUMN backfill, and
+therefore participates in the existing pool-return DISCARD ALL reset. Rollback and failures
+leave gaps. Explicit assignments do not advance the allocator. Exhaustion retains CS02002
+(22003). DDL removing an identity during planning uses retryable CS04067 (40001).
+UPDATE and DELETE take identity sequence grants only for explicit DEFAULT assignments or
+reachable ON DELETE SET DEFAULT actions; other identity-column changes allocate nothing.
 
-SERIAL, BIGSERIAL and SMALLSERIAL report `CK00001` suggesting GENERATED BY DEFAULT AS
-IDENTITY in type positions and when creating SQL or typed-schema domains of those names.
-Explicit INSERT aliases `AS overriding` and `AS "overriding"` remain valid;
-only a bare OVERRIDING token in clause position is refused. OVERRIDING ... VALUE, identity
-MINVALUE/MAXVALUE/CYCLE/CACHE, ALTER COLUMN RESTART/SET GENERATED, and generated stored
-expressions also report named `CK00001`. Identity restart, overriding and populated-table
-identity backfill remain T2. INSERT ... RETURNING exposes the allocated identity value (#1117). Validation-only full-definition ALTER COLUMN refuses identity type changes,
-nullable definitions and DEFAULT; retaining the type and NOT NULL preserves generation. SET/DROP DEFAULT and DROP NOT NULL refuse identity columns with CS03025 (#1122).
+Adding a new identity column to a populated table rewrites currently live rows in physical
+owner-page/slot scan order. It uses recoverable prepared-owner storage and one atomic catalog
+publication: every crash image exposes the old table or the complete new column and enforcing
+indexes. Scanned records and retained decoded/conversion chunk buffers count against statement
+work and memory accounting. StatementMemoryBudget exhaustion reports CS05067 before publication,
+leaves the old table intact and releases every retained charge. A failed copy leaves reclaimable unreachable storage. ADD GENERATED on an existing
+column is metadata-only and keeps its values. TRUNCATE RESTART IDENTITY atomically restarts
+all sequences owned by every table in the truncate closure; CONTINUE IDENTITY preserves them.
+
+A column DEFAULT may be nextval with a constant name, numeric sequence id or constant REGCLASS
+cast, or NEXT VALUE FOR an already published named sequence. It records an early-bound sequence dependency in
+the persisted call-identity vector. DROP SEQUENCE RESTRICT names the dependent default;
+CASCADE atomically removes the default. Dynamic references and compound sequence defaults
+remain CS03074, as do CHECK, domain, view, index and SQL-function sequence expressions.
+Declared provisioning scripts continue to refuse standalone sequence DDL. VALUES expressions
+materialize in written tuple/expression order before omitted column defaults are assigned.
+NEXT VALUE FOR shares repeated default/VALUES occurrences for each inserted row; INSERT SELECT source
+projection and subsequent default evaluation use their respective row scopes. Adding a
+nonidentity sequence-default column to populated storage retains the existing volatile-default
+backfill refusal (CS03027); populated identity additions use the rewrite described above.
+
+INFORMATION_SCHEMA.COLUMNS retains existing ordinals and reports effective owned-sequence
+START, INCREMENT, MINIMUM, MAXIMUM and CYCLE options; COLUMN_DEFAULT remains NULL for an
+identity. Nonidentity columns have NULL identity option fields. SCOPE_IDENTITY and
+pg_get_serial_sequence remain excluded, as do generated stored expressions.
+
+PostgreSQL references: sequence.c:1598-1694 (ownership), tablecmds.c:8322-8680 (ALTER identity),
+rewriteHandler.c:930-972,1015-1027 (overrides and UPDATE DEFAULT), and tablecmds.c:2016-2093
+(TRUNCATE restart). SQL format 29 refuses format 28 and earlier, without a legacy reader.
 
 ## RETURNING contract (#1117)
 
@@ -360,7 +475,8 @@ the proposed stored values after coercion, defaults, expression defaults and ide
 allocation. An unqualified column common to both relations is ambiguous (CS01015).
 A target named or aliased excluded makes that qualifier ambiguous too. SET expressions
 all read the original target plus proposed row; SET c = DEFAULT uses the normal UPDATE
-default resolver. ALWAYS identity assignments retain CS03025. Identity values allocated
+default resolver, which allocates for identity columns of either kind; any other assignment to
+an ALWAYS identity retains CS03025 (PostgreSQL accepts only DEFAULT there). Identity values allocated
 for conflicting proposals are consumed, including skipped proposals. Each proposal and
 its conflict projection consume defaults before the next proposal (PostgreSQL
 src/backend/executor/nodeModifyTable.c:4497,2980); for example identity proposals 2 and 4
@@ -521,7 +637,7 @@ between builder commit and publication therefore sees the complete table after p
 Statement and BEGIN admission proceed normally through that interval. No snapshot sees a partial
 row set. Conversion, domain, budget, cancellation and storage failures before
 publication leave no table. Crash recovery sees no table or the complete table, and reclaims
-abandoned owners. SQL remains format 28; existing kind-14 reclamation records suffice.
+abandoned owners. SQL remains format 29; existing kind-14 reclamation records suffice.
 
 CTAS holds the shared metadata lease for its entire source query and build, following CREATE
 INDEX's precedent. Other sessions' CREATE/DROP of views, functions, domains and schemas fail
@@ -551,7 +667,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), the profile has **67 of 72 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions (#1526) and identity, SERIAL and OVERRIDING forms (#1717), the profile has **74 of 76 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1) adds one declared binding-only clause; recursive execution remains CK00001 until SQ-R2.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -572,8 +688,7 @@ projection aliases, including aliases inside scalar expressions, and select-list
 ordinals through the SQL server/client (#1024). At Phase 22 the count remained 33/49 because
 `ALTER TABLE` and `ORDER BY` were already advertised for smaller executable subsets.
 
-The **5 excluded clauses** are window clauses (`WINDOW`,
-`OVER`, `PARTITION`), `NATURAL`,
+The **2 excluded clauses** are `NATURAL`,
 and `ALL`. Counts describe named clauses, not
 complete ISO SQL support; the boundaries below are part of the contract.
 
@@ -614,7 +729,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `WITH RECURSIVE` | Parsed and bound; execution deferred | Dependency analysis, anchor output contract and PostgreSQL recursive-reference restrictions; valid recursion refuses planning/EXPLAIN/execution with CK00001 until SQ-R2. Acyclic lists execute except before MERGE. |
 | `WITH RECURSIVE ... MERGE` | Recognized, not supported | CK00001 at RECURSIVE even for acyclic lists; plain WITH ... MERGE binds and executes. |
 | `SELECT ... FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` / `FOR KEY SHARE` | Recognized, not supported | Complete locking strengths in the SELECT tail report CK00001, including in subqueries and CTE bodies. Deliberate change from CS00003 in #1719; qualified identifiers and implicit aliases retain their ordinary meaning. |
-| Window functions / `OVER` / `WINDOW` | Recognized, not supported | function names lexed; clauses rejected with `CK00001` |
+| Window functions / `OVER` / `WINDOW` | Ranking and navigation execute | See Window stage; frames, aggregate windows and value functions remain deferred |
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
@@ -807,9 +922,9 @@ snapshot; their first-updater-wins diagnostic names the action. ReadCommitted SE
 validate outgoing references against current parents after a lock wait, including parents
 committed by the child writer. SET DEFAULT with no default
 supplies NULL; each expression default uses the delete transaction's clock. Unique NULLs
-remain equal. SET DEFAULT uses the ordinary assignment
-path for identity columns: BY DEFAULT allocates, and GENERATED ALWAYS retains its CS03025
-UPDATE refusal. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
+remain equal. SET DEFAULT uses the ordinary DEFAULT assignment
+path for identity columns: both BY DEFAULT and GENERATED ALWAYS identities allocate a new value
+from their owned sequence, as PostgreSQL's SET DEFAULT does. PostgreSQL-style column lists after SET NULL/SET DEFAULT and ON UPDATE actions
 report CK00001. Schema-owned typed foreign
 keys retain RESTRICT/CASCADE only. SQL record-space format 20 gates the new persisted
 referential-action values; format 19 and earlier are refused with the recreate remedy.
@@ -890,10 +1005,10 @@ comment, and a string literal or block comment may span lines. `//` is not a
 comment: `/` is the division operator, so `//` is a syntax error.
 
 A recognized clause outside the profile keeps its `CK00001`, for example
-`WINDOW`. The parser stops at such a clause by design, so the text
+`NATURAL JOIN`. The parser stops at such a clause by design, so the text
 from that clause on adds no second diagnostic. Text the parser stopped at before
 it reached the clause still reports `CS00003`: `DELETE FROM t WHRE id = 1
-WINDOW w AS ()` reports both, so fixing `WINDOW` does not reveal a new error. A
+NATURAL JOIN u` reports both, so fixing the unsupported join does not reveal a new error. A
 derived table, `(SELECT ...) alias`, is parsed as a query relation; its alias is required.
 Named `:name` parameters are not part of the dialect; bind `@name` or `$1`.
 
@@ -945,7 +1060,7 @@ before it binds the statement or reads a row: projections, predicates, joins,
 grouping, ordering, `LIMIT`/`OFFSET`, subqueries, DML values and `CHECK`. The
 statement therefore fails the same way over an empty table as over a populated
 one; the evaluator used to find the name per row, so an empty table succeeded.
-Recognized window names that do not execute yet, such as `RANK` and `LEAD` (see
+Recognized value-window names that do not execute yet, such as `FIRST_VALUE` and `LAST_VALUE` (see
 [Builtin functions](#builtin-functions)), are not unknown. They reject at parse time
 with one named `CK00001` and are absent from the executable profile (#1103).
 
@@ -1565,7 +1680,7 @@ index inner is freshly decoded. Earlier indexed inputs retained by later steps a
 copied on delivery, as are unmatched LEFT outer values used in multiple results.
 
 Capability preflight skips advertised clauses and reports the first unadvertised
-one. Thus USING cannot mask a later NATURAL, WINDOW or OVER. MERGE INTO ... USING
+one. Thus USING cannot mask a later NATURAL JOIN or deferred window frame. MERGE INTO ... USING
 binds and explains; DELETE ... USING executes; CREATE INDEX ... USING remains a syntax error.
 
 ## MERGE syntax, binding and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
@@ -1801,7 +1916,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. New databases use format 28, which adds internal standalone sequence records and retains TYPE default assignment coercion; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. New databases use format 29, which adds owned-sequence metadata to format 28's shared sequence records and retains TYPE default assignment coercion; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -1912,8 +2027,7 @@ Without ORDER BY, the count still applies but the choice of rows has no ordering
 Each SELECT accepts one limit spelling and one OFFSET. LIMIT and OFFSET can appear in
 either order, including PostgreSQL FETCH before OFFSET; rendering uses ISO OFFSET before FETCH. LIMIT with FETCH, TOP with LIMIT/OFFSET/FETCH,
 duplicate limits/offsets, or FETCH without ONLY receive CS00003. PERCENT, WITH TIES
-and INSERT/UPDATE/DELETE TOP receive CK00001 naming the form. A paging clause cannot mask
-a later unsupported WINDOW clause, and WITH TIES never becomes a CTE diagnostic.
+and INSERT/UPDATE/DELETE TOP receive CK00001 naming the form. TOP cannot mask a later deferred window frame, and WITH TIES never becomes a CTE diagnostic.
 
 These spellings execute at every accepted SELECT position: scalar, IN and EXISTS
 children, derived/CTE bodies and INSERT SELECT sources, retaining the existing
@@ -2230,7 +2344,7 @@ exceed 1,048,576 UTF-16 units. Ordered calls check while buffering, before sorti
 DISTINCT calls retain one representative per equivalence class, selected in sorted input
 order, so case-insensitive aggregation preserves one input spelling.
 
-Windows, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
+Window frames/aggregate windows/value functions, non-LISTAGG WITHIN GROUP, and LISTAGG ON OVERFLOW
 (including ERROR and TRUNCATE) retain CK00001. ON OVERFLOW is matched contextually
 inside LISTAGG and names the whole construct once; OVERFLOW remains an ordinary identifier.
 FILTER adds one named clause; the T1 modifiers add none.
@@ -2546,8 +2660,8 @@ EXPLAIN includes WITH, materialization and constant-source operators without run
 WITH inside subqueries, derived tables or CTE bodies, modifying CTE bodies,
 `AS [NOT] MATERIALIZED` and SEARCH/CYCLE report `CK00001`.
 A WITH list followed by another command kind reports `CS00003`.
-Capability scanning continues through advertised WITH lists, so an excluded OVER,
-NATURAL JOIN or WINDOW still reports its own clause.
+Capability scanning continues through advertised WITH lists, OVER and WINDOW;
+NATURAL JOIN and deferred window forms retain their capability diagnostics.
 
 ## WITH RECURSIVE binding (#1719, SQ-R1)
 
@@ -2596,7 +2710,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 67/72 declared-clause count.
+These contextual exclusions do not change the 74/76 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3063,7 +3177,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 28 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 29 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
@@ -3224,7 +3338,7 @@ TIMESTAMPTZ. These aliases add no Unicode storage distinction: all character spe
 | TIME WITH TIME ZONE | CS00005: no shared storage type; use TIME WITHOUT TIME ZONE or TIMESTAMP WITH TIME ZONE |
 | BIT, BIT(n) | CS00005: PostgreSQL bit-string meaning wins under D1; use BOOLEAN for truth values |
 | SMALLDATETIME | CS00005: range and minute precision cannot be honored; use TIMESTAMP |
-| SERIAL, BIGSERIAL, SMALLSERIAL | CK00001: use GENERATED BY DEFAULT AS IDENTITY; these names cannot declare user domains either |
+| SERIAL, BIGSERIAL, SMALLSERIAL, SERIAL2/4/8 | BY DEFAULT identity aliases; domain names remain excluded |
 | INT[], INTEGER ARRAY (and other scalar array forms) | CK00001: arrays are unsupported; use a scalar type |
 | INTERVAL field qualifiers | CK00001: field restrictions are not enforced; use bare INTERVAL |
 
@@ -3763,7 +3877,8 @@ existing compiled schema with newly quoted function-named columns is a no-op.
 
 COUNT/SUM/AVG/MIN/MAX keep their existing signatures: COUNT(*)/COUNT(value),
 SUM(numeric), AVG(numeric), MIN(value), MAX(value). Only COUNT accepts `*`.
-Window functions remain recognized-unsupported (CK00001). LOG(base, x), trig,
+Window frames, aggregate windows and value-window functions remain deferred (CK00001).
+Ranking and LAG/LEAD require OVER and execute as described under Window stage. LOG(base, x), trig,
 regex functions, TO_CHAR and other unknown names remain CS01016.
 
 PostgreSQL implementation references (local reference clone):
@@ -3776,7 +3891,7 @@ No reference implementation code is copied.
 types, a result type, a volatility and a NULL rule. A name and parameter-type list is
 registered once, and a name is either scalar or aggregate. A built-in cannot be replaced: an
 overload of a built-in's name is accepted only for a number of arguments the built-in does
-not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a name in the recognized-unsupported vocabulary (`RANK`, `LEAD`, ...), a type name (`INT`, `DATE`), `ANY`,
+not take (`upper(TEXT, BIGINT)` beside `UPPER(TEXT)`). The new T1 built-in names above, a window operator name (`RANK`, `LEAD`, ...), a name in the recognized-unsupported vocabulary (`FIRST_VALUE`, ...), a type name (`INT`, `DATE`), `ANY`,
 `SOME`, `LOCALTIME` and `LOCALTIMESTAMP` cannot be registered. An argument converts to its
 parameter's type along INT8 → INT16 → INT32 → INT64 → NUMERIC → DOUBLE, or REAL → DOUBLE;
 nothing converts from text, so a DATE or UUID parameter takes a column or a parameter of
@@ -3833,9 +3948,8 @@ A call found in neither the engine catalog nor the profile's executable and reco
 unsupported lists fails at plan time with `CS01016`, `Unknown function '<name>'.`
 before any row is read (#1068). Recognized unsupported functions fail at parse time with
 exactly one `CK00001` naming the function, even over an empty table (#1103):
-the nine window functions ROW_NUMBER, RANK, DENSE_RANK, LEAD, LAG, FIRST_VALUE,
-LAST_VALUE, NTH_VALUE and NTILE. Window rejection also works when these names
-lex as identifiers. An OVER clause keeps its existing clause diagnostic.
+the deferred window value functions FIRST_VALUE, LAST_VALUE and NTH_VALUE.
+Ranking and navigation calls require OVER and bind as described in Window stage.
 
 The ISO datetime value functions execute as described in the T1 table above.
 Their unqualified, unquoted spellings never bind a column; quote an identifier
@@ -3951,14 +4065,14 @@ carried per node.
 the internal recognized-unsupported table (`SqlUnsupportedVocabulary`), either
 parses inside a supported clause or reports exactly one `CK00001` naming its
 construct. The table holds the clause keywords the preflight scan rejects,
-such as `WINDOW` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
+such as `NATURAL` in the statement matrix. UNION, INTERSECT and EXCEPT remain profile keywords and execute; CORRESPONDING is rejected contextually after an operator and optional quantifier, without reserving that identifier. It also holds every other word or
 operator outside the profile's keywords that a dedicated rule recognizes and
 rejects with `CK00001`: `RECURSIVE`, `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `SELECT ALL`, SELECT-tail `FOR UPDATE` / `FOR NO KEY UPDATE` / `FOR SHARE` /
 `FOR KEY SHARE`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, and
 `WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) array comparisons,
-`LATERAL`, `~`, `SEQUENCE`, `SERIAL`, `BIGSERIAL`, `SMALLSERIAL`, `OVERRIDING`,
+`LATERAL`, `~`, `SEQUENCE`,
 `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after
 FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
 including `MATERIALIZED`, `SEARCH`, `percent` and `ties`,
@@ -4072,11 +4186,11 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 28, with no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 29, with no compatibility reader.
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
-CS03049. Standalone sequence SQL syntax is delivered by SQ-S2; identity integration remains SQ-S3 work.
+CS03049. Standalone sequence SQL syntax is delivered by SQ-S2; identity integration is delivered by SQ-S3.
 
 Domains share E3's type namespace and coercion/check path. Columns inherit their domain's
 literal default unless they supply one; explicit DEFAULT NULL overrides inheritance. Domain
@@ -4130,8 +4244,8 @@ SDK v8 artifacts do not carry scripts; extraction refuses Script calls with COHD
 ## Quoted calls (#1103 review)
 
 A quoted identifier followed by parentheses is a function call. Recognized unsupported
-built-ins use their lowercase lookup spelling for quoted names: `"rank"(id)` reports
-parse-time `CK00001`, while `"RANK"(id)` and `"Rank"(id)` are distinct names outside
+built-ins use their lowercase lookup spelling for quoted names: `"first_value"(id)` reports
+parse-time `CK00001`, while `"FIRST_VALUE"(id)` and `"First_Value"(id)` are distinct names outside
 that vocabulary. Unquoted names match the vocabulary without regard to case. Quoting a name
 without parentheses keeps it a column reference, including `"sqrt"` and `"current_date"`.
 Declared executable calls such as `"abs"(id)` remain executable. Unknown function names
@@ -4151,7 +4265,7 @@ quoted names to match uppercase vocabulary entries.
 | `CS04021` | A mutation targets a read-only system relation | 25006 (read-only SQL transaction, analogous restriction) |
 | `CS02022` | A non-temporal CAST input or stored-column assignment has invalid text representation | 22P02 |
 | `CS03024` | A column that disallows NULL receives NULL, including DEFAULT with no declared default | 23502 (`not_null_violation`) |
-| `CS03025` | An identity definition, explicit assignment, ALTER, backfill or allocation violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; identity range and definition failures share the local code |
+| `CS03025` | An identity definition, explicit assignment, ALTER or backfill violates its generation contract | 428C9 (`generated_always`) for explicit ALWAYS assignments; allocator exhaustion retains CS02002 (22003) |
 | `CS01026` | Duplicate CTE name or missing relation matching a later sibling, before reading rows | 42712 / 42P01 |
 | `CS02003` | Set-operation column types cannot be matched by implicit conversion; names both types and the one-based position | 42804 |
 
@@ -4236,7 +4350,7 @@ SQL does not infer it from a CLR exception type. This follows PostgreSQL datetim
 REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
-Catalog format 28 and compiled-schema v8 refuse earlier definitions rather than reinterpret
+Catalog format 29 and compiled-schema v8 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,

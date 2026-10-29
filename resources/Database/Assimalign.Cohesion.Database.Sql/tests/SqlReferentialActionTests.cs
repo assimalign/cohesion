@@ -58,18 +58,9 @@ public sealed class SqlReferentialActionTests
         await session.ExecuteAsync("INSERT INTO c DEFAULT VALUES", cancellationToken: CancellationToken.None);
 
         // Act / Assert
-        if (always)
-        {
-            var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None).AsTask());
-            failure.Diagnostics.Single().Code.ShouldBe("CS03025");
-            (await Rows(session, "SELECT id FROM c")).Single()[0].ShouldBe(1);
-            (await Rows(session, "SELECT id FROM p WHERE id = 1")).Single()[0].ShouldBe(1);
-        }
-        else
-        {
-            await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None);
-            (await Rows(session, "SELECT id FROM c")).Single()[0].ShouldBe(2);
-        }
+        await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: CancellationToken.None);
+        (await Rows(session, "SELECT id FROM c")).Single()[0].ShouldBe(2);
+        (await Rows(session, "SELECT id FROM p WHERE id = 1")).ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Compiled schemas: new catalog delete actions cannot collapse to RESTRICT")]

@@ -177,6 +177,21 @@ internal sealed partial class SqlPlanner
     }
 
     private static IEnumerable<SqlExpression> SubqueryRoots(SqlSelectExpression select)
+        => select.Windows.Count == 0 ? OrdinarySubqueryRoots(select)
+            : OrdinarySubqueryRoots(select).Concat(WindowDefinitionRoots(select));
+
+    private static IEnumerable<SqlExpression> WindowDefinitionRoots(SqlSelectExpression select)
+    {
+        foreach (var window in select.Windows)
+        {
+            foreach (var key in window.Specification.PartitionBy) { yield return key; }
+            foreach (var key in window.Specification.OrderBy) { yield return key.Expression; }
+        }
+    }
+
+    // Keep the iterator state of ordinary queries unchanged: extra yield loops retain
+    // extra enumerator fields even when their WINDOW collection is empty.
+    private static IEnumerable<SqlExpression> OrdinarySubqueryRoots(SqlSelectExpression select)
     {
         foreach (var column in select.Columns)
         {

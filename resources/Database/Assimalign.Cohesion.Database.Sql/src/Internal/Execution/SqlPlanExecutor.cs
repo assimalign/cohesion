@@ -119,6 +119,8 @@ internal sealed partial class SqlPlanExecutor
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
+            case SqlWindowAggregatePlan window:
+                return await ExecuteWindowAggregateAsync(window, statement, cancellationToken).ConfigureAwait(false);
             case SqlSetOperationPlan set:
                 return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
             case SqlConstantPlan constant:
@@ -192,6 +194,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteCreateIndexAsync(createIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropIndexPlan dropIndex:
                 return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
+            case SqlAlterIdentityPlan identity:
+                return await ExecuteAlterIdentityAsync(identity, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
                 return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
             case SqlRenamePlan rename:
@@ -304,6 +308,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
                 if (skip > 0) { skip--; continue; }
+                SqlWindowMemory.For(_metrics)?.Retain(output);
                 projected.Add(output);
                 if (--remaining == 0) { break; }
             }
@@ -329,8 +334,10 @@ internal sealed partial class SqlPlanExecutor
             var projected = new List<object?[]>(selected.Count);
             foreach (var source in selected)
             {
-                projected.Add(ProjectRow(source, projections, evaluator, cancellationToken, completed,
-                    completed is { Count: > 0 } ? source.Length - projections.Count : 0));
+                var output = ProjectRow(source, projections, evaluator, cancellationToken, completed,
+                    completed is { Count: > 0 } ? source.Length - projections.Count : 0);
+                SqlWindowMemory.For(_metrics)?.Retain(output);
+                projected.Add(output);
             }
             return ApplyRowWindow(projected, limit, offset);
         }
@@ -344,7 +351,12 @@ internal sealed partial class SqlPlanExecutor
             if (sources.Count == 0) { return []; }
             var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
             var projected = new List<object?[]>(sorted.Count);
-            foreach (var source in sorted) { projected.Add(ProjectRow(source, projections, evaluator, cancellationToken)); }
+            foreach (var source in sorted)
+            {
+                var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                SqlWindowMemory.For(_metrics)?.Retain(output);
+                projected.Add(output);
+            }
             cancellationToken.ThrowIfCancellationRequested();
             return ApplyRowWindow(projected, limit, offset);
         }
@@ -598,7 +610,12 @@ internal sealed partial class SqlPlanExecutor
     //   deleter, and every effect is recorded in the version-store ledger so
     //   rollback can undo it logically.
 
-    private async Task<DatabaseResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private Task<DatabaseResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => SqlSequenceExecution.Current is not null || plan.Overriding != Language.SqlIdentityOverride.None
+            ? ExecuteSequenceInsertAsync(plan, statement, cancellationToken)
+            : ExecutePlainInsertAsync(plan, statement, cancellationToken);
+
+    private async Task<DatabaseResult> ExecutePlainInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // A VALUES row has no columns in scope: the planner rejects column references (#1165) and
         // binds the values with no columns in scope, so no reference can resolve to an ordinal the
@@ -608,7 +625,6 @@ internal sealed partial class SqlPlanExecutor
         foreach (var valueRow in plan.Rows)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             var row = new object?[valueRow.Length];
             for (int i = 0; i < row.Length; i++)
             {
@@ -1328,9 +1344,11 @@ internal sealed partial class SqlPlanExecutor
             throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, plan.Schema, plan.Name));
         }
 
+        var ownedGrants = await LockOwnedSequencesAsync([before], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.DdlLockOwner, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        VerifyOwnedSequences([before], ownedGrants, statement);
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
@@ -1381,9 +1399,11 @@ internal sealed partial class SqlPlanExecutor
         // The DDL-vs-writer interlock: an Exclusive table lock waits for every
         // in-flight row writer (IntentExclusive holders) to finish before the
         // table is dropped — and blocks new ones until this transaction ends.
+        var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        VerifyOwnedSequences([table], ownedGrants, statement);
         SqlCatalogTable current = ReadCurrentTable(table);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
         EnsureSameIdentity(table, current);
@@ -1445,9 +1465,11 @@ internal sealed partial class SqlPlanExecutor
     {
         if (_catalog.TryGetTable(schema, name, out var table))
         {
+            var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
             await statement.Coordinator.LockManager.AcquireAsync(
                 statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+            VerifyOwnedSequences([table], ownedGrants, statement);
             SqlCatalogTable current = ReadCurrentTable(table);
             EnsureCanChange(current.Owner, current.Name, current.OwningSchema, operation, statement);
             EnsureSameIdentity(table, current);

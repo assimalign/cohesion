@@ -259,16 +259,16 @@ public sealed class SqlInsertValuesValidationTests
     }
 
     /// <summary>
-    /// Window functions remain recognized but unsupported in VALUES and LIMIT; nothing is inserted.
+    /// Window functions require OVER and a valid SELECT position; nothing is inserted.
     /// </summary>
     /// <param name="sql">The statement.</param>
     /// <param name="function">The function as written.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES/LIMIT: a window function reports its unsupported name")]
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - INSERT VALUES/LIMIT: a window function requires OVER without inserting rows")]
     [InlineData("INSERT INTO v (id, a) VALUES (2, RANK())", "RANK")]
     [InlineData("INSERT INTO v (id, name) VALUES (2, 'x'), (3, CAST(RANK() AS VARCHAR(20)))", "RANK")]
     [InlineData("INSERT INTO v (id, name) VALUES (2, CAST(LEAD(1) AS VARCHAR(20)))", "LEAD")]
     [InlineData("SELECT a FROM v LIMIT NTILE(1)", "NTILE")]
-    public async Task ExecuteAsync_WindowFunctionWithoutScope_ShouldReportUnsupportedFunction(string sql, string function)
+    public async Task ExecuteAsync_WindowFunctionWithoutScope_ShouldReportPlacement(string sql, string function)
     {
         // Arrange
         await using var engine = CreateEngine();
@@ -278,8 +278,7 @@ public sealed class SqlInsertValuesValidationTests
         var failure = await Should.ThrowAsync<DatabaseException>(() => session.ExecuteAsync(sql).AsTask());
 
         // Assert
-        failure.ShouldBeOfType<DatabaseParseException>();
-        failure.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+                failure.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ShouldHaveSingleItem().Code.ShouldBe("CS05076");
         failure.Message.ShouldContain(function.ToUpperInvariant(), Case.Sensitive);
         session.State.ShouldBe(SessionState.Open);
         (await RowsAsync(session, "SELECT COUNT(*) FROM v")).ShouldHaveSingleItem().ShouldBe(new object?[] { 1L });

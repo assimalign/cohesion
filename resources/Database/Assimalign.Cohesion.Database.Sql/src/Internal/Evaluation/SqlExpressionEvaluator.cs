@@ -92,6 +92,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     // Catalog DEFAULT binding resolves calls without executing application code.
     private readonly bool _foldConstants;
+    private bool _validatingIgnoredIdentityInput;
 
     /// <summary>
     /// What this scope's static typing keeps beyond its binding inputs, created only when a scope
@@ -563,6 +564,12 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlCollationCandidate FindCollationCore(SqlExpression expression, bool bound)
     {
+        if (expression is SqlWindowExpression window)
+        {
+            var args = window.Function.Arguments;
+            return window.Function.FunctionName.ToUpperInvariant() is "LAG" or "LEAD" && args.Count > 0
+                ? SqlCollationCandidate.Fold(FindCollation(args[0], bound), args.Count > 2 ? FindCollation(args[2], bound) : default) : default;
+        }
         if (expression is SqlFunctionCallExpression grouping && SqlStandardLibrary.IsGrouping(grouping.FunctionName)) { return default; }
         if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var source))
         {

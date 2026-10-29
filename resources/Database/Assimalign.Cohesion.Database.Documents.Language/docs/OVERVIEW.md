@@ -50,7 +50,8 @@ DELETE returns the pre-image; the other writes return the stored post-image. Pro
 serialization or budget failure rolls back writes before any results are exposed.
 USE KEYS, OBJECT transformations, multiple bindings, position variables, WITHIN and UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
-produce `CK00001`; all three remain usable field names. Subqueries remain unsupported.
+produce `CK00001`; all three remain usable field names. Uncorrelated SELECT expression subqueries return arrays; EXISTS and IN (SELECT RAW ...) execute.
+Correlation, derived FROM and subqueries in DML remain deferred; see DIALECT.md.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`
 are executable presence predicates. NIL remains a NULL synonym.
 

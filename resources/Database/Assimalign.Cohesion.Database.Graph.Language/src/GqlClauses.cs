@@ -99,6 +99,9 @@ public static class GqlClauses
     /// <summary>Combines graph query results with a set operation.</summary>
     public const string SetOperation = "UNION";
 
+    /// <summary>Tests whether a correlated inner graph pattern produces any row.</summary>
+    public const string Exists = "EXISTS";
+
     /// <summary>Evaluates conditional branches in an expression.</summary>
     public const string Case = "CASE";
 

@@ -14,6 +14,7 @@ internal sealed partial class GraphPlanner
     internal static string DescribeOperator(object plan) => plan switch
     {
         GraphPlan => "Match",
+        GraphCorrelatedSubplan => "CorrelatedSubplan",
         GraphStagePlan => "Stage",
         GqlSetStage => "Set",
         GqlRemoveStage => "Remove",
@@ -72,6 +73,23 @@ internal sealed partial class GraphPlanner
             }
         }
         else { Append(plan, null, null); }
+        if (plan.FunctionBindings is GraphCorrelatedBindings correlated)
+        {
+            var pending = new Stack<(GqlExpression? Owner, int Parent)>();
+            pending.Push((null, 0));
+            while (pending.TryPop(out var scope))
+            {
+                foreach (var pair in correlated.Subplans)
+                {
+                    if (!ReferenceEquals(pair.Value.Parent, scope.Owner)) { continue; }
+                    int apply = Add(correlated.Anti?.Contains(pair.Key) == true ? "AntiSemiApply" : "SemiApply", scope.Parent,
+                        detail: $"correlated={string.Join(",", pair.Value.CorrelatedVariables)}; first_match=True; materialize=False");
+                    int inner = nodes.Count;
+                    Append(pair.Value.Plan, apply, "CorrelatedSubplan");
+                    pending.Push((pair.Key, inner));
+                }
+            }
+        }
         return DatabasePlanDescription.Create(nodes, plan.Warnings);
 
         void Append(GraphPlan plan, int? parentId, string? rootName)

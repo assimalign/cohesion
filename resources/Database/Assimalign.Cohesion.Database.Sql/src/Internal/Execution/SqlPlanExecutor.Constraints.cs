@@ -31,6 +31,7 @@ internal sealed partial class SqlPlanExecutor
     {
         // Referential actions fill this only after every assignment to the final row is known.
         internal byte[] NewVersion { get; set; } = [];
+        internal IReadOnlyDictionary<ulong, long>? SequenceValues { get; set; }
 
         private sealed class DebugView
         {

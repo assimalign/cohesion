@@ -78,7 +78,7 @@ public sealed class GqlWhereExpressionParserTests
     [InlineData("a.name LIKE 'A%'", "CK00001", "LIKE")]
     [InlineData("a.x BETWEEN 1 AND 2", "CK00001", "BETWEEN")]
     [InlineData("a.name =~ 'A.*'", "CK00001", "=~")]
-    [InlineData("EXISTS {(a)->(b)}", "CK00001", "EXISTS")]
+    [InlineData("EXISTS ((a)->(b))", "CK00001", "EXISTS")]
     [InlineData("a.x IN (1, 2)", "CG00002", "[...]")]
     [InlineData("a.x = 2 = 3", "CG00002", "chained")]
     public void Parse_ExcludedConstruct_ShouldNameIt(string predicate, string code, string construct)

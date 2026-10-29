@@ -27,7 +27,7 @@ public sealed partial class SqlCatalog
     // never acquires engine/coordinator locks, waits for DML, or calls another catalog.
     // Create/replace/drop and allocation use the same monitor, preventing stale owners
     // from allocating after retirement. Storage commits finish before publishing cursors.
-    private bool TryAllocate(SqlAllocationCounter counter, ulong id, int kind, long increment,
+    private bool TryAllocate(SqlSequenceCounter counter, ulong id, int kind, long increment,
         long minimum, long maximum, bool cycle, out long value)
     {
         Int128 next = counter.Next;
@@ -51,11 +51,8 @@ public sealed partial class SqlCatalog
             counter.Location = location;
             counter.Remaining = count;
             counter.Next = next;
-            if (counter is SqlSequenceCounter sequence)
-            {
-                sequence.Reserved = last;
-                sequence.IsCalled = true;
-            }
+            counter.Reserved = last;
+            counter.IsCalled = true;
             ReservationCommitted?.Invoke();
         }
         value = (long)next;

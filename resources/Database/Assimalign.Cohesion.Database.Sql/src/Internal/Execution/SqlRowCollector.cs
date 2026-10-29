@@ -62,6 +62,8 @@ internal sealed class SqlRowCollector
     internal object?[]? Add(object?[] output, object?[] keys)
     {
         _cancellationToken.ThrowIfCancellationRequested();
+        SqlWindowMemory.For(_metrics)?.Retain(output);
+        if (keys.Length > 0) { SqlWindowMemory.For(_metrics)?.Retain(keys); }
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {

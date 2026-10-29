@@ -88,6 +88,69 @@ public partial class SqlCatalogTests
         Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06061");
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Sequence: orphan cleanup validates IDs before changing live reservations")]
+    [InlineData(false, false)][InlineData(true, false)][InlineData(false, true)]
+    public async Task Open_OrphanSequence_ShouldValidateIdsBeforeChangingCounters(bool collision, bool dependency)
+    {
+        // Arrange
+        using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "sequence-orphan-collision");
+        var catalog = SqlCatalog.Open(storage);
+        await catalog.CreateSchemaAsync(new SqlCatalogNamespace("dbo"));
+        var sequence = await catalog.CreateSequenceAsync("dbo", "live", new());
+        catalog.AllocateSequence(sequence).ShouldBe(1);
+        ulong pendingOwner = sequence.ObjectId + 100;
+        SqlCatalogSequence? dependentOrphan = null;
+        if (dependency)
+        {
+            dependentOrphan = await catalog.CreateSequenceAsync("dbo", "dependent_orphan", new(), ownerTableId: pendingOwner, ownerColumn: "id");
+            catalog.AllocateSequence(dependentOrphan).ShouldBe(1);
+            await catalog.CreateTableAsync("dbo", "dependent", [new SqlCatalogColumn("v", new DatabaseTypeInfo(DatabaseType.Int64),
+                defaultLiteral: $"nextval({dependentOrphan.ObjectId})", defaultFunctionCalls: [$"S:{dependentOrphan.ObjectId}"])]);
+        }
+        using (var transaction = storage.BeginTransaction())
+        {
+            storage.InsertRow(transaction, pendingOwner, SqlReclamationRecord.Encode(pendingOwner, "dbo", "prepared"));
+            byte[] orphan = new DatabaseKeyWriter().AppendInt32(18).AppendInt64((long)(collision ? sequence.ObjectId : sequence.ObjectId + 1))
+                .AppendString("dbo", Collation.Binary).AppendString("orphan", Collation.Binary)
+                .AppendInt32((int)DatabaseType.Int64).AppendInt64(1).AppendInt64(1)
+                .AppendInt64(1).AppendInt64(long.MaxValue).AppendInt64(1).AppendBoolean(false)
+                .AppendInt64((long)pendingOwner).AppendString("id", Collation.Binary).AppendBoolean(true).ToArray();
+            if (!dependency) { storage.InsertRow(transaction, orphan); }
+            transaction.Commit();
+        }
+        byte[] before = ReadCounter(storage, sequence.ObjectId);
+        before.Length.ShouldBeGreaterThan(0);
+        byte[] orphanBefore = dependentOrphan is null ? [] : ReadCounter(storage, dependentOrphan.ObjectId);
+        // Act
+        if (collision || dependency)
+        {
+            var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
+            // Assert: failed open must leave the live reservation untouched.
+            failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06061");
+            ReadCounter(storage, sequence.ObjectId).ShouldBe(before);
+            if (dependentOrphan is not null) { ReadCounter(storage, dependentOrphan.ObjectId).ShouldBe(orphanBefore); }
+        }
+        else
+        {
+            var restored = SqlCatalog.Open(storage);
+            // Assert: a structurally valid provisional orphan is reclaimed normally.
+            restored.Sequences.ShouldHaveSingleItem().Name.ShouldBe("live");
+            ReadCounter(storage, sequence.ObjectId).ShouldBe(before);
+            restored.AllocateSequence(restored.FindSequence("dbo", "live")!).ShouldBe(33);
+        }
+
+        static byte[] ReadCounter(SqlStorage source, ulong id)
+        {
+            using var iterator = source.GetUnitIterator();
+            while (iterator.MoveNext())
+            {
+                var reader = new DatabaseKeyReader(iterator.Current.Data.Span);
+                if (reader.ReadInt32() == 19 && (ulong)reader.ReadInt64() == id) { return iterator.Current.Data.ToArray(); }
+            }
+            return [];
+        }
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Sequence: canceled mutations leave no publication or reservation")]
     public async Task Catalog_CanceledMutations_ShouldKeepCurrentIncarnation()
     {

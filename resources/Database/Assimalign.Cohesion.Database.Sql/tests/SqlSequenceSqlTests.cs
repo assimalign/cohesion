@@ -103,7 +103,7 @@ public sealed class SqlSequenceSqlTests
     [InlineData("CREATE SEQUENCE s MINVALUE 2 MAXVALUE 2", "CS03069")]
     [InlineData("CREATE SEQUENCE s CACHE 0", "CS03069")]
     [InlineData("ALTER SEQUENCE missing RESTART", "CS03073")]
-    [InlineData("CREATE TABLE t(v BIGINT DEFAULT nextval('s'))", "CS03074")]
+    [InlineData("CREATE TABLE t(v BIGINT DEFAULT nextval('s'))", "CS03073")]
     [InlineData("CREATE TABLE t(v BIGINT CHECK (nextval('s') > 0))", "CS03074")]
     [InlineData("CREATE VIEW v AS SELECT nextval('s')", "CS03074")]
     public async Task ExecuteAsync_InvalidSequence_ShouldKeepCatalogUnchanged(string sql, string code)

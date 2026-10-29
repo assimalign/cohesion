@@ -118,6 +118,13 @@ public sealed class GqlProfileExecutionTests
                 Mutation("MATCH (a:Person) OPTIONAL MATCH (a)-[r:KNOWS]->(b) DELETE r", 1,
                     new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [])),
             ],
+            [GqlClauses.Exists] =
+            [
+                new("MATCH (a:Person) WHERE NOT EXISTS { MATCH (a)-[:KNOWS]->() } RETURN a.name ORDER BY a.name", [["Bob"],["Isolated"]]),
+                new("MATCH (a:Person) RETURN a.name, EXISTS { (a)-[:KNOWS]->(b) WHERE b.age < $age } ORDER BY a.name", [["Alice",true],["Bob",false],["Isolated",false]], Parameters: new Dictionary<string, object?> { ["age"] = 18L }),
+                new("OPTIONAL MATCH (a:MissingExists) RETURN EXISTS { (a)->() }, NOT EXISTS { (a)->() }", [[false,true]]),
+                new("MATCH (a:Person) WHERE any(x IN [a] WHERE EXISTS { (x)->() }) RETURN a.name", [["Alice"]]),
+            ],
             [GqlClauses.Case] =
             [
                 new("MATCH (a:Person {name: 'Alice'}) RETURN CASE WHEN a.age = 42 THEN a.name ELSE 'other' END", [["Alice"]]),
@@ -531,6 +538,7 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
+        GqlClauses.Exists => query.Text?.Contains("EXISTS", StringComparison.OrdinalIgnoreCase) == true,
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
         GqlClauses.Reduce => query.Text?.Contains("reduce(", StringComparison.OrdinalIgnoreCase) == true,
         GqlClauses.ListPredicate => query.Projections.Any(projection => projection.Expression is GqlListPredicateExpression) ||

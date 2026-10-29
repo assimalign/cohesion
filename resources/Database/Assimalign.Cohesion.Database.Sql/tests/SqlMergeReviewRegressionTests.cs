@@ -188,7 +188,7 @@ public sealed class SqlMergeReviewRegressionTests
         failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(duplicate ? "CS03037" : constraint switch
         {
             "not-null" => policy == "SET NULL" ? "CS03039" : "CS03024",
-            "identity" => "CS03025",
+            "identity" => "CS03039",
             _ => "CS03038",
         });
         (await RowsAsync(session, "SELECT id FROM t ORDER BY id", timeout.Token)).ShouldBe(["1", "2", "3"]);

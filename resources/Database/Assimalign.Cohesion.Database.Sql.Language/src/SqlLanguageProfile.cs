@@ -20,7 +20,7 @@ public static class SqlLanguageProfile
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
         "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "SEQUENCE", "VIEW", "IF",
-        "ADD", "COLUMN",
+        "ADD", "COLUMN", "SERIAL", "BIGSERIAL", "SMALLSERIAL", "OVERRIDING", "MINVALUE", "MAXVALUE", "CYCLE", "CACHE", "RESTART",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
         "CASCADE", "RESTRICT",
@@ -55,6 +55,8 @@ public static class SqlLanguageProfile
         "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "LISTAGG",
         "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "STDDEV_SAMP", "STDDEV_POP", "VARIANCE", "VAR_SAMP", "VAR_POP",
         "GROUPING", "GROUPING_ID",
+        // Window functions
+        "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD",
         // Null handling
         "COALESCE", "NULLIF",
         // Type
@@ -89,6 +91,10 @@ public static class SqlLanguageProfile
         SqlClauses.CreateTableAs,
         SqlClauses.CreateSchema,
         SqlClauses.Identity,
+        SqlClauses.AlterIdentity,
+        SqlClauses.Serial,
+        SqlClauses.Overriding,
+        SqlClauses.OwnedBy,
         SqlClauses.CreateSequence,
         SqlClauses.AlterSequence,
         SqlClauses.DropSequence,
@@ -112,6 +118,9 @@ public static class SqlLanguageProfile
         SqlClauses.Cube,
         SqlClauses.Filter,
         SqlClauses.Having,
+        SqlClauses.Over,
+        SqlClauses.Partition,
+        SqlClauses.Window,
         SqlClauses.OrderBy,
         SqlClauses.Limit,
         SqlClauses.Offset,

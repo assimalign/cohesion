@@ -10,11 +10,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlInsertSelectPlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlInsertSelectPlan.DebugView))]
-internal sealed record SqlInsertSelectPlan(
+internal record SqlInsertSelectPlan(
     SqlCatalogTable Table,
     IReadOnlyList<int> TargetOrdinals,
     SqlPlan Source) : SqlPlan
 {
+    internal Assimalign.Cohesion.Database.Sql.Language.SqlIdentityOverride Overriding
+        => this is SqlIdentityInsertSelectPlan identity ? identity.IdentityOverride : default;
     public IReadOnlyList<SqlProjection>? Returning { get; init; }
     public SqlOnConflictPlan? OnConflict { get; init; }
 

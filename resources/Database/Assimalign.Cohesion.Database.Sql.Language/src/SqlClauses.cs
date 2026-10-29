@@ -60,6 +60,18 @@ public static class SqlClauses
     /// <summary>A generated identity column, including the SQL Server lexical alias.</summary>
     public const string Identity = "IDENTITY";
 
+    /// <summary>Changes an existing column identity.</summary>
+    public const string AlterIdentity = "ALTER IDENTITY";
+
+    /// <summary>Serial integer identity aliases.</summary>
+    public const string Serial = "SERIAL";
+
+    /// <summary>An INSERT identity assignment override.</summary>
+    public const string Overriding = "OVERRIDING";
+
+    /// <summary>A sequence column ownership declaration.</summary>
+    public const string OwnedBy = "OWNED BY";
+
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
 

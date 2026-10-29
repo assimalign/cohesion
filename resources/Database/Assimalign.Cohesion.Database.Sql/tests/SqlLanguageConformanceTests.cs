@@ -249,7 +249,8 @@ public sealed class SqlLanguageConformanceTests
         // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
         // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
         // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(67);
+        // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(74);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -661,6 +662,14 @@ public sealed class SqlLanguageConformanceTests
             ["CURRVAL"] = new("currval('function_sequence')", 100L, DatabaseType.Int64, "scalar_rows"),
             ["SETVAL"] = new("setval('function_sequence', 200)", 200L, DatabaseType.Int64, "scalar_rows"),
             ["LASTVAL"] = new("lastval()", 200L, DatabaseType.Int64, "scalar_rows"),
+            ["ROW_NUMBER"] = new("ROW_NUMBER() OVER()", 1L, DatabaseType.Int64, "scalar_rows"),
+            ["RANK"] = new("RANK() OVER()", 1L, DatabaseType.Int64, "scalar_rows"),
+            ["DENSE_RANK"] = new("DENSE_RANK() OVER()", 1L, DatabaseType.Int64, "scalar_rows"),
+            ["PERCENT_RANK"] = new("PERCENT_RANK() OVER()", 0d, DatabaseType.Float64, "scalar_rows"),
+            ["CUME_DIST"] = new("CUME_DIST() OVER()", 1d, DatabaseType.Float64, "scalar_rows"),
+            ["NTILE"] = new("NTILE(3) OVER()", 1, DatabaseType.Int32, "scalar_rows"),
+            ["LAG"] = new("LAG(i,0) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["LEAD"] = new("LEAD(i,0) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
             ["COALESCE"] = new("COALESCE(NULL, 7)", 7L),
             ["CAST"] = new("CAST('42' AS INT)", 42),
             ["UPPER"] = new("UPPER('Ada')", "ADA"),
@@ -838,6 +847,12 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Filter] = Query("SELECT COUNT(*) FILTER (WHERE age > 40), SUM(age) FILTER (WHERE age > 40), " +
             "VAR_POP(COALESCE(CASE WHEN id=1 THEN 16777217 ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))) FILTER (WHERE id > 0) FROM t;",
             expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m, 0d]]),
+        [SqlClauses.Over] = Query("SELECT ROW_NUMBER() OVER(ORDER BY id) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[2L],[3L]]),
+        [SqlClauses.Partition] = Query("SELECT RANK() OVER(PARTITION BY id ORDER BY age) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[1L],[1L]]),
+        [SqlClauses.Window] = Query("SELECT ROW_NUMBER() OVER w FROM t WINDOW w AS(ORDER BY id) ORDER BY id;",
+            expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L],[2L],[3L]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
         [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC NULLS LAST, 1 DESC;",
@@ -971,6 +986,31 @@ public sealed class SqlLanguageConformanceTests
                     await ExpectRowsAsync(session, "SELECT nextval('seq');", [[3L]]);
                 }
             }),
+        [SqlClauses.AlterIdentity] = new("ALTER TABLE ids ALTER id RESTART WITH 7;", ["CREATE TABLE ids(id SERIAL);"],
+            expression => expression is SqlAlterTableExpression { Action: SqlAlterIdentityAction },
+            async (session, _) =>
+            {
+                await ExecuteAsync(session, "ALTER TABLE ids ALTER id TYPE BIGINT;");
+                await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;");
+                await ExpectRowsAsync(session, "SELECT id FROM ids;", [[7L]]);
+            }),
+        [SqlClauses.Serial] = new("CREATE TABLE ids(id SERIAL);", [],
+            expression => expression is SqlCreateTableExpression create && create.Columns[0].Identity is { IsAlways: false },
+            async (session, _) => { await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;"); await ExpectRowsAsync(session, "SELECT id FROM ids;", [[1]]); }),
+        [SqlClauses.Overriding] = new("INSERT INTO ids OVERRIDING SYSTEM VALUE VALUES(9);", ["CREATE TABLE ids(id INT GENERATED ALWAYS AS IDENTITY);"],
+            expression => expression is SqlInsertExpression { Overriding: SqlIdentityOverride.System },
+            async (session, _) =>
+            {
+                await ExpectRowsAsync(session, "SELECT id FROM ids;", [[9]]);
+                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
+                    "INSERT INTO ids OVERRIDING USER VALUE SELECT DATE '2026-01-01';"));
+                error.Diagnostics[0].Code.ShouldBe("CS05013");
+                await ExecuteAsync(session, "INSERT INTO ids OVERRIDING USER VALUE VALUES(99);");
+                await ExpectRowsAsync(session, "SELECT id FROM ids ORDER BY id;", [[1], [9]]);
+            }),
+        [SqlClauses.OwnedBy] = new("CREATE SEQUENCE owned OWNED BY ids.id;", ["CREATE TABLE ids(id INT);"],
+            expression => expression is SqlCreateSequenceExpression,
+            async (session, _) => { await ExecuteAsync(session, "DROP TABLE ids;"); await ExpectRowsAsync(session, "SELECT SEQUENCE_NAME FROM INFORMATION_SCHEMA.SEQUENCES;", []); }),
         [SqlClauses.Identity] = new("CREATE TABLE identities (id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 100 INCREMENT BY 5), label TEXT);", [],
             expression => expression is SqlCreateTableExpression create && create.Columns.Any(column => column.Identity is not null),
             async (session, _) =>

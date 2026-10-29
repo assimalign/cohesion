@@ -12,11 +12,11 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 
 public sealed class OqlDiagnosticTests
 {
-    [Fact(DisplayName = "Cohesion Test [Documents] - Diagnostics: JOIN and nested SELECT reach every request seam")]
+    [Fact(DisplayName = "Cohesion Test [Documents] - Diagnostics: JOIN and derived SELECT reach every request seam")]
     public async Task Execute_ErrorStatement_ShouldCarryCompleteDiagnosticsAsync()
     {
         // Arrange
-        const string oql = "SELECT (SELECT a FROM nested) FROM items JOIN other ON items.a = other.a";
+        const string oql = "SELECT * FROM (SELECT a FROM nested) items JOIN other ON items.a = other.a";
         var parsed = (OqlQueryStatement)new OqlQueryParser().Parse(oql);
         parsed.Diagnostics.Count().ShouldBe(2);
         await using var engine = DocumentDatabaseEngine.Create("diagnostics", new());

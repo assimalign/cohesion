@@ -16,16 +16,37 @@ public sealed partial class SqlQueryParser
         Advance(ref lexer);
         bool guard = ParseExistenceGuard(ref lexer, notExists: !alter);
         var name = ParseUnaliasedTableReference(ref lexer);
+        var options = ParseSequenceOptions(ref lexer, alter);
+        var location = Location.Create(1, 1, position, _lastTokenEnd);
+        return alter ? new SqlAlterSequenceExpression(name, guard, options, location)
+            : new SqlCreateSequenceExpression(name, guard, options, location);
+    }
+
+    private IReadOnlyList<SqlSequenceOption> ParseSequenceOptions(ref TokenLexer lexer, bool alter, bool identity = false, bool firstIdentitySet = false)
+    {
         var options = new List<SqlSequenceOption>();
         var seen = new HashSet<string>();
-        while (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
+        bool firstOption = true;
+        while (!IsAtEnd(ref lexer) && lexer.Current.Type is not (TokenType.Semicolon or TokenType.RightParen))
         {
+            bool set = identity && alter && IsWord(ref lexer, "SET");
+            if (set) { Advance(ref lexer); }
             string option = CurrentText(ref lexer).ToUpperInvariant();
+            if (identity && alter && (option == "RESTART" ? set : !set && !(firstOption && firstIdentitySet)))
+            { AddExpectedDiagnostic(ref lexer, "SET before each identity sequence option, or bare RESTART"); }
+            firstOption = false;
             bool no = option == "NO";
             Advance(ref lexer);
             if (no) { option = CurrentText(ref lexer).ToUpperInvariant(); Advance(ref lexer); }
             if (!seen.Add(option)) { AddExpectedDiagnostic(ref lexer, "each sequence option at most once"); }
-            if (option == "AS" && !no)
+            if (option == "GENERATED" && identity && alter && !no)
+            {
+                bool always = IsWord(ref lexer, "ALWAYS");
+                if (always) { Advance(ref lexer); }
+                else { ExpectWord(ref lexer, "BY"); ExpectWord(ref lexer, "DEFAULT"); }
+                options.Add(new SqlSequenceOption("GENERATED", always ? 1 : 0));
+            }
+            else if (option == "AS" && !no && !identity)
             {
                 string type = CurrentText(ref lexer).ToUpperInvariant();
                 if (!IsNameToken(ref lexer)) { AddExpectedDiagnostic(ref lexer, "SMALLINT, INTEGER or BIGINT"); }
@@ -40,20 +61,33 @@ public sealed partial class SqlQueryParser
                 if (option == "RESTART" && !alter) { AddExpectedDiagnostic(ref lexer, "CREATE SEQUENCE options without RESTART"); }
                 bool with = IsWord(ref lexer, "WITH");
                 if (option is "START" or "RESTART" && with || option == "INCREMENT" && IsWord(ref lexer, "BY")) { Advance(ref lexer); }
-                long? value = option == "RESTART" && !with ? null : ParseIdentityInteger(ref lexer);
+                long? value = option == "RESTART" && !with && CurrentText(ref lexer) is not ("+" or "-") && !(CurrentText(ref lexer).Length > 0 && char.IsDigit(CurrentText(ref lexer)[0])) ? null : ParseIdentityInteger(ref lexer);
                 options.Add(new SqlSequenceOption(option, value));
+            }
+            else if (option == "OWNED" && !identity && !no)
+            {
+                RequireSchemaClause(ref lexer, SqlClauses.OwnedBy);
+                ExpectWord(ref lexer, "BY");
+                if (IsWord(ref lexer, "NONE")) { Advance(ref lexer); options.Add(new SqlSequenceOption("OWNED")); }
+                else
+                {
+                    string first = ParseDefinitionName(ref lexer, "table name");
+                    Expect(ref lexer, TokenType.Dot, "'.' before the owning column");
+                    string second = ParseDefinitionName(ref lexer, "column name");
+                    string? schema = null;
+                    if (lexer.Current.Type == TokenType.Dot)
+                    { Advance(ref lexer); schema = first; first = second; second = ParseDefinitionName(ref lexer, "column name"); }
+                    options.Add(new SqlSequenceOption("OWNED", ownerTable: new SqlTableReference(first, schema, null), ownerColumn: second));
+                }
             }
             else
             {
-                if (option == "OWNED") { RequireSkippedConstruct(position, _lastTokenEnd, "SEQUENCE OWNED BY"); }
-                else { AddExpectedDiagnostic(ref lexer, "AS, START, INCREMENT, MINVALUE, MAXVALUE, CACHE, CYCLE or RESTART"); }
+                AddExpectedDiagnostic(ref lexer, "AS, START, INCREMENT, MINVALUE, MAXVALUE, CACHE, CYCLE or RESTART");
                 ConsumeRemaining(ref lexer);
             }
         }
         if (alter && options.Count == 0) { AddExpectedDiagnostic(ref lexer, "at least one ALTER SEQUENCE option"); }
-        var location = Location.Create(1, 1, position, _lastTokenEnd);
-        return alter ? new SqlAlterSequenceExpression(name, guard, options.AsReadOnly(), location)
-            : new SqlCreateSequenceExpression(name, guard, options.AsReadOnly(), location);
+        return options.AsReadOnly();
     }
 
     private SqlDropSequenceExpression ParseDropSequence(ref TokenLexer lexer, int position)

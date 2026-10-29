@@ -165,7 +165,7 @@ public sealed class SqlTemporalAssignmentConformanceTests
         // Assert
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS06041");
         error.Message.ShouldContain("uses data-storage format 25");
-        error.Message.ShouldContain("supports only format 28");
+        error.Message.ShouldContain("supports only format 29");
     }
 
     public static IEnumerable<object[]> RenderedDefaults() =>

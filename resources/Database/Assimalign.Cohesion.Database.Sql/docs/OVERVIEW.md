@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+Ranking, distribution, NTILE and LAG/LEAD execute in a budgeted WindowAgg stage between
+HAVING and DISTINCT/ORDER BY/pagination, with named windows and shared compatible sorts
+(#1526, SQ-W1). Frames, value functions and aggregate windows follow in SQ-W2/SQ-W3.
+
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
 (#1447). This run executes inline; populated-table provisioning handoff follows in SQ-A3.
@@ -131,7 +135,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 28). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 29). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -320,8 +324,10 @@ See [DESIGN.md](DESIGN.md) for the persistence model and decisions.
 
 Standalone sequences have internal catalog objects and share the identity allocator (#1717,
 SQ-S1). SQ-S2 delivers CREATE/ALTER/DROP SEQUENCE, NEXT VALUE FOR, nextval/currval/setval/lastval,
-REGCLASS references and INFORMATION_SCHEMA.SEQUENCES. SQL format 28 stores definitions and reservations.
-Both allocators reserve up to 32 values before use, retain rollback
+REGCLASS references and INFORMATION_SCHEMA.SEQUENCES. SQL format 29 stores definitions and reservations.
+Identity columns now own catalog sequences, including SERIAL aliases, identity ALTER/RESTART,
+OVERRIDING and recoverable populated-table backfill (SQ-S3). Column nextval and NEXT VALUE FOR
+defaults retain dependencies. The shared allocator reserves up to 32 values before use, retaining rollback
 and recovery gaps, and serialize allocation engine-wide. CACHE is stored without per-session
 caches. See DESIGN for option defaults, incarnation checks and the lock order.
 

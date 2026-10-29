@@ -27,7 +27,8 @@ internal sealed partial class SqlPlanExecutor
             throw new SqlExecutionException(SqlExecutionException.InternalErrorCode,
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.InsertSelectWidth, source.Columns.Count, plan.TargetOrdinals.Count));
         }
-        var rows = new List<object?[]>();
+        List<object?[]> rows = SqlSequenceExecution.Current is not null || plan.Overriding != Language.SqlIdentityOverride.None
+            ? new SqlSequenceInsertValues(0, plan.Overriding) : new List<object?[]>();
         await foreach (var sourceRow in source.GetRowsAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -59,15 +60,24 @@ internal sealed partial class SqlPlanExecutor
         var defaults = bound.DefaultValues;
         // Identity and non-immutable calls (including sequence functions) must interleave
         // with conflict projection. Constants and immutable expressions keep batch locking.
-        bool orderedDefaults = onConflict is not null && Enumerable.Range(0, table.Columns.Count).Any(ordinal =>
+        bool orderedDefaults = false;
+        if (onConflict is not null)
         {
-            if (table.Columns[ordinal].Identity is null && defaults[ordinal] is not SqlBoundDefault { RequiresSourceOrder: true })
-            { return false; }
-            int target = -1;
-            for (int i = 0; i < targetOrdinals.Count; i++) { if (targetOrdinals[i] == ordinal) { target = i; break; } }
-            return target < 0 || valueRows?.Any(row => row[target].Kind == SqlBoundExpressionKind.DefaultItem) == true ||
-                onConflict.Assignments.Any(assignment => assignment.Ordinal == ordinal && assignment.Value.Kind == SqlBoundExpressionKind.DefaultItem);
-        });
+            for (int ordinal = 0; ordinal < table.Columns.Count && !orderedDefaults; ordinal++)
+            {
+                if (table.Columns[ordinal].Identity is null && defaults[ordinal] is not SqlBoundDefault { RequiresSourceOrder: true }) { continue; }
+                int target = -1;
+                for (int i = 0; i < targetOrdinals.Count; i++) { if (targetOrdinals[i] == ordinal) { target = i; break; } }
+                orderedDefaults = target < 0 || table.Columns[ordinal].Identity is not null && sourceRows is SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.User };
+                if (!orderedDefaults && valueRows is not null)
+                {
+                    for (int i = 0; i < valueRows.Count; i++)
+                    { if (valueRows[i][target].Kind == SqlBoundExpressionKind.DefaultItem) { orderedDefaults = true; break; } }
+                }
+                for (int i = 0; i < onConflict.Assignments.Count && !orderedDefaults; i++)
+                { var assignment = onConflict.Assignments[i]; orderedDefaults = assignment.Ordinal == ordinal && assignment.Value.Kind == SqlBoundExpressionKind.DefaultItem; }
+            }
+        }
         var domainEvaluator = bound.Domains.Count == 0 ? null : ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart);
         var rows = new List<(byte[] Record, object?[] Values)>(sourceRows.Count);
         int identityOrdinal = -1;
@@ -83,12 +93,13 @@ internal sealed partial class SqlPlanExecutor
                 if (targetOrdinals[index] == identityOrdinal) { identityTargetIndex = index; break; }
             }
         }
+        var generated = SqlSequenceInsertValues.ScopeRows(sourceRows, BuildRows(), table);
         if (onConflict is not null)
         {
-            return await ExecuteUpsertRowsAsync(table, indexes, BuildRows(), onConflict, returning, statement,
+            return await ExecuteUpsertRowsAsync(table, indexes, generated, onConflict, returning, statement,
                 orderedDefaults, cancellationToken).ConfigureAwait(false);
         }
-        rows.AddRange(BuildRows().Select(values => (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values)));
+        rows.AddRange(generated.Select(values => (SqlRowCodec.Encode(table, values, statement.Transaction.Sequence), values)));
 
         IEnumerable<object?[]> BuildRows()
         {
@@ -106,7 +117,7 @@ internal sealed partial class SqlPlanExecutor
                 // Reserve a requested identity before any column's NOT NULL/default validation,
                 // including when ALTER appended it after another required column. A failed row
                 // consumes its generated value; explicit BY DEFAULT assignments never allocate.
-                if (identityOrdinal >= 0 && (identityTargetIndex < 0 || valueRows is not null &&
+                if (identityOrdinal >= 0 && (identityTargetIndex < 0 || sourceRows is SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.User } || valueRows is not null &&
                     valueRows[rowIndex][identityTargetIndex].Kind == SqlBoundExpressionKind.DefaultItem))
                 {
                     values[identityOrdinal] = ResolveColumnDefault(table, identityOrdinal, defaults[identityOrdinal], statement, cancellationToken);
@@ -119,7 +130,8 @@ internal sealed partial class SqlPlanExecutor
                         continue;
                     }
                     int ordinal = targetOrdinals[i];
-                    if (table.Columns[ordinal].Identity is { IsAlways: true })
+                    if (table.Columns[ordinal].Identity is not null && sourceRows is SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.User }) { continue; }
+                    if (table.Columns[ordinal].Identity is { IsAlways: true } && sourceRows is not SqlSequenceInsertValues { Overriding: Language.SqlIdentityOverride.System })
                     {
                         throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, ErrorMessages.IdentityInsertForbidden);
                     }
@@ -194,15 +206,18 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken, bool upsert = false)
     {
         var column = table.Columns[ordinal];
+        // Incoming FK actions are discovered from the live graph after planning. A new
+        // sequence dependency must replan: acquiring its grant here would invert lock order.
+        SqlSequenceExecution.RequireDefaultGrants(column);
         if (column.Identity is not null)
         {
             try
             {
-                return CoerceForColumn(_catalog.AllocateIdentity(table), column);
+                return CoerceForColumn(SqlSequenceExecution.Current!.AllocateIdentity(table.ObjectId, column.Name), column);
             }
             catch (SqlCatalogException failure)
             {
-                throw new SqlPlanningException("CS03025", failure.Message, innerException: failure);
+                throw new SqlPlanningException(failure.Diagnostics[0].Code!, failure.Message, innerException: failure);
             }
         }
         if (boundDefault is null)

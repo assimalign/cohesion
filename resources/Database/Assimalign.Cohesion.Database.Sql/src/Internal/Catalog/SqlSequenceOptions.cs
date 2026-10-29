@@ -9,10 +9,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlSequenceOptions
 {
     public SqlSequenceOptions(DatabaseType type = DatabaseType.Int64, long? start = null, long increment = 1,
-        long? minimum = null, long? maximum = null, long cache = 1, bool cycle = false)
+        long? minimum = null, long? maximum = null, long cache = 1, bool cycle = false, bool identity = false)
     {
         // PostgreSQL src/backend/commands/sequence.c:1415-1587 (init_params).
-        var (typeMinimum, typeMaximum) = IntegerBounds(type);
+        var (typeMinimum, typeMaximum) = IntegerBounds(type, identity);
         if (increment == 0) { throw new SqlCatalogException("CS03069", ErrorMessages.SequenceIncrementZero); }
         long min = minimum ?? (increment > 0 ? 1 : typeMinimum);
         long max = maximum ?? (increment > 0 ? typeMaximum : -1);

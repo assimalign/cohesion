@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -112,6 +113,8 @@ internal static class Program
         builder.Functions.Add(DocumentAggregateFunction.Create<decimal, decimal, decimal>("rank_total",
             () => 0m, (state, value) => state + value, state => state));
         builder.Functions.Add(new HasValueFunction());
+        using var developerJson = JsonDocument.Parse(new string('[', 256) + "0" + new string(']', 256), new JsonDocumentOptions { MaxDepth = 256 });
+        builder.Functions.Add(DocumentScalarFunction.Create<decimal, DocumentValue>("deep_value", _ => DocumentValue.FromJson(developerJson.RootElement)));
         await using var engine = await builder.BuildAsync(token);
         var database = await engine.OpenDatabaseAsync("documents", token);
         await using (var session = await database.CreateSessionAsync(token))
@@ -149,6 +152,49 @@ internal static class Program
             Check(functions["a"] is long arrayLength && arrayLength == 2, "scalar array Int64");
             Check((decimal)functions["c"]! == 1m, "scalar conditional");
             Check(functions["l"] is long length && length == 2, "scalar code points Int64");
+            var subqueries = await connection.QueryAsync("SELECT (SELECT RAW name FROM items) AS names, EXISTS (SELECT RAW name FROM items) AS present FROM items", cancellationToken: token);
+            Check(subqueries.Count > 0 && ((JsonElement)subqueries[0][0]!).GetArrayLength() == subqueries.Count && Equals(subqueries[0][1], true), "nested SELECT arrays and EXISTS");
+            var subqueryIn = await connection.QueryAsync("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items)", cancellationToken: token);
+            Check(subqueryIn.Count == subqueries.Count, "IN SELECT RAW");
+            var lazySubquery = await connection.QueryAsync("SELECT COALESCE(1, (SELECT RAW 1/0 FROM items)) AS n FROM items LIMIT 1", cancellationToken: token);
+            Check(lazySubquery.Count == 1 && Equals(lazySubquery[0][0], 1m), "lazy nested SELECT");
+            using (var deep = JsonDocument.Parse(new string('[', 255) + "0" + new string(']', 255), new JsonDocumentOptions { MaxDepth = 256 }))
+            {
+                var parameters = new Dictionary<string, object?> { ["deep"] = deep.RootElement };
+                foreach (string query in new[] {
+                    "SELECT (SELECT RAW @deep FROM items LIMIT 1) AS v FROM items LIMIT 1",
+                    "SELECT *, 1 AS w FROM items d UNNEST (SELECT RAW @deep FROM items LIMIT 1) AS v LIMIT 1",
+                    "SELECT *, 1 AS w FROM items d UNNEST [@deep] AS v LIMIT 1",
+                    "SELECT [@deep, 1/0], (SELECT RAW name FROM items) AS v FROM items LIMIT 1" })
+                {
+                    try
+                    {
+                        await connection.QueryAsync(query, parameters, token);
+                        throw new InvalidOperationException("Overdeep subquery projection succeeded.");
+                    }
+                    catch (DocumentClientException error)
+                    { Check(error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == "CD05015" && error.Diagnostics[0].Start is not null, "located subquery depth"); }
+                }
+                var reusable = await connection.QueryAsync("SELECT RAW (SELECT RAW @deep FROM items LIMIT 1) FROM items LIMIT 1", parameters, token);
+                Check(reusable.Count == 1 && connection.IsOpen, "depth refusal preserves session and RAW depth boundary");
+                foreach (string operand in new[] { "[@deep]", "(SELECT RAW @deep FROM items LIMIT 1)" })
+                {
+                    var star = await connection.QueryAsync("SELECT * FROM items d UNNEST " + operand + " AS v LIMIT 1", parameters, token);
+                    Check(star.Count == 1 && star.Documents[0].GetProperty("v").ValueKind == JsonValueKind.Array, "lone star depth boundary");
+                }
+            }
+            foreach (string predicate in new[] { "", " WHERE EXISTS (SELECT RAW 1 FROM items)" })
+            {
+                try
+                {
+                    await connection.QueryAsync("SELECT deep_value(1) AS v FROM items" + predicate, cancellationToken: token);
+                    throw new InvalidOperationException("Overdeep developer JSON projection succeeded.");
+                }
+                catch (DocumentClientException error)
+                { Check(error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == "CD05015" && error.Diagnostics[0].Start == 7, "located developer JSON depth"); }
+                var raw = await connection.QueryAsync("SELECT RAW deep_value(1) FROM items", cancellationToken: token);
+                Check(raw.Count == 1 && connection.IsOpen, "developer JSON RAW boundary and session reuse");
+            }
             var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
             Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
             var aggregates = (await connection.QueryAsync(
