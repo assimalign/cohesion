@@ -13,6 +13,7 @@ internal sealed partial class SqlPlanner
     private SqlOnConflictPlan? BindOnConflict(SqlInsertExpression insert, SqlCatalogTable table)
     {
         if (insert.OnConflict is not { } clause) { return null; }
+        if (clause.Action == SqlOnConflictAction.DoUpdate) { RecordReferentialSequenceUsage(table, deleting: false); }
         var indexes = _catalog.GetIndexes(table.ObjectId);
         var arbiters = new List<SqlCatalogIndex>();
         string target = clause.TargetKind == SqlOnConflictTargetKind.Constraint

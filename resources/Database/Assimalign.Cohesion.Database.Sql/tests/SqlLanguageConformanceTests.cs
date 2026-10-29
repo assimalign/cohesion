@@ -1132,18 +1132,49 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) =>
             {
                 await ExecuteAsync(session, "INSERT INTO c VALUES (1);");
-                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET id=9 WHERE id=1;"));
-                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[1]]);
+                await ExecuteAsync(session, "UPDATE t SET id=9 WHERE id=1;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[9]]);
                 await ExpectRowsAsync(session, "SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;", [["CASCADE"]]);
+                await ExecuteAsync(session, "TRUNCATE t,c;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES(1,'replacement',1);");
+                await ExecuteAsync(session, "INSERT INTO c VALUES(1);");
+                await ExecuteAsync(session, "UPDATE t SET id=2;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[2]]);
                 await ExecuteAsync(session, "CREATE TABLE p_image(id TEXT COLLATE case_insensitive PRIMARY KEY);");
                 await ExecuteAsync(session, "CREATE TABLE c_image(pid TEXT COLLATE case_insensitive REFERENCES p_image(id) ON UPDATE CASCADE);");
                 await ExecuteAsync(session, "INSERT INTO p_image VALUES('Ada');");
                 await ExecuteAsync(session, "INSERT INTO c_image VALUES('Ada');");
-                var imageError = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE p_image SET id='ADA';"));
-                imageError.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-                await ExpectRowsAsync(session, "SELECT id FROM p_image;", [["Ada"]]);
-                await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["Ada"]]);
+                await ExecuteAsync(session, "UPDATE p_image SET id='ADA';");
+                await ExpectRowsAsync(session, "SELECT id FROM p_image;", [["ADA"]]);
+                await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["ADA"]]);
+                await ExecuteAsync(session, "CREATE TABLE self_update(id INT PRIMARY KEY,pid INT REFERENCES self_update(id) ON UPDATE CASCADE);");
+                await ExecuteAsync(session, "INSERT INTO self_update VALUES(1,NULL),(2,1);");
+                await ExpectRowsAsync(session, "UPDATE self_update SET id=id+10,pid=pid RETURNING id,pid;", [[11,null],[12,1]]);
+                await ExpectRowsAsync(session, "SELECT id,pid FROM self_update ORDER BY id;", [[11,null],[12,11]]);
+                string[] actions = ["SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
+                for (int index = 0; index < actions.Length; index++)
+                {
+                    string parent = "update_rule_p_" + index, child = "update_rule_c_" + index;
+                    await ExecuteAsync(session, $"CREATE TABLE {parent}(id INT PRIMARY KEY);");
+                    await ExecuteAsync(session, $"INSERT INTO {parent} VALUES(1),(2);");
+                    await ExecuteAsync(session, $"CREATE TABLE {child}(pid INT DEFAULT 2 REFERENCES {parent}(id) ON UPDATE {actions[index]});");
+                    await ExecuteAsync(session, $"INSERT INTO {child} VALUES(1);");
+                    if (index < 2)
+                    {
+                        await ExecuteAsync(session,$"UPDATE {parent} SET id=9 WHERE id=1;");
+                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",index == 0 ? [[null]] : [[2]]);
+                    }
+                    else if (index == 2)
+                    {
+                        var restrict = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;"));
+                        restrict.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03039");
+                    }
+                    else
+                    {
+                        await ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;");
+                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",[[1]]);
+                    }
+                }
             }),
         [SqlClauses.References] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
         [SqlClauses.Cascade] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE CASCADE);", SqlReferentialAction.Cascade,

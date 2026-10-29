@@ -9,6 +9,19 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Dialect: ON UPDATE describes executed actions and direct RETURNING (#1723)")]
+    public void Dialect_UpdateActions_ShouldDescribeExecutedBehavior()
+    {
+        // Arrange
+        string opening = ReadDialect().Split("## Window stage")[0];
+
+        // Act / Assert
+        opening.ShouldNotContain("does not execute update actions", Case.Sensitive);
+        opening.ShouldContain("execute CASCADE, SET NULL", Case.Sensitive);
+        opening.ShouldContain("RETURNING reports the statement's own row image", Case.Sensitive);
+        opening.ShouldContain("same parent row and constraint replaces", Case.Sensitive);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Dialect: format history retains the version that introduced each record (#1723)")]
     [InlineData("Sql.Language", "DIALECT.md", "(TRUNCATE restart). SQL format 29 refuses format 28 and earlier")]
     [InlineData("Sql.Language", "DIALECT.md", "Format 29 added owned-sequence metadata to format 28's shared sequence records")]

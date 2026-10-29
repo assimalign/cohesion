@@ -74,8 +74,12 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
-Foreign-key ON UPDATE metadata (#1723, SQ-F1) adds no identity: unimplemented changing-action
-execution uses structured CK00001 before row writes on every update path. Malformed/duplicate
+Foreign-key ON UPDATE execution (#1723, SQ-F2) adds CS05085 for different action origins
+proposing conflicting stored values. A same-parent-row/constraint revisit replaces its earlier
+proposal; actions match the statement's completed direct assignments. Every referential closure,
+including plain UPDATE, upsert and DELETE, obeys CS05067's retained-memory budget.
+RESTRICT uses the existing CS03039 FK violation immediately; NO ACTION checks statement-end state.
+Update-action snapshot conflicts retain CS04064 (40001) through the existing serialization condition. Malformed/duplicate
 action syntax retains CS00003; malformed catalog action metadata retains CS06059, unsupported
 table extensions CS06060, and earlier SQL record-space formats CS06041. Compiled v8 is refused as the
 existing InvalidDocument schema.format condition.
@@ -250,7 +254,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state and rewrite/backfill chunks; sequence sorting follows ordinary, uncharged sort accounting |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); sequence sorting follows ordinary, uncharged sort accounting |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -268,6 +272,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
 | New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
 | New (#1526, SQ-W2 fixes) | CS05084 | Window frame recomputation exceeds 1,000,000 candidate input visits per statement (54000) |
+| New (#1723, SQ-F2) | CS05085 | Execution — conflicting replacement of one column through referential actions (27000) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

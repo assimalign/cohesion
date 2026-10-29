@@ -23,7 +23,9 @@ public sealed class SqlReferentialActionTimingTests
     public async Task Delete_HundredThousandChildren_ShouldCompleteWithinTimeout()
     {
         // Arrange
-        await using var engine = SqlDatabaseEngine.Create("linear-set-default", new());
+        // The large closure is deliberately admitted for this work/validation test.
+        // Plain DELETE now charges its retained action rows just like joined DML.
+        await using var engine = SqlDatabaseEngine.Create("linear-set-default", new() { StatementMemoryBudget = 512L * 1024 * 1024 });
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE TABLE p (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
@@ -35,14 +37,12 @@ public sealed class SqlReferentialActionTimingTests
         await session.ExecuteAsync("INSERT INTO digit VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO c SELECT a.id + 10 * b.id + 100 * c.id + 1000 * d.id + 10000 * e.id + 1, 1, 0 FROM digit a CROSS JOIN digit b CROSS JOIN digit c CROSS JOIN digit d CROSS JOIN digit e", cancellationToken: TestTimeout.Token(120));
 
-        // Act: the suite hang bound is five minutes; this delete has a one-minute ceiling.
-        var timer = System.Diagnostics.Stopwatch.StartNew();
+        // Act: the one-minute token is a hang guard; recorded comparisons prove linear work.
         var result = await session.ExecuteAsync("DELETE FROM p WHERE id = 1", cancellationToken: TestTimeout.Token(60));
-        timer.Stop();
 
         // Assert
         result.AffectedCount.ShouldBe(1);
-        timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(60));
+        session.LastStatementMetrics.ShouldNotBeNull().ConstraintKeyComparisons.ShouldBeLessThan(100L * 100_001);
         (await Rows(session, "SELECT COUNT(*) FROM c WHERE pid = 0")).Single()[0].ShouldBe(100_001L);
         (await Rows(session, "SELECT COUNT(*) FROM c WHERE pid = 1")).Single()[0].ShouldBe(0L);
         (await Rows(session, "SELECT COUNT(*) FROM c WHERE anchor = 0")).Single()[0].ShouldBe(100_000L);

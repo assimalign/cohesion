@@ -1,6 +1,6 @@
 # The Declared SQL Dialect
 
-## Foreign-key update declarations (#1723, SQ-F1)
+## Foreign-key update actions (#1723, SQ-F1/SQ-F2)
 
 Foreign keys accept ON UPDATE { CASCADE | SET NULL | SET DEFAULT | RESTRICT | NO ACTION }
 in CREATE TABLE column REFERENCES/table constraints and ALTER TABLE ADD CONSTRAINT/ADD COLUMN.
@@ -13,19 +13,28 @@ and views over it report the stored UPDATE_RULE. CompiledSchemaConstraint expose
 the typed References builder keeps its existing declaration and defaults update metadata to NO ACTION.
 Declared provisioning scripts may carry the SQL clause and persistent views over its metadata.
 
-SQ-F1 does not execute update actions. Changing any referenced parent key under CASCADE,
-SET NULL or SET DEFAULT refuses with CK00001 naming ON UPDATE action execution, even when
-no child currently refers to that key or another final parent retains it. UPDATE, UPDATE FROM,
-ON CONFLICT DO UPDATE and MERGE refuse before any row mutation. Self-referencing updates report
-the action-execution refusal before an outgoing orphan check. Action eligibility compares the
-stored binary representation: case-only and accent-only changes still refuse under an insensitive
-collation. DELETE, DELETE USING and MERGE DELETE chains that SET NULL/DEFAULT on referenced
-keys check all update actions before outgoing FK validation, so they also report CK00001.
-Unchanged referenced keys
-and unrelated-column updates execute normally. RESTRICT and NO ACTION both retain the existing
-statement-end parent-key check, including substitution by another final parent; SQ-F2 will
-make RESTRICT immediate and implement action closure. PostgreSQL references:
-src/backend/parser/gram.y:4581-4689 and src/backend/utils/adt/ri_triggers.c:897-955,4237-4250.
+UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE execute CASCADE, SET NULL and
+SET DEFAULT through a bounded statement closure before applying any row. DELETE SET actions
+also seed update actions when they change a referenced key. RESTRICT checks immediately;
+NO ACTION checks the final state, including another final parent supplying the old key.
+Action eligibility compares stored binary key images, including case/accent changes under an
+insensitive collation; an old key containing NULL matches no child (MATCH SIMPLE).
+
+Actions match child keys after the statement's own assignments. A directly assigned key that
+still matches the old parent receives the action; a key assigned elsewhere keeps that value.
+A later proposal from the same parent row and constraint replaces that origin's earlier proposal.
+Different action origins proposing different values for one column report CS05085, independent
+of traversal order. An unchanged cell adds no proposal; conflicts compare completed values after
+same-origin revisions converge. First-pass ON DELETE SET writes participate with their origins:
+different DELETE/UPDATE replacements raise CS05085, while equal replacements converge. This mixed
+action rule is explicit rather than depending on PostgreSQL trigger order.
+RETURNING reports the statement's own row image before subsequent actions,
+on every update path. Closure memory on every path, including plain DELETE, obeys the statement
+budget (CS05067); abandoned lock-retry attempts release their retained buffers and reservations.
+
+PostgreSQL references: src/backend/parser/gram.y:4581-4689 and
+src/backend/utils/adt/ri_triggers.c:897-955,1223-1328,4237-4250. The cascade query matches
+old foreign keys against the completed direct assignments; RETURNING precedes AFTER ROW actions.
 
 ## Window stage (#1526, SQ-W1/SQ-W2)
 
@@ -842,7 +851,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CREATE [OR REPLACE] VIEW` / `DROP VIEW` | Yes | Persisted read-only views; DROP defaults to RESTRICT and supports CASCADE |
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
-| `ON UPDATE` | Metadata supported | CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION; defaults to NO ACTION. Either order beside ON DELETE, once each. UPDATE_RULE reports the stored action. Changing parent keys under CASCADE/SET NULL/SET DEFAULT refuses with CK00001 before row writes until SQ-F2. RESTRICT/NO ACTION retain statement-end checks in SQ-F1. |
+| `ON UPDATE` | Supported | CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION; defaults to NO ACTION. Either order beside ON DELETE, once each. UPDATE_RULE reports the stored action. Actions execute on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE, including self-references and mixed delete/update chains. Stored key representation changes fire actions even under an equality collation; NULL keys use MATCH SIMPLE. RESTRICT checks existing children immediately and rejects parent substitution; NO ACTION checks the complete statement state and accepts another final parent. SET DEFAULT evaluates per row, including sequence/identity defaults; absent defaults assign NULL. Conflicting cascade assignments fail with CS05085 (27000); the whole statement rolls back. |
 | `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, modes, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION and PREPARE TRANSACTION stay CS00002 (#1012); TRANSACTION alone is not a statement. |
 | `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
@@ -1035,7 +1044,7 @@ remain equal. SET DEFAULT uses the ordinary DEFAULT assignment
 path for identity columns: both BY DEFAULT and GENERATED ALWAYS identities allocate a new value
 from their owned sequence, as PostgreSQL's SET DEFAULT does. PostgreSQL-style column lists after SET NULL/SET DEFAULT
 report CK00001. Compiled foreign keys retain RESTRICT/CASCADE for ON DELETE and expose all five
-ON UPDATE metadata actions. SQL record-space format 20 gates the new persisted
+ON UPDATE actions. SQL record-space format 20 gates the new persisted
 referential-action values; format 19 and earlier are refused with the recreate remedy.
 
 ## Statement completeness (#1068)
@@ -4119,6 +4128,7 @@ pin in the same change.
 | `CS02034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `CS03035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `CS05036` | Error | ON CONFLICT DO UPDATE or MERGE cannot affect a row a second time (PostgreSQL 21000) |
+| `CS05085` | Error | Conflicting replacement of one column through referential actions (27000) |
 | `CS03037` | Error | UNIQUE, PRIMARY KEY or unique-index violation, including a second unique index during ON CONFLICT DO UPDATE (SQLSTATE 23505, unique_violation) |
 | `CS03038` | Error | Table CHECK or domain-check violation, including writes, CAST to a domain and function domain arguments/results (SQLSTATE 23514, check_violation) |
 | `CS03039` | Error | FOREIGN KEY violation: missing parent on INSERT/UPDATE, or referenced key protected by RESTRICT/NO ACTION on DELETE/UPDATE, including final-row checks (SQLSTATE 23503, foreign_key_violation) |
