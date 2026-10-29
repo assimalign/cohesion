@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -158,7 +158,7 @@ public class ApplicationGatewayTests
         Task run = gateway.RunAsync(builder.Build().Model, stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         TestInstance second = await infrastructure.StartInstanceAsync("Web", "orders-api");
-        IApplicationResource ordersApi = gateway.Resources.Single();
+        IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
         (TestInstance first, ResourceService firstService) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
 
         // Act: the write runs once; the gateway records it and restores it on the others.
@@ -190,7 +190,7 @@ public class ApplicationGatewayTests
         using var stop = new CancellationTokenSource();
         Task run = gateway.RunAsync(builder.Build().Model, stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        IApplicationResource ordersApi = gateway.Resources.Single();
+        IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
 
         // Act
         ResourceActionResult scaled = await ordersApi.ExecuteAsync("scale", ResourceActionContext.Create(ResourceActionKind.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));
@@ -234,9 +234,9 @@ public class ApplicationGatewayTests
     private static ApplicationBuilder CreateHierarchy()
     {
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
         IApplicationSet east = builder.AddGateway("east");
-        IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
+        IApplicationResourceDefinition database = east.AddResource("Database.Sql", "orders-db");
         east.AddResource("Web", "orders-api").DependsOn(database, "data.read").DependsOn(identity);
         east.AddGateway("east-edge");
         builder.AddGateway("west");

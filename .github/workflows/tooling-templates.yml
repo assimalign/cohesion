@@ -114,6 +114,8 @@ jobs:
           $packageIds = @(
             'Assimalign.Cohesion.Core'
             'Assimalign.Cohesion.ApplicationModel'
+            'Assimalign.Cohesion.ApplicationModel.Definition'
+            'Assimalign.Cohesion.ApplicationModel.Hosting'
             'Assimalign.Cohesion.IdentityModel'
             'Assimalign.Cohesion.IdentityModel.Token'
             'Assimalign.Cohesion.IdentityModel.Token.JsonWebToken'
@@ -127,7 +129,6 @@ jobs:
             'Assimalign.Cohesion.Connections.Tcp'
             'Assimalign.Cohesion.Connections.Tls'
             'Assimalign.Cohesion.Hosting'
-            'Assimalign.Cohesion.Hosting.Resources'
             'Assimalign.Cohesion.Http'
             'Assimalign.Cohesion.Http.Connections'
             # Sdk.Gateway injects no area client and Gateway.ControlPlane no longer references

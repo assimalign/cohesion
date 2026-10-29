@@ -326,9 +326,11 @@ jobs:
           # other Web consumer here receives them through the App.Web framework, not as packages.
           $packageIds = @(
             "Assimalign.Cohesion.ApplicationModel"
+            "Assimalign.Cohesion.ApplicationModel.Definition"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
             "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
+            "Assimalign.Cohesion.ApplicationModel.Hosting"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
             "Assimalign.Cohesion.Connections"
             "Assimalign.Cohesion.Connections.StreamAbort"
@@ -355,7 +357,6 @@ jobs:
             "Assimalign.Cohesion.FileSystem"
             "Assimalign.Cohesion.FileSystem.Physical"
             "Assimalign.Cohesion.Hosting"
-            "Assimalign.Cohesion.Hosting.Resources"
             "Assimalign.Cohesion.Http"
             "Assimalign.Cohesion.Http.Connections"
             "Assimalign.Cohesion.IdentityHub.ApplicationModel"
@@ -396,9 +397,11 @@ jobs:
           $version = & ./scripts/Get-CohesionVersion.ps1 -RepoRoot (Get-Location).Path
           $required = @(
             "Assimalign.Cohesion.ApplicationModel"
+            "Assimalign.Cohesion.ApplicationModel.Definition"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
             "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
+            "Assimalign.Cohesion.ApplicationModel.Hosting"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
             "Assimalign.Cohesion.Connections"
             "Assimalign.Cohesion.Connections.StreamAbort"
@@ -425,7 +428,6 @@ jobs:
             "Assimalign.Cohesion.FileSystem"
             "Assimalign.Cohesion.FileSystem.Physical"
             "Assimalign.Cohesion.Hosting"
-            "Assimalign.Cohesion.Hosting.Resources"
             "Assimalign.Cohesion.Http"
             "Assimalign.Cohesion.Http.Connections"
             "Assimalign.Cohesion.IdentityHub.ApplicationModel"

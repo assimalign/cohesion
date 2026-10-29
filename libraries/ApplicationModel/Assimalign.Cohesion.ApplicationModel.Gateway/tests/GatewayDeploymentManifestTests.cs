@@ -106,7 +106,7 @@ public class GatewayDeploymentManifestTests
     private static ApplicationManifest CreateManifest()
     {
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
         builder.AddGateway("east").AddResource("Web", "orders-api").DependsOn(identity, "tokens.issue");
         return builder.Build().Model.Manifest;
     }

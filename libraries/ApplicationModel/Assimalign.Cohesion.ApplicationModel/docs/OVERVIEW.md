@@ -2,69 +2,38 @@
 
 ## Purpose
 
-Declares what each gateway in a hierarchy deploys, as application sets of resources and child
-gateways with permission-carrying dependencies, and projects the hierarchy as the global manifest.
-It also supplies the gateway-side aggregate of one resource's instances and the state written to
-them. The design record is [DESIGN.md](DESIGN.md).
+Declares what both sides of the application model exchange, so a gateway and the instances it runs
+speak through the same types without either loading the other's code. The design record is
+[DESIGN.md](DESIGN.md).
 
 ## Scope
 
-- In scope: `IApplication`, `IApplicationBuilder`, and `IApplicationModel` with their
-  implementations; the `IApplicationGateway` seam; `IApplicationSet`; `IApplicationResourceDescriptor`
-  with `DependsOn`, `WithSetting`, `WithExtension`, and its output placeholders; the manifest records; and
-  `IApplicationResource` and `ApplicationResource`.
-- Out of scope: gateways, platforms, infrastructure actions, and the deployment manifest's wire
-  format (ApplicationModel.Gateway); the identity provider; area verbs such as `AddWeb`.
+- In scope: `IApplicationResource`, the base of a resource's definition, deployment, and instances;
+  the identity value objects (`ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
+  `ResourceInstanceKey`, `ResourceActionName`); the instance manifest (`ResourceManifest`,
+  `ResourceActionDescriptor`, `ResourceActionKind`); invocation (`ResourceActionContext`,
+  `ResourceActionResult`, `ResourceActionStatus`); state (`ResourceStateSnapshot`); content
+  (`IResourceContentSerializer`, `ResourceContentException`); and publication
+  (`IResourceManifestPublisher`, `ResourcePublication`).
+- Out of scope: the logical model (ApplicationModel.Definition), the instance runtime and its HTTP
+  publisher (ApplicationModel.Hosting), and gateways (ApplicationModel.Gateway).
 
 ## Dependencies
 
-`Assimalign.Cohesion.Core` and `Assimalign.Cohesion.Hosting.Resources`.
+`Assimalign.Cohesion.Core` only.
 
 ## Usage
 
-Compose the hierarchy in the root gateway's program, build it, and run it:
+An instance publishes its manifest through the seam, and its gateway answers with the snapshots to
+restore:
 
 ```csharp
-ApplicationBuilder builder = Application.CreateBuilder("root", args);   // the root set
-IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
-
-IApplicationSet east = builder.AddGateway("east");
-IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
-IApplicationResourceDescriptor ordersApi = east.AddResource("Web", "orders-api")
-    .DependsOn(database, "data.read", "data.write")
-    .DependsOn(identity)
-    .WithSetting("Database:Endpoint", database.Endpoint)        // filled in when east deploys it
-    .WithSetting("Identity:Authority", identity.Endpoint)       // passed down by the root gateway
-    .WithSetting("Logging:LogLevel:Default", "Information");
-
-// A platform package's verb, here a Kubernetes package's, records how its platform deploys the
-// resource; only a gateway on that platform applies it. It calls the generic form:
-// WithExtension("kubernetes", "autoscaler", JsonSerializer.SerializeToElement(options, context)).
-ordersApi.ConfigureHpa(hpa => hpa.MaxReplicas = 10);
-
-Application application = builder.UseGateway(gateway).Build();   // composition closes here
-ApplicationManifest manifest = application.Model.Manifest;       // the global manifest
-await application.RunAsync();
+ResourceManifest manifest = new("Web", "orders-api", ResourceInstanceKey.New(), actions);
+ResourcePublication publication = await publisher.PublishAsync(manifest, cancellationToken);
 ```
 
-A gateway that receives a manifest as data, rather than composing one, builds the same model:
+Every form of a resource derives the same id from its provider and name:
 
 ```csharp
-ApplicationModel model = ApplicationModel.Create(manifestFromArguments);
-```
-
-A gateway builds one aggregate per resource it runs, answers each publication, and records each
-stateful write:
-
-```csharp
-ApplicationResource ordersApi = ApplicationResource.Create(model.Manifest.Gateways[0].Resources[1]);
-
-// An instance published its manifest: answer with the state it must restore.
-IReadOnlyList<ResourceStateSnapshot> restore = ordersApi.Register(published);
-
-// A stateful write succeeded on one instance: restore its snapshot on the others.
-foreach (ResourceInstanceKey target in ordersApi.Record(source, write.State!))
-{
-    // Send write.State to the target instance's control plane (RestoreAsync).
-}
+ResourceId id = ResourceId.FromName("Web", "orders-api");
 ```

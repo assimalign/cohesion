@@ -1,12 +1,12 @@
 # ApplicationModel Library Area
 
-> **Being rebuilt (2026-10-27).** `Assimalign.Cohesion.ApplicationModel` and
-> `Assimalign.Cohesion.ApplicationModel.Gateway` have been rebuilt on
-> `Assimalign.Cohesion.Hosting.Resources`; see their
-> [model](Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md) and
-> [gateway](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md) designs.
-> `Gateway.InProcess` and `Gateway.ControlPlane` are not rebuilt yet, and the rest of this page and
-> the linked area records describe the retired design.
+> **Being rebuilt (2026-10-27).** Since 2026-10-29 the model is three projects: the shared
+> [contracts](Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md), the logical side in
+> [Definition](Assimalign.Cohesion.ApplicationModel.Definition/docs/DESIGN.md), and the physical
+> side in [Hosting](Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md), formerly
+> `Assimalign.Cohesion.Hosting.Resources`. The [gateway](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
+> builds on the definitions. `Gateway.InProcess` and `Gateway.ControlPlane` are not rebuilt yet,
+> and the linked area records describe the retired design.
 
 The L2 application-composition and orchestration plane: the declarative application model every
 resource area's `<Area>.ApplicationModel` package builds on, plus the gateway family that
@@ -28,17 +28,19 @@ libraries (`Core`, `Hosting`) and below every L3 service platform under `resourc
 ## Project map
 
 The arrow means "references": `Gateway.InProcess --> Gateway` reads "`Gateway.InProcess`
-references `Gateway`". The gateway packages layer onto the base model; nothing in the base model
-references a gateway.
+references `Gateway`". The logical side (Definition) and the physical side (Hosting) both reference
+the shared contracts and never each other; the gateway packages layer onto the definitions.
 
 ```mermaid
 flowchart LR
-    Model["Assimalign.Cohesion.ApplicationModel"] --> Resources["Assimalign.Cohesion.Hosting.Resources"]
-    Model --> Core["Assimalign.Cohesion.Core"]
-    Gateway["ApplicationModel.Gateway"] --> Model
+    Definition["ApplicationModel.Definition"] --> Contracts["Assimalign.Cohesion.ApplicationModel"]
+    Hosting["ApplicationModel.Hosting"] --> Contracts
+    Contracts --> Core["Assimalign.Cohesion.Core"]
+    Gateway["ApplicationModel.Gateway"] --> Definition
     InProcess["ApplicationModel.Gateway.InProcess"] --> Gateway
-    ControlPlane["ApplicationModel.Gateway.ControlPlane"] --> Model
-    AreaModel["resources/*/…​.ApplicationModel"] --> Model
+    ControlPlane["ApplicationModel.Gateway.ControlPlane"] --> Definition
+    AreaModel["resources/*/…​.ApplicationModel"] --> Definition
+    AreaHosting["resources/*/…​.Hosting.ApplicationModel"] --> Hosting
     AreaModel -.->|"COHRES003 ✗"| Gateway
 ```
 
@@ -49,7 +51,9 @@ outside resource-area packages. That prohibition has no opt-out and no exemption
 
 | Project | Role |
 | --- | --- |
-| `Assimalign.Cohesion.ApplicationModel` | Application sets (what each gateway deploys), resource descriptors and their permission-carrying dependencies, the global manifest, and the gateway-side aggregate of a resource's instances and state |
+| `Assimalign.Cohesion.ApplicationModel` | The shared contracts: the `IApplicationResource` base, resource identity, the instance manifest, action invocation and results, state snapshots, and the publication seam |
+| `Assimalign.Cohesion.ApplicationModel.Definition` | The logical side: application sets (what each gateway deploys), resource definitions with their dependencies, settings, and platform extensions, the global manifest, and a gateway's deployment of each resource across its instances |
+| `Assimalign.Cohesion.ApplicationModel.Hosting` | The physical side: a running resource instance, its health contributors, the in-process control plane, the host service that publishes and restores, and the HTTP manifest publisher |
 | `Assimalign.Cohesion.ApplicationModel.Gateway` | The gateway: deploys its part of the hierarchy through an infrastructure provider, receives instance publications, and exposes infrastructure actions |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | The in-process Composite plan controller — compiles the supported in-process subset of a Composite plan |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | The gateway-side control-plane contract that a resource's default control plane is reached through |

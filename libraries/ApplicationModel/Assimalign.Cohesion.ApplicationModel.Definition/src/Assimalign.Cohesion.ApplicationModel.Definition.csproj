@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!-- The definition side shares the ApplicationModel namespace, so a gateway's Program.cs
+		     composes the whole model with one using. -->
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+		<Description>Cohesion application model definitions: the hierarchical set of gateways and the application resources they deploy, resource dependencies and their permissions, settings and platform extensions, the global manifest, and the gateway-side deployment of a resource across its instances.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\GatewayName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\GatewayId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\ResourcePermission.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\OutputName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\PlatformName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\ExtensionName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<!-- Configuration keys compare case-insensitively, so setting names do too. -->
+		<CohesionValueType Include="ValueObjects\SettingName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
+	</ItemGroup>
+</Project>

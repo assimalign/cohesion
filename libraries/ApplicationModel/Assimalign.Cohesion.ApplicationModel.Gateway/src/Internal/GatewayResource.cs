@@ -5,8 +5,6 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 // One resource of the run: its aggregate, its previous record entry, the plan its step made, where
@@ -44,7 +42,7 @@ internal sealed class GatewayResource
     private int _current;
     private int _tornDown;
 
-    public GatewayResource(ApplicationResource aggregate, ApplicationResourceManifest declared, GatewayResourceRecord? previous)
+    public GatewayResource(ApplicationResourceDeployment aggregate, ApplicationResourceManifest declared, GatewayResourceRecord? previous)
     {
         Aggregate = aggregate;
         Declared = declared;
@@ -58,7 +56,7 @@ internal sealed class GatewayResource
         }
     }
 
-    public ApplicationResource Aggregate { get; }
+    public ApplicationResourceDeployment Aggregate { get; }
 
     // The resource as declared for the provider's platform: the model's manifest with only that
     // platform's extensions. The provider sees this, and the definition fingerprints it.
@@ -236,7 +234,7 @@ internal sealed class GatewayResource
             _resource = resource;
         }
 
-        public ApplicationResource Aggregate => _resource.Aggregate;
+        public ApplicationResourceDeployment Aggregate => _resource.Aggregate;
 
         public InfrastructureChange Change => _resource.Change;
 

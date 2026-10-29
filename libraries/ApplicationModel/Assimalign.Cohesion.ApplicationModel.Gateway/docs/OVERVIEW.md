@@ -16,7 +16,7 @@ each resource's aggregate and infrastructure actions. The design record is [DESI
 
 ## Dependencies
 
-`Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`.
+`Assimalign.Cohesion.ApplicationModel.Definition`, and through it the contracts in `Assimalign.Cohesion.ApplicationModel`.
 
 ## Usage
 
@@ -26,13 +26,13 @@ The root gateway composes its application and runs it through a provider for its
 ApplicationGateway gateway = ApplicationGateway.Create(infrastructure, startupTimeout: TimeSpan.FromMinutes(2));
 
 ApplicationBuilder builder = Application.CreateBuilder("root", args).UseGateway(gateway);
-IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
 
 // east deploys once identity has published and its outputs are read, with identity's endpoint in
 // its deployment manifest. Inside east, orders-api deploys once orders-db is ready, with both
 // endpoints in its configuration.
 IApplicationSet east = builder.AddGateway("east");
-IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
+IApplicationResourceDefinition database = east.AddResource("Database.Sql", "orders-db");
 east.AddResource("Web", "orders-api")
     .DependsOn(identity, "tokens.issue")
     .WithSetting("Identity:Authority", identity.Endpoint)

@@ -4,7 +4,7 @@
 		<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 	</ItemGroup>
 </Project>

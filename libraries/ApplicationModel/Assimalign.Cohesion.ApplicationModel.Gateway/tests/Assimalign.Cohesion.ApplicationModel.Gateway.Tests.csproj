@@ -12,5 +12,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
+		<!-- The tests' instances run the real control plane and resource service. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 	</ItemGroup>
 </Project>

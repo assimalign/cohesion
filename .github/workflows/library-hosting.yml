@@ -52,8 +52,7 @@ jobs:
         # One leg per OS builds and tests the whole area: the inner list is a single matrix value
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
-            "Assimalign.Cohesion.Hosting",
-            "Assimalign.Cohesion.Hosting.Resources"
+            "Assimalign.Cohesion.Hosting"
           ]]
     steps:
       - uses: actions/checkout@v7

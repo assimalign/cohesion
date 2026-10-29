@@ -12,7 +12,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 		<!-- Integration acceptance: drive the manifest through the generic gateway
 		     realization algorithm (dependency order, teardown, Failed blocking). -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />

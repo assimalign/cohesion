@@ -38,7 +38,7 @@ public sealed class WebEventSourceConformanceTests
         members.ShouldContain("Assimalign.Cohesion.Web.Hosting");
         members.ShouldContain("Assimalign.Cohesion.Web.Server");
         members.ShouldNotContain("Assimalign.Cohesion.Web.Hosting.Health");
-        members.ShouldContain("Assimalign.Cohesion.Web.Hosting.Resources");
+        members.ShouldContain("Assimalign.Cohesion.Web.Hosting.ApplicationModel");
         documentedSources.Distinct(StringComparer.Ordinal).Count().ShouldBe(documentedSources.Length,
             "The event-source catalog must have one row per source.");
         uninstrumented.ShouldNotBeEmpty("The catalog must declare its deliberate no-source policy.");

@@ -1,7 +1,5 @@
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>

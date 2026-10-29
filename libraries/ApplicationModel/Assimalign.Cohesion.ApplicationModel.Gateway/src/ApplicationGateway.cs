@@ -11,7 +11,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
@@ -70,7 +69,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     private GatewayResource[] _ordered = [];
     private GatewayResourceRecord[] _retiredResources = [];
     private GatewayName[] _retiredGateways = [];
-    private ReadOnlyCollection<IApplicationResource> _aggregates = ReadOnlyCollection<IApplicationResource>.Empty;
+    private ReadOnlyCollection<IApplicationResourceDeployment> _aggregates = ReadOnlyCollection<IApplicationResourceDeployment>.Empty;
     private IApplicationModel? _model;
     private int _lifecycle;
 
@@ -102,7 +101,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// Gets the aggregates of the resources the gateway runs, in dependency order, each after the
     /// resources of this gateway it depends on; empty before <see cref="RunAsync"/>.
     /// </summary>
-    public IReadOnlyCollection<IApplicationResource> Resources => Volatile.Read(ref _aggregates);
+    public IReadOnlyCollection<IApplicationResourceDeployment> Resources => Volatile.Read(ref _aggregates);
 
     /// <summary>
     /// Gets a task that completes when every created or updated resource has published and the
@@ -557,13 +556,13 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             // Until its step plans it, a resource runs as the previous run left it: its recorded
             // state, outputs, and instances. The plan then keeps what still applies.
             recorded.Remove((manifest.Provider, manifest.Name), out GatewayResourceRecord? previous);
-            ApplicationResource aggregate = ApplicationResource.Create(manifest, previous?.State, actions, previous?.Outputs);
+            ApplicationResourceDeployment aggregate = ApplicationResourceDeployment.Create(manifest, previous?.State, actions, previous?.Outputs);
             lookup.Add((manifest.Provider, manifest.Name), new GatewayResource(aggregate, declared, previous));
         }
 
         // The resources are kept in the order they deploy in.
         var ordered = new List<GatewayResource>();
-        var aggregates = new List<IApplicationResource>();
+        var aggregates = new List<IApplicationResourceDeployment>();
         foreach (GatewayStep step in steps)
         {
             if (step.Resource is not null)
@@ -877,7 +876,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
                 continue;
             }
 
-            ApplicationResource aggregate = resource.Aggregate;
+            ApplicationResourceDeployment aggregate = resource.Aggregate;
             resources.Add(new GatewayResourceRecord(
                 aggregate.Manifest.Provider,
                 aggregate.Manifest.Name,
@@ -959,6 +958,6 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
 
         public TimeSpan StartupTimeout => _gateway.StartupTimeout;
 
-        public IReadOnlyCollection<IApplicationResource> Resources => _gateway.Resources;
+        public IReadOnlyCollection<IApplicationResourceDeployment> Resources => _gateway.Resources;
     }
 }

@@ -64,9 +64,11 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/ApplicationModel
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel'
+    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition'
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway'
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane'
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
+    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting'
 
     # libraries/Cache
     'libraries/Cache/Assimalign.Cohesion.Caching'
@@ -127,7 +129,6 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/Hosting
     'libraries/Hosting/Assimalign.Cohesion.Hosting'
-    'libraries/Hosting/Assimalign.Cohesion.Hosting.Resources'
 
     # libraries/Http
     'libraries/Http/Assimalign.Cohesion.Http'
@@ -343,7 +344,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Health'
     'resources/Web/Assimalign.Cohesion.Web.HostFiltering'
     'resources/Web/Assimalign.Cohesion.Web.Hosting'
-    'resources/Web/Assimalign.Cohesion.Web.Hosting.Resources'
+    'resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel'
     'resources/Web/Assimalign.Cohesion.Web.HttpsPolicy'
     'resources/Web/Assimalign.Cohesion.Web.OpenApi'
     'resources/Web/Assimalign.Cohesion.Web.ProblemDetails'

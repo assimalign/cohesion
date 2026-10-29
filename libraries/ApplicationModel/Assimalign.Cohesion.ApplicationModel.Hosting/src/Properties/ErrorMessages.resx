@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="ResourceActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
+  <data name="ResourceInstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
+  <data name="ResourceActionsMissing" xml:space="preserve"><value>The resource returned no action collection.</value></data>
+  <data name="ResourceHealthContributorsMissing" xml:space="preserve"><value>The resource returned no health contributor collection.</value></data>
+  <data name="ResourceActionNull" xml:space="preserve"><value>The resource's action collection contains null.</value></data>
+  <data name="ResourceActionKindInvalid" xml:space="preserve"><value>Action '{0}' must accept Read, Write, or both, and nothing else.</value></data>
+  <data name="ResourceActionStateReadOnly" xml:space="preserve"><value>Action '{0}' has state but does not accept writes. Only a write changes state, so only a writable action may have it.</value></data>
+  <data name="ResourceActionNameDuplicate" xml:space="preserve"><value>The resource declares action '{0}' more than once.</value></data>
+  <data name="ResourceActionResultNull" xml:space="preserve"><value>Action '{0}' returned null instead of a result.</value></data>
+  <data name="ResourceStateSnapshotNull" xml:space="preserve"><value>A state snapshot cannot be a null value.</value></data>
+  <data name="ResourceServiceAlreadyStarted" xml:space="preserve"><value>The resource service has already been started, or a start is in progress.</value></data>
+  <data name="ResourcePublicationNull" xml:space="preserve"><value>The manifest publisher returned null instead of a publication, or a publication without a snapshot list.</value></data>
+  <data name="ResourcePublicationLeaseInvalid" xml:space="preserve"><value>The manifest publisher returned a lease of {0}; a lease is positive.</value></data>
+  <data name="ResourcePublicationSnapshotNull" xml:space="preserve"><value>The manifest publisher returned a null snapshot.</value></data>
+  <data name="ResourcePublicationSnapshotDuplicate" xml:space="preserve"><value>The manifest publisher returned more than one snapshot for action '{0}'.</value></data>
+  <data name="ResourceStateRestoreFailed" xml:space="preserve"><value>The snapshot the manifest publisher returned for action '{0}' was not restored ({1}). {2}</value></data>
+  <data name="ManifestEndpointInvalid" xml:space="preserve"><value>A manifest endpoint is an absolute http or https URL.</value></data>
+  <data name="ManifestPublicationRefused" xml:space="preserve"><value>The gateway at '{0}' refused the resource manifest with HTTP status {1}.</value></data>
+  <data name="ManifestRenewalRefused" xml:space="preserve"><value>The gateway at '{0}' refused the instance's renewal with HTTP status {1}.</value></data>
+  <data name="ManifestHttpClientNull" xml:space="preserve"><value>The HTTP client factory returned null instead of a client.</value></data>
+  <data name="ResourceContentTypeUnsupported" xml:space="preserve"><value>The content serializer does not know type '{0}'. Create it with the source-generated context that declares the type.</value></data>
+  <data name="ResourceActionStateUnsupported" xml:space="preserve"><value>The content serializer cannot write the state of action '{0}': it does not know the state's type.</value></data>
+  <data name="JsonContextNull" xml:space="preserve"><value>The JSON contexts cannot contain null.</value></data>
+</root>

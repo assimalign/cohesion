@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 

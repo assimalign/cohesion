@@ -1093,16 +1093,16 @@
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting/tests/">
 		<Project Path="Web/Assimalign.Cohesion.Web.Hosting/tests/Assimalign.Cohesion.Web.Hosting.Tests.csproj" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/" />
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/">
-		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/DESIGN.md" />
-		<File Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/docs/OVERVIEW.md" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/">
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/OVERVIEW.md" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/src/">
-		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/src/Assimalign.Cohesion.Web.Hosting.Resources.csproj" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/src/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/src/Assimalign.Cohesion.Web.Hosting.ApplicationModel.csproj" />
 	</Folder>
-	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/">
-		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.Resources/tests/Assimalign.Cohesion.Web.Hosting.Resources.Tests.csproj" />
+	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/tests/">
+		<Project Path="Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/tests/Assimalign.Cohesion.Web.Hosting.ApplicationModel.Tests.csproj" />
 	</Folder>
 	<Folder Name="/resources/Web/Assimalign.Cohesion.Web.OpenApi/">
 		<File Path="Web/Assimalign.Cohesion.Web.OpenApi/README.md" />
@@ -1278,6 +1278,8 @@
 		<Project Path="../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 		<Project Path="../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/Assimalign.Cohesion.ApplicationModel.Gateway.csproj" />
 		<Project Path="../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
+		<Project Path="../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/src/Assimalign.Cohesion.ApplicationModel.Definition.csproj" />
+		<Project Path="../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/Assimalign.Cohesion.ApplicationModel.Hosting.csproj" />
 		<Project Path="../libraries/Connections/Assimalign.Cohesion.Connections.InMemory/src/Assimalign.Cohesion.Connections.InMemory.csproj" />
 		<Project Path="../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
 		<Project Path="../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />

@@ -19,7 +19,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 		<!-- Composition acceptance: the host runs a real SQL engine fronted by the
 		     SQL model's server (SqlDatabaseServer, implemented inside Database.Sql)
 		     on the in-memory driver, driven end-to-end by a client (tests are

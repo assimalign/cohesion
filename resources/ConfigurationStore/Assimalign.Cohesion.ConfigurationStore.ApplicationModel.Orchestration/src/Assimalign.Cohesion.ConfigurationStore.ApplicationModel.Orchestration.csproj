@@ -11,7 +11,7 @@
 		<Description>Opt-in gateway provider that resolves ConfigurationStore-backed Configuration mount sources through builder.UseConfigurationStore(store).</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ConfigurationStore.Client" />
 	</ItemGroup>
 </Project>

@@ -4,7 +4,6 @@
 		<Description>Cohesion application gateway: deploys an application model through an infrastructure provider, receives the manifests its resources' instances publish, and exposes each resource's infrastructure actions.</Description>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
 	</ItemGroup>
 </Project>

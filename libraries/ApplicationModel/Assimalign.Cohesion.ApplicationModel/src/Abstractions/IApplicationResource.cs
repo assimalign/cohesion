@@ -1,117 +1,35 @@
-﻿using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// A gateway's view of one application resource: the instances running it and the state written
-/// to them since the gateway was deployed.
+/// One application resource: a logical service, such as <c>orders-api</c>, under its provider, such
+/// as <c>Web</c>.
 /// </summary>
 /// <remarks>
-/// <para>
-/// An instance registers when it publishes its manifest, and the answer is the state it must
-/// restore before serving. After a stateful write succeeds on one instance, the gateway records
-/// the write's snapshot; the answer is every other instance that must restore it. Registration and
-/// recording are atomic with respect to each other, so every instance receives every recorded
-/// snapshot exactly once: in its registration answer or through a restore.
-/// </para>
-/// <para>
-/// The state lasts until the gateway is next deployed. Keeping it across a restart of the same
-/// deployment is the gateway's job: it persists what it records and seeds a new aggregate with it.
-/// Members are safe to call concurrently.
-/// </para>
+/// A resource appears in three forms that share its identity: its definition, which a model
+/// declares (<c>IApplicationResourceDefinition</c>); its deployment, a gateway's view of it across
+/// its instances (<c>IApplicationResourceDeployment</c>); and each instance, one running copy
+/// (<c>IApplicationResourceInstance</c>).
 /// </remarks>
 public interface IApplicationResource
 {
     /// <summary>
-    /// Gets the id the resource's instances share.
-    /// </summary>
-    ResourceId Id => ResourceId.FromName(Manifest.Provider, Manifest.Name);
-
-    /// <summary>
-    /// Gets the resource as the deployment declared it.
-    /// </summary>
-    ApplicationResourceManifest Manifest { get; }
-
-    /// <summary>
-    /// Gets the registered instances' manifests, ordered by instance key and so by start time.
-    /// </summary>
-    IReadOnlyCollection<ResourceManifest> Instances { get; }
-
-    /// <summary>
-    /// Gets the state recorded since the gateway was deployed: one snapshot per action, ordered by
-    /// action name.
-    /// </summary>
-    IReadOnlyCollection<ResourceStateSnapshot> State { get; }
-
-    /// <summary>
-    /// Gets the infrastructure actions the gateway exposes on the resource, ordered by name.
-    /// </summary>
-    IReadOnlyCollection<IApplicationResourceAction> Actions { get; }
-
-    /// <summary>
-    /// Gets the values the resource's platform reported once it was deployed, such as its endpoint;
-    /// empty until the gateway has read them.
-    /// </summary>
-    IReadOnlyDictionary<OutputName, string> Outputs { get; }
-
-    /// <summary>
-    /// Executes one invocation of an infrastructure action.
-    /// </summary>
-    /// <param name="action">The action's name.</param>
-    /// <param name="context">The invocation.</param>
-    /// <param name="cancellationToken">Cancels the invocation.</param>
-    /// <returns>
-    /// The action's result, <see cref="ResourceActionStatus.NotFound"/> when the resource has no such
-    /// action, <see cref="ResourceActionStatus.NotSupported"/> when the action does not accept the
-    /// requested operation, or <see cref="ResourceActionStatus.Rejected"/> when the input does not
-    /// bind.
-    /// </returns>
-    /// <exception cref="System.ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
-    ValueTask<ResourceActionResult> ExecuteAsync(ResourceActionName action, ResourceActionContext context, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Registers an instance and returns the state it must restore before serving.
+    /// Gets the id every form of the resource shares.
     /// </summary>
     /// <remarks>
-    /// Registering an instance that is already registered replaces its manifest, so a publication
-    /// can be retried. The answer holds the recorded snapshot of each action the instance's manifest
-    /// declares stateful.
+    /// The id is derived from <see cref="Provider"/> and <see cref="Name"/> by
+    /// <see cref="ResourceId.FromName(ProviderName, ResourceName)"/>, so it is unique among one
+    /// gateway's resources.
     /// </remarks>
-    /// <param name="instance">The manifest the instance published.</param>
-    /// <returns>The snapshots to restore.</returns>
-    /// <exception cref="System.ArgumentNullException"><paramref name="instance"/> is <see langword="null"/>.</exception>
-    /// <exception cref="System.ArgumentException">
-    /// The manifest names another resource, or has no instance key.
-    /// </exception>
-    IReadOnlyList<ResourceStateSnapshot> Register(ResourceManifest instance);
+    ResourceId Id => ResourceId.FromName(Provider, Name);
 
     /// <summary>
-    /// Removes an instance that stopped.
+    /// Gets the resource's provider: its kind, such as <c>Web</c> or <c>Database.Sql</c>.
     /// </summary>
-    /// <param name="key">The instance's key.</param>
-    /// <returns>Whether the instance was registered.</returns>
-    bool Unregister(ResourceInstanceKey key);
+    ProviderName Provider { get; }
 
     /// <summary>
-    /// Records the snapshot a stateful write left on one instance, and returns the other instances
-    /// that must restore it.
+    /// Gets the resource's name, such as <c>orders-api</c>, unique among one gateway's resources of
+    /// the same provider.
     /// </summary>
-    /// <remarks>
-    /// The snapshot replaces the action's previous one. The answer holds every other registered
-    /// instance whose manifest declares the action stateful; restore the snapshot on each one rather
-    /// than repeating the write.
-    /// </remarks>
-    /// <param name="source">The key of the instance the write ran on.</param>
-    /// <param name="snapshot">The snapshot the write returned.</param>
-    /// <returns>The keys of the instances that must restore the snapshot.</returns>
-    /// <exception cref="System.ArgumentNullException"><paramref name="snapshot"/> is <see langword="null"/>.</exception>
-    /// <exception cref="System.InvalidOperationException"><paramref name="source"/> is not registered.</exception>
-    /// <exception cref="System.ArgumentException">
-    /// The source instance's manifest does not declare the snapshot's action stateful.
-    /// </exception>
-    IReadOnlyList<ResourceInstanceKey> Record(ResourceInstanceKey source, ResourceStateSnapshot snapshot);
+    ResourceName Name { get; }
 }

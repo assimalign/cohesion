@@ -5,8 +5,6 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 // One step of a gateway's deployment: one of its own resources, or one of its child gateways with

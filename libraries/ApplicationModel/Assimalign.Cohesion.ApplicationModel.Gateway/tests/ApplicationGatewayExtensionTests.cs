@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 

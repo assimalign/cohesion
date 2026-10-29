@@ -42,6 +42,8 @@ public sealed class FrameworkManifestTests
         string[] expectedClosure =
         [
             "Assimalign.Cohesion.App",
+            "Assimalign.Cohesion.ApplicationModel",
+            "Assimalign.Cohesion.ApplicationModel.Hosting",
             "Assimalign.Cohesion.Configuration",
             "Assimalign.Cohesion.Configuration.CommandLine",
             "Assimalign.Cohesion.Configuration.EnvironmentVariables",
@@ -56,7 +58,6 @@ public sealed class FrameworkManifestTests
             "Assimalign.Cohesion.FileSystem",
             "Assimalign.Cohesion.FileSystem.Physical",
             "Assimalign.Cohesion.Hosting",
-            "Assimalign.Cohesion.Hosting.Resources",
             "Assimalign.Cohesion.Logging",
             "Assimalign.Cohesion.Logging.Console",
             "Assimalign.Cohesion.Logging.EventSource",

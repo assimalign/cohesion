@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -51,7 +51,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         // Assert
         _infrastructure.Deployed.ShouldHaveSingleItem();
         _infrastructure.TornDown.ShouldBeEmpty();
-        IApplicationResource ordersApi = second.Gateway.Resources.ShouldHaveSingleItem();
+        IApplicationResourceDeployment ordersApi = second.Gateway.Resources.ShouldHaveSingleItem();
         ordersApi.Instances.ShouldHaveSingleItem();
         ordersApi.State.ShouldHaveSingleItem().Action.ShouldBe((ResourceActionName)"log-level");
     }
@@ -112,7 +112,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
         // Assert
         _infrastructure.Deployed.Count.ShouldBe(2);
-        IApplicationResource ordersApi = second.Gateway.Resources.Single();
+        IApplicationResourceDeployment ordersApi = second.Gateway.Resources.Single();
         ordersApi.State.ShouldBeEmpty();
         ResourceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
         _infrastructure.Instances[instance.Key].Instance.Level.Level.ShouldBe("Information");
@@ -135,7 +135,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
         // Assert
         _infrastructure.Deployed.Count.ShouldBe(2);
-        IApplicationResource ordersApi = second.Gateway.Resources.Single();
+        IApplicationResourceDeployment ordersApi = second.Gateway.Resources.Single();
         ordersApi.State.ShouldHaveSingleItem();
         ResourceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
         _infrastructure.Instances[instance.Key].Instance.Level.Level.ShouldBe("Debug");

@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -40,10 +40,10 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     {
         // Arrange: web depends on api, which depends on db and cache.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor web = builder.AddResource("Web", "web");
-        IApplicationResourceDescriptor api = builder.AddResource("Web", "api");
-        IApplicationResourceDescriptor database = builder.AddResource("Database.Sql", "db");
-        IApplicationResourceDescriptor cache = builder.AddResource("Caching", "cache");
+        IApplicationResourceDefinition web = builder.AddResource("Web", "web");
+        IApplicationResourceDefinition api = builder.AddResource("Web", "api");
+        IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
+        IApplicationResourceDefinition cache = builder.AddResource("Caching", "cache");
         web.DependsOn(api);
         api.DependsOn(database, "data.read").DependsOn(cache);
 
@@ -63,7 +63,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         // Arrange: api waits for db, whose instance starts only when the test lets it; cache waits
         // for nothing.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor database = builder.AddResource("Database.Sql", "db");
+        IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
         builder.AddResource("Caching", "cache");
         builder.AddResource("Web", "api").DependsOn(database);
         var release = new TaskCompletionSource();
@@ -91,9 +91,9 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     {
         // Arrange: db never starts; api depends on db and web on api; cache depends on nothing.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor database = builder.AddResource("Database.Sql", "db");
+        IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
         builder.AddResource("Caching", "cache");
-        IApplicationResourceDescriptor api = builder.AddResource("Web", "api").DependsOn(database);
+        IApplicationResourceDefinition api = builder.AddResource("Web", "api").DependsOn(database);
         builder.AddResource("Web", "web").DependsOn(api);
         _infrastructure.Silent.Add("db");
         ApplicationGateway gateway = CreateGateway(_shortWindow);
@@ -158,7 +158,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         // Act: an instance of the api the platform still runs restarts while api waits for db.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
         TestInstance restarted = await _infrastructure.StartInstanceAsync("Web", "api");
-        IApplicationResource api = gateway.Resources.Single(resource => resource.Manifest.Name.Value == "api");
+        IApplicationResourceDeployment api = gateway.Resources.Single(resource => resource.Manifest.Name.Value == "api");
         bool registered = api.Instances.Any(instance => instance.Key == restarted.Key);
         release.SetResult();
 
@@ -190,7 +190,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         // Arrange: orders-api, two levels below the root, uses the root's identity provider, which
         // starts after a delay; west depends on nothing.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
         builder.AddGateway("east").AddGateway("east-edge").AddResource("Web", "orders-api").DependsOn(identity, "tokens.issue");
         builder.AddGateway("west");
         _infrastructure.Delayed["identity"] = () => Task.Delay(200);
@@ -209,7 +209,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     {
         // Arrange
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor ordersApi = builder.AddGateway("east").AddResource("Web", "orders-api");
+        IApplicationResourceDefinition ordersApi = builder.AddGateway("east").AddResource("Web", "orders-api");
         builder.AddResource("Web", "app-gateway").DependsOn(ordersApi);
 
         // Act
@@ -226,8 +226,8 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         // through app-gateway, so east would deploy both before and after app-gateway.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
         IApplicationSet east = builder.AddGateway("east");
-        IApplicationResourceDescriptor ordersApi = east.AddResource("Web", "orders-api");
-        IApplicationResourceDescriptor appGateway = builder.AddResource("Web", "app-gateway").DependsOn(ordersApi);
+        IApplicationResourceDefinition ordersApi = east.AddResource("Web", "orders-api");
+        IApplicationResourceDefinition appGateway = builder.AddResource("Web", "app-gateway").DependsOn(ordersApi);
         east.AddResource("Web", "orders-worker").DependsOn(appGateway);
         ApplicationGateway gateway = CreateGateway(_shortWindow);
 
@@ -250,7 +250,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
         IApplicationSet east = builder.AddGateway("east");
         IApplicationSet edge = east.AddGateway("east-edge");
-        IApplicationResourceDescriptor ingress = east.AddResource("Web", "ingress").DependsOn(edge.AddResource("Caching", "cache"));
+        IApplicationResourceDefinition ingress = east.AddResource("Web", "ingress").DependsOn(edge.AddResource("Caching", "cache"));
         edge.AddResource("Web", "edge-api").DependsOn(ingress);
         ApplicationGateway gateway = CreateGateway(_shortWindow);
 
@@ -278,7 +278,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
     private static IApplicationModel CreateChain()
     {
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor database = builder.AddResource("Database.Sql", "db");
+        IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
         builder.AddResource("Web", "api").DependsOn(database, "data.read");
         return builder.Build().Model;
     }

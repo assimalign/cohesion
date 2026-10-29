@@ -35,7 +35,7 @@ public sealed class ApplicationGatewayOutputTests : IDisposable
     {
         // Arrange
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor store = builder.AddResource("ConfigurationStore", "settings");
+        IApplicationResourceDefinition store = builder.AddResource("ConfigurationStore", "settings");
 
         // Act
         await using RunningGateway running = await RunningGateway.StartAsync(_infrastructure, _store, builder.Build().Model);
@@ -53,7 +53,7 @@ public sealed class ApplicationGatewayOutputTests : IDisposable
     {
         // Arrange
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor store = builder.AddResource("ConfigurationStore", "settings");
+        IApplicationResourceDefinition store = builder.AddResource("ConfigurationStore", "settings");
         IApplicationModel model = builder.Build().Model;
         await using (await RunningGateway.StartAsync(_infrastructure, _store, model))
         {
@@ -77,8 +77,8 @@ public sealed class ApplicationGatewayOutputTests : IDisposable
     {
         // Arrange: the root runs the identity provider; east runs orders-api.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
-        IApplicationResourceDescriptor ordersApi = builder.AddGateway("east").AddResource("Web", "orders-api");
+        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
+        IApplicationResourceDefinition ordersApi = builder.AddGateway("east").AddResource("Web", "orders-api");
         await using RunningGateway root = await RunningGateway.StartAsync(_infrastructure, _store, builder.Build().Model);
 
         // Act

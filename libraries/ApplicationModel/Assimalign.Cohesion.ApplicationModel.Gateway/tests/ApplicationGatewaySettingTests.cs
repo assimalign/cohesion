@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
@@ -140,7 +140,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
     {
         // Arrange: zone, below east, runs an api that reads the root's identity provider endpoint.
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
         builder.AddGateway("east").AddGateway("zone").AddResource("Web", "orders-api").WithSetting("Identity:Authority", identity.Endpoint);
         var east = new TestInfrastructure();
 
@@ -186,10 +186,10 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         // Arrange: west's worker reads east's api endpoint (a sibling's part), and so does the root's
         // portal (a child's part).
         ApplicationBuilder sibling = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor siblingApi = sibling.AddGateway("east").AddResource("Web", "orders-api");
+        IApplicationResourceDefinition siblingApi = sibling.AddGateway("east").AddResource("Web", "orders-api");
         sibling.AddGateway("west").AddResource("Web", "worker").WithSetting("Orders:Endpoint", siblingApi.Endpoint);
         ApplicationBuilder child = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor childApi = child.AddGateway("east").AddResource("Web", "orders-api");
+        IApplicationResourceDefinition childApi = child.AddGateway("east").AddResource("Web", "orders-api");
         child.AddResource("Web", "portal").WithSetting("Orders:Endpoint", childApi.Endpoint);
 
         // Act
@@ -280,7 +280,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
 
         // Act: while api waits, one of its recorded instances renews.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
-        IApplicationResource api = Resource(gateway, "api");
+        IApplicationResourceDeployment api = Resource(gateway, "api");
         ResourceManifest renewing = api.Instances.Single(instance => instance.Key == recorded[0]);
         bool renewed = await gateway.RenewAsync(renewing);
         release.SetResult();
@@ -314,7 +314,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
     private static IApplicationModel CreateChain(string mode)
     {
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor database = builder.AddResource("Database.Sql", "db");
+        IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "db");
         builder.AddResource("Web", "api")
             .WithSetting("Db:Endpoint", database.Endpoint)
             .WithSetting("Feature:Mode", mode);
@@ -326,9 +326,9 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
     private static IApplicationModel CreateHierarchy()
     {
         ApplicationBuilder builder = Application.CreateBuilder("root", []);
-        IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "identity");
+        IApplicationResourceDefinition identity = builder.AddResource("IdentityHub", "identity");
         IApplicationSet east = builder.AddGateway("east");
-        IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
+        IApplicationResourceDefinition database = east.AddResource("Database.Sql", "orders-db");
         east.AddResource("Web", "orders-api")
             .WithSetting("Identity:Authority", identity.Endpoint)
             .WithSetting("Database:Endpoint", database.Endpoint);
@@ -342,7 +342,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
             .Single(instance => instance.Name.Value == resource && (match is null || match(instance)));
     }
 
-    private static IApplicationResource Resource(ApplicationGateway gateway, string name)
+    private static IApplicationResourceDeployment Resource(ApplicationGateway gateway, string name)
     {
         return gateway.Resources.Single(resource => resource.Manifest.Name.Value == name);
     }

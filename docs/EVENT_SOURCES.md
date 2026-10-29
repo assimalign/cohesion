@@ -149,8 +149,8 @@ shells. Each row records the reason from
 | `Assimalign.Cohesion.Web` | Contracts and pure pipeline helpers have no runtime state, loop or swallowed failure; the root must not claim every Web package's signals. |
 | `Assimalign.Cohesion.Web.Testing` | A shipped test harness, like Connections.InMemory, rather than a runtime component; it receives no access to internal sources. |
 | `Assimalign.Cohesion.Web.Hosting` | Its control-plane events left with the retired resource integration; the server, connection and request signals belong to Web.Server. |
-| `Assimalign.Cohesion.Web.Hosting.Resources` | The resource integration is being rebuilt; its control-plane outcomes are HTTP statuses the gateway sees, and diagnostics come with the design. |
-| `Assimalign.Cohesion.Web.ApplicationModel` | Invalid declarative plans throw; runtime control-plane outcomes belong to Hosting.Resources. |
+| `Assimalign.Cohesion.Web.Hosting.ApplicationModel` | The resource integration is being rebuilt; its control-plane outcomes are HTTP statuses the gateway sees, and diagnostics come with the design. |
+| `Assimalign.Cohesion.Web.ApplicationModel` | Invalid declarative plans throw; runtime control-plane outcomes belong to ApplicationModel.Hosting. |
 | `Assimalign.Cohesion.Web.Routing` | Failures throw at startup or reach the exception boundary; 404/405 are statuses and the matched template is already the span's `http.route`. |
 | `Assimalign.Cohesion.Web.Api` | Binding failures are visible client-driven 400s in access logs and request metrics; the signal does not justify a new public rejection API. |
 | `Assimalign.Cohesion.Web.OpenApi` | Build failures reach the boundary and are not cached; first-route-wins is documented and the package is development-facing. |

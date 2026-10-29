@@ -16,7 +16,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Graph.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
@@ -27,7 +27,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPackageReference Include="coverlet.collector" />

@@ -11,7 +11,7 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ApplicationModel" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 	</ItemGroup>
 	<ItemGroup>
 		<None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />

@@ -1,28 +1,33 @@
 # Assimalign.Cohesion.ApplicationModel.Gateway — Design
 
 > **Status (2026-10-27):** chunk 3 of the Application Model rebuild, built on
-> [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md) (chunk 2) and
-> [Hosting.Resources](../../../Hosting/Assimalign.Cohesion.Hosting.Resources/docs/DESIGN.md) (chunk 1).
-> The previous implementation (Local gateway, records, credentials, certificates) is retired; its
-> source is at commit `6576e7c64`.
+> [ApplicationModel.Definition](../../Assimalign.Cohesion.ApplicationModel.Definition/docs/DESIGN.md)
+> (chunk 2) and the shared contracts of
+> [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md). The instance side,
+> [ApplicationModel.Hosting](../../Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md)
+> (chunk 1, formerly Hosting.Resources), is not a dependency. The previous implementation (Local
+> gateway, records, credentials, certificates) is retired; its source is at commit `6576e7c64`.
 
 ## Purpose
 
 A gateway runs an application model. It deploys its part of the hierarchy through an
 infrastructure provider, receives the manifests the deployed resources' instances publish, keeps
-each resource's aggregate (its instances and the state written since the deployment), and exposes
-each resource's infrastructure actions. The library is transport-neutral and platform-neutral: a
-transport binds its endpoints, and an infrastructure provider supplies the platform.
+each resource's deployment (its instances and the state written since the gateway was deployed),
+and exposes each resource's infrastructure actions. The library is transport-neutral and
+platform-neutral: a transport binds its endpoints, and an infrastructure provider supplies the
+platform.
 
 The arrow below means "references". A platform package, such as a Kubernetes provider, references
-the gateway; the gateway references the model and Hosting.Resources.
+the gateway; the gateway references the definitions, which reference the shared contracts. The
+instance side references only the contracts, so a gateway and an instance speak through the same
+manifest and action types without either loading the other's code.
 
 ```mermaid
 flowchart LR
     Platform["Platform provider, such as Kubernetes"] --> Gateway["Assimalign.Cohesion.ApplicationModel.Gateway"]
-    Gateway --> Model["Assimalign.Cohesion.ApplicationModel"]
-    Gateway --> Resources["Assimalign.Cohesion.Hosting.Resources"]
-    Model --> Resources
+    Gateway --> Definition["Assimalign.Cohesion.ApplicationModel.Definition"]
+    Definition --> Contracts["Assimalign.Cohesion.ApplicationModel"]
+    Hosting["Assimalign.Cohesion.ApplicationModel.Hosting"] --> Contracts
 ```
 
 ## Startup: reconcile, then run
@@ -113,7 +118,7 @@ The root therefore deploys `identity`, waits until it is ready, then deploys `ea
 
 In ApplicationModel: `IApplicationModel.Role` and `GatewayRole` say whether a model's gateway is the
 root or a composite; `IApplicationResourceAction` is an infrastructure action, and
-`IApplicationResource.Actions` and `ExecuteAsync` expose and dispatch them.
+`IApplicationResourceDeployment.Actions` and `ExecuteAsync` expose and dispatch them.
 
 ## Decisions
 

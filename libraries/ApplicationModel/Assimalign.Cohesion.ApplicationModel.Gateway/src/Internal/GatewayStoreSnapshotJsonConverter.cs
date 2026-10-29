@@ -2,8 +2,6 @@ using System;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 // A recorded snapshot in the record file: { "action": "cors", "value": "<base64>" }.
