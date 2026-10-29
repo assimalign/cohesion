@@ -56,7 +56,7 @@ public sealed class SqlUpdateForeignKeyWireTests
         };
 
         // Act
-        if (scenario == 0)
+        if (scenario == 0 || action == "RESTRICT")
         {
             var failure = await Should.ThrowAsync<SqlClientException>(async () =>
                 await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout(30)));
@@ -68,7 +68,7 @@ public sealed class SqlUpdateForeignKeyWireTests
 
         // Assert
         var rows = await connection.QueryAsync("SELECT id, parent FROM t ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout(30));
-        object?[][] expected = scenario switch { 0 => [[1, null], [2, null]], 1 => [[10, 10]], _ => [[1, 2], [2, 1]] };
+        object?[][] expected = (action == "RESTRICT" ? scenario + 3 : scenario) switch { 3 => [[1, null], [2, null]], 4 => [[1, 1]], 5 => [[1, 2], [2, 1]], 0 => [[1, null], [2, null]], 1 => [[10, 10]], _ => [[1, 2], [2, 1]] };
         rows.Count.ShouldBe(expected.Length);
         for (int i = 0; i < rows.Count; i++) { new object?[] { rows[i][0], rows[i][1] }.ShouldBe(expected[i]); }
         await connection.ExecuteAsync("COMMIT", cancellationToken: SqlClientTestHarness.Timeout(30));
