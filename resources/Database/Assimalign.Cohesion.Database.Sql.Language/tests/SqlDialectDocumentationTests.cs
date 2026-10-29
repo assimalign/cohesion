@@ -9,6 +9,24 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class SqlDialectDocumentationTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Dialect: format history retains the version that introduced each record (#1723)")]
+    [InlineData("Sql.Language", "DIALECT.md", "(TRUNCATE restart). SQL format 29 refuses format 28 and earlier")]
+    [InlineData("Sql.Language", "DIALECT.md", "Format 29 added owned-sequence metadata to format 28's shared sequence records")]
+    [InlineData("Sql.Language", "DIALECT.md", "abandoned owners. SQL remains format 29; existing kind-14 reclamation records suffice.")]
+    [InlineData("Sql.Language", "DIALECT.md", "Compiled-schema v8 was unchanged by SQ-A.")]
+    [InlineData("Sql", "DESIGN.md", "SQL remains format 29. Failed preparation and crash recovery use kind 14 unchanged.")]
+    [InlineData("Sql", "DESIGN.md", "SQL stays format 29: ordinary table records and kind 14")]
+    [InlineData("Sql", "DESIGN.md", "Current format 30 also requires extension 8's OnUpdate byte")]
+    [InlineData("Sql", "DESIGN.md", "SQL remains format 29: ordinary dense table records")]
+    public void Documentation_FormatHistory_ShouldDistinguishHistoricalAndCurrentVersions(string project, string file, string expected)
+    {
+        // Arrange
+        string documentation = ReadDocumentation(project, file);
+
+        // Act / Assert
+        documentation.ShouldContain(expected, Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Dialect: clause totals and count explanation include FILTER (#1720)")]
     public void Dialect_DeclaredClauseTotals_ShouldIncludeFilter()
     {
@@ -28,4 +46,7 @@ public sealed class SqlDialectDocumentationTests
 
     private static string ReadDialect([CallerFilePath] string source = "")
         => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "docs", "DIALECT.md"));
+
+    private static string ReadDocumentation(string project, string file, [CallerFilePath] string source = "")
+        => File.ReadAllText(Path.Combine(Path.GetDirectoryName(source)!, "..", "..", $"Assimalign.Cohesion.Database.{project}", "docs", file));
 }

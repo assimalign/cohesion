@@ -54,7 +54,7 @@ public sealed class CompiledSchemaDomainTests
         });
 
         // Assert
-        schema.Format.ShouldBe("cohesion/database-schema/v8");
+        schema.Format.ShouldBe("cohesion/database-schema/v9");
         schema.Types.ShouldHaveSingleItem().ShouldBe(new CompiledSchemaType("Money", DatabaseType.Decimal, 18, 2));
         schema.Tables[0].Columns[1].ShouldBe(new CompiledSchemaColumn("Price", DatabaseType.Decimal, false, Precision: 18, Scale: 2, CustomType: "Money"));
         SqlCompiledSchemaSerializer.Deserialize(schema.CanonicalDocument).Hash.ShouldBe(schema.Hash);

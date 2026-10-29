@@ -83,7 +83,7 @@ public sealed class SqlSystemViewProtocolTests
             "SELECT UNIQUE_CONSTRAINT_NAME, UPDATE_RULE, DELETE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_NAME = 'fk_orders_customer'");
         var reference = references.ShouldHaveSingleItem();
         reference[0].ShouldNotBeNull();
-        reference[1].ShouldBe("RESTRICT");
+        reference[1].ShouldBe("NO ACTION");
         reference[2].ShouldBe("CASCADE");
         var parentConstraints = await QueryAsync(client,
             "SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS WHERE TABLE_NAME = 'customers' AND CONSTRAINT_TYPE = 'PRIMARY KEY'");

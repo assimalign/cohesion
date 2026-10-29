@@ -34,6 +34,16 @@ internal sealed partial class SqlSchemaProvisioner
         _ => throw new SqlSchemaMigrationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CompiledDeleteActionInvalid, action)),
     };
 
+    private static CompiledSchemaReferentialAction CompiledUpdateAction(SqlCatalogReferentialAction action) => action switch
+    {
+        SqlCatalogReferentialAction.Restrict => CompiledSchemaReferentialAction.Restrict,
+        SqlCatalogReferentialAction.Cascade => CompiledSchemaReferentialAction.Cascade,
+        SqlCatalogReferentialAction.NoAction => CompiledSchemaReferentialAction.NoAction,
+        SqlCatalogReferentialAction.SetNull => CompiledSchemaReferentialAction.SetNull,
+        SqlCatalogReferentialAction.SetDefault => CompiledSchemaReferentialAction.SetDefault,
+        _ => throw new SqlSchemaMigrationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.CompiledUpdateActionInvalid, action)),
+    };
+
     private readonly SqlDatabase _database;
     private readonly SqlCatalog _catalog;
     private readonly SemaphoreSlim _applyGate = new(1, 1);
@@ -632,7 +642,7 @@ internal sealed partial class SqlSchemaProvisioner
                     constraint.Kind == SqlCatalogConstraintKind.Reference ? CompiledSchemaConstraintKind.Reference : CompiledSchemaConstraintKind.Check,
                     constraint.Columns, constraint.ReferencedTable, constraint.ReferencedColumns,
                     constraint.CheckExpression is null ? null : new CompiledSchemaExpression(DeclaredCheckText(desiredTable, constraint)),
-                    CompiledDeleteAction(constraint.OnDelete))).ToArray()));
+                    CompiledDeleteAction(constraint.OnDelete), CompiledUpdateAction(constraint.OnUpdate))).ToArray()));
         }
 
         return new SqlCompiledSchema(
@@ -727,6 +737,7 @@ internal sealed partial class SqlSchemaProvisioner
                     !string.Equals(persisted.ReferencedTable, constraint.ReferencedObject, StringComparison.OrdinalIgnoreCase) ||
                     (persisted.Kind == SqlCatalogConstraintKind.Reference && !string.Equals(persisted.ReferencedSchema, SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase)) ||
                     CompiledDeleteAction(persisted.OnDelete) != constraint.OnDelete ||
+                    CompiledUpdateAction(persisted.OnUpdate) != constraint.OnUpdate ||
                     !string.Equals(persisted.CheckExpression, CanonicalCheck(constraint.Expression?.CanonicalText), StringComparison.Ordinal))
                 {
                     return string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintDeclarationMismatch, expected.Name, constraint.Name);

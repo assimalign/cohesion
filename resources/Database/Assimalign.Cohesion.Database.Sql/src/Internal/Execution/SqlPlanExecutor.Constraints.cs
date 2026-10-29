@@ -530,6 +530,37 @@ internal sealed partial class SqlPlanExecutor
         return left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
     }
 
+    // Action eligibility follows the stored row representation, independently of key
+    // matching (PostgreSQL ri_triggers.c:4237-4250, datum_image_eq). Reuse the row
+    // codec so CHAR padding, temporal offsets and numeric encodings follow storage too.
+    private static bool ReferencedKeyChanged(SqlBoundConstraintKey key, object?[] oldValues, object?[] newValues,
+        SqlStatementMetrics metrics)
+    {
+        foreach (int ordinal in key.Ordinals)
+        {
+            if (oldValues[ordinal] is null) { return false; } // MATCH SIMPLE: no old referenced key
+        }
+        var oldImage = new DatabaseKeyWriter();
+        var newImage = new DatabaseKeyWriter();
+        foreach (int ordinal in key.Ordinals)
+        {
+            metrics.ConstraintKeyComparisons++;
+            var type = key.Table.Columns[ordinal].Type.Type;
+            SqlRowCodec.AppendValue(oldImage, type, oldValues[ordinal]);
+            SqlRowCodec.AppendValue(newImage, type, newValues[ordinal]);
+        }
+        return !oldImage.WrittenSpan.SequenceEqual(newImage.WrittenSpan);
+    }
+
+    private static void ValidateUpdateAction(SqlBoundConstraintKey key, SqlCatalogConstraint constraint,
+        object?[] oldValues, object?[] newValues, SqlStatementMetrics metrics)
+    {
+        if (constraint.OnUpdate is SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction ||
+            !ReferencedKeyChanged(key, oldValues, newValues, metrics)) { return; }
+        throw new SqlExecutionException("CK00001", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.UpdateActionExecutionUnsupported, ReferentialActionText(constraint.OnUpdate), constraint.Name));
+    }
+
     private static object? SafeValue(object?[] values)
         => values.Length == 1 && values[0] is byte or sbyte or short or ushort or int or uint or long or ulong or decimal or float or double or bool
             ? values[0] : null;
@@ -652,6 +683,18 @@ internal sealed partial class SqlPlanExecutor
             if (parent.ObjectId == table.ObjectId)
             {
                 int[] ordinals = reference.ParentKey.Ordinals;
+                // A self-reference can lose its old parent during outgoing validation,
+                // before ValidateParentUpdate runs. Refuse the stored changing action
+                // first, rather than diagnosing that temporarily orphaned child as RESTRICT.
+                if (updates is not null && constraint.OnUpdate is not (SqlCatalogReferentialAction.Restrict or SqlCatalogReferentialAction.NoAction))
+                {
+                    foreach (var update in updates.Values)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (update.Table.ObjectId != table.ObjectId || update.Location.PageId.Value < 0) { continue; }
+                        ValidateUpdateAction(reference.ParentKey, constraint, update.OldValues, update.NewValues, statement.Metrics);
+                    }
+                }
                 selfKeys = new(new GroupKeyComparer(reference.ParentKey.Collations, statement.Metrics));
                 foreach (var candidate in rows)
                 {
@@ -723,6 +766,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var reference in IncomingReferences(table, statement, cancellationToken))
         {
             var (child, constraint) = reference;
+            ValidateUpdateAction(reference.ParentKey, constraint, oldValues, newValues, statement.Metrics);
             var keys = reference.ParentKey.Read(oldValues);
             if (keys.Any(value => value is null))
             {
@@ -1259,6 +1303,14 @@ internal sealed partial class SqlPlanExecutor
 
             result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Reference, definition.Columns, schema, referenced.TableName,
                 definition.ReferencedColumns, onDelete: definition.OnDelete switch
+                {
+                    SqlReferentialAction.Restrict => SqlCatalogReferentialAction.Restrict,
+                    SqlReferentialAction.Cascade => SqlCatalogReferentialAction.Cascade,
+                    SqlReferentialAction.NoAction => SqlCatalogReferentialAction.NoAction,
+                    SqlReferentialAction.SetNull => SqlCatalogReferentialAction.SetNull,
+                    SqlReferentialAction.SetDefault => SqlCatalogReferentialAction.SetDefault,
+                    _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
+                }, onUpdate: definition.OnUpdate switch
                 {
                     SqlReferentialAction.Restrict => SqlCatalogReferentialAction.Restrict,
                     SqlReferentialAction.Cascade => SqlCatalogReferentialAction.Cascade,

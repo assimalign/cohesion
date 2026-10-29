@@ -13,6 +13,45 @@ namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
 public class CreateDatabaseMigrationTaskTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: v8 FK artifacts and baselines require rebuilding (#1723)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Execute_V8ForeignKeyDocument_ShouldRefuseFormat(bool baseline)
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        var current = new SqlCompiledSchema(SqlCompiledSchema.CurrentFormat, "orders", false, [],
+            [new("c", "Child", [new("id", DatabaseType.Int32, true)], null, [],
+                [new("fk", CompiledSchemaConstraintKind.Reference, ["id"], "p", ["id"])]),
+             new("p", "Parent", [new("id", DatabaseType.Int32, false)], new("pk", ["id"]), [], [])], []);
+        string artifact = WriteSchema(directory.File("schemas"), current);
+        string document = current.CanonicalDocument.Replace(SqlCompiledSchema.CurrentFormat, "cohesion/database-schema/v8", StringComparison.Ordinal)
+            .Replace(",\"onUpdate\":2", "", StringComparison.Ordinal);
+        if (baseline)
+        {
+            Directory.CreateDirectory(directory.File("Migrations/orders"));
+            artifact = directory.File("Migrations/orders/0001_initial.schema.json");
+        }
+        File.WriteAllText(artifact, document);
+        string hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(document)));
+        File.WriteAllText(Path.ChangeExtension(artifact, ".sha256"), hash);
+        var engine = new RecordingBuildEngine();
+        var task = CreateTask(directory, engine, "next");
+
+        // Act
+        task.Execute().ShouldBeFalse();
+
+        // Assert
+        var error = engine.Errors.ShouldHaveSingleItem();
+        error.Code.ShouldBe("COHDBSDK206");
+        error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v9", Case.Sensitive);
+        task.MigrationPath.ShouldBeEmpty();
+        task.BaselinePath.ShouldBeEmpty();
+        File.ReadAllText(artifact).ShouldBe(document);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sdk.Database] - Create migration: v4 numeric artifacts and baselines reach the format gate")]
     [InlineData(false)]
     [InlineData(true)]
@@ -48,7 +87,7 @@ public class CreateDatabaseMigrationTaskTests
         error.Code.ShouldBe("COHDBSDK206");
         error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v9", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         task.MigrationPath.ShouldBeEmpty();
         task.BaselinePath.ShouldBeEmpty();
@@ -97,7 +136,7 @@ public class CreateDatabaseMigrationTaskTests
         error.Code.ShouldBe("COHDBSDK206");
         error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
         error.Message.ShouldContain("cohesion/database-schema/v7", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v9", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         task.MigrationPath.ShouldBeEmpty();
         task.BaselinePath.ShouldBeEmpty();

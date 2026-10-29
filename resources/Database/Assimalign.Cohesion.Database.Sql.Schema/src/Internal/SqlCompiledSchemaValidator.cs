@@ -219,11 +219,18 @@ internal static class SqlCompiledSchemaValidator
                     continue;
                 }
 
-                if (!Enum.IsDefined(constraint.OnDelete) ||
+                if (constraint.OnDelete is not (CompiledSchemaReferentialAction.Restrict or CompiledSchemaReferentialAction.Cascade) ||
                     (constraint.Kind == CompiledSchemaConstraintKind.Check && constraint.OnDelete != CompiledSchemaReferentialAction.Restrict))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.onDelete",
                         ErrorMessages.ValidatorValidateTableConstraintsVoid4);
+                }
+
+                if (!Enum.IsDefined(constraint.OnUpdate) ||
+                    (constraint.Kind == CompiledSchemaConstraintKind.Check && constraint.OnUpdate != CompiledSchemaReferentialAction.NoAction))
+                {
+                    Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.onUpdate",
+                        ErrorMessages.UpdateActionInvalid);
                 }
 
                 if (constraint.Kind != CompiledSchemaConstraintKind.Check || constraint.Columns.Count > 0)

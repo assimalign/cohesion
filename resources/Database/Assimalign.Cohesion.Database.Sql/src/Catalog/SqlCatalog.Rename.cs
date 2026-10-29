@@ -164,7 +164,7 @@ public sealed partial class SqlCatalog
                     References(constraint) && columnName is null ? newName : constraint.ReferencedTable,
                     References(constraint) ? constraint.ReferencedColumns.Select(RenameColumn).ToArray() : constraint.ReferencedColumns,
                     own && constraint.Kind == SqlCatalogConstraintKind.Check ? checkExpressions[constraint.Name] : constraint.CheckExpression,
-                    constraint.OnDelete, constraint.CheckFunctionCalls)).ToArray();
+                    constraint.OnDelete, constraint.CheckFunctionCalls, constraint.OnUpdate)).ToArray();
                 var columns = own && columnName is not null ? table.Columns.Select(column => new SqlCatalogColumn(
                     RenameColumn(column.Name), column.Type, column.IsNullable, column.DefaultLiteral, column.Collation,
                     column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault }).ToArray() : table.Columns;

@@ -33,15 +33,19 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// </remarks>
 public static partial class SqlExpressionRenderer
 {
-    /// <summary>Renders an ALTER COLUMN TYPE or identity operation as canonical SQL without a terminator.</summary>
+    /// <summary>Renders an ALTER COLUMN TYPE, identity or ADD CONSTRAINT operation as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
-    /// <returns>The canonical type alteration or identity operation.</returns>
+    /// <returns>The canonical type alteration, identity or ADD CONSTRAINT operation.</returns>
     /// <exception cref="ArgumentNullException">The query is null.</exception>
-    /// <exception cref="NotSupportedException">The action is not a type or identity alteration.</exception>
+    /// <exception cref="NotSupportedException">The action is not a supported alteration.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
     public static string Render(SqlAlterTableExpression query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        if (query.Action is SqlAlterAddConstraintAction addConstraint)
+        {
+            return "ALTER TABLE " + SequenceName(query.Table) + " ADD " + Render(addConstraint.Constraint);
+        }
         if (query.Action is SqlAlterIdentityAction identity)
         {
             return "ALTER TABLE " + SequenceName(query.Table) + " ALTER COLUMN " + Identifier(identity.ColumnName) + " " +

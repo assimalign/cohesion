@@ -1,5 +1,18 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+
+ON UPDATE accepts CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION beside ON DELETE,
+in either order, once each. Both omitted SQL actions default independently to NO ACTION.
+Column REFERENCES, table FOREIGN KEY, ALTER ADD CONSTRAINT and ALTER ADD COLUMN retain the
+same normalized OnUpdate property. Malformed/repeated actions use the existing CS00003
+syntax diagnostic; action column lists retain CK00001. NO and ACTION stay contextual.
+The constraint renderer emits explicit ON DELETE then ON UPDATE actions, independently of
+source ordering, and ALTER ADD CONSTRAINT uses that renderer. The profile gains ON UPDATE
+(+1 clause); parser/completeness and live engine conformance cover metadata and the interim
+execution refusal. PostgreSQL src/backend/parser/gram.y:4581-4689 supplies the ordering,
+default and action vocabulary. Execution of changing actions belongs to SQ-F2; see DIALECT.
+
 ## Window stage (#1526, SQ-W1)
 
 SqlWindowExpression holds a function and either OVER name or an inline SqlWindowSpecification.
@@ -70,7 +83,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 29's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 30's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -762,7 +775,7 @@ its ordinary bare output alias before SET.
 
 CORRESPONDING, nested or data-modifying CTEs and recursive execution, window frames,
 aggregate windows and value-window functions, LATERAL,
-UPDATE SET subqueries, `ON UPDATE`,
+UPDATE SET subqueries,
 RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
@@ -828,7 +841,7 @@ INDEX` and `CompiledSchemaIndex(IsUnique: true)`. This keeps compiled schemas,
 SQL DDL, persistence, and concurrent uniqueness enforcement on one path.
 Foreign keys and checks remain constraint catalog records. `ON DELETE` accepts
 CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT; an omitted action is NO ACTION.
-`ON UPDATE` stays outside the profile and reports `CK00001`.
+`ON UPDATE` accepts the same five actions in either order beside ON DELETE; changing a parent key under CASCADE/SET NULL/SET DEFAULT reports CK00001 until SQ-F2 executes them.
 
 ## Canonical rendering (`SqlExpressionRenderer`)
 

@@ -1,5 +1,15 @@
 # Database SDK Design
 
+## Compiled SQL schema format v9 (#1723, SQ-F1)
+
+The runtime contract adds CompiledSchemaConstraint.OnUpdate and advances v8 -> v9. SDK extraction
+uses the same compiled records, so an ordinary typed References declaration serializes NO ACTION
+update metadata with the runtime's identical document/hash. The builder signature is unchanged.
+The shared compiled record preserves explicit update actions; engine migration rendering emits them.
+SDK migration scaffolding retains its existing constraint-operation refusal. Earlier artifacts, including v8,
+are refused by the shared format gate before creating a migration; rebuild artifacts and recreate
+affected databases. This change updates the SDK's format pins and parity tests only.
+
 ## SQL type aliases (#1108)
 
 All three national names accept optional VARYING: NATIONAL CHAR VARYING, NATIONAL CHARACTER
@@ -17,7 +27,7 @@ are refused without an upgrade path. Migration SQL retains the validated CustomT
 
 ## Fixed-length strings (#1437)
 
-SDK and runtime now emit **cohesion/database-schema/v8** together. CLR char maps to Character (19)
+SDK and runtime now emit **cohesion/database-schema/v9** together. CLR char maps to Character (19)
 with length one, and explicit CHAR(n)/CHARACTER(n) string columns normalize through the schema
 snapshot to Character with length n. Shared SqlTypeModifiers still owns length validation.
 Migration SQL renders CHAR(n), and switching between CHAR and VARCHAR is an AlterColumn change.
@@ -207,7 +217,7 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document format is `cohesion/database-schema/v8`, shared with the runtime compiler and the
+The document format is `cohesion/database-schema/v9`, shared with the runtime compiler and the
 migration baseline writer. B2 introduced `defaultLiteral` in v4; #1438 advanced to v5 because
 decimal scale normalization changes a raw v4 NUMERIC(p) document's identity. #1437 advanced
 to v6 for Character identity, and #1108 to v7 for NCHAR normalization. #1422 advances to v8:
@@ -337,7 +347,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v9`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated

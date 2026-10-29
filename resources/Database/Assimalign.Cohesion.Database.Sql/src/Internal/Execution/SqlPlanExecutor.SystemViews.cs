@@ -188,16 +188,8 @@ internal sealed partial class SqlPlanExecutor
                             database, table.Schema, constraint.Name,
                             referencedConstraint is null ? null : database,
                             referencedConstraint is null ? null : referencedTable!.Schema,
-                            referencedConstraint, "NONE", "RESTRICT",
-                            constraint.OnDelete switch
-                            {
-                                SqlCatalogReferentialAction.Cascade => "CASCADE",
-                                SqlCatalogReferentialAction.Restrict => "RESTRICT",
-                                SqlCatalogReferentialAction.NoAction => "NO ACTION",
-                                SqlCatalogReferentialAction.SetNull => "SET NULL",
-                                SqlCatalogReferentialAction.SetDefault => "SET DEFAULT",
-                                _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
-                            },
+                            referencedConstraint, "NONE", ReferentialActionText(constraint.OnUpdate),
+                            ReferentialActionText(constraint.OnDelete),
                         ];
                     }
                     break;
@@ -417,4 +409,14 @@ internal sealed partial class SqlPlanExecutor
         DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset => 7,
         _ => null,
     };
+    private static string ReferentialActionText(SqlCatalogReferentialAction action) => action switch
+    {
+        SqlCatalogReferentialAction.Cascade => "CASCADE",
+        SqlCatalogReferentialAction.Restrict => "RESTRICT",
+        SqlCatalogReferentialAction.NoAction => "NO ACTION",
+        SqlCatalogReferentialAction.SetNull => "SET NULL",
+        SqlCatalogReferentialAction.SetDefault => "SET DEFAULT",
+        _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
+    };
+
 }

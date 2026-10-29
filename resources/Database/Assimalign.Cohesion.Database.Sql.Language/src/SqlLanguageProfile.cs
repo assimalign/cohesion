@@ -140,6 +140,7 @@ public static class SqlLanguageProfile
         SqlClauses.Constraint,
         SqlClauses.ForeignKey,
         SqlClauses.References,
+        SqlClauses.OnUpdate,
         SqlClauses.Check,
         SqlClauses.UniqueConstraint,
         SqlClauses.Cascade,

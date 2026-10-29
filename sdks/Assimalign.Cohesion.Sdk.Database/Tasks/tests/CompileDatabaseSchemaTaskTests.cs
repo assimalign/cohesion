@@ -57,9 +57,12 @@ public partial class CompileDatabaseSchemaTaskTests
 
         string schemaPath = SchemaPath(task, "orders");
         SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(schemaPath);
-        schema.Format.ShouldBe("cohesion/database-schema/v8");
+        schema.Format.ShouldBe("cohesion/database-schema/v9");
         schema.Name.ShouldBe("orders");
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
+        schema.Tables.SelectMany(static table => table.Constraints)
+            .Where(static constraint => constraint.Kind == CompiledSchemaConstraintKind.Reference)
+            .ShouldHaveSingleItem().OnUpdate.ShouldBe(CompiledSchemaReferentialAction.NoAction);
         ITaskItem item = task.Schemas.ShouldHaveSingleItem();
         item.ItemSpec.ShouldBe("orders");
         item.GetMetadata("Hash").ShouldBe(schema.Hash);
