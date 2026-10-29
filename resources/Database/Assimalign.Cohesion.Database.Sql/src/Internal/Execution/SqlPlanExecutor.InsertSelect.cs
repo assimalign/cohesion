@@ -206,6 +206,9 @@ internal sealed partial class SqlPlanExecutor
         CancellationToken cancellationToken, bool upsert = false)
     {
         var column = table.Columns[ordinal];
+        // Incoming FK actions are discovered from the live graph after planning. A new
+        // sequence dependency must replan: acquiring its grant here would invert lock order.
+        SqlSequenceExecution.RequireDefaultGrants(column);
         if (column.Identity is not null)
         {
             try

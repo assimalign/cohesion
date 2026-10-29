@@ -77,11 +77,22 @@ RESTART or setval(false); SET START remains metadata until a restart. This follo
 src/backend/parser/parse_utilcmd.c:3700-3727 and src/backend/commands/sequence.c:479-480,513-514.
 OVERRIDING USER binds and checks assignment conversion before discarding an identity input,
 including VALUES, SELECT and MERGE (PostgreSQL parser/analyze.c:1146, parse_target.c:582-594,
-parse_merge.c:352). Untyped string input conversion is checked at binding; discarded typed
-numeric casts are never executed (parser/parse_coerce.c:233-249). Allocator exhaustion retains
+parse_merge.c:352). Untyped string input conversion is checked at binding, including literals
+under CAST (parser/parse_coerce.c:233-249) and folded text operands of a CAST.
+Ignored VALUES and MERGE INSERT inputs bind in a validation scope that propagates failures
+from the engine's existing immutable-call and
+signed-constant folds before discard, including MERGE's otherwise deferred action scope.
+Successful folds run once; typed numeric casts and volatile inputs remain deferred and are
+discarded without execution. Allocator exhaustion retains
 CS02002 through the column context. A
 disappearing identity incarnation uses retryable CS04067, never the persisted-metadata
 corruption condition CS06061.
+
+Referential actions read the live FK graph during execution. Before resolving a column
+default, execution verifies that its sequence grants were captured by the plan; a newly
+introduced SET DEFAULT dependency raises retryable CS04067 (40001) before evaluating that
+default or mutating rows. The caller replans the statement. This keeps sequence grants ahead
+of table and row grants without a new FK-generation dependency or an evaluation-time lock wait.
 
 Catalog load is read-only. It validates live/retired owner disjointness, every ownership edge,
 default dependency and reservation before open publication; the reclamation worker later deletes

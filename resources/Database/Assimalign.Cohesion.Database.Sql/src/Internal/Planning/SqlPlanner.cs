@@ -855,8 +855,10 @@ internal sealed partial class SqlPlanner
             for (int ordinal = 0; ordinal < bound.Length; ordinal++)
             {
                 var expression = row[ordinal];
-                var value = expression is SqlDefaultExpression ? SqlBoundDefaultItem.Instance : ScopelessEvaluator.Bind(expression);
-                if (insert.Overriding == SqlIdentityOverride.User && table.Columns[targetOrdinals[ordinal]].Identity is not null && expression is not SqlDefaultExpression)
+                bool ignored = insert.Overriding == SqlIdentityOverride.User && table.Columns[targetOrdinals[ordinal]].Identity is not null && expression is not SqlDefaultExpression;
+                var value = expression is SqlDefaultExpression ? SqlBoundDefaultItem.Instance
+                    : ignored ? ScopelessEvaluator.BindIgnoredIdentityInput(expression) : ScopelessEvaluator.Bind(expression);
+                if (ignored)
                 {
                     ValidateIgnoredIdentityInput(table.Columns[targetOrdinals[ordinal]], ScopelessEvaluator.StaticTypeOf(expression), value, expression);
                     value = SqlBoundDefaultItem.Instance;

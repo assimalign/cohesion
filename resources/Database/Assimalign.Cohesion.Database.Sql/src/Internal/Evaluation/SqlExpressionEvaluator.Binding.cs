@@ -41,6 +41,16 @@ internal sealed partial class SqlExpressionEvaluator
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the expression.</exception>
     internal SqlBoundExpression Bind(SqlExpression expression) => Bind(expression, out SqlCollationCandidate _);
 
+    // Ignored identity values still undergo parse-time input conversion and the engine's
+    // existing constant folds. Preserve those failures before the bound value is discarded.
+    internal SqlBoundExpression BindIgnoredIdentityInput(SqlExpression expression)
+    {
+        bool previous = _validatingIgnoredIdentityInput;
+        _validatingIgnoredIdentityInput = true;
+        try { return Bind(expression); }
+        finally { _validatingIgnoredIdentityInput = previous; }
+    }
+
     /// <summary>Binds a Boolean position, coercing only untyped Boolean string literals.</summary>
     internal SqlBoundExpression BindPredicate(SqlExpression expression)
         => Bind(expression, out SqlCollationCandidate _, requireBoolean: true);
@@ -356,8 +366,13 @@ internal sealed partial class SqlExpressionEvaluator
             return CastTargetFailure(cast, _functions.Types);
         }
 
-        return new SqlBoundCast(operand, cast.TargetType, target, _functions.Types.ResolveCasts(SourceDomain(cast.Operand), target),
+        var bound = new SqlBoundCast(operand, cast.TargetType, target, _functions.Types.ResolveCasts(SourceDomain(cast.Operand), target),
             _functions.Database, _defaultCollation, cast.Location, StaticTypeOf(cast.Operand));
+        // PostgreSQL parse_coerce.c:233-249 converts an unknown string constant while
+        // analyzing the CAST. Include text the engine already folded to a constant;
+        // typed numeric casts remain deferred and can be discarded.
+        return _validatingIgnoredIdentityInput && operand is SqlBoundConstant { Value: string or SqlCharacter }
+            ? new SqlBoundConstant(Evaluate(bound, [])) : bound;
     }
 
     /// <summary>
@@ -501,7 +516,7 @@ internal sealed partial class SqlExpressionEvaluator
         // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant
         // -5 (doNegate, src/backend/parser/gram.y): computed once here, so an immutable call over it
         // folds too (ABS(-5)). One that fails is kept, and fails only when a row reaches it, as before.
-        return _foldConstants && (unary.Operator is SqlUnaryOperator.Negate or SqlUnaryOperator.Plus) && operand.Kind == SqlBoundExpressionKind.Constant
+        return (_foldConstants || _validatingIgnoredIdentityInput) && (unary.Operator is SqlUnaryOperator.Negate or SqlUnaryOperator.Plus) && operand.Kind == SqlBoundExpressionKind.Constant
             ? FoldSign(bound)
             : bound;
     }
@@ -513,7 +528,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             return new SqlBoundConstant(Evaluate(sign, []));
         }
-        catch (Exception exception) when (IsDeferrable(exception))
+        catch (Exception exception) when (!_validatingIgnoredIdentityInput && IsDeferrable(exception))
         {
             return sign;
         }
@@ -767,7 +782,7 @@ internal sealed partial class SqlExpressionEvaluator
         BindParameterCoercions(scalar, arguments, callCollation);
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
             callCollation, _functions.Database, _cancellationToken, _functions.TransactionStart);
-        return _foldConstants && scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
+        return (_foldConstants || _validatingIgnoredIdentityInput) && scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
     }
 
     /// <summary>Applies declared CHAR bounds and domain checks before scalar or aggregate STRICT dispatch.</summary>
@@ -809,7 +824,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             return new SqlBoundConstant(EvaluateCall(call, []));
         }
-        catch (Exception exception) when (IsDeferrable(exception))
+        catch (Exception exception) when (!_validatingIgnoredIdentityInput && IsDeferrable(exception))
         {
             return call;
         }

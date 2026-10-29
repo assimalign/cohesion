@@ -26,6 +26,7 @@ internal sealed class SqlQueryExecutor
 {
     // Deterministic snapshot-versus-publication tests stop before any table binding.
     internal static Action<SqlQueryRequest>? BeforePlan { get; set; }
+    internal static Action<SqlQueryRequest, SqlPlan>? AfterPlan { get; set; }
     internal static Action? BeforeCatalogCapture { get; set; }
 
     private readonly SqlStorage _storage;
@@ -76,6 +77,7 @@ internal sealed class SqlQueryExecutor
                 [.. exception.Diagnostics]));
         }
 
+        AfterPlan?.Invoke(request, plan);
         statement.Metrics.IsPlanned = true;
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
         var sequenceUsage = plan.SequenceUsage;

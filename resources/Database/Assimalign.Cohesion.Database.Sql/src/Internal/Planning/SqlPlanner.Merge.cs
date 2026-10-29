@@ -74,8 +74,9 @@ internal sealed partial class SqlPlanner
                 for (int i = 0; i < insertValues.Count; i++)
                 {
                     if (clause.Overriding == SqlIdentityOverride.None) { ValidateIdentity(ordinals[i], insertValues[i], update: false); }
-                    var value = BindValue(ordinals[i], insertValues[i], scope);
-                    if (clause.Overriding == SqlIdentityOverride.User && table.Columns[ordinals[i]].Identity is not null && insertValues[i] is not SqlDefaultExpression)
+                    bool ignored = clause.Overriding == SqlIdentityOverride.User && table.Columns[ordinals[i]].Identity is not null && insertValues[i] is not SqlDefaultExpression;
+                    var value = BindValue(ordinals[i], insertValues[i], scope, ignored);
+                    if (ignored)
                     {
                         ValidateIgnoredIdentityInput(table.Columns[ordinals[i]], scope.StaticTypeOf(insertValues[i]), value, insertValues[i]);
                         value = SqlBoundDefaultItem.Instance;
@@ -146,7 +147,7 @@ internal sealed partial class SqlPlanner
             { throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, update ? ErrorMessages.IdentityUpdateForbidden : ErrorMessages.IdentityInsertForbidden); }
         }
 
-        SqlBoundExpression BindValue(int ordinal, SqlExpression expression, SqlExpressionEvaluator scope)
+        SqlBoundExpression BindValue(int ordinal, SqlExpression expression, SqlExpressionEvaluator scope, bool ignored = false)
         {
             if (expression is SqlDefaultExpression)
             { RecordColumnSequenceUsage(table, table.Columns[ordinal]); return SqlBoundDefaultItem.Instance; }
@@ -155,7 +156,7 @@ internal sealed partial class SqlPlanner
             var target = table.Columns[ordinal];
             if (!CanAssignInsertType(type, target.Type.Type))
             { throw new SqlPlanningException("CS02003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.MergeAssignmentType, type, target.Name, target.Type.Type), expression.Location); }
-            return scope.Bind(expression);
+            return ignored ? scope.BindIgnoredIdentityInput(expression) : scope.Bind(expression);
         }
 
         SqlPlanningException Invalid() => new("CS05013", ErrorMessages.MergeActionInvalid, merge.Location);

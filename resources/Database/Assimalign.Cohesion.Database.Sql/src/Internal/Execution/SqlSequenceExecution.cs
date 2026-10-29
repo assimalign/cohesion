@@ -35,6 +35,27 @@ internal sealed class SqlSequenceExecution : IDisposable
     internal static SqlSequenceExecution? Current => _current.Value;
     internal static Action<TransactionContext>? AfterSequenceGrant { get; set; }
 
+    internal static void RequireDefaultGrants(SqlCatalogColumn column)
+    {
+        var execution = Current;
+        if (column.Identity is not null && execution is null)
+        { throw new SqlPlanningException("CS04067", ErrorMessages.SequenceChanged); }
+        for (int index = 0; index < column.DefaultFunctionCalls.Count; index++)
+        {
+            string dependency = column.DefaultFunctionCalls[index];
+            if (dependency.StartsWith("S:", StringComparison.Ordinal) && ulong.TryParse(dependency.AsSpan(2), out ulong id) &&
+                (execution is null || !execution.HasGrant(id)))
+            { throw new SqlPlanningException("CS04067", ErrorMessages.SequenceChanged); }
+        }
+    }
+
+    private bool HasGrant(ulong id)
+    {
+        for (int index = 0; index < _sequences.Count; index++)
+        { if (_sequences[index].ObjectId == id) { return true; } }
+        return false;
+    }
+
     internal static void CheckGrant(SqlStatementContext statement, TransactionSequence owner)
     {
         AfterSequenceGrant?.Invoke(statement.Transaction);

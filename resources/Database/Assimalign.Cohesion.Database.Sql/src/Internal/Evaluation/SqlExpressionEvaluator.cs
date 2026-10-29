@@ -92,6 +92,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     // Catalog DEFAULT binding resolves calls without executing application code.
     private readonly bool _foldConstants;
+    private bool _validatingIgnoredIdentityInput;
 
     /// <summary>
     /// What this scope's static typing keeps beyond its binding inputs, created only when a scope
