@@ -178,6 +178,41 @@ public sealed class TransactionUndoMarkerTests
         Values(storage).ShouldBeEmpty();
     }
 
+    [Theory(DisplayName = "Cohesion Test [Transactions] - Undo markers: failed tombstones before the first marker cannot protect a later deletion")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RollbackToMarker_FailedTombstoneBeforeFirstMarker_ShouldRestoreLaterDeletion(bool indexed)
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var index = indexed ? new UndoTestStorage.Index(storage) : null;
+        var seeded = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        ulong old = await InsertAsync(coordinator, storage, seeded, 1, index);
+        await coordinator.CommitAsync(seeded);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await Should.ThrowAsync<IOException>(() => coordinator.ApplyStatementAsync<int>(writer, bracket =>
+        {
+            storage.Update(bracket, old, RecordVersionStamp.WithDeleter(storage.Read(old).Span, writer.Sequence));
+            var (page, slot) = UndoTestStorage.Unpack(old);
+            if (index is null) { coordinator.VersionStore.RecordTombstoned(writer.Sequence, page, slot); }
+            else { coordinator.VersionStore.RecordIndexEntryTombstoned(writer.Sequence, index, new byte[] { 1 }, old); }
+            throw new IOException("Injected statement failure before any marker");
+        }, CancellationToken.None).AsTask());
+        var marker = await coordinator.CreateUndoMarkerAsync(writer);
+        await TombstoneAsync(coordinator, storage, writer, old, index);
+
+        // Act
+        await coordinator.RollbackToUndoMarkerAsync(writer, marker);
+
+        // Assert: the failed statement's ledger entry is absent from the retained prefix.
+        RecordVersionStamp.ReadStamps(storage.Read(old).Span).Deleter.ShouldBe(TransactionSequence.None);
+        (await coordinator.VersionStore.GetVisibleVersionAsync(0, old, writer.Snapshot)).HasValue.ShouldBeTrue();
+        coordinator.VersionStore.TrackedVersionCount.ShouldBe(0);
+        await coordinator.CommitAsync(writer);
+        Values(storage).ShouldBe([1]);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Transactions] - Undo markers: failed statement entries cannot undo same-writer slot reuse before a later marker")]
     public async Task RollbackToMarker_FailedStatementAndSlotReuse_ShouldDiscardFailedLedgerSuffix()
     {
