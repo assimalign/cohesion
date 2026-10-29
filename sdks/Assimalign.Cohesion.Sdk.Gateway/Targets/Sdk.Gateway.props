@@ -9,7 +9,6 @@
 		<IsAotCompatible>true</IsAotCompatible>
 		<CohesionApplicationModel>enabled</CohesionApplicationModel>
 		<CohesionResourceKind>Composite</CohesionResourceKind>
-		<CohesionResourceApplicationModel>Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane</CohesionResourceApplicationModel>
 		<CohesionResourceComposable>true</CohesionResourceComposable>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>

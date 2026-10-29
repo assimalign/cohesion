@@ -121,7 +121,6 @@ jobs:
             'Assimalign.Cohesion.IdentityModel.Token.JsonWebToken'
             'Assimalign.Cohesion.Security.DataProtection'
             'Assimalign.Cohesion.ApplicationModel.Gateway'
-            'Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane'
             'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
             'Assimalign.Cohesion.Connections'
             'Assimalign.Cohesion.Connections.StreamAbort'
@@ -131,8 +130,8 @@ jobs:
             'Assimalign.Cohesion.Hosting'
             'Assimalign.Cohesion.Http'
             'Assimalign.Cohesion.Http.Connections'
-            # Sdk.Gateway injects no area client and Gateway.ControlPlane no longer references
-            # Web.Routing, so neither Web nor the Database.Client closure reaches a template restore.
+            # Sdk.Gateway injects no area client, so neither Web nor the Database.Client closure reaches
+            # a template restore.
             'Assimalign.Cohesion.Web.ApplicationModel'
             'Assimalign.Cohesion.Database.ApplicationModel'
             'Assimalign.Cohesion.ConfigurationStore.ApplicationModel'

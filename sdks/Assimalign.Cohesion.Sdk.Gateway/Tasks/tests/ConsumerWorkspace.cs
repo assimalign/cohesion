@@ -35,7 +35,6 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Core",
         "Assimalign.Cohesion.ApplicationModel",
         "Assimalign.Cohesion.ApplicationModel.Gateway",
-        "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane",
         "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess",
         "Assimalign.Cohesion.Connections",
         "Assimalign.Cohesion.Connections.StreamAbort",
@@ -50,8 +49,8 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Http",
         "Assimalign.Cohesion.Http.Connections",
         "Assimalign.Cohesion.Security.DataProtection",
-        // No Web or Web.Routing package: Gateway.ControlPlane routes its endpoints itself, so
-        // nothing in the gateway closure references the Web area outside its ApplicationModel.
+        // No Web or Web.Routing package: nothing in the gateway closure references the Web area
+        // outside its ApplicationModel.
         "Assimalign.Cohesion.Web.ApplicationModel",
         "Assimalign.Cohesion.Database.ApplicationModel",
         "Assimalign.Cohesion.ConfigurationStore.ApplicationModel",

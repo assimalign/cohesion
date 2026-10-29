@@ -30,7 +30,7 @@ connects the packages to the signed direction and records the build-out decision
 
 | Family | Packages and responsibility |
 |---|---|
-| ApplicationModel | `Assimalign.Cohesion.ApplicationModel` (portable contracts), `.Gateway` (plan-driven lifecycle and Local realization), `.Gateway.InProcess` (composite members), `.Gateway.ControlPlane` (authenticated application control plane). |
+| ApplicationModel | `Assimalign.Cohesion.ApplicationModel` (shared contracts), `.Definition` (the logical model), `.Hosting` (the running instance), `.Gateway` (reconciles one gateway's model onto an infrastructure provider), `.Gateway.InProcess` (runs a gateway's resources in its own process). Rebuilt since 2026-10-27; see the area README. |
 | Hosting | `Assimalign.Cohesion.Hosting` (nestable lifecycle), `.Health`, `.Resources` (ambient runtime context), `.Telemetry` (resource log-export bootstrap and shutdown). |
 | OpenTelemetry | `Assimalign.Cohesion.OpenTelemetry` is implemented by item 31b (`acc951aa`): `OtlpProtocol`, `OtlpSignal`, `OtlpExporterOptions`, `IOtlpLogExporter`, `OtlpLogRecord`, and `OtlpExporter`; OTLP/HTTP JSON logs, with traces, metrics, and protobuf deferred. |
 | Resource declarative planes | All 18 areas deliver a guarded `<Area>.ApplicationModel` package: typed resource, planner, graph verbs, and the area's default-control-plane factory. They are NuGet-only. |

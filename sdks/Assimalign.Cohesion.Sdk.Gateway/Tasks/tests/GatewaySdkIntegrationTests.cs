@@ -108,9 +108,8 @@ public sealed class GatewaySdkIntegrationTests
             StringSplitOptions.None).Length.ShouldBe(3);
         source.ReplaceLineEndings("\n").ShouldContain(
             "global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);\n" +
-            "        global::GatewaySmoke.JitTestGatewayCommandLine.Apply(options, args);\n" +
-            "        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
-        source.ShouldContain("Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode)");
+            "        global::GatewaySmoke.JitTestGatewayCommandLine.Apply(options, args);");
+        source.ShouldNotContain("GatewayControlPlane", Case.Sensitive);
         source.ShouldContain("new CohesionGatewayProviders(selected, args, builder.RunMode)");
         source.ShouldContain("new global::Assimalign.Cohesion.ApplicationModel.Gateway.LocalGateway(options)");
         source.ShouldNotContain(".InProcess(");
@@ -129,8 +128,6 @@ public sealed class GatewaySdkIntegrationTests
             JsonElement manifest = manifestDocument.RootElement;
             manifest.GetProperty("kind").GetString().ShouldBe("Composite");
             manifest.GetProperty("application").GetString().ShouldBe("gateway-smoke");
-            manifest.GetProperty("applicationModel").GetString()
-                .ShouldBe("Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane");
             manifest.GetProperty("artifact").GetProperty("composable").GetBoolean().ShouldBeTrue();
             manifest.GetProperty("properties").GetProperty("composite.applicationSet").GetString()
                 .ShouldBe("true");
@@ -170,9 +167,7 @@ public sealed class GatewaySdkIntegrationTests
         ContainsOrdinalIgnoreCase(referencePaths, "GatewaySmokeDatabase").ShouldBeFalse();
         ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.Web.Hosting").ShouldBeFalse();
         ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.Database.Hosting").ShouldBeFalse();
-        ContainsOrdinalIgnoreCase(
-            referencePaths,
-            "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane").ShouldBeTrue();
+        ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane").ShouldBeFalse();
         // The hand-written area verbs compile against the ApplicationModel packages the SDK
         // injects for the referenced Web and Database projects.
         ContainsOrdinalIgnoreCase(referencePaths, "Assimalign.Cohesion.Web.ApplicationModel").ShouldBeTrue();

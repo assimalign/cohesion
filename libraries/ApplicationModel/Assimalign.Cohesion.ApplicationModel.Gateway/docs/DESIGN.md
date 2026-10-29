@@ -422,13 +422,19 @@ gateway to the provider on each call (`DeployResourceAsync(gateway, …)`). It w
 instances reach the gateway to the platform that starts them, which differs on every platform but
 in-process.
 
-**G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
-(any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
-today. The options are: serve HTTP from this library tier with `Http.Connections`, as the retired
-gateway did; move the endpoint contracts into ApplicationModel and bind them in `Web.ApplicationModel`;
-or relax one of the guards. That choice is open, so this chunk stops at transport-neutral logic.
-Whichever it is, the endpoint ships as a transport (G33). Joins have no transport either: a child
-joins a parent in the same process directly (G26).
+**G9 — No HTTP here, yet; it will be a transport over Web (owner direction, 2026-10-29).** COHLIB001
+bars a library from referencing Web, and COHRES003 bars Web (any resource package) from referencing
+a `Gateway*` assembly, so neither side can bind the other today. The options were: serve HTTP from
+this library tier with `Http.Connections`, as the retired gateway did; move the endpoint contracts
+into ApplicationModel and bind them in `Web.ApplicationModel`; or relax one of the guards. The owner
+chose the third: the HTTP transport reuses the Web area as a private reference, so its endpoints run
+on Web.Server's engine, as an instance's control plane already does (Web.Hosting.ApplicationModel
+W1), and no Web type reaches the gateway's public API. It ships as a transport (G33) in a package of
+its own, so a gateway that runs only in process does not carry Web. The retired
+`Gateway.ControlPlane`, which served HTTP on `Http.Connections` with its own router, was removed on
+2026-10-29: everything it served (the export document, application sets, declarative commands,
+trusted-issuer grants) was retired with the old model. Joins have no transport either: a child joins
+a parent in the same process directly (G26).
 
 ## AOT
 
@@ -442,8 +448,9 @@ candidates for an event source.
 
 ## Open questions
 
-1. **HTTP binding** (G9): which of the three options, for publications and for joins. Publications
-   arrive through a transport (G33) either way.
+1. **HTTP binding** (G9): settled as a transport over a private Web reference. Still open: the
+   package's name and where it lives, its routes for publications, renewals, and joins, and
+   authentication.
 2. **Instance liveness.** Resolved by leases (G15). A lease only bounds how long a dead instance stays
    registered; asking the platform which instances run would detect a death sooner.
 3. **Startup failure scope.** Only missed new resources are torn down (G13). Should a failed startup

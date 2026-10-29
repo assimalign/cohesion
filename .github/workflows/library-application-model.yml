@@ -53,7 +53,6 @@ jobs:
             'Assimalign.Cohesion.ApplicationModel',
             'Assimalign.Cohesion.ApplicationModel.Definition',
             'Assimalign.Cohesion.ApplicationModel.Gateway',
-            'Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane',
             'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess',
             'Assimalign.Cohesion.ApplicationModel.Hosting'
         ]]

@@ -7,8 +7,9 @@
 > `Assimalign.Cohesion.Hosting.Resources`. The [gateway](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
 > builds on the definitions. Each gateway runs a model of its own, deployed by its own pipeline, and
 > a child gateway joins its parent. [Gateway.InProcess](Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md)
-> runs a gateway's resources in its own process (rebuilt 2026-10-29). `Gateway.ControlPlane` is not
-> rebuilt yet, and the linked area records describe the retired design.
+> runs a gateway's resources in its own process (rebuilt 2026-10-29). `Gateway.ControlPlane`, the
+> retired gateway's HTTP front end, was removed on 2026-10-29; the gateway's HTTP surface returns as
+> a transport. The linked area records describe the retired design.
 
 The L2 application-composition and orchestration plane: the declarative application model every
 resource area's `<Area>.ApplicationModel` package builds on, plus the gateway family that
@@ -43,7 +44,6 @@ flowchart LR
     Gateway["ApplicationModel.Gateway"] --> Definition
     InProcess["ApplicationModel.Gateway.InProcess"] --> Gateway
     InProcess --> Hosting
-    ControlPlane["ApplicationModel.Gateway.ControlPlane"] --> Definition
     AreaModel["resources/*/…​.ApplicationModel"] --> Definition
     AreaHosting["resources/*/…​.Hosting.ApplicationModel"] --> Hosting
     AreaModel -.->|"COHRES003 ✗"| Gateway
@@ -61,7 +61,6 @@ outside resource-area packages. That prohibition has no opt-out and no exemption
 | `Assimalign.Cohesion.ApplicationModel.Hosting` | The physical side: a running resource instance, its health contributors, the in-process control plane, the host service that publishes and restores, and the HTTP manifest publisher |
 | `Assimalign.Cohesion.ApplicationModel.Gateway` | The gateway: deploys its model's resources through an infrastructure provider, keeps each resource's deployment across its instances, receives instance publications and child gateways' joins, and exposes infrastructure actions; `ApplicationBuilder` declares the model and builds the gateway |
 | `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | The `inprocess` infrastructure: runs each resource's program on a thread of its own in the gateway's process, in an environment scope of its own, and is the in-process channel the programs publish through |
-| `Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` | The gateway-side control-plane contract that a resource's default control plane is reached through |
 
 ## Further reading
 

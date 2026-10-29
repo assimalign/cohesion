@@ -322,13 +322,12 @@ jobs:
           # stay because the base/ApplicationModel SDK harness's EnabledWeb consumer references them;
           # Database.Sql.Client's closure is now Database.Client + Database.Sql.Protocol (no engine); the Database.Sql engine family and
           # FileSystem/FileSystem.Physical, so those are packed too (NU1101 otherwise).
-          # Web and Web.Routing are absent: Gateway.ControlPlane routes its own endpoints, and every
-          # other Web consumer here receives them through the App.Web framework, not as packages.
+          # Web and Web.Routing are absent: every Web consumer here receives them through the App.Web
+          # framework, not as packages.
           $packageIds = @(
             "Assimalign.Cohesion.ApplicationModel"
             "Assimalign.Cohesion.ApplicationModel.Definition"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.ApplicationModel.Hosting"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
@@ -399,7 +398,6 @@ jobs:
             "Assimalign.Cohesion.ApplicationModel"
             "Assimalign.Cohesion.ApplicationModel.Definition"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
             "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
             "Assimalign.Cohesion.ApplicationModel.Hosting"
             "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"

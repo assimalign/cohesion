@@ -7,7 +7,6 @@
 		<OutputType>Exe</OutputType>
 		<CohesionApplicationModel>enabled</CohesionApplicationModel>
 		<CohesionResourceKind>Composite</CohesionResourceKind>
-		<CohesionResourceApplicationModel>Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane</CohesionResourceApplicationModel>
 		<_CohesionGatewayInProcessSelected>$([System.Text.RegularExpressions.Regex]::IsMatch('$(CohesionGateways)', '(^|;)\s*InProcess\s*(;|$)', System.Text.RegularExpressions.RegexOptions.IgnoreCase))</_CohesionGatewayInProcessSelected>
 		<_CohesionGatewayDockerSelected>$([System.Text.RegularExpressions.Regex]::IsMatch('$(CohesionGateways)', '(^|;)\s*Docker\s*(;|$)', System.Text.RegularExpressions.RegexOptions.IgnoreCase))</_CohesionGatewayDockerSelected>
 		<_CohesionGatewayKubernetesSelected>$([System.Text.RegularExpressions.Regex]::IsMatch('$(CohesionGateways)', '(^|;)\s*Kubernetes\s*(;|$)', System.Text.RegularExpressions.RegexOptions.IgnoreCase))</_CohesionGatewayKubernetesSelected>
@@ -17,7 +16,6 @@
 		<ValidateExecutableReferencesMatchSelfContained Condition="'$(_CohesionGatewayInProcessActive)' == 'true'">false</ValidateExecutableReferencesMatchSelfContained>
 
 		<_CohesionGatewayInProcessProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess\src\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj</_CohesionGatewayInProcessProject>
-		<_CohesionGatewayControlPlaneProject>$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane\src\Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.csproj</_CohesionGatewayControlPlaneProject>
 	</PropertyGroup>
 
 	<!--
@@ -90,8 +88,6 @@
 			Include="@(_CohesionGatewayReferencedAreaModel->WithMetadataValue('ProjectExists', 'False')->'%(PackageId)')"
 			Version="$(CohesionVersion)" />
 
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" ProjectPath="$(_CohesionGatewayControlPlaneProject)" Condition="'$(CohesionRepositoryDirectory)' != ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane" Version="$(CohesionVersion)" Condition="'$(CohesionRepositoryDirectory)' == ''" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" ProjectPath="$(_CohesionGatewayInProcessProject)" Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionRepositoryDirectory)' != ''" />
 		<CohesionPackageReference Include="@(_CohesionGatewayInProcessPackage->'%(PackageId)')" Version="@(_CohesionGatewayInProcessPackage->'%(Version)')" Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionRepositoryDirectory)' == ''" />
 
