@@ -472,7 +472,7 @@ one require an explicit alias. An inferred duplicate spans the final path-name t
 bracket-string paths and parenthesized paths. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
 preserving existing fields and AS-less aliases named every or satisfies. END was already
 reserved. ANY and SOME retain their existing reservations. UNNEST in UPDATE/DELETE, FLATTEN calls,
-general JOIN/NEST predicates, DML source joins, WITHIN and ANY AND EVERY remain CK00001.
+general JOIN/NEST predicates, UPDATE/DELETE source joins, WITHIN and ANY AND EVERY remain CK00001.
 UPDATE/DELETE reject UNNEST only where their grammar expects a clause; a field named unnest
 in SATISFIES remains an expression. MERGE INTO in a CASE result under SATISFIES reports the
 single MERGE construct before its internal mutation tokens are scanned.
@@ -592,10 +592,12 @@ and preservation state. OqlUnnestExpression and OqlJoinExpression are sealed lea
 retains their evaluation order; Unnest remains the array-only view. SELECT's existing source slot
 holds an optional wrapper only for joined queries, preserving ordinary node size and allocations.
 The parser accepts only right-hand META(alias).id equality and keeps JOIN/NEST contextual.
-General forms, ON KEYS and DML source joins retain CK00001; explicit aliases avoid #1767.
+General forms, ON KEYS and UPDATE/DELETE source joins retain CK00001; explicit aliases avoid #1767.
 A joined statement requires aliases in every SELECT scope. The parser tracks actual join clauses
 and unaliased sources across recursive parsing, then resets this state for its next statement.
-The engine validates the same rule for direct ASTs before source planning.
+The engine validates the same rule for direct ASTs before source planning. Metadata validation
+processes bindings in declaration order: UNNEST removes a shadowed captured receiver, while JOIN
+and NEST introduce their local receiver after validating the preceding key scope.
 The [dialect](DIALECT.md#key-join-and-nest-1732-oq-j1) records scalar/unknown keys, metadata,
 star shape, paging, cache/budget defaults and pinned SQL++ references. OqlKeyJoinParserTests,
 keyword disposition and the engine's profile-driven conformance corpus cover the four capabilities.

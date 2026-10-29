@@ -38,6 +38,7 @@ internal sealed partial class DocumentPlanner
         foreach (var binding in query.Bindings)
         {
             if (ReferenceEquals(binding, before)) { break; }
+            sources.Remove(binding.Variable);
             if (binding is OqlJoinExpression) { sources.Add(binding.Variable); }
         }
         Visit(expression, sources);

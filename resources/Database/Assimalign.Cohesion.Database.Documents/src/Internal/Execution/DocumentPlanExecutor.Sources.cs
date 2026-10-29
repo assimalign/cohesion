@@ -51,6 +51,7 @@ internal static partial class DocumentPlanExecutor
             {
                 retained.Charge(128L + logical.Query.Bindings.Count * 64L);
                 retained.Retain(row.Content);
+                retained.Retain(row.Id);
                 // The input iterator lends its JSON until the next MoveNext. Cloning
                 // here gives blocking stages an independent representation.
                 var owned = new DocumentEvaluationContext(row.Content.Clone(), row.Id, row.Version);
@@ -59,7 +60,12 @@ internal static partial class DocumentPlanExecutor
                 foreach (var frame in bindings)
                 {
                     retained.Retain(frame.Value is DocumentEvaluationContext captured ? captured.Content : frame.Value);
-                    owned = owned.Bind(frame.Name, frame.Value is JsonElement json ? json.Clone() : frame.Value);
+                    if (frame.Value is DocumentEvaluationContext stored)
+                    {
+                        retained.Retain(stored.Id);
+                        owned = owned.Bind(frame.Name, new DocumentEvaluationContext(stored.Content.Clone(), stored.Id, stored.Version));
+                    }
+                    else { owned = owned.Bind(frame.Name, frame.Value is JsonElement json ? json.Clone() : frame.Value); }
                 }
                 matches.Add(owned);
             }
@@ -141,7 +147,7 @@ internal static partial class DocumentPlanExecutor
         if (query.Bindings.Count == 0)
         { cancellationToken.ThrowIfCancellationRequested(); operation.EnsureActive(); yield return source; yield break; }
         using var retained = evaluator.Memory.Reserve();
-        var pending = new Stack<(DocumentEvaluationContext Row, int Next, JsonElement.ArrayEnumerator Items, long Start)>();
+        var pending = new Stack<(DocumentEvaluationContext Row, int Next, JsonElement.ArrayEnumerator Items, long Start, long Active)>();
         var row = source;
         int next = 0;
         while (true)
@@ -160,13 +166,13 @@ internal static partial class DocumentPlanExecutor
                     finally { evaluator.Memory.Release(evaluator.Memory.Bytes - nested.RetainedBytes - beforeKey); }
                     if (key is not (null or DocumentMissing or string))
                     { throw new DocumentPlanningException("CD02028", ErrorMessages.JoinKeyInvalid, join.Expression.Location); }
-                    var match = LookupJoinKey(plan!, join, key, nested, cancellationToken);
+                    var match = LookupJoinKey(plan!, join, key, nested, retained, cancellationToken);
                     if (match is not null || join.IsLeft)
                     {
                         object? value = match is { } document ? document : DocumentMissing.UnmatchedSource;
                         if (join.IsNest && key is string)
                         {
-                            try { value = nested.Nest(match, cancellationToken); }
+                            try { value = nested.Nest(plan!.Collections[join].Id, (string)key, match, retained, cancellationToken); }
                             catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Start is null && join.Expression.Location is not null)
                             { throw exception.At(join.Expression.Location); }
                         }
@@ -190,7 +196,7 @@ internal static partial class DocumentPlanExecutor
                         if (binding.Expression is not OqlPathExpression) { retained.Retain(value); }
                         var items = array.EnumerateArray();
                         items.MoveNext();
-                        pending.Push((row, next + 1, items, start));
+                        pending.Push((row, next + 1, items, start, retained.Bytes));
                         row = row.Bind(binding.Variable, items.Current);
                         next++;
                         continue;
@@ -203,7 +209,8 @@ internal static partial class DocumentPlanExecutor
             {
                 var items = frame.Items;
                 if (!items.MoveNext()) { retained.Rewind(frame.Start); continue; }
-                pending.Push((frame.Row, frame.Next, items, frame.Start));
+                retained.Rewind(frame.Active);
+                pending.Push((frame.Row, frame.Next, items, frame.Start, frame.Active));
                 row = frame.Row.Bind(query.Bindings[frame.Next - 1].Variable, items.Current);
                 next = frame.Next;
                 resumed = true;
@@ -214,9 +221,9 @@ internal static partial class DocumentPlanExecutor
     }
 
     private static DocumentEvaluationContext? LookupJoinKey(DocumentJoinPlan plan, OqlJoinExpression join, object? key,
-        DocumentNestedExecutionContext nested, CancellationToken cancellationToken)
+        DocumentNestedExecutionContext nested, DocumentAggregateMemory.Reservation active, CancellationToken cancellationToken)
     {
-        try { return key is string id ? nested.Lookup(plan.Collections[join].Id, id, cancellationToken) : null; }
+        try { return key is string id ? nested.Lookup(plan.Collections[join].Id, id, active, cancellationToken) : null; }
         catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Start is null && join.Expression.Location is not null)
         { throw exception.At(join.Expression.Location); }
     }

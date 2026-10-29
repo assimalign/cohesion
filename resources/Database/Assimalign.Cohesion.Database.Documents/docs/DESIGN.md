@@ -718,7 +718,9 @@ object-star preservation (nonobject roots wrap under document). Star deliberatel
 engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
 IN subqueries retain the conservative CD00014 guard pending owner sign-off; this is a deliberate
 SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
-shadow them. Qualified stars retain their CK00001 refusal; FROM references to explicit outer aliases use per-row expression scans. Unqualified fields otherwise bind to the inner source, as in Couchbase. EXISTS uses
+shadow them. Qualified stars outside joined SELECT projections retain their CK00001 refusal.
+FROM references to explicit outer aliases use per-row expression scans. Unqualified fields
+otherwise bind to the inner source, as in Couchbase. EXISTS uses
 Couchbase coll_exists.go:40-53; the array
 contract follows subqueries.adoc:26-68 at the pinned versions linked in the language DIALECT.
 PostgreSQL src/backend/optimizer/plan/subselect.c:392-410 informed the separate subplan ownership
@@ -784,12 +786,20 @@ FROM field fallback; a name matching a self or later binding requires an earlier
 The language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#key-join-and-nest-1732-oq-j1)
 records all defaults, including the NULL/MISSING lookup-NEST table, qualified stars, metadata
 ambiguity and selected-window headers. Ordinary queries keep their existing execution path.
+Metadata validation removes captured names shadowed by each local UNNEST, and introduces
+JOIN/NEST receivers in binding order. A binding's
+input/key expression sees only preceding declarations.
 
 DocumentNestedExecutionContext owns a lazy cache keyed by collection Guid and ordinal document key.
 It calls Catalog.FindDocument with the current operation snapshot and reads content inside that
 operation; it never uses public GetAsync. Hits and misses are cached across aliases and subqueries.
-NEST arrays are independently owned and cached alongside the document values. Cache entries, keys,
-content and arrays reserve conservative retained bytes before allocation where sizes are known;
+The least-recently-used lookup cache owns at most one eighth of StatementMemoryBudget (8 MiB
+by default), including NEST arrays. Eviction drops the entire entry and its array; oversized
+entries bypass caching. Repeated evicted keys call FindDocument in the same operation and snapshot.
+Current cursor rows have separate conservative reservations, released when their binding frame
+advances. Blocking rows clone and charge content, stored identities and NEST arrays independently,
+so cache eviction never releases their ownership. NEST arrays are cached alongside document values.
+Cache entries, keys, content and arrays reserve conservative retained bytes before allocation where sizes are known;
 all cache retention shares CD05018. Evaluation/lookup/cache-hit work shares CD05020. Reservations
 release on success, failure and cancellation. RavenDB uses the analogous statement loader cache in
 src/Raven.Server/Documents/Queries/Results/QueryResultRetrieverBase.cs:921-931 (local reference).
@@ -802,7 +812,8 @@ existing non-join metadata behavior. LEFT JOIN's absent frame and its META are M
 NEST arrays have no scalar identity. EXPLAIN inserts KeyJoin/LeftKeyJoin/KeyNest/LeftKeyNest between
 projection and initial access, with collection, alias, snapshot and cache details, without lookups.
 The generated nested-loop oracle and statement counters prove one lookup per distinct right-hand
-identity, and event-gated Snapshot/ReadCommitted tests pin both cached and first-time lookups during
+identity while resident, and tiny-grant differential tests force eviction across all four forms.
+Event-gated Snapshot/ReadCommitted tests pin both cached and first-time lookups during
 an intervening writer commit. Both transports, the parity corpus and NativeAOT exercise the feature.
 There is no new public engine interface, assembly reference, friend grant, disk or wire contract.
 
@@ -1089,11 +1100,11 @@ columns retain long values. JSON numeric equality and wire digits are unchanged 
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
-SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM/UNNEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
+SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, expression/derived FROM, UNNEST, key JOIN/NEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
 CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
-Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
-and server statements are rejected with `CK00001`. The parser advertises only clauses this executor
-supports.
+Retired ODMG constructs are rejected positionally; general joins, deferred document mutations
+and server statements are rejected with `CK00001`. Expression subqueries execute as described above.
+The parser advertises only clauses this executor supports.
 AST diagnostics are checked both for text requests and directly constructed requests.
 
 Each result is one JSON value. A SELECT list desugars to a VALUE object: `e1 AS a, e2 AS b`
@@ -1951,10 +1962,10 @@ the database's own retry, a `FailureBackoff` after the failure, not the next
 ## Limits and verification
 
 The current engine materializes query inputs/results and whole JSON values in
-managed memory. UNNEST multiplies input rows and has no row cap; it is not a join and
-does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
+managed memory. UNNEST multiplies input rows and has no row cap; scalar key JOIN/NEST can
+look up another stored collection in the same database. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
-writer locking is conservative; there are no persisted query statistics, join,
+writer locking is conservative; there are no persisted query statistics, general-predicate joins,
 external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 

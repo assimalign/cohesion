@@ -170,7 +170,8 @@ derived and local-value bindings have no stored identity and return NULL for met
 A nested `FROM d.items AS i`, or `FROM d AS i`
 where d is an explicit outer alias, iterates that outer value per row. An implicit collection name
 in a bare FROM continues to name the collection. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
-Qualified stars (`d.*`) retain their existing CK00001 refusal.
+Qualified stars (`d.*`) retain their CK00001 refusal outside joined SELECT projections; see
+[key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
 
 Subqueries execute in UPDATE/DELETE predicates, SET and VALUES expressions, INSERT/UPSERT SELECT
 sources and RETURNING. Every nested read sees statement-start data, including writes from earlier
@@ -241,8 +242,11 @@ META(alias).id/version retains each stored document's identity, independent of J
 Unmatched JOIN metadata is MISSING. Expression/derived sources and NEST arrays have no single
 document identity, so their metadata is NULL; an unknown-key LEFT NEST binding is MISSING.
 META() is ambiguous in a joined SELECT and gives CD01035. META on UNNEST and comprehension
-variables remains invalid. Grouping, captures and ORDER BY projection aliases keep their existing
-scope rules. Unqualified ordinary field paths continue to address the initial FROM value.
+variables remains invalid, including when a local UNNEST shadows a captured source name.
+Bindings take effect in declaration order, after evaluating their own input/key expression.
+JOIN and NEST aliases replace captured names with their local metadata behavior. Grouping,
+captures and ORDER BY projection aliases keep their existing scope rules. Unqualified ordinary
+field paths continue to address the initial FROM value.
 
 SELECT * yields a synthetic object keyed by the explicit FROM alias and every JOIN/NEST/UNNEST
 alias; MISSING members are omitted and NULL members remain. A top-level qualified star (b.*)
@@ -253,8 +257,12 @@ correlated subqueries. Equal sort keys retain input source order. Nonblocking jo
 before projection and infer dynamic headers from the selected window, as expression sources do.
 
 All lookups use the current operation and its snapshot. The statement caches both hits and misses
-by collection identity and ordinal key, across chains and subqueries; it releases them at statement
-end. Cached content and NEST arrays, dictionary entries and key strings are charged to the shared
+by collection identity and ordinal key, across chains and subqueries. Its least-recently-used cache
+is limited to one eighth of StatementMemoryBudget (8 MiB of the default 64 MiB grant).
+Eviction releases an entry and its NEST array; an evicted key is looked up again with FindDocument
+in the same operation and snapshot. Oversized entries bypass the cache. Current rows and rows
+held for ordering or grouping keep independent charges until their owners release them. Cached
+content and NEST arrays, dictionary entries and key strings are charged to the shared
 StatementMemoryBudget (CD05018). Lookup attempts, cache hits and NEST materialization also consume
 StatementWorkBudget (CD05020). No lookup opens a session operation or calls public GetAsync.
 LIMIT 0 and EXPLAIN perform static validation without document lookups. EXPLAIN exposes KeyJoin,
@@ -318,7 +326,9 @@ must re-read, under the shared CD05018 memory budget. Outer ORDER BY sorts; it c
 inner index-order guarantee. EXPLAIN includes DerivedSource/ExpressionSource and nested plans.
 All levels share the operation, snapshot, function catalog, work/memory bounds and cancellation.
 Correlated sources are evaluated per outer row. INSERT/UPSERT SELECT accepts both source forms.
-JOIN/NEST (including comma joins) retain named CK00001 refusals. No format or wire
+Scalar key JOIN/NEST may follow either source form; see [key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
+General ON predicates, ON KEYS, expression/derived right-hand sources and comma joins retain
+named CK00001 refusals. No format or wire
 version changes are required.
 
 ## RETURNING (#1727)

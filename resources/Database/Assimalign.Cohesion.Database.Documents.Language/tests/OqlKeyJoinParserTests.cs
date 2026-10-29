@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using System.Linq;
 
 using Shouldly;
@@ -7,6 +9,28 @@ namespace Assimalign.Cohesion.Database.Documents.Language.Tests;
 
 public sealed class OqlKeyJoinParserTests
 {
+    [Fact(DisplayName = "Cohesion Test [OQL] - Key joins: source documentation links supported joins without blanket refusals")]
+    public void Dialect_ExpressionSourceSection_ShouldDescribeKeyJoinSupport()
+    {
+        // Arrange
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "docs", "DIALECT.md")))
+        { directory = directory.Parent; }
+        directory.ShouldNotBeNull();
+        string dialect = File.ReadAllText(Path.Combine(directory.FullName, "docs", "DIALECT.md"));
+        int start = dialect.IndexOf("## Derived and expression FROM sources", StringComparison.Ordinal);
+        int end = dialect.IndexOf("## RETURNING", start, StringComparison.Ordinal);
+        // Act
+        string sources = dialect[start..end];
+        // Assert: the source section must defer to the executable key-join contract.
+        sources.ShouldContain("](#key-join-and-nest-1732-oq-j1)", Case.Sensitive);
+        sources.ShouldNotContain("JOIN/NEST (including comma joins) retain named CK00001 refusals", Case.Sensitive);
+        string design = File.ReadAllText(Path.Combine(directory.Parent!.FullName,
+            "Assimalign.Cohesion.Database.Documents", "docs", "DESIGN.md"));
+        design.ShouldNotContain("does not add JOIN or cross-collection execution", Case.Sensitive);
+        design.ShouldNotContain("nested queries, deferred document mutations", Case.Sensitive);
+    }
+
     [Fact(DisplayName = "Cohesion Test [OQL] - Key joins: statement-wide alias requirements reset when the parser is reused")]
     public void Parse_JoinedThenOrdinary_ShouldResetAliasRequirement()
     {

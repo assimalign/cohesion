@@ -253,7 +253,7 @@ public sealed class DocumentKeyJoinTests
         }, CancellationToken.None);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Documents] - Key joins: cache retention is bounded and released after failure")]
+    [Fact(DisplayName = "Cohesion Test [Documents] - Key joins: retained ordered rows exhaust the budget and release after failure")]
     public async Task ExecuteAsync_CacheBudget_ShouldRefuseAndReleaseAsync()
     {
         // Arrange
@@ -264,7 +264,7 @@ public sealed class DocumentKeyJoinTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.CreateCollectionAsync("items", CancellationToken.None);
         string keys = "[" + string.Join(",", Enumerable.Range(0, 500).Select(index => "'absent" + index + "'")) + "]";
-        var request = DocumentQueryRequest.FromOql("SELECT RAW 1 FROM " + keys + " AS k JOIN items AS b ON META(b).id = k");
+        var request = DocumentQueryRequest.FromOql("SELECT RAW 1 FROM " + keys + " AS k LEFT JOIN items AS b ON META(b).id = k ORDER BY k");
         // Act / Assert
         await database.RunAsync(session, async operation =>
         {
