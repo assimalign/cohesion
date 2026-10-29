@@ -121,6 +121,10 @@ internal static class GqlPathRenderer
                 case GqlPropertyExpression property: Push(Name(property.Variable), ".", Name(property.Property)); break;
                 case GqlMemberExpression member: Push("(", member.Operand, ").", Name(member.Member)); break;
                 case GqlSubscriptExpression subscript: Push("(", subscript.Operand, ")[", subscript.Index, "]"); break;
+                case GqlPatternComprehensionExpression pattern:
+                    Push("[", pattern.Pattern, pattern.Predicate is null ? null : " WHERE ", pattern.Predicate,
+                        " | ", pattern.Projection, "]");
+                    break;
                 case GqlExistsExpression exists:
                     Push(" }");
                     for (int i = exists.MatchClauses.Count - 1; i >= 0; i--)

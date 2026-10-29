@@ -30,7 +30,7 @@ public sealed class GraphExistsLifetimeTests
         int cold = 0, warm = 0;
         try
         {
-            foreach (var item in GraphExistsTests.PatternCases)
+            foreach (var item in GraphExistsTests.PatternCases.Concat(GraphPatternComprehensionTests.PatternCases))
             {
                 await using (var seedEngine = GraphDatabaseEngine.Create("exists-sync", new() { RootPath = root }))
                 {
@@ -66,7 +66,7 @@ public sealed class GraphExistsLifetimeTests
                 await using var cleanup = GraphDatabaseEngine.Create("exists-sync", new() { RootPath = root });
                 await cleanup.DropDatabaseAsync("graph", CancellationToken.None);
             }
-            cold.ShouldBe(GraphExistsTests.PatternCases.Count());
+            cold.ShouldBe(GraphExistsTests.PatternCases.Count() + GraphPatternComprehensionTests.PatternCases.Count());
             warm.ShouldBe(cold);
             _output.WriteLine($"EXISTS synchronous seam: cold statements={cold}; warm statements={warm}; inner evaluations={evaluations}; suspended=0.");
         }

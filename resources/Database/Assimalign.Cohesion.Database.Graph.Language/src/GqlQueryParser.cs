@@ -281,6 +281,13 @@ public sealed partial class GqlQueryParser : QueryParser
                 _tokens[i - 1].Type == TokenType.Colon && i - 1 != mapSeparatorPosition)) { continue; }
             if (i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.Colon) { continue; }
             string value = token.Text.ToUpperInvariant();
+            if (valuePosition && (value is "WALK" or "TRAIL" or "SIMPLE" or "ACYCLIC" or "ANY" or "ALL" or "SHORTEST") &&
+                TryPatternComprehensionPrefix(i, out int patternPrefixEnd))
+            {
+                UnsupportedConstruct("PATTERN COMPREHENSION PATH PREFIX", token, _tokens[patternPrefixEnd]);
+                i = patternPrefixEnd;
+                continue;
+            }
             // Scan the body in its own pattern context. Its WHERE and inline predicates use
             // exactly the ordinary capability checks; pattern identifiers remain names.
             if (valuePosition && value == "EXISTS" && i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftBrace)

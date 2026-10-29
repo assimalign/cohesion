@@ -6,8 +6,8 @@ using Assimalign.Cohesion.Database.Graph.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-// Public ASTs may be DAGs. Give every EXISTS occurrence its own identity before binding,
-// copying only ancestors that contain it. Lists and nodes without EXISTS retain their identity.
+// Public ASTs may be DAGs. Give every correlated expression occurrence its own identity
+// before binding, copying only ancestors that contain it. Other nodes retain their identity.
 internal static class GraphLexicalOccurrences
 {
     internal static IReadOnlyList<GqlStage> Bind(IReadOnlyList<GqlStage> stages, CancellationToken token)
@@ -41,6 +41,9 @@ internal static class GraphLexicalOccurrences
         token.ThrowIfCancellationRequested();
         switch (value)
         {
+            case GqlPatternComprehensionExpression pattern:
+                return new GqlPatternComprehensionExpression(Path(pattern.Pattern, token), Optional(pattern.Predicate, token),
+                    Expression(pattern.Projection, token), pattern.Location);
             case GqlExistsExpression exists:
                 return new GqlExistsExpression(Map(exists.MatchClauses, Clause, token), exists.Location);
             case GqlBinaryExpression item:

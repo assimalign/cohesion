@@ -82,8 +82,9 @@ internal sealed partial class GraphPlanner
                 foreach (var pair in correlated.Subplans)
                 {
                     if (!ReferenceEquals(pair.Value.Parent, scope.Owner)) { continue; }
-                    int apply = Add(correlated.Anti?.Contains(pair.Key) == true ? "AntiSemiApply" : "SemiApply", scope.Parent,
-                        detail: $"correlated={string.Join(",", pair.Value.CorrelatedVariables)}; first_match=True; materialize=False");
+                    bool collect = pair.Key is GqlPatternComprehensionExpression;
+                    int apply = Add(collect ? "CollectApply" : correlated.Anti?.Contains(pair.Key) == true ? "AntiSemiApply" : "SemiApply", scope.Parent,
+                        detail: $"correlated={string.Join(",", pair.Value.CorrelatedVariables)}; first_match={!collect}; materialize={collect}");
                     int inner = nodes.Count;
                     Append(pair.Value.Plan, apply, "CorrelatedSubplan");
                     pending.Push((pair.Key, inner));

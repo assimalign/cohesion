@@ -22,7 +22,7 @@ null extension, WALK/TRAIL/SIMPLE/ACYCLIC modes (implicit TRAIL), quantified rel
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
 core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
-CASE, COALESCE, NULLIF, correlated EXISTS/NOT EXISTS braced patterns, list/map literals and parameters, lexical list comprehensions, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended list slices,
+CASE, COALESCE, NULLIF, correlated EXISTS/NOT EXISTS braced patterns, list/map literals and parameters, lexical list comprehensions, correlated pattern collections, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended list slices,
 subscripts and map/entity property access,
 LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
@@ -38,7 +38,7 @@ limit: `:A:B:...`, `A|B|...` and AND/OR/XOR runs are each one n-ary node of any 
 parentheses nest as deep as the parsing thread's stack allows; deeper text reports `CG00009`
 instead of overflowing it.
 
-Named path assignment is supported only in `MATCH`. The engine's path request API projects one
+Named path assignment is supported in `MATCH` and locally in pattern comprehensions. The engine's path request API projects one
 bound node, relationship or named path; deleting a path variable or accessing a path property is
 rejected by binding. Path results retain the actual traversal entities rather than scalar rows.
 

@@ -55,6 +55,7 @@
   <data name="ReductionBindingInvalid" xml:space="preserve">
     <value>Reduce and list predicates require nonempty iterator names; a reduce accumulator must have a different name from its iterator.</value>
   </data>
+  <data name="PatternComprehensionInvalid" xml:space="preserve"><value>A pattern comprehension requires a nonempty path, a projection without aggregates, and a planned correlated subplan.</value></data>
   <data name="CorrelatedPlanRequired" xml:space="preserve"><value>A correlated pattern requires a nonempty, validated inner plan and its bound arguments.</value></data>
   <data name="ReductionBodyInvalid" xml:space="preserve">
     <value>Reduce and list predicate bodies require valid expressions without aggregates.</value>

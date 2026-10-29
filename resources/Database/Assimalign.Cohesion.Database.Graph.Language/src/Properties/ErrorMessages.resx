@@ -17,6 +17,7 @@
   <data name="GqlQueryParserIdentifierVoid" xml:space="preserve"><value>An identifier cannot be empty.</value></data>
   <data name="GqlQueryParserIdentifierVoid2" xml:space="preserve"><value>Expected an identifier.</value></data>
   <data name="GqlQueryParserHasStackToNestVoid" xml:space="preserve"><value>The statement nests deeper than the stack available to the parser on this thread; reduce the nesting of its parentheses or run it on a thread with a larger stack.</value></data>
+  <data name="PatternComprehensionRequired" xml:space="preserve"><value>A pattern comprehension requires a nonempty path and a projection after |.</value></data>
   <data name="ExistsBodyRequired" xml:space="preserve"><value>EXISTS requires a nonempty graph pattern in braces.</value></data>
   <data name="GqlQueryParserParseExpressionVoid" xml:space="preserve"><value>Comparison predicates cannot be chained; use AND or parentheses.</value></data>
   <data name="GqlQueryParserParseExpressionVoid2" xml:space="preserve"><value>Expected NULL, TRUE, FALSE or UNKNOWN after IS [NOT].</value></data>

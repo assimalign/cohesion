@@ -40,6 +40,7 @@ internal static class GraphProjectionText
                 (comprehension.Projection is null ? "" : " | " + Describe(comprehension.Projection)) + "]",
             GqlReduceExpression reduce => "reduce(" + Name(reduce.Accumulator) + " = " + Describe(reduce.Initial) + ", " +
                 Name(reduce.Variable) + " IN " + Describe(reduce.List) + " | " + Describe(reduce.Body) + ")",
+            GqlPatternComprehensionExpression pattern => pattern.ToString(),
             GqlExistsExpression exists => exists.ToString(),
             GqlListPredicateExpression predicate => predicate.Kind.ToString().ToLowerInvariant() + "(" + Name(predicate.Variable) +
                 " IN " + Describe(predicate.List) + " WHERE " + Describe(predicate.Predicate) + ")",

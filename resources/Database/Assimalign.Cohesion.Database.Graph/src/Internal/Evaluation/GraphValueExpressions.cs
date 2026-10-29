@@ -16,10 +16,10 @@ internal static partial class GraphValueExpressions
         while (pending.TryPop(out var expression))
         {
             token.ThrowIfCancellationRequested();
-            if (expression is GqlExistsExpression exists)
+            if (expression is GqlExistsExpression or GqlPatternComprehensionExpression)
             {
                 RuntimeHelpers.EnsureSufficientExecutionStack();
-                foreach (var input in ExistsInputs(exists))
+                foreach (var input in expression is GqlExistsExpression exists ? ExistsInputs(exists) : CorrelatedInputs(expression))
                 { if (ReferencesAny(input, names, token)) { return true; } }
                 continue;
             }
@@ -80,9 +80,9 @@ internal static partial class GraphValueExpressions
         pending.Push(root);
         while (pending.TryPop(out var expression))
         {
-            if (expression is GqlExistsExpression exists)
+            if (expression is GqlExistsExpression or GqlPatternComprehensionExpression)
             {
-                if (correlated is null || !correlated.Subplans.TryGetValue(exists, out var subplan)) { return true; }
+                if (correlated is null || !correlated.Subplans.TryGetValue(expression, out var subplan)) { return true; }
                 foreach (string correlatedName in subplan.CorrelatedVariables)
                 { if (!bindings.ContainsKey(correlatedName)) { return true; } }
                 continue;
@@ -128,6 +128,7 @@ internal static partial class GraphValueExpressions
     // every expression walk, including statements that contain no comprehensions.
     internal static IEnumerable<GqlExpression> Children(GqlExpression expression) => expression switch
     {
+        GqlPatternComprehensionExpression pattern => PatternChildren(pattern),
         GqlListComprehensionExpression comprehension => ComprehensionChildren(comprehension),
         GqlReduceExpression reduce => ReduceChildren(reduce),
         GqlListPredicateExpression predicate => PredicateChildren(predicate),
@@ -243,6 +244,9 @@ internal static partial class GraphValueExpressions
             analysis?.Visit(value);
             switch (value)
             {
+                case GqlPatternComprehensionExpression pattern:
+                    if (depth > 0 && PatternGroup(pattern, variableGroup, depth - 1, nativeExpression, analysis)) { return true; }
+                    break;
                 case GqlReduceExpression reduce:
                     if (ReduceGroup(reduce, variableGroup, depth, nativeExpression, analysis)) { return true; }
                     break;
@@ -296,6 +300,9 @@ internal static partial class GraphValueExpressions
             analysis?.Visit(value);
             switch (value)
             {
+                case GqlPatternComprehensionExpression pattern:
+                    if (!entity && accesses == 0 || PatternMayReturn(pattern, parameters, entity, variableShape, Math.Max(0, accesses - 1), functionType, nativeExpression, analysis)) { return true; }
+                    break;
                 case GqlReduceExpression reduce:
                     if (ReduceMayReturn(reduce, parameters, entity, variableShape, accesses, functionType, nativeExpression, analysis)) { return true; }
                     break;
@@ -374,6 +381,9 @@ internal static partial class GraphValueExpressions
             analysis?.Visit(value);
             switch (value)
             {
+                case GqlPatternComprehensionExpression pattern:
+                    if (depth == 0 || !Merge(PatternEntity(pattern, variableShape, depth - 1, token, functionType, nativeExpression, analysis), nonNull)) { return default; }
+                    break;
                 case GqlReduceExpression reduce:
                     if (!Merge(ReduceEntity(reduce, variableShape, depth, token, functionType, nativeExpression, analysis), nonNull)) { return default; }
                     break;
@@ -475,6 +485,9 @@ internal static partial class GraphValueExpressions
             analysis?.Visit(value);
             switch (value)
             {
+                case GqlPatternComprehensionExpression pattern:
+                    if (depth == 0 || !PatternScalar(pattern, parameters, variableScalar, depth - 1, functionType, nativeExpression, analysis)) { return false; }
+                    break;
                 case GqlReduceExpression reduce:
                     if (!ReduceScalar(reduce, parameters, variableScalar, depth, functionType, nativeExpression, analysis)) { return false; }
                     break;

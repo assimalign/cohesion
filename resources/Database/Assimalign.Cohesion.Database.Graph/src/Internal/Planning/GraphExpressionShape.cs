@@ -79,6 +79,7 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
                     break;
                 case GqlReduceExpression reduce:
                     hash.Add(reduce.Accumulator, StringComparer.Ordinal); hash.Add(reduce.Variable, StringComparer.Ordinal); break;
+                case GqlPatternComprehensionExpression pattern: hash.Add(pattern.ToString(), StringComparer.Ordinal); break;
                 case GqlExistsExpression exists: hash.Add(exists.ToString(), StringComparer.Ordinal); break;
                 case GqlListPredicateExpression predicate:
                     hash.Add(predicate.Kind); hash.Add(predicate.Variable, StringComparer.Ordinal); break;
@@ -91,13 +92,13 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         return _hashes[expression];
     }
 
-    private static bool EquivalentExists(GqlExistsExpression left, GqlExistsExpression right, CancellationToken token)
+    private static bool EquivalentExists(GqlExpression left, GqlExpression right, CancellationToken token)
     {
         // Syntax compares the pattern topology; scalar inputs retain ordinary expression
         // identity/type rules, including conservative reuse of registered function calls.
         if (left.ToString() != right.ToString()) { return false; }
-        using var first = GraphValueExpressions.ExistsInputs(left).GetEnumerator();
-        using var second = GraphValueExpressions.ExistsInputs(right).GetEnumerator();
+        using var first = (left is GqlExistsExpression firstExists ? GraphValueExpressions.ExistsInputs(firstExists) : GraphValueExpressions.CorrelatedInputs(left)).GetEnumerator();
+        using var second = (right is GqlExistsExpression secondExists ? GraphValueExpressions.ExistsInputs(secondExists) : GraphValueExpressions.CorrelatedInputs(right)).GetEnumerator();
         while (first.MoveNext())
         {
             token.ThrowIfCancellationRequested();
@@ -114,6 +115,7 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         if (ReferenceEquals(left, right)) { return true; }
         bool same = (left, right) switch
         {
+            (GqlPatternComprehensionExpression a, GqlPatternComprehensionExpression b) => EquivalentExists(a, b, token),
             (GqlExistsExpression a, GqlExistsExpression b) => EquivalentExists(a, b, token),
             (GqlFunctionCallExpression a, GqlFunctionCallExpression b) => a.Function == b.Function && a.Arguments is not null && b.Arguments is not null,
             (GqlNamedFunctionCallExpression, GqlNamedFunctionCallExpression) => false,
