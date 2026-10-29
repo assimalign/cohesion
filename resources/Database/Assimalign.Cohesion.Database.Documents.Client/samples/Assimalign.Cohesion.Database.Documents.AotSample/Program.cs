@@ -106,6 +106,7 @@ internal static class Program
         Check(correlated.Documents.Select(row => row[0].GetInt32()).SequenceEqual(new[] { 1, 2 }), "correlated key join");
         var plan = await connection.QueryAsync("EXPLAIN SELECT * FROM [1] AS a NEST join_items AS b ON META(b).id = 'a'", cancellationToken: cancellationToken);
         Check(plan.Documents.Any(row => row.GetProperty("operator").GetString() == "KeyNest"), "key join EXPLAIN");
+        Check(await connection.ExecuteAsync("DROP COLLECTION join_items", cancellationToken: cancellationToken) == 0, "key join collection cleanup");
     }
 
     private static async Task RunAsync(bool tcp)
