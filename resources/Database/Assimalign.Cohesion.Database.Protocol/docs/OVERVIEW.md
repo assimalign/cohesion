@@ -17,7 +17,7 @@ This child root has no dependencies on models, the area root, or transports. The
 area root references it. See [design and wire contract](DESIGN.md).
 
 SQL, Graph and Documents negotiate transaction-status: Execute, Graph ExecutePaths and Documents
-Command end with Ready I/T/E status, enabling rollback before pool reuse. Reset retains each
+Command end with two-byte Ready I/T/E plus retained-session-state status, enabling rollback before pool reuse. Reset retains each
 family's existing envelope: SQL/Graph use 5/8 and Documents uses 64/66 with two completion counts.
 Existing identifiers and protocol 2.1 are retained (#1540, #1725).
 

@@ -45,6 +45,9 @@ public sealed class SqlStatementCompletenessTests
             "SELECT * FROM t WHERE a = @a OR b = $1",
         ],
         [SqlClauses.GroupBy] = ["SELECT a, COUNT(*) FROM t GROUP BY a", "SELECT a, b FROM t GROUP BY a, b"],
+        [SqlClauses.GroupingSets] = ["SELECT a, GROUPING(a), COUNT(*) FROM t GROUP BY GROUPING SETS ((a),())", "SELECT COUNT(*) FROM t GROUP BY DISTINCT GROUPING SETS ((),())"],
+        [SqlClauses.Rollup] = ["SELECT a,b,COUNT(*) FROM t GROUP BY ROLLUP(a,b)"],
+        [SqlClauses.Cube] = ["SELECT a,b,COUNT(*) FROM t GROUP BY CUBE(a,b)"],
         [SqlClauses.Filter] = ["SELECT COUNT(*) FILTER (WHERE a > 0) FROM t", "SELECT SUM(DISTINCT a) FILTER (WHERE TRUE) FROM t"],
         [SqlClauses.Having] = ["SELECT a FROM t GROUP BY a HAVING COUNT(*) > 1"],
         [SqlClauses.OrderBy] = ["SELECT a FROM t ORDER BY a", "SELECT a FROM t ORDER BY a DESC, 2 ASC"],
@@ -90,6 +93,10 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Returning] = ["INSERT INTO t VALUES (1) RETURNING *", "INSERT INTO t SELECT a FROM u RETURNING a", "UPDATE t SET a = 1 RETURNING a AS updated", "DELETE FROM t RETURNING *"],
         [SqlClauses.CreateTable] = ["CREATE TABLE t (id INT PRIMARY KEY, name TEXT NOT NULL DEFAULT 'x')", "CREATE TABLE IF NOT EXISTS dbo.t (id INT)"],
         [SqlClauses.CreateTableAs] = ["CREATE TABLE t AS SELECT 1 AS n", "CREATE TABLE t (n) AS SELECT 1 WITH DATA", "CREATE TABLE t AS WITH q AS (SELECT 1 AS n) SELECT n FROM q WITH NO DATA"],
+        [SqlClauses.CreateSequence] = ["CREATE SEQUENCE ids AS BIGINT START WITH 3 INCREMENT BY 2 MINVALUE 1 MAXVALUE 100 CACHE 5 CYCLE"],
+        [SqlClauses.AlterSequence] = ["ALTER SEQUENCE IF EXISTS ids NO MINVALUE NO MAXVALUE NO CYCLE RESTART WITH 7"],
+        [SqlClauses.DropSequence] = ["DROP SEQUENCE IF EXISTS ids, dbo.ids2 CASCADE"],
+        [SqlClauses.NextValue] = ["SELECT NEXT VALUE FOR dbo.ids"],
         [SqlClauses.Identity] = ["CREATE TABLE t (id BIGINT GENERATED ALWAYS AS IDENTITY)", "ALTER TABLE t ADD id INT IDENTITY(100, 5)"],
         [SqlClauses.CreateIndex] = ["CREATE INDEX ix ON t (a)", "CREATE UNIQUE INDEX IF NOT EXISTS ix ON dbo.t (a, b)"],
         [SqlClauses.AlterTable] =
@@ -132,6 +139,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.Commit] = ["COMMIT", "COMMIT WORK", "COMMIT TRANSACTION", "END"],
         [SqlClauses.Rollback] = ["ROLLBACK", "ROLLBACK WORK", "ROLLBACK TRANSACTION"],
         [SqlClauses.Transaction] = ["BEGIN TRANSACTION"],
+        [SqlClauses.DiscardAll] = ["DISCARD ALL"],
     };
 
     /// <summary>

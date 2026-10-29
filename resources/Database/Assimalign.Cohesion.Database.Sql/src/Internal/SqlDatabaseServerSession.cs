@@ -392,7 +392,7 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                             : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
                                 ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
                         await WriteFrameAsync(ProtocolMessageType.Ready,
-                            new ProtocolTransactionStatusMessage(status).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
+                            new ProtocolTransactionStatusMessage(status, _databaseSession!.HasRetainedState).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
                     }
                     break;
 

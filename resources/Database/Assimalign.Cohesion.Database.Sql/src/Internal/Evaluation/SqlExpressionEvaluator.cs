@@ -169,6 +169,16 @@ internal sealed partial class SqlExpressionEvaluator
 
     // Grouping and ordering already resolved these nodes to completed value slots.
     internal bool IsBoundValue(SqlExpression expression) => _valueOrdinals?.ContainsKey(expression) == true;
+    internal SqlBoundGrouping? OuterGrouping(SqlFunctionCallExpression call)
+    {
+        for (var scope = _typing?.OuterScope; scope is not null; scope = scope.Parent)
+        {
+            if (scope.GroupingCalls is null) { continue; }
+            foreach (var grouping in scope.GroupingCalls)
+            { if (ReferenceEquals(grouping.Call, call)) { return grouping; } }
+        }
+        return null;
+    }
     internal bool HasOutputValues => _projectionSources is not null;
     internal bool IsOutputValue(SqlExpression expression) => _projectionSources?.ContainsKey(expression) == true;
 
@@ -290,6 +300,9 @@ internal sealed partial class SqlExpressionEvaluator
         {
             case SqlBoundExpressionKind.OuterColumn:
                 return EvaluateOuter((SqlBoundOuterColumn)expression, copySharedBinary);
+            case SqlBoundExpressionKind.Grouping:
+                var grouping = (SqlBoundGrouping)expression;
+                return _subqueryValues!.FindScope(grouping.Scope).Row![grouping.Ordinal];
             case SqlBoundExpressionKind.Column:
                 int columnOrdinal = ((SqlBoundColumn)expression).Ordinal;
                 return copySharedBinary ? DeliverColumn(row, columnOrdinal) : row[columnOrdinal];
@@ -320,6 +333,13 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBoundExpressionKind.IsNull:
                 var isNull = (SqlBoundIsNull)expression;
                 return Box(EvaluateCore(isNull.Operand, row) is null != isNull.IsNegated);
+            case SqlBoundExpressionKind.Sequence:
+                var sequence = (SqlBoundSequence)expression;
+                object? name = sequence.Arguments.Length == 0 ? null : EvaluateCore(sequence.Arguments[0], row);
+                object? value = sequence.Arguments.Length < 2 ? null : EvaluateCore(sequence.Arguments[1], row);
+                object? called = sequence.Arguments.Length < 3 ? _true : EvaluateCore(sequence.Arguments[2], row);
+                return (SqlSequenceExecution.Current ?? throw new SqlPlanningException("CS03076", ErrorMessages.SequencePlanningUnsupported))
+                    .Evaluate(sequence.Operation, name, value, called, row);
             case SqlBoundExpressionKind.SpecialForm:
                 return EvaluateSpecialForm((SqlBoundSpecialForm)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.Coalesce:
@@ -543,6 +563,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlCollationCandidate FindCollationCore(SqlExpression expression, bool bound)
     {
+        if (expression is SqlFunctionCallExpression grouping && SqlStandardLibrary.IsGrouping(grouping.FunctionName)) { return default; }
         if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var source))
         {
             return source.ColumnOrdinal is int ordinal ? ColumnCollation(ordinal) : FindCollation(source.Expression, bound);

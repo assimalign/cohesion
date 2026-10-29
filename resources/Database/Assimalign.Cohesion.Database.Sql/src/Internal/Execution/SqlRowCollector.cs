@@ -51,14 +51,22 @@ internal sealed class SqlRowCollector
 
     internal int RetainedCount => _orderBy.Count == 0 ? _rows.Count : _ordered.Count;
 
-    internal void Add(object?[] output, object?[] keys)
+    /// <summary>Discards an already projected unordered sequence row within OFFSET without retaining it.</summary>
+    internal bool SkipSequenceOffset()
+    {
+        if (_orderBy.Count != 0 || _visited >= _offset) { return false; }
+        _visited++;
+        return true;
+    }
+
+    internal object?[]? Add(object?[] output, object?[] keys)
     {
         _cancellationToken.ThrowIfCancellationRequested();
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {
-            if (ordinal >= _offset) { _rows.Add(output); }
-            return;
+            if (ordinal >= _offset) { _rows.Add(output); return null; }
+            return output;
         }
         var entry = new Entry(output, keys, ordinal);
         // Capture while this qualifying row's subqueries are still available. A later
@@ -68,7 +76,7 @@ internal sealed class SqlRowCollector
         {
             _ordered.Add(entry);
             RecordRetainedCount();
-            return;
+            return null;
         }
         // Max-heap: the worst retained key (latest input on ties) is at the root.
         // PostgreSQL src/backend/utils/sort/tuplesort.c:2482-2523 uses the same reversed-order bound;
@@ -77,7 +85,7 @@ internal sealed class SqlRowCollector
         {
             _ordered.Add(entry);
             RecordRetainedCount();
-            return;
+            return null;
         }
         if (!_isHeap)
         {
@@ -90,10 +98,16 @@ internal sealed class SqlRowCollector
             }
             _isHeap = true;
         }
-        if (_ordered.Count > 0 && Compare(entry, _ordered[0]) < 0) { SiftDown(0, entry); }
+        if (_ordered.Count > 0 && Compare(entry, _ordered[0]) < 0)
+        {
+            var replaced = _ordered[0].Output;
+            SiftDown(0, entry);
+            return replaced;
+        }
+        return output;
     }
 
-    internal List<object?[]> Finish(bool resolveEmptyCollations = true)
+    internal List<object?[]> Finish(bool resolveEmptyCollations = true, bool includeOffset = false)
     {
         _cancellationToken.ThrowIfCancellationRequested();
         if (_orderBy.Count == 0) { return _rows; }
@@ -105,8 +119,9 @@ internal sealed class SqlRowCollector
             throw;
         }
         _cancellationToken.ThrowIfCancellationRequested();
-        int start = (int)Math.Min(_offset, _ordered.Count);
-        int count = (int)Math.Min(_limit ?? _ordered.Count, _ordered.Count - start);
+        int start = includeOffset ? 0 : (int)Math.Min(_offset, _ordered.Count);
+        int count = includeOffset ? (int)Math.Min(_bound, _ordered.Count)
+            : (int)Math.Min(_limit ?? _ordered.Count, _ordered.Count - start);
         for (int i = start; i < start + count; i++)
         {
             _cancellationToken.ThrowIfCancellationRequested();

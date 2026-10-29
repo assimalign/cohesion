@@ -21,7 +21,6 @@
   <data name="ExpressionRendererUnaryNotSupported" xml:space="preserve"><value>Unary operator '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererLiteralNotSupported" xml:space="preserve"><value>Literal type '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererSelectNotSupported" xml:space="preserve"><value>Join type '{0}' has no SQL spelling.</value></data>
-  <data name="ParserParseGroupingExpressionVoid" xml:space="preserve"><value>The empty SQL grouping set GROUP BY () is not supported; use an ungrouped aggregate.</value></data>
   <data name="ParserParseGroupingExpressionVoid2" xml:space="preserve"><value>SQL select-list ordinals in GROUP BY are not supported; use the source grouping expression. Ordinals are supported only in ORDER BY.</value></data>
   <data name="AddTypeModifierDiagnosticDiagnostic" xml:space="preserve"><value>{0}: {1}</value></data>
   <data name="SqlQueryParserParseCastVoid" xml:space="preserve"><value>Expected '(' after CAST.</value></data>

@@ -8,7 +8,7 @@ The engine defaults are 256 MiB retained memory and 1,000,000 physical work unit
 bindings stream and an unordered LIMIT can stop upstream work; final results remain materialized.
 This changes no grammar or wire bytes; remote execution uses the server engine ceilings.
 
-SQL and Graph negotiate transaction-status: each Execute ends with a Ready I/T/E status, enabling rollback before pool reuse. Existing identifiers and protocol 2.1 are retained (#1540).
+SQL and Graph negotiate transaction-status: each Execute ends with a two-byte Ready I/T/E plus retained-session-state status, enabling rollback before pool reuse. Existing identifiers and protocol 2.1 are retained (#1540).
 
 ## Graph diagnostic conventions (#1470)
 

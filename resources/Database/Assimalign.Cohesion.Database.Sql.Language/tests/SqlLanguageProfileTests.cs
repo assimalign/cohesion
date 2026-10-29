@@ -29,6 +29,10 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.UpdateFrom, "UPDATE t SET id=s.id FROM s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.DeleteUsing, "DELETE FROM t USING s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
+    [InlineData(SqlClauses.CreateSequence, "CREATE SEQUENCE s;")]
+    [InlineData(SqlClauses.AlterSequence, "ALTER SEQUENCE s RESTART;")]
+    [InlineData(SqlClauses.DropSequence, "DROP SEQUENCE s;")]
+    [InlineData(SqlClauses.NextValue, "SELECT NEXT VALUE FOR s;")]
     [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
     [InlineData(SqlClauses.CreateTable, "CREATE TABLE t (id INT);")]
     [InlineData(SqlClauses.CreateTableAs, "CREATE TABLE t (id) AS SELECT 1 WITH NO DATA;")]
@@ -43,6 +47,9 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;")]
     [InlineData(SqlClauses.Where, "SELECT * FROM t WHERE id = 1;")]
     [InlineData(SqlClauses.Filter, "SELECT COUNT(*) FILTER (WHERE a > 0) FROM t;")]
+    [InlineData(SqlClauses.GroupingSets, "SELECT a FROM t GROUP BY GROUPING SETS ((a), ());")]
+    [InlineData(SqlClauses.Rollup, "SELECT a FROM t GROUP BY ROLLUP(a);")]
+    [InlineData(SqlClauses.Cube, "SELECT a FROM t GROUP BY CUBE(a);")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.OrderBy, "SELECT * FROM t ORDER BY id;")]
@@ -71,6 +78,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Rollback, "ROLLBACK WORK;")]
     [InlineData(SqlClauses.Transaction, "BEGIN TRANSACTION;")]
     [InlineData(SqlClauses.Transaction, "COMMIT WORK;")]
+    [InlineData(SqlClauses.DiscardAll, "DISCARD ALL;")]
     public void Parse_ImplementedClause_IsDeclaredAndParses(string clause, string sql)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();

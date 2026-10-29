@@ -124,6 +124,21 @@ public sealed class GqlProfileExecutionTests
                 new("RETURN CASE 1 WHEN 1.0 THEN 'match' ELSE 'other' END", [["match"]]),
                 new("RETURN COALESCE(NULL, 5), NULLIF(42, 42)", [[5L, null]]),
             ],
+            [GqlClauses.Reduce] =
+            [
+                new("RETURN reduce(a=0,x IN [1,2,3] | a+x)", [[6L]]),
+                new("RETURN all(x IN [1] WHERE reduce(a=1,y IN [1] | TRUE))", [[true]]),
+                new("RETURN reduce(a=42,x IN [] | 1/0), reduce(a=42,x IN NULL | a+x)", [[42L, null]]),
+                new("MATCH (a:Person) WHERE reduce(s=0,x IN [a.age,1] | s+x) > 40 RETURN a.name", [["Alice"]]),
+            ],
+            [GqlClauses.ListPredicate] =
+            [
+                new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY all(x IN [n] WHERE old)", [[true]]),
+                new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY all(x IN [n] WHERE all(y IN old WHERE y))", [[new object?[] { true }]]),
+                new("RETURN all(x IN [] WHERE TRUE), any(x IN [] WHERE TRUE), none(x IN [] WHERE TRUE), single(x IN [] WHERE TRUE)", [[true, false, true, false]]),
+                new("RETURN all(x IN [TRUE,NULL] WHERE x), any(x IN [FALSE,NULL] WHERE x), none(x IN [FALSE,NULL] WHERE x), single(x IN [TRUE,NULL] WHERE x)", [[null, null, null, null]]),
+                new("MATCH (a:Person) WHERE any(x IN [a.age] WHERE x > 40) RETURN a.name", [["Alice"]]),
+            ],
             [GqlClauses.ListComprehension] =
             [
                 new("RETURN [x IN [1,2,3] WHERE x > 1 | x * 2]", [[new object?[] { 4L, 6L }]]),
@@ -209,6 +224,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.OrderBy] =
             [
+                new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[true]]),
+                new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE all(y IN old WHERE y) | 1][0]", [[new object?[] { true }]]),
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.age", [["Bob"], ["Isolated"], ["Alice"]]),
             ],
             [GqlClauses.Offset] =
@@ -446,6 +463,7 @@ public sealed class GqlProfileExecutionTests
             ["toBoolean"] = new("RETURN toBoolean('true')", [[true]]),
             ["current_date"] = new("RETURN CURRENT_DATE=CURRENT_DATE", [[true]]),
             ["current_timestamp"] = new("RETURN CURRENT_TIMESTAMP=CURRENT_TIMESTAMP", [[true]]),
+            ["reduce"] = new("RETURN reduce(a=0,x IN [1,2,3] | a+x)", [[6L]]),
             ["cast"] = new("RETURN CAST('42' AS INTEGER)", [[42]]),
             ["count"] = new("MATCH (a:Person) RETURN count(a)", [[3L]]),
             ["sum"] = new("MATCH (a:Person) RETURN sum(a.age)", [[89L]]),
@@ -514,6 +532,10 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
+        GqlClauses.Reduce => query.Text?.Contains("reduce(", StringComparison.OrdinalIgnoreCase) == true,
+        GqlClauses.ListPredicate => query.Projections.Any(projection => projection.Expression is GqlListPredicateExpression) ||
+            query.OrderBy.Any(order => order.Expression is GqlListPredicateExpression) ||
+            query.Text?.Contains("any(", StringComparison.OrdinalIgnoreCase) == true,
         GqlClauses.ListComprehension => query.Projections.Any(item => item.Expression is GqlListComprehensionExpression),
         GqlClauses.ListSlice => query.Projections.Any(item => item.Expression is GqlListSliceExpression),
         GqlClauses.Let => query.Stages.Any(stage => stage is GqlLetStage),

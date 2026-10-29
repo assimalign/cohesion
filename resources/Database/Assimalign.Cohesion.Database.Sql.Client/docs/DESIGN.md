@@ -1,5 +1,9 @@
 # Database.Sql.Client — Design
 
+## Sequence wire surface (#1717, SQ-S2)
+
+The ordinary execute exchange carries sequence DDL, functions, NEXT VALUE FOR, EXPLAIN and INFORMATION_SCHEMA.SEQUENCES on InMemory and TCP. Undefined session state and explicit-transaction DDL refusals remain structured execution failures with usable connections. Session currval/lastval survive rollback and remain isolated between logical connections: pool return clears them with the family-declared DISCARD ALL only when Ready reports retained state, after any required rollback. The two-byte Ready reports transaction state and retained state. A one-slot pool and queued waiter exercise exact exchange counts on both transports: idle 0, SELECT 1, BEGIN plus return 2, nextval plus reset 2, and nextval plus user DISCARD 2. Existing client methods and protocol identifiers remain unchanged.
+
 ## Terminal TCP conformance (#1087)
 
 The real SqlClient and model server run missing-database handshakes on InMemory and
@@ -36,6 +40,12 @@ Engine-owned wire tests also run reclamation while the old snapshot remains acti
 no frees until it ends. No client surface, result shape or protocol version changes.
 
 ## Quantified comparisons (#1718)
+
+Grouping sets (#1720, SQ-H2) use the existing execute exchange. InMemory and TCP
+tests cover subtotal versus stored NULL masks, GROUPING_ID, HAVING/ORDER BY,
+FILTER/DISTINCT and Boolean/statistical/string aggregates, empty grouping sets,
+EXPLAIN expansion and reusable CS01062 failures. Mask metadata is non-null INTEGER;
+subtotal grouping columns remain nullable. No client API or wire format changes.
 
 The existing execute exchange carries scalar ANY/SOME/ALL subqueries without a
 protocol change. InMemory and TCP tests measure all comparison operators against

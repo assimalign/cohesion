@@ -224,6 +224,10 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.OrderBy] =
             [
+                new("SELECT META().id FROM items ORDER BY amount", [["d"], ["a"], ["c"], ["b"]],
+                    ["CREATE INDEX ordered_amount ON items (amount INCLUDE MISSING)"]),
+                new("SELECT META().id FROM items WHERE amount >= 2 AND category = 'a' ORDER BY amount DESC", [["b"], ["a"]],
+                    ["CREATE INDEX ordered_amount ON items (amount)"]),
                 new("SELECT name AS label, amount FROM items ORDER BY amount DESC NULLS FIRST, label ASC NULLS LAST",
                     [["delta", null], ["beta", 6m], ["gamma", 4m], ["alpha", 2m]]),
                 new("SELECT name AS label, amount FROM items ORDER BY amount DESC, label ASC",
@@ -231,6 +235,14 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Limit] =
             [
+                new("SELECT * FROM items ORDER BY k LIMIT 1", [[Json("{\"k\":1}")]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('one', {'k':1}), ('two', {'k':2})",
+                     "CREATE INDEX ordered_k ON items (k INCLUDE MISSING)"]),
+                new("SELECT * FROM items ORDER BY k DESC LIMIT 1", [[Json("{\"k\":2}")]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('one', {'k':1}), ('two', {'k':2})",
+                     "CREATE INDEX ordered_k ON items (k INCLUDE MISSING)"]),
+                new("SELECT META().id FROM items ORDER BY category DESC LIMIT 2 OFFSET 1", [["a"], ["b"]],
+                    ["CREATE INDEX ordered_category ON items (category INCLUDE MISSING, amount)"]),
                 new("SELECT name FROM items ORDER BY name LIMIT 2", [["alpha"], ["beta"]]),
                 new("SELECT name FROM items ORDER BY name LIMIT 2 OFFSET 1", [["beta"], ["delta"]]),
                 new("SELECT name FROM items ORDER BY name LIMIT 0", []),
@@ -239,6 +251,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Offset] =
             [
+                new("SELECT META().id FROM items WHERE amount >= 2 ORDER BY amount DESC OFFSET 1 LIMIT 1", [["c"]],
+                    ["CREATE INDEX ordered_amount ON items (amount)"]),
                 new("SELECT name FROM items ORDER BY name OFFSET 3", [["gamma"]]),
                 new("SELECT name FROM items ORDER BY name OFFSET 1 LIMIT 2", [["beta"], ["delta"]]),
             ],

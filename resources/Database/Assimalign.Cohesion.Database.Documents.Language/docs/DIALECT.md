@@ -484,7 +484,7 @@ array with its original element multiplicity: `[1,1,2]` still produces three row
 DISTINCT ARRAY keys, `distinct_documents=True; array_residual=True`, and posting-count estimates.
 Ungrouped, non-DISTINCT queries with fixed projection types can stop after OFFSET + LIMIT residual
 survivors when unordered or ordered solely by META().id (including a projection alias), ASC or DESC.
-Other orderings and projections requiring type inference retain materialization. This limits content
+Proven scalar index order also permits early paging (#1632); projections requiring type inference retain materialization. This limits content
 fetches, not candidate metadata or index probes. The benchmark category = X AND any variant price
 <= Y shape with a `(category, DISTINCT ARRAY v.price FOR v IN variants END)` index has no residual
 rejections and fetches at most OFFSET + LIMIT documents in identity order. Among 256 candidates,
@@ -497,7 +497,7 @@ These are local probes, not an SF10 run.
 The syntax/matching basis is [Couchbase array indexing](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/indexing-arrays.html);
 the DISTINCT-only, scalar projection and no-UNIQUE restrictions are Cohesion's approved boundary.
 
-### INCLUDE MISSING and ordered-access eligibility (#1632, OQ-O1)
+### INCLUDE MISSING and ordered index execution (#1632)
 
 `CREATE INDEX ix ON items (score INCLUDE MISSING, category)` includes leading-MISSING
 records using the existing v3 flag; INCLUDE is contextual. The suffix belongs inside the key
@@ -518,15 +518,44 @@ DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fal
 
 Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
 comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
-512-entry/32-page absence probe checks complex tags on the first varying component, without
-fetching documents. Incomplete probes and later varying components without a scalar proof
-report scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+one-entry/32-page existence probe checks complex tags on the first varying component, without
+fetching documents. A visible match stops immediately; an invisible first entry leaves the domain
+unproven. Incomplete probes and later varying components without a scalar proof report
+scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+Ordering reuses the ordinary access analysis; every structural and predicate proof runs before
+probing. Rejected ordinary plans allocate no EXPLAIN candidate graph.
 A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
 including all trailing physical components, before identity sorting and LIMIT termination.
-OQ-O1 computes eligibility only for EXPLAIN: ordinary execution retains its existing planning
-allocation path, including ORDER BY without NULLS. EXPLAIN explicitly says consumed=False and
-sort=retained. OQ-O2 must enable AnalyzeOrdering for execution when it adds scan consumption,
-sort elision and earlier LIMIT/OFFSET termination.
+Execution consumes a proven scalar index in forward or reverse order and elides the result
+sort. The existing predicate chooser's eligible index wins; otherwise the first eligible index
+in ordinal name order wins. Intersections retain their identity merge and fallback sort.
+The catalog cursor uses the statement snapshot and releases every page/latch before returning
+metadata. It materializes one complete equal-ORDER-BY-prefix bucket, including trailing physical
+components, then emits that bucket in ascending document identity order in either scan direction.
+The full WHERE predicate filters this stream without changing its order. Bucket metadata, keys
+and identities charge the existing statement memory budget (CD05018); cancellation and failure
+release the cursor and reservations.
+
+With fixed projection types, LIMIT/OFFSET stop after OFFSET + LIMIT residual survivors. LIMIT 0
+opens no cursor. One next-bucket entry establishes completeness, and the B-tree may already have
+read ahead in its bounded batch. SELECT * has a fixed JSON type and stops early on a consumed
+ordered path. Projections needing result type inference still read all matching documents so
+column headers retain the existing full-result contract;
+their proven index order still elides sorting. EXPLAIN reports consumed=True; sort=elided on the
+selected access and candidate, early_paging, and paging_reason=result_type_inference when needed.
+VALUE/RAW ordering by its projected expression retains sorting unless MISSING is rejected,
+because projection promotes MISSING to NULL and changes equal-key ties (value_missing_becomes_null).
+Other candidates retain consumed=False and their eligibility/selection reason; the root describes
+sort retention and its reason. EXPLAIN remains nonexecuting and actual_rows remains NULL.
+
+Conformance compares 504 generated index/predicate/order combinations across eight paging
+windows (4,032 exact comparisons), with complete duplicate buckets, residual rejections,
+scalar extremes, MISSING/NULL, escaped strings and trailing coarse tags. Controlled concurrent
+insert/update/delete/index replacement tests cover autocommit, Snapshot and ReadCommitted,
+plus own writes, rollback and cancellation. InMemory/TCP and the NativeAOT consumer exercise
+consumption and paging without new API, wire or disk formats. Star paging regressions cover
+both directions and the 256 KiB statement budget; rejected-shape allocation guards cover complex
+values, mixed directions, unproven MISSING, later scalar domains and array indexes.
 
 Conformance lives in OqlSqlppBasisTests, OqlKeywordDispositionTests, DocumentMissingTests,
 OqlExecutionConformanceTests, DocumentQueryTests and DocumentMissingWireTests. The wire tests

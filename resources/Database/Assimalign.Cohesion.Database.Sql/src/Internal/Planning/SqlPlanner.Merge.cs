@@ -159,9 +159,9 @@ internal sealed partial class SqlPlanner
     {
         var state = _queryScopes!;
         bool deferred = state.DeferQueryEvaluation;
-        var scopeless = _scopelessEvaluator;
+        var scopeless = CachedScopelessEvaluator;
         state.DeferQueryEvaluation = true;
-        _scopelessEvaluator = null;
+        CachedScopelessEvaluator = null;
         try
         {
             return BindSubqueries(expressions.SelectMany(WalkSubqueries), dml: target,
@@ -170,7 +170,7 @@ internal sealed partial class SqlPlanner
         finally
         {
             state.DeferQueryEvaluation = deferred;
-            _scopelessEvaluator = scopeless;
+            CachedScopelessEvaluator = scopeless;
         }
     }
 

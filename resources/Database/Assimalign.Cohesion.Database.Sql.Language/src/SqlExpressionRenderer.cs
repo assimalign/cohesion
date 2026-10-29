@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// carries an error renders, but need not parse back to itself.
 /// </para>
 /// </remarks>
-public static class SqlExpressionRenderer
+public static partial class SqlExpressionRenderer
 {
     /// <summary>Renders an ALTER COLUMN TYPE statement as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
@@ -75,7 +75,7 @@ public static class SqlExpressionRenderer
 
     // Words that are not profile keywords or functions but that a parser rule reads by spelling
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
-    private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
+    private static readonly string[] _positionalWords = ["ROLLUP", "CUBE", "ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
 
     /// <summary>Renders TRUNCATE as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
@@ -317,10 +317,18 @@ public static class SqlExpressionRenderer
 
     private static string Node(SqlExpression expression) => expression switch
     {
+        SqlGroupingSetExpression group => (group.Kind switch
+        {
+            SqlGroupingSetKind.Sets => "GROUPING SETS ",
+            SqlGroupingSetKind.Rollup => "ROLLUP ",
+            SqlGroupingSetKind.Cube => "CUBE ",
+            _ => "",
+        }) + "(" + List(group.Items) + ")",
         SqlLogicalExpression logical => Logical(logical),
         SqlBinaryExpression binary => Binary(binary),
         SqlUnaryExpression unary => Unary(unary),
         SqlLiteralExpression literal => Literal(literal),
+        SqlNextValueExpression next => "NEXT VALUE FOR " + SequenceName(next.Sequence),
         SqlDefaultExpression => "DEFAULT",
         SqlColumnReferenceExpression column => Column(column),
         SqlParameterExpression parameter => parameter.ParameterName,
@@ -643,7 +651,7 @@ public static class SqlExpressionRenderer
         }
         if (select.GroupBy.Count > 0)
         {
-            builder.Append(" GROUP BY ").Append(List(select.GroupBy));
+            builder.Append(select.IsGroupByDistinct ? " GROUP BY DISTINCT " : " GROUP BY ").Append(List(select.GroupBy));
         }
         if (select.Having is not null)
         {

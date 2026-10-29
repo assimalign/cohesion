@@ -14,11 +14,16 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken) => plan is SqlGroupingSetsPlan grouped
+            ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
+            : ExecutePlainGroupAsync(plan, statement, cancellationToken);
+
     /// <summary>
     /// Consumes a filtered relation, accumulates one state per group, then applies
     /// HAVING, ordering, projection and pagination to completed groups.
     /// </summary>
-    private async Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
         await using var input = (DatabaseResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
@@ -91,14 +96,18 @@ internal sealed partial class SqlPlanExecutor
 
         int projectionStart = keys.Count + aggregates.Count;
         var matches = new List<object?[]>();
+        var sequenceOrdering = !plan.IsDistinct && HasSequenceProjection(plan.Projections)
+            ? OrderingOutputSlots(plan.OrderBy, projectionStart) : null;
+        bool deferredSequence = sequenceOrdering is not null && plan.OrderBy.Count > 0 && !OrderingUsesSequence(plan.Projections, sequenceOrdering);
         bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
         var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
             plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics);
         Collation[]? projectionCollations = null;
         foreach (var (key, states) in groups)
         {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             cancellationToken.ThrowIfCancellationRequested();
-            if (!correlatedOrdering && collected.IsComplete) { break; }
+            if (!deferredSequence && !correlatedOrdering && collected.IsComplete) { break; }
             var row = new object?[projectionStart + plan.Projections.Count];
             key.CopyTo(row, 0);
             for (int i = 0; i < states.Length; i++)
@@ -121,12 +130,14 @@ internal sealed partial class SqlPlanExecutor
             {
                 continue;
             }
+            if (deferredSequence) { matches.Add(row[..projectionStart]); continue; }
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
                 row[projectionStart + i] = NormalizeGroupValue(
                     evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
             }
+            if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
             if (correlatedOrdering) { matches.Add(row); }
             else
             {
@@ -142,6 +153,11 @@ internal sealed partial class SqlPlanExecutor
                 }
                 collected.Add(row[projectionStart..], orderingKeys);
             }
+        }
+        if (deferredSequence)
+        {
+            return await MaterializeSequenceSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                evaluator, statement, cancellationToken, null, sequenceOrdering!).ConfigureAwait(false);
         }
         if (correlatedOrdering)
         {

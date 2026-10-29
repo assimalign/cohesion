@@ -22,7 +22,8 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// Connections are not thread-safe: one command at a time, mirroring the engine-session contract. A
 /// connection rented from a <see cref="SqlClient"/> returns to its pool on dispose (with its
 /// authenticated session intact when it is still healthy).
-/// Pool return rolls back an unfinished explicit transaction before reusing its session.
+/// Pool return rolls back an unfinished explicit transaction and discards logical-session state
+/// before reusing its session. Ordinary rollback preserves sequence state.
 /// After acquiring the database writer lock, an idle transaction holds it until COMMIT, ROLLBACK,
 /// disconnect, pool return or server IdleTimeout (30 minutes by default). Servers without
 /// negotiated transaction-status (pre-#1540) are not pooled.

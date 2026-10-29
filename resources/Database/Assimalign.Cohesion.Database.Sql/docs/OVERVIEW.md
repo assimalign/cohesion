@@ -69,7 +69,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   full pool, so unrelated runtime retention cannot decide its bound (DESIGN, bounded build validation).
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
-  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
+  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates, including GROUPING SETS, ROLLUP, CUBE and GROUPING masks;
   `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE
   (recursive bodies bind and refuse planning with CK00001 until SQ-R2; WITH RECURSIVE
   before MERGE reports CK00001 at RECURSIVE), with ordered SELECT definitions
@@ -319,8 +319,9 @@ See [DESIGN.md](DESIGN.md) for the persistence model and decisions.
 
 
 Standalone sequences have internal catalog objects and share the identity allocator (#1717,
-SQ-S1). SQL format 28 adds sequence definitions and reservations; SQL sequence syntax and public
-entry points remain deferred. Both allocators reserve up to 32 values before use, retain rollback
+SQ-S1). SQ-S2 delivers CREATE/ALTER/DROP SEQUENCE, NEXT VALUE FOR, nextval/currval/setval/lastval,
+REGCLASS references and INFORMATION_SCHEMA.SEQUENCES. SQL format 28 stores definitions and reservations.
+Both allocators reserve up to 32 values before use, retain rollback
 and recovery gaps, and serialize allocation engine-wide. CACHE is stored without per-session
 caches. See DESIGN for option defaults, incarnation checks and the lock order.
 
@@ -386,7 +387,8 @@ Access selection compares bounded snapshot-visible index probes without stored s
 Broad safe equijoins can build an in-memory hash table; unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
-hash builds per statement; CS05067 (SQLSTATE 53200) refuses excess memory, without spill.
+hash builds and grouping-set aggregate states per statement; CS05067 (SQLSTATE 53200)
+refuses excess memory, without spill.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
 executes to report candidate work in the same eight-column description; unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;

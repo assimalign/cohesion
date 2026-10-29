@@ -1,12 +1,45 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Sequence grammar (#1717, SQ-S2)
+
+NEXT VALUE FOR is selected only after lookahead recognizes all three words. Unquoted
+next remains a column, alias, table, and function-argument name in its ordinary positions.
+
+DISCARD ALL uses the session-control statement leaf and a distinct command kind. It is
+contextual at the command head, needs complete parsing, and travels over ordinary Execute.
+The engine refuses it inside a transaction and clears logical-session state otherwise.
+Its named profile capability and parser/live conformance cases cover that complete statement.
+
+NEXT VALUE FOR remains a parsed scalar leaf in RETURNING; the engine refuses that context
+with CS03076 before evaluation, following Microsoft's OUTPUT exclusion. nextval() retains
+PostgreSQL's separate per-row RETURNING evaluation. Persisted-expression checks visit each
+node once rather than recursively walking every node's subtree. Declared CHECK validation starts
+that walk once at the predicate root, including subqueries, to retain CS03074 for dependencies.
+
+Sequence outputs independent of ordering evaluate after sorting and before pagination, stopping
+after OFFSET + LIMIT. Every path projects qualifying OFFSET rows in their own row scopes before
+discarding them, consuming their
+sequence values. Rows rejected by WHERE/HAVING consume no projection values.
+GROUPING SETS, ROLLUP, CUBE and GROUPING() follow the same sequence row scopes and windows,
+including subtotal and empty groups; HAVING runs before projection.
+Unordered grouped and correlated inputs apply WHERE/HAVING, project each qualifying row immediately,
+discard OFFSET rows and stop at LIMIT, without deferred
+input retention or charges. Ordered deferral uses the ordinary uncharged sort collector on plain,
+correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages. Plain and
+correlated retention is bounded by OFFSET + LIMIT when ordering collations are fixed; grouped and
+grouping-set deferral retains every group that passes HAVING, and deferred collations require full
+retention. Grouping-set group/aggregate state retains its existing statement-budget charge on
+both sequence and sequence-free paths; sequence deferral adds none.
+
+CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY remains CK00001. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
+
 ## Sequence catalog review (#1717)
 
 DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 28's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
-syntax remains deferred to SQ-S2.
+syntax is delivered by SQ-S2 as described above.
 
 ## WITH RECURSIVE binding (#1719, SQ-R1)
 
@@ -302,6 +335,19 @@ query/call comparisons include placement, preserving persisted view round trips.
 No profile clause or keyword is added. DIALECT.md specifies syntax, defaults and errors.
 
 ## Aggregate modifiers and string aggregation (#1115)
+
+SQ-H2 (#1720) adds sealed SqlGroupingSetExpression leaves with ordered children and
+Composite/Sets/Rollup/Cube kind. SqlSelectExpression retains GROUP BY DISTINCT;
+empty composites represent (). Contextual recursive parsing shares nesting guards,
+and canonical rendering preserves composite units, nested elements and DISTINCT.
+GROUPING/GROUPING_ID use the existing call AST and bind to subtotal slots in Sql,
+including correlated calls owned by the arguments' outer query level. Parsing retains
+recursive grouping shapes; planning flattens composites/inner GROUPING SETS and
+refuses GROUPING SETS inside ROLLUP/CUBE with CS00010, following PostgreSQL
+parse_clause.c:2225–2235. ROLLUP/CUBE inside GROUPING SETS remains supported.
+The profile adds three grouping clauses and two function names; their former four
+unsupported-vocabulary rows leave. Parser, renderer and live conformance advance together.
+No public construction bridge, interface, catalog format or wire format is added.
 
 FILTER and Boolean/statistical aggregates (#1720, SQ-H1) extend this representation:
 SqlFunctionCallExpression.Filter retains the optional condition, including depth and source
@@ -1142,3 +1188,7 @@ expressions. Its projection uses nonvirtual CommandType; Text is omitted because
 subclass can override that getter. Scalar-expression views expose existing syntax data without
 walking depth or diagnostics enumerations. Parser inspection does not advance lexers or initialize
 a language profile through its protected getter.
+
+DISCARD ALL restores the host timeout values captured before the session's first statement.
+Negotiated Ready carries transaction status and retained session state in two bytes; clean
+returns and user-discarded sessions require no extra reset exchange. See Protocol DESIGN (#1717).

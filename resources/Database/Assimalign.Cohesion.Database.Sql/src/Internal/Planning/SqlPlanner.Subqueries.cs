@@ -52,6 +52,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
         if (OuterScope is not null) { RejectOuterOnlyAggregates(select); }
+        if (OuterScope is not null && _queryScopes!.HasGroupingCalls) { BindOuterGroupingCalls(select); }
         var queries = BindSubqueries(SubquerySources(select), select);
         var input = PlanSelectCore(select);
         return WrapSubqueries(input, queries);

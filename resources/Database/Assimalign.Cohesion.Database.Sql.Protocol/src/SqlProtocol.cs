@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Sql.Protocol;
 public static partial class SqlProtocol
 {
     /// <summary>Gets the family bound to every Sql protocol connection.</summary>
-    public static ProtocolMessageFamily Family { get; } = new("Sql", [ProtocolCapability.Diagnostics, ProtocolCapability.TransactionStatus], 5, 6, 7, 8, 9);
+    public static ProtocolMessageFamily Family { get; } = new("Sql", [ProtocolCapability.Diagnostics, ProtocolCapability.TransactionStatus], "DISCARD ALL", 5, 6, 7, 8, 9);
 
     extension(ProtocolMessageType)
     {

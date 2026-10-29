@@ -159,6 +159,9 @@ internal sealed partial class SqlExpressionEvaluator
                 return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot)
                     ? new SqlBoundSubquery(slot.Id)
                     : NotMaterialized(expression.Location);
+            case SqlNextValueExpression next:
+                collation = default;
+                return new SqlBoundSequence("NEXT VALUE FOR", [new SqlBoundConstant(SqlSequenceExecution.Name(next.Sequence))]);
             case SqlLiteralExpression literal:
                 collation = CollationOf(expression, []);
                 return BindLiteral(literal);
@@ -340,6 +343,8 @@ internal sealed partial class SqlExpressionEvaluator
     private SqlBoundExpression BindCast(SqlCastExpression cast, out SqlCollationCandidate collation, bool statisticsInput)
     {
         var operand = Bind(cast.Operand, out SqlCollationCandidate operandCollation, statisticsInput: statisticsInput);
+        if (cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase))
+        { collation = default; return new SqlBoundSequence("REGCLASS", [operand]); }
         collation = CollationOf(cast, [operandCollation]);
         SqlType target;
         try
@@ -683,6 +688,18 @@ internal sealed partial class SqlExpressionEvaluator
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput)
     {
+        if (SqlSequenceExecution.IsFunction(call.FunctionName))
+        {
+            SqlSequenceExecution.CheckCall(call);
+            ResolveFunction(call);
+            collation = default;
+            return new SqlBoundSequence(call.FunctionName.ToUpperInvariant(), BindArguments(call.Arguments, out _));
+        }
+        if (SqlStandardLibrary.IsGrouping(call.FunctionName) && OuterGrouping(call) is { } grouping)
+        {
+            collation = default;
+            return grouping;
+        }
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             ValidateEvaluatorForm(call);

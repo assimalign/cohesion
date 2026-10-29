@@ -37,12 +37,15 @@ public sealed class ProtocolMessageFamily
     /// <param name="name">The endpoint family name.</param>
     /// <param name="capabilities">Capabilities supported by this endpoint.</param>
     /// <param name="messageTypes">The endpoint message identifiers.</param>
-    /// <exception cref="ArgumentException">A capability is duplicated, wrongly scoped, or gates an undefined identifier.</exception>
+    /// <param name="resetStatement">The statement that clears retained session state, or null for a stateless family.</param>
+    /// <exception cref="ArgumentException">A capability is duplicated, wrongly scoped, or gates an undefined identifier, or the reset statement is empty.</exception>
     /// <exception cref="ArgumentNullException">The capabilities are null.</exception>
-    public ProtocolMessageFamily(string name, IReadOnlyList<ProtocolCapability> capabilities, params byte[] messageTypes)
+    public ProtocolMessageFamily(string name, IReadOnlyList<ProtocolCapability> capabilities, string? resetStatement, params byte[] messageTypes)
         : this(name, messageTypes)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
+        if (resetStatement is not null) { ArgumentException.ThrowIfNullOrWhiteSpace(resetStatement); }
+        ResetStatement = resetStatement;
         var names = new HashSet<string>(StringComparer.Ordinal);
         var gated = new HashSet<byte>();
         foreach (var capability in capabilities)
@@ -68,6 +71,9 @@ public sealed class ProtocolMessageFamily
     /// <summary>Gets the endpoint's supported capabilities.</summary>
     public IReadOnlyList<ProtocolCapability> Capabilities { get; } = Array.Empty<ProtocolCapability>();
 
+    /// <summary>Gets the statement that clears retained session state, or null when none is supported.</summary>
+    public string? ResetStatement { get; }
+
     /// <summary>Gets the endpoint family's diagnostic name.</summary>
     public string Name { get; }
 
@@ -90,6 +96,7 @@ public sealed class ProtocolMessageFamily
         }
 
         public string Name => _target.Name;
+        public string? ResetStatement => _target.ResetStatement;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Protocol.ProtocolCapability> Capabilities => _target.Capabilities;
     }
 }

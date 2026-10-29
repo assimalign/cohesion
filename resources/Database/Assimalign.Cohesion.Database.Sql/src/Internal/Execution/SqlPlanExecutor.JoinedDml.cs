@@ -35,6 +35,7 @@ internal sealed partial class SqlPlanExecutor
         int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
         foreach (var (pageId, slotIndex, values) in targets)
         {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             cancellationToken.ThrowIfCancellationRequested();
             var updated = (object?[])values.Clone();
             var input = associations[SqlRecordLocation.Pack(pageId, slotIndex)].Values;
@@ -101,6 +102,14 @@ internal sealed partial class SqlPlanExecutor
         }
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
+        if (HasSequenceProjection(plan.Returning))
+        {
+            foreach (var replacement in replacements)
+            {
+                var output = DmlReturningRow(associations[SqlRecordLocation.Pack(replacement.PageId, replacement.SlotIndex)].Values, replacement.NewValues);
+                returned!.Add(ProjectRow(output, plan.Returning!, evaluator, cancellationToken));
+            }
+        }
 
         try
         {
@@ -136,7 +145,7 @@ internal sealed partial class SqlPlanExecutor
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
                         statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null)
+                    if (returned is not null && !HasSequenceProjection(plan.Returning))
                     {
                         var output = DmlReturningRow(
                             associations[SqlRecordLocation.Pack(pageId, slotIndex)].Values, newValues);
@@ -210,6 +219,14 @@ internal sealed partial class SqlPlanExecutor
                     var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
                     ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
                     await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
+                    if (HasSequenceProjection(plan.Returning))
+                    {
+                        foreach (var deletion in deletions.Values)
+                        {
+                            if (deletion.Table.ObjectId == plan.Table.ObjectId && returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
+                            { returned!.Add(ProjectRow(associations![SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)].Values, plan.Returning!, evaluator, cancellationToken)); }
+                        }
+                    }
                     return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
                     {
                         applyStarted = true;
@@ -229,7 +246,7 @@ internal sealed partial class SqlPlanExecutor
                             TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                             await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
                                 SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                            if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
+                            if (returned is not null && !HasSequenceProjection(plan.Returning) && deletion.Table.ObjectId == plan.Table.ObjectId &&
                                 returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
                             {
                                 var output = associations![

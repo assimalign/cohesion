@@ -18,6 +18,7 @@ public sealed partial class SqlCatalog
     private const int sequenceCounterRecordKind = 19;
     private readonly Dictionary<(string Schema, string Name), DefinitionSlot<SqlCatalogSequence>> _sequences = new(TableNameComparer.Instance);
     private readonly Dictionary<ulong, SqlSequenceCounter> _sequenceCounters = new();
+    private readonly Dictionary<ulong, SqlCatalogSequence> _sequencesById = new();
 
     internal IReadOnlyList<SqlCatalogSequence> Sequences
     { get { lock (_sync) { ThrowIfOffline(); return Array.AsReadOnly(_sequences.Values.Select(slot => slot.Value).ToArray()); } } }
@@ -29,6 +30,17 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             return _sequences.TryGetValue((schema, name), out var slot) ? slot.Value : null;
         }
+    }
+
+    internal SqlCatalogSequence? FindSequence(ulong objectId)
+    {
+        lock (_sync) { ThrowIfOffline(); return _sequencesById.GetValueOrDefault(objectId); }
+    }
+
+    internal long AllocateSequence(ulong objectId)
+    {
+        var sequence = FindSequence(objectId) ?? throw new SqlCatalogException("CS04067", ErrorMessages.SequenceChanged);
+        return AllocateSequence(sequence);
     }
 
     internal ValueTask<SqlCatalogSequence> CreateSequenceAsync(string schema, string name, SqlSequenceOptions options,
@@ -50,11 +62,30 @@ public sealed partial class SqlCatalog
             var location = _storage.InsertRow(transaction, record);
             CommitCatalogChange(transaction, checked(_nextObjectId + 1));
             _sequences.Add((schema, name), new(sequence, location));
+            _sequencesById.Add(sequence.ObjectId, sequence);
             return ValueTask.FromResult(sequence);
         }
     }
 
-    // Resolved replacement options are supplied by the future SQL binder. Ordinary
+    // Existence and option validation share the publication monitor. PostgreSQL
+    // sequence.c:135-159 skips an occupied relation before init_params runs.
+    internal ValueTask<SqlCatalogSequence?> CreateSequenceIfAbsentAsync(string schema, string name,
+        Func<SqlSequenceOptions> options, bool ifNotExists, CancellationToken cancellationToken)
+    {
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (RelationExists(schema, name))
+            {
+                if (ifNotExists) { return ValueTask.FromResult<SqlCatalogSequence?>(null); }
+                throw RelationNameCollision(schema, name);
+            }
+            return ValueTask.FromResult<SqlCatalogSequence?>(CreateSequenceAsync(schema, name, options(), cancellationToken).Result);
+        }
+    }
+
+    // The SQL DDL executor supplies resolved replacement options. Ordinary
     // replacement retains the last fetched value and discards its unused reservation;
     // explicit restart is transactional and may deliberately reissue old values.
     internal ValueTask<SqlCatalogSequence> AlterSequenceAsync(SqlCatalogSequence expected, SqlSequenceOptions options,
@@ -85,6 +116,7 @@ public sealed partial class SqlCatalog
                 EncodeAllocation(sequenceCounterRecordKind, expected.ObjectId, reserved, called));
             CommitCatalogChange(transaction);
             _sequences[(expected.Schema, expected.Name)] = new(updated, location);
+            _sequencesById[expected.ObjectId] = updated;
             _sequenceCounters[expected.ObjectId] = new SqlSequenceCounter
             { Next = RecoverAllocation(reserved, options.Increment, called), Reserved = reserved, IsCalled = called, Location = counterLocation };
             return ValueTask.FromResult(updated);
@@ -104,6 +136,7 @@ public sealed partial class SqlCatalog
             DeleteSequence(transaction, slot);
             CommitCatalogChange(transaction);
             _sequences.Remove((expected.Schema, expected.Name));
+            _sequencesById.Remove(expected.ObjectId);
             _sequenceCounters.Remove(expected.ObjectId);
             return default;
         }
@@ -128,6 +161,42 @@ public sealed partial class SqlCatalog
                 options.Minimum, options.Maximum, options.Cycle, out long value))
             { throw new SqlCatalogException("CS02002", string.Format(CultureInfo.CurrentCulture, ErrorMessages.SequenceExhausted, sequence.Schema, sequence.Name)); }
             return value;
+        }
+    }
+
+    internal ValueTask DropSequencesAsync(IReadOnlyList<SqlCatalogSequence> sequences, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_sync)
+        {
+            ThrowIfOffline();
+            foreach (var sequence in sequences) { RequireSequence(sequence); }
+            using var transaction = _storage.BeginTransaction();
+            foreach (var sequence in sequences) { DeleteSequence(transaction, RequireSequence(sequence)); }
+            CommitCatalogChange(transaction);
+            foreach (var sequence in sequences)
+            { _sequences.Remove((sequence.Schema, sequence.Name)); _sequencesById.Remove(sequence.ObjectId); _sequenceCounters.Remove(sequence.ObjectId); }
+            return default;
+        }
+    }
+
+    internal void SetSequence(SqlCatalogSequence sequence, long value, bool isCalled)
+    {
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_allocationClosed, this);
+            ThrowIfOffline();
+            RequireSequence(sequence);
+            if (value < sequence.Options.Minimum || value > sequence.Options.Maximum)
+            { throw new SqlCatalogException("CS03075", ErrorMessages.SequenceSetvalBounds); }
+            _sequenceCounters.TryGetValue(sequence.ObjectId, out var counter);
+            using var transaction = _storage.BeginTransaction();
+            var location = UpsertRecord(transaction, counter?.Location,
+                EncodeAllocation(sequenceCounterRecordKind, sequence.ObjectId, value, isCalled));
+            ReservationCommitting?.Invoke();
+            transaction.Commit();
+            _sequenceCounters[sequence.ObjectId] = new SqlSequenceCounter
+            { Next = RecoverAllocation(value, sequence.Options.Increment, isCalled), Reserved = value, IsCalled = isCalled, Location = location };
         }
     }
 
@@ -198,7 +267,7 @@ public sealed partial class SqlCatalog
         foreach (var slot in _sequences.Values)
         {
             var sequence = slot.Value;
-            if (!ids.TryAdd(sequence.ObjectId, sequence) || tables.ContainsKey(sequence.ObjectId) || _pendingReclamations.ContainsKey(sequence.ObjectId) ||
+            if (!ids.TryAdd(sequence.ObjectId, sequence) || !_sequencesById.TryAdd(sequence.ObjectId, sequence) || tables.ContainsKey(sequence.ObjectId) || _pendingReclamations.ContainsKey(sequence.ObjectId) ||
                 _tables.ContainsKey((sequence.Schema, sequence.Name)) || _views.ContainsKey(SqlObjectIdentity.View(sequence.Schema, sequence.Name)) ||
                 !_namespaces.ContainsKey(sequence.Schema))
             { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }

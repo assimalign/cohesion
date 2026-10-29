@@ -248,7 +248,8 @@ public sealed class SqlLanguageConformanceTests
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
         // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
         // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(59);
+        // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(67);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -650,10 +651,16 @@ public sealed class SqlLanguageConformanceTests
             ["VARIANCE"] = new("VARIANCE(1)", 0m),
             ["VAR_SAMP"] = new("VAR_SAMP(1)", 0m),
             ["VAR_POP"] = new("VAR_POP(1)", 0m),
+            ["GROUPING"] = new("GROUPING(age-age)", 0, DatabaseType.Int32, "t GROUP BY age-age"),
+            ["GROUPING_ID"] = new("GROUPING_ID(age-age)", 0, DatabaseType.Int32, "t GROUP BY age-age"),
             ["MIN"] = new("MIN(age)", 36),
             ["MAX"] = new("MAX(age)", 45),
             ["STRING_AGG"] = new("STRING_AGG(name, ',' ORDER BY id)", "Ada,Grace,Alan"),
             ["LISTAGG"] = new("LISTAGG(name, ',') WITHIN GROUP (ORDER BY id)", "Ada,Grace,Alan"),
+            ["NEXTVAL"] = new("nextval('function_sequence')", 100L, DatabaseType.Int64, "scalar_rows"),
+            ["CURRVAL"] = new("currval('function_sequence')", 100L, DatabaseType.Int64, "scalar_rows"),
+            ["SETVAL"] = new("setval('function_sequence', 200)", 200L, DatabaseType.Int64, "scalar_rows"),
+            ["LASTVAL"] = new("lastval()", 200L, DatabaseType.Int64, "scalar_rows"),
             ["COALESCE"] = new("COALESCE(NULL, 7)", 7L),
             ["CAST"] = new("CAST('42' AS INT)", 42),
             ["UPPER"] = new("UPPER('Ada')", "ADA"),
@@ -678,6 +685,7 @@ public sealed class SqlLanguageConformanceTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
 
+        await ExecuteAsync(session, "CREATE SEQUENCE function_sequence START 100;");
         await ExecuteAsync(session, "CREATE TABLE scalar_rows (s TEXT, i BIGINT, n DECIMAL, d DATE);");
         await ExecuteAsync(session, "INSERT INTO scalar_rows VALUES ('A😀b', -2, 2.5, DATE '2024-03-04');");
 
@@ -821,6 +829,12 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Where: SqlBinaryExpression { Right: SqlCollateExpression } }, [[1]]),
         [SqlClauses.GroupBy] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t GROUP BY age > 40 ORDER BY age > 40;",
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
+        [SqlClauses.GroupingSets] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY GROUPING SETS ((age), ()) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
+        [SqlClauses.Rollup] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY ROLLUP(age) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression { Kind: SqlGroupingSetKind.Rollup }] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
+        [SqlClauses.Cube] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY CUBE(age) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression { Kind: SqlGroupingSetKind.Cube }] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
         [SqlClauses.Filter] = Query("SELECT COUNT(*) FILTER (WHERE age > 40), SUM(age) FILTER (WHERE age > 40), " +
             "VAR_POP(COALESCE(CASE WHEN id=1 THEN 16777217 ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))) FILTER (WHERE id > 0) FROM t;",
             expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m, 0d]]),
@@ -919,6 +933,43 @@ public sealed class SqlLanguageConformanceTests
                 session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(2);
                 CheckRows(await ReadRowsAsync(result), [[2, "Grace"]]);
                 await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [3]]);
+            }),
+        [SqlClauses.CreateSequence] = new("CREATE SEQUENCE seq START 7;", [],
+            expression => expression is SqlCreateSequenceExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT nextval('seq');", [[7L]])),
+        [SqlClauses.AlterSequence] = new("ALTER SEQUENCE seq RESTART WITH 9;", ["CREATE SEQUENCE seq;"],
+            expression => expression is SqlAlterSequenceExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT nextval('seq');", [[9L]])),
+        [SqlClauses.DropSequence] = new("DROP SEQUENCE seq;", ["CREATE SEQUENCE seq;"],
+            expression => expression is SqlDropSequenceExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT SEQUENCE_NAME FROM INFORMATION_SCHEMA.SEQUENCES;", [])),
+        [SqlClauses.NextValue] = new("SELECT NEXT VALUE FOR seq, (SELECT u.id FROM t u WHERE u.id=t.id), NEXT VALUE FOR seq FROM t ORDER BY id;",
+            ["CREATE SEQUENCE seq;", "CREATE TABLE t(id INT);", "INSERT INTO t VALUES (1),(2);"],
+            expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlNextValueExpression,
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[1L, 1, 1L], [2L, 2, 2L]]);
+                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
+                    "UPDATE t SET id = NEXT VALUE FOR seq RETURNING NEXT VALUE FOR seq;"));
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03076");
+                await ExpectRowsAsync(session, "SELECT nextval('seq'), id FROM t ORDER BY id LIMIT 1 OFFSET 1;", [[4L, 2]]);
+                await ExpectRowsAsync(session, "SELECT nextval('seq');", [[5L]]);
+                foreach (string clauses in new[] { "", " GROUP BY id",
+                    " WHERE EXISTS (SELECT 1 FROM t u WHERE u.id=t.id)",
+                    " WHERE EXISTS (SELECT 1 FROM t u WHERE u.id=t.id) GROUP BY id" })
+                {
+                    await ExecuteAsync(session, "ALTER SEQUENCE seq RESTART WITH 1;");
+                    await ExpectRowsAsync(session, "SELECT NEXT VALUE FOR seq, NEXT VALUE FOR seq, id FROM t" +
+                        clauses + " LIMIT 1 OFFSET 1;", [[2L, 2L, 2]]);
+                    await ExpectRowsAsync(session, "SELECT nextval('seq');", [[3L]]);
+                }
+                foreach (string grouping in new[] { "ROLLUP(id)", "CUBE(id)", "GROUPING SETS ((id), ())" })
+                {
+                    await ExecuteAsync(session, "ALTER SEQUENCE seq RESTART WITH 1;");
+                    await ExpectRowsAsync(session, "SELECT NEXT VALUE FOR seq, NEXT VALUE FOR seq, id, GROUPING(id) FROM t GROUP BY " +
+                        grouping + " ORDER BY GROUPING(id), id LIMIT 1 OFFSET 1;", [[2L, 2L, 2, 0]]);
+                    await ExpectRowsAsync(session, "SELECT nextval('seq');", [[3L]]);
+                }
             }),
         [SqlClauses.Identity] = new("CREATE TABLE identities (id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 100 INCREMENT BY 5), label TEXT);", [],
             expression => expression is SqlCreateTableExpression create && create.Columns.Any(column => column.Identity is not null),
@@ -1069,6 +1120,15 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.Begin] = new("BEGIN;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin }, VerifyBeginAsync),
+        [SqlClauses.DiscardAll] = new("DISCARD ALL;", ["CREATE SEQUENCE seq;", "SELECT nextval('seq');"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Discard },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+                    await session.ExecuteAsync("SELECT currval('seq')", cancellationToken: CancellationToken.None));
+                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04068");
+            }),
         [SqlClauses.Commit] = new("COMMIT;", [.. _seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Commit },
             async (session, _) =>

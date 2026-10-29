@@ -505,7 +505,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
 | `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
-| `CD05018` | Retained statement source rows, groups, RETURNING results or aggregate values exceed the statement memory budget |
+| `CD05018` | Retained statement source rows, ordered candidate buckets, groups, RETURNING results or aggregate values exceed the statement memory budget |
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
@@ -1183,7 +1183,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | Catalog index name, collection, inclusive/exclusive bounds and bounded index-entry estimate |
-| `IndexOrderCandidate` | Per-index ordering eligibility, reason, direction and equal-key bucket contract; consumed=False in OQ-O1 |
+| `IndexOrderCandidate` | Per-index ordering eligibility, reason, direction and equal-key bucket contract; consumed=True and sort=elided when selected |
 | `IndexIntersection` | Ordinal identity intersection before JSON reads; children are the selected IndexSeek inputs |
 | `Delete` | Snapshot-filtered deletion; detail names its IndexSeek, IndexIntersection or CollectionScan child |
 | `Update` | Snapshot-filtered partial update; detail names its IndexSeek, IndexIntersection or CollectionScan child |
@@ -2498,7 +2498,7 @@ Ungrouped, non-DISTINCT pages with fixed projection types (including META().id) 
 OFFSET + LIMIT residual survivors when there is no ORDER BY or the sole ordering is document
 identity, ASC or DESC. Projection aliases resolving to META().id have the same behavior. Candidates
 are visited in that identity direction, and every visited document receives the full residual.
-Other orderings, grouping, DISTINCT and projections requiring type inference retain materialization.
+Proven scalar index order also supports early paging (#1632); grouping, DISTINCT and projections requiring type inference retain materialization.
 Candidate metadata and index probes are not limited by this content-read optimization.
 
 For the benchmark-shaped `(category, DISTINCT ARRAY v.price FOR v IN variants END)` query with
@@ -2551,7 +2551,7 @@ upper uses successor(P+v) exclusively. A successor increments the last non-FF by
 truncates after it. Every component tag is below FF, so every nonempty prefix has a successor.
 These bounds include trailing components, unlike an inclusive [P,P] range. The planner uses
 one range component and retains all other conjuncts as residual filters, matching PostgreSQL
-`doc/src/sgml/indices.sgml:461-466`. Candidate documents remain ordered by ordinal identity.
+`doc/src/sgml/indices.sgml:461-466`. The ordinary search returns ordinal identities; proven ORDER BY uses the internal ordered cursor.
 
 Index leaf entry references are packed metadata page/slot locations. Leaf entries carry writer
 and deleter stamps through the existing index API. Create snapshots only visible document/reference
@@ -2879,7 +2879,7 @@ engine tests retain their original message prefix, coordinator-disposal and byte
 assertions. Registration truncation retains its exact EndOfStreamException beneath the located
 corruption and catalog wrappers. No format reader, upgrader or public exception member is added.
 
-### INCLUDE MISSING and ordered-access eligibility (#1632, OQ-O1)
+### INCLUDE MISSING and ordered index execution (#1632)
 
 `CREATE INDEX ix ON items (score INCLUDE MISSING, category)` includes leading-MISSING
 records using the existing v3 flag; INCLUDE is contextual. The suffix belongs inside the key
@@ -2900,23 +2900,59 @@ DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fal
 
 Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
 comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
-512-entry/32-page absence probe checks complex tags on the first varying component, without
-fetching documents. Incomplete probes and later varying components without a scalar proof
-report scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+one-entry/32-page existence probe checks complex tags on the first varying component, without
+fetching documents. A visible match stops immediately; an invisible first entry leaves the domain
+unproven. Incomplete probes and later varying components without a scalar proof report
+scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+Ordering reuses the ordinary access analysis; every structural and predicate proof runs before
+probing. Rejected ordinary plans allocate no EXPLAIN candidate graph.
 A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
 including all trailing physical components, before identity sorting and LIMIT termination.
-OQ-O1 computes eligibility only for EXPLAIN: ordinary execution retains its existing planning
-allocation path, including ORDER BY without NULLS. EXPLAIN explicitly says consumed=False and
-sort=retained. OQ-O2 must enable AnalyzeOrdering for execution when it adds scan consumption,
-sort elision and earlier LIMIT/OFFSET termination.
+Execution consumes a proven scalar index in forward or reverse order and elides the result
+sort. The existing predicate chooser's eligible index wins; otherwise the first eligible index
+in ordinal name order wins. Intersections retain their identity merge and fallback sort.
+The catalog cursor uses the statement snapshot and releases every page/latch before returning
+metadata. It materializes one complete equal-ORDER-BY-prefix bucket, including trailing physical
+components, then emits that bucket in ascending document identity order in either scan direction.
+The full WHERE predicate filters this stream without changing its order. Bucket metadata, keys
+and identities charge the existing statement memory budget (CD05018); cancellation and failure
+release the cursor and reservations.
+
+With fixed projection types, LIMIT/OFFSET stop after OFFSET + LIMIT residual survivors. LIMIT 0
+opens no cursor. One next-bucket entry establishes completeness, and the B-tree may already have
+read ahead in its bounded batch. SELECT * has a fixed JSON type and stops early on a consumed
+ordered path. Projections needing result type inference still read all matching documents so
+column headers retain the existing full-result contract;
+their proven index order still elides sorting. EXPLAIN reports consumed=True; sort=elided on the
+selected access and candidate, early_paging, and paging_reason=result_type_inference when needed.
+VALUE/RAW ordering by its projected expression retains sorting unless MISSING is rejected,
+because projection promotes MISSING to NULL and changes equal-key ties (value_missing_becomes_null).
+Other candidates retain consumed=False and their eligibility/selection reason; the root describes
+sort retention and its reason. EXPLAIN remains nonexecuting and actual_rows remains NULL.
+
+Conformance compares 504 generated index/predicate/order combinations across eight paging
+windows (4,032 exact comparisons), with complete duplicate buckets, residual rejections,
+scalar extremes, MISSING/NULL, escaped strings and trailing coarse tags. Controlled concurrent
+insert/update/delete/index replacement tests cover autocommit, Snapshot and ReadCommitted,
+plus own writes, rollback and cancellation. InMemory/TCP and the NativeAOT consumer exercise
+consumption and paging without new API, wire or disk formats. Star paging regressions cover
+both directions and the 256 KiB statement budget; rejected-shape allocation guards cover complex
+values, mixed directions, unproven MISSING, later scalar domains and array indexes.
 
 Equality-fixed leading keys can be skipped, following PostgreSQL's constant-pathkey principle
 (src/backend/optimizer/path/pathkeys.c:129-137,164-166 in the local reference clone);
 Cohesion deliberately uses only its direct scalar equality bounds, with no equivalence-class solver.
-DocumentOrderingPath wraps the existing access only for EXPLAIN queries with ordering. Its candidates
-carry DocumentOrderEligibility; the executor unwraps Input and retains every existing sort.
-Ordinary execution queries allocate no wrapper or eligibility state. ProbeComplexOrderKeys uses
+DocumentOrderingPath carries the original access, eligibility candidates and the selected ordered
+candidate. Queries without ORDER BY and known shaped-row/intersection fallbacks skip execution
+analysis. Predicate/type proofs and bounded absence probes remain conservative; ProbeComplexOrderKeys uses
 existing tagged v3 keys and the shared bounded CountRange, never content reads or a new public seam.
+
+Ordered execution follows PostgreSQL's scan-direction, statement-snapshot and residual recheck
+separation (C:/Source/repos/postgres/postgres/src/backend/executor/nodeIndexscan.c:96-100,
+112-120, 142-156). OQL additionally repairs equal-key identity ties; PostgreSQL's physical tie
+order is not adopted. The internal LastQueryIndexEntriesRead counter counts visible cursor
+advances, including stale references and boundary lookahead, and excludes bounded read-ahead;
+LastQueryDocumentsRead counts JSON fetches. Neither is a public diagnostic or EventSource.
 
 ## Probe costing and identity intersection (D3, #1527)
 
@@ -3225,3 +3261,10 @@ Protocol layout and version stay unchanged.
 
 Interleaved same-process Release comparisons did not reproduce the reported native-call
 slowdown; dispatch retains bounded per-statement allocation overhead.
+
+## Ready retained-state contract (#1717)
+
+Every negotiated statement Ready now carries transaction I/T/E followed by a zero retained-state
+byte. This model retains no state requiring a family reset and declares no reset statement. Pool
+return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
+the former form without a compatibility reader; see Database.Protocol DESIGN.

@@ -48,7 +48,7 @@ public static class GqlLanguageProfile
 
     private static readonly string[] _functions =
     [
-        .. GqlScalarFunctions.Signatures.Keys, "cast",
+        .. GqlScalarFunctions.Signatures.Keys, "cast", "reduce",
         "count", "sum", "avg", "min", "max", "collect_list", "collect",
     ];
 
@@ -71,6 +71,8 @@ public static class GqlLanguageProfile
         GqlClauses.Case,
         GqlClauses.ListComprehension,
         GqlClauses.ListSlice,
+        GqlClauses.Reduce,
+        GqlClauses.ListPredicate,
         GqlClauses.Create,
         GqlClauses.Insert,
         GqlClauses.Merge,

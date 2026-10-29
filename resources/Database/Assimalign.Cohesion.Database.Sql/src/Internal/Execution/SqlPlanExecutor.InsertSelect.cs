@@ -161,6 +161,10 @@ internal sealed partial class SqlPlanExecutor
         await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
         var returned = returning is null ? null : new List<object?[]>(rows.Count);
         var returningEvaluator = returning is null ? null : ExecutionEvaluator(_subqueryValues, cancellationToken);
+        if (HasSequenceProjection(returning))
+        {
+            foreach (var row in rows) { returned!.Add(ProjectRow(row.Values, returning!, returningEvaluator!, cancellationToken)); }
+        }
         try
         {
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
@@ -172,7 +176,7 @@ internal sealed partial class SqlPlanExecutor
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, pageId, slotIndex);
                     await InsertIndexEntriesAsync(statement, indexes, table, values,
                         SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null) { returned.Add(ProjectRow(values, returning!, returningEvaluator!, cancellationToken)); }
+                    if (returned is not null && !HasSequenceProjection(returning)) { returned.Add(ProjectRow(values, returning!, returningEvaluator!, cancellationToken)); }
                 }
                 AfterInsertApplied?.Invoke();
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, rows.Count)

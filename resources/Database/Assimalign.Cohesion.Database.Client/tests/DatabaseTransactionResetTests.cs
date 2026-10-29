@@ -83,7 +83,7 @@ public sealed class DatabaseTransactionResetTests
                     if (!legacy)
                     {
                         var type = scenario == "wrong-frame" && accepted == 0 ? ProtocolMessageType.Pong : ProtocolMessageType.Ready;
-                        byte[] status = accepted == 1 ? [(byte)'I'] : scenario is "invalid-status" or "primary-error" ? [0] : [(byte)'T'];
+                        byte[] status = accepted == 1 ? [(byte)'I', 0] : scenario is "invalid-status" or "primary-error" ? [0] : [(byte)'T', 0];
                         await WriteAsync(channel, type, status, token);
                     }
                     if (accepted == 0 && scenario.StartsWith("rollback-", StringComparison.Ordinal))
@@ -96,7 +96,7 @@ public sealed class DatabaseTransactionResetTests
                         else
                         {
                             await WriteAsync(channel, (ProtocolMessageType)8, new ProtocolResultCompleteMessage(0).Encode(), token);
-                            await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'T'], token);
+                            await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'T', 0], token);
                         }
                     }
                     while (await channel.Reader.ReadFrameAsync(token) is { } frame)

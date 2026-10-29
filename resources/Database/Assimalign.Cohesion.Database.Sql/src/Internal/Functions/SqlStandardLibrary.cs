@@ -25,6 +25,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal static class SqlStandardLibrary
 {
+    internal static bool IsGrouping(string name) => name.Equals("GROUPING", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("GROUPING_ID", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The name of <c>COALESCE</c>, the special form the evaluator computes lazily.</summary>
     internal const string Coalesce = "COALESCE";
 
@@ -80,6 +83,11 @@ internal static class SqlStandardLibrary
         new SqlBuiltinScalarFunction("LOCALTIMESTAMP", [], SqlType.Timestamp, SqlFunctionVolatility.Stable),
         new SqlBuiltinScalarFunction("NOW", [], SqlType.TimestampTz, SqlFunctionVolatility.Stable),
         new SqlBuiltinScalarFunction("DATE_TRUNC", [SqlType.Text, SqlType.AnyElement], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("NEXTVAL", [SqlType.Any], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("CURRVAL", [SqlType.Any], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("SETVAL", [SqlType.Any, SqlType.BigInt], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("SETVAL", [SqlType.Any, SqlType.BigInt, SqlType.Boolean], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("LASTVAL", [], SqlType.BigInt, SqlFunctionVolatility.Volatile),
         new SqlBuiltinScalarFunction("GEN_RANDOM_UUID", [], SqlType.Uuid, SqlFunctionVolatility.Volatile),
         new SqlCountFunction(rows: true),
         new SqlCountFunction(rows: false),
@@ -108,7 +116,7 @@ internal static class SqlStandardLibrary
     ];
 
     /// <summary>The special forms: grammar, never catalog functions.</summary>
-    private static readonly string[] _specialForms = ["COALESCE", "NULLIF", "CASE", "CAST", "EXTRACT"];
+    private static readonly string[] _specialForms = ["COALESCE", "NULLIF", "GROUPING", "GROUPING_ID", "CASE", "CAST", "EXTRACT"];
 
     /// <summary>
     /// Words the dialect gives a meaning that is not a call of a catalog function: quantifiers, and
@@ -192,7 +200,7 @@ internal static class SqlStandardLibrary
         return false;
     }
 
-    /// <summary>The special forms, which are grammar and never catalog functions: <c>COALESCE</c>, <c>NULLIF</c>, <c>CASE</c>, <c>CAST</c>, <c>EXTRACT</c>.</summary>
+    /// <summary>The special forms, which are grammar and never catalog functions, including GROUPING and its alias.</summary>
     internal static IReadOnlyList<string> SpecialForms { get; } = Array.AsReadOnly(_specialForms);
 
     /// <summary>Whether a call names <c>COALESCE</c>.</summary>

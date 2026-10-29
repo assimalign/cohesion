@@ -261,6 +261,13 @@ public sealed class SqlFunctionArityTests : IDisposable
             function.Usage.ShouldStartWith($"{function.Name}(", Case.Sensitive);
             if (function.Kind == SqlFunctionKind.Scalar)
             {
+                if (SqlSequenceExecution.IsFunction(function.Name))
+                {
+                    var stateFailure = Should.Throw<DatabaseException>(() => ((SqlScalarFunction)function).Invoke(new SqlArguments(
+                        function.Parameters.Select(_ => SqlValue.FromObject(2L)).ToArray(), new SqlFunctionContext(default, null, CancellationToken.None))));
+                    stateFailure.Diagnostics.Single().Code.ShouldBe("CS04069");
+                    continue;
+                }
                 var values = function.Parameters.Select((parameter, index) => SqlValue.FromObject(
                     function.Name == "DATE_TRUNC" ? index == 0 ? (object)"day" : new DateOnly(2024, 1, 1) :
                     parameter == SqlType.Text ? (object)"x" : 2L)).ToArray();

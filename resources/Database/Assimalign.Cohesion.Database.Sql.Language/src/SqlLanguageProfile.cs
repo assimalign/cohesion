@@ -19,7 +19,7 @@ public static class SqlLanguageProfile
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
-        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
+        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "SEQUENCE", "VIEW", "IF",
         "ADD", "COLUMN",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
@@ -54,6 +54,7 @@ public static class SqlLanguageProfile
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "LISTAGG",
         "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "STDDEV_SAMP", "STDDEV_POP", "VARIANCE", "VAR_SAMP", "VAR_POP",
+        "GROUPING", "GROUPING_ID",
         // Null handling
         "COALESCE", "NULLIF",
         // Type
@@ -66,6 +67,8 @@ public static class SqlLanguageProfile
         "ABS", "ROUND", "FLOOR", "CEILING", "CEIL", "POWER", "SQRT", "MOD", "SIGN", "EXP", "LN", "LOG10",
         // Temporal
         "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP", "NOW", "EXTRACT", "DATE_TRUNC",
+        // Sequences
+        "NEXTVAL", "CURRVAL", "SETVAL", "LASTVAL",
         // UUID
         "GEN_RANDOM_UUID",
     ];
@@ -86,6 +89,11 @@ public static class SqlLanguageProfile
         SqlClauses.CreateTableAs,
         SqlClauses.CreateSchema,
         SqlClauses.Identity,
+        SqlClauses.CreateSequence,
+        SqlClauses.AlterSequence,
+        SqlClauses.DropSequence,
+        SqlClauses.NextValue,
+        SqlClauses.DiscardAll,
         SqlClauses.CreateIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
@@ -99,6 +107,9 @@ public static class SqlLanguageProfile
         SqlClauses.Using,
         SqlClauses.Where,
         SqlClauses.GroupBy,
+        SqlClauses.GroupingSets,
+        SqlClauses.Rollup,
+        SqlClauses.Cube,
         SqlClauses.Filter,
         SqlClauses.Having,
         SqlClauses.OrderBy,

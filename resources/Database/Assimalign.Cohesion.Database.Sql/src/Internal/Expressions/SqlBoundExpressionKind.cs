@@ -12,6 +12,9 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary><see cref="SqlBoundOuterColumn"/>: a value in an enclosing query's evaluation frame.</summary>
     OuterColumn,
 
+    /// <summary><see cref="SqlBoundGrouping"/>: a mask in its owning outer query's grouped frame.</summary>
+    Grouping,
+
     /// <summary><see cref="SqlBoundSlot"/>: a grouping key, an aggregate's result or a completed output column, by ordinal.</summary>
     Slot,
 
@@ -26,6 +29,9 @@ internal enum SqlBoundExpressionKind : byte
 
     /// <summary>NULLIF and EXTRACT evaluator forms.</summary>
     SpecialForm,
+
+    /// <summary>A session sequence operation.</summary>
+    Sequence,
 
     /// <summary><see cref="SqlBoundLogical"/>: an <c>AND</c> or <c>OR</c> chain.</summary>
     Logical,

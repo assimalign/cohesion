@@ -1,5 +1,128 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## SQL sequence surface (#1717, SQ-S2)
+
+Ready reports whether currval/lastval entries or changed session settings require reset. Pool return
+uses DISCARD ALL through the existing Execute envelope only when the last Ready reports retained
+state, after any required rollback. A clean return needs no reset exchange. Ordinary rollback preserves sequence state. DISCARD ALL
+inside an explicit transaction refuses with CS04070 (25001), leaving that transaction active.
+
+The language AST retains explicit sequence options in written order and gives NEXT VALUE FOR
+its own leaf; duplicate options are syntax failures. The SQL planner binds sequence calls as
+volatile BIGINT leaves, with the five typed built-in signatures also present in the function
+catalog. REGCLASS casts resolve sequence object identities. Sequence DDL has an ordinary plan
+and EXPLAIN node and reuses the self-committing metadata path; BEGIN refuses it with CS04003.
+
+Sequence execution opens an async-flow scope only for a plan containing a sequence operation.
+It carries the session's lazy currval dictionary and lastval object identity, the captured sequence
+directory and scoped per-row NEXT VALUE cache. Disposable value-type row scopes save and restore
+the outer dictionary across nested projections; shared empty arrays never identify a row.
+The planner refuses NEXT VALUE FOR in subqueries, derived bodies, CTE definitions and
+CASE/COALESCE/NULLIF arguments with CS03076, including unused definitions.
+RETURNING also refuses NEXT VALUE FOR during planning, including MERGE and joined DML;
+nextval() retains its independent per-row RETURNING evaluation. Persisted-expression refusal
+visits each node once, including views and declared CHECK expressions. Declared CHECK validation
+runs that refusal once at the predicate root, entering subquery bodies before ordinary CHECK
+binding can report CK00001, so sequence dependencies consistently report CS03074.
+Ordinary evaluators and statement contexts gain no state.
+Literal/parameter names lock only their resolved objects; row-varying names take the
+captured directory's Shared grants before execution. This conservative dynamic-name policy
+avoids synchronous evaluation-time lock waits and retains the documented directory-wide blocking:
+unrelated ALTER/DROP waits until transaction end, each captured sequence costs one request, and
+queued Exclusive requests stall later dynamic statements. New names enter the next statement.
+A sequence-only binding wrapper carries usage metadata and becomes an EXPLAIN parent;
+the session unwraps it before costing/execution. Ordinary plans retain their original fields.
+The planner reuses its existing scopeless-cache slot for optional sequence metadata. Ordinary
+planning and execution therefore preserve the existing Release allocation guards.
+Sequence-dependent ordering checks use static loops so sequence-free execution allocates no closure.
+ALTER/RESTART/DROP take Exclusive
+grants before waiting for a non-definition metadata lease, re-resolve by object identity and then publish.
+The lease wait honors cancellation and the session lock timeout (CS04044).
+Unrelated CREATE INDEX leases remain compatible. CREATE guards check occupied relations before
+option validation under the publication monitor; DROP/ALTER IF EXISTS skip disappearance while
+waiting. DROP SCHEMA locks sequences before tables. Waits enter the existing deadlock graph, and transaction/timeout cleanup
+owns release. Each sequence grant rechecks transaction state and returns the finished owner's
+grants, covering a host rollback between acquisitions for function S grants and sequence/schema
+DDL X grants. An end observed after a sequence grant refuses before publication. Failed statements retain prior
+explicit-transaction sequence grants as other locks do.
+
+Sequence ALTER/DROP take ordered sequence X grants before the non-definition lease.
+DROP SCHEMA takes sequence X, table X, then its definition lease; ordinary conflicting admission
+refuses, while a provisioning step already owns its complete object reservation before waiting.
+CREATE/DROP VIEW, FUNCTION, DOMAIN and CREATE SCHEMA take a definition lease and never wait for
+object grants under it. Ordinary table DDL and CTAS may acquire object grants under non-definition
+leases; those leases are compatible with sequence DDL's lease. Thus a sequence metadata wait is
+blocked only by a definition holder that cannot wait back on its object grants. Deferred apply
+and rewrite steps reserve their table grants before metadata admission. The data apply gate,
+catalog monitor and storage/page latches remain innermost. No catalog monitor spans a sequence
+lock wait. Locks retained by earlier transaction statements can still
+form genuine cycles; the lock manager detects them. setval uses the same durable
+counter record and invalidates unused reservations; session updates occur only after that commit.
+SQL allocation resolves the stable ObjectId after locking and calls SQ-S1 with that current incarnation. No second
+allocator, public interface, shipped visibility grant, project reference or disk format bump is added.
+The negotiated statement Ready payload changes to two bytes, as specified in Protocol DESIGN.
+SqlCatalogSnapshot now captures immutable internal sequence descriptions for information schema;
+empty directories reuse the empty list. Cached bound nextval adds 24 managed bytes for its BIGINT result box, while the shared allocator adds none. The reservation-commit monitor still blocks relation
+lookups; SQL scalar planning remains monitor-free as SQ-S1 established. RETURNING lists containing
+sequence calls evaluate after preparation and before the global apply gate, so durable reservation
+and setval commits never occupy that gate. Deterministic held-reservation probes record writer
+gate waits dropping from one to zero for INSERT, upsert, UPDATE, DELETE and their joined paths.
+Independent ordered sequence outputs project after Sort and before Limit, including alias/ordinal
+ordering and grouped/correlated paths; these independent outputs beyond OFFSET + LIMIT remain
+unevaluated. Every path projects qualifying OFFSET rows in their own row scopes and consumes
+their sequence values before discarding them; rows rejected by WHERE/HAVING
+consume no projection values. GROUPING SETS, ROLLUP, CUBE and GROUPING() use the same row scopes,
+HAVING-before-projection and ordered deferral rules as plain grouping, including empty sets.
+PostgreSQL
+src/backend/optimizer/plan/planner.c:2216-2225 places Limit above projection, and
+src/backend/executor/nodeLimit.c:91-116 pulls offset tuples through its child.
+Unordered grouped/correlated sequence inputs apply WHERE/HAVING, project each qualifying row
+immediately, discard OFFSET rows and stop at LIMIT, retaining no deferred input and charging no grant.
+Scan and grouped predicate/projection effects interleave per reached row (PostgreSQL
+src/include/executor/execScan.h:224-235 and src/backend/executor/nodeAgg.c:1378-1384).
+Joins, correlated or not, filter every candidate pair before projection, buffering qualifying pairs;
+nextval() in their WHERE therefore runs for every pair even under LIMIT 1. The projection window
+then consumes OFFSET rows and stops at LIMIT. This differs from PostgreSQL, whose nested loop
+projects and returns each qualifying pair as its Limit node pulls it, and stops at LIMIT
+(src/backend/optimizer/plan/initsplan.c:2975-2979, src/backend/executor/nodeNestloop.c:194-219,
+nodeLimit.c:153-159). With two rows in t, the four-pair query
+`SELECT nextval('s') FROM t a CROSS JOIN t b WHERE nextval('s') > 0 LIMIT 1` returns 2 in
+PostgreSQL and 5 here.
+Ordered deferral keeps filtering before retention and uses the ordinary uncharged sort collector
+on plain, correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages.
+Plain and correlated top-N retention stays bounded by OFFSET + LIMIT when ordering collations are
+fixed; grouped and grouping-set deferral retains every group that passes HAVING, as the
+sequence-free grouped sort does, and deferred ordering collations require full retention.
+Neither form adds a StatementMemoryBudget charge. Grouping-set group/aggregate state retains its
+existing charge for both sequence and sequence-free queries. Ordinary collectors retain their instance layout.
+Cached sort aliases retain the declared output type, including numeric CASE promotion.
+DISCARD ALL clears sequence state and restores the timeout values configured before the first
+statement; ordinary rollback preserves them. These initial host overrides remain reset values even
+when a caller changes a setting or discards repeatedly. PostgreSQL src/include/utils/guc.h:88
+describes reset-value sources; src/backend/utils/misc/guc.c:1927-1929 preserves noninteractive
+settings, and :1940-1945 restores reset_val. Pool return consults Ready after ROLLBACK and sends
+the family-declared reset only for retained state. The two-byte Ready changes no message identifier.
+
+Persisted DEFAULT/CHECK/domain/view/function expressions and declared-script sequence DDL are refused
+with CS03074 until dependency and receipt ownership are modeled. CASCADE/RESTRICT are equivalent
+for these unowned generators. SQL format 28 already represents all definitions and counters.
+SQ-S3 owns identity linkage, SERIAL and owned dependencies. The full SQL-visible defaults,
+setval semantics, standard row sharing and deliberate PostgreSQL differences are in DIALECT.
+Reference: PostgreSQL src/backend/commands/sequence.c:867-1044,1415-1587; NEXT VALUE FOR is absent
+from PostgreSQL, whose doc/src/sgml/ref/create_sequence.sgml compatibility section confirms it.
+
+| Code | Sequence SQL condition | SQLSTATE |
+| --- | --- | --- |
+| CS03073 | Missing sequence name or object identity | 42P01 |
+| CS04070 | DISCARD ALL inside an explicit transaction | 25001 |
+| CS03074 | Unsupported persisted dependency or declared-script ownership | 0A000 |
+| CS03075 | setval outside sequence bounds | 22003 |
+| CS03076 | Sequence value in an unsupported evaluation context or detached from execution | 0A000 |
+| CS03077 | Malformed sequence reference or runtime call argument | 22023 |
+| CS04068 | Undefined session currval | 55000 |
+| CS04069 | Undefined session lastval, including a dropped sequence | 55000 |
+
+
 ## Joined DML planning and execution (#1714, SQ-UF2)
 
 The DML binder reuses SELECT's source namespace and join rules, seeding a distinct target binding
@@ -1528,6 +1651,53 @@ flowchart LR
   conversion remains cached and applies only built-in storage coercion; a domain check runs when
   the value is assigned. A canceled refresh after definition DDL has published leaves the cache
   pending; the next statement or provisioning operation rebuilds it with its own token.
+- **Grouping sets (#1720, SQ-H2).** A separate plan leaf and execution frame retain
+  expanded sets and GROUPING argument ordinals without enlarging plain grouping plans,
+  accumulator objects or async frames. Plain binding/execution keeps the established path;
+  the additional dispatch walk allocates nothing. Expansion follows PostgreSQL
+  parse_agg.c:1864–2102: products, per-set column deduplication and optional DISTINCT
+  set deduplication after the 4096-set limit. Composite items are units after recursive
+  flattening. GROUPING SETS may contain ROLLUP/CUBE and inner GROUPING SETS;
+  GROUPING SETS under ROLLUP/CUBE, even through composites, reports CS00010 (42601),
+  following PostgreSQL parse_clause.c:2225–2235.
+  Every set identity enters its hash key, so duplicate sets and subtotal NULLs never
+  share state with other sets or stored NULLs.
+  A logical transition evaluates FILTER, arguments and input ordering once per row
+  before feeding all sets, as execExpr.c:3708–3740 does. Volatile calls never share
+  a logical transition. Immutable input tuples may alias, while mutable ordered
+  representatives are copied per set to keep DISTINCT replacement independent.
+  Completed rows contain masked keys, independent aggregate results and GROUPING masks before HAVING,
+  projection, ordering or correlated reads. The rightmost argument is bit zero
+  (execExprInterp.c:5310–5336). GROUPING_ID aliases GROUPING; 1–31 arguments produce
+  non-null INTEGER metadata. Argument-level ownership follows parse_agg.c:348–358
+  and its outer-call regressions at src/test/regress/sql/groupingsets.sql:676–684.
+  A child registers its outer mask with the owning grouped correlation scope; that
+  plan assigns its slot after all aggregate slots are known. The child reads the
+  completed outer frame, including subtotal masks, without evaluating its arguments.
+  Optional mask state shares existing scope storage; queries without GROUPING keep
+  their scope object sizes and avoid the added correlation walk and registries.
+  Bare arguments from other levels cannot match local keys (parse_agg.c:1701–1730).
+  Associated-level key binding reports CS01062, invalid
+  arity CS01063, placement CS05074 and expansion CS05075. View call identities omit
+  the grouping primitive while retaining functions within its arguments and keys.
+  COHESION_SCHEMA.FUNCTIONS advertises GROUPING and GROUPING_ID as SPECIAL FORM;
+  neither has a scalar catalog overload or an application-overridable identity.
+  State uses the existing statement grant and releases it on every exit: conservative
+  fixed allowances cover each group/dictionary entry and native accumulator, with
+  retained keys, DISTINCT/ordered tuples and growing string output charged separately.
+  Application-owned accumulator allocations remain application-owned; no new sizing
+  interface or spill path is introduced. EXPLAIN describes set count and each set's
+  zero-based key ordinals, retaining duplicates, along with the mask convention and
+  budget. Ordinary GROUP BY descriptions remain unchanged.
+  In-process generated UNION ALL equivalence, empty inputs, 1–4-bit
+  masks, views/reopen, memory refusals, wire and NativeAOT checks cover the contract.
+  No disk/wire format or public implementation boundary changes.
+  The earlier external comparison used PGlite's PostgreSQL 18.6 WebAssembly engine:
+  a Node harness executed generated setup and ten grouping queries, wrote reference
+  rows as JSON, and compared them with a separate C# engine probe after bag sorting
+  (exact cells except a 1e-12 tolerance for statistics). The committed in-process
+  equivalence corpus compares independent UNION ALL aggregates. Plain grouped-key
+  and expression-key queries retain the base's Release allocations exactly.
 - **FILTER and statistics (#1720, SQ-H1).** The source-bound optional predicate executes
   before argument or ordering subqueries, evaluation, coercion, DISTINCT retention or transition
   calls. Only TRUE admits a row. Independent children inside a filtered call are deferred until
@@ -3269,6 +3439,11 @@ Deviates from interface-first (database-area.md); new public syntax leaves are s
 | CS05071 | WHEN follows an unconditional clause of the same match kind |
 | CS05072 | FILTER on a scalar call (42809) |
 | CS05073 | Aggregate in FILTER (42803) |
+| CS00010 | GROUPING SETS nested inside ROLLUP or CUBE (42601) |
+| CS01062 | GROUPING argument is not a grouping expression of the associated query level (42803) |
+| CS01063 | GROUPING requires 1–31 non-star expression arguments (54023) |
+| CS05074 | GROUPING outside grouped output, or in aggregate/grouping inputs (42803) |
+| CS05075 | Pre-DISTINCT grouping-set expansion exceeds 4096 sets (54001) |
 
 Existing names/duplicates/arity/parameters use CS01014/015/019/006/020; non-Boolean predicates
 and incompatible assignment types use CS02003; aggregates use CS05017; identity uses CS03025.
@@ -6245,10 +6420,10 @@ takes 35 and 16 µs.
 
 ## Non-goals (current cut)
 
-Identity columns execute; standalone sequence catalog/allocation is internal. SQL sequence DDL,
-currval/lastval/SCOPE_IDENTITY, OVERRIDING,
-RESTART, generation-mode changes and identity backfill on populated tables remain excluded
-(#1123). Compiled typed schemas cannot declare identity metadata; SQL scripts can create
+Identity columns and the SQ-S2 standalone sequence DDL/functions execute. SQ-S3 retains
+SCOPE_IDENTITY, OVERRIDING, identity RESTART, generation-mode changes, identity linkage to
+standalone sequences and identity backfill on populated tables as exclusions (#1123, #1717).
+Compiled typed schemas cannot declare identity metadata; SQL scripts can create
 identity tables through the ordinary SQL executor.
 
 NATURAL and LATERAL joins, qualified wildcards, UPDATE SET
@@ -6972,8 +7147,8 @@ advance DDL generation and is independent of the data transaction, so rollback l
 The identity cursor retains T1's three-field carrier layout; sequence-only restart metadata
 lives in its sealed internal derived carrier, without an extra object. Cached sequence allocation allocates zero managed bytes;
 cached identity allocation retains T1's existing readonly-column facet lookup budget.
-Internal sequence captures use Catalog.Sequences; the existing SqlCatalogSnapshot layout and
-empty-catalog capture path stay unchanged until SQL binding is added in SQ-S2. Identity counters remain table-owned kind 16 until SQ-S3; their bounds, 32-value gaps, diagnostics,
+Internal allocator captures use Catalog.Sequences. SQ-S2 extends SqlCatalogSnapshot internally
+with immutable sequence descriptions; empty sequence directories reuse the empty array. Identity counters remain table-owned kind 16 until SQ-S3; their bounds, 32-value gaps, diagnostics,
 TRUNCATE RESTART/CONTINUE, rewrite and TYPE behavior remain unchanged.
 
 Lock order is existing caller object grants, catalog monitor, catalog storage transaction/apply
@@ -6995,7 +7170,7 @@ RESTART write, validating complete old/new cursors and ALTER's fetched endpoint.
 
 | Code | Internal sequence condition | SQLSTATE |
 | --- | --- | --- |
-| CS02002 | Range exhausted without CYCLE (shared identity condition; PostgreSQL raises 2200H `sequence_generator_limit_exceeded` here, so SQ-S2 decides whether nextval keeps this code) | 22003 |
+| CS02002 | Range exhausted without CYCLE (shared identity condition retained by nextval; PostgreSQL raises 2200H `sequence_generator_limit_exceeded` here) | 22003 |
 | CS03069 | Invalid resolved options | 22023 |
 | CS03070 | Occupied relation name; message names the existing kind | 42P07 |
 | CS03071 | Missing namespace | 3F000 |
@@ -7946,7 +8121,7 @@ it atomically. A recreated table gets a fresh ObjectId and starts from START.
 
 #### Catalog: Non-goals
 
-- General sequences and permissions (permissions are
+- Identity linkage to general sequences (SQ-S3) and permissions (permissions are
   a future SQL engine feature, #177). Virtual system views are engine projections
   of this catalog and require no view records here.
 - Multi-statement DDL atomicity (see self-committing DDL above). The migration
@@ -8410,6 +8585,11 @@ SqlDatabaseEngineOptions.StatementMemoryBudget is a positive byte count, default
 statement, including nested queries: each table reserves 104 bytes, arrays reserve both old and
 new storage during doubling, and retained rows charge their arrays and conservatively sized
 boxed/text/binary cells, including both padded CHAR payloads and trimmed comparison strings.
+Ordered sequence deferral uses the same uncharged collector as sequence-free sorting (#1717),
+including bounded top-N selection and deep OFFSET pages on plain, correlated, grouped and
+grouping-set paths. LIMIT controls retention, without introducing a separate accounting rule.
+Unordered grouped/correlated sequence projection streams without retaining inputs. Plain grouping
+remains uncharged; grouping-set group/aggregate state retains its existing charge on both paths.
 The limit governs accounted live hash-build memory, joined-DML retention and CTAS retention described above. General
 result materialization, planning and transient scalar hashing remain outside this grant. Hash-build
 reservation precedes retained allocation; CTAS admits the completed query output before copying.

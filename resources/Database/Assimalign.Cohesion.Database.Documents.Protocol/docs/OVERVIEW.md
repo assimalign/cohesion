@@ -23,3 +23,6 @@ standard .NET argument guards retain their own contracts.
 DocumentId has a debugger view over its stored public value; protocol parsing and payload handling are unchanged.
 
 Eligible types follow the [Database conventions](../../Assimalign.Cohesion.Database/docs/CONVENTIONS.md) debugger display/proxy rules. Views are private and read-only; inspection does not change the public API, execution paths, error contracts, storage formats or protocol bytes.
+
+Statement Ready now carries two bytes: transaction status I/T/E and a retained-state byte, always
+zero for Documents. This replaces the former payload without a compatibility reader (#1717).
