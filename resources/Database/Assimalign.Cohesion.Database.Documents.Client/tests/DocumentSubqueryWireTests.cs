@@ -9,6 +9,23 @@ namespace Assimalign.Cohesion.Database.Documents.Client.Tests;
 
 public sealed class DocumentSubqueryWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Subqueries: shared work refusal is located and preserves both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_WorkBudget_ShouldRefuseAndPreserveSessionAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp, configureEngine: builder => builder.Options.StatementWorkBudget = 8);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        // Act
+        var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync(
+            "SELECT (SELECT RAW (SELECT RAW d FROM [1,2] AS v) FROM [1,2] AS s) FROM [1,2] AS d", cancellationToken: harness.Token));
+        // Assert
+        error.Diagnostics.Single().Code.ShouldBe("CD05020");
+        error.Diagnostics.Single().Start.ShouldNotBeNull();
+        (await connection.QueryAsync("SELECT RAW 1 FROM [1] AS v", cancellationToken: harness.Token)).Documents.Single().GetInt32().ShouldBe(1);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Client] - Subqueries: overdeep projections return a located error and leave both transports reusable")]
     [InlineData(false)]
     [InlineData(true)]
@@ -53,8 +70,21 @@ public sealed class DocumentSubqueryWireTests
         lazy.Single()[0].ShouldBe(7m);
         var plan = await connection.QueryAsync("EXPLAIN SELECT (SELECT RAW n FROM items) FROM items", cancellationToken: harness.Token);
         plan.Documents.ShouldContain(row => row.GetProperty("operator").GetString() == "SubqueryExpression" && row.GetProperty("detail").GetString()!.Contains("cached_for_statement"));
-        var error = await Should.ThrowAsync<DocumentClientException>(async () => await connection.QueryAsync("SELECT (SELECT RAW d.n FROM items s) FROM items d", cancellationToken: harness.Token));
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        var correlated = await connection.QueryAsync("SELECT (SELECT RAW d.n FROM items s) FROM items d", cancellationToken: harness.Token);
+        correlated.Select(row => ((JsonElement)row[0]!).GetRawText()).ShouldBe(new[] { "[1,1]", "[2,2]" });
+        var identity = await connection.QueryAsync("SELECT (SELECT RAW META(d).id FROM [1] AS v) FROM items d", cancellationToken: harness.Token);
+        identity.Select(row => ((JsonElement)row[0]!).GetRawText()).ShouldBe(new[] { "[\"a\"]", "[\"b\"]" });
+        var sources = await connection.QueryAsync("SELECT (SELECT RAW v FROM [d.n] AS v) FROM items d", cancellationToken: harness.Token);
+        sources.Select(row => ((JsonElement)row[0]!).GetRawText()).ShouldBe(new[] { "[1]", "[2]" });
+        var updated = await connection.QueryAsync("UPDATE items d SET old = (SELECT RAW s.n FROM items s) WHERE EXISTS (SELECT RAW v FROM [d.n] AS v) RETURNING n, old", cancellationToken: harness.Token);
+        updated.Count.ShouldBe(2);
+        updated.All(row => ((JsonElement)row[1]!).GetRawText() == "[1,2]").ShouldBeTrue();
+        await connection.CreateCollectionAsync("copied", harness.Token);
+        await connection.QueryAsync("INSERT INTO copied (KEY k, VALUE v) SELECT 'x' AS k, {a:(SELECT RAW n FROM items)} AS v FROM [1] AS d", cancellationToken: harness.Token);
+        ((JsonElement)(await connection.QueryAsync("SELECT a FROM copied", cancellationToken: harness.Token)).Single()[0]!).GetRawText().ShouldBe("[1,2]");
+        var removed = await connection.QueryAsync("DELETE FROM items d WHERE n IN (SELECT RAW s.n FROM items s) RETURNING n", cancellationToken: harness.Token);
+        removed.Count.ShouldBe(2);
+        await connection.QueryAsync("INSERT INTO items (KEY, VALUE) VALUES ('a', {n:1}), ('b', {n:2})", cancellationToken: harness.Token);
         (await connection.QueryAsync("SELECT n FROM items WHERE n IN (SELECT RAW n FROM items)", cancellationToken: harness.Token)).Count.ShouldBe(2);
         connection.IsOpen.ShouldBeTrue();
     }

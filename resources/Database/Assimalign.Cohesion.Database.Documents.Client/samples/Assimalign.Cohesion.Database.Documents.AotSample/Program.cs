@@ -156,6 +156,18 @@ internal static class Program
             Check(subqueries.Count > 0 && ((JsonElement)subqueries[0][0]!).GetArrayLength() == subqueries.Count && Equals(subqueries[0][1], true), "nested SELECT arrays and EXISTS");
             var subqueryIn = await connection.QueryAsync("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items)", cancellationToken: token);
             Check(subqueryIn.Count == subqueries.Count, "IN SELECT RAW");
+            var correlated = await connection.QueryAsync("SELECT d.name, (SELECT RAW d.name FROM [1] AS v) AS names FROM items d", cancellationToken: token);
+            Check(correlated.All(row => ((JsonElement)row[1]!)[0].GetString() == (string?)row[0]), "correlated expression arrays");
+            var correlatedIdentity = await connection.QueryAsync("SELECT (SELECT RAW META(d).id FROM [1] AS v) FROM items d", cancellationToken: token);
+            Check(correlatedIdentity.All(row => ((JsonElement)row[0]!)[0].ValueKind == JsonValueKind.String), "correlated stored metadata");
+            var correlatedFrom = await connection.QueryAsync("SELECT d.name, (SELECT RAW v FROM [d.name] AS v) AS names FROM items d", cancellationToken: token);
+            Check(correlatedFrom.All(row => ((JsonElement)row[1]!)[0].GetString() == (string?)row[0]), "correlated FROM");
+            await connection.CreateCollectionAsync("nested_writes", token);
+            await connection.QueryAsync("INSERT INTO nested_writes (KEY k, VALUE v) SELECT 'a' AS k, {n:1, names:(SELECT RAW name FROM items)} AS v FROM [1] AS d", cancellationToken: token);
+            var nestedUpdate = await connection.QueryAsync("UPDATE nested_writes d SET n = 2 WHERE EXISTS (SELECT RAW v FROM [d.n] AS v) RETURNING (SELECT RAW s.n FROM nested_writes s) AS before", cancellationToken: token);
+            Check(((JsonElement)nestedUpdate.Single()[0]!).GetRawText() == "[1]", "DML statement-start nested reads");
+            var nestedDelete = await connection.QueryAsync("DELETE FROM nested_writes d WHERE n IN (SELECT RAW s.n FROM nested_writes s) RETURNING n", cancellationToken: token);
+            Check(Equals(nestedDelete.Single()[0], 2m), "DELETE nested predicate");
             var lazySubquery = await connection.QueryAsync("SELECT COALESCE(1, (SELECT RAW 1/0 FROM items)) AS n FROM items LIMIT 1", cancellationToken: token);
             Check(lazySubquery.Count == 1 && Equals(lazySubquery[0][0], 1m), "lazy nested SELECT");
             using (var deep = JsonDocument.Parse(new string('[', 255) + "0" + new string(']', 255), new JsonDocumentOptions { MaxDepth = 256 }))
