@@ -645,6 +645,20 @@ Deadline-dependent peers and busy test drivers use the linked Storage test helpe
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
 
+## Transaction isolation text (#1012)
+
+Outside a transaction block, SET TRANSACTION succeeds with Warning CS04071 through the existing
+negotiated diagnostic frame; QueryAsync exposes the warning and leaves Ready idle. InMemory/TCP
+conformance verifies the warning and continued usability. No client API or wire format changes.
+
+BEGIN/START isolation modes and early SET TRANSACTION use existing Execute, diagnostic and Ready
+frames on InMemory and TCP. READ COMMITTED and READ UNCOMMITTED see a concurrent commit on the next
+statement; REPEATABLE READ keeps the begin snapshot. CS04071/CS04072/CS04073 preserve connection
+usability and transaction state. A one-slot pool proves physical-session reuse after an early
+isolation change, with optional DISCARD ALL, restores optionless BEGIN's Snapshot behavior.
+No client API, capability bit or wire identifier changes.
+
+
 ## Server-reported transaction reset (#1540)
 
 SQL/Graph transaction-status negotiation adds an existing Ready I/T/E frame after Execute

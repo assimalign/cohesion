@@ -242,6 +242,10 @@ public static class SqlClauses
 
     /// <summary>A <c>BEGIN</c> transaction-control statement.</summary>
     public const string Begin = "BEGIN";
+    /// <summary>The isolation option of BEGIN and START TRANSACTION.</summary>
+    public const string IsolationLevel = "ISOLATION LEVEL";
+    /// <summary>Configure the current transaction's isolation level.</summary>
+    public const string SetTransaction = "SET TRANSACTION";
 
     /// <summary>A <c>COMMIT</c> transaction-control statement.</summary>
     public const string Commit = "COMMIT";

@@ -24,4 +24,11 @@
   <data name="TransactionManagerClaimEndFailure3" xml:space="preserve"><value>Transaction {0} is already ending: its commit or rollback is running.</value></data>
   <data name="TransactionSnapshotArgument" xml:space="preserve"><value>Snapshot minimum cannot exceed its maximum.</value></data>
   <data name="LogUnconfirmedMessageFailure" xml:space="preserve"><value>Transaction {0} committed in this process, but its commit record could not be made durable, so its outcome is unknown: the failed flush took the storage offline, and nothing more is written to it. Reopen the database; its recovery keeps the commit if the record reached stable storage and discards it if not.</value></data>
+  <data name="IsolationStatementView" xml:space="preserve"><value>A statement view cannot configure transaction isolation; pass the current transaction context.</value></data>
+  <data name="IsolationSnapshotPin" xml:space="preserve"><value>A snapshot pin cannot configure transaction isolation; pass the current transaction context.</value></data>
+  <data name="IsolationContextUntracked" xml:space="preserve"><value>The transaction context is untracked by this manager.</value></data>
+  <data name="IsolationHandleStale" xml:space="preserve"><value>The transaction handle is stale; pass the current replacement context.</value></data>
+  <data name="IsolationStatementRunning" xml:space="preserve"><value>A statement apply is running; transaction isolation cannot change.</value></data>
+  <data name="IsolationTransactionEnding" xml:space="preserve"><value>The transaction is ending or has ended; isolation cannot change.</value></data>
+  <data name="IsolationBeginPinRequired" xml:space="preserve"><value>Restoring fixed begin visibility from READ COMMITTED requires an active begin-time snapshot pin.</value></data>
 </root>

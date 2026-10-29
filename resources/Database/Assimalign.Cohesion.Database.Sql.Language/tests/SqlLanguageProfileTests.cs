@@ -82,6 +82,8 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Cascade, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE CASCADE);")]
     [InlineData(SqlClauses.Restrict, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE RESTRICT);")]
     [InlineData(SqlClauses.Begin, "BEGIN;")]
+    [InlineData(SqlClauses.IsolationLevel, "BEGIN ISOLATION LEVEL READ COMMITTED;")]
+    [InlineData(SqlClauses.SetTransaction, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")]
     [InlineData(SqlClauses.Begin, "START TRANSACTION;")]
     [InlineData(SqlClauses.Begin, "BEGIN WORK;")]
     [InlineData(SqlClauses.Commit, "COMMIT;")]

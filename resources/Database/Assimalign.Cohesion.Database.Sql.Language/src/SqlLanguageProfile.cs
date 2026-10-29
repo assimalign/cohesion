@@ -154,6 +154,8 @@ public static class SqlLanguageProfile
         SqlClauses.SetDefault,
         SqlClauses.NoAction,
         SqlClauses.Begin,
+        SqlClauses.IsolationLevel,
+        SqlClauses.SetTransaction,
         SqlClauses.Commit,
         SqlClauses.Rollback,
         SqlClauses.Transaction,

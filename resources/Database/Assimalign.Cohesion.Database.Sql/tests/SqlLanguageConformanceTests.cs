@@ -252,7 +252,8 @@ public sealed class SqlLanguageConformanceTests
         // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
         // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
         // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(80);
+        // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(82);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -1229,6 +1230,22 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.Begin] = new("BEGIN;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin }, VerifyBeginAsync),
+        [SqlClauses.IsolationLevel] = new("BEGIN ISOLATION LEVEL READ COMMITTED;", _seed,
+            expression => expression is SqlTransactionExpression { IsolationLevels.Count: 1 },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                session.CurrentTransaction.ShouldNotBeNull().IsolationLevel.ShouldBe(IsolationLevel.ReadCommitted);
+                await ExecuteAsync(session, "ROLLBACK;");
+            }),
+        [SqlClauses.SetTransaction] = new("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;", [.. _seed, "BEGIN ISOLATION LEVEL READ COMMITTED;"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.SetTransaction },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                session.CurrentTransaction.ShouldNotBeNull().IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
+                await ExecuteAsync(session, "COMMIT;");
+            }),
         [SqlClauses.DiscardAll] = new("DISCARD ALL;", ["CREATE SEQUENCE seq;", "SELECT nextval('seq');"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Discard },
             async (session, result) =>

@@ -44,6 +44,7 @@
   <data name="SqlQueryParserParseCoreDiagnostic2" xml:space="preserve"><value>Unsupported or unknown SQL command.</value></data>
   <data name="SqlQueryParserParseCoreDiagnostic3" xml:space="preserve"><value>Statement does not end with ';'.</value></data>
   <data name="SqlQueryParserParseTransactionVoid" xml:space="preserve"><value>Expected the end of the transaction-control statement.</value></data>
+  <data name="TransactionIsolationSyntax" xml:space="preserve"><value>Expected ISOLATION LEVEL READ COMMITTED, READ UNCOMMITTED, REPEATABLE READ or SERIALIZABLE.</value></data>
   <data name="QueryParserAddExpectedDiagnosticVoid" xml:space="preserve"><value>Expected {0} before the end of the statement.</value></data>
   <data name="QueryParserAddExpectedDiagnosticVoid2" xml:space="preserve"><value>Expected {0} but found {1}.</value></data>
   <data name="SqlQueryParserRejectLexicalErrorsVoid" xml:space="preserve"><value>Unterminated string literal: the closing ' is missing, so the literal runs to the end of the text.</value></data>

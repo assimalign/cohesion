@@ -82,7 +82,7 @@ public sealed class SqlTransactionControlTests
         harness.Server.Sessions.ShouldAllBe(session => session.DatabaseSession!.CurrentTransaction == null);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Wire transactions: malformed START returns CS00003 without opening a transaction and the connection recovers")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Wire transactions: malformed isolation returns CS00012 without opening a transaction and the connection recovers")]
     public async Task ExecuteAsync_WireMalformedStartTransaction_ShouldReportParseFailureAndKeepConnectionUsable()
     {
         // Arrange
@@ -93,13 +93,13 @@ public sealed class SqlTransactionControlTests
 
         // Act
         await client.SendAsync(ProtocolMessageType.Execute,
-            ProtocolExecuteMessage.Create("START TRANSACTION ISOLATION LEVEL SERIALIZABLE").Encode());
+            ProtocolExecuteMessage.Create("START TRANSACTION ISOLATION LEVEL READ").Encode());
         var frame = await client.ExpectAsync(ProtocolMessageType.Error);
         var error = ProtocolErrorMessage.Decode(frame.Payload.Span);
 
         // Assert
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Message.ShouldContain("CS00003", Case.Sensitive);
+        error.Message.ShouldContain("CS00012", Case.Sensitive);
         session.CurrentTransaction.ShouldBeNull();
         (await CountAsync(client)).ShouldBe(2);
         session.CurrentTransaction.ShouldBeNull();

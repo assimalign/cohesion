@@ -86,8 +86,11 @@ public sealed class SqlReadCommittedSnapshotPinTests
         // and the transaction, still active, did not hold it after that.
         rows.ShouldBe(["1,1", "2,2", "3,3"]);
         prunedWhileWaiting.ShouldBe(0);
-        openWhileWaiting.ShouldBe(openBefore + 1);
-        openAfter.ShouldBe(openBefore - 2);
+        // #1012's early-configuration pin ends on data admission and is replaced by
+        // the statement pin. Both must be gone after the statement, along with writer/blocker.
+        openBefore.ShouldBe(4);
+        openWhileWaiting.ShouldBe(openBefore);
+        openAfter.ShouldBe(openBefore - 3);
         // #1195 adds the dead index entry to the total only when the index exists.
         // Observe record and physical-index reclamation independently as well.
         retainedRecordsBefore.ShouldBe(1);
@@ -203,9 +206,12 @@ public sealed class SqlReadCommittedSnapshotPinTests
 
         // Assert: one pin while a read-committed statement ran, none after it, whatever ended it;
         // a failed statement left the transaction usable.
-        openWhileWaiting.ShouldBe(isolationLevel == IsolationLevel.ReadCommitted ? openBefore + 1 : openBefore);
+        // Data admission ends #1012's configuration pin. READ COMMITTED then takes its
+        // statement pin; Snapshot needs no second horizon. Neither pin may survive the statement.
+        openBefore.ShouldBe(3);
+        openWhileWaiting.ShouldBe(isolationLevel == IsolationLevel.ReadCommitted ? openBefore : openBefore - 1);
         int blockerEnded = outcome == "canceled" ? 0 : 1;
-        openAfter.ShouldBe(openBefore - blockerEnded);
+        openAfter.ShouldBe(openBefore - blockerEnded - 1);
         switch (outcome)
         {
             case "completes":

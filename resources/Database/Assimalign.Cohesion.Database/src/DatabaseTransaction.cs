@@ -54,7 +54,7 @@ namespace Assimalign.Cohesion.Database;
 /// and rollback with its own exception translation (<see cref="CommitCoreAsync"/>,
 /// <see cref="RollbackCoreAsync"/>), its offline refusal and its coded aborted error. The leaves
 /// live in the model assemblies, so the constructor is <c>protected</c>; the identity and
-/// isolation level are fixed by it (concrete-types plan, phase 3, #1259; §6.4).
+/// initial isolation level are supplied by it (concrete-types plan, phase 3, #1259; §6.4).
 /// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
@@ -66,7 +66,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     private const string sessionClosedCause = "SessionClosed";
 
     private readonly TransactionId _id;
-    private readonly IsolationLevel _isolationLevel;
+    private IsolationLevel _isolationLevel;
     private readonly object _sync = new();
 
     // Serializes every path that ends the kernel transaction (commit, rollback, dispose, abort,
@@ -103,10 +103,31 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     public TransactionId Id => _id;
 
     /// <summary>
-    /// Gets the isolation level the transaction was begun at. An engine may execute at a stronger
+    /// Gets the effective isolation level, including an admitted early configuration. An engine may execute at a stronger
     /// level than requested, never weaker.
     /// </summary>
     public IsolationLevel IsolationLevel => _isolationLevel;
+
+    /// <summary>Changes the isolation of an unused transaction while excluding operation admission and transaction ends.</summary>
+    /// <param name="isolationLevel">The effective isolation level after configuration.</param>
+    /// <param name="configure">Replaces the model's context synchronously without waiting on engine locks; false refuses the change.</param>
+    /// <returns>True if configuration completed; false if the model refuses, the transaction is ending or operations are running.</returns>
+    /// <exception cref="ArgumentNullException">The configuration action is null.</exception>
+    // Deviates from the repo database-area.md rule 6 (state fixed at construction) per design decision: SQL SET TRANSACTION may change the isolation level before the first data statement (#1012); pending owner sign-off.
+    protected bool TryConfigureIsolationLevel(IsolationLevel isolationLevel, Func<bool> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+        lock (_sync)
+        {
+            // Lock order: root transaction state -> manager registration -> context end latch.
+            // The coordinator's tracking lock follows manager release. No storage/page latch or
+            // lock-manager grant is acquired here. End cores run after releasing root state.
+            if (!IsUsableLocked || _operations != 0) { return false; }
+            if (!configure()) { return false; }
+            _isolationLevel = isolationLevel;
+            return true;
+        }
+    }
 
     /// <summary>
     /// Gets the state of the transaction: the kernel transaction's state once the caller ended it,
