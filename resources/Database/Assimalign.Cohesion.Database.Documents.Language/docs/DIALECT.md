@@ -265,8 +265,9 @@ DELETE projects the pre-image and its old metadata. UPDATE projects the stored p
 INSERT/UPSERT project the stored post-image and newly allocated durable version. The target
 alias, or collection name when no alias is supplied, binds that image, including META().id
 and META([binding]).version. INSERT/UPSERT SELECT source bindings do not escape into RETURNING.
-Scalar functions, parameters, predicates, CASE and constructors are accepted; aggregates and
-subqueries remain unavailable here. Parameters and expression contexts are checked even for
+Scalar functions, parameters, predicates, CASE, constructors and subqueries are accepted;
+aggregates remain unavailable here. RETURNING subqueries read the statement-start snapshot,
+staged before the writes (#1731). Parameters and expression contexts are checked even for
 zero affected documents. A directly constructed AST with an empty RETURNING output name gives
 CD01026 before mutation (empty quoted labels in text retain CD00002). EXPLAIN validates RETURNING and describes Returning/ReturningValue
 without reading documents, invoking projection callbacks or performing writes.

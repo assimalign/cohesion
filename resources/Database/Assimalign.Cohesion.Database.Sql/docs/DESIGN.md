@@ -3702,11 +3702,12 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
 
 ## UPDATE final foreign-key state (#1667)
 
-Multi-row UPDATE and ON CONFLICT share BuildConstraintUpdates: outgoing and incoming
-NO ACTION/RESTRICT probes exclude old replaced heap versions and contribute every final
+Multi-row UPDATE and ON CONFLICT share BuildConstraintUpdates: outgoing probes and incoming
+NO ACTION probes exclude old replaced heap versions and contribute every final
 replacement. A removed parent key cannot authorize a new child; a self-reference can move
 with its key, and mutually referenced keys can swap if the final state is consistent.
-Incoming checks permit an old key retained by another replacement. UPDATE tombstones all
+Incoming NO ACTION checks permit an old key retained by another replacement; incoming
+RESTRICT checks run immediately against existing children and accept no substitute (#1723). UPDATE tombstones all
 replaced row/index versions before inserting any new versions in the same rollback bracket,
 so unique entries also validate the final state during a swap. Snapshot and ReadCommitted
 use the same pending view. Wire regressions select isolation via the existing server-session
