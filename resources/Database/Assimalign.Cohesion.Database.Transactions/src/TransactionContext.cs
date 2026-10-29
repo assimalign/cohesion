@@ -1,5 +1,7 @@
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Transactions.Internal;
+
 namespace Assimalign.Cohesion.Database.Transactions;
 
 /// <summary>
@@ -67,6 +69,7 @@ public sealed class TransactionContext
     private TransactionState _state;
     private int _applying;
     private bool _ending;
+    private bool _partialUndoPending;
     private TaskCompletionSource? _drained;
 
     internal TransactionContext(
@@ -117,6 +120,36 @@ public sealed class TransactionContext
     internal bool IsSnapshotPin => (_kind & snapshotPinFlag) != 0;
 
     internal TransactionSnapshot BeginSnapshot => _beginSnapshot;
+
+    internal bool PartialUndoPending
+    {
+        get
+        {
+            if (_transaction is not null) { return _transaction.PartialUndoPending; }
+            lock (_endSync) { return _partialUndoPending; }
+        }
+    }
+
+    // Called under the manager lock and the coordinator apply gate. The apply count makes
+    // rollback/disposal drain this operation. Commit checks the pending flag under the same
+    // manager lock before claiming the end, so it cannot publish half an undone suffix.
+    internal bool TryEnterPartialUndo()
+    {
+        if (_transaction is not null) { return _transaction.TryEnterPartialUndo(); }
+        lock (_endSync)
+        {
+            if (_ending || _applying != 0 || State != TransactionState.Active) { return false; }
+            _partialUndoPending = true;
+            _applying++;
+            return true;
+        }
+    }
+
+    internal void CompletePartialUndo()
+    {
+        if (_transaction is not null) { _transaction.CompletePartialUndo(); return; }
+        lock (_endSync) { _partialUndoPending = false; }
+    }
 
     /// <summary>
     /// Gets the external identity of the transaction.
@@ -194,6 +227,8 @@ public sealed class TransactionContext
             { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
             if (owner._applying != 0)
             { throw new TransactionAbortedException(ErrorMessages.IsolationStatementRunning); }
+            if (owner._partialUndoPending)
+            { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
             return new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
         }
     }
@@ -238,7 +273,7 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
-            if (_ending || State != TransactionState.Active)
+            if (_ending || _partialUndoPending || State != TransactionState.Active)
             {
                 return false;
             }

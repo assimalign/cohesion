@@ -23,6 +23,70 @@ move neither the transaction gauge nor the rates.
 
 One transaction substrate for five engines. ACID is the platform's defining requirement (area `DESIGN.md` R1), so the machinery that provides it — MVCC snapshots, commit ordering, locking, WAL binding — lives in a kernel project no model owns. Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction` from the contract root.
 
+## In-memory undo markers (#1726, XT-2)
+
+The coordinator's internal `CreateUndoMarkerAsync`, `ReleaseUndoMarkerAsync` and
+`RollbackToUndoMarkerAsync` are the substrate for later named scopes. No language or public
+savepoint API is added. An opaque marker records a position in the combined ordered ledger of
+row creates, row tombstones, index creates and index tombstones. Maintenance implemented through
+those index undo adapters participates in the same ordering; model-owned ledgers still require
+XT-3's adapters. Distinct markers at the same position remain distinct scopes. Release discards
+the target and its descendants while retaining their effects. Rollback discards descendants,
+undoes the suffix in reverse order and retains the target for reuse. Earlier same-writer
+tombstones survive repeated deletion records: undo builds a set from the retained prefix,
+comparing index keys by bytes and adapters by identity/equality. Model adapters must reuse one
+identity per logical index, or supply equivalent equality (XT-3). This follows PostgreSQL's
+release-to-target and rollback/restart semantics (`src/backend/access/transam/xact.c:4595-4607,
+4707-4733`, rechecked locally); name resolution belongs to XT-4.
+
+All controls acquire the coordinator apply gate, then manager registration lock, then the
+context end latch. The monitors are released before storage or index work. The version-store
+monitor follows the apply gate and never spans storage/page/index latches. Index undo must not
+wait for a model lock inside this gate. An admitted undo increments the existing apply count,
+so root rollback and disposal drain it before undoing the prefix or releasing locks. Commit
+cannot claim the end while partial undo is pending. Other transactions continue to exclude the
+root writer throughout every physical batch: its creates are invisible and its tombstones do
+not hide older committed records. Its registration and snapshot horizons remain in place,
+including across checkpoints and concurrent purge. Same-transaction operations are serialized
+by the session; they must not read or mutate concurrently with a control.
+
+Undo uses at most 64 ledger effects per physical bracket. A completed bracket is removed from
+the ledger only after commit; a failed bracket restores its own pages and leaves that suffix
+available for retry. The root stays Active but refuses writes, marker creation/release,
+isolation replacement and commit after incomplete undo. It admits only retry of that same
+target or whole-transaction rollback/disposal. Storage faults retain the existing offline
+rule. Cancellation is observed while waiting for admission and immediately before undo starts;
+after admission it cannot interrupt undo. Locks taken after the marker remain held until root
+transaction end in XT-2; lock rollback/upgrades belong to XT-3.
+
+Markers allocate only on use. Each statement captures its ledger position without allocating;
+after physical statement rollback its failed suffix is discarded, including before the first
+marker, so stale same-writer slot references cannot affect a later scope. Root completion
+removes marker state. Marker controls alone neither enroll a read-only writer nor append any
+lifecycle record. The context's pending bit shares the existing scalar padding; no per-context
+object, delegate or collection is added to transactions that never set a marker.
+
+Markers have no durable identities. Partial undo uses the existing physical WAL operations and
+root-writer stamps. A later root commit makes the remaining prefix and preceding undo durable
+in journal order; without a root commit, recovery scrubs every remaining effect of that writer,
+including after a crash mid-undo or checkpoint truncation. The owner-required storage-format
+fence moves from 4 to 5; record layout and journal frame format 4 do not change. Earlier storage
+files are refused through CK06001 without an upgrade path.
+
+The internal structured `TransactionUndoException.Code` carries these substrate conditions
+separately from its resource-backed message:
+
+| Code | Condition |
+|---|---|
+| CK04008 | Foreign, released, discarded or ended marker; foreign/stale context, statement view or snapshot pin |
+| CK04009 | Partial undo is running/incomplete, or control admission finds the transaction ending |
+
+Tests use real slotted pages/WAL and a record-backed index undo adapter under all five storage
+model tags. They cover nested scopes, statement failure and slot reuse, cancellation, retry,
+root rollback/disposal drain, retained locks, read-only markers, crash after undo with/without
+commit, every whole/torn physical write during multi-batch undo, and reader/purge overlap driven
+by progress counters. Actual model-specific ledger integration remains XT-3's scope.
+
 ## Why MVCC (and not lock-based isolation)
 
 Readers never block writers and writers never block readers — the OLTP profile all five models share. Locking is retained only where MVCC cannot arbitrate: write-write conflicts, in `LockManager`, with intent modes so object-level operations (drop table, reindex) coexist with entry-level writes.
@@ -1488,7 +1552,7 @@ arms the `LockWaitBlocked` timer only while a listener takes the source's warnin
 
 - No distributed transactions / two-phase commit — single-node ACID first.
 - No lock escalation policy in the contract — an implementation concern.
-- No savepoints in the MVP surface — add to `TransactionContext` when a model needs them.
+- No named savepoint or language surface yet; the internal undo-marker substrate is delivered in XT-2.
 
 ## AOT posture
 

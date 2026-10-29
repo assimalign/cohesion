@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 /// <summary>
 /// Tracks physical record and index effects over a record space whose versions
@@ -28,6 +29,121 @@ public sealed class RecordSpaceVersionStore : VersionStore
     private readonly List<PrunableVersion> _prunable = new();
     private readonly HashSet<ulong> _pendingAbortedPurges = new();
     private readonly object _sync = new();
+    private Dictionary<ulong, UndoScopes>? _undoScopes;
+
+    // These seams require the coordinator's apply gate. The gate precedes _sync, and _sync
+    // is released before storage/page/index latches or callbacks. No model lock is acquired
+    // here. Other transactions ignore this active writer's creates and tombstones throughout
+    // every batch; its manager registration keeps their horizons and pruning fences intact.
+    internal TransactionUndoMarker CreateMarker(TransactionSequence writer)
+    {
+        lock (_sync)
+        {
+            _undoScopes ??= new();
+            if (!_undoScopes.TryGetValue(writer.Value, out var scopes))
+            {
+                scopes = new UndoScopes();
+                _undoScopes.Add(writer.Value, scopes);
+            }
+            var marker = new TransactionUndoMarker(LedgerPosition(writer));
+            scopes.Markers.Add(marker);
+            return marker;
+        }
+    }
+
+    internal void ValidateMarker(TransactionSequence writer, TransactionUndoMarker marker)
+    {
+        lock (_sync)
+        {
+            if (_undoScopes is null || !_undoScopes.TryGetValue(writer.Value, out var scopes) ||
+                !scopes.Markers.Contains(marker))
+            { throw new TransactionUndoException("CK04008", ErrorMessages.UndoMarkerInvalid); }
+            if (scopes.Pending is not null && !ReferenceEquals(scopes.Pending, marker))
+            { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
+        }
+    }
+
+    internal void ReleaseMarker(TransactionSequence writer, TransactionUndoMarker marker)
+    {
+        lock (_sync)
+        {
+            ValidateMarker(writer, marker);
+            var scopes = _undoScopes![writer.Value];
+            int index = scopes.Markers.IndexOf(marker);
+            scopes.Markers.RemoveRange(index, scopes.Markers.Count - index);
+            if (scopes.Markers.Count == 0) { _undoScopes.Remove(writer.Value); }
+        }
+    }
+
+    // A failed statement physically restores its bracket and must forget its ledger suffix:
+    // later same-writer slot reuse must not turn stale entries into undo of unrelated work.
+    // Capture even before the first marker; no allocation is added to the never-marked path.
+    internal int CaptureStatementPosition(TransactionSequence writer)
+    {
+        lock (_sync) { return LedgerPosition(writer); }
+    }
+
+    internal void DiscardStatementSuffix(TransactionSequence writer, int position)
+    {
+        lock (_sync)
+        {
+            if (_ledger.TryGetValue(writer.Value, out var entries))
+            { entries.RemoveRange(position, entries.Count - position); }
+        }
+    }
+
+    private int LedgerPosition(TransactionSequence writer)
+        => _ledger.TryGetValue(writer.Value, out var entries) ? entries.Count : 0;
+
+    internal async ValueTask RollbackToMarkerUnderGateAsync(TransactionSequence writer, TransactionUndoMarker marker)
+    {
+        List<LedgerEntry>? entries;
+        HashSet<LedgerEntry>? earlierTombstones = null;
+        lock (_sync)
+        {
+            ValidateMarker(writer, marker);
+            var scopes = _undoScopes![writer.Value];
+            scopes.Pending = marker;
+            int index = scopes.Markers.IndexOf(marker) + 1;
+            scopes.Markers.RemoveRange(index, scopes.Markers.Count - index);
+            _ledger.TryGetValue(writer.Value, out entries);
+            if (entries is not null)
+            {
+                for (int prefix = 0; prefix < marker.Position; prefix++)
+                {
+                    var entry = entries[prefix];
+                    if (entry.Kind is LedgerEntryKind.Tombstoned or LedgerEntryKind.IndexEntryTombstoned)
+                    {
+                        earlierTombstones ??= new HashSet<LedgerEntry>(TombstoneComparer.Instance);
+                        earlierTombstones.Add(entry);
+                    }
+                }
+            }
+        }
+
+        // Reverse the combined row/index/maintenance order. Only remove a batch from the
+        // ledger after its physical commit; an exception rolls its bracket back and retains
+        // exactly the outstanding suffix for retry or whole-transaction abort. Bounded
+        // brackets use ordinary WAL operations with the existing root-writer stamps.
+        while (entries is not null && entries.Count > marker.Position)
+        {
+            int end = entries.Count;
+            int start = Math.Max(marker.Position, end - mutationBatchSize);
+            using var bracket = _storage.BeginTransaction();
+            for (int index = end - 1; index >= start; index--)
+            {
+                // A repeated same-writer delete can record a no-op. Its pre-marker tombstone
+                // must survive. Compare encoded key bytes by value and adapters by identity
+                // (or their equality contract); adapters for one logical index must be stable.
+                if (earlierTombstones?.Contains(entries[index]) == true) { continue; }
+                await UndoEntryAsync(writer, entries[index], bracket, CancellationToken.None).ConfigureAwait(false);
+            }
+            bracket.Commit(awaitDurability: false);
+            lock (_sync) { entries.RemoveRange(start, end - start); }
+        }
+
+        lock (_sync) { _undoScopes![writer.Value].Pending = null; }
+    }
 
     internal RecordSpaceVersionStore(Storage storage, TransactionRecordSpace records, SemaphoreSlim applyGate)
     {
@@ -100,7 +216,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     /// physically erases the aborted writer's entries from the index too.
     /// </summary>
     /// <param name="writer">The transaction creating the index entry.</param>
-    /// <param name="index">The index's stamp-verified undo adapter.</param>
+    /// <param name="index">The index's stamp-verified undo adapter; reuse a stable identity or equality for each logical index while markers are live.</param>
     /// <param name="key">The encoded key; a private copy is retained for undo.</param>
     /// <param name="entryReference">The index entry's record reference.</param>
     public void RecordIndexEntryCreated(TransactionSequence writer, RecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
@@ -112,7 +228,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     /// rollback restores the entry's deleter stamp.
     /// </summary>
     /// <param name="writer">The transaction tombstoning the index entry.</param>
-    /// <param name="index">The index's stamp-verified undo adapter.</param>
+    /// <param name="index">The index's stamp-verified undo adapter; reuse a stable identity or equality for each logical index while markers are live.</param>
     /// <param name="key">The encoded key; a private copy is retained for undo.</param>
     /// <param name="entryReference">The index entry's record reference.</param>
     public void RecordIndexEntryTombstoned(TransactionSequence writer, RecordVersionIndex index, ReadOnlyMemory<byte> key, ulong entryReference)
@@ -127,6 +243,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     {
         lock (_sync)
         {
+            _undoScopes?.Remove(writer.Value);
             if (!_ledger.Remove(writer.Value, out var entries))
             {
                 return;
@@ -285,6 +402,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
         lock (_sync)
         {
+            _undoScopes?.Remove(writer.Value);
             // Only a writer with a ledger can have tombstones to forget, and a transaction that wrote
             // nothing (a read-committed statement's snapshot pin, #1363) must not pay a scan of every
             // committed tombstone the purge has not reclaimed yet. Committed writers alone enter the
@@ -449,43 +567,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 int end = Math.Min(offset + mutationBatchSize, entries.Count);
                 for (int index = offset; index < end; index++)
                 {
-                    var entry = entries[index];
-                    var (pageId, slotIndex) = _records.UnpackLocation(entry.Location);
-
-                    switch (entry.Kind)
-                    {
-                        case LedgerEntryKind.Created:
-                            if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _) && createdWriter == writer)
-                            {
-                                _records.Delete(bracket, pageId, slotIndex);
-                                removed++;
-                            }
-
-                            break;
-
-                        case LedgerEntryKind.Tombstoned:
-                            if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter == writer)
-                            {
-                                var record = _records.Read(pageId, slotIndex);
-                                _records.Update(bracket, pageId, slotIndex, RecordVersionStamp.WithoutDeleter(record.Span));
-                                removed++;
-                            }
-
-                            break;
-
-                        case LedgerEntryKind.IndexEntryCreated:
-                            // Physical erase of the aborted insert's entry: both index
-                            // ops verify the recorded stamp before acting, so a stale
-                            // ledger entry is a no-op, never a misdelete.
-                            await entry.Index!.EraseAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
-                            removed++;
-                            break;
-
-                        case LedgerEntryKind.IndexEntryTombstoned:
-                            await entry.Index!.ClearDeleterAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
-                            removed++;
-                            break;
-                    }
+                    removed += await UndoEntryAsync(writer, entries[index], bracket, cancellationToken).ConfigureAwait(false);
                 }
 
                 // Undo remains idempotent across batches: every mutation checks
@@ -498,6 +580,51 @@ public sealed class RecordSpaceVersionStore : VersionStore
             _applyGate.Release();
         }
 
+        return removed;
+    }
+
+    private async ValueTask<long> UndoEntryAsync(TransactionSequence writer, LedgerEntry entry,
+        StorageTransaction bracket, CancellationToken cancellationToken)
+    {
+        long removed = 0;
+        // Index references belong to the index adapter and need not be row locations.
+        var (pageId, slotIndex) = entry.Kind is LedgerEntryKind.Created or LedgerEntryKind.Tombstoned
+            ? _records.UnpackLocation(entry.Location) : default;
+
+        switch (entry.Kind)
+        {
+            case LedgerEntryKind.Created:
+                if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _) && createdWriter == writer)
+                {
+                    _records.Delete(bracket, pageId, slotIndex);
+                    removed++;
+                }
+
+                break;
+
+            case LedgerEntryKind.Tombstoned:
+                if (TryReadStamps(pageId, slotIndex, out _, out var deleter) && deleter == writer)
+                {
+                    var record = _records.Read(pageId, slotIndex);
+                    _records.Update(bracket, pageId, slotIndex, RecordVersionStamp.WithoutDeleter(record.Span));
+                    removed++;
+                }
+
+                break;
+
+            case LedgerEntryKind.IndexEntryCreated:
+                // Physical erase of the aborted insert's entry: both index
+                // ops verify the recorded stamp before acting, so a stale
+                // ledger entry is a no-op, never a misdelete.
+                await entry.Index!.EraseAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
+                removed++;
+                break;
+
+            case LedgerEntryKind.IndexEntryTombstoned:
+                await entry.Index!.ClearDeleterAsync(bracket, entry.Key, entry.Location, writer, cancellationToken).ConfigureAwait(false);
+                removed++;
+                break;
+        }
         return removed;
     }
 
@@ -552,6 +679,38 @@ public sealed class RecordSpaceVersionStore : VersionStore
     private static StorageCorruptionException ShortRecord(PageId pageId, int slotIndex, int length)
         => new(pageId, slotIndex, string.Format(System.Globalization.CultureInfo.CurrentCulture,
             ErrorMessages.VersionRecordTooShort, length, RecordVersionStamp.HeaderSize));
+
+    private sealed class TombstoneComparer : IEqualityComparer<LedgerEntry>
+    {
+        internal static readonly TombstoneComparer Instance = new();
+
+        public bool Equals(LedgerEntry left, LedgerEntry right)
+            => left.Kind == right.Kind && left.Location == right.Location && Equals(left.Index, right.Index)
+                && left.Key.AsSpan().SequenceEqual(right.Key);
+
+        public int GetHashCode(LedgerEntry entry)
+        {
+            var hash = new HashCode();
+            hash.Add(entry.Kind);
+            hash.Add(entry.Location);
+            hash.Add(entry.Index);
+            hash.AddBytes(entry.Key);
+            return hash.ToHashCode();
+        }
+    }
+
+    [System.Diagnostics.DebuggerDisplay("UndoScopes")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(UndoScopes.DebugView))]
+    private sealed class UndoScopes
+    {
+        internal List<TransactionUndoMarker> Markers { get; } = new();
+        internal TransactionUndoMarker? Pending { get; set; }
+
+        private sealed class DebugView
+        {
+            public DebugView(UndoScopes scopes) { _ = scopes; }
+        }
+    }
 
     private enum LedgerEntryKind : byte
     {
