@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 
@@ -63,6 +64,26 @@ public class GatewayDeploymentManifestTests
             "\"outputs\":[{\"output\":{\"gateway\":\"root\",\"provider\":\"IdentityHub\",\"name\":\"identity\",\"output\":\"endpoint\"},\"value\":\"http://identity.root.svc\"}]",
             Case.Sensitive);
         model.Outputs.ShouldHaveSingleItem().ShouldBe(value);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A resource's platform extensions travel as JSON values")]
+    public void ToUtf8Json_WithExtension_ShouldCarryItsValueAsJson()
+    {
+        // Arrange
+        using JsonDocument autoscaler = JsonDocument.Parse("""{"maxReplicas":5}""");
+        ApplicationBuilder builder = Application.CreateBuilder("root", []);
+        builder.AddGateway("east").AddResource("Web", "orders-api").WithExtension("kubernetes", "autoscaler", autoscaler.RootElement);
+        var manifest = new GatewayDeploymentManifest("east", builder.Build().Model.Manifest, null, null);
+
+        // Act
+        byte[] json = manifest.ToUtf8Json();
+        ApplicationModel model = GatewayDeploymentManifest.Parse(json).ToModel();
+
+        // Assert
+        Encoding.UTF8.GetString(json).ShouldContain(
+            "\"extensions\":[{\"platform\":\"kubernetes\",\"name\":\"autoscaler\",\"value\":{\"maxReplicas\":5}}]",
+            Case.Sensitive);
+        model.Deployment.Resources.Single().Extensions.Single().Value.GetProperty("maxReplicas").GetInt32().ShouldBe(5);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A manifest for a gateway the hierarchy does not declare is refused")]

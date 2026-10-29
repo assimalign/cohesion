@@ -14,6 +14,13 @@
   <data name="OutputNameMissing" xml:space="preserve"><value>An output name is required; a default output name is not one.</value></data>
   <data name="SettingNameInvalid" xml:space="preserve"><value>A setting name is colon-separated segments of ASCII letters, digits, underscores, hyphens, and periods, at most 256 characters.</value></data>
   <data name="SettingNameMissing" xml:space="preserve"><value>A setting name is required; a default setting name is not one.</value></data>
+  <data name="PlatformNameInvalid" xml:space="preserve"><value>A platform name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="PlatformNameMissing" xml:space="preserve"><value>A platform name is required; a default platform name is not one.</value></data>
+  <data name="ExtensionNameInvalid" xml:space="preserve"><value>An extension name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ExtensionNameMissing" xml:space="preserve"><value>An extension name is required; a default extension name is not one.</value></data>
+  <data name="ExtensionValueMissing" xml:space="preserve"><value>An extension needs a JSON value; a default JsonElement is not one.</value></data>
+  <data name="ApplicationExtensionValueMissing" xml:space="preserve"><value>Extension '{0}' for platform '{1}' of resource '{2}/{3}' in gateway '{4}' has no JSON value.</value></data>
+  <data name="ApplicationExtensionDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' declares extension '{3}' for platform '{4}' more than once.</value></data>
   <data name="ApplicationSettingOutputSelf" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' cannot use the resource's own output '{3}': a resource's outputs exist only once it is deployed.</value></data>
   <data name="ApplicationSettingOutputUnknown" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' uses an output of '{3}/{4}' in gateway '{5}', which this hierarchy does not declare.</value></data>
   <data name="ApplicationSettingValueMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' must have exactly one of a value and an output.</value></data>
@@ -40,7 +47,7 @@
   <data name="ApplicationGatewayAlreadySet" xml:space="preserve"><value>The application builder already has a gateway.</value></data>
   <data name="ApplicationGatewayMissing" xml:space="preserve"><value>The application has no gateway to run it; call UseGateway before Build.</value></data>
   <data name="ApplicationAlreadyRun" xml:space="preserve"><value>The application has already been run.</value></data>
-  <data name="ApplicationManifestListMissing" xml:space="preserve"><value>The manifest of gateway '{0}' is missing a resource, gateway, dependency, or setting list.</value></data>
+  <data name="ApplicationManifestListMissing" xml:space="preserve"><value>The manifest of gateway '{0}' is missing a resource, gateway, dependency, setting, or extension list.</value></data>
   <data name="ApplicationManifestEntryNull" xml:space="preserve"><value>The manifest of gateway '{0}' contains a null entry.</value></data>
   <data name="ApplicationDependencyUnknown" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' depends on '{3}/{4}' in gateway '{5}', which the manifest does not declare.</value></data>
   <data name="ApplicationDependencyDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' declares its dependency on '{3}/{4}' in gateway '{5}' more than once.</value></data>

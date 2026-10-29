@@ -168,7 +168,7 @@ public class ApplicationResourceSettingTests
         var output = new ApplicationResourceOutput("root", "Database.Sql", "orders-db", OutputName.Endpoint);
         var manifest = new ApplicationManifest(
             "root",
-            [new("Database.Sql", "orders-db", [], []), new("Web", "orders-api", [], [new ApplicationResourceSetting("Database:Endpoint", null, output)])],
+            [new("Database.Sql", "orders-db", [], [], []), new("Web", "orders-api", [], [new ApplicationResourceSetting("Database:Endpoint", null, output)], [])],
             []);
 
         // Act
@@ -184,11 +184,11 @@ public class ApplicationResourceSettingTests
         // Arrange
         var output = new ApplicationResourceOutput("root", "Database.Sql", "orders-db", OutputName.Endpoint);
         var dependency = new ApplicationResourceDependency("root", "Database.Sql", "orders-db", []);
-        ApplicationResourceManifest database = new("Database.Sql", "orders-db", [], []);
+        ApplicationResourceManifest database = new("Database.Sql", "orders-db", [], [], []);
 
         ApplicationManifest With(params ApplicationResourceSetting[] settings)
         {
-            return new ApplicationManifest("root", [database, new("Web", "orders-api", [dependency], settings)], []);
+            return new ApplicationManifest("root", [database, new("Web", "orders-api", [dependency], settings, [])], []);
         }
 
         // Act & Assert

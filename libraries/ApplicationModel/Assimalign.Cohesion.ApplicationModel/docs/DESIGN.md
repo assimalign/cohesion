@@ -72,10 +72,10 @@ flowchart TB
 | `IApplicationResourceAction` | An infrastructure action on a resource, such as `scale`, executed against the platform. Same invocation and result types as a control. |
 | `IApplicationGateway` | The seam ApplicationModel.Gateway implements: `RunAsync(model)`. Deliberately minimal until chunk 3. |
 | `IApplicationSet` | One gateway's scope. The builder is the root; `AddGateway` makes a child; `AddResource` declares a resource. |
-| `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency, which also orders deployment; declaring it again adds the new permissions, and one that would close a cycle is refused. `WithSetting(name, value)` and `WithSetting(name, output)` give its instances a configuration value; the second depends on the output's resource. `Endpoint` and `Output(name)` hand out its own output placeholders. |
-| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting`, `ApplicationResourceOutputValue` | The hierarchy as data. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. An output value is an output with the value a gateway passes down. |
+| `IApplicationResourceDescriptor` | One declared resource. `DependsOn(resource, permissions)` records a dependency, which also orders deployment; declaring it again adds the new permissions, and one that would close a cycle is refused. `WithSetting(name, value)` and `WithSetting(name, output)` give its instances a configuration value; the second depends on the output's resource. `WithExtension(platform, name, json)` configures how one platform deploys it. `Endpoint` and `Output(name)` hand out its own output placeholders. |
+| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting`, `ApplicationResourceExtension`, `ApplicationResourceOutputValue` | The hierarchy as data. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. An extension has a platform, a name, and a JSON value. An output value is an output with the value a gateway passes down. |
 | `IApplicationResource`, `ApplicationResource` | A gateway's aggregate of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`. The gateway also sets its `Outputs` and clears its state when a deployment redefines it. |
-| `GatewayName`, `GatewayId`, `ResourcePermission`, `OutputName`, `SettingName` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. `SettingName` is a configuration key and compares case-insensitively. |
+| `GatewayName`, `GatewayId`, `ResourcePermission`, `OutputName`, `SettingName`, `PlatformName`, `ExtensionName` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. `SettingName` is a configuration key and compares case-insensitively. `PlatformName` names an infrastructure provider's platform, such as `kubernetes`. |
 
 ## Decisions
 
@@ -217,6 +217,24 @@ the hierarchy rules do not depend on them. *Rejected:* a child reading its paren
 run time. That needs a gateway-to-gateway channel and ties the child's start to the parent being
 reachable, while the parent already has every value when it deploys the child.
 
+**D19 — Platform extensions apply only on their platform (owner direction, 2026-10-28; built
+2026-10-29).** Some configuration belongs to one platform's deployment of a resource, not to the
+resource: a Kubernetes autoscaler, a node selector, a Docker restart policy. A platform package adds
+a verb for it, such as `ConfigureHpa`, which calls the generic `WithExtension(platform, name, json)`
+with its options serialized through its own source-generated JSON context. The model stores the
+extension as data, a platform, a name, and an opaque `JsonElement`, so the manifest still travels as
+JSON and the base model needs no platform types. The platform is the extension's apply condition: a
+gateway hands it only to an infrastructure provider of that platform, and every other provider never
+sees it (ApplicationModel.Gateway G25). One resource can therefore carry extensions for each
+platform it may run on, and the in-process gateway of a local run ignores the Kubernetes ones. A
+platform and name are unique per resource, and declaring them again replaces the value in place. The
+value is cloned, so the model never depends on a document its caller disposes. *Rejected:* typed
+extension objects held in memory. The manifest must cross to child gateways as data, and a typed
+object would make the base model reference every platform's options. *Rejected:* string key/value
+pairs like settings. Platform options are structured, such as an autoscaler's metrics, and pairs
+would flatten them into keys only the provider could reassemble. *Open:* conditions beyond the
+platform, such as a gateway or an environment (open question 8).
+
 ## Threading
 
 An application builder and its sets are composed on one thread and are not safe for concurrent
@@ -248,3 +266,10 @@ None. The library raises no events and has no event source.
    comes with the generation that fills it.
 7. **A child gateway's model — settled in chunk 3** (D14): the whole manifest plus the child's name,
    carried by a `GatewayDeploymentManifest`.
+8. **Apply conditions beyond the platform.** An extension applies on one platform (D19). A
+   condition on the gateway (only east's cluster autoscales) or on an environment (only production)
+   would need the condition as data beside the platform. Today the same resource declared in two
+   gateways can already carry different extensions, because resources are declared per gateway.
+9. **Secret settings.** A setting's value is a plain string. A secret one, such as a connection
+   string with a password, needs a marker so a provider delivers it as a platform secret rather than
+   a plain environment variable.

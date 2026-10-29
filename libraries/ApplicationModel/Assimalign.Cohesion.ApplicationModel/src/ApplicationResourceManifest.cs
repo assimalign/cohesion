@@ -13,8 +13,13 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <param name="Settings">
 /// The configuration values its instances receive with their deployment, in declaration order.
 /// </param>
+/// <param name="Extensions">
+/// The configuration of how particular platforms deploy it, each applied only on its platform, in
+/// declaration order.
+/// </param>
 public sealed record ApplicationResourceManifest(
     ProviderName Provider,
     ResourceName Name,
     IReadOnlyList<ApplicationResourceDependency> Dependencies,
-    IReadOnlyList<ApplicationResourceSetting> Settings);
+    IReadOnlyList<ApplicationResourceSetting> Settings,
+    IReadOnlyList<ApplicationResourceExtension> Extensions);

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.Json;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
@@ -16,14 +17,17 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
     private readonly List<ApplicationResourceDependency> _dependencies = [];
     private readonly List<ApplicationResourceDescriptor> _targets = [];
     private readonly List<ApplicationResourceSetting> _settings = [];
+    private readonly List<ApplicationResourceExtension> _extensions = [];
     private readonly ReadOnlyCollection<ApplicationResourceDependency> _dependenciesView;
     private readonly ReadOnlyCollection<ApplicationResourceSetting> _settingsView;
+    private readonly ReadOnlyCollection<ApplicationResourceExtension> _extensionsView;
 
     public ApplicationResourceDescriptor(ApplicationSetComposition composition, ProviderName provider, ResourceName name)
     {
         _composition = composition;
         _dependenciesView = _dependencies.AsReadOnly();
         _settingsView = _settings.AsReadOnly();
+        _extensionsView = _extensions.AsReadOnly();
         Provider = provider;
         Name = name;
     }
@@ -37,6 +41,8 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
     public IReadOnlyList<ApplicationResourceDependency> Dependencies => _dependenciesView;
 
     public IReadOnlyList<ApplicationResourceSetting> Settings => _settingsView;
+
+    public IReadOnlyList<ApplicationResourceExtension> Extensions => _extensionsView;
 
     public IApplicationResourceDescriptor DependsOn(IApplicationResourceDescriptor resource, params ResourcePermission[] permissions)
     {
@@ -147,9 +153,49 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
         return this;
     }
 
+    public IApplicationResourceDescriptor WithExtension(PlatformName platform, ExtensionName name, JsonElement value)
+    {
+        if (platform.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.PlatformNameMissing, nameof(platform));
+        }
+
+        if (name.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.ExtensionNameMissing, nameof(name));
+        }
+
+        if (value.ValueKind == JsonValueKind.Undefined)
+        {
+            throw new ArgumentException(ErrorMessages.ExtensionValueMissing, nameof(value));
+        }
+
+        _composition.Hierarchy.ThrowIfBuilt();
+
+        // A copy outlives the document the caller may dispose. A platform and name declared again
+        // keep their place and take the new value.
+        var extension = new ApplicationResourceExtension(platform, name, value.Clone());
+        for (int index = 0; index < _extensions.Count; index++)
+        {
+            if (_extensions[index].Platform == platform && _extensions[index].Name == name)
+            {
+                _extensions[index] = extension;
+                return this;
+            }
+        }
+
+        _extensions.Add(extension);
+        return this;
+    }
+
     public ApplicationResourceManifest ToManifest()
     {
-        return new ApplicationResourceManifest(Provider, Name, Array.AsReadOnly(_dependencies.ToArray()), Array.AsReadOnly(_settings.ToArray()));
+        return new ApplicationResourceManifest(
+            Provider,
+            Name,
+            Array.AsReadOnly(_dependencies.ToArray()),
+            Array.AsReadOnly(_settings.ToArray()),
+            Array.AsReadOnly(_extensions.ToArray()));
     }
 
     // A name set again keeps its place and takes the new value.
@@ -249,5 +295,7 @@ internal sealed class ApplicationResourceDescriptor : IApplicationResourceDescri
         public IReadOnlyList<ApplicationResourceDependency> Dependencies => _descriptor.Dependencies;
 
         public IReadOnlyList<ApplicationResourceSetting> Settings => _descriptor.Settings;
+
+        public IReadOnlyList<ApplicationResourceExtension> Extensions => _descriptor.Extensions;
     }
 }

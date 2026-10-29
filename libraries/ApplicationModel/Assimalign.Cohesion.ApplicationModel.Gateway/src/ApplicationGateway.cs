@@ -122,6 +122,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// </param>
     /// <returns>The gateway.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="infrastructure"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="infrastructure"/> names no platform.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="startupTimeout"/> is not positive.</exception>
     public static ApplicationGateway Create(IInfrastructureProvider infrastructure, TimeSpan? startupTimeout = null)
     {
@@ -143,11 +144,17 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     /// </param>
     /// <returns>The gateway.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="infrastructure"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="infrastructure"/> names no platform.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="startupTimeout"/> or <paramref name="leaseDuration"/> is not positive.</exception>
     public static ApplicationGateway Create(IInfrastructureProvider infrastructure, IGatewayStore store, TimeSpan? startupTimeout = null, TimeSpan? leaseDuration = null)
     {
         ArgumentNullException.ThrowIfNull(infrastructure);
         ArgumentNullException.ThrowIfNull(store);
+
+        if (infrastructure.Platform.Value is null)
+        {
+            throw new ArgumentException(ErrorMessages.GatewayPlatformMissing, nameof(infrastructure));
+        }
 
         TimeSpan timeout = startupTimeout ?? _defaultStartupTimeout;
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero, nameof(startupTimeout));
@@ -541,14 +548,17 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         var lookup = new Dictionary<(ProviderName Provider, ResourceName Name), GatewayResource>();
         foreach (ApplicationResourceManifest manifest in model.Deployment.Resources)
         {
-            IReadOnlyCollection<IApplicationResourceAction> actions = _infrastructure.GetResourceActions(model, manifest)
+            // The provider sees a resource as declared for its platform: no other platform's
+            // extensions reach it.
+            ApplicationResourceManifest declared = ForPlatform(manifest);
+            IReadOnlyCollection<IApplicationResourceAction> actions = _infrastructure.GetResourceActions(model, declared)
                 ?? throw new InvalidOperationException(Format(ErrorMessages.GatewayResourceActionsNull, manifest.Provider, manifest.Name));
 
             // Until its step plans it, a resource runs as the previous run left it: its recorded
             // state, outputs, and instances. The plan then keeps what still applies.
             recorded.Remove((manifest.Provider, manifest.Name), out GatewayResourceRecord? previous);
             ApplicationResource aggregate = ApplicationResource.Create(manifest, previous?.State, actions, previous?.Outputs);
-            lookup.Add((manifest.Provider, manifest.Name), new GatewayResource(aggregate, previous));
+            lookup.Add((manifest.Provider, manifest.Name), new GatewayResource(aggregate, declared, previous));
         }
 
         // The resources are kept in the order they deploy in.
@@ -685,7 +695,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     // it can be planned.
     private async Task<bool> RunResourceAsync(IApplicationModel model, GatewayResource resource, CancellationToken cancellationToken)
     {
-        ApplicationResourceManifest manifest = resource.Aggregate.Manifest;
+        ApplicationResourceManifest manifest = resource.Declared;
         IReadOnlyDictionary<SettingName, string> settings = ResolveSettings(manifest);
         InfrastructurePlan? plan = await _infrastructure.PlanResourceAsync(model, manifest, settings, cancellationToken).ConfigureAwait(false);
         if (plan?.Revision is null)
@@ -693,10 +703,11 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
             throw new InvalidOperationException(Format(ErrorMessages.GatewayResourcePlanNull, manifest.Provider, manifest.Name));
         }
 
-        // The definition is the model's manifest, settings as declared, and the provider's revision.
-        // A value filled in from a dependency is not part of it, so a dependency that moved does not
-        // cost this resource its recorded state. Planned before the call: an in-process provider's
-        // instances publish before it returns.
+        // The definition is the manifest as declared for this platform (settings as declared, and
+        // only this platform's extensions) and the provider's revision. A value filled in from a
+        // dependency is not part of it, so a dependency that moved does not cost this resource its
+        // recorded state, and neither does an extension for another platform. Planned before the
+        // call: an in-process provider's instances publish before it returns.
         resource.Plan(plan.Change, string.Concat(Fingerprint(manifest), ":", plan.Revision));
         if (plan.Change != InfrastructureChange.None)
         {
@@ -815,7 +826,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
     {
         foreach (GatewayResourceRecord retired in Volatile.Read(ref _retiredResources))
         {
-            await _infrastructure.TeardownResourceAsync(model, new ApplicationResourceManifest(retired.Provider, retired.Name, [], []), cancellationToken).ConfigureAwait(false);
+            await _infrastructure.TeardownResourceAsync(model, new ApplicationResourceManifest(retired.Provider, retired.Name, [], [], []), cancellationToken).ConfigureAwait(false);
             Volatile.Write(ref _retiredResources, Array.FindAll(Volatile.Read(ref _retiredResources), entry => !ReferenceEquals(entry, retired)));
             await SaveAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -891,11 +902,31 @@ public sealed class ApplicationGateway : IApplicationGateway, IResourceManifestP
         return new GatewayRecord(model.Name, gateways.AsReadOnly(), resources.AsReadOnly());
     }
 
-    // The resource's definition in the model, as its manifest's JSON: provider, name, dependencies.
+    // The resource's definition in the model, as the JSON of its manifest as declared for this
+    // platform: provider, name, dependencies, settings, and this platform's extensions.
     private static string Fingerprint(ApplicationResourceManifest manifest)
     {
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, GatewayJsonContext.Default.ApplicationResourceManifest);
         return Convert.ToHexStringLower(SHA256.HashData(json));
+    }
+
+    // The resource as declared for the provider's platform: the model's manifest without the
+    // extensions of any other platform.
+    private ApplicationResourceManifest ForPlatform(ApplicationResourceManifest manifest)
+    {
+        PlatformName platform = _infrastructure.Platform;
+        var applicable = new List<ApplicationResourceExtension>(manifest.Extensions.Count);
+        foreach (ApplicationResourceExtension extension in manifest.Extensions)
+        {
+            if (extension.Platform == platform)
+            {
+                applicable.Add(extension);
+            }
+        }
+
+        return applicable.Count == manifest.Extensions.Count
+            ? manifest
+            : manifest with { Extensions = applicable.AsReadOnly() };
     }
 
     private ApplicationGatewayException Closed(GatewayResource resource)

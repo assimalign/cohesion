@@ -104,7 +104,7 @@ The root therefore deploys `identity`, waits until it is ready, then deploys `ea
 | Type | Role |
 | --- | --- |
 | `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`RunAsync`) and `IResourceManifestPublisher` (`PublishAsync`, the publication endpoint's logic). `RecordAsync` records a write's snapshot and saves the record. Exposes `Model`, `Resources` (the aggregates), `StartupTimeout`, and `Started`. |
-| `IInfrastructureProvider` | The platform: plans a resource with its settings' values (`PlanResourceAsync`), deploys resources with those values and child gateways, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears down resources and child gateways, and supplies each resource's infrastructure actions. |
+| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys resources with those values and child gateways, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears down resources and child gateways, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IGatewayStore`, `GatewayRecord`, `GatewayResourceRecord` | The gateway's persisted record: child gateways and, per resource, the revision deployed, the state recorded, and the instances registered. |
 | `JsonFileGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
@@ -185,8 +185,9 @@ Database area replaces it in each gateway once that area is ready, and the gatew
 Snapshot values are stored as base64, because the platform's content serializer may not be JSON.
 
 **G12 — State follows the definition.** A resource's revision is a fingerprint of its manifest
-(provider, name, dependencies, settings as declared) followed by the provider's revision (image,
-platform settings). The recorded state survives while the revision does. A new revision is a new
+(provider, name, dependencies, settings as declared, and this platform's extensions, G25) followed
+by the provider's revision (image, the provider's own configuration). The recorded state survives
+while the revision does. A new revision is a new
 deployment of that resource and starts without the previous state; a workload that disappeared and
 is created again keeps it. Registered instances survive only while the plan is `None`, because a
 created or updated workload replaces them; an instance that renewed or published during the run
@@ -286,9 +287,10 @@ instance before its resource is planned is held in memory and saved once the pla
 its instances receive with their deployment. At the resource's step, everything it depends on is
 ready and its outputs are read (G16), so the gateway fills in each output-valued setting from the
 aggregate of the resource it names, or, for a resource above this gateway, from the values its
-deployment manifest carried (G24). It then plans the resource with the values (`PlanResourceAsync`), because the
-platform needs an update when it runs other values, and deploys with the same values
-(`DeployResourceAsync`); the provider delivers them, for example as environment variables. The
+deployment manifest carried (G24). It then plans the resource with the values
+(`PlanResourceAsync`), because the platform needs an update when it runs other values, and deploys
+with the same values (`DeployResourceAsync`); the provider delivers them, for example as
+environment variables. The
 values are not part of the resource's definition: the gateway fingerprints the settings as declared,
 and the provider's revision leaves the values out. A redeployed dependency with a new address
 therefore updates its dependents, which keep their operator changes (G12). A setting whose output the
@@ -330,6 +332,22 @@ is byte-for-byte unchanged. *Superseded:* `DeployGatewayAsync(model, gateway)`, 
 built the manifest and knew nothing of the values. *Rejected:* the child reading its parent's
 outputs at run time (ApplicationModel D18), and the provider looking the values up itself, which
 would make every provider walk the settings of the hierarchy.
+
+**G25 — A provider sees only its own platform's extensions (owner direction, 2026-10-28; built
+2026-10-29).** `IInfrastructureProvider.Platform` names the platform a provider deploys onto, and
+`Create` refuses a provider that names none. A resource's platform extensions (ApplicationModel D19)
+apply only on their platform, so the gateway passes every provider method the resource as declared
+for that platform: the model's manifest without any other platform's extensions. The Kubernetes
+autoscaler a resource carries therefore reaches a Kubernetes provider and never the in-process one,
+and the provider reads its own with its own JSON contract. The same view is the resource's definition
+(G12): the gateway fingerprints it, extensions included, and the provider's revision leaves them
+out. An extension for another platform therefore changes nothing here, while a change to one for this
+platform is a new definition, like a change to the provider's own configuration, and the provider
+plans an update for it. The gateway's aggregate keeps the manifest as declared, every platform's
+extensions included, for what reads the model. An extension name the platform does not know is the
+provider's to refuse when it plans. *Rejected:* passing every extension and leaving each provider to
+filter by name. The filter would be correct only in the providers that remember it, and the
+definition would change when another platform's extension did.
 
 **G9 — No HTTP here, yet.** COHLIB001 bars a library from referencing Web, and COHRES003 bars Web
 (any resource package) from referencing a `Gateway*` assembly, so neither side can bind the other
@@ -377,3 +395,6 @@ candidates for an event source.
     manifests (G24), so east's `orders-api` reads the root's identity provider endpoint. A setting
     that uses an output of a resource in a child's or a sibling's part is still refused (G22): it
     needs that child to publish its outputs to its parent (question 10).
+12. **One platform per provider.** A provider names one platform (G25). A provider that wants
+    another platform's extensions too, such as a Compose provider reading Docker's, would need a
+    list of platforms, and an order for when two of them configure the same thing.

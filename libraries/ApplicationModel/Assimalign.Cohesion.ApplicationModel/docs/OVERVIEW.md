@@ -11,7 +11,7 @@ them. The design record is [DESIGN.md](DESIGN.md).
 
 - In scope: `IApplication`, `IApplicationBuilder`, and `IApplicationModel` with their
   implementations; the `IApplicationGateway` seam; `IApplicationSet`; `IApplicationResourceDescriptor`
-  with `DependsOn`, `WithSetting`, and its output placeholders; the manifest records; and
+  with `DependsOn`, `WithSetting`, `WithExtension`, and its output placeholders; the manifest records; and
   `IApplicationResource` and `ApplicationResource`.
 - Out of scope: gateways, platforms, infrastructure actions, and the deployment manifest's wire
   format (ApplicationModel.Gateway); the identity provider; area verbs such as `AddWeb`.
@@ -30,12 +30,17 @@ IApplicationResourceDescriptor identity = builder.AddResource("IdentityHub", "id
 
 IApplicationSet east = builder.AddGateway("east");
 IApplicationResourceDescriptor database = east.AddResource("Database.Sql", "orders-db");
-east.AddResource("Web", "orders-api")
+IApplicationResourceDescriptor ordersApi = east.AddResource("Web", "orders-api")
     .DependsOn(database, "data.read", "data.write")
     .DependsOn(identity)
     .WithSetting("Database:Endpoint", database.Endpoint)        // filled in when east deploys it
     .WithSetting("Identity:Authority", identity.Endpoint)       // passed down by the root gateway
     .WithSetting("Logging:LogLevel:Default", "Information");
+
+// A platform package's verb, here a Kubernetes package's, records how its platform deploys the
+// resource; only a gateway on that platform applies it. It calls the generic form:
+// WithExtension("kubernetes", "autoscaler", JsonSerializer.SerializeToElement(options, context)).
+ordersApi.ConfigureHpa(hpa => hpa.MaxReplicas = 10);
 
 Application application = builder.UseGateway(gateway).Build();   // composition closes here
 ApplicationManifest manifest = application.Model.Manifest;       // the global manifest

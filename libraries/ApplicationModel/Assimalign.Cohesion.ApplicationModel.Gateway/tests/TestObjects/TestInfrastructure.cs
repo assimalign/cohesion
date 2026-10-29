@@ -55,6 +55,15 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     /// <summary>The settings each resource was last planned with.</summary>
     public ConcurrentDictionary<ResourceName, IReadOnlyDictionary<SettingName, string>> Planned { get; } = new();
 
+    /// <summary>The extensions each workload runs with, as <see cref="Describe"/> writes them.</summary>
+    public ConcurrentDictionary<ResourceName, string> RunningExtensions { get; } = new();
+
+    /// <summary>The manifest of each resource as the gateway last handed it to the platform.</summary>
+    public ConcurrentDictionary<ResourceName, ApplicationResourceManifest> Seen { get; } = new();
+
+    /// <summary>The platform's name; a resource's extensions for it apply here.</summary>
+    public PlatformName Platform => "test";
+
     public ConcurrentDictionary<ResourceInstanceKey, (TestInstance Instance, ResourceService Service)> Instances { get; } = new();
 
     /// <summary>
@@ -75,6 +84,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
     public IReadOnlyCollection<IApplicationResourceAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource)
     {
+        Seen[resource.Name] = resource;
         return [Scale];
     }
 
@@ -86,11 +96,15 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     {
         Record($"plan:{resource.Name}");
         Planned[resource.Name] = settings;
+        Seen[resource.Name] = resource;
 
-        // A workload that runs other settings needs an update; the revision leaves them out.
+        // A workload that runs other settings or extensions needs an update; the revision leaves
+        // both out.
         string revision = Revisions.GetValueOrDefault(resource.Name, "1");
         InfrastructureChange change = !Running.TryGetValue(resource.Name, out string? running) ? InfrastructureChange.Create
-            : running == revision && SameSettings(RunningSettings.GetValueOrDefault(resource.Name), settings) ? InfrastructureChange.None
+            : running == revision
+                && SameSettings(RunningSettings.GetValueOrDefault(resource.Name), settings)
+                && RunningExtensions.GetValueOrDefault(resource.Name, string.Empty) == Describe(resource.Extensions) ? InfrastructureChange.None
             : InfrastructureChange.Update;
 
         return ValueTask.FromResult(new InfrastructurePlan(change, revision));
@@ -105,6 +119,8 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         Record(Deployed, $"{model.Name}:{resource.Provider}/{resource.Name}");
         Record($"deploy:{resource.Name}");
         RunningSettings[resource.Name] = settings;
+        RunningExtensions[resource.Name] = Describe(resource.Extensions);
+        Seen[resource.Name] = resource;
         Running[resource.Name] = Revisions.GetValueOrDefault(resource.Name, "1");
         if (Silent.Contains(resource.Name))
         {
@@ -189,6 +205,18 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     private void Record(string call)
     {
         Record(_events, call);
+    }
+
+    /// <summary>The extensions as text a platform can compare: each platform, name, and JSON value.</summary>
+    public static string Describe(IReadOnlyList<ApplicationResourceExtension> extensions)
+    {
+        var text = new List<string>(extensions.Count);
+        foreach (ApplicationResourceExtension extension in extensions)
+        {
+            text.Add($"{extension.Platform}/{extension.Name}={extension.Value.GetRawText()}");
+        }
+
+        return string.Join(";", text);
     }
 
     private static bool SameSettings(IReadOnlyDictionary<SettingName, string>? running, IReadOnlyDictionary<SettingName, string> planned)

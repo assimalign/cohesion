@@ -40,10 +40,24 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 public interface IInfrastructureProvider
 {
     /// <summary>
+    /// Gets the platform the provider deploys onto, such as <c>kubernetes</c>.
+    /// </summary>
+    /// <remarks>
+    /// A resource's platform extensions (<see cref="ApplicationResourceManifest.Extensions"/>) apply
+    /// only on their platform. The gateway passes every method the resource as declared for this
+    /// platform: its manifest with only the extensions for <see cref="Platform"/>, so the provider
+    /// reads its own with its own JSON contract and never sees another platform's.
+    /// </remarks>
+    PlatformName Platform { get; }
+
+    /// <summary>
     /// Gets the infrastructure actions the provider exposes on a resource, such as scaling it.
     /// </summary>
     /// <param name="model">The model the gateway runs.</param>
-    /// <param name="resource">The resource, from the model's <see cref="IApplicationModel.Deployment"/>.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Deployment"/>, with only this
+    /// platform's extensions.
+    /// </param>
     /// <returns>The actions; empty for none.</returns>
     IReadOnlyCollection<IApplicationResourceAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource);
 
@@ -59,14 +73,19 @@ public interface IInfrastructureProvider
     /// </para>
     /// <para>
     /// The revision fingerprints everything the provider deploys for the resource that the model does
-    /// not carry, such as its image and platform settings, but not the settings' values. The gateway
-    /// compares it with the revision it recorded: a different one is a new definition, which starts
-    /// without the state recorded for the previous one. A value filled in from a dependency's output
-    /// changes when that dependency is redeployed, which is not a new definition of this resource.
+    /// not carry, such as its image and the provider's own configuration. It leaves out the settings'
+    /// values and the resource's extensions: the gateway fingerprints the manifest as declared for
+    /// this platform, extensions included, itself. The gateway compares the whole with the revision it
+    /// recorded: a different one is a new definition, which starts without the state recorded for the
+    /// previous one. A value filled in from a dependency's output changes when that dependency is
+    /// redeployed, which is not a new definition of this resource.
     /// </para>
     /// </remarks>
     /// <param name="model">The model the gateway runs.</param>
-    /// <param name="resource">The resource, from the model's <see cref="IApplicationModel.Deployment"/>.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Deployment"/>, with only this
+    /// platform's extensions.
+    /// </param>
     /// <param name="settings">
     /// The values of the resource's settings by name, with every output filled in; the manifest's
     /// <see cref="ApplicationResourceManifest.Settings"/> gives their order.
@@ -91,7 +110,10 @@ public interface IInfrastructureProvider
     /// the platform's rollout.
     /// </remarks>
     /// <param name="model">The model the gateway runs.</param>
-    /// <param name="resource">The resource, from the model's <see cref="IApplicationModel.Deployment"/>.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Deployment"/>, with only this
+    /// platform's extensions.
+    /// </param>
     /// <param name="settings">The values the plan was made with.</param>
     /// <param name="cancellationToken">Cancels the deployment.</param>
     /// <returns>A task that completes when the workload has been started, not when it is ready.</returns>
@@ -114,7 +136,10 @@ public interface IInfrastructureProvider
     /// the next run.
     /// </remarks>
     /// <param name="model">The model the gateway runs.</param>
-    /// <param name="resource">The resource, from the model's <see cref="IApplicationModel.Deployment"/>.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Deployment"/>, with only this
+    /// platform's extensions.
+    /// </param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The outputs by name; empty when the resource has none.</returns>
     ValueTask<IReadOnlyDictionary<OutputName, string>> GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default);
@@ -147,8 +172,9 @@ public interface IInfrastructureProvider
     /// </summary>
     /// <param name="model">The model the gateway runs.</param>
     /// <param name="resource">
-    /// The resource, from the model's <see cref="IApplicationModel.Deployment"/>; for a resource the
-    /// deployment removed, its provider and name as the gateway recorded them, with no dependencies.
+    /// The resource, from the model's <see cref="IApplicationModel.Deployment"/>, with only this
+    /// platform's extensions; for a resource the deployment removed, its provider and name as the
+    /// gateway recorded them, with no dependencies.
     /// </param>
     /// <param name="cancellationToken">Cancels the teardown.</param>
     /// <returns>A task that completes when the workload has been removed.</returns>

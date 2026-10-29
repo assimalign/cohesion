@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.Json;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
@@ -45,6 +46,11 @@ public interface IApplicationResourceDescriptor
     /// declaration order.
     /// </summary>
     IReadOnlyList<ApplicationResourceSetting> Settings { get; }
+
+    /// <summary>
+    /// Gets the configuration of how particular platforms deploy the resource, in declaration order.
+    /// </summary>
+    IReadOnlyList<ApplicationResourceExtension> Extensions { get; }
 
     /// <summary>
     /// Gets the placeholder for the endpoint the resource's platform gives it, through which its
@@ -121,4 +127,25 @@ public interface IApplicationResourceDescriptor
     /// in this hierarchy; or that resource already depends on this one, directly or through others.
     /// </exception>
     IApplicationResourceDescriptor WithSetting(SettingName name, ApplicationResourceOutput output);
+
+    /// <summary>
+    /// Configures how one platform deploys the resource, such as an autoscaler on Kubernetes.
+    /// </summary>
+    /// <remarks>
+    /// Platform packages call this from their own verbs, such as <c>ConfigureHpa</c>, with their
+    /// options serialized to JSON. The extension applies only where the resource's gateway deploys onto
+    /// <paramref name="platform"/>: the gateway hands it to an infrastructure provider of that platform
+    /// and to no other, so the same resource can carry extensions for every platform it may run on.
+    /// The value is copied, so it does not depend on the document it came from. Declaring the same
+    /// platform and name again replaces the value.
+    /// </remarks>
+    /// <param name="platform">The platform the extension applies on, such as <c>kubernetes</c>.</param>
+    /// <param name="name">The extension's name, such as <c>autoscaler</c>.</param>
+    /// <param name="value">The extension's options, as JSON that platform's provider reads.</param>
+    /// <returns>This descriptor.</returns>
+    /// <exception cref="System.ArgumentException">
+    /// <paramref name="platform"/> or <paramref name="name"/> is <see langword="default"/>, or
+    /// <paramref name="value"/> is the default <see cref="JsonElement"/>.
+    /// </exception>
+    IApplicationResourceDescriptor WithExtension(PlatformName platform, ExtensionName name, JsonElement value);
 }

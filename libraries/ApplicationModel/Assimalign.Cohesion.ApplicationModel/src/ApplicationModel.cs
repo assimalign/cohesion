@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.Json;
 
 using Assimalign.Cohesion.Hosting.Resources;
 
@@ -60,7 +61,8 @@ public sealed class ApplicationModel : IApplicationModel
     /// manifest declares, never its own resource, and at most once per resource; a dependency's
     /// permissions are unique; the dependencies form no cycle, because they order deployment; and a
     /// resource's setting names are unique, each setting has a value or an output but not both, and
-    /// an output belongs to a resource the setting's resource depends on.
+    /// an output belongs to a resource the setting's resource depends on; and a resource's extensions
+    /// are unique per platform and name, each with a JSON value.
     /// The model keeps a read-only copy, so later changes to
     /// <paramref name="manifest"/>'s lists do not reach it.
     /// </remarks>
@@ -279,7 +281,7 @@ public sealed class ApplicationModel : IApplicationModel
         ApplicationResourceManifest resource,
         HashSet<(GatewayName Gateway, ProviderName Provider, ResourceName Name)> resources)
     {
-        if (resource.Dependencies is null || resource.Settings is null)
+        if (resource.Dependencies is null || resource.Settings is null || resource.Extensions is null)
         {
             throw new ArgumentException(Format(ErrorMessages.ApplicationManifestListMissing, gateway), manifestParameter);
         }
@@ -392,7 +394,50 @@ public sealed class ApplicationModel : IApplicationModel
             settings[index] = setting;
         }
 
-        return new ApplicationResourceManifest(resource.Provider, resource.Name, Array.AsReadOnly(dependencies), Array.AsReadOnly(settings));
+        var declared = new HashSet<(PlatformName Platform, ExtensionName Name)>();
+        var extensions = new ApplicationResourceExtension[resource.Extensions.Count];
+        for (int index = 0; index < extensions.Length; index++)
+        {
+            ApplicationResourceExtension? extension = resource.Extensions[index];
+            if (extension is null)
+            {
+                throw new ArgumentException(Format(ErrorMessages.ApplicationManifestEntryNull, gateway), manifestParameter);
+            }
+
+            if (extension.Platform.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.PlatformNameMissing, manifestParameter);
+            }
+
+            if (extension.Name.Value is null)
+            {
+                throw new ArgumentException(ErrorMessages.ExtensionNameMissing, manifestParameter);
+            }
+
+            if (extension.Value.ValueKind == JsonValueKind.Undefined)
+            {
+                throw new ArgumentException(
+                    Format(ErrorMessages.ApplicationExtensionValueMissing, extension.Name, extension.Platform, resource.Provider, resource.Name, gateway),
+                    manifestParameter);
+            }
+
+            if (!declared.Add((extension.Platform, extension.Name)))
+            {
+                throw new ArgumentException(
+                    Format(ErrorMessages.ApplicationExtensionDuplicate, resource.Provider, resource.Name, gateway, extension.Name, extension.Platform),
+                    manifestParameter);
+            }
+
+            // A copy, so the model does not depend on the document the value came from.
+            extensions[index] = extension with { Value = extension.Value.Clone() };
+        }
+
+        return new ApplicationResourceManifest(
+            resource.Provider,
+            resource.Name,
+            Array.AsReadOnly(dependencies),
+            Array.AsReadOnly(settings),
+            Array.AsReadOnly(extensions));
     }
 
     // Third pass: dependencies order deployment, so they may not form a cycle anywhere in the

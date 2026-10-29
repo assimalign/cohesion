@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// <param name="Change">What deploying the resource would change.</param>
 /// <param name="Revision">
 /// An opaque fingerprint of what the provider deploys for the resource beyond the model, such as its
-/// image and platform settings, leaving out the values of the resource's settings; empty when the
-/// provider deploys nothing the model does not say.
+/// image and the provider's own configuration, leaving out the values of the resource's settings and
+/// its extensions; empty when the provider deploys nothing the model does not say.
 /// </param>
 public sealed record InfrastructurePlan(InfrastructureChange Change, string Revision);

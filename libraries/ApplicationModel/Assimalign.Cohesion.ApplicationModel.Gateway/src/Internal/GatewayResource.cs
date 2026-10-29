@@ -44,9 +44,10 @@ internal sealed class GatewayResource
     private int _current;
     private int _tornDown;
 
-    public GatewayResource(ApplicationResource aggregate, GatewayResourceRecord? previous)
+    public GatewayResource(ApplicationResource aggregate, ApplicationResourceManifest declared, GatewayResourceRecord? previous)
     {
         Aggregate = aggregate;
+        Declared = declared;
         Previous = previous;
 
         foreach (ResourceManifest instance in previous?.Instances ?? [])
@@ -58,6 +59,10 @@ internal sealed class GatewayResource
     }
 
     public ApplicationResource Aggregate { get; }
+
+    // The resource as declared for the provider's platform: the model's manifest with only that
+    // platform's extensions. The provider sees this, and the definition fingerprints it.
+    public ApplicationResourceManifest Declared { get; }
 
     // The resource's entry in the record the run started from, or null when it had none.
     public GatewayResourceRecord? Previous { get; }
