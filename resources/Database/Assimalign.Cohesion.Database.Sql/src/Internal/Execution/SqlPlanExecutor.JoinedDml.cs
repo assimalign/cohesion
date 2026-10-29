@@ -99,8 +99,8 @@ internal sealed partial class SqlPlanExecutor
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
-            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
-            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
+            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes, cancellationToken);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes, cancellationToken);
         }
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
@@ -146,7 +146,7 @@ internal sealed partial class SqlPlanExecutor
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
-                        statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                        statement, bracket, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                     if (returned is not null && !HasSequenceProjection(plan.Returning))
                     {
                         var output = DmlReturningRow(
@@ -274,7 +274,7 @@ internal sealed partial class SqlPlanExecutor
                             statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                             try
                             {
-                                await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
+                                await InsertIndexEntriesAsync(statement, bracket, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
                                     SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                             }
                             catch (IndexUniqueViolationException exception)

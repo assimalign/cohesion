@@ -216,6 +216,9 @@ structured-carrier messages remain unprefixed.
 | New (#1717, SQ-S3) | CS03079 | Schema/identity — column has no identity (55000) |
 | New (#1717, SQ-S3) | CS03080 | Schema/dependency — sequence required by identity or column default (2BP01) |
 | New (#1717, SQ-S3) | CS03081 | Schema/ownership — invalid sequence OWNED BY target or identity ownership change (55000) |
+| New (#1630, SQ-P1) | CS03082 | Partial predicate on a primary key (42P16) |
+| New (#1630, SQ-P1) | CS03083 | Type change of a column read by a partial-index predicate (0A000) |
+| New (#1630, SQ-P1) | CS03084 | Inconsistent index predicate text/dependency metadata (42P17) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -280,6 +283,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS05087 | GROUPS requires ORDER BY (42P20) |
 | New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
 | New (#1719, SQ-R2 reader fix) | CS05090 | Execution/internal invariant — a CTE opens more readers than its plan counted (XX000) |
+| New (#1630, SQ-P1) | CS05091 | Prohibited expression or non-immutable function in a partial-index predicate (42P17) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

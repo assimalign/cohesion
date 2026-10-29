@@ -744,8 +744,8 @@ internal sealed partial class SqlPlanExecutor
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
-            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
-            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
+            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes, cancellationToken);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes, cancellationToken);
         }
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
@@ -788,7 +788,7 @@ internal sealed partial class SqlPlanExecutor
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
-                        statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                        statement, bracket, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                     if (returned is not null && !HasSequenceProjection(plan.Returning)) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
                 }
 
@@ -903,7 +903,7 @@ internal sealed partial class SqlPlanExecutor
                             statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                             try
                             {
-                                await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
+                                await InsertIndexEntriesAsync(statement, bracket, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
                                     SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                             }
                             catch (IndexUniqueViolationException exception)
@@ -1031,11 +1031,23 @@ internal sealed partial class SqlPlanExecutor
 
             var ordinals = _definitions.Get(table).GetKey(metadata.ColumnNames).Ordinals;
 
+            if (metadata.Predicate is not null) { _definitions.GetIndexPredicate(table, metadata); }
             result.Add(new SqlLiveIndex(metadata, index, ordinals));
         }
 
         cached.Add(table, result);
         return result;
+    }
+
+    private bool MatchesIndex(SqlCatalogTable table, SqlCatalogIndex index, object?[] values, bool prepared = false, CancellationToken cancellationToken = default)
+        => index.Predicate is null || SqlPartialIndexPredicate.Matches(_definitions.GetIndexPredicate(table, index, cancellationToken), values,
+            prepared ? null : new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: _definitions.Functions, cancellationToken: cancellationToken));
+
+    private static bool PartialNullKey(SqlCatalogIndex index, int[] ordinals, object?[] values)
+    {
+        if (index.Predicate is null || !index.IsUnique) { return false; }
+        foreach (int ordinal in ordinals) { if (values[ordinal] is null) { return true; } }
+        return false;
     }
 
     /// <summary>
@@ -1077,10 +1089,11 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Collects lock hashes for existing values without validating or building nonunique keys.
     /// </summary>
-    private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes, CancellationToken cancellationToken)
     {
         foreach (var liveIndex in indexes)
         {
+            if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
             if (liveIndex.Metadata.IsUnique)
             {
                 hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values).Hash());
@@ -1091,10 +1104,11 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Validates every index key before apply and collects the unique keys' lock hashes.
     /// </summary>
-    private void ValidateIndexKeysAndCollectUniqueHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    private void ValidateIndexKeysAndCollectUniqueHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes, CancellationToken cancellationToken)
     {
         foreach (var liveIndex in indexes)
         {
+            if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
             var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
             if (liveIndex.Metadata.IsUnique) { hashes.Add(key.Hash()); }
         }
@@ -1138,6 +1152,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async ValueTask InsertIndexEntriesAsync(
         SqlStatementContext statement,
+        StorageTransaction bracket,
         List<SqlLiveIndex> indexes,
         SqlCatalogTable table,
         object?[] values,
@@ -1146,10 +1161,19 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var liveIndex in indexes)
         {
+            if (!MatchesIndex(table, liveIndex.Metadata, values, prepared: true)) { continue; }
             var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
             try
             {
-                await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+                // SQL NULL keys are distinct within a partial unique index. The
+                // existing version insertion API preserves stamps and bypasses physical
+                // equality rejection; the same logical undo ledger still owns the entry.
+                if (PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
+                {
+                    await liveIndex.Index.InsertVersionAsync(bracket, key, entryReference, statement.Transaction.Sequence,
+                        TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                }
+                else { await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false); }
             }
             catch (IndexUniqueViolationException)
             {
@@ -1175,6 +1199,7 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var liveIndex in indexes)
         {
+            if (!MatchesIndex(table, liveIndex.Metadata, values, prepared: true)) { continue; }
             var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values);
             await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
             statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
@@ -1387,10 +1412,16 @@ internal sealed partial class SqlPlanExecutor
             _definitions.Get(prepared, cancellationToken);
         }
 
+        var droppedIndexes = _catalog.GetIndexes(current.ObjectId).Where(index => index.Predicate is not null &&
+            (index.PredicateColumns.Contains(plan.ColumnName, StringComparer.OrdinalIgnoreCase) ||
+             index.ColumnNames.Contains(plan.ColumnName, StringComparer.OrdinalIgnoreCase))).ToArray();
+        foreach (var index in droppedIndexes) { EnsureCanChange(index.Owner, index.Name, index.OwningSchema, "ALTER TABLE DROP COLUMN dependency", statement); }
+
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
         var updated = await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken) : _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
+        await RemoveDroppedIndexesAsync(statement, droppedIndexes, cancellationToken: CancellationToken.None).ConfigureAwait(false);
         if (prepared is not null) { _definitions.Adopt(updated, prepared, CancellationToken.None); }
         else { _definitions.Get(updated, CancellationToken.None); }
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
@@ -1539,16 +1570,23 @@ internal sealed partial class SqlPlanExecutor
             ordinals[i] = FindColumnOrdinal(plan.Table, plan.ColumnNames[i]);
         }
 
+        var metadata = new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
+            statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+            statement.ProvisioningSchema, predicate: plan.PartialIndex?.Predicate,
+            predicateColumns: plan.PartialIndex?.PredicateColumns, predicateFunctionCalls: plan.PartialIndex?.PredicateFunctionCalls);
+        if (metadata.Predicate is not null) { _definitions.GetIndexPredicate(plan.Table, metadata, cancellationToken); }
         var definition = new IndexDefinition(plan.IndexName, IndexKind.BTree, plan.IsUnique);
         bool registered = false;
         int commitsBeforePublication = statement.Metrics.SelfCommits;
 
         try
         {
-            if (statement.ProvisioningProgress is not null)
+            // Table X precedes apply gate, index directory/tree latch and page pins.
+            // X remains held through publication and all cleanup; session disposal releases it.
+            if (statement.ProvisioningProgress is not null || metadata.Predicate is not null)
             {
                 await BuildDeferredIndexAsync(plan.Table, definition, ordinals, statement,
-                    () => registered = true, cancellationToken).ConfigureAwait(false);
+                    () => registered = true, cancellationToken, metadata).ConfigureAwait(false);
             }
             else
             {
@@ -1561,29 +1599,24 @@ internal sealed partial class SqlPlanExecutor
 
                     foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
                     {
+                        if (!MatchesIndex(plan.Table, metadata, values)) { continue; }
                         var key = BuildIndexKey(plan.Table, ordinals, values);
 
                         await index.InsertVersionAsync(
                             bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
                     }
-                    await ValidateBuiltUniqueIndexAsync(plan.Table, index, statement, cancellationToken, ordinals).ConfigureAwait(false);
+                    await ValidateBuiltUniqueIndexAsync(plan.Table, index, statement, cancellationToken, ordinals, metadata.Predicate is not null).ConfigureAwait(false);
                     return true;
                 }, durable: true, cancellationToken).ConfigureAwait(false);
             }
             // Metadata + registrations persist in ONE catalog self-commit: a crash
             // cannot leave a described index without a tree registration (or the
             // reverse). A crash before this write leaves only orphaned tree pages.
-            var registrations = PublishedRegistrations([new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique)]);
+            var registrations = PublishedRegistrations([metadata]);
             await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.CreateIndexAsync(
-                new SqlCatalogIndex(
-                    plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
-                    statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                    statement.ProvisioningSchema),
+                metadata,
                 registrations, cancellationToken) : _catalog.CreateIndexAsync(
-                new SqlCatalogIndex(
-                    plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
-                    statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                    statement.ProvisioningSchema),
+                metadata,
                 registrations, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
         }
         catch

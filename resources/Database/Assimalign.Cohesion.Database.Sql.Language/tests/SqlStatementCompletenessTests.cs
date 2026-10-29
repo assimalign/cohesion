@@ -110,6 +110,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.DropSequence] = ["DROP SEQUENCE IF EXISTS ids, dbo.ids2 CASCADE"],
         [SqlClauses.NextValue] = ["SELECT NEXT VALUE FOR dbo.ids"],
         [SqlClauses.Identity] = ["CREATE TABLE t (id BIGINT GENERATED ALWAYS AS IDENTITY)", "ALTER TABLE t ADD id INT IDENTITY(100, 5)"],
+        [SqlClauses.PartialIndex] = ["CREATE INDEX ix ON t (a) WHERE b > 0", "CREATE UNIQUE INDEX ix ON t (a) WHERE b IS NOT NULL"],
         [SqlClauses.CreateIndex] = ["CREATE INDEX ix ON t (a)", "CREATE UNIQUE INDEX IF NOT EXISTS ix ON dbo.t (a, b)"],
         [SqlClauses.AlterTable] =
         [

@@ -67,7 +67,7 @@ public sealed class SqlDialectDocumentationTests
     [InlineData("Sql.Language", "DIALECT.md", "Compiled-schema v8 was unchanged by SQ-A.")]
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29. Failed preparation and crash recovery use kind 14 unchanged.")]
     [InlineData("Sql", "DESIGN.md", "SQL stays format 29: ordinary table records and kind 14")]
-    [InlineData("Sql", "DESIGN.md", "Current format 30 also requires extension 8's OnUpdate byte")]
+    [InlineData("Sql", "DESIGN.md", "Current format 31 also requires extension 8's OnUpdate byte")]
     [InlineData("Sql", "DESIGN.md", "SQL remains format 29: ordinary dense table records")]
     public void Documentation_FormatHistory_ShouldDistinguishHistoricalAndCurrentVersions(string project, string file, string expected)
     {

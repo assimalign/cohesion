@@ -985,6 +985,7 @@ public sealed partial class SqlQueryParser : QueryParser
         string? firstToken = null;
         bool insertValues = false;
         bool dmlWhere = false;
+        bool createIndex = false;
         bool dmlStatement = false;
         bool returning = false;
         bool onConflictUpdate = false;
@@ -1046,6 +1047,8 @@ public sealed partial class SqlQueryParser : QueryParser
                 (firstToken.ToUpperInvariant() is "CREATE" or "ALTER" or "DROP"))
             { clause = string.Empty; location = null!; return false; }
             createTable |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "TABLE");
+            createIndex |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
+                previousToken is "CREATE" or "UNIQUE" && IsKeyword(ref lexer, "INDEX");
             if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
                 (IsKeyword(ref lexer, "VIEW") || (createTable && IsKeyword(ref lexer, "AS") && fromScopes.Count == 0)))
             {
@@ -1141,7 +1144,7 @@ public sealed partial class SqlQueryParser : QueryParser
                  IsKeyword(ref lexer, "USING") && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase)));
 
             dmlWhere |= fromScopes.Count == 0 && IsKeyword(ref lexer, "WHERE") &&
-                (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
+                (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || createIndex);
 
             if (token.Equals("COLLATION", StringComparison.OrdinalIgnoreCase) &&
                 previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true)

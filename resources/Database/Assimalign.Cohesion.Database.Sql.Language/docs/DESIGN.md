@@ -1,5 +1,19 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+The current record-space format is 31; index predicates are persisted by Sql, independently
+of this parser assembly. Earlier catalog formats are refused without conversion.
+
+
+## Partial index grammar (#1630, SQ-P1)
+
+SqlCreateIndexExpression.Predicate retains the optional WHERE tree. The canonical statement
+renderer emits it after the ordered column list; scalar predicate rendering is unchanged.
+The profile adds CREATE INDEX WHERE beside CREATE INDEX (+1 clause). Parser completeness,
+positive/negative conformance and rendering cases advance together. CREATE INDEX subqueries
+reach engine predicate validation and fail with CS05091. They are never executable predicates.
+SQ-P1 deliberately advertises no implication/access optimization; see DIALECT.
+
+
 ## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
 
 ON UPDATE accepts CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION beside ON DELETE,
@@ -100,7 +114,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 30's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 31's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL

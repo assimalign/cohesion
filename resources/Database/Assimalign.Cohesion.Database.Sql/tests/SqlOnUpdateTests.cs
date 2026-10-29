@@ -159,7 +159,7 @@ public sealed class SqlOnUpdateTests : IDisposable
         await using var query = await opened.CreateSessionAsync(CancellationToken.None);
 
         // Assert
-        opened.Catalog.RecordSpaceFormatVersion.ShouldBe(30);
+        opened.Catalog.RecordSpaceFormatVersion.ShouldBe(31);
         opened.Catalog.TryGetTable("dbo", "c", out var child).ShouldBeTrue();
         child.Constraints.Single().OnUpdate.ShouldBe(expected);
         child.Constraints.Single().OnDelete.ShouldBe(SqlCatalogReferentialAction.SetNull);
@@ -282,7 +282,7 @@ public sealed class SqlOnUpdateTests : IDisposable
         // Assert
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
         error.Message.ShouldContain("data-storage format 29", Case.Sensitive);
-        error.Message.ShouldContain("supports only format 30", Case.Sensitive);
+        error.Message.ShouldContain("supports only format 31", Case.Sensitive);
         Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ShouldBe(before.Keys, ignoreOrder: true);
         foreach (var file in before) { File.ReadAllBytes(file.Key).ShouldBe(file.Value); }
     }
@@ -346,7 +346,7 @@ public sealed class SqlOnUpdateTests : IDisposable
         error.Errors.ShouldHaveSingleItem().Declaration.ShouldBe("schema.format");
         error.Errors[0].Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
         error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v9", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v10", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
     }
 

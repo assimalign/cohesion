@@ -736,7 +736,7 @@ public sealed partial class SqlCatalog
     /// <returns>The updated table description.</returns>
     /// <exception cref="SqlCatalogException">
     /// The table or column does not exist; the column is part of the primary key, a
-    /// constraint or an index; it is the table's last column; or the definition, which keeps
+    /// constraint or an unconditional index; it is the table's last column; or the definition, which keeps
     /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
@@ -762,7 +762,7 @@ public sealed partial class SqlCatalog
     /// <returns>The updated table description.</returns>
     /// <exception cref="SqlCatalogException">
     /// The table or column does not exist; the column is part of the primary key, a
-    /// constraint or an index; it is the table's last column; or the definition, which keeps
+    /// constraint or an unconditional index; it is the table's last column; or the definition, which keeps
     /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
@@ -831,10 +831,11 @@ public sealed partial class SqlCatalog
                 }
             }
 
-            // An indexed column cannot be dropped: index entries key on the column's values.
+            // Preserve the existing unconditional-index key dependency refusal.
+            // Dependent partial indexes are retired atomically with the column below.
             foreach (var indexSlot in _indexes.Values)
             {
-                if (indexSlot.Index.TableObjectId == slot.Table.ObjectId &&
+                if (indexSlot.Index.TableObjectId == slot.Table.ObjectId && indexSlot.Index.Predicate is null &&
                     indexSlot.Index.ColumnNames.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase)))
                 {
                     throw new SqlCatalogException("CS03056",
@@ -858,7 +859,10 @@ public sealed partial class SqlCatalog
             int[] dropped = [.. slot.Table.DroppedColumnOrdinals, slot.Table.GetPhysicalOrdinal(ordinal)];
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
                 slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints, dropped);
-            ReplaceTable(slot, updated, publication);
+            var droppedIndexes = _indexes.Values.Where(index => index.Index.TableObjectId == slot.Table.ObjectId &&
+                index.Index.Predicate is not null && (index.Index.PredicateColumns.Contains(columnName, StringComparer.OrdinalIgnoreCase) ||
+                index.Index.ColumnNames.Contains(columnName, StringComparer.OrdinalIgnoreCase))).ToArray();
+            ReplaceTable(slot, updated, publication, droppedIndexes);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -987,7 +991,7 @@ public sealed partial class SqlCatalog
                     ErrorMessages.ConstraintNameExists, index.Name, table.Name));
             }
 
-            foreach (string column in index.ColumnNames)
+            foreach (string column in index.ColumnNames.Concat(index.PredicateColumns))
             {
                 if (table.FindColumn(column) is null)
                 {
@@ -1546,7 +1550,7 @@ public sealed partial class SqlCatalog
         return null;
     }
 
-    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication)
+    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication, IReadOnlyList<IndexSlot>? droppedIndexes = null)
     {
         ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
         byte[] record = EncodeTable(updated);
@@ -1554,11 +1558,25 @@ public sealed partial class SqlCatalog
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
+            IReadOnlyList<BTreeIndexRegistration>? remaining = null;
+            if (droppedIndexes is { Count: > 0 })
+            {
+                remaining = _registrations.Where(registration => !droppedIndexes.Any(index =>
+                    index.Index.TableObjectId == registration.ObjectId && index.Index.Name.Equals(registration.Definition.Name, StringComparison.OrdinalIgnoreCase))).ToArray();
+                foreach (var index in droppedIndexes) { _storage.DeleteRow(transaction, index.Location.PageId, index.Location.SlotIndex); }
+            }
+            var registrationsLocation = remaining is null ? _registrationsLocation : UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remaining));
             ulong next = _nextObjectId;
             var owned = StageOwnedSequences(transaction, slot.Table, updated, ref next);
             CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
             owned();
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
+            if (remaining is not null)
+            {
+                _registrations = remaining;
+                _registrationsLocation = registrationsLocation;
+                foreach (var index in droppedIndexes!) { _indexes.Remove((index.Index.TableObjectId, index.Index.Name)); }
+            }
         }
     }
 
@@ -2061,7 +2079,12 @@ public sealed partial class SqlCatalog
         }
 
         AppendOwnership(ref writer, index.Owner, index.OwningSchema);
-        writer.AppendInt32(1).AppendBoolean(index.IsPrimaryKey);
+        writer.AppendInt32(2).AppendBoolean(index.IsPrimaryKey);
+        AppendOptionalString(ref writer, index.Predicate);
+        writer.AppendInt32(index.PredicateColumns.Count);
+        foreach (string column in index.PredicateColumns) { writer.AppendString(column, Collation.Binary); }
+        writer.AppendInt32(index.PredicateFunctionCalls.Count);
+        foreach (string call in index.PredicateFunctionCalls) { writer.AppendString(call, Collation.Binary); }
         return writer.ToArray();
     }
 
@@ -2079,21 +2102,26 @@ public sealed partial class SqlCatalog
         }
 
         var (owner, owningSchema) = ReadOwnership(ref reader, allowTrailing: true);
-        bool isPrimaryKey = false;
-        if (!reader.IsAtEnd)
+        int version = reader.ReadInt32();
+        if (version != 2)
         {
-            int version = reader.ReadInt32();
-            if (version != 1)
-            {
-                throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
-            }
-            isPrimaryKey = reader.ReadBoolean();
+            throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
         }
-        if (!reader.IsAtEnd || (isPrimaryKey && !isUnique))
+        bool isPrimaryKey = reader.ReadBoolean();
+        string? predicate = ReadOptionalString(ref reader);
+        int dependencies = reader.ReadInt32();
+        var predicateColumns = new List<string>();
+        for (int i = 0; i < dependencies; i++) { predicateColumns.Add(reader.ReadString(out _)); }
+        int calls = reader.ReadInt32();
+        var functionCalls = new List<string>();
+        for (int i = 0; i < calls; i++) { functionCalls.Add(reader.ReadString(out _)); }
+        if (!reader.IsAtEnd || dependencies < 0 || calls < 0 || (isPrimaryKey && (!isUnique || predicate is not null)) ||
+            predicate is null && (dependencies != 0 || calls != 0) || predicate is not null && string.IsNullOrWhiteSpace(predicate))
         {
             throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeIndexSqlCatalog2);
         }
-        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey);
+        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey,
+            predicate, predicateColumns, functionCalls);
     }
 
     private static void ValidateConstraints(SqlCatalogTable table)
@@ -2406,7 +2434,7 @@ public sealed partial class SqlCatalog
             var names = new HashSet<string>(table.Constraints.Select(constraint => constraint.Name), StringComparer.OrdinalIgnoreCase);
             foreach (SqlCatalogIndex index in GetIndexes(table.ObjectId))
             {
-                if (!names.Add(index.Name) || index.ColumnNames.Any(column => table.FindColumn(column) is null))
+                if (!names.Add(index.Name) || index.ColumnNames.Concat(index.PredicateColumns).Any(column => table.FindColumn(column) is null))
                 {
                     throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog3, index.Name));
                 }
@@ -2414,7 +2442,7 @@ public sealed partial class SqlCatalog
             foreach (SqlCatalogIndex index in indexes)
             {
                 if (index.TableObjectId != table.ObjectId || !names.Add(index.Name) ||
-                    index.ColumnNames.Any(column => table.FindColumn(column) is null))
+                    index.ColumnNames.Concat(index.PredicateColumns).Any(column => table.FindColumn(column) is null))
                 {
                     throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog4, index.Name, table.Schema, table.Name));
                 }

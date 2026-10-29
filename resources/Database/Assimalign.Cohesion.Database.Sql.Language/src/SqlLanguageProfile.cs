@@ -101,6 +101,7 @@ public static class SqlLanguageProfile
         SqlClauses.NextValue,
         SqlClauses.DiscardAll,
         SqlClauses.CreateIndex,
+        SqlClauses.PartialIndex,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
         SqlClauses.Truncate,

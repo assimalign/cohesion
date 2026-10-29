@@ -209,7 +209,7 @@ internal sealed partial class SqlPlanExecutor
                             yield return
                             [
                                 database, table.Schema, table.Name, index.Name, index.ColumnNames[ordinal], (long)ordinal + 1,
-                                index.IsUnique ? "YES" : "NO", index.IsPrimaryKey ? "YES" : "NO",
+                                index.IsUnique ? "YES" : "NO", index.IsPrimaryKey ? "YES" : "NO", index.Predicate,
                             ];
                         }
                     }
@@ -320,7 +320,7 @@ internal sealed partial class SqlPlanExecutor
             }
             yield return (name, table.PrimaryKeyColumns, true);
         }
-        foreach (var index in indexes.Where(index => index.IsUnique))
+        foreach (var index in indexes.Where(index => index.IsUnique && index.Predicate is null))
         {
             yield return (index.Name, index.ColumnNames, index.IsPrimaryKey);
         }

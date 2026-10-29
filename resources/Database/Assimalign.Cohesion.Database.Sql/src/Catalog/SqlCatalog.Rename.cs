@@ -15,12 +15,12 @@ public sealed partial class SqlCatalog
     /// <summary>Renames a table within its schema and its dependent foreign-key metadata in one catalog transaction.</summary>
     /// <param name="expected">The current immutable table definition; a stale definition is refused.</param>
     /// <param name="newName">The unqualified new name.</param>
-    /// <param name="checkExpressions">Canonical CHECK text rendered by the engine for every CHECK on the renamed table.</param>
+    /// <param name="checkExpressions">Canonical rewritten CHECK and partial-index predicates, keyed by their unique names, for the renamed table.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The durably published table definition.</returns>
     /// <exception cref="ArgumentException">A required name is blank.</exception>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
-    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or CHECK metadata is incomplete or too large.</exception>
+    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or predicate metadata is incomplete or too large.</exception>
     /// <exception cref="DatabaseTypeException">Metadata text contains invalid UTF-16.</exception>
     /// <exception cref="StorageException">The catalog cannot persist the change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested before publication.</exception>
@@ -36,13 +36,13 @@ public sealed partial class SqlCatalog
     /// <summary>Renames a table within its schema and its dependent foreign-key metadata in one catalog transaction.</summary>
     /// <param name="expected">The current immutable table definition; a stale definition is refused.</param>
     /// <param name="newName">The unqualified new name.</param>
-    /// <param name="checkExpressions">Canonical CHECK text rendered by the engine for every CHECK on the renamed table.</param>
+    /// <param name="checkExpressions">Canonical rewritten CHECK and partial-index predicates, keyed by their unique names, for the renamed table.</param>
     /// <param name="publication">The expected script target and exact preceding receipt and generation.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The durably published table definition.</returns>
     /// <exception cref="ArgumentException">A required name is blank.</exception>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
-    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or CHECK metadata is incomplete or too large.</exception>
+    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or predicate metadata is incomplete or too large.</exception>
     /// <exception cref="DatabaseTypeException">Metadata text contains invalid UTF-16.</exception>
     /// <exception cref="StorageException">The catalog cannot persist the change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested before publication.</exception>
@@ -61,12 +61,12 @@ public sealed partial class SqlCatalog
     /// <param name="expected">The current immutable table definition; a stale definition is refused.</param>
     /// <param name="columnName">The existing column name.</param>
     /// <param name="newName">The unqualified new name.</param>
-    /// <param name="checkExpressions">Canonical CHECK text rendered by the engine for every CHECK on the renamed table.</param>
+    /// <param name="checkExpressions">Canonical rewritten CHECK and partial-index predicates, keyed by their unique names, for the renamed table.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The durably published table definition.</returns>
     /// <exception cref="ArgumentException">A required name is blank.</exception>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
-    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or CHECK metadata is incomplete or too large.</exception>
+    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or predicate metadata is incomplete or too large.</exception>
     /// <exception cref="DatabaseTypeException">Metadata text contains invalid UTF-16.</exception>
     /// <exception cref="StorageException">The catalog cannot persist the change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested before publication.</exception>
@@ -85,13 +85,13 @@ public sealed partial class SqlCatalog
     /// <param name="expected">The current immutable table definition; a stale definition is refused.</param>
     /// <param name="columnName">The existing column name.</param>
     /// <param name="newName">The unqualified new name.</param>
-    /// <param name="checkExpressions">Canonical CHECK text rendered by the engine for every CHECK on the renamed table.</param>
+    /// <param name="checkExpressions">Canonical rewritten CHECK and partial-index predicates, keyed by their unique names, for the renamed table.</param>
     /// <param name="publication">The expected script target and exact preceding receipt and generation.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     /// <returns>The durably published table definition.</returns>
     /// <exception cref="ArgumentException">A required name is blank.</exception>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>
-    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or CHECK metadata is incomplete or too large.</exception>
+    /// <exception cref="SqlCatalogException">The definition is stale, a name collides, or predicate metadata is incomplete or too large.</exception>
     /// <exception cref="DatabaseTypeException">Metadata text contains invalid UTF-16.</exception>
     /// <exception cref="StorageException">The catalog cannot persist the change.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested before publication.</exception>
@@ -143,7 +143,9 @@ public sealed partial class SqlCatalog
                 }
             }
             var checks = expected.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Check).ToArray();
-            if (checks.Length != checkExpressions.Count || checks.Any(check => !checkExpressions.TryGetValue(check.Name, out var text) || string.IsNullOrWhiteSpace(text)))
+            var partials = _indexes.Values.Where(slot => slot.Index.TableObjectId == expected.ObjectId && slot.Index.Predicate is not null).Select(slot => slot.Index).ToArray();
+            if (checks.Length + partials.Length != checkExpressions.Count || checks.Select(check => check.Name).Concat(partials.Select(index => index.Name))
+                .Any(name => !checkExpressions.TryGetValue(name, out var text) || string.IsNullOrWhiteSpace(text)))
             {
                 throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogRenameCoreAsyncSqlCatalog2, expected.Name));
             }
@@ -176,13 +178,14 @@ public sealed partial class SqlCatalog
                 tables.Add((slot, replacement, EncodeTable(replacement)));
             }
             var indexes = new List<(IndexSlot Old, SqlCatalogIndex Index, byte[] Record)>();
-            if (columnName is not null)
+            if (columnName is not null || partials.Length > 0)
             {
                 foreach (var slot in _indexes.Values.Where(slot => slot.Index.TableObjectId == expected.ObjectId))
                 {
                     var index = slot.Index;
                     var replacement = new SqlCatalogIndex(index.TableObjectId, index.Name, index.ColumnNames.Select(RenameColumn).ToArray(),
-                        index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey);
+                        index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey,
+                        index.Predicate is null ? null : checkExpressions[index.Name], index.PredicateColumns.Select(RenameColumn).ToArray(), index.PredicateFunctionCalls);
                     indexes.Add((slot, replacement, EncodeIndex(replacement)));
                 }
             }

@@ -424,8 +424,8 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in group)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes); }
-                ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.NewValues, hashes);
+                if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes, cancellationToken); }
+                ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.NewValues, hashes, cancellationToken);
             }
             await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
         }

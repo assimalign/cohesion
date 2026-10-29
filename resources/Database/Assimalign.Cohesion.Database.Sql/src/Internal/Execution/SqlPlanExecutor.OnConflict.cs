@@ -46,7 +46,7 @@ internal sealed partial class SqlPlanExecutor
         try
         {
             var arbiters = indexes.Where(index => plan.Arbiters.Any(arbiter => arbiter.Name == index.Metadata.Name)).ToList();
-            var unique = indexes.Where(index => index.Metadata.IsUnique).ToList();
+            var unique = indexes.Where(index => index.Metadata.IsUnique && index.Metadata.Predicate is null).ToList();
         RetryArbitration:
             cancellationToken.ThrowIfCancellationRequested();
             var hashes = new List<ulong>();
@@ -170,9 +170,9 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (write.OldValues is not null)
                 {
-                    CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes);
+                    CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes, cancellationToken);
                 }
-                ValidateIndexKeysAndCollectUniqueHashes(indexes, table, write.Values, hashes);
+                ValidateIndexKeysAndCollectUniqueHashes(indexes, table, write.Values, hashes, cancellationToken);
             }
             // Arbitration takes sorted key locks, then try-acquires rows. A refused row
             // releases new keys before waiting (WaitForUpsertRowAsync). Size checks stay
@@ -269,7 +269,7 @@ internal sealed partial class SqlPlanExecutor
                     if (write.OldLocation is { } predecessor)
                     { _storage.RowVersionLinks.Add(predecessor, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence); }
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
-                    await InsertIndexEntriesAsync(statement, indexes, table, write.Values,
+                    await InsertIndexEntriesAsync(statement, bracket, indexes, table, write.Values,
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                     if (returned is not null && !HasSequenceProjection(returning)) { returned.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
                 }

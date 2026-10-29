@@ -162,7 +162,9 @@ internal static class SqlSchemaStatementRenderer
             builder.Append(Identifier(index.Columns[columnIndex]));
         }
 
-        return builder.Append(");").ToString();
+        builder.Append(')');
+        if (index.Predicate is { } predicate) { builder.Append(" WHERE ").Append(SqlPersistedExpression.Canonicalize(SqlPersistedExpression.Load(predicate, index.Name), index.Name)); }
+        return builder.Append(';').ToString();
     }
 
     internal static string DropIndex(string tableName, string indexName)

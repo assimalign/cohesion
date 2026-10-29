@@ -39,6 +39,7 @@ internal sealed class SqlBoundTableCache
     private readonly SqlCatalog _catalog;
     private readonly SqlFunctionEnvironment _native;
     private readonly object _sync = new();
+    private readonly ConditionalWeakTable<SqlCatalogTable, ConditionalWeakTable<SqlCatalogIndex, SqlBindingEntry<SqlBoundExpression>>> _indexPredicates = new();
     private CacheState _state;
     private SqlBindingEntry<CacheState>? _pending;
     private long _bindCount;
@@ -138,6 +139,10 @@ internal sealed class SqlBoundTableCache
         return GetState(cancellationToken).Get(table, cancellationToken);
     }
 
+    internal SqlBoundExpression GetIndexPredicate(SqlCatalogTable table, SqlCatalogIndex index, CancellationToken cancellationToken = default)
+        => _indexPredicates.GetValue(table, static _ => new()).GetValue(index, _ =>
+            new(token => SqlPartialIndexPredicate.Bind(table, index, _catalog.DefaultCollation, Functions, token))).Get(cancellationToken);
+
     // DDL has already evaluated immutable defaults before its first mutation. Retain
     // those exact bindings instead of folding them again while publishing this version.
     internal SqlBoundTable GetDeclared(SqlCatalogTable table, IReadOnlyList<SqlBoundExpression?> defaults, CancellationToken cancellationToken)
@@ -222,6 +227,11 @@ internal sealed class SqlBoundTableCache
         try
         {
             GetValidation(cancellationToken, countWalk: false);
+            foreach (var table in _catalog.Tables)
+            {
+                foreach (var index in _catalog.GetIndexes(table.ObjectId))
+                { if (index.Predicate is not null) { GetIndexPredicate(table, index, cancellationToken); } }
+            }
             new SqlPlanner(_catalog, null, Functions, cancellationToken).BindViews();
         }
         catch (InsufficientExecutionStackException exception)

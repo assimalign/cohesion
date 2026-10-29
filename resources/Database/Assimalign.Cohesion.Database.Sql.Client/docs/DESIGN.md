@@ -1,5 +1,12 @@
 # Database.Sql.Client — Design
 
+## Partial indexes over the existing exchange (#1630, SQ-P1)
+
+InMemory and TCP execute CREATE INDEX WHERE, predicate transitions, NULL-distinct partial
+uniqueness, canonical metadata views and coded predicate refusals. Failed transitions leave
+rows intact and connections usable. No client API or protocol format changes are required.
+
+
 ## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
 
 InMemory and TCP execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE

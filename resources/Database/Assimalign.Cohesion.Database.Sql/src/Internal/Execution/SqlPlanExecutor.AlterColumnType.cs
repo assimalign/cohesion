@@ -39,6 +39,8 @@ internal sealed partial class SqlPlanExecutor
         }
         foreach (var index in _catalog.GetIndexes(plan.Table.ObjectId))
         {
+            if (index.PredicateColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
+            { throw new SqlPlanningException("CS03083", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateTypeChange, column.Name, index.Name)); }
             if (index.ColumnNames.Contains(column.Name, StringComparer.OrdinalIgnoreCase) &&
                 column.Type.Type is DatabaseType.String or DatabaseType.Character &&
                 !(column.Collation ?? _catalog.DefaultCollation).IsIndexBacked)
