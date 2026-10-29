@@ -194,6 +194,9 @@ The function table advertises the aggregates and core scalar functions listed be
 | `WITH` | Cypher projection spelling, including DISTINCT/ALL, star, GROUP BY, ordering/paging and WHERE | Projects a new scope; applies WHERE after ordering/paging |
 | `UNION [DISTINCT]` | Complete read-only operands with matching columns | Existing structural tuple equality removes duplicates; all operands are planned first |
 | `UNION ALL` | The same operands, without mixing modes | Streams every occurrence in operand order into the ordinary final result collector |
+| `EXCEPT [DISTINCT/ALL]` | Read-only operands with matching columns/shapes | Distinct difference or max(m-n,0) occurrences |
+| `INTERSECT [DISTINCT/ALL]` | Read-only operands with matching columns/shapes | Distinct intersection or min(m,n) occurrences |
+| `OTHERWISE` | Both operands validated before execution | Whole-result fallback; the right runs only on empty left |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
 | `GROUP BY` | ISO names of non-aggregated RETURN items, equivalent input expressions, or the empty grouping set `()`; omission uses the same implicit keys | Bounded hash grouping before projection, DISTINCT, ordering and paging; aggregate placement and scope are validated before execution |
 | `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN or WITH | Orders projected rows and paths by the total order below, after DISTINCT |
@@ -607,9 +610,9 @@ The [engine's catalog section](../../Assimalign.Cohesion.Database.Graph/docs/DES
 defines ordered result columns, SQL-consistent ownership vocabulary and session snapshot behavior.
 The parser describes only the metadata subject; it never accesses or caches catalog state.
 
-## Composite queries: UNION and UNION ALL (#1737, GQ-Q1)
+## Composite queries: UNION, EXCEPT, INTERSECT and OTHERWISE (#1737, GQ-Q1/Q2)
 
-A query may combine complete read-only operands with `UNION` or `UNION ALL`. Both
+A query may combine complete read-only operands with UNION, EXCEPT, INTERSECT or OTHERWISE. All
 have the same precedence and associate left; parentheses explicitly group operands (a Cohesion
 extension). NEXT has lower precedence: each of its segments is a complete composite expression.
 A NEXT inside a parenthesized operand remains in that operand. WITH stays operand-local. The immutable
@@ -629,8 +632,19 @@ are checked when rows arrive. Runtime incompatible kinds also fail without publi
 results. Collection contents retain the existing heterogeneous structural-value contract; proven
 incompatible nested entity kinds are refused. Mixing UNION and UNION ALL anywhere in one tree,
 including a parenthesized group, is refused. Bare UNION and explicit UNION DISTINCT both mean
-distinct and may mix; rendering normalizes UNION DISTINCT to UNION. EXCEPT, INTERSECT and OTHERWISE
-remain CK00001 naming the form until GQ-Q2. The deferred words remain contextual names in scalar/binding slots.
+distinct and may mix; rendering normalizes UNION DISTINCT to UNION. EXCEPT and INTERSECT also
+default to DISTINCT, normalized to the bare operator, or accept ALL. Quantifiers are local and may
+mix across EXCEPT/INTERSECT; otherwise mixed conjunctions are admitted. The UNION-mode refusal
+remains a Cohesion restriction. EXCEPT, INTERSECT and OTHERWISE remain contextual identifiers in
+scalar/binding slots. OTHERWISE accepts no quantifier.
+
+EXCEPT DISTINCT returns one representative only when absent on the right; INTERSECT DISTINCT
+returns one when present on both sides. EXCEPT ALL returns max(m-n,0) copies and INTERSECT ALL
+min(m,n), using the existing structural row comparer. Execution retains eligible left occurrences
+in their original order and representation. OTHERWISE returns the whole left result if nonempty,
+including NULL rows and duplicates, and opens the right cursor only on zero left rows. Left errors
+propagate. This lazy whole-result contract is Cohesion-specific, with no Neo4j precedent; the right
+operand still participates in all static validation, metadata reconciliation and wire admission.
 
 ORDER BY, OFFSET/SKIP and LIMIT belong to each operand's RETURN. A tail after the final RETURN
 therefore affects only the last operand. There is no global composite ordering/page clause;
@@ -639,7 +653,7 @@ UNION keeps the first occurrence, and UNION ALL preserves all occurrences, altho
 must use ORDER BY when ordering is part of their query contract. Column names come from the first
 operand; numeric metadata widens across operands, NULL is neutral, and incompatible or dynamic
 values use the existing DatabaseType.Null (unknown). Actual values retain their CLR types.
-EXPLAIN plans every operand and preserves the binary grouping in Union/UnionAll nodes; NEXT
+EXPLAIN plans every operand and preserves the binary grouping in operator-named nodes; NEXT
 pipelines place those groups alongside ordered Next and subsequent stage nodes.
 
 Local Neo4j reference (no code copied), relative to `C:/Source/repos/neo4j/neo4j`:
@@ -656,9 +670,18 @@ attaches ordering/paging to RETURN. These are grammar references, not an ISO con
 for Cohesion's parentheses extension.
 
 `GqlCompositeQueryParserTests`, the keyword disposition corpus and the live profile corpus
-cover the admitted forms and deferred operators. Diagnostics: CG00015 missing operand,
+cover every operator and quantifier, equal precedence, grouping, NEXT and capability scanning.
+The [OpenGQL grammar, 14.2](https://github.com/opengql/grammar/blob/main/GQL.g4#L479-L498)
+has one left-recursive conjunction level, including OTHERWISE and independently optional set
+quantifiers; it has no INTERSECT precedence tier or syntactic prohibition on mixing. This is
+grammar evidence; no stronger ISO semantic claim is inferred from it. Neo4j
+Cypher25Parser.g4:75-77 supplies only UNION and is not fallback precedent.
+Diagnostics: CG00015 missing operand,
 CG00016 mixed UNION modes, CG01020 column names/order/count mismatch, CG02017 incompatible
-result shape, CG05029 modifying operand, and CG05030 UNION distinct-state memory refusal.
+result shape, CG05029 modifying operand, CG05030 UNION distinct-state memory refusal, and
+CG05032 EXCEPT/INTERSECT retained-state memory refusal, including empty execution frames.
+Every parent hash visit or forwarded row in a mixed tree consumes the shared work budget (CG05004).
+No new interface or wire/disk format.
 
 NEXT passes each variable's proven binding kind as well as its value shape into every operand;
 named paths remain valid for ExecutePaths and path property access remains a planning CG03003,
@@ -1313,7 +1336,7 @@ GqlOrderPagingTests and GraphOrderPagingWireTests pin the executable surface.
 
 | Code | Meaning |
 | --- | --- |
-| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, map projections, questioned paths, subpath variables, nested quantifiers, standalone ORDER BY/page statements, set operations, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, pattern-comprehension path prefixes, nested path modes/selectors, unselected unbounded WALK, counted ANY and `NODETACH DELETE` |
+| `CK00001` | Recognized construct outside the executable profile, reported once at its own span: OPTIONAL block operands, MANDATORY MATCH, procedures, excluded functions and datetime forms, unsupported CAST targets, HAVING and statistical aggregates (STDDEV_SAMP/POP, PERCENTILE_CONT/DISC), substituted/whole-map parameters, composite properties, map projections, questioned paths, subpath variables, nested quantifiers, standalone/global composite ORDER BY/page statements, FOR ordinality/offset suffixes, NEXT YIELD, server/session scope, undirected (tilde) edges, pattern-comprehension path prefixes, nested path modes/selectors, unselected unbounded WALK, counted ANY and `NODETACH DELETE` |
 | `CG00001` | Empty statement |
 | `CG00002` | Malformed supported syntax, invalid statement composition, leftover tokens, or a character GQL does not use (`?`, `#`, `^`, ```, ...) |
 | `CG00003` | Unterminated string, quoted name, or block comment |

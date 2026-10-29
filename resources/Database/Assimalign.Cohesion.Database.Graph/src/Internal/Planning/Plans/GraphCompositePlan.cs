@@ -4,6 +4,7 @@ using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
-// Homogeneous UNION trees can stream their leaves in source order; the query retains grouping.
+// Source-ordered leaves and indexed binary nodes preserve grouping without recursive cursors.
 internal sealed record GraphCompositePlan(GqlQueryExpression Query, GqlCompositeOperator Operator,
-    IReadOnlyList<GraphPlan> Operands, IReadOnlyList<Diagnostic> Warnings, GraphFunctionKind[] ColumnKinds, IReadOnlyList<GraphProjectionPlan> Projections, IReadOnlyList<GraphBindingShape> Shapes);
+    IReadOnlyList<GraphPlan> Operands, IReadOnlyList<Diagnostic> Warnings, GraphFunctionKind[] ColumnKinds, IReadOnlyList<GraphProjectionPlan> Projections, IReadOnlyList<GraphBindingShape> Shapes,
+    IReadOnlyList<GraphCompositeNode> Nodes, bool HomogeneousUnion);

@@ -17,12 +17,22 @@ internal sealed partial class GraphPlanner
         var normalized = inputShapes is not null ? parameters : ParameterBindings.Normalize(parameters, name => new GraphPlanningException("CG01014",
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
         var operation = query.Composite!.Operator;
-        var pending = new Stack<GqlQueryExpression>();
+        var pending = new Stack<(GqlQueryExpression Query, int Parent, bool Right)>();
+        var nodes = new List<GraphCompositeNode>();
         var leaves = new List<GqlQueryExpression>();
-        pending.Push(query);
-        while (pending.TryPop(out var operand))
+        GqlCompositeOperator? unionMode = null;
+        bool homogeneousUnion = operation is GqlCompositeOperator.Union or GqlCompositeOperator.UnionAll;
+        pending.Push((query, -1, false));
+        while (pending.TryPop(out var step))
         {
             token.ThrowIfCancellationRequested();
+            var operand = step.Query;
+            int node = nodes.Count;
+            nodes.Add(new(operand.Composite?.Operator, -1, -1, operand.Composite is null ? leaves.Count : -1));
+            if (step.Parent >= 0)
+            {
+                nodes[step.Parent] = step.Right ? nodes[step.Parent] with { Right = node } : nodes[step.Parent] with { Left = node };
+            }
             if (operand.Composite is { } composite)
             {
                 if (operand.CatalogSurface is not null || operand.TransactionCommand != GqlTransactionCommand.None ||
@@ -32,10 +42,15 @@ internal sealed partial class GraphPlanner
                 { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, operand.Location); }
                 if (composite.Left is null || composite.Right is null || !Enum.IsDefined(composite.Operator))
                 { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, operand.Location); }
-                if (composite.Operator != operation)
-                { throw new GraphPlanningException("CG00016", ErrorMessages.CompositeMixedUnion, operand.Location); }
-                pending.Push(composite.Right);
-                pending.Push(composite.Left);
+                homogeneousUnion &= composite.Operator == operation;
+                if (composite.Operator is GqlCompositeOperator.Union or GqlCompositeOperator.UnionAll)
+                {
+                    if (unionMode is not null && unionMode != composite.Operator)
+                    { throw new GraphPlanningException("CG00016", ErrorMessages.CompositeMixedUnion, operand.Location); }
+                    unionMode = composite.Operator;
+                }
+                pending.Push((composite.Right, node, true));
+                pending.Push((composite.Left, node, false));
             }
             else
             {
@@ -71,6 +86,20 @@ internal sealed partial class GraphPlanner
             { throw new GraphPlanningException("CG01020", ErrorMessages.CompositeColumns, operand.Location); }
             for (int i = 0; i < shapes.Count; i++)
             {
+                // A skipped fallback cannot supply runtime nullability observations. Keep
+                // these extra proofs local to composite planning; ordinary plans are unchanged.
+                if (shapes[i].ResultNullable is null && plan.Projections[i].Expression is not GqlLiteralExpression)
+                {
+                    var expression = plan.Projections[i].Expression;
+                    while (expression is GqlCastExpression cast) { expression = cast.Operand; }
+                    bool? nullable = expression switch
+                    {
+                        GqlLiteralExpression value => value.Value is null,
+                        GqlAggregateExpression { Function: GqlAggregateFunction.Count } => false,
+                        _ => null,
+                    };
+                    if (nullable is not null) { shapes[i] = shapes[i] with { ResultNullable = nullable }; }
+                }
                 if (plan.Projections[i].Expression is GqlLiteralExpression literal)
                 { shapes[i] = shapes[i] with { Type = GraphCompositeMetadata.Type(literal.Value),
                     ValueKind = literal.Value is null ? GraphFunctionKind.Null : shapes[i].ValueKind,
@@ -120,7 +149,7 @@ internal sealed partial class GraphPlanner
             Optional = combinedShapes[i].EntityKinds[0].Optional,
             ResultNullable = combinedShapes[i].ResultNullable,
         }).ToArray();
-        return new(query, operation, plans.AsReadOnly(), plans.SelectMany(plan => plan.Warnings).ToArray(), kinds!, projections, combinedShapes!);
+        return new(query, operation, plans.AsReadOnly(), plans.SelectMany(plan => plan.Warnings).ToArray(), kinds!, projections, combinedShapes!, nodes.AsReadOnly(), homogeneousUnion);
     }
 
     private static void ValidateCompositeReadOnly(GqlQueryExpression query, CancellationToken token)

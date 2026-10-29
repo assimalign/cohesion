@@ -39,15 +39,26 @@ public sealed partial class GqlQueryParser
     {
         var start = Current;
         var left = ParseQueryOperand(hasInput);
-        while (!Failed && Take("UNION"))
+        // ISO/IEC 39075 14.2 has one left-recursive query-conjunction level.
+        while (!Failed && (Is("UNION") || Is("EXCEPT") || Is("INTERSECT") || Is("OTHERWISE")))
         {
-            var operation = Take("ALL") ? GqlCompositeOperator.UnionAll : GqlCompositeOperator.Union;
-            if (operation == GqlCompositeOperator.Union) { Take("DISTINCT"); }
+            var operation = Take("UNION") ? GqlCompositeOperator.Union :
+                Take("EXCEPT") ? GqlCompositeOperator.Except :
+                Take("INTERSECT") ? GqlCompositeOperator.Intersect : GqlCompositeOperator.Otherwise;
+            if (operation == GqlCompositeOperator.Otherwise) { Take("OTHERWISE"); }
+            else if (Take("ALL"))
+            {
+                operation = operation switch
+                {
+                    GqlCompositeOperator.Union => GqlCompositeOperator.UnionAll,
+                    GqlCompositeOperator.Except => GqlCompositeOperator.ExceptAll,
+                    _ => GqlCompositeOperator.IntersectAll,
+                };
+            }
+            else { Take("DISTINCT"); }
             var right = ParseQueryOperand(hasInput);
             left = new GqlQueryExpression(new GqlCompositeQuery(left, operation, right), Span(start, Previous));
         }
-        if (!Failed && (Is("EXCEPT") || Is("INTERSECT") || Is("OTHERWISE")))
-        { Unsupported(Current.Text.ToUpperInvariant(), Current); }
         if (!Failed && (Is("ORDER") || Is("OFFSET") || Is("SKIP") || Is("LIMIT")) &&
             (left.Composite is not null || left.Stages.Any(stage => stage is GqlCompositeStage)))
         { Unsupported("COMPOSITE ORDER BY AND PAGE STATEMENT", Current); }

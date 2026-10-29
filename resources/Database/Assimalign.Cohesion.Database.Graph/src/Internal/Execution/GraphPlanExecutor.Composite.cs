@@ -88,7 +88,7 @@ internal static partial class GraphPlanExecutor
         }
         var columns = composite.Projections.Select((projection, i) => new DatabaseColumn
         { Name = projection.Name, Ordinal = i, Type = dynamicTypes[i] ? DatabaseType.Null : types[i],
-          IsNullable = nullable[i] || projection.ResultNullable == true }).ToArray();
+          IsNullable = nullable[i] || projection.ResultNullable != false }).ToArray();
         return new GraphQueryResult(columns, rows.ToArray(), composite.Warnings, compositeColumns);
     }
 
@@ -97,6 +97,12 @@ internal static partial class GraphPlanExecutor
         IReadOnlyList<IReadOnlyDictionary<string, object?>>? incoming = null, DatabaseType[]? metadataTypes = null,
         bool[]? dynamicTypes = null, bool[]? nullable = null)
     {
+        if (!composite.HomogeneousUnion)
+        {
+            await foreach (var row in StreamCompositeTreeRowsAsync(database, operation, composite, token, incoming,
+                metadataTypes, dynamicTypes, nullable).ConfigureAwait(false)) { yield return row; }
+            yield break;
+        }
         var budget = operation.QueryBudget!;
         using var distinctMemory = new GraphMemoryOwner(budget.Memory);
         var kinds = (GraphFunctionKind[])composite.ColumnKinds.Clone();
@@ -115,28 +121,7 @@ internal static partial class GraphPlanExecutor
                     if (!await source.MoveNextAsync().ConfigureAwait(false)) { break; }
                     var row = source.Current;
                     budget.Consume();
-                    for (int i = 0; i < row.Length; i++)
-                    {
-                        var kind = GraphScalarFunctions.Kind(row[i]);
-                        if ((kind & GraphFunctionKind.Number) != 0) { kind |= GraphFunctionKind.Number; }
-                        if (kind == GraphFunctionKind.Unknown) { continue; }
-                        if (kinds[i] != GraphFunctionKind.Unknown && (kinds[i] & kind) == 0)
-                        { throw new GraphPlanningException("CG02017", ErrorMessages.CompositeShapes, plan.Query.Location); }
-                        kinds[i] = kinds[i] == GraphFunctionKind.Unknown ? kind : kinds[i] & kind;
-                    }
-                    // Reconcile every operand value before duplicate elimination keeps its first representative.
-                    if (metadataTypes is not null)
-                    {
-                        for (int i = 0; i < row.Length; i++)
-                        {
-                            if (row[i] is null) { nullable![i] = true; continue; }
-                            var type = GraphCompositeMetadata.Type(row[i]);
-                            if (type == DatabaseType.Null) { dynamicTypes![i] = true; }
-                            var widened = GraphCompositeMetadata.Widen(metadataTypes[i], type);
-                            if (metadataTypes[i] != DatabaseType.Null && type != DatabaseType.Null && widened == DatabaseType.Null) { dynamicTypes![i] = true; }
-                            metadataTypes[i] = widened;
-                        }
-                    }
+                    ReconcileCompositeRow(row, plan, kinds, metadataTypes, dynamicTypes, nullable);
                     if (seen is not null)
                     {
                         if (!seen.Add(row)) { continue; }

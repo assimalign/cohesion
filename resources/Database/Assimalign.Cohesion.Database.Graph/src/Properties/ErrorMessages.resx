@@ -49,6 +49,7 @@
   <data name="CompositeColumns" xml:space="preserve"><value>Composite operands must return the same column names in the same order.</value></data>
   <data name="CompositeShapes" xml:space="preserve"><value>Composite operands have incompatible result shapes.</value></data>
   <data name="UnionMemoryExceeded" xml:space="preserve"><value>UNION duplicate elimination exceeds the statement memory budget.</value></data>
+  <data name="SetStateMemoryExceeded" xml:space="preserve"><value>EXCEPT or INTERSECT retained state exceeds the statement memory budget.</value></data>
   <data name="EntityListWireUnsupported" xml:space="preserve"><value>Lists of nodes or relationships cannot be returned over the wire yet. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>

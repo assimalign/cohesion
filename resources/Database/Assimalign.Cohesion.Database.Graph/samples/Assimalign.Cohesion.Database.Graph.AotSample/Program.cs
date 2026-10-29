@@ -42,6 +42,12 @@ await Check("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,coalesce(n.m,0) ORDER B
 await Check("RETURN 7", [[7L]]);
 await Check("FOR x IN [1,1] RETURN x UNION FOR x IN [1,2] RETURN x", [[1L],[2L]]);
 await Check("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L],[2L]]);
+await Check("FOR x IN [1,1,2] RETURN x EXCEPT ALL RETURN 1 AS x", [[1L],[2L]]);
+await Check("FOR x IN [1,1,2] RETURN x EXCEPT DISTINCT RETURN 1 AS x", [[2L]]);
+await Check("FOR x IN [1,1,2] RETURN x INTERSECT ALL FOR x IN [1,1,1] RETURN x", [[1L],[1L]]);
+await Check("FOR x IN [1,1,2] RETURN x INTERSECT RETURN 1 AS x", [[1L]]);
+await Check("RETURN 1 AS x OTHERWISE RETURN 1/0 AS x", [[1L]]);
+await Check("FOR x IN [] RETURN x OTHERWISE FOR x IN [7,7] RETURN x NEXT RETURN x+1 AS x", [[8L],[8L]]);
 await Check("RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x", [[10L],[20L]]);
 await Check("(RETURN 1 AS x) UNION ALL (RETURN 2 AS x) NEXT (RETURN x*10 AS x) NEXT RETURN x+1 AS x", [[11L],[21L]]);
 await Check("RETURN 1 AS x UNION ALL (RETURN 1 AS x UNION ALL RETURN 2 AS x)", [[1L],[1L],[2L]]);

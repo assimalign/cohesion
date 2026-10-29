@@ -19,9 +19,6 @@ internal static class GqlUnsupportedVocabulary
         // Clauses, statements and predicates outside the executable subset.
         new("MANDATORY", GqlClauses.MandatoryMatch, GqlWordPosition.Clause),
         new("FOREACH", "FOREACH", GqlWordPosition.Clause),
-        new("EXCEPT", "EXCEPT", GqlWordPosition.Clause),
-        new("INTERSECT", "INTERSECT", GqlWordPosition.Clause),
-        new("OTHERWISE", "OTHERWISE", GqlWordPosition.Clause),
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
         // MATCH selector prefixes are parsed; these retain refusals in other positions.

@@ -25,7 +25,16 @@ internal static class GqlPathRenderer
             {
                 case string text: builder.Append(text); break;
                 case GqlCompositeQuery composite:
-                    Push("(", composite.Left, composite.Operator == GqlCompositeOperator.UnionAll ? ") UNION ALL (" : ") UNION (", composite.Right, ")");
+                    Push("(", composite.Left, composite.Operator switch
+                    {
+                        GqlCompositeOperator.UnionAll => ") UNION ALL (",
+                        GqlCompositeOperator.Except => ") EXCEPT (",
+                        GqlCompositeOperator.ExceptAll => ") EXCEPT ALL (",
+                        GqlCompositeOperator.Intersect => ") INTERSECT (",
+                        GqlCompositeOperator.IntersectAll => ") INTERSECT ALL (",
+                        GqlCompositeOperator.Otherwise => ") OTHERWISE (",
+                        _ => ") UNION (",
+                    }, composite.Right, ")");
                     break;
                 case GqlMatchStage match:
                     if (match.Clause.Predicate is { } matchPredicate) { Push(" WHERE ", matchPredicate); }
