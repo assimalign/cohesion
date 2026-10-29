@@ -4322,9 +4322,10 @@ rejects with `CK00001`: `[NOT] MATERIALIZED`, `SEARCH`/`CYCLE`,
 `FOR KEY SHARE`,
 `CREATE COLLATION`, `CREATE FULLTEXT`, and
 `WITHIN GROUP` after a non-LISTAGG call, LISTAGG ON OVERFLOW (contextual), the `ANY`/`SOME` (and `ALL`) array comparisons,
-`LATERAL`, `~`, `SEQUENCE`,
-`MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE`, `RESTART`, plus `PERCENT` and `WITH TIES` after
-FETCH or TOP. Identifiers spelled like these recognized-unsupported words,
+`LATERAL`, `~`, plus `PERCENT` and `WITH TIES` after
+FETCH or TOP. The sequence words `SEQUENCE`, `MINVALUE`, `MAXVALUE`, `CYCLE`, `CACHE` and
+`RESTART` are profile keywords since sequence DDL executes (#1717); only the recursive-CTE
+`SEARCH`/`CYCLE` clause is still rejected. Identifiers spelled like these recognized-unsupported words,
 including `MATERIALIZED`, `SEARCH`, `percent` and `ties`,
 render quoted in canonical SQL. `WITH` remains a profile keyword; its nested-form
 refusal is a dedicated parser rule. RECURSIVE is a profile keyword, rejected with
