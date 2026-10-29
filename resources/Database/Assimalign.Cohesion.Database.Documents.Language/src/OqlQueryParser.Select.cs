@@ -27,16 +27,25 @@ public sealed partial class OqlQueryParser
         } while (!value && !Failed && Take(TokenType.Comma));
         if (Failed) { return EmptyExpression(); }
         Expect("FROM");
-        string collection = CollectionName();
+        var sourceToken = Current;
+        bool collectionTerm = Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+            (_tokens[_position + 1].Type is not (TokenType.LeftParen or TokenType.LeftBracket or TokenType.Dot) ||
+                Is("COHESION_SCHEMA") || _depth == 0 && _tokens[_position + 1].Type == TokenType.Dot);
+        string collection = collectionTerm ? CollectionName() : string.Empty;
+        OqlExpression? source = collectionTerm ? null : ParseExpression();
         string? alias = null;
         if (Take("AS"))
         {
             alias = Identifier();
         }
-        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsUnnestClause())
+        else if ((source is null or OqlSubqueryExpression) && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsUnnestClause())
         {
             alias = Identifier();
         }
+        if (!Failed && source is OqlSubqueryExpression && alias is null)
+        { Error("CD00015", ErrorMessages.DerivedSourceAliasRequired, sourceToken); }
+        if (source is OqlPathExpression { Segments.Count: > 0 } sourcePath && alias is null)
+        { alias = sourcePath.Segments[^1].Name; }
 
         List<OqlUnnestExpression> unnest = [];
         var variables = new HashSet<string>(StringComparer.Ordinal);
@@ -67,6 +76,8 @@ public sealed partial class OqlQueryParser
             unnest.Add(new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous)));
         }
 
+        if (!Failed && Current.Type == TokenType.Comma)
+        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("comma-separated JOIN", Profile.Language, Span(Current, Current))); }
         OqlExpression? predicate = Take("WHERE") ? ParseExpression() : null;
         List<OqlExpression> groups = [];
         List<string?>? groupAliases = null;
@@ -140,7 +151,7 @@ public sealed partial class OqlQueryParser
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
             groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly(),
-            groupAliases?.AsReadOnly(), groupAs);
+            groupAliases?.AsReadOnly(), groupAs, source);
     }
 
     private bool IsUnnestClause() => IsUnnestClause(_position);

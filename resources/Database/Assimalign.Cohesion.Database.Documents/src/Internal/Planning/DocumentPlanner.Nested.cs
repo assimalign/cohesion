@@ -18,6 +18,7 @@ internal sealed partial class DocumentPlanner
         if (expression is OqlSubqueryExpression) { return true; }
         if (expression is OqlSelectExpression query)
         {
+            if (query.Source is not null) { return true; }
             for (int index = 0; index < query.Projections.Count; index++) { if (HasSubquery(query.Projections[index].Expression)) { return true; } }
             if (HasSubquery(query.Predicate) || HasSubquery(query.Having)) { return true; }
             for (int index = 0; index < query.GroupBy.Count; index++) { if (HasSubquery(query.GroupBy[index])) { return true; } }
@@ -91,10 +92,14 @@ internal sealed partial class DocumentPlanner
     private DocumentNestedPlan PlanNested(OqlExpression expression)
     {
         if (expression is not OqlSelectExpression query)
-        { throw new DocumentPlanningException("CK00001", ErrorMessages.DmlSubqueryDeferred, expression.Location); }
+        {
+            bool sourceInDml = expression is OqlInsertExpression { Select.Source: not null and not OqlSubqueryExpression } or
+                OqlUpsertExpression { Select.Source: not null and not OqlSubqueryExpression };
+            throw new DocumentPlanningException("CK00001", sourceInDml ? ErrorMessages.DmlSourceDeferred : ErrorMessages.DmlSubqueryDeferred, expression.Location);
+        }
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
         VisitQuery(query, new Dictionary<string, bool>(StringComparer.Ordinal));
-        return new DocumentNestedPlan(PlanCore(query), queries);
+        return new DocumentNestedPlan(PlanCore(query, queries), queries);
 
         void VisitQuery(OqlSelectExpression select, Dictionary<string, bool> outer)
         {
@@ -103,6 +108,7 @@ internal sealed partial class DocumentPlanner
             if (outer.TryGetValue(select.Collection, out bool keyspace) && !keyspace)
             { throw new DocumentPlanningException("CK00001", ErrorMessages.CorrelationDeferred, select.Location); }
             var source = new Dictionary<string, bool>(StringComparer.Ordinal) { [select.Alias ?? select.Collection] = select.Alias is null };
+            Visit(select.Source, "FROM", new Dictionary<string, bool>(StringComparer.Ordinal), outer);
             foreach (var binding in select.Unnest)
             {
                 Visit(binding.Collection, "UNNEST", source, outer);
@@ -135,15 +141,21 @@ internal sealed partial class DocumentPlanner
             _cancellationToken.ThrowIfCancellationRequested();
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
             if (node is null) { return; }
-            if (node is OqlPathExpression path && path.Segments.Count > 0 && path.Segments[0].Name is string name && outer.ContainsKey(name) && !local.ContainsKey(name))
-            { throw new DocumentPlanningException("CK00001", ErrorMessages.CorrelationDeferred, node.Location); }
+            if (node is OqlPathExpression path && path.Segments.Count > 0 && path.Segments[0].Name is string name)
+            {
+                if (outer.ContainsKey(name) && !local.ContainsKey(name))
+                { throw new DocumentPlanningException("CK00001", ErrorMessages.CorrelationDeferred, node.Location); }
+                if (owner == "FROM" && !local.ContainsKey(name))
+                { throw new DocumentPlanningException("CD01034", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.FromVariableUnbound, name), node.Location); }
+            }
             if (node is OqlSubqueryExpression subquery)
             {
                 if (queries.ContainsKey(subquery)) { return; }
                 var enclosing = new Dictionary<string, bool>(outer, StringComparer.Ordinal);
                 foreach (var declaration in local) { enclosing[declaration.Key] = declaration.Value; }
                 VisitQuery(subquery.Query, enclosing);
-                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(subquery.Query), CanCache(subquery.Query), owner));
+                queries.Add(subquery, new DocumentNestedQueryPlan(PlanCore(subquery.Query, queries), CanCache(subquery.Query), owner));
                 return;
             }
             if (node is OqlComprehensionExpression comprehension)
@@ -180,6 +192,7 @@ internal sealed partial class DocumentPlanner
         {
             case OqlSubqueryExpression subquery: yield return subquery.Query; break;
             case OqlSelectExpression query:
+                if (query.Source is not null) { yield return query.Source; }
                 foreach (var projection in query.Projections) { yield return projection.Expression; }
                 if (query.Predicate is not null) { yield return query.Predicate; }
                 foreach (var key in query.GroupBy) { yield return key; }
@@ -210,8 +223,15 @@ internal sealed partial class DocumentPlanner
                 nodes.Add(new DatabasePlanNode { NodeId = offset + node.NodeId, ParentId = node.ParentId is int id ? offset + id : parent,
                     Operator = node.Operator, Target = node.Target, Index = node.Index, Detail = node.Detail, EstimatedRows = node.EstimatedRows });
             }
-            var query = queryPlan is DocumentPlan select ? select.Logical.Query : ((DocumentSystemCollectionPlan)queryPlan).Logical.Query;
-            AddExpressions(query, offset);
+            var query = QueryLogical(queryPlan).Query;
+            if (queryPlan is DocumentFromPlan { Input: not null } source)
+            { AddQuery(source.Input, nodes.Skip(offset).First(node => node.Operator == "DerivedSource").NodeId); }
+            foreach (var child in NestedChildren(query))
+            {
+                if (!ReferenceEquals(child, query.Source)) { AddExpressions(child, offset); }
+                else if (queryPlan is DocumentFromPlan { Input: null })
+                { AddExpressions(child, nodes.Skip(offset).First(node => node.Operator == "ExpressionSource").NodeId); }
+            }
         }
 
         void AddExpressions(OqlExpression node, int parent)

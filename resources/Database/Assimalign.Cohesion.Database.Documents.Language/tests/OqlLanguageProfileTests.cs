@@ -45,6 +45,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.FirstComprehension)]
     [InlineData(OqlClauses.Explain)]
     [InlineData(OqlClauses.From)]
+    [InlineData(OqlClauses.DerivedFrom)]
+    [InlineData(OqlClauses.ExpressionFrom)]
     [InlineData(OqlClauses.Unnest)]
     [InlineData(OqlClauses.LeftUnnest)]
     [InlineData(OqlClauses.Any)]
@@ -76,7 +78,7 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData("DERIVED FROM")]
+    [InlineData("JOIN")]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();

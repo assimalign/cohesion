@@ -69,6 +69,8 @@ public static class OqlLanguageProfile
         OqlClauses.FirstComprehension,
         OqlClauses.Explain,
         OqlClauses.From,
+        OqlClauses.DerivedFrom,
+        OqlClauses.ExpressionFrom,
         OqlClauses.Unnest,
         OqlClauses.LeftUnnest,
         OqlClauses.Where,

@@ -22,7 +22,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Star(document),
-                OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlMetaExpression meta => document.Id is null ? null : meta.Member == "id" ? document.Id : (decimal)document.Version,
                 OqlArrayExpression or OqlObjectExpression => (await ConstructAsync(expression, document, group, nested).ConfigureAwait(false)),
                 OqlPathExpression path => ReadPath(path, document),
                 OqlUnaryExpression unary => Unary(unary.Operator, (await EvaluateAsync(unary.Operand, document, group, nested).ConfigureAwait(false))),

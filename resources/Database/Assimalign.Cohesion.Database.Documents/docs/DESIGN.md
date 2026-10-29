@@ -509,6 +509,9 @@ CD00007 for the same count rule at parse and plan time:
 | `CD00011` | ALL/DISTINCT applied to a scalar or star call |
 | `CD00013` | NULLS without FIRST or LAST |
 | `CD00014` | Direct IN subquery requires RAW/VALUE |
+| `CD00015` | Derived FROM subquery requires an alias |
+| `CD01033` | FROM expression has no explicit alias or implicit field name |
+| `CD01034` | Unbound variable in a FROM expression without an input-row scope |
 | `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
 | `CD01032` | Direct ordering AST has an invalid null placement |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
@@ -676,6 +679,41 @@ Nested array/object materialization retains the same depth guard and located sub
 Release measurements preserve the baseline allocations for ordinary plans, native queries and
 selective scans; the statement wrapper adds no ordinary-plan fields.
 
+### Derived and expression sources (#1731, OQ-Q2)
+
+DocumentFromPlan owns the outer logical plan and an optional derived input plan. Generic inputs
+retain the expression in OqlSelectExpression.Source. PlanNested's lexical visitor validates the
+source before introducing its row alias, refusing outer captures with CK00001 and otherwise
+unbound source variables with CD01034. Comprehension-local bindings remain valid. Planning
+binds inner collections, parameters, grouping and metadata even when LIMIT 0 skips execution.
+The ordinary AST and plan allocation path remains unchanged: the collection-name storage slot
+also carries the optional source expression. CD00015 names a missing derived alias; CD01033
+names an expression without an explicit alias or implicit field name.
+
+SourceInputAsync, SourceMatchesAsync and StreamSourceRowsAsync form a pull pipeline. Simple
+inner SELECTs lend one projected JSON row until the next MoveNext; no subquery array is created.
+Each cursor owns its candidate and current-row reservations and is disposed by await using on
+LIMIT, success, failure and cancellation. The outer match loop tests its window before advancing.
+Filters and UNNEST remain lazy, and each nonblocking source projection is evaluated once. Dynamic
+headers describe the selected page; paging precedes projection. Source stars use the existing
+synthetic wrapper helper with the FROM alias, even without UNNEST. META yields NULL for rows
+without stored identity. Stored collection stars and metadata keep their existing contracts.
+
+Grouping, DISTINCT and sorting use the existing blocking helpers. Retained input content and
+UNNEST bindings are independently cloned and charged to the same CD05018 counter before the
+input advances. Temporary projected rows, expression values and result rows have scoped owners.
+The source UNNEST cursor also reserves independently generated arrays while re-reading their elements.
+Only surviving final results transfer their reservation to DocumentQueryResult. Q1's nested
+arrays retain their existing statement ownership. Candidate discovery uses the operation snapshot
+and sees own writes. No new public execution seam, interface, reference or friend grant is needed.
+EXPLAIN includes DerivedSource/ExpressionSource and the inner tree; outer ORDER BY always sorts.
+After eager planning, a zero LIMIT returns an empty result with planned column metadata before
+opening any stored, system, expression or derived source or running grouping, DISTINCT or sorting.
+Derived input iterators enforce their own zero window before opening a cursor, even without an
+outer LIMIT. This follows PostgreSQL src/backend/executor/nodeLimit.c:81-95 in the reference clone.
+The deterministic LIMIT counters prove one inner content read and callback for LIMIT 1. Ordinary
+Release plan, native-query and selective-scan allocation measurements retain their base budgets.
+
 ### Stored document queries
 
 #### Array row bindings (#1136)
@@ -782,9 +820,9 @@ rounding; fractional inputs cannot normalize to zero or round into an integer. C
 the issue's original Int32 bound under the 2026-10-18 ruling. NULL and LIMIT ALL remain invalid,
 diverging from PostgreSQL (src/backend/executor/nodeLimit.c:359-408).
 
-Paging runs last, after HAVING, DISTINCT, ORDER BY and complete column-type inference and numeric
-promotion. Alias rewrites retain both AST operands. Empty and zero-limit pages keep the header
-and static function types, including Int64 COUNT. The window clamps offset to row count, then
+Unless LIMIT is zero, paging runs last, after HAVING, DISTINCT, ORDER BY and complete column-type
+inference and numeric promotion. Alias rewrites retain both AST operands. Empty and zero-limit
+pages keep the header and static function types, including Int64 COUNT. The window clamps offset to row count, then
 limit to remaining rows; it never adds counts, so Int64.MaxValue is safe. The same output slice
 carries original whole-document bytes. Query AffectedCount stays -1; wire Complete's result
 count is the number of frames after paging. INSERT and UPSERT SELECT write only that page.
@@ -797,7 +835,8 @@ data. Writes between separate statements may shift pages; use a shared snapshot 
 EXPLAIN's select detail includes resolved limit (none when absent) and offset (zero when absent).
 Unsorted, ungrouped, non-DISTINCT queries whose projections have fixed static result types stop reads
 once the page is complete, including registered scalar functions, unary and binary operators,
-META, literals and constructors. LIMIT 0 evaluates no row predicates; a completed window never
+META, literals and constructors. LIMIT 0 skips all execution stages after static validation and
+uses planned column types without reading documents or invoking callbacks; a completed window never
 evaluates the next predicate, following PostgreSQL src/backend/executor/nodeLimit.c:153-159.
 Paths and lone stars can observe heterogeneous scalar roots and
 still inspect all matches to guarantee page-independent column types; their result is materialized.
@@ -1824,7 +1863,7 @@ managed memory. UNNEST multiplies input rows and has no row cap; it is not a joi
 does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
 writer locking is conservative; there are no persisted query statistics, join,
-correlated/derived/DML subqueries, external sort, replication, model-specific security,
+correlated/DML subqueries, external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 
 Co-located tests cover nested/mixed JSON, expected-version writes, explicit commit

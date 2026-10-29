@@ -62,6 +62,15 @@ Direct references are Database.Client, Documents.Protocol, Database.Types, Datab
 
 `DocumentClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
 
+## FROM source results (#1731, OQ-Q2)
+
+Derived and uncorrelated expression FROM sources use the existing row/document frames on
+InMemory and TCP. Aliased stars wrap the source value under its alias; RAW source projections
+preserve mixed JSON kinds. META on a source without stored identity returns NULL. EXPLAIN
+includes DerivedSource/ExpressionSource and child plans. CD00015/CD01033 preserve their
+structured identity and leave an autocommit connection reusable. The NativeAOT guard exercises
+both source forms, mixed values, empty MISSING, star, metadata and EXPLAIN on both transports.
+
 ## Intent and dependencies
 
 The client makes the existing database-bound document session available over its model protocol.
