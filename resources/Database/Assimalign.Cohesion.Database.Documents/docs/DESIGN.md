@@ -779,7 +779,8 @@ DocumentJoinPlan wraps the initial stored, virtual, derived or expression source
 each right-hand stored collection against the planning snapshot. Ordered source bindings share the
 streaming expression-source pipeline, including left-to-right UNNEST cursors, correlation, grouped
 captures and ORDER BY aliases. Every SELECT source in a statement containing a key join requires an explicit alias pending #1767,
-including nested scopes without their own joins and direct AST requests.
+including nested scopes without their own joins and direct AST requests. Key expressions retain initial
+FROM field fallback; a name matching a self or later binding requires an earlier-source qualifier.
 The language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#key-join-and-nest-1732-oq-j1)
 records all defaults, including the NULL/MISSING lookup-NEST table, qualified stars, metadata
 ambiguity and selected-window headers. Ordinary queries keep their existing execution path.

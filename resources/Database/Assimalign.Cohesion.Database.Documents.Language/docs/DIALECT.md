@@ -210,7 +210,9 @@ Bindings execute left to right and may interleave with UNNEST. The right-hand so
 stored collection in this database. ON must be exactly META(rightAlias).id = keyExpression;
 parentheses are allowed. The key expression sees earlier sources and lexical outer captures,
 including scalar functions, parameters and subqueries. A self or forward source reference gives
-CD01035. General ON predicates, reversed equality, ON KEYS, expression/derived right-hand
+CD01035. Unqualified key fields address the initial FROM value; a field whose name collides with
+a self or later source alias must be qualified with its earlier source alias.
+General ON predicates, reversed equality, ON KEYS, expression/derived right-hand
 sources, comma joins and joins on UPDATE/DELETE remain named CK00001 refusals.
 INSERT/UPSERT SELECT and expression subqueries may contain the supported SELECT joins.
 

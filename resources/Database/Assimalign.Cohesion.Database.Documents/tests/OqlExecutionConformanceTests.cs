@@ -210,6 +210,7 @@ public sealed class OqlExecutionConformanceTests
             [OqlClauses.Join] =
             [
                 new("SELECT b.name FROM items AS a JOIN items AS b ON META(b).id = META(a).id ORDER BY b.name", [["alpha"], ["beta"], ["delta"], ["gamma"]]),
+                new("SELECT b.name FROM [{key:'A'}] AS a JOIN items AS b ON META(b).id = LOWER(key)", [["alpha"]]),
             ],
             [OqlClauses.LeftJoin] =
             [

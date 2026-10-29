@@ -131,12 +131,15 @@ internal sealed partial class DocumentPlanner
             bool capturesSource = select.Source is null && outer.TryGetValue(select.Collection, out bool keyspace) && !keyspace;
             var source = new Dictionary<string, bool>(StringComparer.Ordinal)
             { [select.Alias ?? select.Collection] = select.Alias is null && select.Source is null && !capturesSource };
+            var joinNames = select.Bindings == select.Unnest ? null :
+                new HashSet<string>(select.Bindings.Select(binding => binding.Variable), StringComparer.Ordinal);
             if (capturesSource)
             { free.Add(select.Collection); }
             Visit(select.Source, "FROM", new Dictionary<string, bool>(StringComparer.Ordinal), outer, free);
             foreach (var binding in select.Bindings)
             {
-                Visit(binding.Expression, binding is OqlJoinExpression ? "JOIN" : "UNNEST", source, outer, free);
+                Visit(binding.Expression, binding is OqlJoinExpression ? "JOIN" : "UNNEST", source, outer, free,
+                    keyNames: binding is OqlJoinExpression ? joinNames : null);
                 source[binding.Variable] = false;
             }
             Visit(select.Predicate, "WHERE", source, outer, free);
@@ -152,7 +155,7 @@ internal sealed partial class DocumentPlanner
         }
 
         void Visit(OqlExpression? node, string owner, Dictionary<string, bool> local, Dictionary<string, bool> outer, HashSet<string> free,
-            Dictionary<string, bool>? nestedOrder = null)
+            Dictionary<string, bool>? nestedOrder = null, IReadOnlySet<string>? keyNames = null)
         {
             _cancellationToken.ThrowIfCancellationRequested();
             System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
@@ -161,7 +164,7 @@ internal sealed partial class DocumentPlanner
             {
                 if (outer.ContainsKey(name) && !local.ContainsKey(name))
                 { free.Add(name); }
-                if (owner == "JOIN" && !local.ContainsKey(name) && !outer.ContainsKey(name))
+                if (owner == "JOIN" && keyNames?.Contains(name) == true && !local.ContainsKey(name) && !outer.ContainsKey(name))
                 { throw new DocumentPlanningException("CD01035", ErrorMessages.JoinBindingInvalid, node.Location); }
                 if (owner == "FROM" && !local.ContainsKey(name) && !outer.ContainsKey(name))
                 { throw new DocumentPlanningException("CD01034", string.Format(System.Globalization.CultureInfo.CurrentCulture,
@@ -189,21 +192,21 @@ internal sealed partial class DocumentPlanner
             }
             if (node is OqlComprehensionExpression comprehension)
             {
-                Visit(comprehension.Collection, owner, local, outer, free, nestedOrder);
+                Visit(comprehension.Collection, owner, local, outer, free, nestedOrder, keyNames);
                 var inner = new Dictionary<string, bool>(local, StringComparer.Ordinal) { [comprehension.Variable] = false };
                 var orderedInner = nestedOrder is null ? null : new Dictionary<string, bool>(nestedOrder, StringComparer.Ordinal) { [comprehension.Variable] = false };
-                Visit(comprehension.Projection, owner, inner, outer, free, orderedInner);
-                Visit(comprehension.Predicate, owner, inner, outer, free, orderedInner);
+                Visit(comprehension.Projection, owner, inner, outer, free, orderedInner, keyNames);
+                Visit(comprehension.Predicate, owner, inner, outer, free, orderedInner, keyNames);
                 return;
             }
             if (node is OqlQuantifiedExpression quantified)
             {
-                Visit(quantified.Collection, owner, local, outer, free, nestedOrder);
+                Visit(quantified.Collection, owner, local, outer, free, nestedOrder, keyNames);
                 Visit(quantified.Predicate, owner, new Dictionary<string, bool>(local, StringComparer.Ordinal) { [quantified.Variable] = false }, outer, free,
-                    nestedOrder is null ? null : new Dictionary<string, bool>(nestedOrder, StringComparer.Ordinal) { [quantified.Variable] = false });
+                    nestedOrder is null ? null : new Dictionary<string, bool>(nestedOrder, StringComparer.Ordinal) { [quantified.Variable] = false }, keyNames);
                 return;
             }
-            foreach (var child in NestedChildren(node)) { Visit(child, owner, local, outer, free, nestedOrder); }
+            foreach (var child in NestedChildren(node)) { Visit(child, owner, local, outer, free, nestedOrder, keyNames); }
         }
 
         bool CanCache(OqlExpression node)

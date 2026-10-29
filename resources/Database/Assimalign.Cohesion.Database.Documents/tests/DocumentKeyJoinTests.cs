@@ -108,6 +108,8 @@ public sealed class DocumentKeyJoinTests
     [InlineData("SELECT RAW (SELECT RAW META(b).id FROM [1] AS s) FROM [1] AS a JOIN items AS b ON META(b).id = 'a'", "[\"a\"]")]
     [InlineData("SELECT RAW (SELECT RAW b.n FROM [1] AS s JOIN items AS b ON META(b).id = META(a).id) FROM items AS a ORDER BY a.n", "[1];[2];[3]")]
     [InlineData("SELECT RAW b.n FROM (SELECT RAW 'b' FROM items AS a LIMIT 1) AS k JOIN items AS b ON META(b).id = k", "2")]
+    [InlineData("SELECT RAW b.n FROM [{key:'b'}] AS a JOIN items AS b ON META(b).id = key", "2")]
+    [InlineData("SELECT RAW b.n FROM [{key:'B'}] AS a JOIN items AS b ON META(b).id = LOWER(key)", "2")]
     [InlineData("SELECT META(a).id AS id FROM [1] AS a JOIN items AS b ON META(b).id = 'a'", "")]
     [InlineData("SELECT META(b).id AS id FROM [1] AS a NEST items AS b ON META(b).id = 'a'", "")]
     [InlineData("SELECT RAW (SELECT b.* FROM [1] AS s LEFT JOIN items AS b ON META(b).id = 'absent') FROM [1] AS a", "[null]")]
