@@ -121,6 +121,10 @@ Cached deterministic arrays remain retained until the statement exits. Uncached 
 the evaluating expression or row: predicates release them immediately, while projection, grouping,
 UNNEST and ordering consumers clone and charge the values they retain. Filter-only nested retention
 is constant across outer rows. Arrays and output projection clones own their JSON independently.
+Quantifiers and other per-element filters release discarded correlated results after each iteration,
+while preserving the input collection and statement caches. IN-list operands, CASE conditions and
+skipped conditional arguments have the same scratch lifetime. Object construction retains live
+member values until serialization and releases discarded expression scratch per member.
 Nested source rows, results, scratch and arrays share the existing
 memory budget. A conservative reservation precedes array serialization and then shrinks to its
 measured representation. Cancellation or failure releases all nested reservations. EXPLAIN binds

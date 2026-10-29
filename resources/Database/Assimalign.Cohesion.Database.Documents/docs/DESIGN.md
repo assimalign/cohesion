@@ -660,6 +660,13 @@ filters release discarded arrays immediately; projection, group keys, ordered ke
 UNNEST rows clone and charge independent retained values. No list in the statement context retains
 uncached arrays. Each nested query owns its temporary sources, results and conservative array
 serialization reservation. Failure/cancellation unwind each reservation before operation cleanup.
+Quantified predicates release each iteration's discarded scratch in finally, after the collection
+has been evaluated and excluding statement-cache reservations. IN lists, CASE conditions and
+skipped lazy conditional arguments release each discarded operand; ARRAY/FIRST filters already
+use the same predicate bracket. Object members release expression scratch after charging their
+live map value, retaining only the last non-MISSING value per key until serialization. Budget
+regressions compare literal and correlated 8 KiB operands across 1,000 iterations under 256 KiB,
+and separately preserve cached collection reservations and refuse oversized live object maps.
 The deterministic 10,000-row filter test observes identical first/last evaluation peaks under a
 16 MiB grant, replacing the former 8,488 retained bytes per row. Ordinary Release allocations stay
 at the base budgets because outer-scope state exists only in the nested evaluator state variant.

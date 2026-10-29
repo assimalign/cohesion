@@ -95,8 +95,13 @@ internal sealed partial class DocumentExpressionEvaluator
         // Couchbase expression/coll_in.go:58-159: a match wins, then NULL, then MISSING.
         foreach (var item in expression.Values)
         {
-            var value = (await EvaluateAsync(item, document, group, nested).ConfigureAwait(false));
-            AddInItem(operand, value, ref missing, ref nullItem, ref matched);
+            long before = Memory.Bytes - nested.RetainedBytes;
+            try
+            {
+                var value = await EvaluateAsync(item, document, group, nested).ConfigureAwait(false);
+                AddInItem(operand, value, ref missing, ref nullItem, ref matched);
+            }
+            finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
         }
         return FinishIn(expression.Negated, operand, missing, nullItem, matched);
     }
@@ -114,8 +119,14 @@ internal sealed partial class DocumentExpressionEvaluator
         var operand = expression.Operand is null ? null : (await EvaluateAsync(expression.Operand, document, group, nested).ConfigureAwait(false));
         foreach (var branch in expression.Branches)
         {
-            var condition = (await EvaluateAsync(branch.Key, document, group, nested).ConfigureAwait(false));
-            bool matches = CaseMatches(expression, operand, condition);
+            bool matches;
+            long before = Memory.Bytes - nested.RetainedBytes;
+            try
+            {
+                var condition = await EvaluateAsync(branch.Key, document, group, nested).ConfigureAwait(false);
+                matches = CaseMatches(expression, operand, condition);
+            }
+            finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
             if (matches) { return (await EvaluateAsync(branch.Value, document, group, nested).ConfigureAwait(false)); }
         }
         // Couchbase expression/case_simple.go:83-108 and case_searched.go:73-98:
@@ -145,7 +156,12 @@ internal sealed partial class DocumentExpressionEvaluator
         foreach (var item in array.EnumerateArray())
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            if (QuantifiedResult(expression, await EvaluateAsync(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group, nested).ConfigureAwait(false)) is bool result) { return result; }
+            long before = Memory.Bytes - nested.RetainedBytes;
+            try
+            {
+                if (QuantifiedResult(expression, await EvaluateAsync(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group, nested).ConfigureAwait(false)) is bool result) { return result; }
+            }
+            finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
         }
         return expression.IsEvery;
     }
@@ -157,9 +173,15 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             foreach (var argument in call.Arguments)
             {
-                var value = (await EvaluateAsync(argument, document, group, nested).ConfigureAwait(false));
-                bool skip = SkipConditional(call.Name, value);
-                if (!skip) { return value; }
+                long before = Memory.Bytes - nested.RetainedBytes;
+                bool keep = false;
+                try
+                {
+                    var value = await EvaluateAsync(argument, document, group, nested).ConfigureAwait(false);
+                    keep = !SkipConditional(call.Name, value);
+                    if (keep) { return value; }
+                }
+                finally { if (!keep) { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); } }
             }
             return null;
         }
@@ -219,6 +241,8 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         if (expression is OqlArrayExpression array)
         { return await DocumentJsonValue.ArrayAsync(ElementsAsync(array), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false); }
+        using var members = Memory.Reserve();
+        var memberCharges = new Dictionary<string, long>(StringComparer.Ordinal);
         return await DocumentJsonValue.ObjectAsync(MembersAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
 
         async IAsyncEnumerable<object?> ElementsAsync(OqlArrayExpression array)
@@ -233,7 +257,25 @@ internal sealed partial class DocumentExpressionEvaluator
         async IAsyncEnumerable<KeyValuePair<string, object?>> MembersAsync()
         {
             foreach (var member in ((OqlObjectExpression)expression).Members)
-            { yield return new(member.Key, await EvaluateAsync(member.Value, document, group, nested).ConfigureAwait(false)); }
+            {
+                long before = Memory.Bytes - nested.RetainedBytes - members.Bytes;
+                try
+                {
+                    var value = await EvaluateAsync(member.Value, document, group, nested).ConfigureAwait(false);
+                    if (value is not DocumentMissing)
+                    {
+                        // ObjectAsync keeps the last non-MISSING value for each key
+                        // until serialization. Transfer its ownership before releasing
+                        // this member's discarded expression scratch.
+                        long bytes = 64L + Memory.ValueBytes(value);
+                        members.Charge(bytes);
+                        members.Rewind(members.Bytes - memberCharges.GetValueOrDefault(member.Key));
+                        memberCharges[member.Key] = bytes;
+                    }
+                    yield return new(member.Key, value);
+                }
+                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - members.Bytes - before); }
+            }
         }
     }
 
