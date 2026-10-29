@@ -19,7 +19,7 @@ public sealed class GraphWireDiagnosticTests
         // Arrange
         await using var harness = await GraphClientTestHarness.StartAsync();
         await using var connection = await harness.Client.ConnectAsync(harness.Token);
-        const string gql = "MATCH (a)->(b) CALL foo() RETURN a EXCEPT MATCH (c) RETURN c";
+        const string gql = "MATCH (a)->(b) CALL foo() RETURN a HAVING TRUE";
         var expected = new GqlQueryParser().Parse(gql).Diagnostics.Where(item => item.Severity is DiagnosticSeverity.Warning or DiagnosticSeverity.Error).ToArray();
         // Act
         var parse = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(gql, cancellationToken: harness.Token));
@@ -68,12 +68,12 @@ public sealed class GraphWireDiagnosticTests
         // Act
         var error = await Should.ThrowAsync<GraphClientException>(async () =>
         {
-            await foreach (var path in connection.QueryPathsAsync("MATCH (a)->(b) CALL foo() RETURN a EXCEPT MATCH (c) RETURN c", cancellationToken: harness.Token)) { }
+            await foreach (var path in connection.QueryPathsAsync("MATCH (a)->(b) CALL foo() RETURN a HAVING TRUE", cancellationToken: harness.Token)) { }
         });
         // Assert
         error.Diagnostics.Count.ShouldBeGreaterThanOrEqualTo(2);
         error.Code.ShouldBe(ProtocolErrorCode.ParseFailure);
-        error.Diagnostics.Select(Value).ShouldBe(new GqlQueryParser().Parse("MATCH (a)->(b) CALL foo() RETURN a EXCEPT MATCH (c) RETURN c").Diagnostics.Select(Value));
+        error.Diagnostics.Select(Value).ShouldBe(new GqlQueryParser().Parse("MATCH (a)->(b) CALL foo() RETURN a HAVING TRUE").Diagnostics.Select(Value));
         connection.IsOpen.ShouldBeTrue();
         var session = harness.Server.Sessions.Single();
         await connection.QueryAsync("SHOW LABELS", cancellationToken: harness.Token);

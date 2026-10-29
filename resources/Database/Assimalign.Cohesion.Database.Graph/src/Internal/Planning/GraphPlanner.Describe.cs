@@ -14,8 +14,7 @@ internal sealed partial class GraphPlanner
     internal static string DescribeOperator(object plan) => plan switch
     {
         GraphPlan => "Match",
-        GraphCompositePlan { Operator: GqlCompositeOperator.UnionAll } => "UnionAll",
-        GraphCompositePlan => "Union",
+        GraphCompositePlan composite => composite.Operator.ToString(),
         GraphCorrelatedSubplan => "CorrelatedSubplan",
         GraphStagePlan => "Stage",
         GqlSetStage => "Set",

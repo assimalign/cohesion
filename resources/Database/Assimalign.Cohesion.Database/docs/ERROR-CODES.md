@@ -441,6 +441,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1737, GQ-Q1) | CG05029 | A composite query contains a modifying operand |
 | New (#1737, GQ-Q1) | CG05030 | UNION duplicate-elimination state exceeds the statement memory budget |
 | New (#1737, GQ-Q1 fixes) | CG05031 | Internal statement lookup unexpectedly lacks its key; original cause is retained |
+| New (#1737, GQ-Q2) | CG05032 | EXCEPT or INTERSECT retained rows/hash state exceeds the statement memory budget |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |

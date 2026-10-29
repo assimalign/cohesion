@@ -221,8 +221,8 @@ public sealed partial class GqlQueryParser : QueryParser
             // value, label and update context, relative to its own delimiter depth.
             if (!existsPattern && patternDepth == 0 && token.Type == TokenType.LeftParen &&
                 (i == start || i == start + 1 && IsWordAt(start, "EXPLAIN") ||
-                 IsWordAt(i - 1, "UNION") || IsWordAt(i - 1, "NEXT") ||
-                 i > 1 && IsWordAt(i - 2, "UNION") && (IsWordAt(i - 1, "ALL") || IsWordAt(i - 1, "DISTINCT"))))
+                 IsConjunctionAt(i - 1) || IsWordAt(i - 1, "NEXT") ||
+                 i > 1 && IsConjunctionAt(i - 2) && (IsWordAt(i - 1, "ALL") || IsWordAt(i - 1, "DISTINCT"))))
             {
                 if (!HasStackToNest(token)) { return; }
                 int body = i + 1;
@@ -382,6 +382,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
             if (valuePosition && token.Type is TokenType.Identifier or TokenType.Function &&
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen &&
+                !(IsConjunctionAt(i) && FollowsCompositeValue(i)) &&
                 !GqlUnsupportedVocabulary.TryFind(value, out _) && token.Type != TokenType.Function && !_allowCustomFunctions)
             {
                 Error("CG00010", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserFindUnsupportedVoid, token.Text), token);
@@ -390,11 +391,8 @@ public sealed partial class GqlQueryParser : QueryParser
             if (value == "WITH" && valuePosition && i > 0 && (IsWordAt(i - 1, "STARTS") || IsWordAt(i - 1, "ENDS"))) { continue; }
             if (value is "ALL" or "ANY" or "NONE" or "SINGLE" && valuePosition &&
                 i + 1 < _tokens.Count && _tokens[i + 1].Type == TokenType.LeftParen) { continue; }
-            if (value == "ALL" && i > 0 && (IsWordAt(i - 1, "UNION") || IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && (_tokens[i - 2].Type == TokenType.Function || _allowCustomFunctions && _tokens[i - 2].Type == TokenType.Identifier))) { continue; }
+            if (value == "ALL" && i > 0 && (IsConjunctionAt(i - 1) || IsWordAt(i - 1, "RETURN") || IsWordAt(i - 1, "WITH") || _tokens[i - 1].Type == TokenType.LeftParen && i > 1 && (_tokens[i - 2].Type == TokenType.Function || _allowCustomFunctions && _tokens[i - 2].Type == TokenType.Identifier))) { continue; }
             if (patternDepth != 0 && !valuePosition) { continue; }
-            // Deferred conjunctions remain contextual identifiers in scalar/binding slots.
-            // The composite parser reports them when a complete operand is followed by one.
-            if (valuePosition && value is "EXCEPT" or "INTERSECT" or "OTHERWISE" && !FollowsCompositeValue(i)) { continue; }
             if (!GqlUnsupportedVocabulary.TryFind(value, out var word)) { continue; }
 
             bool first = i == start;
@@ -618,6 +616,10 @@ public sealed partial class GqlQueryParser : QueryParser
     private bool IsQueryStart() => Is("MATCH") || Is("OPTIONAL") || Is("CREATE") || Is("INSERT") || Is("MERGE") || Is("RETURN") ||
         Is("LET") || Is("FILTER") || Is("FOR") || Is("UNWIND") || Is("WITH");
 
+    private bool IsConjunctionAt(int index) => index >= 0 &&
+        (IsWordAt(index, "UNION") || IsWordAt(index, "EXCEPT") || IsWordAt(index, "INTERSECT") || IsWordAt(index, "OTHERWISE"));
+
+    // Contextual conjunctions followed by a grouped operand are not function calls.
     private bool FollowsCompositeValue(int index) => index > 0 &&
         (_tokens[index - 1].Type is TokenType.Identifier or TokenType.Function or TokenType.QuotedIdentifier or
             TokenType.Integer or TokenType.Float or TokenType.String or TokenType.Parameter or

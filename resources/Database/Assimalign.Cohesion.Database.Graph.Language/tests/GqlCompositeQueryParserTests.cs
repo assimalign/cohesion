@@ -74,23 +74,24 @@ public sealed class GqlCompositeQueryParserTests
         diagnostic.End!.Value.ShouldBeLessThanOrEqualTo(source.Length);
     }
 
-    [Theory(DisplayName = "Cohesion Test [GQL] - Deferred set operators name the unsupported form")]
+    [Theory(DisplayName = "Cohesion Test [GQL] - Composite conjunctions parse and roundtrip")]
     [InlineData("EXCEPT")]
     [InlineData("INTERSECT")]
     [InlineData("OTHERWISE")]
-    public void Parse_DeferredOperator_ShouldNameForm(string operation)
+    public void Parse_CompositeOperator_ShouldRoundTrip(string operation)
     {
         // Arrange / Act
-        var diagnostic = new GqlQueryParser().Parse("RETURN 1 AS x " + operation + " RETURN 2 AS x").Diagnostics.ShouldHaveSingleItem();
+        var parsed = (GqlQueryStatement)new GqlQueryParser().Parse("RETURN 1 AS x " + operation + " RETURN 2 AS x");
         // Assert
-        diagnostic.Code.ShouldBe("CK00001");
-        diagnostic.Message!.ShouldContain(operation, Case.Sensitive);
+        parsed.Diagnostics.ShouldBeEmpty();
+        string rendered = parsed.GqlExpression.Composite.ShouldNotBeNull().ToString();
+        rendered.ShouldContain(operation, Case.Sensitive);
+        new GqlQueryParser().Parse(rendered).Diagnostics.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - UNION: unsupported modifiers and global page suffixes remain named capabilities")]
     [InlineData("(RETURN 1 AS x UNION RETURN 2 AS x) ORDER BY x", "COMPOSITE ORDER BY AND PAGE STATEMENT")]
     [InlineData("(RETURN 1 AS x UNION RETURN 2 AS x NEXT RETURN x) ORDER BY x", "COMPOSITE ORDER BY AND PAGE STATEMENT")]
-    [InlineData("RETURN 1 AS x UNION (RETURN 2 AS x EXCEPT RETURN 3 AS x)", "EXCEPT")]
     public void Parse_ExcludedCompositeForm_ShouldNameCapability(string source, string form)
     {
         // Arrange / Act

@@ -38,12 +38,12 @@ statement's lifetime guard reports `CG09019`. These are ExecutionFailure respons
 leave the wire session ready. An aborted explicit transaction requires rollback before
 further statements. The engine's `GraphEngineFailureWireTests` supplies the fault corpus.
 
-## Composite queries: UNION and UNION ALL
+## Composite queries: UNION, EXCEPT, INTERSECT and OTHERWISE
 
 `query UNION query` removes structurally equal rows; `query UNION ALL query` preserves all
 occurrences. Equality is the same as RETURN DISTINCT, including NULLs, numeric equivalence,
 list order, map entries, entity identities and ordered path identities. Chains associate left;
-parentheses group operands as a Cohesion extension. UNION binds more tightly than NEXT:
+parentheses group operands as a Cohesion extension. Every conjunction binds more tightly than NEXT:
 `RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x` returns 10 and 20.
 NEXT inside a parenthesized operand stays within that group. Each NEXT segment may itself be a
 composite; its operands receive the preceding segment's complete projected binding table.
@@ -57,17 +57,42 @@ UNION and UNION ALL, including inside groups, is CG00016; a missing operand is C
 ORDER BY and OFFSET/SKIP/LIMIT apply to the RETURN of their operand. A tail after the last RETURN
 pages only that operand. A suffix after a grouped composite is CK00001; no global composite page
 is admitted. UNION's default is distinct; explicit UNION DISTINCT is accepted and renders as UNION.
-UNION and UNION DISTINCT may mix; either mixed with UNION ALL is CG00016. EXCEPT,
-INTERSECT and OTHERWISE remain CK00001 naming the deferred form. The language DESIGN cites the
-Neo4j and GQL grammar evidence for these decisions.
+UNION and UNION DISTINCT may mix; either mixed with UNION ALL is CG00016, even across other
+conjunctions or groups. EXCEPT and INTERSECT default to DISTINCT; explicit DISTINCT renders as
+the bare operator. ALL uses multiset counts under the same structural row equality:
+
+| Operator | Copies of a row with left count m and right count n |
+| --- | --- |
+| EXCEPT / EXCEPT DISTINCT | 1 when m > 0 and n = 0, otherwise 0 |
+| EXCEPT ALL | max(m - n, 0) |
+| INTERSECT / INTERSECT DISTINCT | 1 when m > 0 and n > 0, otherwise 0 |
+| INTERSECT ALL | min(m, n) |
+
+EXCEPT/INTERSECT keep eligible occurrences from the start of the left result, preserving their
+original values and relative order; DISTINCT keeps the first representative. They read the left
+operand before the right and validate runtime shapes on both, even when the result is provably
+empty. No result escapes before completion. OTHERWISE returns the entire left result, including
+duplicates and NULL rows, when it contains any row. Only an empty left result evaluates the right;
+a left error propagates. This whole-result, lazy fallback is a Cohesion contract with no Neo4j
+precedent. Both operands are still planned and statically admitted. OTHERWISE has no quantifier.
+
+ISO GQL's composite-expression grammar puts UNION, EXCEPT, INTERSECT and OTHERWISE at the same
+precedence, left-associative; it admits mixed conjunctions with a local quantifier on each set
+operator. For example, A OTHERWISE B UNION ALL C means (A OTHERWISE B) UNION ALL C, and
+A UNION B INTERSECT C means (A UNION B) INTERSECT C. Parentheses change that tree.
+EXCEPT/INTERSECT DISTINCT and ALL may mix; the retained UNION-mode refusal above is a Cohesion
+restriction following the owner decision and Neo4j. The language DESIGN cites the grammar evidence.
 
 Every operand is planned and statically wire-admitted before any operand executes. All read one
 statement snapshot and share work/memory limits and cancellation. UNION distinct state is charged
-to that budget (CG05030); output/operand memory and work retain CG05020/CG05004. UNION ALL has no
+to that budget (CG05030); EXCEPT/INTERSECT retained rows and hash counts use CG05032. Their hash
+work and retained rows share the statement grant; output/operand memory and work retain
+CG05020/CG05004. UNION ALL has no
 distinct table or intermediate materialized operand result. Final results materialize under the
 existing API contract. Column names come from the first operand. Types widen across every
 operand's numeric kinds, NULL is neutral, and dynamic values use the existing unknown type.
-This reconciliation includes a union ending a NEXT chain. Carried path variables retain their
+Nullability covers skipped branches too; unresolved static nullability is conservatively nullable.
+This reconciliation includes a composite ending a NEXT chain. Carried path variables retain their
 path kind in every operand; path member access is CG03003 before reading data. Quoted display
 names bind later references and star by their decoded variable names.
 Negotiated value encoding accounts for values from all operands. EXPLAIN retains grouping and shows every operand and its

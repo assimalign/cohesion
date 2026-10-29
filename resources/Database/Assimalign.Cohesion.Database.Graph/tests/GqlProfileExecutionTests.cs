@@ -188,6 +188,13 @@ public sealed class GqlProfileExecutionTests
             [GqlClauses.SetOperation] = [new("RETURN 1 AS x UNION RETURN 1 AS x", [[1L]])],
             [GqlClauses.UnionDistinct] = [new("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L], [2L]])],
             [GqlClauses.UnionAll] = [new("RETURN 1 AS x UNION ALL RETURN 1 AS x", [[1L], [1L]])],
+            [GqlClauses.Except] = [new("FOR x IN [1,1,2,NULL] RETURN x EXCEPT RETURN 2 AS x", [[1L], [null]])],
+            [GqlClauses.ExceptDistinct] = [new("FOR x IN [1,1,2] RETURN x EXCEPT DISTINCT RETURN 2 AS x", [[1L]])],
+            [GqlClauses.ExceptAll] = [new("FOR x IN [1,1,2] RETURN x EXCEPT ALL RETURN 1 AS x", [[1L], [2L]])],
+            [GqlClauses.Intersect] = [new("FOR x IN [1,1,2] RETURN x INTERSECT RETURN 1 AS x", [[1L]])],
+            [GqlClauses.IntersectDistinct] = [new("FOR x IN [1,1,2] RETURN x INTERSECT DISTINCT RETURN 1 AS x", [[1L]])],
+            [GqlClauses.IntersectAll] = [new("FOR x IN [1,1,2] RETURN x INTERSECT ALL FOR x IN [1,1,1] RETURN x", [[1L], [1L]])],
+            [GqlClauses.Otherwise] = [new("FOR x IN [] RETURN x OTHERWISE RETURN 2 AS x", [[2L]])],
             [GqlClauses.Return] =
             [
                 new("RETURN [10,20,30][-1], {k:{j:1}}.k.j, [1] IN [[1]], [NULL] = [NULL]", [[30L, 1L, true, null]]),
@@ -546,6 +553,11 @@ public sealed class GqlProfileExecutionTests
     {
         GqlClauses.SetOperation or GqlClauses.UnionDistinct => query.Composite is { Operator: GqlCompositeOperator.Union },
         GqlClauses.UnionAll => query.Composite is { Operator: GqlCompositeOperator.UnionAll },
+        GqlClauses.Except or GqlClauses.ExceptDistinct => query.Composite is { Operator: GqlCompositeOperator.Except },
+        GqlClauses.ExceptAll => query.Composite is { Operator: GqlCompositeOperator.ExceptAll },
+        GqlClauses.Intersect or GqlClauses.IntersectDistinct => query.Composite is { Operator: GqlCompositeOperator.Intersect },
+        GqlClauses.IntersectAll => query.Composite is { Operator: GqlCompositeOperator.IntersectAll },
+        GqlClauses.Otherwise => query.Composite is { Operator: GqlCompositeOperator.Otherwise },
         GqlClauses.Merge => query.Stages.Any(stage => stage is GqlMergeStage),
         GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),
         GqlClauses.Remove => query.Stages.Any(stage => stage is GqlRemoveStage),

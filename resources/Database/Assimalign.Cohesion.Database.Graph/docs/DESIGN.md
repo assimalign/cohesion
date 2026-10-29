@@ -833,16 +833,16 @@ The cold/warm synchronous seam corpus includes collection and nested collection;
 inner read can suspend**, a real asynchronous scalar evaluator is required. This preserves the
 GQ-E1/OQ-Q1 invariant. Fanout tests prove exactly N+1 advances and one disposal for N outputs.
 
-### Composite query planning and execution (#1737, GQ-Q1)
+### Composite query planning and execution (#1737, GQ-Q1/Q2)
 
-`GraphCompositePlan` retains the binary syntax tree and source-ordered leaf plans. A prewalk
+`GraphCompositePlan` retains the binary syntax tree, indexed binary nodes and source-ordered leaf plans. A prewalk
 rejects writes and mixed UNION modes; every leaf is then planned by its own GraphPlanner against
 the same GraphOperation snapshot. Parameter normalization occurs once. The existing 65,536-visit reduce planning cap is shared
 across all operands and correlated passes. Binding scopes, native
 expression caches and correlated registries stay per operand, including reused source-free AST
 occurrences. The ordinary planner optionally reports result shapes to the composite reconciler;
 ordinary statements acquire no new plan/planner fields or shape allocations.
-NEXT binds above UNION: GqlCompositeStage carries a nested GraphCompositeStagePlan. Each
+NEXT binds above composites: GqlCompositeStage carries a nested GraphCompositeStagePlan. Each
 operand plans against the same incoming projected shapes and binding kinds, including named paths,
 with isolated lexical registries. Displayed result names remain distinct from decoded binding names;
 only referenceable BindingName values become keys for later stages, as at ordinary RETURN boundaries.
@@ -861,6 +861,24 @@ GraphValueComparer without a second equality contract, retaining the first struc
 Its hash-state grants are shared with all operand/output memory and refuse with CG05030; other
 memory/work refusals retain CG05020/CG05004. Every submitted composite row consumes one work unit.
 Cancellation reaches every advance and projection, and failures dispose every cursor and owner.
+EXCEPT and INTERSECT use an explicit cursor stack, retaining left rows and structural hash counts,
+then reading the right operand and emitting eligible left occurrences in source order. DISTINCT
+retains only the first left representative. ALL retains original left rows and emits the first
+max(m-n,0) or min(m,n) occurrences, without coercing equivalent numeric representations. State is
+charged to the statement grant (CG05032); rows retained solely by operands/output keep CG05020.
+Each input hash visit and retained-row output visit consumes one work unit in addition to ordinary
+operand work. A binary operation has expected O(m+n) work and O(m) retained state; DISTINCT uses
+O(distinct left rows). The deterministic 100/200-row fixture records 700/1400 work units for each
+of the four modes. Hash behavior is the existing GraphRowComparer/GraphValueComparer contract.
+The explicit stack also handles mixed operators without recursive iterator chains. Homogeneous
+UNION keeps its existing flattened fast path. Nested operations retain separate budgeted owners.
+
+OTHERWISE drains the complete left cursor; on any row it skips the right cursor entirely, while
+retaining duplicates and NULL rows. Errors propagate and never trigger fallback. Both branches are
+planned, shape-reconciled and wire-admitted first. This Cohesion whole-result fallback has no
+Neo4j precedent. Equal precedence and quantifier mixing follow the language DESIGN's grammar
+analysis; only UNION/UNION ALL mixing remains refused by owner decision.
+
 Unknown root result kinds are reconciled during execution, before a result can escape. NULL is
 kind-neutral; numeric representations are compatible. Collection values preserve heterogeneous
 contents, with proven incompatible nested entity kinds refused during planning.
@@ -869,10 +887,13 @@ Result names come from the first operand; types and nullability cover every oper
 kinds widen to the largest kind, floating/integral mixtures to Float64, and decimal/integral
 mixtures to Decimal. Decimal/floating mixtures and other dynamic kinds use DatabaseType.Null
 (unknown), with NULL-only inputs neutral. Materialized values further reconcile the header
-without coercing cells, including when a composite ends a NEXT chain. Terminal composites pass rows
+without coercing cells, including when a composite ends a NEXT chain. Composite planning propagates CAST operand
+nullability, and unresolved static nullability is conservatively nullable across skipped branches.
+Terminal composites pass rows
 directly to the same collector, including unaliased computed columns. Composite-value encoding flags cover all operands. Static scalar/composite/entity-list admission visits every leaf, even an
-empty later operand. EXPLAIN uses explicit-stack traversal to retain each Union/UnionAll group
-and append every operand's complete plan, including correlated apply nodes. Warnings retain
+empty later operand. EXPLAIN uses explicit-stack traversal to retain every operator group
+and append every operand's complete plan, including correlated apply nodes. Root operator
+attribution also names the actual conjunction. Warnings retain
 operand source order. No public interface, assembly reference, persisted format or wire change
 is introduced. GraphUnionTests compares generated graphs to an independent structural bag/set
 oracle; GraphUnionExecutionTests proves one statement snapshot, cancellation in both operands,
@@ -2001,6 +2022,7 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05029` | A composite query contains a modifying operand |
 | `CG05030` | UNION duplicate-elimination state exceeds the statement memory budget |
 | `CG05031` | An internal statement lookup unexpectedly lacks its key; the statement boundary retains the KeyNotFoundException cause and reports a code-free internal-error message. Application function failures retain their existing CG05021 wrapper |
+| `CG05032` | EXCEPT/INTERSECT retained rows and hash state exceed the statement memory budget |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
