@@ -38,6 +38,42 @@ statement's lifetime guard reports `CG09019`. These are ExecutionFailure respons
 leave the wire session ready. An aborted explicit transaction requires rollback before
 further statements. The engine's `GraphEngineFailureWireTests` supplies the fault corpus.
 
+## Composite queries: UNION and UNION ALL
+
+`query UNION query` removes structurally equal rows; `query UNION ALL query` preserves all
+occurrences. Equality is the same as RETURN DISTINCT, including NULLs, numeric equivalence,
+list order, map entries, entity identities and ordered path identities. Chains associate left;
+parentheses group operands as a Cohesion extension. UNION binds more tightly than NEXT:
+`RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x` returns 10 and 20.
+NEXT inside a parenthesized operand stays within that group. Each NEXT segment may itself be a
+composite; its operands receive the preceding segment's complete projected binding table.
+WITH remains local to its operand.
+Each operand starts with an isolated copy of the NEXT segment's incoming scope, must be read-only (CG05029), and must return matching
+case-sensitive column names/order/count (CG01020) and compatible shapes (CG02017). Numeric kinds
+are compatible and NULL accepts any kind. Proven kinds are checked before execution, unknown kinds
+when rows arrive. Collection contents retain the existing heterogeneous value contract. Mixing
+UNION and UNION ALL, including inside groups, is CG00016; a missing operand is CG00015.
+
+ORDER BY and OFFSET/SKIP/LIMIT apply to the RETURN of their operand. A tail after the last RETURN
+pages only that operand. A suffix after a grouped composite is CK00001; no global composite page
+is admitted. UNION's default is distinct; explicit UNION DISTINCT is accepted and renders as UNION.
+UNION and UNION DISTINCT may mix; either mixed with UNION ALL is CG00016. EXCEPT,
+INTERSECT and OTHERWISE remain CK00001 naming the deferred form. The language DESIGN cites the
+Neo4j and GQL grammar evidence for these decisions.
+
+Every operand is planned and statically wire-admitted before any operand executes. All read one
+statement snapshot and share work/memory limits and cancellation. UNION distinct state is charged
+to that budget (CG05030); output/operand memory and work retain CG05020/CG05004. UNION ALL has no
+distinct table or intermediate materialized operand result. Final results materialize under the
+existing API contract. Column names come from the first operand. Types widen across every
+operand's numeric kinds, NULL is neutral, and dynamic values use the existing unknown type.
+This reconciliation includes a union ending a NEXT chain. Carried path variables retain their
+path kind in every operand; path member access is CG03003 before reading data. Quoted display
+names bind later references and star by their decoded variable names.
+Negotiated value encoding accounts for values from all operands. EXPLAIN retains grouping and shows every operand and its
+correlated subplans. The #1662 entity-list wire gate is checked for every operand, including empty
+ones, before execution. No disk or wire format changes are needed.
+
 ## EXISTS and NOT EXISTS
 
 EXISTS { MATCH pattern [WHERE predicate] ... } and EXISTS { pattern [, pattern] [WHERE predicate] }
@@ -324,7 +360,7 @@ WITH supports GROUP BY, ORDER BY, OFFSET/SKIP, LIMIT and WHERE. Without DISTINCT
 
 NEXT requires RETURN on a read segment, and cannot trail a statement. A modifying segment without RETURN passes one empty binding and no variables to NEXT. INSERT and DELETE run in source order; deleted variables leave scope (a later reference is CG03003). Statements see their own writes, so INSERT (:T {k:1}) MATCH (t:T) RETURN t.k works even for a new label. INSERT maps evaluate scalar expressions against each row, enabling FOR name IN $names INSERT (:Person {name:name}); composite properties remain unsupported.
 
-LET/FOR cannot rebind a name in scope (CG03003). Dropped or unaliased variables are unbound (CG05001). Standalone ordering/page stages remain CK00001, including after the new clauses. Immediate RETURN after DELETE remains CK00001. FOREACH, CALL, NEXT YIELD and UNION remain excluded. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
+LET/FOR cannot rebind a name in scope (CG03003). Dropped or unaliased variables are unbound (CG05001). Standalone ordering/page stages remain CK00001, including after the new clauses. Immediate RETURN after DELETE remains CK00001. FOREACH, CALL and NEXT YIELD remain excluded; UNION combines complete read-only operands. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
 
 ## Aggregates and GROUP BY
 

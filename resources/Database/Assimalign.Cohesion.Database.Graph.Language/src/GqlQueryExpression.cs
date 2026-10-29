@@ -44,16 +44,30 @@ public sealed class GqlQueryExpression : GqlExpression
         Projections = projections;
     }
 
-    private readonly IReadOnlyList<GqlStage>? _stages;
+    // A union body reuses the existing stage reference, preserving ordinary AST size.
+    private readonly object? _body;
 
-    /// <summary>Initializes a source-ordered linear statement.</summary>
-    /// <param name="stages">The operations, including NEXT segment boundaries.</param>
+    /// <summary>Initializes an explicitly grouped composite query.</summary>
+    /// <param name="composite">The binary composition and its isolated operands.</param>
+    /// <param name="location">The complete source span.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="composite"/> is null.</exception>
+    public GqlQueryExpression(GqlCompositeQuery composite, Location? location = null) : this(Array.Empty<GqlStage>(), location)
+    {
+        ArgumentNullException.ThrowIfNull(composite);
+        _body = composite;
+    }
+
+    /// <summary>Gets the binary query composition, or null when the query uses pipeline stages.</summary>
+    public GqlCompositeQuery? Composite => _body as GqlCompositeQuery;
+
+    /// <summary>Initializes a source-ordered query pipeline.</summary>
+    /// <param name="stages">The operations, including composite queries and NEXT segment boundaries.</param>
     /// <param name="location">The statement source span.</param>
     /// <exception cref="ArgumentNullException"><paramref name="stages"/> is null.</exception>
     public GqlQueryExpression(IReadOnlyList<GqlStage> stages, Location? location = null) : base(location)
     {
         ArgumentNullException.ThrowIfNull(stages);
-        _stages = stages;
+        _body = stages;
         MatchClauses = stages.OfType<GqlMatchStage>().Select(stage => stage.Clause).ToArray();
         Creates = stages.OfType<GqlInsertStage>().SelectMany(stage => stage.Paths ?? []).ToArray();
         DeleteVariables = stages.OfType<GqlDeleteStage>().SelectMany(stage => stage.Variables ?? []).ToArray();
@@ -68,12 +82,13 @@ public sealed class GqlQueryExpression : GqlExpression
         Limit = final?.Limit;
     }
 
-    /// <summary>Gets the operations in source order. Original constructors provide a single-segment facade.</summary>
+    /// <summary>Gets the pipeline operations, including composite and NEXT stages, or an empty list for a standalone composite. Original constructors provide a single-segment facade.</summary>
     public IReadOnlyList<GqlStage> Stages
     {
         get
         {
-            if (_stages is not null) { return _stages; }
+            if (_body is IReadOnlyList<GqlStage> body) { return body; }
+            if (Composite is not null) { return Array.Empty<GqlStage>(); }
             var stages = new List<GqlStage>();
             if (MatchClauses is not null)
             { foreach (var clause in MatchClauses) { stages.Add(new GqlMatchStage(clause)); } }
@@ -88,12 +103,17 @@ public sealed class GqlQueryExpression : GqlExpression
         }
     }
 
+    /// <summary>Renders the semantic query tree with explicit composite grouping.</summary>
+    /// <returns>The normalized GQL query, including NEXT precedence.</returns>
+    public override string ToString() => CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
+        ? Text ?? base.ToString()! : Internal.GqlPathRenderer.RenderExpression(this);
+
     /// <summary>Gets SET items across all stages in source order.</summary>
     public IReadOnlyList<GqlSetItem> SetItems => Stages.OfType<GqlSetStage>().SelectMany(stage => stage.Items).ToArray();
     /// <summary>Gets REMOVE items across all stages in source order.</summary>
     public IReadOnlyList<GqlRemoveItem> RemoveItems => Stages.OfType<GqlRemoveStage>().SelectMany(stage => stage.Items).ToArray();
 
-    /// <summary>Gets the linear segments separated by explicit NEXT boundaries.</summary>
+    /// <summary>Gets the query segments separated by explicit NEXT boundaries.</summary>
     public IReadOnlyList<GqlQuerySegment> Segments
     {
         get
@@ -160,6 +180,7 @@ public sealed class GqlQueryExpression : GqlExpression
         public global::System.Collections.Generic.IReadOnlyList<string> DeleteVariables => _target.DeleteVariables;
         public bool DetachDelete => _target.DetachDelete;
         public bool IsExplain => _target.IsExplain;
+        public GqlCompositeQuery? Composite => _target.Composite;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Graph.Language.GqlProjection> Projections => _target.Projections;
         public global::Assimalign.Cohesion.Database.Graph.Language.GqlSetQuantifier SetQuantifier => _target.SetQuantifier;
         public bool ReturnStar => _target.ReturnStar;

@@ -400,6 +400,8 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C1 fixes) | CG00012 | Language/syntax — list slice omits both bounds; rejected during planning |
 | New (#1537, GQ-E1) | CG00013 | Language/syntax — EXISTS omits its nonempty braced pattern |
 | New (#1736, GQ-C3) | CG00014 | Language — pattern comprehension requires a nonempty path and projection |
+| New (#1737, GQ-Q1) | CG00015 | A composite operation is missing its query operand |
+| New (#1737, GQ-Q1) | CG00016 | UNION and UNION ALL are mixed within one composite tree |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |
@@ -409,11 +411,13 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C1) | CG01017 | Binding/names — missing/empty comprehension iterator declaration in a hand-built AST |
 | New (#1736, GQ-C2) | CG01018 | Binding/names — missing reduce/list-predicate declaration or identical accumulator and iterator names |
 | New (#1537, GQ-E1) | CG01019 | Binding/names — outer binding has a proven incompatible correlated pattern kind |
+| New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
 | New (#1736, GQ-C2) | CG02015 | Values/types — reduce or list predicate source is neither list nor NULL |
 | New (#1537, GQ-E1) | CG02016 | Values/types — runtime correlated argument has an incompatible entity kind |
+| New (#1737, GQ-Q1) | CG02017 | Composite operand result shapes are incompatible |
 | COHDBG003 | CG03003 | Schema/constraints |
 | New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
 | New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
@@ -434,6 +438,9 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C2) | CG05026 | Planning — reduce shape/type analysis exceeds 65,536 visited nodes or closure steps |
 | New (#1537, GQ-E1) | CG05027 | Execution — malformed or missing correlated subplan or missing argument |
 | New (#1736, GQ-C3) | CG05028 | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
+| New (#1737, GQ-Q1) | CG05029 | A composite query contains a modifying operand |
+| New (#1737, GQ-Q1) | CG05030 | UNION duplicate-elimination state exceeds the statement memory budget |
+| New (#1737, GQ-Q1 fixes) | CG05031 | Internal statement lookup unexpectedly lacks its key; original cause is retained |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |

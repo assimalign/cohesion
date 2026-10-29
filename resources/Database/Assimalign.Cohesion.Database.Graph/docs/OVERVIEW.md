@@ -13,6 +13,7 @@ core element/string/math functions, CAST, Cypher conversions, transaction-start 
 CASE, COALESCE, NULLIF, correlated EXISTS/NOT EXISTS braced patterns, list/map constructors, lexical list comprehensions, correlated pattern collections, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended slices and field/index access,
 SET/REMOVE scalar properties and node labels through MVCC replacements, literal-map replacement and merge,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
+read-only UNION/UNION DISTINCT and UNION ALL with shared snapshots/budgets and combined bindings passed to NEXT,
 RETURN DISTINCT/ALL, star, aliases and standalone RETURN, ORDER BY with explicit null placement,
 OFFSET/SKIP and LIMIT, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 

@@ -25,6 +25,7 @@ core element/string/math functions, CAST, Cypher conversions, transaction-start 
 CASE, COALESCE, NULLIF, correlated EXISTS/NOT EXISTS braced patterns, list/map literals and parameters, lexical list comprehensions, correlated pattern collections, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended list slices,
 subscripts and map/entity property access,
 LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
+read-only UNION/UNION DISTINCT and UNION ALL composites with isolated operands; UNION binds more tightly than NEXT,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,

@@ -69,7 +69,6 @@ public sealed class GqlLinearCompositionParserTests
     [InlineData("NEXT RETURN 1", "CG00002", "NEXT")]
     [InlineData("EXPLAIN NEXT RETURN 1", "CG00002", "NEXT")]
     [InlineData("MATCH (a) DELETE a RETURN a", "CK00001", "RETURN AFTER DELETE")]
-    [InlineData("RETURN 1 NEXT RETURN 2 UNION RETURN 3", "CK00001", "UNION")]
     public void Parse_ExcludedForm_ShouldReportOneDiagnostic(string source, string code, string message)
     {
         // Arrange / Act
