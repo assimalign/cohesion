@@ -8,19 +8,27 @@ must be immutable Boolean row expressions: columns, literals, built-in casts and
 functions are supported. Application casts have no volatility declaration and are refused; domain checks must be immutable. Parameters, subqueries, aggregates, windows, sequences and stable or
 volatile calls fail CS05091. Unknown columns retain CS01015; non-Boolean results retain
 CS02003. Function overloads and column dependencies are persisted with canonical text.
+Every runtime conversion must be provably immutable, including conversions in untaken CASE and
+COALESCE alternatives. After reopening without a predicate function, or with its registration
+weakened from IMMUTABLE, reads still work and every write to the table refuses CS01009, regardless
+of short-circuit evaluation.
 
 A partial UNIQUE index enforces only matching non-NULL keys; any NULL key component permits
 duplicates. It cannot enforce a primary key or serve as a foreign-key target. Ordinary unique
 indexes keep their existing NULL semantics. UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE, MERGE,
 referential actions, DELETE/USING, TRUNCATE, rewrites and identity backfill maintain the subset.
 Dropping a predicate/key column drops its partial index. TYPE on a predicate column refuses
-CS03083; drop/recreate the index around the change. RENAME preserves the expression.
+CS03083, including widening that needs no conversion; drop/recreate the index around the change.
+Compiled-schema migration plans drop and recreate partial indexes around type-facet changes.
+RENAME preserves the expression.
 
 **Implication rules in SQ-P1: none.** The planner never uses a partial index for a query,
 including an identical WHERE, joins or views. SQ-P2 adds conservative implication and access
-selection. ON CONFLICT inference/arbitration uses unconditional indexes only; explicit partial
+selection. Targeted ON CONFLICT inference uses unconditional indexes only; explicit partial
 column/name targets refuse CS03035 and partial-WHERE inference retains CK00001. Untargeted
-DO NOTHING can still fail a partial uniqueness check on a surviving proposal.
+DO NOTHING checks every unique index, including applicable partial indexes, and skips conflicting
+proposals. Applicability uses the proposed row's predicate result, without query implication.
+NULL-containing partial keys neither conflict nor take uniqueness locks, including on deletion.
 
 COHESION_SCHEMA.INDEXES and its nonstandard INFORMATION_SCHEMA.INDEXES alias expose nullable
 canonical PREDICATE text per key column. Views over these relations retain that text. Partial

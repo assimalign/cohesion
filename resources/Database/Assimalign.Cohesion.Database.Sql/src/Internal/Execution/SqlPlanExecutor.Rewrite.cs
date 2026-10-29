@@ -231,6 +231,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
+            ForgetIndexRows(converted);
             processed += batch.Count;
             statement.ProvisioningProgress?.Invoke(processed, null);
             RewriteStage?.Invoke("Copied", processed);

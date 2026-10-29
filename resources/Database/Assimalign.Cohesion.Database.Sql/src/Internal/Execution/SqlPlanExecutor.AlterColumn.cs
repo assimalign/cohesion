@@ -20,6 +20,16 @@ internal sealed partial class SqlPlanExecutor
         int ordinal = FindColumnOrdinal(plan.Table, plan.Column.Name);
         SqlCatalogColumn previous = plan.Table.Columns[ordinal];
         var column = plan.Column;
+        if (plan.TypeChange || previous.Type != column.Type ||
+            !string.Equals(previous.DomainName, column.DomainName, StringComparison.OrdinalIgnoreCase) ||
+            (previous.Collation ?? _catalog.DefaultCollation).Id != (column.Collation ?? _catalog.DefaultCollation).Id)
+        {
+            foreach (var index in _catalog.GetIndexes(plan.Table.ObjectId))
+            {
+                if (index.PredicateColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase))
+                { throw new SqlPlanningException("CS03083", string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateTypeChange, column.Name, index.Name)); }
+            }
+        }
         if (plan.Conversion is not null)
         {
             return await ExecuteAlterColumnTypeAsync(plan, statement, cancellationToken).ConfigureAwait(false);

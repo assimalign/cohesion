@@ -13,24 +13,6 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Admission and binding for immutable, row-local index predicates.</summary>
 internal static class SqlPartialIndexPredicate
 {
-    // Row arrays belong to a preparation pass. Recompute when preparing; applying only
-    // reads the recorded result, so immutable application callbacks never run under the
-    // coordinator gate or a tree/page latch. Weak keys retain neither rows nor old bindings.
-    private static readonly ConditionalWeakTable<SqlBoundExpression, ConditionalWeakTable<object?[], StrongBox<bool>>> _matches = new();
-
-    internal static bool Matches(SqlBoundExpression predicate, object?[] values, SqlExpressionEvaluator? evaluator)
-    {
-        var rows = _matches.GetValue(predicate, static _ => new());
-        if (evaluator is not null)
-        {
-            bool matches = evaluator.Matches(predicate, values);
-            rows.GetValue(values, static _ => new()).Value = matches;
-            return matches;
-        }
-        return rows.TryGetValue(values, out var result) ? result.Value
-            : throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.PartialPredicateUnprepared);
-    }
-
     internal static SqlCatalogIndex Declare(SqlCatalogTable table, SqlCreateIndexExpression create,
         Collation collation, SqlFunctionEnvironment functions)
     {
@@ -44,6 +26,7 @@ internal static class SqlPartialIndexPredicate
         Validate(expression, table, scope);
         SqlPlanner.ValidateExpression(expression, scope);
         RequireBoolean(expression, scope);
+        _ = scope.BindPredicate(expression); // Includes implicit conversions in every alternative.
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Collect(expression);
         return new SqlCatalogIndex(table.ObjectId, name, keys, unique,
@@ -65,11 +48,18 @@ internal static class SqlPartialIndexPredicate
         var expression = SqlPersistedExpression.Load(index.Predicate!, index.Name);
         var scope = Scope(table, collation, functions, cancellationToken);
         SqlDefinitionBinder.PinCalls(expression, scope, index.PredicateFunctionCalls);
-        Validate(expression, table, scope);
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Collect(expression);
         if (!columns.SetEquals(index.PredicateColumns))
         { throw new SqlCatalogException("CS06059", ErrorMessages.PartialPredicateDependencies); }
+        // Resolve the entire stored contract before binding its executable tree. A
+        // short-circuit must never hide a missing or weakened application registration.
+        if (SqlDefinitionBinder.HasUnavailableCall(expression, scope, SqlFunctionVolatility.Immutable))
+        {
+            var unresolved = new SqlUnresolvedDefinition(index.Name, index.Predicate!, ErrorMessages.PartialPredicateUnavailable);
+            return new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(unresolved));
+        }
+        Validate(expression, table, scope);
         SqlPersistedExpression.Bind(expression, scope);
         SqlPlanner.ValidateExpression(expression, scope);
         RequireBoolean(expression, scope);
@@ -86,7 +76,17 @@ internal static class SqlPartialIndexPredicate
     private static SqlExpressionEvaluator Scope(SqlCatalogTable table, Collation collation,
         SqlFunctionEnvironment functions, CancellationToken cancellationToken)
         => new(table.Columns, null, defaultCollation: collation, functions: functions,
-            cancellationToken: cancellationToken, foldConstants: false);
+            cancellationToken: cancellationToken, foldConstants: false, bindingContext: SqlBindingContext.IndexPredicate);
+
+    internal static void ValidateConversions(SqlCast?[] conversions, SqlType target, Assimalign.Cohesion.Database.Language.Location? location)
+    {
+        // The evaluator dispatches by the runtime value's type, which CASE/COALESCE
+        // can change independently of the inferred source. Every dispatch slot must
+        // be safe, including alternatives the current rows will never select.
+        if (conversions.Any(conversion => conversion is not null && !SqlStandardCasts.Contains(conversion)) ||
+            target.Check is { Volatility: not SqlFunctionVolatility.Immutable })
+        { throw new SqlPlanningException("CS05091", ErrorMessages.PartialPredicateInvalid, location); }
+    }
 
     private static void RequireBoolean(SqlExpression expression, SqlExpressionEvaluator scope)
     {
@@ -111,14 +111,10 @@ internal static class SqlPartialIndexPredicate
             if (cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase))
             { throw new SqlPlanningException("CS05091", ErrorMessages.PartialPredicateInvalid, cast.Location); }
             var target = SqlPlanner.ResolveCastTarget(cast, scope.Functions.Types);
-            var source = scope.StaticTypeOf(cast.Operand);
             var conversions = scope.Functions.Types.ResolveCasts(scope.SourceDomain(cast.Operand), target);
-            var conversion = conversions[(int)source];
             // Application casts have no volatility contract. Only standard conversions
             // and immutable domain checks can prove a persisted predicate immutable.
-            if (conversion is not null && !SqlStandardCasts.Contains(conversion) ||
-                target.Check is { Volatility: not SqlFunctionVolatility.Immutable })
-            { throw new SqlPlanningException("CS05091", ErrorMessages.PartialPredicateInvalid, cast.Location); }
+            ValidateConversions(conversions, target, cast.Location);
         }
         if (expression is SqlColumnReferenceExpression column)
         {
@@ -135,6 +131,8 @@ internal static class SqlPartialIndexPredicate
             if (SqlSequenceExecution.IsFunction(call.FunctionName) || scope.Functions.Catalog.IsAggregate(call.FunctionName))
             { throw new SqlPlanningException("CS05091", ErrorMessages.PartialPredicateInvalid, call.Location); }
             var function = scope.ResolveFunction(call);
+            if (function is null)
+            { throw new SqlPlanningException("CS01009", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionMissing, call.FunctionName), call.Location); }
             if (function is not null && (function.Kind != SqlFunctionKind.Scalar || function.Volatility != SqlFunctionVolatility.Immutable))
             { throw new SqlPlanningException("CS05091", ErrorMessages.PartialPredicateInvalid, call.Location); }
         }

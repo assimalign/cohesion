@@ -13,10 +13,10 @@ indexes retain their existing NULL identity and DML allocation shape.
 
 Predicate admission allows immutable scalar functions, built-in casts, comparisons and Boolean row
 expressions, while CS05091 rejects parameters, sequence calls, subqueries, aggregates,
-windows and stable/volatile functions. Application casts have no volatility metadata and are conservatively refused, as are non-immutable domain checks.
+windows and stable/volatile functions. Application casts have no volatility metadata and are conservatively refused, as are non-immutable domain checks. Admission checks every runtime conversion slot, including implicit conversions and every CASE/COALESCE alternative, even unreachable branches.
 Binding errors retain CS01 identities; Boolean
 requirements retain CS02003. CS03082 rejects a partial primary key. CS03083 refuses TYPE
-on a predicate column: drop and recreate the index around the type change. CS03084
+on a predicate column, including widening without conversion: drop and recreate the index around the type change. CS03084
 refuses blank predicate metadata or dependency vectors without a predicate. DROP COLUMN
 atomically removes dependent partial descriptions and registrations with the column record;
 physical tree detachment follows publication under table X. Renames rewrite only parsed
@@ -24,9 +24,11 @@ column references, retaining function identities. Function/domain drops respect 
 PostgreSQL commands/indexcmds.c:1869-1894 establishes row locality and immutability;
 commands/tablecmds.c:9530-9542 delegates column removal and its dependents to dependency deletion.
 
-All write paths prepare predicate membership before the coordinator apply gate. Weak row
-and binding keys retain the prepared Boolean only while those objects remain alive; apply
-reads that result without invoking application code. Ordinary DML adds no membership state.
+All write paths prepare predicate membership before the coordinator apply gate. A weak executor
+key owns statement dictionaries over the prepared row arrays and bound predicates, with one reused
+evaluator per predicate. Apply reads the recorded Boolean without invoking application code; a missing
+preparation throws. Retries prepare again. Builds filter bounded batches without retaining membership
+for their scanned rows. Ordinary DML adds no membership state or object fields.
 Builds hold table X through bounded data brackets, latest-state unique validation,
 publication and cleanup. The order is table X, coordinator apply gate, directory/tree latch,
 then page pins; no tree/page latch spans catalog publication. Original MVCC stamps remain
@@ -34,14 +36,27 @@ on historical build entries. Cancellation/exception cleanup detaches unpublished
 session cleanup releases DDL grants. Rewrites and identity backfills use the same filtering.
 
 Until SQ-P2 proves implication, every partial index is excluded from query seeks, join probes,
-cardinality probes, constraint lookups, foreign-key targets and ON CONFLICT arbitration.
-Its uniqueness still applies to surviving INSERT/UPDATE/UPSERT/MERGE writes. Untargeted
-DO NOTHING arbitrates unconditional indexes only and can therefore raise a partial unique
-violation. INFORMATION_SCHEMA.INDEXES is an explicitly nonstandard alias of
+cardinality probes, constraint lookups and foreign-key targets. Targeted ON CONFLICT inference
+still refuses partial indexes. Untargeted DO NOTHING checks every unique index using each proposed
+row's own membership; FALSE/UNKNOWN and NULL-containing partial keys do not arbitrate or take key
+locks. PostgreSQL executor/execIndexing.c:601-632 filters arbiters by row membership and
+access/nbtree/nbtinsert.c:128-140 bypasses unique checking for NULL keys. Partial NULL tombstones
+use a borrowed tree handle attached to the same fixed root and shared latch through the existing
+manager composition API, with no key-lock manager. Its ordinary DeleteAsync performs one atomic
+stamp mutation and keeps the same undo ledger and recovery stamps. The handle is weakly cached
+by the canonical tree identity, never published, and used only for NULL-containing partial keys.
+INFORMATION_SCHEMA.INDEXES is an explicitly nonstandard alias of
 COHESION_SCHEMA.INDEXES; both expose nullable canonical PREDICATE text, including through
 user views. Partial unique indexes are absent from TABLE_CONSTRAINTS. The conformance oracle
 compares live cursor entries with full predicate scans after generated writes, rewrites and
 TRUNCATE; crash images and counter-driven nonparallel races cover publication and key waits.
+
+At reopen, missing or weakened predicate function registrations bind as one unresolved predicate.
+The database opens and reads work; every DML write to that table refuses CS01009 before row
+evaluation, even when an OR/CASE branch or an empty input could avoid the call. Malformed persisted
+syntax and dependency vectors remain catalog failures. This follows persisted CHECK handling.
+Predicate bindings belong to the function-environment generation, so restoring a missing immutable
+SQL definition rebinds them; dropping the affected index also restores write availability.
 
 
 ### Partial-index diagnostics
@@ -4039,8 +4054,9 @@ referential-action pending-update view excludes replaced heap versions and suppl
 values to FK and incoming-reference checks. A removed key cannot authorize a new child; a
 self-reference moved with its key validates against the final row.
 
-After object intent locks, statements without requested side-effecting defaults acquire the keys of
-**every unique index of every proposal**, sorted and deduplicated, before live arbitration.
+After object intent locks, statements without requested side-effecting defaults acquire every
+unconditional unique proposal key and each matching non-NULL partial arbiter key, sorted and
+deduplicated, before live arbitration. Partial arbiters participate only in untargeted DO NOTHING.
 Each proposal's encoded keys are reused for hashing, lookup and pending inserts.
 BTreeIndex.FindLiveEntryAsync re-grants those locks outside the apply gate. When a proposal
 or conflict assignment requests an identity or a default containing a non-immutable function

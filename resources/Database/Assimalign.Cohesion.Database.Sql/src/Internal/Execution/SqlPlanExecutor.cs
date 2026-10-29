@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,6 +30,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private static readonly string _errorExecutorEnsureLatestVersionFailure = ErrorMessages.ExecutorEnsureLatestVersionFailure;
+
+    // Only partial-index statements create state. The executor is rooted throughout every
+    // asynchronous preparation/apply attempt; its weak key adds no field or allocation to
+    // ordinary DML, and no per-row dependent GC handle. Row arrays use reference identity.
+    private static readonly ConditionalWeakTable<SqlPlanExecutor, Dictionary<(SqlCatalogTable, SqlCatalogIndex),
+        (SqlBoundExpression Predicate, SqlExpressionEvaluator Evaluator, Dictionary<object?[], bool> Rows)>> _preparedIndexRows = new();
+    private static readonly ConditionalWeakTable<BTreeIndex, BTreeIndex> _nullKeyDeleteIndexes = new();
 
     // Test seam: after the final INSERT effect, while its statement apply is still admitted.
     internal static Action? AfterInsertApplied { get; set; }
@@ -151,6 +159,7 @@ internal sealed partial class SqlPlanExecutor
             case SqlCorrelatedSubqueryPlan correlated:
                 return await ExecuteSubqueriesAsync(correlated.Input, correlated.Queries, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertSelectPlan insertSelect:
+                _definitions.EnsureIndexPredicatesResolved(insertSelect.Table, cancellationToken);
                 return await ExecuteInsertSelectAsync(insertSelect, statement, cancellationToken).ConfigureAwait(false);
             case SqlGroupPlan group:
                 return await ExecuteGroupAsync(group, statement, cancellationToken).ConfigureAwait(false);
@@ -169,12 +178,16 @@ internal sealed partial class SqlPlanExecutor
             case SqlJoinPlan join:
                 return await ExecuteJoinAsync(join, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertPlan insert:
+                _definitions.EnsureIndexPredicatesResolved(insert.Table, cancellationToken);
                 return await ExecuteInsertAsync(insert, statement, cancellationToken).ConfigureAwait(false);
             case SqlUpdatePlan update:
+                _definitions.EnsureIndexPredicatesResolved(update.Table, cancellationToken);
                 return await ExecuteUpdateAsync(update, statement, cancellationToken).ConfigureAwait(false);
             case SqlDeletePlan delete:
+                _definitions.EnsureIndexPredicatesResolved(delete.Table, cancellationToken);
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlMergePlan merge:
+                _definitions.EnsureIndexPredicatesResolved(merge.Table, cancellationToken);
                 return await ExecuteMergeAsync(merge, statement, cancellationToken).ConfigureAwait(false);
             case SqlSequencePlan sequence:
                 return await ExecuteSequenceDdlAsync(sequence, statement, cancellationToken).ConfigureAwait(false);
@@ -1031,7 +1044,8 @@ internal sealed partial class SqlPlanExecutor
 
             var ordinals = _definitions.Get(table).GetKey(metadata.ColumnNames).Ordinals;
 
-            if (metadata.Predicate is not null) { _definitions.GetIndexPredicate(table, metadata); }
+            if (metadata.Predicate is not null && _definitions.GetIndexPredicate(table, metadata) is SqlBoundFailure unresolved)
+            { unresolved.Raise(); }
             result.Add(new SqlLiveIndex(metadata, index, ordinals));
         }
 
@@ -1039,9 +1053,34 @@ internal sealed partial class SqlPlanExecutor
         return result;
     }
 
-    private bool MatchesIndex(SqlCatalogTable table, SqlCatalogIndex index, object?[] values, bool prepared = false, CancellationToken cancellationToken = default)
-        => index.Predicate is null || SqlPartialIndexPredicate.Matches(_definitions.GetIndexPredicate(table, index, cancellationToken), values,
-            prepared ? null : new SqlExpressionEvaluator(table.Columns, null, defaultCollation: _catalog.DefaultCollation, functions: _definitions.Functions, cancellationToken: cancellationToken));
+    private bool MatchesIndex(SqlCatalogTable table, SqlCatalogIndex index, object?[] values, bool prepared = false,
+        CancellationToken cancellationToken = default, bool record = true)
+    {
+        if (index.Predicate is null) { return true; }
+        var indexes = _preparedIndexRows.GetValue(this, static _ => new());
+        if (!indexes.TryGetValue((table, index), out var membership))
+        {
+            if (prepared) { throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.PartialPredicateUnprepared); }
+            membership = (_definitions.GetIndexPredicate(table, index, cancellationToken),
+                ExecutionEvaluator(null, cancellationToken, containsLike: true), new());
+            indexes.Add((table, index), membership);
+        }
+        if (prepared)
+        {
+            return membership.Rows.TryGetValue(values, out bool found) ? found
+                : throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.PartialPredicateUnprepared);
+        }
+        bool matches = membership.Evaluator.Matches(membership.Predicate, values);
+        if (record) { membership.Rows[values] = matches; }
+        return matches;
+    }
+
+    private void ForgetIndexRows(object?[][] rows)
+    {
+        if (!_preparedIndexRows.TryGetValue(this, out var indexes)) { return; }
+        foreach (var membership in indexes.Values)
+        { foreach (var values in rows) { membership.Rows.Remove(values); } }
+    }
 
     private static bool PartialNullKey(SqlCatalogIndex index, int[] ordinals, object?[] values)
     {
@@ -1094,7 +1133,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var liveIndex in indexes)
         {
             if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
-            if (liveIndex.Metadata.IsUnique)
+            if (liveIndex.Metadata.IsUnique && !PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
             {
                 hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values).Hash());
             }
@@ -1110,7 +1149,7 @@ internal sealed partial class SqlPlanExecutor
         {
             if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
             var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
-            if (liveIndex.Metadata.IsUnique) { hashes.Add(key.Hash()); }
+            if (liveIndex.Metadata.IsUnique && !PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values)) { hashes.Add(key.Hash()); }
         }
     }
 
@@ -1201,9 +1240,40 @@ internal sealed partial class SqlPlanExecutor
         {
             if (!MatchesIndex(table, liveIndex.Metadata, values, prepared: true)) { continue; }
             var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values);
-            await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            if (PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
+            {
+                // Attach a borrowed handle to the same fixed root and shared tree latch,
+                // with no key-lock manager. Only NULL-containing partial keys use it.
+                // DeleteAsync still stamps the exact existing version atomically: no
+                // erase/reinsert gap is visible to an older cursor or snapshot.
+                var index = NullKeyDeleteIndex(liveIndex.Index, statement.Coordinator, table.ObjectId, liveIndex.Metadata.Name);
+                await index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            }
+            else { await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false); }
             statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
         }
+    }
+
+    private BTreeIndex NullKeyDeleteIndex(BTreeIndex canonical, TransactionCoordinator coordinator, ulong objectId, string name)
+        => _nullKeyDeleteIndexes.TryGetValue(canonical, out var found) ? found
+            : CacheNullKeyDeleteIndex(canonical, coordinator, objectId, name);
+
+    // Keep both closure factories off the ordinary tombstone path and the cache-hit path.
+    private BTreeIndex CacheNullKeyDeleteIndex(BTreeIndex canonical, TransactionCoordinator coordinator, ulong objectId, string name)
+        => _nullKeyDeleteIndexes.GetValue(canonical, _ => AttachNullKeyDeleteIndex(coordinator, objectId, name));
+
+    private BTreeIndex AttachNullKeyDeleteIndex(TransactionCoordinator coordinator, ulong objectId, string name)
+    {
+        var registration = _indexManager.ExportRegistrations().Single(value => value.ObjectId == objectId && value.Definition.Name == name);
+        var manager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = _storage,
+            ExistingIndexes = [registration],
+            TransactionSource = context => coordinator.TryGetStorageTransaction(context, out var bracket) ? bracket
+                : throw new DatabaseException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResolveStatementBracketDatabase, context.Sequence)),
+        });
+        manager.TryGetIndex(objectId, name, out var index);
+        return index!;
     }
 
     /// <summary>

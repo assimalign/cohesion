@@ -43,7 +43,7 @@ internal sealed partial class SqlPlanExecutor
         // from committing. The table lock and snapshot pin outlive every bracket.
         foreach (var batch in ScanVersions(table, cancellationToken).Chunk(64))
         {
-            var included = metadata?.Predicate is null ? batch : batch.Where(version => MatchesIndex(table, metadata, version.Values, cancellationToken: cancellationToken)).ToArray();
+            var included = metadata?.Predicate is null ? batch : batch.Where(version => MatchesIndex(table, metadata, version.Values, cancellationToken: cancellationToken, record: false)).ToArray();
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
                 foreach (var version in included)

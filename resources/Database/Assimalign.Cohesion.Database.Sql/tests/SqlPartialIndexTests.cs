@@ -90,7 +90,7 @@ public sealed class SqlPartialIndexTests
         await Execute(session, "UPDATE t SET k=9 WHERE id=5");
         await Execute(session, "DELETE FROM t WHERE id=6");
         await Refuses(session, "INSERT INTO t VALUES(9,7,TRUE) ON CONFLICT(k) DO NOTHING", "CS03035");
-        await SqlConstraintAssertions.ThrowAsync(async () => await Execute(session, "INSERT INTO t VALUES(9,7,TRUE) ON CONFLICT DO NOTHING"));
+        (await session.ExecuteAsync("INSERT INTO t VALUES(9,7,TRUE) ON CONFLICT DO NOTHING", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(0);
         await Refuses(session, "CREATE TABLE child(k INT REFERENCES t(k))", "CS03054");
         await Execute(session, "BEGIN");
         await Execute(session, "UPDATE t SET active=FALSE WHERE id=2");

@@ -47,17 +47,23 @@ internal sealed partial class SqlPlanExecutor
         {
             var arbiters = indexes.Where(index => plan.Arbiters.Any(arbiter => arbiter.Name == index.Metadata.Name)).ToList();
             var unique = indexes.Where(index => index.Metadata.IsUnique && index.Metadata.Predicate is null).ToList();
+            for (int index = 0; index < arbiters.Count; index++)
+            {
+                if (arbiters[index].Metadata.Predicate is not null) { unique.Add(arbiters[index]); }
+            }
         RetryArbitration:
             cancellationToken.ThrowIfCancellationRequested();
             var hashes = new List<ulong>();
             // Build each proposal's keys once, sharing them between locking, arbitration and
             // pending inserts. Without side-effecting defaults the full batch precedes lookup.
             IEnumerable<(object?[] Values, IndexKey[] Keys)> prepared = proposals.Select(values =>
-                (values, unique.Select(index => BuildIndexKeyUnchecked(table, index.KeyOrdinals, values)).ToArray()));
+                (values, unique.Select(index => index.Metadata.Predicate is not null &&
+                    (!MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false) || PartialNullKey(index.Metadata, index.KeyOrdinals, values))
+                    ? default : BuildIndexKeyUnchecked(table, index.KeyOrdinals, values)).ToArray()));
             if (!orderedDefaults)
             {
                 prepared = prepared.ToList();
-                foreach (var proposal in prepared) { hashes.AddRange(proposal.Keys.Select(key => key.Hash())); }
+                foreach (var proposal in prepared) { hashes.AddRange(UpsertKeyHashes(proposal.Keys)); }
                 await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
             }
             // Ordered defaults stay lazy: acquire each proposal's sorted unique keys after
@@ -79,7 +85,7 @@ internal sealed partial class SqlPlanExecutor
                 if (orderedDefaults)
                 {
                     hashes.Clear();
-                    hashes.AddRange(proposal.Keys.Select(key => key.Hash()));
+                    hashes.AddRange(UpsertKeyHashes(proposal.Keys));
                     await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
                 }
                 ulong? conflict = null;
@@ -88,6 +94,7 @@ internal sealed partial class SqlPlanExecutor
                 {
                     var arbiter = arbiters[arbiterIndex];
                     var key = proposal.Keys[arbiterOrdinals[arbiterIndex]];
+                    if (key.Length == 0) { continue; } // This partial arbiter does not cover this proposed key.
                     if (pending.TryGetValue((arbiter.Metadata.Name, key), out var prior))
                     {
                         if (prior is null) { continue; } // An earlier update released this key.
@@ -141,7 +148,9 @@ internal sealed partial class SqlPlanExecutor
                     for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                     {
                         var arbiter = arbiters[arbiterIndex];
-                        pending[(arbiter.Metadata.Name, BuildIndexKeyUnchecked(table, arbiter.KeyOrdinals, oldValues))] = null;
+                        if (arbiter.Metadata.Predicate is null ||
+                            MatchesIndex(table, arbiter.Metadata, oldValues, cancellationToken: cancellationToken) && !PartialNullKey(arbiter.Metadata, arbiter.KeyOrdinals, oldValues))
+                        { pending[(arbiter.Metadata.Name, BuildIndexKeyUnchecked(table, arbiter.KeyOrdinals, oldValues))] = null; }
                     }
                 }
                 // PostgreSQL nodeModifyTable.c:1121-1232 arbitrates before heap/index insertion.
@@ -153,6 +162,7 @@ internal sealed partial class SqlPlanExecutor
                     var arbiter = arbiters[arbiterIndex];
                     var key = write.OldLocation.HasValue ? BuildIndexKey(table, arbiter.KeyOrdinals, write.Values)
                         : proposal.Keys[arbiterOrdinals[arbiterIndex]];
+                    if (key.Length == 0) { continue; }
                     pending[(arbiter.Metadata.Name, key)] = write;
                 }
             }
@@ -322,6 +332,17 @@ internal sealed partial class SqlPlanExecutor
             }
         }
         return null;
+    }
+
+    private static IEnumerable<ulong> UpsertKeyHashes(IndexKey[] keys)
+    {
+        // Keep the original Select allocation for unconditional proposals. Only a
+        // nonparticipating partial arbiter needs the extra filtering iterator.
+        foreach (var key in keys)
+        {
+            if (key.Length == 0) { return keys.Where(candidate => candidate.Length != 0).Select(candidate => candidate.Hash()); }
+        }
+        return keys.Select(key => key.Hash());
     }
 
     private static object? CoerceUpsertColumn(SqlCatalogTable table, int ordinal, object? value)

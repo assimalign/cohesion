@@ -524,7 +524,7 @@ internal sealed partial class SqlExpressionEvaluator
         var type = StatisticsInputType(syntax);
         if (!SqlFunctionResolver.IsNumeric(type)) { return value; }
         var target = SqlType.ForStorage(new DatabaseTypeInfo(type));
-        return new SqlBoundCast(value, target.Name, target, _functions.Types.ResolveCasts(null, target),
+        return new SqlBoundCast(value, target.Name, target, ResolveExpressionCasts(null, target, syntax.Location),
             _functions.Database, _defaultCollation, syntax.Location);
     }
 

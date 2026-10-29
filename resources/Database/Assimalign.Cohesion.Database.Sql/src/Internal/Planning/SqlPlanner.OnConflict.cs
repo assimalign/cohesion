@@ -21,7 +21,7 @@ internal sealed partial class SqlPlanner
         if (clause.TargetKind == SqlOnConflictTargetKind.None)
         {
             if (clause.Action == SqlOnConflictAction.DoUpdate) { throw Invalid(ErrorMessages.UpsertTargetRequired); }
-            arbiters.AddRange(indexes.Where(index => index.IsUnique && index.Predicate is null));
+            arbiters.AddRange(indexes.Where(index => index.IsUnique));
         }
         else if (clause.TargetKind == SqlOnConflictTargetKind.Constraint)
         {
