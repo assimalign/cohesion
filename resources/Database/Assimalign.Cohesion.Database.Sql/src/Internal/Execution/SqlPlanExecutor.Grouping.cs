@@ -26,7 +26,9 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        await using var input = (DatabaseResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
+        await using var input = (DatabaseResultSet)await (RecursiveState is null
+            ? ExecuteAsync(plan.Input, statement, cancellationToken)
+            : RecursiveGroupInputAsync(plan, statement, cancellationToken)).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var keys = plan.Keys;
         var aggregates = plan.Aggregates;
@@ -65,6 +67,7 @@ internal sealed partial class SqlPlanExecutor
             }
             if (!groups.TryGetValue(key, out var states))
             {
+                RecursiveScratch?.Retain(key);
                 states = CreateStates();
                 groups.Add(key, states);
             }
@@ -90,7 +93,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     AddRow(state.Accumulator, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken, statement.TransactionStart);
                 }
-                else { AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken, statement.TransactionStart); }
+                else { AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken,
+                    statement.TransactionStart, RecursiveScratch, retainDistinct: RecursiveScratch is not null); }
             }
         }
 
@@ -130,7 +134,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 continue;
             }
-            if (deferredSequence) { matches.Add(row[..projectionStart]); continue; }
+            if (deferredSequence) { var retained = row[..projectionStart]; RecursiveScratch?.Retain(retained); matches.Add(retained); continue; }
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
@@ -138,7 +142,7 @@ internal sealed partial class SqlPlanExecutor
                     evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
             }
             if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
-            if (correlatedOrdering) { matches.Add(row); }
+            if (correlatedOrdering) { RecursiveScratch?.Retain(row); matches.Add(row); }
             else
             {
                 if (plan.IsDistinct)
@@ -174,6 +178,7 @@ internal sealed partial class SqlPlanExecutor
         // One accumulator per group, per aggregate call, per statement, owned here and never shared.
         GroupAggregateState[] CreateStates()
         {
+            RecursiveScratch?.Reserve(128L + 128L * aggregates.Count);
             var states = new GroupAggregateState[aggregates.Count];
             for (int i = 0; i < states.Length; i++)
             {
@@ -222,7 +227,7 @@ internal sealed partial class SqlPlanExecutor
 
     private static long AddAggregateInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
         SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp,
-        SqlWindowMemory? windowMemory = null)
+        SqlWindowMemory? windowMemory = null, bool retainDistinct = false)
     {
         var values = new SqlValue[aggregate.Arguments.Length];
         EvaluateArguments(aggregate, evaluator, source, values);
@@ -249,6 +254,8 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return 0;
             }
+            if (retainDistinct)
+            { windowMemory!.Retain(tuple); windowMemory.Retain(row); windowMemory.Reserve(64); }
             state.Distinct.Add(tuple, row);
         }
         if (state.Inputs is null)

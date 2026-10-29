@@ -98,11 +98,7 @@ validation as ExecutionFailure with a reusable connection. No client API or payl
 Non-recursive WITH queries and INSERT/UPDATE/DELETE (#1116) travel through the
 existing SQL execute exchange. Wire tests pin results, exact affected counts and
 modifying-body ParseFailure diagnostics, preserving connection reuse
-and stored rows after rejection. WITH RECURSIVE (#1719, SQ-R1) executes acyclic
-lists and reports valid recursion as CK00001 / ExecutionFailure at planning;
-invalid anchor references retain CS01055. InMemory/TCP regressions pin these
-carriers and connection reuse. Runtime fixpoints remain SQ-R2. No client API or
-wire payload changes.
+and stored rows after rejection. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) executes UNION ALL and DISTINCT fixpoints, shared scans and outer LIMIT demand. InMemory/TCP regressions cover values, NULL identity, EXPLAIN iteration/row counters, CS02066/CS02067 compatibility errors, CS05067 memory refusal and connection reuse. Invalid anchor references retain CS01055. Windows over finite fixpoints execute. For unbounded inputs, blocking consumers that retain input refuse with CS05067 when they exhaust StatementMemoryBudget; bounded-state consumers run until cancellation, including infinite COUNT and top-K sorts. No client API or wire payload changes.
 
 Blank derived output names fail planning with CS05013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit

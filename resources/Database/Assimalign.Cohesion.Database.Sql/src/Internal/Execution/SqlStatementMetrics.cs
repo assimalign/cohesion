@@ -90,6 +90,15 @@ internal sealed class SqlStatementMetrics
                 if (value is null) { return; }
                 // Installed before WITH/subqueries or association enumeration do any work.
                 work = new();
+                if (_accessPath is JoinWork prior)
+                {
+                    work.Paths = prior.Paths;
+                    work.ScalarPath = prior.ScalarPath;
+                    work.CandidatePairs = prior.CandidatePairs;
+                    work.MemoryBytes = prior.MemoryBytes;
+                    work.PeakMemoryBytes = prior.PeakMemoryBytes;
+                    work.ObservationState = prior.ObservationState;
+                }
                 _accessPath = work;
             }
             work.DmlStatement = value;

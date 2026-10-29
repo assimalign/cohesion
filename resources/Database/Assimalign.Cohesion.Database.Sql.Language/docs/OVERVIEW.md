@@ -20,7 +20,7 @@ GROUPING/GROUPING_ID subtotal masks execute (#1720, SQ-H2). Ranking, LAG/LEAD, O
 ROWS, RANGE distances, GROUPS, EXCLUDE, aggregate windows with FILTER, value functions and
 IGNORE/RESPECT NULLS execute (#1526, SQ-W3). FROM FIRST/LAST retain named refusals.
 
-- **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE (recursive bodies bind; execution is deferred to SQ-R2; WITH RECURSIVE before MERGE reports CK00001), plus `SELECT` (INNER/LEFT/RIGHT/FULL/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
+- **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE (recursive bodies bind and execute demand-driven fixpoints; WITH RECURSIVE before MERGE reports CK00001), plus `SELECT` (INNER/LEFT/RIGHT/FULL/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`
   (including parsed/bound FROM sources, `SET c = DEFAULT` and correlated and uncorrelated WHERE subqueries), `DELETE`
   (including parsed/bound USING sources and correlated and uncorrelated WHERE subqueries), `CREATE/ALTER/DROP TABLE`, `TRUNCATE` table lists with identity and FK policies,

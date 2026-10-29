@@ -39,6 +39,7 @@ internal sealed partial class SqlPlanner
         SqlSequenceScopePlan => "Sequences",
         SqlSelectPlan => "Select",
         SqlSetOperationPlan p => p.Operator.ToString(),
+        SqlRecursiveUnionPlan => "RecursiveUnion",
         SqlJoinPlan { Steps.Count: 0 } => "Select",
         SqlJoinPlan { Steps: { } steps } when steps.Any(step => step.Hash is not null) => "HashJoin",
         SqlJoinPlan => "NestedLoopJoin",
@@ -89,6 +90,7 @@ internal sealed partial class SqlPlanner
     internal static DatabasePlanDescription Describe(SqlPlan plan, IEnumerable<Diagnostic>? diagnostics = null, SqlStatementMetrics? metrics = null)
     {
         var nodes = new List<DatabasePlanNode>();
+        bool recursiveDemand = plan.ContainsRecursion || plan is SqlSequenceScopePlan { Input.ContainsRecursion: true };
         Visit(plan, null);
         return DatabasePlanDescription.Create(nodes, diagnostics);
 
@@ -132,9 +134,12 @@ internal sealed partial class SqlPlanner
                 SqlJoinPlan { Steps.Count: 0 } p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlConstantPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlSetOperationPlan p => QueryDetail(false, p.OrderBy, !p.IsAll, p.Limit, p.Offset),
+                SqlRecursiveUnionPlan p => (p.IsAll ? "UNION ALL" : "UNION DISTINCT") + "; demand_driven=true; working=previous_iteration" +
+                    (metrics is null ? "" : "; iterations=" + (metrics.Analysis(p)?.RecursiveIterations ?? 0) +
+                        "; rows=" + (metrics.Analysis(p)?.RecursiveRows ?? 0) + "; candidates=" + (metrics.ActualCandidates(p) ?? 0)),
                 SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
-                SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(step.Hash is not null ? "bounded in-memory hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
+                SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(recursiveDemand ? "demand-driven inputs" : step.Hash is not null ? "bounded in-memory hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
                     QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
                     (p is not SqlGroupingSetsPlan extended ? "" : GroupingSetsDetail(extended)) +
@@ -162,7 +167,8 @@ internal sealed partial class SqlPlanner
                 SqlDropIndexPlan p => p.IndexName,
                 _ => null,
             };
-            Add(DescribeOperator(current), parent, target, indexName, detail, actual: metrics?.ActualCandidates(current));
+            Add(recursiveDemand && current is SqlJoinPlan { Steps.Count: > 0 } ? "NestedLoopJoin" : DescribeOperator(current),
+                parent, target, indexName, detail, actual: metrics?.ActualCandidates(current));
             switch (current)
             {
                 case SqlWindowAggregatePlan window:
@@ -194,6 +200,10 @@ internal sealed partial class SqlPlanner
                 case SqlSetOperationPlan set:
                     foreach (var operand in set.Operands) { Visit(operand.Query, id); }
                     break;
+                case SqlRecursiveUnionPlan recursive:
+                    Visit(recursive.Anchor.Query, id);
+                    Visit(recursive.Recursive.Query, id);
+                    break;
                 case SqlSelectPlan select:
                     Access(select.Table, select.Access, id, actual: metrics?.ActualCandidates(select));
                     break;
@@ -218,7 +228,8 @@ internal sealed partial class SqlPlanner
                                 continue;
                             }
                             int treeId = nodes.Count;
-                            string algorithm = treeStep.Kind == SqlJoinType.FullOuter ? "FullHashJoin; unmatched=both"
+                            string algorithm = recursiveDemand ? treeStep.Kind == SqlJoinType.FullOuter ? "FullNestedLoop; unmatched=both" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop"
+                                : treeStep.Kind == SqlJoinType.FullOuter ? "FullHashJoin; unmatched=both"
                                 : treeStep.Hash is not null ? "HashJoin" : treeStep.Access is not null ? "IndexNestedLoop" : "NestedLoop";
                             string normalization = treeStep.Kind == SqlJoinType.RightOuter ? "; normalized RIGHT to LEFT; physical=LeftOuter" : string.Empty;
                             Add("JoinStep", next.Parent, Target(join.Bindings[treeStep.Binding].Source),
@@ -241,7 +252,7 @@ internal sealed partial class SqlPlanner
                         int inner = ReferenceEquals(step, join.Steps[0]) && first == 1 ? 0 : step.Binding;
                         var binding = join.Bindings[inner];
                         int stepId = nodes.Count;
-                        string algorithm = step.Hash is not null ? "HashJoin" : step.Access is not null ? "IndexNestedLoop" : "NestedLoop";
+                        string algorithm = !recursiveDemand && step.Hash is not null ? "HashJoin" : step.Access is not null ? "IndexNestedLoop" : "NestedLoop";
                         long? estimated = null;
                         if (ReferenceEquals(step, join.Steps[0]) && join.InputEstimates is { } counts &&
                             counts[first] is { } outerCount && counts[inner] is { } innerCount)
@@ -284,7 +295,7 @@ internal sealed partial class SqlPlanner
                     foreach (var relation in with.Relations)
                     {
                         int materialization = nodes.Count;
-                        Add("Materialize", id, relation.Name);
+                        Add(recursiveDemand ? "CteBuffer" : "Materialize", id, relation.Name);
                         using var analysis = metrics?.EnterRelationAnalysis(relation);
                         Visit(relation.Query, materialization);
                     }
@@ -322,7 +333,7 @@ internal sealed partial class SqlPlanner
         {
             if (source.Derived is { IsCommonTable: true } commonTable)
             {
-                Add("CteScan", parent, commonTable.Name);
+                Add(commonTable.IsRecursiveReference ? "WorkTableScan" : "CteScan", parent, commonTable.Name);
                 return;
             }
             if (source.Derived is { } derived)

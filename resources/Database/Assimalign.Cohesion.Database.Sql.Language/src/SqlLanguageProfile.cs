@@ -161,7 +161,7 @@ public static class SqlLanguageProfile
 
     /// <summary>
     /// Gets the SQL language profile, including MERGE actions, BY SOURCE, RETURNING,
-    /// repeated-target detection and EXPLAIN. WITH RECURSIVE binds; recursive execution is deferred.
+    /// repeated-target detection, EXPLAIN and demand-driven WITH RECURSIVE fixpoints.
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",

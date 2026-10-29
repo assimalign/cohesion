@@ -39,19 +39,27 @@ internal sealed class SqlSubqueryValues
     }
 
     internal Dictionary<int, SqlSubqueryBinding> Queries { get; }
+    internal SqlSubqueryValues? Parent => _parent;
     internal Dictionary<int, object?[]> StatementValues { get; }
     internal bool HasCorrelatedQueries { get; }
     internal object?[]? Row { get; private set; }
     internal Dictionary<SqlBoundExpression, object?>? Evaluated { get; }
 
-    internal void BeginRow(object?[] row)
+    internal void BeginRow(object?[] row, SqlWindowMemory? memory = null)
     {
         if (ReferenceEquals(Row, row)) { return; }
         Row = row;
         Evaluated?.Clear();
+        ClearCorrelated(memory);
+    }
+
+    internal void ClearCorrelated(SqlWindowMemory? memory)
+    {
         foreach (var query in Queries.Values)
         {
-            if (query.IsCorrelated) { Clear(query.Slot); }
+            if (!query.IsCorrelated) { continue; }
+            if (memory is not null && TryGet(query.Slot, out var values)) { memory.ReleaseRow(values); }
+            Clear(query.Slot);
         }
     }
 

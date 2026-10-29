@@ -24,11 +24,13 @@ internal sealed class SqlWindowMemory : IDisposable
     private long _partitionRowBytes;
     private int _partitionRowCapacity;
     private bool _admittingChildren;
+    private readonly bool _statementBudgetOnly;
 
-    internal SqlWindowMemory(SqlStatementMetrics metrics, long budget)
+    internal SqlWindowMemory(SqlStatementMetrics metrics, long budget, bool statementBudgetOnly = false)
     {
         _metrics = metrics;
         _budget = budget;
+        _statementBudgetOnly = statementBudgetOnly;
         _previous = _current.Value;
         Reserve(1024);
         _current.Value = this;
@@ -40,7 +42,7 @@ internal sealed class SqlWindowMemory : IDisposable
 
     internal void Reserve(long bytes)
     {
-        if (!_admittingChildren && bytes > _budget - _metrics.HashMemoryBytes)
+        if (!_statementBudgetOnly && !_admittingChildren && bytes > _budget - _metrics.HashMemoryBytes)
         { throw new SqlExecutionException("CS05079", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WindowMemoryBudget, _budget)); }
         _metrics.ReserveHashMemory(bytes, _budget);
         _reserved += bytes;
