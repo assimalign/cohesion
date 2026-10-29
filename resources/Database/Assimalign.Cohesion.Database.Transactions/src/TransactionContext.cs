@@ -116,6 +116,8 @@ public sealed class TransactionContext
     /// <summary>Gets whether this context only holds a statement snapshot horizon.</summary>
     internal bool IsSnapshotPin => (_kind & snapshotPinFlag) != 0;
 
+    internal TransactionSnapshot BeginSnapshot => _beginSnapshot;
+
     /// <summary>
     /// Gets the external identity of the transaction.
     /// </summary>
@@ -183,12 +185,15 @@ public sealed class TransactionContext
     // The manager holds its registration lock before this lifecycle latch, as for ClaimEnd.
     // Replacement preserves the original begin snapshot and shares end/apply state with every
     // earlier handle. Neither lock spans storage, an engine lock wait, or a coordinator lock.
-    internal TransactionContext? ReplaceIsolationLevel(IsolationLevel isolationLevel)
+    internal TransactionContext ReplaceIsolationLevel(IsolationLevel isolationLevel)
     {
         lock (_endSync)
         {
             var owner = _transaction ?? this;
-            if (owner._ending || owner._applying != 0 || State != TransactionState.Active) { return null; }
+            if (owner._ending || State != TransactionState.Active)
+            { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
+            if (owner._applying != 0)
+            { throw new TransactionAbortedException(ErrorMessages.IsolationStatementRunning); }
             return new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
         }
     }

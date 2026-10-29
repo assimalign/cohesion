@@ -8,7 +8,7 @@ model supplies synchronous configuration that can refuse and never waits for eng
 a successful context replacement publishes the level. There is no new public interface or virtual
 hook. SQL supplies its early-statement policy; other model behavior remains unchanged. Lock order
 is root state, manager registration, context end latch; coordinator tracking follows manager
-release. End cores run outside root state. Identity remains fixed throughout configuration.
+release. End cores run outside root state. Identity remains fixed throughout configuration. This intentionally deviates from database-area.md rule 6 (state fixed at construction): SQL SET TRANSACTION may change isolation before the first data statement (#1012), pending owner sign-off. The protected seam stays non-virtual and field-backed; other construction state remains fixed.
 
 ## Shared plan-description contract (#1522)
 

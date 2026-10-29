@@ -5,12 +5,19 @@
 ReplaceIsolationLevel returns an immutable replacement context with the same id, sequence and
 begin snapshot. Earlier handles and statement views share one end/apply lifecycle. Registration
 changes under manager lock before coordinator tracking; those locks are never nested. The context
-end latch follows manager lock, as in ClaimEnd. Stale, pinned, applying or ending contexts refuse
-replacement. Callers exclude data statements and transaction ends, retain a begin snapshot pin
-while READ COMMITTED may still change to Snapshot, and release it when configuration closes.
-This takes no new engine locks, writes no log records and changes no lifecycle rates or formats.
-Statement-view and snapshot-pin kind share one byte so replacement support preserves the
-context's existing aligned size, including auto-commit contexts and per-statement pins.
+end latch follows manager lock, as in ClaimEnd. Stale and untracked handles, running statement
+applies and ending transactions each have a distinct TransactionAbortedException message.
+Statement views and pins are ArgumentException caller errors. The manager refuses READ COMMITTED
+to fixed visibility unless an active pin registered before the transaction still retains its begin
+floor; a late or released pin cannot restore pruned data. Registration, pin removal and prune-bound
+evaluation share the manager lock. Callers exclude data statements and transaction ends, retain a
+begin snapshot pin while READ COMMITTED may still change to Snapshot, and release it when
+configuration closes. This takes no new engine locks, writes no log records and changes no
+lifecycle rates or formats. Statement-view and snapshot-pin kind share one byte so replacement
+support preserves the context's existing aligned size, including auto-commit contexts and
+per-statement pins. Successful changes emit event 20 TransactionIsolationChanged with the effective
+level; idempotent replacements emit no change event. Snapshot pins stay registered for pruning but
+move neither the transaction gauge nor the rates.
 
 ## Intent
 
@@ -1333,7 +1340,7 @@ all five engines. The explicit transaction a session runs is the root's
 explicit transaction and one per autocommit statement. In every model, statement snapshot pins
 use `BeginSnapshotPinAsync` and end through `RollbackAsync`. Their immutable kind is assigned
 under the manager lock before active-table insertion (#1351), preserving the snapshot/prune
-ordering described above. Pins remain in the current-transactions gauge but move none of the
+ordering described above. Pins remain registered for pruning but move neither the current-transactions gauge nor the
 three transaction rates and emit none of the Verbose begin, commit or rollback events, including
 when disposal aborts them. Real transaction rollbacks and failures still count. The conventions
 every Database source shares (failure payloads, `Start`/`Stop` endings) are in the area's
@@ -1382,6 +1389,7 @@ events check `EventKeywords.None`.
 | 17 | `DeferredCheckpointFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the same, when it failed; the next `TryCheckpoint` throws the failure and its worker reports it (root event 1) |
 | 18 | `VersionPurgePass` | Verbose | Purge | `database`, `versionsPurged`, `durationMilliseconds` | `TransactionCoordinator.RunVersionPurgePass`, when the pass ran to its end (a retry failure it rethrows included) |
 | 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for: a holder as `<sequence>:<modes held>` (modes joined by `+`), the owner of a conflicting request queued ahead of it as `<sequence>:queued <mode>`. Each is followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step. Bounded (#1390 review): 16 blockers, 4 queued requests of each and 4 blockers of each of those, the rest counted as `... (+N more)` and ` and N more requests` |
+| 20 | `TransactionIsolationChanged` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | successful `ReplaceIsolationLevel`, only when the effective level changes; no rate or gauge transition |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
@@ -1427,15 +1435,15 @@ reads exact values.
 
 | Counter | Kind | Transition |
 | --- | --- | --- |
-| `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync` or `BeginSnapshotPinAsync`, including pins); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
+| `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync`, excluding pins); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
 | `transactions-per-second` | rate | a tracked context other than a snapshot pin begins |
 | `commits-per-second` | rate | a context other than a snapshot pin ends `Committed` (an unconfirmed commit included) |
 | `rollbacks-per-second` | rate | a context other than a snapshot pin ends rolled back or aborted, including an aborted commit or disposal's abort |
 | `total-deadlocks` | total | each deadlock victim (event 6) |
 | `lock-waits-per-second` | rate | each queued request (event 7) |
 
-The transaction rates exclude snapshot pins; the gauge includes every open context, so it still
-exposes a leaked pin. A pin keeps its ordinary manager registration, sequence, fixed snapshot,
+The transaction rates and gauge exclude snapshot pins. GetOpenContexts and PruneBound still
+expose retained pin registrations. A pin keeps its ordinary manager registration, sequence, fixed snapshot,
 end claim and lock release. It writes no journal lifecycle records (#1280); registered statement
 snapshots without kernel contexts are outside #1351. The lock counters count every lock manager.
 The transaction rates move once at a non-pin kernel transaction's begin and once at its end,

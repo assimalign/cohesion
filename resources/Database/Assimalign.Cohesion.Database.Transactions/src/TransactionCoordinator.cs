@@ -396,11 +396,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <returns>The replacement context. Earlier handles share its lifecycle.</returns>
     /// <exception cref="ArgumentNullException">The context is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The level is undefined.</exception>
-    /// <exception cref="TransactionAbortedException">The context is stale, ending, applying, a view or a pin.</exception>
+    /// <exception cref="ArgumentException">The context is a statement view or snapshot pin, or a change from READ COMMITTED to fixed visibility has no active begin-time snapshot pin.</exception>
+    /// <exception cref="TransactionAbortedException">The context is stale, untracked, ending or has a running statement apply.</exception>
     /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
     /// <remarks>
     /// The caller excludes data statements and transaction ends, and retains a begin-time snapshot
-    /// pin while READ COMMITTED remains configurable. That pin protects historical versions if the
+    /// pin while READ COMMITTED remains configurable. The manager enforces that a pin registered
+    /// before the transaction still protects its begin floor when selecting fixed visibility. It protects historical versions if the
     /// caller subsequently selects Snapshot. Release it after configuration or at transaction end.
     /// No engine locks are acquired. Manager registration precedes coordinator tracking, with no
     /// nested locks; the manager protects the new horizon before the coordinator publishes it.
@@ -417,12 +419,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             if (_openContexts.ContainsKey(context.Sequence.Value))
             { _openContexts[context.Sequence.Value] = replacement; }
         }
+        if (context.IsolationLevel != isolationLevel)
+        { TransactionEventSource.Log.TransactionIsolationChanged(_storage, replacement); }
         return replacement;
     }
 
     /// <summary>
     /// Begins a snapshot pin that holds the version-pruning horizon for one statement.
-    /// It remains tracked by the current-transactions gauge, but contributes no transaction
+    /// It remains registered for pruning, but contributes no current-transactions gauge or transaction
     /// begin, commit or rollback rate and writes no Verbose transaction lifecycle events.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
