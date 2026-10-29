@@ -109,7 +109,10 @@ reading a non-consuming native final result. Equal frames share the previously c
 result. Ordinary application accumulator Finish remains once-only: those frames, moving
 frame heads and aggregate-local ordering recompute when necessary. String output cost is
 also proportional to the total returned text. Native ordered/string buffers and accumulator
-scratch charge CS05079's statement grant; complete retained-memory refinement remains SQ-W3.
+scratch charge CS05079's statement grant. Ordered aggregate inputs evaluate their arguments
+and keys once after FILTER; their actual retained payload and conservative stable-sort scratch
+reserve the grant before buffering. Those reservations release on success, refusal or cancellation;
+complete retained-memory refinement remains SQ-W3.
 No public accumulator contract, disk version or wire format changes.
 EXPLAIN retains frame boundaries for each function and ANALYZE reports frame_visits,
 counting candidate aggregate inputs before FILTER. Frames do not split shared sort groups,

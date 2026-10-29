@@ -214,10 +214,8 @@ internal sealed partial class SqlPlanExecutor
                         if (ordered is null) { AddRow(accumulator, aggregate, collation, evaluator, inputRow, cancellationToken, statement.TransactionStart); }
                         else
                         {
-                            long bytes = 128L + (aggregate.Arguments.Length + aggregate.OrderBy.Count) * 16L + SqlHashJoinTable.RowBytes(inputRow);
-                            memory.Reserve(bytes);
-                            retained += bytes;
-                            AddAggregateInput(ordered, aggregate, collation, evaluator, inputRow, cancellationToken, statement.TransactionStart);
+                            retained += AddAggregateInput(ordered, aggregate, collation, evaluator, inputRow,
+                                cancellationToken, statement.TransactionStart, memory);
                         }
                     }
                     if (ordered?.Inputs is { } inputs)
