@@ -191,6 +191,7 @@ structured-carrier messages remain unprefixed.
 | New (#1721, SQ-O2) | CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
 | New (#1722, SQ-N1) | CS02078 | Malformed JSON access or assignment input, invalid Unicode/UTF-8 or depth over 128 (22032) |
 | New (#1722, SQ-N1) | CS02079 | JSON kind cannot convert to the requested numeric or Boolean scalar (22023) |
+| New (#1722, SQ-N1) | CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |

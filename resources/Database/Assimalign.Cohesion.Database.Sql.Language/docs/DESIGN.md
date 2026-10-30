@@ -1258,6 +1258,11 @@ predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refu
 The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
 ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
 including grouping, windows, correlation, persisted equivalence and definition checks.
+The engine resolves CASE/COALESCE alternatives through one scoped common-type path in JSON
+positions, records the selector overload, and folds adjacent bound arrows over one validated
+document. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
+literal coercion and the CS02080 declared-type mismatch refusal; the conformance corpus covers
+common selectors and JSON partial predicates.
 The shared reader validates complete input with strict UTF-8 and maximum depth 128;
 missing/wrong-container results, JSON null and SQL NULL remain distinct. The dialect
 specifies extraction, Unicode conversion and numeric/Boolean cast rules and PostgreSQL
@@ -1277,6 +1282,7 @@ admission now refuses malformed input; it does not rewrite existing row bytes.
 | CS01067 | Invalid JSON access or IS JSON signature (42883) |
 | CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 
 The extraction oracle performs 10,240 comparisons over generated nested values,
 negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.

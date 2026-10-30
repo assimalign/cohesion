@@ -394,6 +394,7 @@ executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL compari
 | CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
 | CS02078 | Invalid JSON access/assignment input, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 | CS05086 | Offset RANGE requires exactly one ordering key (42P20) |
 | CS05087 | GROUPS requires ORDER BY (42P20) |
 | CS05088 | NULL treatment on an incompatible function (42601) |
@@ -3652,6 +3653,15 @@ The left operand must be declared JSON/JSONB (use CAST for character or polymorp
 An unresolved NULL left operand cannot choose between those signatures and is CS01067;
 CAST(NULL AS JSON/JSONB) propagates SQL NULL. Untyped NULL result alternatives adopt
 a surrounding CASE/COALESCE JSON result type.
+In JSON operands and selectors (including IS JSON), CASE/COALESCE resolve one common SQL
+type before selecting an arrow overload. Untyped string and NULL literals adopt declared
+alternatives; all-unknown sets resolve to TEXT. Declared INTEGER and TEXT alternatives, or
+JSON and JSONB alternatives, refuse with CS02080 (42804) before reading input rows.
+Unknown literals undergo input conversion during binding, including skipped alternatives;
+invalid text retains CS02022. The resolved type, rather than the selected runtime value,
+chooses member lookup or indexing. PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+parse_coerce.c:1357-1456 define these rules. Consecutive arrows validate one document and
+serialize only the final value; CAST or another intervening expression ends that chain.
 Duplicate keys select the last occurrence, including escaped-equivalent names.
 Member lookup is ordinal. Text extraction inherits a text selector's collation;
 without one its output uses the database default (parse_collate.c:577-750).
@@ -3688,6 +3698,8 @@ access and assignment; IS JSON returns FALSE when that limit or encoding is inva
 JSON text and JSONB UTF-8 storage remain unchanged. Existing text/bytes/scalar wire cells
 carry results over InMemory and TCP. Invalid operand signatures are CS01067 (42883),
 checked before rows, including all CASE/COALESCE result alternatives.
+Identical JSON conjuncts can prove partial-index eligibility, including IS JSON kind and
+negation. Different source/selector types, keys and arrow forms do not provide that proof.
 
 PostgreSQL references (local clone): src/backend/utils/adt/jsonfuncs.c:886-1005,
 1105-1116,1160-1296; src/backend/utils/adt/jsonb.c:1819-2006;

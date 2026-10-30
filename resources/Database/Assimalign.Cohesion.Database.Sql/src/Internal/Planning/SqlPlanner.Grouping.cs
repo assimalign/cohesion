@@ -431,7 +431,7 @@ internal sealed partial class SqlPlanner
             or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo
             => SqlExpressionEvaluator.ArithmeticType(binary.Operator, GroupExpressionType(binary.Left, columns, evaluator), GroupExpressionType(binary.Right, columns, evaluator)),
         SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator)
-            => SqlJsonAccess.ResultType(json.Operator, GroupExpressionType(json.Left, columns, evaluator)),
+            => evaluator.StaticTypeOf(json),
         SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator)
             => evaluator.StaticTypeOf(bitwise),
         SqlLogicalExpression or SqlBinaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression

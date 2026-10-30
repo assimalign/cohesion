@@ -201,8 +201,7 @@ public sealed class SqlJsonAccessTests
     [InlineData("'{}'::JSON -> 1::BIGINT")]
     [InlineData("'{}'::JSON -> TRUE")]
     [InlineData("1 IS JSON")]
-    [InlineData("COALESCE(NULL::JSON, 'bad') -> 'a'")]
-    [InlineData("(CASE WHEN TRUE THEN '{}'::JSON ELSE '{}'::JSONB END) -> 'a'")]
+    [InlineData("(CASE WHEN TRUE THEN DATE '2024-01-01' ELSE TIMESTAMP '2024-01-01 00:00:00' END) IS JSON")]
     [InlineData("(CASE WHEN TRUE THEN '{}'::JSON ELSE @bad END) -> 'a'")]
     [InlineData("'{}'::JSON -> COALESCE(1,@bad)")]
     public async Task Execute_InvalidSignatures_ShouldBindBeforeInputAsync(string expression)
@@ -283,6 +282,8 @@ public sealed class SqlJsonAccessTests
             .ShouldBe(new object?[][] { ["2", 1L], ["3", 1L] });
         (await SqlPredicateExecutionTests.RowsAsync(session, "SELECT COALESCE(NULL::JSONB,(SELECT doc FROM j WHERE id=o.id))->'a'->>0 FROM j o ORDER BY id"))
             .ShouldBe(new object?[][] { ["2"], ["3"] });
+        (await SqlPredicateExecutionTests.RowsAsync(session, "SELECT doc->'a'->>(SELECT o.id-1)::INT FROM j o ORDER BY id"))
+            .ShouldBe(new object?[][] { ["2"], [null] });
         (await SqlPredicateExecutionTests.RowsAsync(session, "SELECT (FIRST_VALUE(doc) OVER(ORDER BY id))->'a'->>0 FROM j ORDER BY id"))
             .ShouldBe(new object?[][] { ["2"], ["2"] });
         await using var empty = (await session.ExecuteAsync("SELECT doc->'a',doc->>'a',doc IS JSON ARRAY FROM j WHERE FALSE", cancellationToken: CancellationToken.None)).ShouldBeAssignableTo<DatabaseResultSet>();
@@ -335,6 +336,49 @@ public sealed class SqlJsonAccessTests
             for (int i = 0; i < 128; i++) { _ = SqlJsonAccess.Extract(input, "n", DatabaseType.Json, asText: true); }
             return GC.GetAllocatedBytesForCurrentThread() - before;
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql] - JSON chains: folded and cast-separated steps agree with the extraction oracle (#1722)")]
+    public void Evaluate_ChainedCorpus_ShouldMatchUnfoldedStepsAndOracle()
+    {
+        // Arrange: reuse the independent corpus; a CAST forces step-by-step evaluation.
+        object[] selectors = ["a", "dup", "é", "nested", "missing", "", "0", int.MinValue, -7, -4, -3, -2, -1, 0, 1, 2, 3, 4, 7, int.MaxValue];
+        int comparisons = 0;
+        // Act / Assert
+        foreach (string type in new[] { "JSON", "JSONB" })
+        {
+            var source = type == "JSON" ? DatabaseType.Json : DatabaseType.JsonBinary;
+            var documents = Documents().Select(document => (Oracle: document, Value: source == DatabaseType.Json ? (object)document.Raw : Encoding.UTF8.GetBytes(document.Raw))).ToArray();
+            foreach (object first in selectors)
+            {
+                foreach (object second in selectors)
+                {
+                    var evaluator = new SqlExpressionEvaluator([new Assimalign.Cohesion.Database.Sql.Catalog.SqlCatalogColumn("doc", new(source))],
+                        new Dictionary<string, object?> { ["first"] = first, ["second"] = second });
+                    foreach (bool text in new[] { false, true })
+                    {
+                        string arrow = text ? "->>" : "->";
+                        var chain = evaluator.Bind(Expression($"doc->@first {arrow} @second"));
+                        var unfolded = evaluator.Bind(Expression($"CAST(doc->@first AS {type}) {arrow} @second"));
+                        foreach (var document in documents)
+                        {
+                            object?[] row = [document.Value];
+                            object? actual = evaluator.Evaluate(chain, row);
+                            object? expected = evaluator.Evaluate(unfolded, row);
+                            if (actual is byte[] bytes) { actual = Encoding.UTF8.GetString(bytes); }
+                            if (expected is byte[] raw) { expected = Encoding.UTF8.GetString(raw); }
+                            actual.ShouldBe(expected);
+                            var selected = document.Oracle.Select(first)?.Select(second);
+                            actual.ShouldBe(text && selected?.IsNull == true ? null : text ? selected?.Text ?? selected?.Raw : selected?.Raw);
+                            comparisons++;
+                        }
+                        evaluator.Evaluate(chain, [null]).ShouldBeNull();
+                    }
+                }
+            }
+        }
+        comparisons.ShouldBe(204_800);
+        _output.WriteLine($"{comparisons} chained/unfolded/oracle comparisons, plus 1600 SQL NULL chains");
     }
 
     private static SqlExpression Expression(string text)

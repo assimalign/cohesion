@@ -7761,6 +7761,18 @@ predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refu
 The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
 ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
 including grouping, windows, correlation, persisted equivalence and definition checks.
+JSON positions share a scoped CASE/COALESCE common-type resolver: unknown literals adopt
+declared alternatives, all-unknown sets become TEXT, and incompatible declared alternatives
+refuse before rows. The ordinary binder has no equivalent resolver; its rules outside these
+positions remain unchanged. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+parse_coerce.c:1357-1456. Bound selectors retain their SQL type and member/index overload;
+evaluation converts alternatives to that type before access.
+Adjacent arrows fold only in the bound tree into ordered selectors over one owned, validated
+document. Intermediate missing values still evaluate later selectors; casts and other
+expressions end a chain. Only the final value is serialized. Structural partial-index proofs
+compare source/selector types, overloads, ordered selectors, text mode and IS JSON kind/negation,
+map column offsets and render their witnesses. JSON restrictions remain outside error-free
+join pushdown because extraction may raise CS02078 on valid stored Unicode escapes.
 The shared reader validates complete input with strict UTF-8 and maximum depth 128;
 missing/wrong-container results, JSON null and SQL NULL remain distinct. The dialect
 specifies extraction, Unicode conversion and numeric/Boolean cast rules and PostgreSQL
@@ -7780,6 +7792,7 @@ admission now refuses malformed input; it does not rewrite existing row bytes.
 | CS01067 | Invalid JSON access or IS JSON signature (42883) |
 | CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
 | CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 
 The extraction oracle performs 10,240 comparisons over generated nested values,
 negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.

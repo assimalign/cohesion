@@ -1,4 +1,5 @@
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -6,15 +7,17 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(SqlBoundIsJson.DebugView))]
 internal sealed class SqlBoundIsJson : SqlBoundExpression
 {
-    internal SqlBoundIsJson(SqlBoundExpression operand, SqlJsonKind kind, bool isNegated)
+    internal SqlBoundIsJson(SqlBoundExpression operand, DatabaseType source, SqlJsonKind kind, bool isNegated)
         : base(SqlBoundExpressionKind.IsJson)
     {
         Operand = operand;
+        Source = source;
         JsonKind = kind;
         IsNegated = isNegated;
     }
 
     internal SqlBoundExpression Operand { get; }
+    internal DatabaseType Source { get; }
     internal SqlJsonKind JsonKind { get; }
     internal bool IsNegated { get; }
 

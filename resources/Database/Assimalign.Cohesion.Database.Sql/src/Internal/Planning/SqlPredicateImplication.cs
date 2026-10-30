@@ -129,6 +129,12 @@ internal static class SqlPredicateImplication
             (SqlBoundLogical q, SqlBoundLogical p) => !q.IsOr && !p.IsOr && SameList(q.Operands, p.Operands, offset),
             (SqlBoundBinary q, SqlBoundBinary p) => q.Operator == p.Operator && SameCollation(q.Collation, p.Collation) &&
                 Same(q.Left, p.Left, offset) && Same(q.Right, p.Right, offset),
+            (SqlBoundJsonAccess q, SqlBoundJsonAccess p) => q.Source == p.Source && q.AsText == p.AsText &&
+                Same(q.Operand, p.Operand, offset) && q.Steps.Length == p.Steps.Length && q.Steps.Zip(p.Steps).All(pair =>
+                    pair.First.SelectorType == pair.Second.SelectorType && pair.First.IsIndex == pair.Second.IsIndex &&
+                    Same(pair.First.Selector, pair.Second.Selector, offset)),
+            (SqlBoundIsJson q, SqlBoundIsJson p) => q.Source == p.Source && q.JsonKind == p.JsonKind && q.IsNegated == p.IsNegated &&
+                Same(q.Operand, p.Operand, offset),
             (SqlBoundIsNull q, SqlBoundIsNull p) => q.IsNegated == p.IsNegated && Same(q.Operand, p.Operand, offset),
             (SqlBoundBooleanTest q, SqlBoundBooleanTest p) => q.IsNegated == p.IsNegated && q.TruthValue == p.TruthValue && Same(q.Operand, p.Operand, offset),
             (SqlBoundUnary q, SqlBoundUnary p) => q.Operator == p.Operator && q.Operator != SqlUnaryOperator.Not && Same(q.Operand, p.Operand, offset),
@@ -235,6 +241,8 @@ internal static class SqlPredicateImplication
             SqlBoundConstant => expression is not SqlBoundParameterConstant,
             SqlBoundLogical { IsOr: false } logical => logical.Operands.All(Local),
             SqlBoundBinary binary => Local(binary.Left) && Local(binary.Right),
+            SqlBoundJsonAccess json => Local(json.Operand) && json.Steps.All(step => Local(step.Selector)),
+            SqlBoundIsJson json => Local(json.Operand),
             SqlBoundIsNull test => Local(test.Operand),
             SqlBoundBooleanTest test => Local(test.Operand),
             SqlBoundUnary unary => unary.Operator != SqlUnaryOperator.Not && Local(unary.Operand),
@@ -275,6 +283,9 @@ internal static class SqlPredicateImplication
                 _ => Convert.ToString(constant.Value, CultureInfo.InvariantCulture)!,
             },
             SqlBoundBinary binary => "(" + Render(binary.Left) + " " + Operator(binary.Operator) + " " + Render(binary.Right) + ")",
+            SqlBoundJsonAccess json => "(" + Render(json.Operand) + string.Concat(json.Steps.Select((step, index) =>
+                (json.AsText && index == json.Steps.Length - 1 ? " ->> " : " -> ") + Render(step.Selector))) + ")",
+            SqlBoundIsJson json => Render(json.Operand) + (json.IsNegated ? " IS NOT JSON " : " IS JSON ") + json.JsonKind.ToString().ToUpperInvariant(),
             SqlBoundIsNull test => Render(test.Operand) + (test.IsNegated ? " IS NOT NULL" : " IS NULL"),
             SqlBoundCall call => call.Function.Name + "(" + string.Join(", ", call.Arguments.Select(Render)) + ")",
             SqlBoundUnary unary => unary.Operator + "(" + Render(unary.Operand) + ")",

@@ -132,7 +132,10 @@ internal sealed partial class SqlPlanExecutor
                 if (bitwise.Right is not null) { yield return bitwise.Right; }
                 break;
             case SqlBoundDistinct distinct: yield return distinct.Left; yield return distinct.Right; break;
-            case SqlBoundJsonAccess json: yield return json.Operand; yield return json.Selector; break;
+            case SqlBoundJsonAccess json:
+                yield return json.Operand;
+                foreach (var step in json.Steps) { yield return step.Selector; }
+                break;
             case SqlBoundIsJson json: yield return json.Operand; break;
             case SqlBoundBooleanTest test: yield return test.Operand; break;
             case SqlBoundIsNull isNull: yield return isNull.Operand; break;

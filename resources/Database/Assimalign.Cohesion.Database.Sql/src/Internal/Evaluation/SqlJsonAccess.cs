@@ -52,19 +52,42 @@ internal static class SqlJsonAccess
 
     internal static object? Extract(object value, object selector, DatabaseType source, bool asText)
     {
+        // Unbound reader entry point for the oracle/allocation probes. Bound SQL
+        // evaluation calls Select with the overload fixed on SqlBoundJsonStep.
+        if (selector is not (string or SqlCharacter or short or int)) { throw Signature(); }
+        return Extract(value, selector, source, asText, selector is short or int);
+    }
+
+    internal static object? Extract(object value, object selector, DatabaseType source, bool asText, bool isIndex)
+    {
+        using var document = ReadExtraction(value);
+        var selected = Select(document.RootElement, selector, isIndex);
+        return selected is null ? null : Serialize(selected.Value, source, asText);
+    }
+
+    internal static JsonDocument ReadExtraction(object value)
+    {
         if (value is not (string or byte[])) { throw Signature(); }
-        using var document = ReadChecked(value);
-        var container = document.RootElement;
+        var document = ReadChecked(value);
         // PostgreSQL get_worker uses need_escapes=true even for a missing member
         // (jsonfuncs.c:1105-1116). Invalid surrogate escapes and \u0000 therefore
         // fail extraction wherever they occur. IS JSON only checks JSON syntax.
-        if (value is string input ? input.Contains('\\') : ((byte[])value).AsSpan().Contains((byte)'\\'))
+        try
         {
-            try { ValidateDecoded(container); }
-            catch (InvalidOperationException exception) { throw new SqlExecutionException("CS02078", ErrorMessages.JsonInputInvalid, exception); }
+            if (value is string input ? input.Contains('\\') : ((byte[])value).AsSpan().Contains((byte)'\\'))
+            {
+                try { ValidateDecoded(document.RootElement); }
+                catch (InvalidOperationException exception) { throw new SqlExecutionException("CS02078", ErrorMessages.JsonInputInvalid, exception); }
+            }
+            return document;
         }
+        catch { document.Dispose(); throw; } // This method owns the DOM until it returns.
+    }
+
+    internal static JsonElement? Select(JsonElement container, object selector, bool isIndex)
+    {
         JsonElement selected;
-        if (selector is string or SqlCharacter)
+        if (!isIndex)
         {
             string name = selector is SqlCharacter character ? character.Text : (string)selector;
             // TryGetProperty follows PostgreSQL's last duplicate member wins rule.
@@ -77,18 +100,22 @@ internal static class SqlJsonAccess
             }
             catch (ArgumentException exception) { throw new SqlExecutionException("CS02078", ErrorMessages.JsonInputInvalid, exception); }
         }
-        else if (selector is short or int)
+        else
         {
             if (container.ValueKind != JsonValueKind.Array) { return null; }
-            int index = selector is short small ? small : (int)selector;
+            int index = Convert.ToInt32(selector, CultureInfo.InvariantCulture);
             int count = container.GetArrayLength();
             // Addition cannot overflow, including int.MinValue; never negate the index.
             if (index < 0) { index += count; }
             if (index < 0 || index >= count) { return null; }
             selected = container[index];
         }
-        else { throw Signature(); }
 
+        return selected;
+    }
+
+    internal static object? Serialize(JsonElement selected, DatabaseType source, bool asText)
+    {
         if (asText)
         {
             if (selected.ValueKind == JsonValueKind.Null) { return null; }
