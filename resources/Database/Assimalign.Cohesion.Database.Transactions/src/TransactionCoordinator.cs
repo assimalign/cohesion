@@ -1274,6 +1274,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // keeps bounding the prune and its statement bracket stays resolvable.
     private void UntrackEnded(TransactionContext context)
     {
+        // A rejected foreign end may have the same sequence as a local writer. Only
+        // this manager's contexts can drive tracking or model-ledger cleanup. Preserve
+        // the manager's argument failure too when a public end receives null.
+        if (context is null || !ReferenceEquals(context.Manager, _manager)) { return; }
         if (context.State != TransactionState.Active && context.HadUndoMarkers) { _records.TransactionEnded(context); }
         if (context.State == TransactionState.Active)
         {

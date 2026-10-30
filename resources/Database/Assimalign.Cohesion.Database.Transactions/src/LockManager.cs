@@ -580,7 +580,11 @@ public sealed class LockManager
     // Control order: manager registration -> context admission, both released before
     // version-store or lock-table _sync. Physical undo takes apply gate -> store monitor
     // (released before index/page latches), then lock-table _sync only after every undo
-    // bracket commits. No lock-table monitor spans storage, an await, manager admission,
+    // bracket commits. Model callbacks take their monitor only after store/page latches
+    // are released. Model code can record ledger entries or read pages under that monitor,
+    // but never retains it while entering admission or waiting for the apply gate; neither
+    // ledger nor page latches can therefore wait back on a model monitor.
+    // No lock-table monitor spans storage, an await, manager admission,
     // or a grant notification. This covers create/release versus grants, rollback-to versus
     // release (context admission excludes a second control), failed undo (all locks stay),
     // and root end/disposal (the apply count drains undo before ReleaseAllUnfiltered).

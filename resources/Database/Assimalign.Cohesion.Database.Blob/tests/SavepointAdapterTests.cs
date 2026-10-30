@@ -75,6 +75,7 @@ public sealed class SavepointAdapterTests
         var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
         await Write(container, "one", 2);
         await Write(container, "two", 9);
+        await session.CreateContainerAsync("transient");
         // Act
         await UndoReaderProbe.RunAsync(async () => { (await Read(observing, "one")).ShouldBe(Enumerable.Repeat((byte)0, 20_000).ToArray()); }, async () =>
         {
@@ -83,8 +84,10 @@ public sealed class SavepointAdapterTests
         });
         (await Read(container, "one")).ShouldBe(Enumerable.Repeat((byte)1, 20_000).ToArray());
         (await container.GetPropertiesAsync("two")).ShouldBeNull();
+        database.Catalog.FindContainer("transient", transaction.Context.Snapshot).ShouldBeNull();
         await Write(container, "one", 3);
         await Write(container, "two", 9);
+        await session.CreateContainerAsync("transient");
         if (commit) { await transaction.CommitAsync(); }
         database.DataStorage.WriteBackDirtyPages(int.MaxValue);
         database.DataStorage.WriteAheadJournal.Flush(forceDurable: false);
@@ -95,6 +98,9 @@ public sealed class SavepointAdapterTests
         // Assert
         (await Read(recovered, "one")).ShouldBe(Enumerable.Repeat(commit ? (byte)3 : (byte)0, 20_000).ToArray());
         (await recovered.GetPropertiesAsync("two")).HasValue.ShouldBe(commit);
+        var names = new List<string>();
+        await foreach (var item in reader.GetContainersAsync()) { names.Add(item.Name); }
+        names.Contains("transient").ShouldBe(commit);
     }
 
     private static async Task Write(BlobContainer container, string name, byte value)

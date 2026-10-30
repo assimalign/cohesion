@@ -26,10 +26,12 @@ One transaction substrate for five engines. ACID is the platform's defining requ
 ## In-memory undo markers (#1726, XT-2)
 
 The coordinator's internal `CreateUndoMarkerAsync`, `ReleaseUndoMarkerAsync` and
-`RollbackToUndoMarkerAsync` are the substrate for later named scopes. No language or public
+`RollbackToUndoMarkerAsync` are the substrate for later named scopes. No language or public session
 savepoint API is added. An opaque marker records a position in the combined ordered ledger of
 row creates, row tombstones, index creates and index tombstones. Maintenance implemented through
-those index undo adapters participates in the same ordering; model-owned maintenance now participates through XT-3 adapters. Distinct markers at the same position remain distinct scopes. Release discards
+those index undo adapters participates in the same ordering; model-owned maintenance now
+participates through XT-3 adapters. Distinct markers at the same position remain distinct
+scopes. Release discards
 the target and its descendants while retaining their effects. Rollback discards descendants,
 undoes the suffix in reverse order and retains the target for reuse. Earlier same-writer
 tombstones survive repeated deletion records: undo builds a set of suffix tombstones, then
@@ -55,8 +57,9 @@ invalidate that token without taking the gate. The store revalidates before inst
 pending target; a refusal there clears only a retry fence newly set by this attempt. An
 existing incomplete undo keeps its fence. Create/release and admitted rollback-to exclude
 every second control through the same end latch. The version-store monitor follows admission and never spans
-storage/page/index latches or prefix scans. Index undo must not
-wait for a model lock inside this gate. An admitted undo increments the existing apply count,
+storage/page/index latches or prefix scans. Model monitors acquired by undo adapters must
+never span transaction admission or an apply-gate wait; callbacks run after store/page latches
+are released. An admitted undo increments the existing apply count,
 so root rollback and disposal drain it before undoing the prefix or releasing locks. Commit
 cannot claim the end while partial undo is pending. Other transactions continue to exclude the
 root writer throughout every physical batch: its creates are invisible and its tombstones do
@@ -120,7 +123,8 @@ Tests use real slotted pages/WAL and a record-backed index undo adapter under al
 model tags. They cover nested scopes, statement failure and slot reuse, cancellation, retry,
 root rollback/disposal drain, retained locks, read-only markers, crash after undo with/without
 commit, every whole/torn physical write during multi-batch undo, and reader/purge overlap driven
-by progress counters. Actual model-specific ledger integration remains XT-3's scope.
+by progress counters. XT-3's model suites also exercise real adapters, pinned readers,
+write-after-undo reuse and copied live crash images.
 
 ### Lock scopes and model maintenance (#1726, XT-3)
 
@@ -138,6 +142,8 @@ src/backend/access/transam/xact.c:4620-4733 (rechecked locally).
 
 The code beside LockManager.CreateUndoMarker establishes the admission, apply, ledger,
 lock-table and page-latch order, including failed undo, concurrent release, root end and disposal.
+Untracking and model end cleanup verify the context's manager before using its sequence,
+so rejected foreign/null lifecycle arguments cannot affect a local marked writer.
 Owner operations and lock requests are serialized with controls by the model session. Other
 owners can grant, queue, cancel, time out or end while undo runs. No lock-table monitor spans
 storage, manager admission, an await or notification. No version-store monitor spans model
@@ -158,7 +164,8 @@ registration uses the high word of the existing apply counter; its low word cont
 statement/control admission. Atomic counter updates and a full control-side store/load fence
 make stream registration and marker admission mutually exclusive without a new context field,
 allocation or monitor acquisition on ordinary stream registration. Completion, cancellation and
-failure release the registration exactly once. Same-owner stream/control operations remain
+failure release the registration exactly once. Ending/ended contexts report aborted even when
+the stream count is saturated. Same-owner stream/control operations remain
 session-serialized. The existing lifecycle callback restores no stream state.
 
 XT-4 still owns named scopes, language/session integration and the aborted-block read fence.

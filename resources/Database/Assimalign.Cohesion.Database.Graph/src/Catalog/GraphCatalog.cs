@@ -71,7 +71,7 @@ public sealed class GraphCatalog
 
     private void CreatedVersionUndone(PageId page, int slot, ReadOnlyMemory<byte> bytes)
     {
-        if (bytes.Length < 18 || bytes.Span[17] != 2) { return; }
+        if (bytes.Length < 18 || bytes.Span[17] != GraphCatalogCodec.FormatVersion) { return; }
         var record = GraphCatalogCodec.Decode(bytes.Span, page, slot);
         var key = (record.Kind, record.Parent, record.Name);
         lock (_sync)

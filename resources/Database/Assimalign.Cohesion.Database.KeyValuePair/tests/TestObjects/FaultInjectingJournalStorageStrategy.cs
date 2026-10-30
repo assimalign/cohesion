@@ -125,11 +125,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
         return new FailureScope(_flushFailures, previous, budget);
     }
 
-    /// <summary>
-    /// Gets the bytes a file set's data and journal streams hold right now.
-    /// </summary>
-    /// <param name="databaseName">The database name.</param>
-    /// <param name="catalog">True for the database's catalog file set; false for its data set.</param>
+    // Copy flushed live files before source cleanup, preserving crash-recovery input.
     internal void CopyDatabase(string source, string target)
     {
         lock (_sync)
@@ -143,6 +139,11 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
         }
     }
 
+    /// <summary>
+    /// Gets the bytes a file set's data and journal streams hold right now.
+    /// </summary>
+    /// <param name="databaseName">The database name.</param>
+    /// <param name="catalog">True for the database's catalog file set; false for its data set.</param>
     internal (byte[] Data, byte[] Journal) Capture(string databaseName, bool catalog = false)
     {
         lock (_sync)

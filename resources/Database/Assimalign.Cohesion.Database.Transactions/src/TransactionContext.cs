@@ -185,7 +185,11 @@ public sealed class TransactionContext
         {
             int before = Volatile.Read(ref owner._applying);
             if ((before & ~applyMask) == unchecked((int)0xffff0000))
-            { throw new TransactionUndoException("CK04011", ErrorMessages.WriteStreamLimitExceeded); }
+            {
+                if ((Volatile.Read(ref owner._admission) & endingFlag) != 0 || owner.State != TransactionState.Active)
+                { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
+                throw new TransactionUndoException("CK04011", ErrorMessages.WriteStreamLimitExceeded);
+            }
             if (Interlocked.CompareExchange(ref owner._applying, unchecked(before + streamUnit), before) == before) { break; }
         }
         // Lock-free handshake with control admission: either control sees this count,

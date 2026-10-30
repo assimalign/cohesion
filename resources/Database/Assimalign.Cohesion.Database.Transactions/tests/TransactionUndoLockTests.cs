@@ -17,6 +17,51 @@ public sealed class TransactionUndoLockTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
+    [Theory(DisplayName = "Cohesion Test [Transactions] - Undo lifecycle: rejected foreign ended contexts cannot clean a colliding local scope")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task End_ForeignEndedMarkedContext_ShouldPreserveLocalScopes(bool commit)
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        using var foreignStorage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        await using var foreign = new TransactionCoordinator(foreignStorage, foreignStorage.Log, foreignStorage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var other = await foreign.BeginAsync(IsolationLevel.Snapshot);
+        writer.Sequence.ShouldBe(other.Sequence);
+        await coordinator.CreateUndoMarkerAsync(writer);
+        await foreign.CreateUndoMarkerAsync(other);
+        await foreign.CommitAsync(other);
+        int ends = 0;
+        storage.ScopeEnded = _ => ends++;
+        // Act
+        await Should.ThrowAsync<TransactionAbortedException>(() => commit
+            ? coordinator.CommitAsync(other).AsTask() : coordinator.RollbackAsync(other).AsTask());
+        // Assert
+        ends.ShouldBe(0);
+        coordinator.GetOpenContexts().ShouldHaveSingleItem().ShouldBeSameAs(writer);
+        writer.State.ShouldBe(TransactionState.Active);
+        await coordinator.ApplyStatementAsync(writer, _ => 1);
+        await coordinator.CommitAsync(writer);
+        ends.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Undo lifecycle: null end arguments preserve their argument failure and local scopes")]
+    public async Task End_NullContext_ShouldPreserveArgumentFailureAndLocalScopes()
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await coordinator.CreateUndoMarkerAsync(writer);
+        // Act / Assert
+        await Should.ThrowAsync<ArgumentNullException>(() => coordinator.CommitAsync(null!).AsTask());
+        await Should.ThrowAsync<ArgumentNullException>(() => coordinator.RollbackAsync(null!).AsTask());
+        coordinator.GetOpenContexts().ShouldHaveSingleItem().ShouldBeSameAs(writer);
+        await coordinator.RollbackAsync(writer);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Transactions] - Undo streams: saturation cannot wrap the packed count or leak registration")]
     public async Task BeginWriteStream_SaturatedCount_ShouldRefuseWithoutWrapping()
     {
@@ -38,6 +83,29 @@ public sealed class TransactionUndoLockTests
         var marker = await coordinator.CreateUndoMarkerAsync(writer);
         await coordinator.ReleaseUndoMarkerAsync(writer, marker);
         await coordinator.CommitAsync(writer);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Transactions] - Undo streams: ended transactions take precedence over stream saturation")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BeginWriteStream_EndedSaturatedContext_ShouldReportAborted(bool commit)
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        int registered = 0;
+        try
+        {
+            for (; registered < 65_535; registered++) { writer.BeginWriteStream(); }
+            if (commit) { await coordinator.CommitAsync(writer); }
+            else { await coordinator.RollbackAsync(writer); }
+            // Act / Assert
+            Should.Throw<TransactionAbortedException>(writer.BeginWriteStream);
+            writer.HasOpenWriteStreams.ShouldBeTrue();
+        }
+        finally { for (int i = 0; i < registered; i++) { writer.EndWriteStream(); } }
+        writer.HasOpenWriteStreams.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Transactions] - Undo lifecycle: failed creation unwinds its token and disposal ends model scopes outside the tracking lock")]

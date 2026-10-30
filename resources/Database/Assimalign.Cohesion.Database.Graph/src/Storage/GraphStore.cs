@@ -80,9 +80,11 @@ public sealed partial class GraphStore
 
     private RecordVersionIndex CaptureDirectoryUndo(GraphRecord record)
     {
-        var key = (record.Kind, record.Id);
+        byte kind = record.Kind;
+        ulong id = record.Id;
+        var key = (kind, id);
         bool existed = _records.TryGetValue(key, out var before);
-        bool definition = _definitionIds.Contains(record.Id);
+        bool definition = _definitionIds.Contains(id);
         var labels = record.Node?.Labels.Select(label => (Name: label,
             Tokens: _labelTokens.TryGetValue(label, out var tokens) ? new HashSet<Guid>(tokens) : null,
             Count: _labelCardinalities.GetValueOrDefault(label))).ToArray();
@@ -94,7 +96,7 @@ public sealed partial class GraphStore
             lock (_sync)
             {
                 if (existed) { _records[key] = before; } else { _records.Remove(key); }
-                if (record.Kind == 3 && !definition) { _definitionIds.Remove(record.Id); }
+                if (kind == 3 && !definition) { _definitionIds.Remove(id); }
                 if (labels is not null)
                 {
                     foreach (var label in labels)

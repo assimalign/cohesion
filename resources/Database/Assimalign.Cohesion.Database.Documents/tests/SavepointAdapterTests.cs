@@ -76,6 +76,7 @@ public sealed class SavepointAdapterTests
         var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
         await collection.PutAsync(session, "one", """{"n":2}"""u8.ToArray());
         await collection.PutAsync(session, "two", """{"n":9}"""u8.ToArray());
+        await session.CreateCollectionAsync("transient");
         // Act
         await UndoReaderProbe.RunAsync(async () => { Encoding.UTF8.GetString((await observing.GetAsync(observer, "one"))!.Value.Content.Span).ShouldBe("""{"n":0}"""); }, async () =>
         {
@@ -84,8 +85,10 @@ public sealed class SavepointAdapterTests
         });
         Encoding.UTF8.GetString((await collection.GetAsync(session, "one"))!.Value.Content.Span).ShouldBe("""{"n":1}""");
         (await collection.GetAsync(session, "two")).ShouldBeNull();
+        database.Catalog.FindCollection("transient", transaction.Context.Snapshot).ShouldBeNull();
         await collection.PutAsync(session, "one", """{"n":3}"""u8.ToArray());
         await collection.PutAsync(session, "two", """{"n":9}"""u8.ToArray());
+        await session.CreateCollectionAsync("transient");
         if (commit) { await transaction.CommitAsync(); }
         database.DataStorage.WriteBackDirtyPages(int.MaxValue);
         database.DataStorage.WriteAheadJournal.Flush(forceDurable: false);
@@ -96,5 +99,8 @@ public sealed class SavepointAdapterTests
         // Assert
         Encoding.UTF8.GetString((await recovered.GetAsync(reader, "one"))!.Value.Content.Span).ShouldBe(commit ? """{"n":3}""" : """{"n":0}""");
         (await recovered.GetAsync(reader, "two")).HasValue.ShouldBe(commit);
+        var names = new List<string>();
+        await foreach (var item in reader.GetCollectionsAsync()) { names.Add(item.Name); }
+        names.Contains("transient").ShouldBe(commit);
     }
 }
