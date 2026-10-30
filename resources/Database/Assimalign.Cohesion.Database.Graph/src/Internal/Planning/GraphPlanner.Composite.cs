@@ -11,9 +11,10 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 internal sealed partial class GraphPlanner
 {
     internal GraphCompositePlan PlanComposite(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters,
-        bool paths, CancellationToken token, IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null, GraphReductionWork? sharedWork = null)
+        bool paths, CancellationToken token, IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null, GraphReductionWork? sharedWork = null, GraphTokenResolver? tokens = null)
     {
         ValidateCompositeReadOnly(query, token);
+        tokens ??= new GraphTokenResolver(_database.Catalog, _snapshot);
         var normalized = inputShapes is not null ? parameters : ParameterBindings.Normalize(parameters, name => new GraphPlanningException("CG01014",
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
         var operation = query.Composite!.Operator;
@@ -74,7 +75,7 @@ internal sealed partial class GraphPlanner
             var planner = new GraphPlanner(_database, _snapshot)
             { _nativeExpressions = new ReductionPlanningState(null) { SharedWork = reductionWork } };
             var plan = planner.Plan(operand, normalized, paths, token,
-                normalizedParameters: true, resultShapes: shapes, inputShapes: inputShapes);
+                normalizedParameters: true, resultShapes: shapes, inputShapes: inputShapes, tokens: tokens);
             if (plan.Projections.Count == 0)
             { throw new GraphPlanningException("CG05001", ErrorMessages.UnionOperandMalformed, operand.Location); }
             if (plans.Count == 0)
@@ -149,7 +150,7 @@ internal sealed partial class GraphPlanner
             Optional = combinedShapes[i].EntityKinds[0].Optional,
             ResultNullable = combinedShapes[i].ResultNullable,
         }).ToArray();
-        return new(query, operation, plans.AsReadOnly(), plans.SelectMany(plan => plan.Warnings).ToArray(), kinds!, projections, combinedShapes!, nodes.AsReadOnly(), homogeneousUnion);
+        return new(query, operation, plans.AsReadOnly(), tokens.Warnings, kinds!, projections, combinedShapes!, nodes.AsReadOnly(), homogeneousUnion);
     }
 
     private static void ValidateCompositeReadOnly(GqlQueryExpression query, CancellationToken token)

@@ -85,6 +85,11 @@ evaluation stays inside the already-bound logical database.
 
 ## Schema DDL (#1738, GQ-D2)
 
+Read-only unknown-property warnings (#1249, GQ-D3) are engine diagnostics, using the existing
+property/member AST and source spans. The parser corpus admits the same syntax independently of
+database contents. Graph DESIGN describes snapshot token resolution and statement-wide
+de-duplication; DIALECT specifies CG01023 and the entity/map/dynamic/write boundary.
+
 Standalone CREATE/DROP INDEX and CONSTRAINT plus Cohesion LABEL/RELATIONSHIP TYPE definition
 commands use GqlSchemaCommand, GqlSchemaObjectKind and GqlSchemaPropertyType. The FOR variable
 must match its property reference (CG01022). The dedicated parser branch skips ordinary-query

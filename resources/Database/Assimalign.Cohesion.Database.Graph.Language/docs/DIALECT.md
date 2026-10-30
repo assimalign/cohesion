@@ -67,7 +67,19 @@ remain ordinal and case-sensitive across the shared database-wide namespace.
 SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
 CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
 name, followed by relationship type name then constraint name. Other SHOW column contracts
-stay fixed. Graph catalog v2 and graph format 5 remain unchanged. D3 adds unknown-property warnings.
+stay fixed. Graph catalog v2 and graph format 5 remain unchanged.
+
+Read-only statements warn with structured CG01023 for each distinct, ordinal, statically named
+entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship
+property-map keys and entity fields in RETURN, WHERE and ORDER BY, including aliases, lexical
+collections, correlated patterns, NEXT and composite operands. A name known on any label or
+relationship type suppresses the warning, even when absent on the entity being read. Missing map
+fields, dynamic subscripts (`n[$key]` or `n['key']`) and writing statements do not warn. Values,
+row counts and explicit transaction state retain their normal behavior. EXPLAIN reports these
+warnings too. Each warning carries the property name and, when available, the first field-access
+span; pattern map keys and unlocated typed ASTs have no span. Diagnostics are available on typed
+results and through the negotiated wire Diagnostics channel. Property discovery follows the
+statement snapshot and rolls back with its write; removing a value retains discovered metadata.
 
 SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
 `~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix

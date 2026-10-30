@@ -77,6 +77,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person {never_seen:1}) RETURN a.name", []),
+                new("MATCH (a:Person {name:'Alice'}) WHERE a.never_seen IS NULL RETURN a.never_seen ORDER BY a.never_seen", [[null]]),
                 new("MATCH (a:Person|Robot) RETURN a.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
                 new("MATCH (a:Person&Robot) RETURN a.name", []),
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),

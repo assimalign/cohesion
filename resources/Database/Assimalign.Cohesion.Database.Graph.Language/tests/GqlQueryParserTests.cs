@@ -50,6 +50,8 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a) WHERE @age = a.age RETURN a")]
     [InlineData("MATCH (a) WHERE a.left = a.right RETURN a")]
     [InlineData("MATCH (a) WHERE NULL = a.absent RETURN a")]
+    [InlineData("MATCH (n:Person {never_seen:1}) RETURN n.never_seen ORDER BY n.never_seen")]
+    [InlineData("MATCH (n:Person) WHERE n.never_seen IS NULL RETURN n[$key], properties(n).never_seen")]
     [InlineData("INSERT (a:Person {name: 'Alice', age: -42, active: TRUE, optional: NULL})")]
     [InlineData("INSERT (a:Person), (b:Person), (a)-[r:KNOWS {weight: .5}]->(b) RETURN a, r, b")]
     [InlineData("CREATE (a:Person {name: 'Alice'}) RETURN a")]

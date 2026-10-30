@@ -38,6 +38,7 @@ public sealed class GraphCatalog
     private readonly Dictionary<Guid, HashSet<(byte Kind, string Name)>> _definitions = new();
     private readonly Dictionary<(byte Kind, Guid Parent), SortedSet<string>> _children = new();
     private readonly Dictionary<string, HashSet<(byte Kind, Guid Parent)>> _schemaNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<Reference>> _propertyNames = new(StringComparer.Ordinal);
 
     // Per-instance fault/record-visit seam, reached only by this model's tests.
     internal Action? BeforeRecordRead { get; set; }
@@ -215,6 +216,22 @@ public sealed class GraphCatalog
 
     internal IReadOnlyList<GraphPropertyKeyMetadata> GetDeclaredPropertyKeys(Guid definitionId, TransactionSnapshot snapshot)
         => List(3, definitionId, snapshot).Select(item => item.Record.Property!.Value).ToArray();
+
+    // Tokens describe names a definition has had, independently of a particular entity's
+    // current values. Consult the writer stamps already loaded by Add, without decoding
+    // metadata or scanning definitions on the read path. Undone versions leave this directory.
+    internal bool HasPropertyKey(string name, TransactionSnapshot snapshot)
+    {
+        lock (_sync)
+        {
+            if (!_propertyNames.TryGetValue(name, out var versions)) { return false; }
+            foreach (var version in versions)
+            {
+                if (snapshot.IsVisible(version.Writer)) { return true; }
+            }
+            return false;
+        }
+    }
 
     internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
     {
@@ -613,6 +630,11 @@ public sealed class GraphCatalog
         }
         _versions[key] = versions;
         versions.Add(reference);
+        if (record.Kind == 3)
+        {
+            if (!_propertyNames.TryGetValue(record.Name, out var properties)) { _propertyNames[record.Name] = properties = []; }
+            properties.Add(reference);
+        }
         if (record.Kind is 4 or 5)
         {
             if (!_schemaNames.TryGetValue(record.Name, out var routes)) { _schemaNames[record.Name] = routes = []; }
@@ -666,6 +688,11 @@ public sealed class GraphCatalog
     {
         var removed = versions[index];
         versions.RemoveAt(index);
+        if (key.Kind == 3 && _propertyNames.TryGetValue(key.Name, out var properties))
+        {
+            properties.Remove(removed);
+            if (properties.Count == 0) { _propertyNames.Remove(key.Name); }
+        }
         if (key.Kind <= 2 && !versions.Any(item => item.Id == removed.Id) &&
             _definitions.TryGetValue(removed.Id, out var keys))
         {
