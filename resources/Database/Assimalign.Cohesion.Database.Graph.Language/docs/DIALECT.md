@@ -15,8 +15,10 @@ independent: dropping that constraint preserves the unnamed rule. Typed GetPrope
 returns declared metadata only; SHOW PROPERTY KEYS continues to report effective rules.
 
 SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
-`~~*` and `!~~*` is unchanged. SQL postfix casts remain outside this language's scalar grammar;
-Label colons retain their existing meaning.
+`~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix
+casts remain outside this language's scalar grammar;
+Label colons retain their existing meaning. The corpus pins :A|B, :A&B, ! and
+<- / -> / <-- / --> / <-[ token boundaries, preserving label and arrow parsing.
 
 The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DESIGN.md](DESIGN.md).
 The supported-clause matrix there is authoritative; RETURN projects value expressions,

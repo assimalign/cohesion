@@ -1817,11 +1817,13 @@ internal sealed partial class SqlPlanner
         {
             SqlParameterExpression => true,
             SqlCollateExpression collate => CastTypeDependsOnParameter(collate.Operand, evaluator),
-            SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate } sign
+            SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate or SqlUnaryOperator.BitwiseNot } sign
                 => CastTypeDependsOnParameter(sign.Operand, evaluator),
             SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic
                 => CastTypeDependsOnParameter(arithmetic.Left, evaluator) || CastTypeDependsOnParameter(arithmetic.Right, evaluator),
+            SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator)
+                => CastTypeDependsOnParameter(bitwise.Left, evaluator) || CastTypeDependsOnParameter(bitwise.Right, evaluator),
             SqlCaseExpression conditional => conditional.WhenClauses.Any(clause => CastTypeDependsOnParameter(clause.Result, evaluator))
                 || conditional.ElseResult is not null && CastTypeDependsOnParameter(conditional.ElseResult, evaluator),
             SqlFunctionCallExpression call when evaluator.CallResultDependsOnArguments(call)
@@ -1881,6 +1883,8 @@ internal sealed partial class SqlPlanner
             SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
             SqlLogicalExpression => DatabaseType.Boolean,
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
+            SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator) => evaluator.StaticTypeOf(bitwise),
+            SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } bitwise => evaluator.StaticTypeOf(bitwise),
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
             SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,

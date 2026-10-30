@@ -7710,6 +7710,42 @@ CK07001 with exact retained/omitted counts; the original Error category/message 
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
+
+## Integer bitwise operators (#1721, SQ-O2)
+
+The existing binary/unary nodes carry integer bitwise operations. All binary operators
+share the generic precedence level with concatenation; prefix ~ binds at that level
+below addition. Canonical rendering preserves these trees, with no changed old branch
+or identifier rule. SQL consumes # and adjacent shift-token pairs locally; the shared
+lexer, token values and other language profiles remain unchanged. PostgreSQL anchors:
+parser/gram.y:904-914,15368-15371 and include/catalog/pg_operator.dat:2274-2328.
+
+Binding accepts SMALLINT/INTEGER/BIGINT storage types and untyped NULL. AND, OR and
+XOR promote to the wider operand. Shifts take an INTEGER count (SMALLINT widens;
+BIGINT is refused) and return the left operand's type, matching PostgreSQL's catalog
+(include/catalog/pg_operator.dat:2286-2328; pg_cast.dat:23-24,33-36). CS02077 (42804)
+refuses invalid operands and count types before rows execute. Validation walks every
+CASE/COALESCE result alternative and supplied parameter, including nested wrappers.
+Explicit CAST inputs and selection conditions retain their ordinary conversion rules.
+
+An engine-owned SqlBoundBitwise leaf carries the resolved integer width through evaluation,
+including domain base types. Runtime CASE/COALESCE values convert to that width before
+all six operations; ordinary unary/binary nodes retain their allocation sizes. SMALLINT
+shifts compute in INTEGER and truncate, so SMALLINT and INTEGER counts wrap modulo 32;
+BIGINT operands use modulo 64. Right shifts are arithmetic and left-shift results wrap
+without overflow diagnostics (utils/adt/int.c:1449,1511,1520; int8.c:1255). Untyped NULL
+propagates NULL; two untyped NULLs default to INTEGER metadata.
+
+Views, defaults and CHECKs round-trip through reopen. No format or wire change is
+needed; 21,008 baseline canonical comparisons against 8ac5744fa are identical and
+reload with identical trees. Existing canonical expressions retain their interpretation. The engine oracle
+checks signed integer boundaries and every shift-count residue against independent .NET operators; all three
+profile corpora pin token isolation, including GQL labels and arrows.
+
+| Code | Condition |
+| --- | --- |
+| CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
+
 ## ILIKE and postfix casts (#1721, SQ-O1)
 
 ILIKE and NOT ILIKE reuse SqlLikeExpression, its bound node and the bounded,
@@ -7739,8 +7775,7 @@ existing contiguous :: token. Direct numeric plus retains its documented literal
 without a following cast, preserving +1 and ORDER BY +1. A postfix cast keeps the sign
 outside the cast: +1::TEXT and + 1::TEXT fail with CS02003, while +1::INT is 1.
 ILIKE remains contextual, preserving identifier quoting.
-Regex and SIMILAR TO remain CK00001. Bitwise operators remain deferred to SQ-O2; ^ is
-recognized as deferred exponentiation, never XOR, and # as deferred bitwise XOR.
+Regex and SIMILAR TO remain CK00001. SQ-O2 delivers bitwise operators above; ^ remains deferred exponentiation, never XOR.
 
 The persisted-expression audit found unchanged canonical text and tree interpretation for
 existing views, CHECKs, column/domain defaults, SQL functions, generated declaration metadata

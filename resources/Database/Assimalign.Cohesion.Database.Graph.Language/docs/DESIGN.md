@@ -2,7 +2,10 @@
 
 ## SQL operator isolation (#1721)
 
-The shared lexer is unchanged. Profile conformance pins :: as ColonColon, separated
+The shared lexer is unchanged. The operator corpus pins # as Unrecognized, ~, &, |
+and paired angle brackets as their existing tokens, with SQL bitwise syntax still refused.
+GQL additionally pins :A|B, :A&B, ! and <-, ->, <--, -->, <-[ boundaries.
+Profile conformance also pins :: as ColonColon, separated
 colons as individual Colon tokens, and `~~*` and `!~~*` as individual tilde/bang/asterisk tokens.
 SQL casts do not become expression syntax here; adjacent colons preserve the existing
 parser refusal and GQL label grammar. No language vocabulary or persisted text changes.

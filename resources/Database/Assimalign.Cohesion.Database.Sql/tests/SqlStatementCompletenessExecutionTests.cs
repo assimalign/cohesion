@@ -86,7 +86,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("UPDATE t SET name = 'it''s WHERE id = 1;")]
     [InlineData("DELETE FROM t /* WHERE id = 1;")]
     [InlineData("DELETE FROM t /* /* nested */ WHERE id = 1;")]
-    [InlineData("DELETE FROM t # WHERE id = 1;", "CK00001")]
+    [InlineData("DELETE FROM t # WHERE id = 1;", "CS00003")]
     [InlineData("UPDATE t SET age = 0 WHERE flag NOT FALSE;")]
     [InlineData("DELETE FROM t WHERE NOT (flag NOT NULL);")]
     [InlineData("DELETE FROM t WHERE (id = 1;")]

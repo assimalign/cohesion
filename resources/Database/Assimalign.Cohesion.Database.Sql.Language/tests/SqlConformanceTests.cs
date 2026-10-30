@@ -35,6 +35,9 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
+    [InlineData("SELECT 1 & 3, 1 | 2, 1 # 3, ~1 + 2, 1 << 2, 8 >> 2;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT 32767::SMALLINT << 1, 1::SMALLINT << 16::SMALLINT, (-32768)::SMALLINT >> 16::SMALLINT, COALESCE(NULL::BIGINT, 1) << 32;", SqlQueryCommandType.Select)]
+    [InlineData("CREATE TABLE t(n INT DEFAULT 1 | 2 & 3, CHECK ((n & 1)=1));", SqlQueryCommandType.Create)]
     [InlineData("SELECT +1::TEXT, + 1::INT, +x::INT FROM t ORDER BY +1;", SqlQueryCommandType.Select)]
     [InlineData("SELECT 'Σ' COLLATE binary ILIKE 'ς', 'ΟΣ' COLLATE invariant ILIKE 'ος';", SqlQueryCommandType.Select)]
     [InlineData("CREATE TABLE t(id SERIAL2);", SqlQueryCommandType.Create)]

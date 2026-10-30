@@ -101,6 +101,9 @@ internal static class Program
     private const string characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
 
+    private const string bitwise = "SELECT 1 | 2 & 3, 5 # 3, ~1::SMALLINT, 1 << 32, (-8)::BIGINT >> 65, NULL & 1, ~1 + 2";
+    private static readonly object?[][] _bitwise = [[3, 6, (short)-2, 1, -4L, null, -4L]];
+
     private const string typeAliases = "SELECT n, CAST(s AS CHARACTER VARYING(5)), CAST(f AS DOUBLE PRECISION), " +
         "CAST(NULL AS DATETIME2), CAST(NULL AS DATETIMEOFFSET), CAST(NULL AS UNIQUEIDENTIFIER) FROM type_aliases";
     private static readonly object?[][] _typeAliases = [["ab ", "text", 1.5d, null, null, null]];
@@ -351,6 +354,7 @@ internal static class Program
         Check("in process: TOP after sorting", await RowsAsync(session, "SELECT TOP (1) Id FROM customers ORDER BY Id DESC"), [[2L]]);
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
         Check("in process: distinct truth tests and ESCAPE", await RowsAsync(session, predicates), _predicates);
+        Check("in process: integer bitwise types and precedence", await RowsAsync(session, bitwise), _bitwise);
         Check("in process: ordinary invariant LIKE anchors", await RowsAsync(session,
             "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%a', " +
             "(RPAD('z', 199997, 'z') || 'abc') COLLATE invariant LIKE '%abc%', " +
@@ -655,6 +659,7 @@ internal static class Program
         Check("over the wire: hash analysis keeps typed counts", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L) && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
+        Check("over the wire: integer bitwise types and precedence", await RowsAsync(connection, bitwise, timeout.Token), _bitwise);
         Check("over the wire: ordinary invariant LIKE anchors", await RowsAsync(connection,
             "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%a', " +
             "(RPAD('z', 199997, 'z') || 'abc') COLLATE invariant LIKE '%abc%', " +

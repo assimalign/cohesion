@@ -33,8 +33,8 @@ public sealed class SqlExpressionDepthTests
     /// </summary>
     public static TheoryData<string> Constructs => new()
     {
-        "additive", "multiplicative", "concatenation", "right-nested", "and-right-nested", "or-and-alternating",
-        "minus", "plus", "not", "case", "function", "cast", "in-list", "collate", "between",
+        "additive", "multiplicative", "concatenation", "bitwise", "shift", "right-nested", "and-right-nested", "or-and-alternating",
+        "minus", "plus", "bitwise-not", "not", "case", "function", "cast", "in-list", "collate", "between",
     };
 
     private static string Build(string construct, int depth) => construct switch
@@ -43,6 +43,8 @@ public sealed class SqlExpressionDepthTests
         "additive" => string.Join(" + ", Enumerable.Repeat("1", depth)),
         "multiplicative" => string.Join(" * ", Enumerable.Repeat("1", depth)),
         "concatenation" => string.Join(" || ", Enumerable.Repeat("'a'", depth)),
+        "bitwise" => string.Join(" # ", Enumerable.Repeat("1", depth)),
+        "shift" => string.Join(" << ", Enumerable.Repeat("1", depth)),
         // 1 + (1 + (... + 1)): N terms, N - 1 parentheses.
         "right-nested" => string.Concat(Enumerable.Repeat("1 + (", depth - 1)) + "1" + new string(')', depth - 1),
         // TRUE AND (TRUE AND (...)): a chain nested in a later position is a nested node, N - 1
@@ -53,6 +55,7 @@ public sealed class SqlExpressionDepthTests
         // N - 1 signs over a leaf. The spaces keep two minus signs from starting a comment.
         "minus" => string.Concat(Enumerable.Repeat("- ", depth - 1)) + "a",
         "plus" => string.Concat(Enumerable.Repeat("+ ", depth - 1)) + "a",
+        "bitwise-not" => string.Concat(Enumerable.Repeat("~ ", depth - 1)) + "a",
         "not" => string.Concat(Enumerable.Repeat("NOT ", depth - 1)) + "TRUE",
         "case" => string.Concat(Enumerable.Repeat("CASE WHEN TRUE THEN ", depth - 1)) + "1" +
             string.Concat(Enumerable.Repeat(" END", depth - 1)),
@@ -448,9 +451,9 @@ public sealed class SqlExpressionDepthTests
     [Fact(DisplayName = "Cohesion Test [Sql.Language] - Nesting: diagnostics before the limit are kept and nothing after it is reported")]
     public void Parse_PastLimit_ShouldKeepEarlierDiagnosticsOnly()
     {
-        // Arrange: ~ is reported before the limit; the unclosed parentheses and missing END after
+        // Arrange: infix ~ is reported before the limit; the unclosed parentheses and missing END after
         // it would each report CS00003 if the abandoned rules were allowed to.
-        string sql = $"SELECT ~a, (CASE WHEN {Build("additive", limitValue + 1)} THEN 1 FROM t WHRE (id = 1;";
+        string sql = $"SELECT a ~ 'x', (CASE WHEN {Build("additive", limitValue + 1)} THEN 1 FROM t WHRE (id = 1;";
 
         // Act
         var statement = Parse(sql);

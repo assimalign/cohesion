@@ -315,6 +315,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return Deliver(((SqlBoundConstant)expression).Value, copySharedBinary);
             case SqlBoundExpressionKind.Binary:
                 return EvaluateBinary((SqlBoundBinary)expression, row);
+            case SqlBoundExpressionKind.Bitwise:
+                return EvaluateBitwise((SqlBoundBitwise)expression, row);
             case SqlBoundExpressionKind.Logical:
                 return EvaluateLogical((SqlBoundLogical)expression, row);
             case SqlBoundExpressionKind.Call:
@@ -909,6 +911,22 @@ internal sealed partial class SqlExpressionEvaluator
         catch (ArithmeticException exception)
         {
             throw SqlEvaluationException.FromArithmetic(exception).At(binary.Location);
+        }
+    }
+
+    private object? EvaluateBitwise(SqlBoundBitwise expression, object?[] row)
+    {
+        var left = EvaluateCore(expression.Left, row);
+        var right = expression.Right is null ? null : EvaluateCore(expression.Right, row);
+        if (left is null || expression.Right is not null && right is null) { return null; }
+        try
+        {
+            return expression.Right is null ? SqlBitwise.Not(left, expression.Type, expression.Location)
+                : SqlBitwise.Binary(expression.Operator, left, right!, expression.Type, expression.Location);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception).At(expression.Location);
         }
     }
 
