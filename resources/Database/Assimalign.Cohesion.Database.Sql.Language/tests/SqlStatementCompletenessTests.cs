@@ -40,6 +40,7 @@ public sealed class SqlStatementCompletenessTests
             "SELECT * FROM t WHERE a = 1",
             "SELECT * FROM t WHERE a IS NOT NULL",
             "SELECT * FROM t WHERE a LIKE 'x%'",
+            "SELECT * FROM t WHERE a ILIKE 'X%'",
             "SELECT * FROM t WHERE a NOT BETWEEN 1 AND 2",
             "SELECT * FROM t WHERE a NOT IN (1, 2)",
             "SELECT * FROM t WHERE a = @a OR b = $1",
@@ -83,7 +84,7 @@ public sealed class SqlStatementCompletenessTests
             "INSERT INTO t (a) SELECT b FROM u",
         ],
         [SqlClauses.Case] = ["SELECT CASE WHEN a = 1 THEN 'x' ELSE 'y' END FROM t", "SELECT a FROM t WHERE CASE a WHEN 1 THEN TRUE END"],
-        [SqlClauses.Cast] = ["SELECT CAST(a AS INT) FROM t", "SELECT a FROM t WHERE CAST(a AS TEXT) = '1'"],
+        [SqlClauses.Cast] = ["SELECT -a::TEXT::INT FROM t", "SELECT CAST(a AS INT) FROM t", "SELECT a FROM t WHERE CAST(a AS TEXT) = '1'"],
         [SqlClauses.Collate] = ["SELECT a FROM t WHERE a = 'x' COLLATE binary", "SELECT a COLLATE case_insensitive FROM t"],
         [SqlClauses.Merge] = ["MERGE INTO t USING s ON t.id=s.id WHEN MATCHED THEN DELETE", "MERGE INTO t USING s ON TRUE WHEN NOT MATCHED THEN INSERT DEFAULT VALUES WHEN NOT MATCHED BY SOURCE THEN DO NOTHING RETURNING merge_action()"],
         [SqlClauses.Insert] = ["INSERT INTO t VALUES (1)", "INSERT INTO t (a, b) VALUES (1, 'x')", "INSERT INTO t (b, a) DEFAULT VALUES"],
@@ -252,6 +253,7 @@ public sealed class SqlStatementCompletenessTests
     /// <summary>The issue's regression cases: each is one CS00003 at the dropped text.</summary>
     /// <param name="marked">A statement whose tail the parser used to drop; '^' marks where the diagnostic starts.</param>
     /// <param name="located">The source text the diagnostic covers.</param>
+    /// <param name="code">The syntax or recognized unsupported-surface identity.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Completeness: dropped clauses and predicates report CS00003 where they start")]
     [InlineData("DELETE FROM t WHRE ^id = 1;", "id")]
     [InlineData("UPDATE t SET a = 1 ^WHRE id = 1;", "WHRE")]
@@ -265,14 +267,14 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("DELETE FROM t ^/* WHERE id = 1;", "/*")]
     [InlineData("DELETE FROM t ^/* /* nested */ WHERE id = 1;", "/*")]
     [InlineData("SELECT ^\"id FROM t;", "\"")]
-    [InlineData("DELETE FROM t ^# WHERE id = 1;", "#")]
+    [InlineData("DELETE FROM t ^# WHERE id = 1;", "#", "CK00001")]
     [InlineData("DELETE FROM t WHERE a NOT ^NULL;", "NULL")]
     [InlineData("UPDATE t SET age = 0 WHERE flag NOT ^FALSE;", "FALSE")]
     [InlineData("DELETE FROM t WHERE NOT (flag NOT ^NULL);", "NULL")]
     [InlineData("SELECT id FROM t WHERE NOT flag NOT ^TRUE;", "TRUE")]
     [InlineData("SELECT a NOT ^NULL FROM t;", "NULL")]
-    public void Parse_DroppedTail_ShouldReportOneSyntaxErrorAtIt(string marked, string located)
-        => AssertOneSyntaxErrorAt(marked, located);
+    public void Parse_DroppedTail_ShouldReportOneSyntaxErrorAtIt(string marked, string located, string code = "CS00003")
+        => AssertOneSyntaxErrorAt(marked, located, code);
 
     /// <summary>
     /// A missing token, keyword or name is reported where it was expected, once, instead of
@@ -441,7 +443,7 @@ public sealed class SqlStatementCompletenessTests
         errors.Select(error => error.Code).ShouldBe(expected);
     }
 
-    private static void AssertOneSyntaxErrorAt(string marked, string located)
+    private static void AssertOneSyntaxErrorAt(string marked, string located, string code = "CS00003")
     {
         // Arrange
         int start = marked.IndexOf('^', StringComparison.Ordinal);
@@ -452,7 +454,7 @@ public sealed class SqlStatementCompletenessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("CS00003");
+        error.Code.ShouldBe(code);
         error.Start.ShouldBe(start);
         sql[error.Start!.Value..error.End!.Value].ShouldBe(located);
     }

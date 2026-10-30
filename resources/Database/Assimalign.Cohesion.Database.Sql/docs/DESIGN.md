@@ -7550,6 +7550,37 @@ CK07001 with exact retained/omitted counts; the original Error category/message 
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
+## ILIKE and postfix casts (#1721, SQ-O1)
+
+ILIKE and NOT ILIKE reuse SqlLikeExpression, its bound node and the bounded,
+iterative LIKE matcher. IsCaseInsensitive participates in grouping and persisted-tree
+identity; child walkers, collation resolution, NULLs, ESCAPE, eager constant validation,
+CS02034, CS05040 and statement cancellation use the existing paths. Tokenization precedes
+casing. Binary ILIKE uses the pinned Unicode 17.0 simple-fold collation; the two
+insensitive collations retain their own pinned transforms, including accent removal.
+Legacy invariant ILIKE lowercases literal runs and input through invariant TextInfo and
+then uses the existing linguistic matcher, preserving its globalization refusal and work
+budget. Folded fixed patterns are cached; dynamic patterns compile per evaluation.
+PostgreSQL src/backend/utils/adt/like.c:165-244 supplies collation-selected casing before
+matching; Cohesion uses its four declared collations rather than PostgreSQL locale names.
+
+Postfix :: targets share CAST's type-name/modifier/domain parser and existing cast binder.
+They bind above unary minus and every binary operator, associate left to right, and render as
+CAST. PostgreSQL src/backend/parser/gram.y:904-914 supplies that precedence. The earlier
+REGCLASS suffix's separated-colon spelling remains accepted; other types require the
+existing contiguous :: token. Direct numeric plus retains its documented literal alias
+(including +1::REGCLASS); other unary plus operands use the ordinary sign rung.
+ILIKE remains contextual, preserving identifier quoting.
+Regex and SIMILAR TO remain CK00001. Bitwise operators remain deferred to SQ-O2; ^ is
+recognized as deferred exponentiation, never XOR, and # as deferred bitwise XOR.
+
+The persisted-expression audit found unchanged canonical text and tree interpretation for
+existing views, CHECKs, column/domain defaults, SQL functions, generated declaration metadata
+and compiled-schema expressions, so SQL format 30 and compiled-schema v9 remain unchanged
+in this run. New :: trees use existing CAST text and ILIKE retains its own spelling;
+canonical/tree comparisons, renderer fixed points and durable reopen tests cover that
+contract without changing catalog fields, compiled codecs or value wire representation.
+
 ## Predicate execution (#1111, #1166)
 
 Dedicated E1 distinct and Boolean-test nodes avoid binary null propagation and seek

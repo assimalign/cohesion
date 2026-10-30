@@ -20,12 +20,13 @@ public sealed class SqlParseStrictnessTests
     /// and the statement keeps only its command type: no alias, column or placeholder.
     /// </summary>
     /// <param name="marked">The statement; the stray character sits between '«' and '»'.</param>
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: a stray character is one CS00003 at its span and binds nothing")]
+    /// <param name="expectedCode">Syntax or recognized unsupported operator identity.</param>
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: stray characters and deferred symbols have one located diagnostic and bind nothing")]
     [InlineData("SELECT * FROM t «?»")]
-    [InlineData("SELECT * FROM t «#»")]
-    [InlineData("SELECT * FROM t «^»")]
+    [InlineData("SELECT * FROM t «#»", false, "CK00001")]
+    [InlineData("SELECT * FROM t «^»", false, "CK00001")]
+    [InlineData("SELECT a «#» b FROM t", false, "CK00001")]
     [InlineData("SELECT * FROM t «§»;")]
-    [InlineData("SELECT a «#» b FROM t")]
     [InlineData("SELECT a FROM t WHERE b = «?»", true)]
     [InlineData("SELECT «?» FROM t;", true)]
     [InlineData("SELECT a «?» FROM t;")]
@@ -38,7 +39,7 @@ public sealed class SqlParseStrictnessTests
     [InlineData("SELECT «٣» FROM t;")]
     [InlineData("SELECT a FROM t WHERE a = «１»;")]
     [InlineData("DELETE FROM t WHERE id = «١»;")]
-    public void Parse_StrayCharacter_ShouldReportOneSyntaxErrorAndBindNothing(string marked, bool parameterForm = false)
+    public void Parse_StrayCharacter_ShouldReportOneLocatedDiagnosticAndBindNothing(string marked, bool parameterForm = false, string expectedCode = "CS00003")
     {
         // Arrange
         var (sql, start, end) = Unmark(marked);
@@ -48,10 +49,14 @@ public sealed class SqlParseStrictnessTests
 
         // Assert
         var error = Errors(statement).ShouldHaveSingleItem();
-        error.Code.ShouldBe("CS00003");
+        error.Code.ShouldBe(expectedCode);
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
-        if (parameterForm)
+        if (expectedCode == "CK00001")
+        {
+            error.Message!.ShouldContain("operator is not supported", Case.Sensitive);
+        }
+        else if (parameterForm)
         {
             error.Message!.ShouldContain("use $name, @name, or $1");
         }

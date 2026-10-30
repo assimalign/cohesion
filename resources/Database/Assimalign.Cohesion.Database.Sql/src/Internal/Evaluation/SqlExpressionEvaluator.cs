@@ -1148,7 +1148,7 @@ internal sealed partial class SqlExpressionEvaluator
         try
         {
             var compiled = expression.Compiled ?? SqlLikePattern.Compile(LikeText(pattern), LikeText(escape), _cancellationToken);
-            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken, out _, _beforeLikeMatch);
+            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken, out _, _beforeLikeMatch, expression.IsCaseInsensitive);
             return Box(matches != expression.IsNegated);
         }
         catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)

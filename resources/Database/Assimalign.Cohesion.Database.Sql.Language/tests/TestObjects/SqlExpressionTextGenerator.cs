@@ -90,11 +90,12 @@ internal sealed class SqlExpressionTextGenerator
         }
 
         int next = depth - 1;
-        return _random.Next(31) switch
+        return _random.Next(32) switch
         {
+            31 => Primary(next) + Pick("::INT", "::TEXT::INT", " :: VARCHAR(10)"),
             28 => Operand(next) + Pick(" IS DISTINCT FROM ", " IS NOT DISTINCT FROM ") + Operand(next),
             29 => Operand(next) + Pick(" IS ", " IS NOT ") + Pick("TRUE", "FALSE", "UNKNOWN"),
-            30 => Operand(next) + Pick(" LIKE ", " NOT LIKE ") + Operand(next) + " ESCAPE " + Operand(next),
+            30 => Operand(next) + Pick(" LIKE ", " NOT LIKE ", " ILIKE ", " NOT ILIKE ") + Operand(next) + " ESCAPE " + Operand(next),
             24 => "COUNT(" + Pick("DISTINCT ", "ALL ") + Value(next) + ")",
             25 => "STRING_AGG(" + Pick("DISTINCT ", "ALL ", "") + Value(next) + ", ',' ORDER BY " + Value(next) + Pick(" DESC", " ASC", "") + ")",
             26 => "LISTAGG(" + Pick("DISTINCT ", "ALL ", "") + Value(next) + ") WITHIN GROUP (ORDER BY " + Value(next) + ")",
@@ -109,7 +110,7 @@ internal sealed class SqlExpressionTextGenerator
             8 => Operand(next) + Pick(" IS NULL", " is not null", " IS NOT NULL"),
             9 => Operand(next) + Pick(" BETWEEN ", " NOT BETWEEN ", " between ") + Operand(next) + " AND " + Operand(next),
             10 => Operand(next) + Pick(" IN (", " NOT IN (", " in(") + List(next) + ")",
-            11 => Operand(next) + Pick(" LIKE ", " NOT LIKE ") + Pick("'a%'", "'_b'", "(" + Value(next) + ")", "b"),
+            11 => Operand(next) + Pick(" LIKE ", " NOT LIKE ", " ILIKE ", " NOT ILIKE ") + Pick("'a%'", "'_b'", "(" + Value(next) + ")", "b"),
             12 => "CASE WHEN " + Value(next) + " THEN " + Value(next) + Else(next) + " END",
             13 => "case " + Value(next) + " when " + Value(next) + " then " + Value(next) + Else(next) + " end",
             14 => Primary(next) + Pick(" COLLATE binary", " collate CASE_INSENSITIVE", " COLLATE case_accent_insensitive"),

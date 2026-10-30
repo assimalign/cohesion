@@ -63,7 +63,7 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary>A scalar ANY, SOME or ALL subquery comparison.</summary>
     QuantifiedComparison,
 
-    /// <summary><see cref="SqlBoundLike"/>: <c>[NOT] LIKE</c>.</summary>
+    /// <summary><see cref="SqlBoundLike"/>: <c>[NOT] LIKE</c> or <c>[NOT] ILIKE</c>.</summary>
     Like,
 
     /// <summary><see cref="SqlBoundCase"/>: a searched or simple <c>CASE</c>.</summary>

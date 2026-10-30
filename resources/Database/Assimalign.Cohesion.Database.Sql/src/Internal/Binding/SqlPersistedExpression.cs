@@ -394,7 +394,7 @@ internal static class SqlPersistedExpression
         (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
         (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
         (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
-        (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated,
+        (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated && a.IsCaseInsensitive == b.IsCaseInsensitive,
         (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated &&
             (a.Values is null) == (b.Values is null) && (a.Values?.Count ?? 0) == (b.Values?.Count ?? 0) &&
             SameQuery(a.Subquery, b.Subquery),

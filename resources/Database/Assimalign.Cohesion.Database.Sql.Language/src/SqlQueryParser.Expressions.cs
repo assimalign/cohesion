@@ -20,7 +20,7 @@ public sealed partial class SqlQueryParser
     //   ParseConcat              → ParseAddition (|| ParseAddition)*
     //   ParseAddition            → ParseMultiplication ((+|-) ParseMultiplication)*
     //   ParseMultiplication     → ParseCollate ((*|/|%) ParseCollate)*
-    //   ParseUnary              → (-|+|~) ParseUnary | ParsePrimary
+    //   ParseUnary              → (-|+|~) ParseUnary | ParsePrimary (:: type)*
     //                            (a prefix ~ reports CK00001; a + directly before a
     //                            numeric literal is part of the literal, see ParsePrimary)
     //   ParseCollate            → ParseUnary (COLLATE name)*
@@ -206,6 +206,13 @@ public sealed partial class SqlQueryParser
                 break;
             }
 
+            if (lexer.Current.Type == TokenType.ColonColon)
+            {
+                left = ParsePostfixCasts(ref lexer, left);
+                previous = 0;
+                continue;
+            }
+
             // A completed postfix form has no right operand to absorb a following
             // tighter operator (NULL IS NULL || 'x', or a IN (1) + 1). Resume that
             // operator over the completed left node, as PostgreSQL's a_expr does.
@@ -264,9 +271,9 @@ public sealed partial class SqlQueryParser
                 continue;
             }
 
-            if (lexer.Current.Type is TokenType.Ampersand or TokenType.Pipe or TokenType.ColonColon)
+            if (lexer.Current.Type is TokenType.Ampersand or TokenType.Pipe)
             {
-                RejectPredicateOperator(ref lexer, pos, lexer.Current.Type == TokenType.ColonColon ? ":: cast; use CAST(x AS type)" : CurrentText(ref lexer));
+                RejectPredicateOperator(ref lexer, pos, CurrentText(ref lexer));
                 break;
             }
             bool notBefore = IsWord(ref lexer, "NOT");
@@ -275,10 +282,10 @@ public sealed partial class SqlQueryParser
             if (restricted || !predicate || minimum > 3) { break; }
             if (previous == 3) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid3); SkipQueryRemainder(ref lexer); break; }
             if (notBefore) { Advance(ref lexer); }
-            if (IsWord(ref lexer, "ILIKE") || IsWord(ref lexer, "SIMILAR"))
+            if (IsWord(ref lexer, "SIMILAR"))
             {
                 RejectPredicateOperator(ref lexer, pos, (notBefore ? "NOT " : "") +
-                    (IsWord(ref lexer, "ILIKE") ? "ILIKE" : "SIMILAR TO"));
+                    "SIMILAR TO");
                 break;
             }
             if (IsWord(ref lexer, "BETWEEN"))
@@ -297,8 +304,9 @@ public sealed partial class SqlQueryParser
                 previous = left is SqlInExpression ? 0 : 3;
                 continue;
             }
-            else if (IsWord(ref lexer, "LIKE"))
+            else if (IsWord(ref lexer, "LIKE") || IsWord(ref lexer, "ILIKE"))
             {
+                bool ignoreCase = IsWord(ref lexer, "ILIKE");
                 Advance(ref lexer);
                 var pattern = ParseOperand(ref lexer, OperandRule.PatternOperand);
                 SqlExpression? escape = null;
@@ -307,7 +315,7 @@ public sealed partial class SqlQueryParser
                     Advance(ref lexer);
                     escape = ParseOperand(ref lexer, OperandRule.PatternOperand);
                 }
-                left = Nest(ref lexer, new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos), escape));
+                left = Nest(ref lexer, new SqlLikeExpression(left, pattern, notBefore, Location.Create(1, 1, pos, pos), escape, ignoreCase));
             }
             else
             {
@@ -316,7 +324,7 @@ public sealed partial class SqlQueryParser
                     AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid4);
                     Advance(ref lexer);
                 }
-                else { AddExpectedDiagnostic(ref lexer, "BETWEEN, IN or LIKE after NOT"); }
+                else { AddExpectedDiagnostic(ref lexer, "BETWEEN, IN, LIKE or ILIKE after NOT"); }
                 break;
             }
             previous = 3;
@@ -329,7 +337,6 @@ public sealed partial class SqlQueryParser
         int end = lexer.Current.Position + lexer.Current.Value.Length;
         bool pair = form is "<<" or ">>";
         bool similar = IsWord(ref lexer, "SIMILAR");
-        bool cast = lexer.Current.Type == TokenType.ColonColon;
         bool of = IsWord(ref lexer, "OF");
         bool terminal = IsWord(ref lexer, "JSON") || IsWord(ref lexer, "NORMALIZED");
         if ((pair || similar) && TryPeekToken(lexer, out string next, out int nextEnd) &&
@@ -341,9 +348,8 @@ public sealed partial class SqlQueryParser
         RequireSkippedConstruct(start, end, form);
         Advance(ref lexer);
         if (terminal) { return; }
-        if (of || cast)
+        if (of)
         {
-            if (cast && CanStartOperand(ref lexer)) { Advance(ref lexer); }
             if (lexer.Current.Type == TokenType.LeftParen) { SkipParenthesized(ref lexer); }
             return;
         }
@@ -555,23 +561,7 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos));
         }
 
-        var primary = ParsePrimary(ref lexer);
-        if (CurrentText(ref lexer) is ":" or "::")
-        {
-            var lookahead = lexer;
-            bool pair = CurrentText(ref lookahead) == "::";
-            Advance(ref lookahead);
-            if (!pair && CurrentText(ref lookahead) == ":") { pair = true; Advance(ref lookahead); }
-            if (pair && IsWord(ref lookahead, "REGCLASS"))
-            {
-                RequireSchemaClause(ref lexer, SqlClauses.Cast);
-                lexer = lookahead;
-                Advance(ref lexer);
-                return Nest(ref lexer, new SqlCastExpression(primary, "REGCLASS", null,
-                    Location.Create(1, 1, primary.Location!.Start, _lastTokenEnd)));
-            }
-        }
-        return primary;
+        return ParsePostfixCasts(ref lexer, ParsePrimary(ref lexer));
     }
 
     /// <summary>

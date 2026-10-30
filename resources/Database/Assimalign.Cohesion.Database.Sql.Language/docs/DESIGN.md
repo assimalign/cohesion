@@ -1205,13 +1205,34 @@ The engine's view metadata contract is documented in DIALECT: complete common ty
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
 
+## ILIKE and postfix CAST (#1721, SQ-O1)
+
+ILIKE is contextual and adds IsCaseInsensitive to the existing LIKE AST, preserving the
+keyword/profile counts and old identifier quoting. LIKE and ILIKE share the predicate rung,
+ESCAPE operands, NULL behavior, nonassociativity and nesting guard. The matcher and effective
+collation semantics are specified in DIALECT.md and the SQL engine DESIGN.
+
+The postfix :: loop sits between ParsePrimary and unary signs; each left-associated cast
+uses Nest and the same target parser as CAST, including modifiers, aliases and quoted domains.
+It renders only as CAST, preserving every existing renderer precedence and canonical form.
+Direct +numeric remains a literal alias, so +1::TEXT casts the literal 1 while
++(1::TEXT) retains a unary-plus node; existing +1::REGCLASS canonicalization is unchanged.
+PostgreSQL src/backend/parser/gram.y:904-914 supplies precedence; like.c:165-244 supplies
+collation-selected case handling. The shared lexer is unchanged. All three language profiles
+pin ::, adjacent colons and ~~* token sequences; GQL labels retain their colon grammar.
+Deferred # and ^ receive named CK00001 refusals in SQL lexical preflight, with ^ described as
+exponentiation (PostgreSQL src/include/catalog/pg_operator.dat:2119,2300). No public interface,
+diagnostic identity, format or wire layout is added.
+Persisted-expression equality and grouping identity distinguish LIKE from ILIKE. Existing
+text, including contextual ilike identifiers and REGCLASS casts, keeps its canonical form.
+
 ## Distinct predicates, truth tests and LIKE ESCAPE (#1111)
 
 Dedicated SqlDistinctExpression and SqlBooleanTestExpression nodes retain negation;
 SqlTruthValue selects TRUE, FALSE or UNKNOWN. SqlLikeExpression adds an optional Escape
 operand. Depth accounting, canonical rendering and the complete tree dump include every
 operand. The parser uses PostgreSQL's IS/comparison/predicate/ESCAPE ladder and separates
-concatenation from addition; no named clause or keyword is added. ILIKE/SIMILAR are refused
+concatenation from addition; no named clause or keyword is added. SIMILAR is refused
 positionally, so ordinary identifier quoting stays unchanged. ISNULL/NOTNULL are likewise
 postfix capability refusals. Both list and subquery IN/NOT IN forms complete at the
 closing parenthesis and can feed another predicate (gram.y:15632-15668); binary

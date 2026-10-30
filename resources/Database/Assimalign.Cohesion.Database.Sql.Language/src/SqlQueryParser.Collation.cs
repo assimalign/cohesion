@@ -14,6 +14,7 @@ public sealed partial class SqlQueryParser
             string name = ParseCollationName(ref lexer);
             expression = Nest(ref lexer, new SqlCollateExpression(expression, name,
                 Location.Create(1, 1, position, _lastTokenEnd)));
+            expression = ParsePostfixCasts(ref lexer, expression);
         }
         return expression;
     }

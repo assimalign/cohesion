@@ -85,8 +85,19 @@ internal sealed class SqlLikePattern
         return new SqlLikePattern(tokens.ToArray(), pattern.Length);
     }
 
-    internal SqlLikePattern Normalize(Collation collation)
+    internal SqlLikePattern Normalize(Collation collation, bool ignoreCase = false)
     {
+        if (ignoreCase && ReferenceEquals(collation, Collation.Binary)) { collation = Collation.CaseInsensitive; }
+        if (ignoreCase && ReferenceEquals(collation, Collation.Invariant))
+        {
+            if (ReferenceEquals(_normalizedFor, collation)) { return this; }
+            var folded = new string?[_tokens.Length];
+            for (int index = 0; index < folded.Length; index++)
+            {
+                folded[index] = _tokens[index] is { } literal ? CultureInfo.InvariantCulture.TextInfo.ToLower(literal) : null;
+            }
+            return new SqlLikePattern(folded, _sourceLength, collation);
+        }
         if (!collation.IsIndexBacked || ReferenceEquals(_normalizedFor, collation)) { return this; }
         var tokens = new string?[_tokens.Length];
         for (int index = 0; index < tokens.Length; index++)
@@ -102,11 +113,22 @@ internal sealed class SqlLikePattern
 
     // Work counts search transitions and UTF-16 units offered to literal comparisons.
     // A ref/out counter permits deterministic resource tests without a per-match object.
-    internal bool Match(string input, Collation collation, CancellationToken cancellationToken, out long work, Action? beforeMatch = null)
+    internal bool Match(string input, Collation collation, CancellationToken cancellationToken, out long work, Action? beforeMatch = null, bool ignoreCase = false)
     {
         work = 0;
         beforeMatch?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
+        // PostgreSQL like.c:165-244 chooses casing from the effective collation.
+        // Tokenize first so folding an alphabetic ESCAPE never creates a wildcard.
+        if (ignoreCase && ReferenceEquals(collation, Collation.Binary)) { collation = Collation.CaseInsensitive; }
+        if (ignoreCase && ReferenceEquals(collation, Collation.Invariant))
+        {
+            collation.Compare(string.Empty, string.Empty); // Keep invariant-globalization refusal.
+            var folded = Normalize(collation, ignoreCase: true);
+            string text = CultureInfo.InvariantCulture.TextInfo.ToLower(input);
+            cancellationToken.ThrowIfCancellationRequested();
+            return folded.Match(text, collation, cancellationToken, out work);
+        }
         long limit = WorkLimit(input.Length);
         var pattern = Normalize(collation);
         if (ReferenceEquals(collation, Collation.Binary))
