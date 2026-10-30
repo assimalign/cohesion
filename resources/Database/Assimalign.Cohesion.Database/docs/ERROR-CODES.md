@@ -293,6 +293,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
 | New (#1719, SQ-R2 reader fix) | CS05090 | Execution/internal invariant — a CTE opens more readers than its plan counted (XX000) |
 | New (#1630, SQ-P1) | CS05091 | Prohibited expression or non-immutable function in a partial-index predicate (42P17) |
+| New (#1630, SQ-P2) | CS05092 | Non-row-local ON CONFLICT inference predicate |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 

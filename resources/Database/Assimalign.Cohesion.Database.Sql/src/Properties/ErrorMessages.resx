@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="UpsertPredicateInvalid" xml:space="preserve">
+    <value>ON CONFLICT target WHERE must use row-local scalar expressions.</value>
+  </data>
   <data name="UpsertArbiterInvalid" xml:space="preserve"><value>ON CONFLICT target '{0}' on '{1}.{2}': {3}</value></data>
   <data name="MergeActionInvalid" xml:space="preserve"><value>MERGE requires at least one WHEN clause with an action valid for its match kind.</value></data>
   <data name="MergeWhenUnreachable" xml:space="preserve"><value>A MERGE WHEN clause follows an unconditional clause of the same match kind.</value></data>

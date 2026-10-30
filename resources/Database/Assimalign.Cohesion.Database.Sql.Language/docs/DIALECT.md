@@ -1,6 +1,6 @@
 # The Declared SQL Dialect
 
-## Partial indexes (#1630, SQ-P1)
+## Partial indexes (#1630, SQ-P1/SQ-P2)
 
 CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [, ...]) WHERE predicate
 indexes exactly rows where the predicate is TRUE. FALSE and UNKNOWN are excluded. Predicates
@@ -30,10 +30,35 @@ CS03083, including widening that needs no conversion; drop/recreate the index ar
 Compiled-schema migration plans drop and recreate partial indexes around type-facet changes.
 RENAME preserves the expression.
 
-**Implication rules in SQ-P1: none.** The planner never uses a partial index for a query,
-including an identical WHERE, joins or views. SQ-P2 adds conservative implication and access
-selection. Targeted ON CONFLICT inference uses unconditional indexes only; explicit partial
-column/name targets refuse CS03035 and partial-WHERE inference retains CK00001. Untargeted
+**Conservative implication.** Mandatory AND conjuncts on both sides are matched after binding
+column names, aliases, parentheses, literal signs and standard literal casts. Identical immutable
+row expressions prove themselves, except expressions involving OR or NOT. Simple comparisons
+of the same column and constant type, with the same resolved collation, use equality and ordered
+bounds: x>10 implies x>5; x=7 implies x>=7; x>=7 does not imply x>7. A strict column/constant
+comparison with a non-NULL constant implies that column IS NOT NULL. A Boolean column and its
+= TRUE form are interchangeable. Floating-point bound deductions, parameter-dependent proofs,
+contradiction reasoning, cross-column/transitive facts, OR and NOT reasoning decline optimization.
+No unproven implication is used. The complete query predicate remains a residual filter.
+
+Proofs use only the indexed input's own WHERE conjuncts and INNER JOIN ON conjuncts referencing
+that input alone. ON terms must reference at least one of its columns; constant-only ON terms
+can belong to another preserved subtree and supply no proof. Nullable outer-join inputs and
+predicates from another scope supply no proof.
+Proven partial indexes can provide equality seeks, ranges, correlated join probes and unbounded
+subset scans, including UPDATE FROM targets, DELETE USING and MERGE inputs when their row
+preservation permits it. Referential lookups can use a partial index when the lookup's own key
+comparisons prove the predicate; the current reusable lookup proof recognizes IS NOT NULL on
+compared key columns. Partial uniqueness never proves unconditional DISTINCT or join uniqueness.
+EXPLAIN names the selected partial index and reports partial_predicate and implied_by conjuncts;
+ConflictArbiter children describe inferred partial unique arbiters.
+
+ON CONFLICT (columns) WHERE predicate infers matching unique column-set indexes whose predicates
+that target WHERE proves. Unconditional unique indexes can also be inferred with a target WHERE.
+Without a target WHERE, partial unique indexes are not inferred; ON CONSTRAINT never names one
+(CS03035). The inference WHERE is distinct from DO UPDATE WHERE and does not filter proposed rows:
+each arbiter uses the proposal's actual predicate membership. Non-row-local target predicates (subqueries, aggregates, windows and sequences) refuse CS05092.
+Parameters and non-immutable calls are accepted but supply no proof of a partial predicate. Other valid
+forms with unproven implication fail partial inference with CS03035. Untargeted
 DO NOTHING checks every unique index, including applicable partial indexes, and skips conflicting
 proposals. Applicability uses the proposed row's predicate result, without query implication.
 Each proposed row's CHECKs run first. Arbiters are visited in index creation order (a table-declared
@@ -874,7 +899,7 @@ The gated [arbitration conformance cases](../../Assimalign.Cohesion.Database.Sql
 measure this contract, including FK parent-row back-off and the plain INSERT audit.
 
 The supported shape follows [PostgreSQL INSERT](https://www.postgresql.org/docs/18/sql-insert.html).
-Expression, COLLATE, ordering (ASC/DESC/NULLS FIRST/LAST), operator-class and partial-WHERE
+Expression, COLLATE, ordering (ASC/DESC/NULLS FIRST/LAST), operator-class
 inference, DO SELECT, and subqueries in DO UPDATE SET/WHERE report named CK00001.
 Subqueries there are named ON CONFLICT DO UPDATE after VALUES, SELECT and WITH sources.
 EXCLUDED is absent from RETURNING scope; EXCLUDED.column there reports CK00001, unless

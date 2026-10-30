@@ -1915,6 +1915,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek, int[] indexOrdinals)
     {
+        if (seek.EqualityValues.Count == 0 && seek.Lower is null && seek.Upper is null) { return IndexKeyRange.All; }
         var prefixWriter = new DatabaseKeyWriter();
 
         for (int i = 0; i < seek.EqualityValues.Count; i++)

@@ -10,10 +10,32 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
+    private static void ValidateInference(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or
+            SqlWindowExpression or SqlNextValueExpression or SqlStarExpression or SqlInExpression { Values: null } ||
+            expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) &&
+            (SqlSequenceExecution.IsFunction(call.FunctionName) || scope.Functions.Catalog.IsAggregate(call.FunctionName)))
+        { throw new SqlPlanningException("CS05092", ErrorMessages.UpsertPredicateInvalid, expression.Location); }
+        foreach (var child in Children(expression)) { ValidateInference(child, scope); }
+    }
+
     private SqlOnConflictPlan? BindOnConflict(SqlInsertExpression insert, SqlCatalogTable table)
     {
         if (insert.OnConflict is not { } clause) { return null; }
         if (clause.Action == SqlOnConflictAction.DoUpdate) { RecordReferentialSequenceUsage(table, deleting: false); }
+        SqlBoundExpression? inference = null;
+        List<(SqlCatalogIndex Index, string Proof)>? proofs = null;
+        if (clause.TargetWhere is { } targetWhere)
+        {
+            var scope = new SqlExpressionEvaluator(table.Columns, _parameters,
+                [new(new SqlRelationSource(table), insert.Table, 0)], defaultCollation: _catalog.DefaultCollation,
+                functions: _functions, cancellationToken: _cancellationToken, foldConstants: false);
+            ValidateInference(targetWhere, scope);
+            ValidatePredicate(targetWhere, scope, "ON CONFLICT target WHERE");
+            inference = scope.BindPredicate(targetWhere);
+        }
         var indexes = _catalog.GetIndexes(table.ObjectId);
         var arbiters = new List<SqlCatalogIndex>();
         string target = clause.TargetKind == SqlOnConflictTargetKind.Constraint
@@ -42,7 +64,24 @@ internal sealed partial class SqlPlanner
                 if (!table.Columns.Any(candidate => string.Equals(candidate.Name, column, StringComparison.OrdinalIgnoreCase)))
                 { throw Invalid(ErrorMessages.UpsertIndexMissing); }
             }
-            arbiters.AddRange(indexes.Where(index => index.IsUnique && index.Predicate is null && columns.SetEquals(index.ColumnNames)));
+            if (inference is null)
+            {
+                // Keep the established iterator/closure allocation shape for existing syntax.
+                arbiters.AddRange(indexes.Where(index => index.IsUnique && index.Predicate is null && columns.SetEquals(index.ColumnNames)));
+            }
+            else
+            {
+                foreach (var index in indexes)
+                {
+                    if (!index.IsUnique || !columns.SetEquals(index.ColumnNames)) { continue; }
+                    if (index.Predicate is null) { arbiters.Add(index); }
+                    else if (ProvePartialIndex(table, index, [inference]) is { } proof)
+                    {
+                        arbiters.Add(index);
+                        (proofs ??= []).Add((index, proof));
+                    }
+                }
+            }
             if (arbiters.Count == 0) { throw Invalid(ErrorMessages.UpsertIndexMissing); }
         }
 
@@ -67,6 +106,11 @@ internal sealed partial class SqlPlanner
             assignments.Add((ordinal, evaluator.Bind(assignment.Value)));
         }
         if (clause.Where is not null) { Validate(clause.Where, "ON CONFLICT DO UPDATE WHERE"); }
+        if (proofs is not null)
+        {
+            return new SqlPartialOnConflictPlan(arbiters, indexes.Where(index => index.IsUnique).ToArray(), clause.Action == SqlOnConflictAction.DoUpdate,
+                assignments, clause.Where is null ? null : evaluator.BindPredicate(clause.Where), proofs);
+        }
         return new(arbiters, indexes.Where(index => index.IsUnique).ToArray(), clause.Action == SqlOnConflictAction.DoUpdate, assignments,
             clause.Where is null ? null : evaluator.BindPredicate(clause.Where));
 

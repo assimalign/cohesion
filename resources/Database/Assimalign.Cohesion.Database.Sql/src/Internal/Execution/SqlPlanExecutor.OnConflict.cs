@@ -187,6 +187,8 @@ internal sealed partial class SqlPlanExecutor
                 for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                 {
                     var arbiter = arbiters[arbiterIndex];
+                    if (write.OldLocation.HasValue && arbiter.Metadata.Predicate is not null &&
+                        (!MatchesIndex(table, arbiter.Metadata, write.Values, cancellationToken: cancellationToken) || PartialNullKey(arbiter.Metadata, arbiter.KeyOrdinals, write.Values))) { continue; }
                     var key = write.OldLocation.HasValue ? BuildIndexKey(table, arbiter.KeyOrdinals, write.Values)
                         : proposal.Keys[arbiterOrdinals[arbiterIndex]];
                     if (key.Length == 0) { continue; }

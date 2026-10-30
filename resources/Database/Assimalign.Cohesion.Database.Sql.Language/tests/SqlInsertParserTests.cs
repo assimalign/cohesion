@@ -9,6 +9,24 @@ public class SqlInsertParserTests
 {
     private readonly SqlQueryParser _parser = new();
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Partial inference: target and action predicates round trip independently (#1630)")]
+    [InlineData("INSERT INTO t VALUES(1) ON CONFLICT(id) WHERE id>0 DO NOTHING")]
+    [InlineData("INSERT INTO t VALUES(1) ON CONFLICT(id) WHERE id>0 AND active DO UPDATE SET id=excluded.id WHERE id<5")]
+    public void Parse_TargetPredicate_ShouldRoundTrip(string sql)
+    {
+        // Arrange / Act
+        var statement = _parser.Parse(sql + ";").ShouldBeOfType<SqlQueryStatement>();
+        var insert = statement.SqlExpression.ShouldBeOfType<SqlInsertExpression>();
+        var rendered = SqlExpressionRenderer.Render(insert);
+        var again = _parser.Parse(rendered + ";").ShouldBeOfType<SqlQueryStatement>();
+
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        insert.OnConflict.ShouldNotBeNull().TargetWhere.ShouldNotBeNull();
+        again.Diagnostics.ShouldBeEmpty();
+        SqlExpressionRenderer.Render(again.SqlExpression.ShouldBeOfType<SqlInsertExpression>()).ShouldBe(rendered);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Upsert: malformed inference lists and missing actions report syntax")]
     [InlineData("ON CONFLICT () DO NOTHING")]
     [InlineData("ON CONFLICT (id,, a) DO NOTHING")]
@@ -60,7 +78,6 @@ public class SqlInsertParserTests
     [InlineData("INSERT OR IGNORE INTO t VALUES (1)", "INSERT OR IGNORE")]
     [InlineData("INSERT OR REPLACE INTO t VALUES (1)", "INSERT OR REPLACE")]
     [InlineData("INSERT INTO t VALUES (1) ON CONFLICT (lower(email)) DO NOTHING", "ON CONFLICT inference")]
-    [InlineData("INSERT INTO t VALUES (1) ON CONFLICT (id) WHERE id > 0 DO NOTHING", "ON CONFLICT target WHERE")]
     [InlineData("INSERT INTO t VALUES (1) ON CONFLICT (c COLLATE x) DO NOTHING", "ON CONFLICT inference")]
     [InlineData("INSERT INTO t VALUES (1) ON CONFLICT (id DESC) DO NOTHING", "ON CONFLICT inference")]
     [InlineData("INSERT INTO t VALUES (1) ON CONFLICT (id NULLS FIRST) DO NOTHING", "ON CONFLICT inference")]

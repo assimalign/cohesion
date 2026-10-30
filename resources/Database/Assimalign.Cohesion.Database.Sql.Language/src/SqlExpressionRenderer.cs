@@ -223,6 +223,7 @@ public static partial class SqlExpressionRenderer
             if (conflict.Columns.Count > 0)
             { builder.Append(" (").Append(string.Join(", ", conflict.Columns.Select(Identifier))).Append(')'); }
             if (conflict.ConstraintName is { } constraint) { builder.Append(" ON CONSTRAINT ").Append(Identifier(constraint)); }
+            if (conflict.TargetWhere is { } targetWhere) { builder.Append(" WHERE ").Append(Expression(targetWhere)); }
             if (conflict.Action == SqlOnConflictAction.DoNothing) { builder.Append(" DO NOTHING"); }
             else
             {

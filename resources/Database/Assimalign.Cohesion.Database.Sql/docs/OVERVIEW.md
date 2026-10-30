@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
+Conservative implication also supports ON CONFLICT target-WHERE inference; EXPLAIN reports the
+selected index and proof. Unproven cases use the existing complete access paths (#1630).
+
 WITH RECURSIVE uses anchor-typed working-table iteration and shared demand-driven scans.
 Outer LIMIT and subquery demand can stop an infinite producer. The statement memory grant
 bounds retained rows and DISTINCT state, and cancellation releases every buffer (#1719).
