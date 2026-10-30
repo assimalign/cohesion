@@ -135,7 +135,7 @@ public sealed class TransactionUndoMarkerTests
         writer.PartialUndoPending.ShouldBeTrue();
         coordinator.VersionStore.TrackedVersionCount.ShouldBe(8); // prefix + 7 outstanding
         (await Should.ThrowAsync<TransactionUndoException>(() => coordinator.CommitAsync(writer).AsTask())).Code.ShouldBe("CK04009");
-        await Should.ThrowAsync<TransactionAbortedException>(() => InsertAsync(coordinator, storage, writer, 9).AsTask());
+        (await Should.ThrowAsync<TransactionUndoException>(() => InsertAsync(coordinator, storage, writer, 9).AsTask())).Code.ShouldBe("CK04009");
         index.BeforeUndo = null;
         if (abort)
         {
@@ -294,10 +294,8 @@ public sealed class TransactionUndoMarkerTests
         {
             entered.Wait(_timeout).ShouldBeTrue();
             (await Should.ThrowAsync<TransactionUndoException>(() => coordinator.CommitAsync(writer).AsTask())).Code.ShouldBe("CK04009");
-            using var canceled = new CancellationTokenSource();
-            var queued = coordinator.CreateUndoMarkerAsync(writer, canceled.Token).AsTask();
-            canceled.Cancel();
-            await Should.ThrowAsync<OperationCanceledException>(() => queued);
+            (await Should.ThrowAsync<TransactionUndoException>(() => coordinator.CreateUndoMarkerAsync(writer).AsTask())).Code.ShouldBe("CK04009");
+            await Should.ThrowAsync<OperationCanceledException>(() => coordinator.CreateUndoMarkerAsync(writer, new CancellationToken(true)).AsTask());
 
             // Act
             end = dispose ? coordinator.DisposeAsync().AsTask() : coordinator.RollbackAsync(writer).AsTask();

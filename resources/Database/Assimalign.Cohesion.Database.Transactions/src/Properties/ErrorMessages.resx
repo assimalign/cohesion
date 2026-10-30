@@ -27,7 +27,7 @@
   <data name="IsolationStatementView" xml:space="preserve"><value>A statement view cannot configure transaction isolation; pass the current transaction context.</value></data>
   <data name="UndoMarkerInvalid" xml:space="preserve"><value>The undo marker is foreign, released, discarded or no longer active.</value></data>
   <data name="UndoContextInvalid" xml:space="preserve"><value>Undo controls require this coordinator's current transaction context, not a statement view or snapshot pin.</value></data>
-  <data name="PartialUndoPending" xml:space="preserve"><value>A partial undo is running or incomplete, or the transaction is ending. Retry its rollback target or roll back the whole transaction before further work.</value></data>
+  <data name="PartialUndoPending" xml:space="preserve"><value>A partial undo is running or incomplete, a statement or control is running, or the transaction is ending. Retry rollback to its target or an earlier marker, or roll back the whole transaction before further work.</value></data>
   <data name="IsolationSnapshotPin" xml:space="preserve"><value>A snapshot pin cannot configure transaction isolation; pass the current transaction context.</value></data>
   <data name="IsolationContextUntracked" xml:space="preserve"><value>The transaction context is untracked by this manager.</value></data>
   <data name="IsolationHandleStale" xml:space="preserve"><value>The transaction handle is stale; pass the current replacement context.</value></data>

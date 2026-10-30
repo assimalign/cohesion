@@ -33,17 +33,24 @@ those index undo adapters participates in the same ordering; model-owned ledgers
 XT-3's adapters. Distinct markers at the same position remain distinct scopes. Release discards
 the target and its descendants while retaining their effects. Rollback discards descendants,
 undoes the suffix in reverse order and retains the target for reuse. Earlier same-writer
-tombstones survive repeated deletion records: undo builds a set from the retained prefix,
-comparing index keys by bytes. Every `RecordVersionIndex` recorded under markers must compare
+tombstones survive repeated deletion records: undo builds a set of suffix tombstones, then
+removes matches from the retained prefix. It allocates no lookup and visits no prefix entry
+for an empty or tombstone-free suffix; lookup memory is bounded by suffix tombstones. All
+prefix work runs outside the version-store monitor, which other writers' commits take.
+Index keys compare by bytes. Every `RecordVersionIndex` recorded under markers must compare
 equal and hash equal by logical index across adapter instances. `BTreeRecordVersionIndex`
 supplies that equality; the Graph and Documents `IndexUndo` adapters are XT-3's obligation.
 This follows PostgreSQL's
 release-to-target and rollback/restart semantics (`src/backend/access/transam/xact.c:4595-4607,
 4707-4733`, rechecked locally); name resolution belongs to XT-4.
 
-All controls acquire the coordinator apply gate, then manager registration lock, then the
-context end latch. The monitors are released before storage or index work. The version-store
-monitor follows the apply gate and never spans storage/page/index latches. Index undo must not
+Rollback-to acquires the coordinator apply gate, then manager registration lock, then the
+context end latch. Create and release only acquire transaction admission through those two
+monitors: they never queue on the apply gate or run a deferred checkpoint. Admission excludes
+that transaction's current apply and end; a packed control bit excludes later applies, and
+the existing apply count makes a root end drain an admitted control. The monitors are released
+before storage or index work. The version-store monitor follows admission and never spans
+storage/page/index latches or prefix scans. Index undo must not
 wait for a model lock inside this gate. An admitted undo increments the existing apply count,
 so root rollback and disposal drain it before undoing the prefix or releasing locks. Commit
 cannot claim the end while partial undo is pending. Other transactions continue to exclude the
@@ -56,13 +63,23 @@ Undo uses at most 64 ledger effects per physical bracket. A completed bracket is
 the ledger only after commit; a failed bracket restores its own pages and leaves that suffix
 available for retry. The root stays Active but refuses writes, marker creation/release,
 isolation replacement and commit after incomplete undo. It admits only retry of that same
-target or whole-transaction rollback/disposal. Storage faults retain the existing offline
+target, any earlier marker (including one at the same position), or whole-transaction
+rollback/disposal. A successful deeper undo clears the pending state. PostgreSQL likewise
+searches parent savepoints from a failed subtransaction and restarts the selected target
+(`src/backend/access/transam/xact.c:4663-4733`). A fenced statement receives
+`TransactionUndoException` CK04009 while the transaction remains Active and retryable;
+the ordinary admission success path performs no additional check. Storage faults retain the existing offline
 rule. Cancellation is observed while waiting for admission and immediately before undo starts;
 after admission it cannot interrupt undo. Locks taken after the marker remain held until root
 transaction end in XT-2; lock rollback/upgrades belong to XT-3.
 
-Markers allocate only on use. Each statement captures its ledger position without allocating;
-after physical statement rollback its failed suffix is discarded, including before the first
+Markers allocate only on use. Each statement registers a writer and an unset position in
+the store while holding the existing apply gate; its first ledger record captures the position
+under Record's existing monitor. No extra monitor is taken at statement entry, even before
+the first marker. Commit checks pending undo inside TryClaimEnd's existing end-latch hold,
+under the manager registration lock, instead of acquiring that latch a second time. Thus
+never-marked transactions take no additional statement/commit lock relative to c3dc498bf.
+After physical statement rollback its failed suffix is discarded, including before the first
 marker, so stale same-writer slot references cannot affect a later scope. Root completion
 removes marker state. Marker controls alone neither enroll a read-only writer nor append any
 lifecycle record. The context's pending and ending bits share the former end boolean's byte, preserving its
@@ -83,13 +100,30 @@ separately from its resource-backed message:
 | Code | Condition |
 |---|---|
 | CK04008 | Foreign, released, discarded or ended marker; foreign/stale context, statement view or snapshot pin |
-| CK04009 | Partial undo is running/incomplete, or control admission finds the transaction ending |
+| CK04009 | Partial undo is running/incomplete, or a statement/control/end prevents control admission |
 
 Tests use real slotted pages/WAL and a record-backed index undo adapter under all five storage
 model tags. They cover nested scopes, statement failure and slot reuse, cancellation, retry,
 root rollback/disposal drain, retained locks, read-only markers, crash after undo with/without
 commit, every whole/torn physical write during multi-batch undo, and reader/purge overlap driven
 by progress counters. Actual model-specific ledger integration remains XT-3's scope.
+
+### Later runs
+
+- XT-3 must give Graph's `GraphStore.Indexes.cs` and Documents' `DocumentCatalog.Indexes.cs`
+  per-mutation `IndexUndo` adapters equality and hashing by logical index before recording
+  them under markers. Those adapters are intentionally unchanged in XT-2.
+- The ledger has no entry kind that saves a before-image. Documents and Blob update a chunk's
+  `next` pointer in place (`DocumentWriteStream.cs:166`, `BlobWriteStream.cs:161`). A marker
+  inside an open write stream can leave a dangling chain after undo. XT-3 must either refuse
+  markers inside open streams or ledger that pointer write.
+- SQL's `RowVersionLinks` and the Graph and Documents catalog caches sit outside the ledger;
+  XT-3 must integrate their rollback before markers become reachable in model sessions.
+- XT-4 owns the session's aborted-block state. The owning session receives a partial-undo
+  failure from rollback-to; until it retries rollback-to (the target or an earlier marker) or
+  rolls back the transaction, it must refuse every other statement, including reads that
+  would see a half-undone state. The substrate deliberately adds no read fence. PostgreSQL's
+  statement gate is in `src/backend/tcop/postgres.c:1158-1165,2945-2958`.
 
 ## Why MVCC (and not lock-based isolation)
 

@@ -55,6 +55,7 @@ public sealed class TransactionContext
     private const byte statementViewFlag = 2;
     private const byte endingFlag = 1;
     private const byte partialUndoFlag = 2;
+    private const byte undoControlFlag = 4;
 
     private readonly TransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
@@ -133,16 +134,18 @@ public sealed class TransactionContext
         }
     }
 
-    // Called under the manager lock and the coordinator apply gate. The apply count makes
-    // rollback/disposal drain this operation. Commit checks the pending flag under the same
-    // manager lock before claiming the end, so it cannot publish half an undone suffix.
-    internal bool TryEnterPartialUndo()
+    // Called under the manager lock; physical undo also holds the coordinator apply gate.
+    // The control bit excludes later statements while memory-only controls run without that
+    // gate. The apply count makes every end drain an admitted control.
+    internal bool TryEnterUndoControl(bool rollback)
     {
-        if (_transaction is not null) { return _transaction.TryEnterPartialUndo(); }
+        if (_transaction is not null) { return _transaction.TryEnterUndoControl(rollback); }
         lock (_endSync)
         {
-            if ((_admission & endingFlag) != 0 || _applying != 0 || State != TransactionState.Active) { return false; }
-            _admission |= partialUndoFlag;
+            if ((_admission & (endingFlag | undoControlFlag)) != 0 || _applying != 0 || State != TransactionState.Active ||
+                (!rollback && (_admission & partialUndoFlag) != 0)) { return false; }
+            _admission |= undoControlFlag;
+            if (rollback) { _admission |= partialUndoFlag; }
             _applying++;
             return true;
         }
@@ -243,15 +246,17 @@ public sealed class TransactionContext
     /// writer's versions or log records.
     /// </summary>
     /// <returns>True for the one caller that claimed the end.</returns>
-    internal bool TryClaimEnd()
+    internal bool TryClaimEnd(bool allowPendingUndo = true)
     {
         if (_transaction is not null)
         {
-            return _transaction.TryClaimEnd();
+            return _transaction.TryClaimEnd(allowPendingUndo);
         }
 
         lock (_endSync)
         {
+            if (!allowPendingUndo && (_admission & partialUndoFlag) != 0)
+            { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
             if ((_admission & endingFlag) != 0)
             {
                 return false;
@@ -289,11 +294,11 @@ public sealed class TransactionContext
     /// <summary>
     /// Ends one admitted statement apply and wakes an end waiting for the last one.
     /// </summary>
-    internal void ExitApply()
+    internal void ExitApply(bool undoControl = false)
     {
         if (_transaction is not null)
         {
-            _transaction.ExitApply();
+            _transaction.ExitApply(undoControl);
             return;
         }
 
@@ -301,6 +306,7 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
+            if (undoControl) { _admission = (byte)(_admission & ~undoControlFlag); }
             if (--_applying == 0 && _drained is not null)
             {
                 drained = _drained;

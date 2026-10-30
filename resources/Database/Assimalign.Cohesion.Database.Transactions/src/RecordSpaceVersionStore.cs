@@ -31,7 +31,13 @@ public sealed class RecordSpaceVersionStore : VersionStore
     private readonly object _sync = new();
     private Dictionary<ulong, UndoScopes>? _undoScopes;
 
-    // These seams require the coordinator's apply gate. The gate precedes _sync, and _sync
+    // One statement holds the apply gate. Capture its position lazily under Record's
+    // existing lock, so even never-marked transactions pay no additional lock or allocation.
+    private TransactionSequence _statementWriter;
+    private int _statementPosition = -1;
+
+    // These seams require exclusive admission for this writer; undo also holds the apply gate.
+    // The gate precedes _sync, and _sync
     // is released before storage/page/index latches or callbacks. No model lock is acquired
     // here. Other transactions ignore this active writer's creates and tombstones throughout
     // every batch; its manager registration keeps their horizons and pruning fences intact.
@@ -58,7 +64,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
             if (_undoScopes is null || !_undoScopes.TryGetValue(writer.Value, out var scopes) ||
                 !scopes.Markers.Contains(marker))
             { throw new TransactionUndoException("CK04008", ErrorMessages.UndoMarkerInvalid); }
-            if (scopes.Pending is not null && !ReferenceEquals(scopes.Pending, marker))
+            if (scopes.Pending is not null && scopes.Markers.IndexOf(marker) > scopes.Markers.IndexOf(scopes.Pending))
             { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
         }
     }
@@ -77,18 +83,22 @@ public sealed class RecordSpaceVersionStore : VersionStore
 
     // A failed statement physically restores its bracket and must forget its ledger suffix:
     // later same-writer slot reuse must not turn stale entries into undo of unrelated work.
-    // Capture even before the first marker; no allocation is added to the never-marked path.
-    internal int CaptureStatementPosition(TransactionSequence writer)
+    // Track even before the first marker, without taking a lock at statement entry.
+    internal void BeginStatement(TransactionSequence writer)
     {
-        lock (_sync) { return LedgerPosition(writer); }
+        _statementWriter = writer;
+        _statementPosition = -1;
     }
 
-    internal void DiscardStatementSuffix(TransactionSequence writer, int position)
+    internal void EndStatement() => _statementWriter = TransactionSequence.None;
+
+    internal void DiscardStatementSuffix(TransactionSequence writer)
     {
+        if (_statementPosition < 0) { return; }
         lock (_sync)
         {
             if (_ledger.TryGetValue(writer.Value, out var entries))
-            { entries.RemoveRange(position, entries.Count - position); }
+            { entries.RemoveRange(_statementPosition, entries.Count - _statementPosition); }
         }
     }
 
@@ -98,7 +108,6 @@ public sealed class RecordSpaceVersionStore : VersionStore
     internal async ValueTask RollbackToMarkerUnderGateAsync(TransactionSequence writer, TransactionUndoMarker marker)
     {
         List<LedgerEntry>? entries;
-        HashSet<LedgerEntry>? earlierTombstones = null;
         lock (_sync)
         {
             ValidateMarker(writer, marker);
@@ -107,16 +116,31 @@ public sealed class RecordSpaceVersionStore : VersionStore
             int index = scopes.Markers.IndexOf(marker) + 1;
             scopes.Markers.RemoveRange(index, scopes.Markers.Count - index);
             _ledger.TryGetValue(writer.Value, out entries);
-            if (entries is not null)
+        }
+
+        // The gate and pending admission freeze this writer's ledger. Other transactions'
+        // commits take _sync, so all prefix-proportional work runs outside that monitor.
+        // Retain only suffix tombstones, removing those already present before the marker:
+        // memory is O(suffix), and an empty/create-only suffix never visits the prefix.
+        HashSet<LedgerEntry>? tombstonesToUndo = null;
+        if (entries is not null)
+        {
+            for (int suffix = marker.Position; suffix < entries.Count; suffix++)
             {
-                for (int prefix = 0; prefix < marker.Position; prefix++)
+                var entry = entries[suffix];
+                if (entry.Kind is LedgerEntryKind.Tombstoned or LedgerEntryKind.IndexEntryTombstoned)
+                {
+                    tombstonesToUndo ??= new HashSet<LedgerEntry>(TombstoneComparer.Instance);
+                    tombstonesToUndo.Add(entry);
+                }
+            }
+            if (tombstonesToUndo is not null)
+            {
+                for (int prefix = 0; prefix < marker.Position && tombstonesToUndo.Count != 0; prefix++)
                 {
                     var entry = entries[prefix];
                     if (entry.Kind is LedgerEntryKind.Tombstoned or LedgerEntryKind.IndexEntryTombstoned)
-                    {
-                        earlierTombstones ??= new HashSet<LedgerEntry>(TombstoneComparer.Instance);
-                        earlierTombstones.Add(entry);
-                    }
+                    { tombstonesToUndo.Remove(entry); }
                 }
             }
         }
@@ -133,9 +157,10 @@ public sealed class RecordSpaceVersionStore : VersionStore
             for (int index = end - 1; index >= start; index--)
             {
                 // A repeated same-writer delete can record a no-op. Its pre-marker tombstone
-                // must survive. Compare encoded key bytes by value and adapters by identity
-                // (or their equality contract); adapters for one logical index must be stable.
-                if (earlierTombstones?.Contains(entries[index]) == true) { continue; }
+                // must survive. Compare encoded key bytes and logical index identity by value.
+                var entry = entries[index];
+                if ((entry.Kind is LedgerEntryKind.Tombstoned or LedgerEntryKind.IndexEntryTombstoned) &&
+                    tombstonesToUndo?.Contains(entry) == false) { continue; }
                 await UndoEntryAsync(writer, entries[index], bracket, CancellationToken.None).ConfigureAwait(false);
             }
             bracket.Commit(awaitDurability: false);
@@ -638,6 +663,8 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 _ledger[writer.Value] = entries;
             }
 
+            if (_statementWriter == writer && _statementPosition < 0)
+            { _statementPosition = entries.Count; }
             entries.Add(entry);
         }
     }

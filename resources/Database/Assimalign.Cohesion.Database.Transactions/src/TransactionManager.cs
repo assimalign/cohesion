@@ -633,6 +633,8 @@ public sealed class TransactionManager : IAsyncDisposable
         // claimed, so it is refused here like any other ended transaction.
         if (owned is null || !owned.TryEnterApply())
         {
+            if (owned?.PartialUndoPending == true)
+            { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
             throw new TransactionAbortedException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerEnterApplyFailure, context.Sequence));
         }
@@ -651,7 +653,7 @@ public sealed class TransactionManager : IAsyncDisposable
     }
 
     // Marker controls do not enroll a read-only transaction as a durable writer. Lock order:
-    // coordinator apply gate -> manager _sync -> context end latch. Neither monitor spans
+    // manager _sync -> context end latch (physical undo takes the apply gate first). Neither monitor spans
     // storage/index I/O; the apply count protects lifecycle draining after both are released.
     internal TransactionContext EnterUndoControl(TransactionContext context, bool rollback = false)
     {
@@ -665,7 +667,7 @@ public sealed class TransactionManager : IAsyncDisposable
                 throw new TransactionUndoException("CK04008", ErrorMessages.UndoContextInvalid);
             }
 
-            if (!(rollback ? owned.TryEnterPartialUndo() : owned.TryEnterApply()))
+            if (!owned.TryEnterUndoControl(rollback))
             {
                 throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
             }
@@ -1027,12 +1029,7 @@ public sealed class TransactionManager : IAsyncDisposable
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerClaimEndFailure2, owned.Sequence, owned.State));
             }
 
-            if (!allowPendingUndo && owned.PartialUndoPending)
-            {
-                throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
-            }
-
-            if (!owned.TryClaimEnd())
+            if (!owned.TryClaimEnd(allowPendingUndo))
             {
                 throw new TransactionAbortedException(
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerClaimEndFailure3, owned.Sequence));

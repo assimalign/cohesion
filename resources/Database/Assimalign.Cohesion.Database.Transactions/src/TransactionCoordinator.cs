@@ -565,6 +565,19 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(context);
         if (rollback || release) { ArgumentNullException.ThrowIfNull(marker); }
         ThrowIfInsideApply();
+        if (!rollback)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var owner = _manager.EnterUndoControl(context);
+            try
+            {
+                if (release) { _versionStore.ReleaseMarker(context.Sequence, marker!); }
+                else { marker = _versionStore.CreateMarker(context.Sequence); }
+                return marker!;
+            }
+            finally { owner.ExitApply(undoControl: true); }
+        }
+
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         _insideApply.Value = true;
         try
@@ -573,19 +586,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             // Validate the token before marking the context pending. An invalid marker
             // cannot poison an otherwise healthy transaction. All token use holds the gate.
             if (marker is not null) { _versionStore.ValidateMarker(context.Sequence, marker); }
-            var owner = _manager.EnterUndoControl(context, rollback);
+            var owner = _manager.EnterUndoControl(context, rollback: true);
             try
             {
-                if (rollback)
-                {
-                    await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
-                    owner.CompletePartialUndo();
-                }
-                else if (release) { _versionStore.ReleaseMarker(context.Sequence, marker!); }
-                else { marker = _versionStore.CreateMarker(context.Sequence); }
+                await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                owner.CompletePartialUndo();
                 return marker!;
             }
-            finally { owner.ExitApply(); }
+            finally { owner.ExitApply(undoControl: true); }
         }
         finally
         {
@@ -677,7 +685,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             try
             {
                 var bracket = _storage.BeginTransaction();
-                int ledgerPosition = _versionStore.CaptureStatementPosition(context.Sequence);
+                _versionStore.BeginStatement(context.Sequence);
 
                 lock (_sync)
                 {
@@ -715,11 +723,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                         }
                     }
 
-                    if (restoring) { _versionStore.DiscardStatementSuffix(context.Sequence, ledgerPosition); }
+                    if (restoring) { _versionStore.DiscardStatementSuffix(context.Sequence); }
                     throw;
                 }
                 finally
                 {
+                    _versionStore.EndStatement();
                     lock (_sync)
                     {
                         _statementBrackets.Remove(context.Sequence.Value);
