@@ -1,5 +1,9 @@
 # OQL SQL++ dialect
 
+SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
+`~~*` and `!~~*` is unchanged. SQL postfix casts remain outside this language's scalar grammar;
+Object-member colons retain their existing meaning.
+
 ## Text transactions (#1725)
 
 In-process and wire Documents sessions accept `BEGIN [WORK | TRAN | TRANSACTION]`,

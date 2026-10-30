@@ -1,5 +1,12 @@
 # Database.Sql.Client — Design
 
+## Partial indexes over the existing exchange (#1630, SQ-P1)
+
+InMemory and TCP execute CREATE INDEX WHERE, predicate transitions, NULL-distinct partial
+uniqueness, canonical metadata views and coded predicate refusals. Failed transitions leave
+rows intact and connections usable. No client API or protocol format changes are required.
+
+
 ## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
 
 InMemory and TCP execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
@@ -44,6 +51,13 @@ and 200 idle and graceful-stop notices surfaced by the next concrete-client oper
 An in-memory regression returns an authenticated rental to its pool and leaves the client open
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
+
+## ILIKE and postfix CAST wire conformance (#1721)
+
+The existing exchange carries collation-aware ILIKE/NOT ILIKE, NULL Boolean cells,
+parameter ESCAPE and chained casts over InMemory and TCP. CS02022 and CS05040 retain
+located execution diagnostics and usable connections. Recorded matcher admission drives
+disconnect cancellation for LIKE and ILIKE. No public client API or wire layout changes.
 
 ## Contract-only dependencies
 

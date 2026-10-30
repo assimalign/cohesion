@@ -168,7 +168,7 @@ internal sealed partial class SqlPlanExecutor
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, values) in rows)
         {
-            ValidateIndexKeysAndCollectUniqueHashes(indexes, table, values, uniqueKeyHashes);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, table, values, uniqueKeyHashes, cancellationToken);
         }
         await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
         var returned = returning is null ? null : new List<object?[]>(rows.Count);
@@ -186,7 +186,7 @@ internal sealed partial class SqlPlanExecutor
                     cancellationToken.ThrowIfCancellationRequested();
                     var (pageId, slotIndex) = _storage.InsertRow(bracket, table.ObjectId, record);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, pageId, slotIndex);
-                    await InsertIndexEntriesAsync(statement, indexes, table, values,
+                    await InsertIndexEntriesAsync(statement, bracket, indexes, table, values,
                         SqlRecordLocation.Pack(pageId, slotIndex), cancellationToken).ConfigureAwait(false);
                     if (returned is not null && !HasSequenceProjection(returning)) { returned.Add(ProjectRow(values, returning!, returningEvaluator!, cancellationToken)); }
                 }

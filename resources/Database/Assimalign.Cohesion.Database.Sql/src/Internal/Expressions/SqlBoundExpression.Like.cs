@@ -3,7 +3,7 @@ using Assimalign.Cohesion.Database.Language;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// <c>[NOT] LIKE</c> over a bound value and pattern, with their collation resolved when the
+/// <c>[NOT] LIKE</c> or <c>[NOT] ILIKE</c> over a bound value and pattern, with their collation resolved when the
 /// expression was bound.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlBoundLike")]
@@ -18,7 +18,8 @@ internal sealed class SqlBoundLike : SqlBoundExpression
     /// <param name="isNegated"><see langword="true"/> for <c>NOT LIKE</c>.</param>
     /// <param name="location">The source expression span.</param>
     /// <param name="collation">The collation of the value and the pattern.</param>
-    internal SqlBoundLike(SqlBoundExpression operand, SqlBoundExpression pattern, SqlBoundExpression escape, bool isNegated, SqlBoundCollation collation, SqlLikePattern? compiled, Location? location = null)
+    /// <param name="isCaseInsensitive">Whether the predicate uses ILIKE folding.</param>
+    internal SqlBoundLike(SqlBoundExpression operand, SqlBoundExpression pattern, SqlBoundExpression escape, bool isNegated, SqlBoundCollation collation, SqlLikePattern? compiled, Location? location = null, bool isCaseInsensitive = false)
         : base(SqlBoundExpressionKind.Like)
     {
         Location = location;
@@ -27,6 +28,7 @@ internal sealed class SqlBoundLike : SqlBoundExpression
         Escape = escape;
         Compiled = compiled;
         IsNegated = isNegated;
+        IsCaseInsensitive = isCaseInsensitive;
         Collation = collation;
     }
 
@@ -42,6 +44,8 @@ internal sealed class SqlBoundLike : SqlBoundExpression
 
     /// <summary>Gets whether the match is <c>NOT LIKE</c>.</summary>
     internal bool IsNegated { get; }
+
+    internal bool IsCaseInsensitive { get; }
 
     /// <summary>Gets the collation of the value and the pattern.</summary>
     internal SqlBoundCollation Collation { get; }

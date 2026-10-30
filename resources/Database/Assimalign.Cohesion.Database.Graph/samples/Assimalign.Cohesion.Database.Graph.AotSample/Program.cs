@@ -171,6 +171,33 @@ foreach (var (expression, code) in new[]
         checks++;
     }
 }
+var schema = GraphSchema.Open(database, session);
+Guid schemaLabel = Guid.NewGuid();
+await schema.SaveLabelAsync(new(schemaLabel, "SchemaSmoke"), CancellationToken.None);
+await schema.CreateConstraintAsync(new(schemaLabel, "schema_type", "p", Assimalign.Cohesion.Database.Types.DatabaseType.Int64), CancellationToken.None);
+await schema.CreateConstraintAsync(new(schemaLabel, "schema_exists", "p"), CancellationToken.None);
+await schema.CreateIndexAsync("SchemaSmoke", "schema_index", "p", CancellationToken.None);
+await Check("INSERT (n:SchemaSmoke {p:1}) RETURN n.p", [[1L]]);
+foreach (string query in new[] { "INSERT (:SchemaSmoke)", "MATCH (n:SchemaSmoke) SET n.p='bad'", "MATCH (n:SchemaSmoke) REMOVE n.p" })
+{
+    bool refused = false;
+    try { await session.ExecuteAsync(query, cancellationToken: CancellationToken.None); }
+    catch (DatabaseException error) when (error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == "CG03003") { refused = true; }
+    if (!refused) { throw new InvalidOperationException("Named constraint AOT enforcement failed."); }
+    checks++;
+}
+if ((await schema.GetConstraintsAsync(CancellationToken.None)).Count != 2 ||
+    (await schema.FindIndexAsync("schema_index", CancellationToken.None))?.LabelId != schemaLabel)
+{ throw new InvalidOperationException("Named schema AOT discovery failed."); }
+checks++;
+await schema.DropConstraintAsync("schema_exists", CancellationToken.None);
+await session.ExecuteAsync("MATCH (n:SchemaSmoke) REMOVE n.p", cancellationToken: CancellationToken.None);
+await schema.DropConstraintAsync("schema_type", CancellationToken.None);
+await schema.DropIndexAsync("schema_index", CancellationToken.None);
+if ((await schema.GetConstraintsAsync(CancellationToken.None)).Count != 0 ||
+    await schema.FindIndexAsync("schema_index", CancellationToken.None) is not null)
+{ throw new InvalidOperationException("Named schema AOT drop failed."); }
+checks++;
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

@@ -398,7 +398,7 @@ internal sealed partial class SqlExpressionEvaluator
         RuntimeHelpers.EnsureSufficientExecutionStack();
         // PostgreSQL functions.c:491 and typecmds.c:3609 use Param and CoerceToDomainValue,
         // neither of which is a Var for parse_expr.c:1163. The binding site supplies that distinction.
-        if (_bindingContext != SqlBindingContext.Table) { return false; }
+        if (_bindingContext is not (SqlBindingContext.Table or SqlBindingContext.IndexPredicate)) { return false; }
         return expression is SqlColumnReferenceExpression || SqlPlanner.Children(expression).Any(ReferencesTableColumn);
     }
 
@@ -1148,7 +1148,7 @@ internal sealed partial class SqlExpressionEvaluator
         try
         {
             var compiled = expression.Compiled ?? SqlLikePattern.Compile(LikeText(pattern), LikeText(escape), _cancellationToken);
-            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken, out _, _beforeLikeMatch);
+            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken, out _, _beforeLikeMatch, expression.IsCaseInsensitive);
             return Box(matches != expression.IsNegated);
         }
         catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)

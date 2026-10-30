@@ -23,6 +23,119 @@ move neither the transaction gauge nor the rates.
 
 One transaction substrate for five engines. ACID is the platform's defining requirement (area `DESIGN.md` R1), so the machinery that provides it — MVCC snapshots, commit ordering, locking, WAL binding — lives in a kernel project no model owns. Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction` from the contract root.
 
+## In-memory undo markers (#1726, XT-2)
+
+The coordinator's internal `CreateUndoMarkerAsync`, `ReleaseUndoMarkerAsync` and
+`RollbackToUndoMarkerAsync` are the substrate for later named scopes. No language or public
+savepoint API is added. An opaque marker records a position in the combined ordered ledger of
+row creates, row tombstones, index creates and index tombstones. Maintenance implemented through
+those index undo adapters participates in the same ordering; model-owned ledgers still require
+XT-3's adapters. Distinct markers at the same position remain distinct scopes. Release discards
+the target and its descendants while retaining their effects. Rollback discards descendants,
+undoes the suffix in reverse order and retains the target for reuse. Earlier same-writer
+tombstones survive repeated deletion records: undo builds a set of suffix tombstones, then
+removes matches from the retained prefix. It allocates no lookup and visits no prefix entry
+for an empty or tombstone-free suffix; lookup memory is bounded by suffix tombstones. All
+prefix work runs outside both the version-store monitor and the database apply gate, so
+other writers can apply statements and commit during duplicate lookup construction.
+Index keys compare by bytes. Every `RecordVersionIndex` recorded under markers must compare
+equal and hash equal by logical index across adapter instances. `BTreeRecordVersionIndex`
+supplies that equality; the Graph and Documents `IndexUndo` adapters are XT-3's obligation.
+This follows PostgreSQL's
+release-to-target and rollback/restart semantics (`src/backend/access/transam/xact.c:4595-4607,
+4707-4733`, rechecked locally); name resolution belongs to XT-4.
+
+Rollback-to takes transaction admission through the manager registration lock and context
+end latch before building its duplicate lookup or acquiring the coordinator apply gate.
+Create and release only acquire transaction admission through those two
+monitors: they never queue on the apply gate or run a deferred checkpoint. Admission excludes
+that transaction's current apply and end; a packed control bit excludes later applies, and
+the existing apply count makes a root end drain an admitted control. The monitors are released
+before storage or index work. Marker validation before admission is optimistic: release can
+invalidate that token without taking the gate. The store revalidates before installing its
+pending target; a refusal there clears only a retry fence newly set by this attempt. An
+existing incomplete undo keeps its fence. Create/release and admitted rollback-to exclude
+every second control through the same end latch. The version-store monitor follows admission and never spans
+storage/page/index latches or prefix scans. Index undo must not
+wait for a model lock inside this gate. An admitted undo increments the existing apply count,
+so root rollback and disposal drain it before undoing the prefix or releasing locks. Commit
+cannot claim the end while partial undo is pending. Other transactions continue to exclude the
+root writer throughout every physical batch: its creates are invisible and its tombstones do
+not hide older committed records. Its registration and snapshot horizons remain in place,
+including across checkpoints and concurrent purge. Same-transaction operations are serialized
+by the session; they must not read or mutate concurrently with a control.
+
+Undo uses at most 64 ledger effects per physical bracket. A completed bracket is removed from
+the ledger only after commit; a failed bracket restores its own pages and leaves that suffix
+available for retry. The root stays Active but refuses writes, marker creation/release,
+isolation replacement and commit after incomplete undo. It admits only retry of that same
+target, any earlier marker (including one at the same position), or whole-transaction
+rollback/disposal. A successful deeper undo clears the pending state. PostgreSQL likewise
+searches parent savepoints from a failed subtransaction and restarts the selected target
+(`src/backend/access/transam/xact.c:4663-4733`). A fenced statement receives
+`TransactionUndoException` CK04009 while the transaction remains Active and retryable.
+Statement admission decides its refusal inside the existing end latch: ending/ended takes
+precedence over pending undo and reports `TransactionAbortedException`. Statements wait on
+that latch for a memory-only create/release, whose exit wakes them to recheck cancellation
+before admission. The ordinary apply path adds no cancellation check, lock or allocation.
+The root end claim clears the pending retry bit under its existing latch, including when
+physical whole undo will be deferred; the ending bit remains authoritative. Storage faults retain the existing offline
+rule. Cancellation is checked before admission; once admitted, lookup construction and the
+physical gate wait cannot interrupt undo. Locks taken after the marker remain held until root
+transaction end in XT-2; lock rollback/upgrades belong to XT-3.
+
+Markers allocate only on use. Each statement registers a writer and an unset position in
+the store while holding the existing apply gate; its first ledger record captures the position
+under Record's existing monitor. No extra monitor is taken at statement entry, even before
+the first marker. Commit checks pending undo inside TryClaimEnd's existing end-latch hold,
+under the manager registration lock, instead of acquiring that latch a second time. Thus
+never-marked transactions take no additional statement/commit lock relative to c3dc498bf.
+After physical statement rollback its failed suffix is discarded, including before the first
+marker, so stale same-writer slot references cannot affect a later scope. Root completion
+removes marker state. Marker controls alone neither enroll a read-only writer nor append any
+lifecycle record. The context's pending and ending bits share the former end boolean's byte, preserving its
+aligned size. A separate pending boolean added eight bytes per statement pin and tripped the
+SQL Release allocation guards; packing the flags keeps the existing budgets. No per-context
+object, delegate or collection is added to transactions that never set a marker.
+
+Markers have no durable identities. Partial undo uses the existing physical WAL operations and
+root-writer stamps. A later root commit makes the remaining prefix and preceding undo durable
+in journal order; without a root commit, recovery scrubs every remaining effect of that writer,
+including after a crash mid-undo or checkpoint truncation. The substrate needs no format
+change: storage stays at format 4. Record, page, WAL, journal-frame and recovery layouts are
+unchanged; markers and ledger positions exist only in memory.
+
+The internal structured `TransactionUndoException.Code` carries these substrate conditions
+separately from its resource-backed message:
+
+| Code | Condition |
+|---|---|
+| CK04008 | Foreign, released, discarded or ended marker; foreign/stale context, statement view or snapshot pin |
+| CK04009 | Partial undo is running/incomplete, or a statement/control/end prevents control admission |
+
+Tests use real slotted pages/WAL and a record-backed index undo adapter under all five storage
+model tags. They cover nested scopes, statement failure and slot reuse, cancellation, retry,
+root rollback/disposal drain, retained locks, read-only markers, crash after undo with/without
+commit, every whole/torn physical write during multi-batch undo, and reader/purge overlap driven
+by progress counters. Actual model-specific ledger integration remains XT-3's scope.
+
+### Later runs
+
+- XT-3 must give Graph's `GraphStore.Indexes.cs` and Documents' `DocumentCatalog.Indexes.cs`
+  per-mutation `IndexUndo` adapters equality and hashing by logical index before recording
+  them under markers. Those adapters are intentionally unchanged in XT-2.
+- The ledger has no entry kind that saves a before-image. Documents and Blob update a chunk's
+  `next` pointer in place (`DocumentWriteStream.cs:166`, `BlobWriteStream.cs:161`). A marker
+  inside an open write stream can leave a dangling chain after undo. XT-3 must either refuse
+  markers inside open streams or ledger that pointer write.
+- SQL's `RowVersionLinks` and the Graph and Documents catalog caches sit outside the ledger;
+  XT-3 must integrate their rollback before markers become reachable in model sessions.
+- XT-4 owns the session's aborted-block state. The owning session receives a partial-undo
+  failure from rollback-to; until it retries rollback-to (the target or an earlier marker) or
+  rolls back the transaction, it must refuse every other statement, including reads that
+  would see a half-undone state. The substrate deliberately adds no read fence. PostgreSQL's
+  statement gate is in `src/backend/tcop/postgres.c:1158-1165,2945-2958`.
+
 ## Why MVCC (and not lock-based isolation)
 
 Readers never block writers and writers never block readers — the OLTP profile all five models share. Locking is retained only where MVCC cannot arbitrate: write-write conflicts, in `LockManager`, with intent modes so object-level operations (drop table, reindex) coexist with entry-level writes.
@@ -1306,7 +1419,7 @@ interfaces: they re-implemented `IStorage.Checkpoint` and
 `Storage.Checkpoint`, `Storage.ReserveTransactionSequence` and
 `StorageJournal.AppendRollback` are non-virtual, and a test cannot hand `Storage` a journal
 of its own, so the interception moved to the type that makes the calls
-(`database-area.md`, "Test doubles"). The coordinator carries four internal hooks, reached
+(`database-area.md`, "Test doubles"). The coordinator carries the following internal hooks, reached
 only through this package's `InternalsVisibleTo` grant to its own tests:
 
 | Hook | Where it runs | Used for |
@@ -1315,9 +1428,12 @@ only through this package's `InternalsVisibleTo` grant to its own tests:
 | `SequenceReserved()` | in the manager's sequence allocator, after the storage reserved the sequence and before the context returns | a begin that reached the coordinator while a checkpoint holds the append gate (the reader may now finish; its first apply waits) |
 | `BeforeContextTrackedAsync(TransactionContext context)` | after manager registration, before coordinator tracking, with neither lock held | pause begin while disposal aborts its context and clears the coordinator table (#1351) |
 | `BeforeAbortRecord(long sequence)` | inside the `try` of the abort record's append, before the journal append; a throw rejects the record | a lost abort record on a storage that stays online |
+| `UndoMarkerValidated()` | after optimistic rollback-to validation, before control admission | release on another flow invalidates the marker before the admitted recheck |
+| `UndoControlAdmitted()` | after create/release admission, before its marker mutation | a concurrent statement waits; a second control is refused |
 
-Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation,
-context begin or abort record, never per row. Each rewritten test asserts that its hook fired: the
+Each is `null` unless a test sets it and runs once per corresponding operation, never per row.
+The manager's `ApplyWaitingForUndoControl()` hook records a statement reaching its memory-control
+wait under the context end latch. Each rewritten test asserts that its hook fired: the
 `Checkpoint` helper of the rollback tests starts its capture unset and requires it set.
 
 **Stream-level triggers cover the rest.** #1252 made every journal append a write into a
@@ -1488,7 +1604,7 @@ arms the `LockWaitBlocked` timer only while a listener takes the source's warnin
 
 - No distributed transactions / two-phase commit — single-node ACID first.
 - No lock escalation policy in the contract — an implementation concern.
-- No savepoints in the MVP surface — add to `TransactionContext` when a model needs them.
+- No named savepoint or language surface yet; the internal undo-marker substrate is delivered in XT-2.
 
 ## AOT posture
 

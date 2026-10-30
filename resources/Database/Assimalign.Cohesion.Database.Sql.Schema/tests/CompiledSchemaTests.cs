@@ -16,7 +16,7 @@ public class CompiledSchemaTests
     {
         SqlCompiledSchema schema = CompileOrders();
 
-        schema.Format.ShouldBe("cohesion/database-schema/v9");
+        schema.Format.ShouldBe("cohesion/database-schema/v10");
         schema.Name.ShouldBe("orders-db");
         schema.Tables.Select(table => table.Name).ShouldBe(["order_lines", "orders"]);
         schema.Tables[1].RowType.ShouldStartWith("Assimalign.Cohesion.Database.Sql.Schema.Tests:");

@@ -596,7 +596,7 @@ public sealed class TransactionManager : IAsyncDisposable
     public async ValueTask RollbackAsync(TransactionContext context, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var owned = ClaimEnd(context);
+        var owned = ClaimEnd(context, allowPendingUndo: true);
 
         try
         {
@@ -608,6 +608,8 @@ public sealed class TransactionManager : IAsyncDisposable
         }
     }
 
+    internal Action? ApplyWaitingForUndoControl { get; set; }
+
     /// <summary>
     /// Admits one statement apply for the context's transaction, which must still be
     /// in the active table and not ending. Every admitted apply is paired with
@@ -616,7 +618,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <param name="context">The context the statement runs under, or a statement wrapper sharing its sequence.</param>
     /// <returns>The manager's context for the transaction.</returns>
     /// <exception cref="TransactionAbortedException">The transaction has ended or its end has begun.</exception>
-    internal TransactionContext EnterApply(TransactionContext context)
+    internal TransactionContext EnterApply(TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -631,8 +633,11 @@ public sealed class TransactionManager : IAsyncDisposable
 
         // A writer whose undo is deferred is still in the active table, but its end was
         // claimed, so it is refused here like any other ended transaction.
-        if (owned is null || !owned.TryEnterApply())
+        bool pendingUndo = false;
+        if (owned is null || !owned.TryEnterApply(out pendingUndo, ApplyWaitingForUndoControl, cancellationToken))
         {
+            if (pendingUndo)
+            { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
             throw new TransactionAbortedException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerEnterApplyFailure, context.Sequence));
         }
@@ -647,6 +652,30 @@ public sealed class TransactionManager : IAsyncDisposable
             // A refused first begin must release admission too, or an end would wait forever.
             owned.ExitApply();
             throw;
+        }
+    }
+
+    // Marker controls do not enroll a read-only transaction as a durable writer. Lock order:
+    // manager _sync -> context end latch, before physical undo takes the apply gate. Neither monitor spans
+    // storage/index I/O; the apply count protects lifecycle draining after both are released.
+    internal TransactionContext EnterUndoControl(TransactionContext context, out bool undoWasPending, bool rollback = false)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (!ReferenceEquals(context.Manager, this) || context.IsStatementView || context.IsSnapshotPin ||
+                !_active.TryGetValue(context.Sequence.Value, out var owned) || !ReferenceEquals(context, owned))
+            {
+                throw new TransactionUndoException("CK04008", ErrorMessages.UndoContextInvalid);
+            }
+
+            if (!owned.TryEnterUndoControl(rollback, out undoWasPending))
+            {
+                throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
+            }
+
+            return owned;
         }
     }
 
@@ -974,7 +1003,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// Validates a context and claims its end for the caller. Every successful claim is
     /// paired with one <see cref="ExitEnd"/> when the end returns.
     /// </summary>
-    private TransactionContext ClaimEnd(TransactionContext context)
+    private TransactionContext ClaimEnd(TransactionContext context, bool allowPendingUndo = false)
     {
         ArgumentNullException.ThrowIfNull(context);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -1003,7 +1032,7 @@ public sealed class TransactionManager : IAsyncDisposable
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerClaimEndFailure2, owned.Sequence, owned.State));
             }
 
-            if (!owned.TryClaimEnd())
+            if (!owned.TryClaimEnd(allowPendingUndo))
             {
                 throw new TransactionAbortedException(
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorTransactionManagerClaimEndFailure3, owned.Sequence));

@@ -85,7 +85,7 @@ internal sealed partial class SqlPlanExecutor
             if (!HasCurrentDefinition(table)) { return null; }
             var description = seek?.Index ?? _catalog.GetIndexes(table.ObjectId)
                 .OrderBy(index => index.IsPrimaryKey ? 0 : index.IsUnique ? 1 : 2)
-                .ThenBy(index => index.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+                .ThenBy(index => index.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(index => index.Predicate is null);
             if (description is null || !TryResolveSeekTree(table, description, out var tree)) { return null; }
             var range = seek is null ? IndexKeyRange.All : BuildSeekRange(table, seek,
                 _definitions.Get(table, cancellationToken).GetKey(description.ColumnNames).Ordinals);

@@ -19,6 +19,11 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
   for its stamped records and its index undo, which the coordinator drives
 - `TransactionAbortedException` — an independent exception root (inherits `Exception`, not `DatabaseException`)
 
+The coordinator's internal anonymous markers capture positions in the ordered row/index
+ledger. Partial undo reverses a marker's suffix through bounded physical brackets while the
+root transaction stays open; locks remain held until root end in XT-2 (#1726). Named scopes
+and language controls follow in later runs. See DESIGN for failure recovery and cancellation.
+
 The coordinator's record ledger supports streamed model records: logical rollback,
 pruning, and recovery scrub use bounded physical mutation batches, while lifecycle
 analysis streams the shared journal instead of retaining page-image payloads.

@@ -138,6 +138,26 @@ internal sealed class SqlBoundTableCache
         return GetState(cancellationToken).Get(table, cancellationToken);
     }
 
+    internal SqlBoundExpression GetIndexPredicate(SqlCatalogTable table, SqlCatalogIndex index, CancellationToken cancellationToken = default)
+    {
+        var state = GetState(cancellationToken);
+        var bound = state.IndexPredicates.GetValue(table, static _ => new()).GetValue(index, _ =>
+            new(token => SqlPartialIndexPredicate.Bind(table, index, _catalog.DefaultCollation, state.Functions, token))).Get(cancellationToken);
+        if (bound is SqlBoundFailure) { Volatile.Write(ref state.HasUnresolvedIndexPredicates, true); }
+        return bound;
+    }
+
+    internal void EnsureIndexPredicatesResolved(SqlCatalogTable table, CancellationToken cancellationToken)
+    {
+        // The normal path stays a flag read. An unresolved generation must still leave
+        // tables without partial indexes out of validation, including after unrelated DDL.
+        var state = Volatile.Read(ref _state);
+        if (!Volatile.Read(ref state.HasUnresolvedIndexPredicates)) { return; }
+        if (!_catalog.GetIndexes(table.ObjectId).Any(static index => index.Predicate is not null)) { return; }
+        if (GetValidation(cancellationToken).IndexPredicates is { } predicates && predicates.TryGetValue(table, out var unresolved))
+        { unresolved.Raise(); }
+    }
+
     // DDL has already evaluated immutable defaults before its first mutation. Retain
     // those exact bindings instead of folding them again while publishing this version.
     internal SqlBoundTable GetDeclared(SqlCatalogTable table, IReadOnlyList<SqlBoundExpression?> defaults, CancellationToken cancellationToken)
@@ -222,6 +242,11 @@ internal sealed class SqlBoundTableCache
         try
         {
             GetValidation(cancellationToken, countWalk: false);
+            foreach (var table in _catalog.Tables)
+            {
+                foreach (var index in _catalog.GetIndexes(table.ObjectId))
+                { if (index.Predicate is not null) { GetIndexPredicate(table, index, cancellationToken); } }
+            }
             new SqlPlanner(_catalog, null, Functions, cancellationToken).BindViews();
         }
         catch (InsufficientExecutionStackException exception)
@@ -241,6 +266,7 @@ internal sealed class SqlBoundTableCache
     {
         SqlUnresolvedDefinition? definition = null;
         SqlUnresolvedDomain? unresolvedDomain = null;
+        Dictionary<SqlCatalogTable, SqlBoundFailure>? unresolvedIndexes = null;
         foreach (var function in state.Functions.Catalog.OfType<SqlExpressionFunction>())
         {
             if (function.Unresolved is { } reason) { definition ??= new SqlUnresolvedDefinition("SQL function '" + function.Name + "'", function.Name, reason); }
@@ -256,6 +282,11 @@ internal sealed class SqlBoundTableCache
             {
                 if (column.DefaultLiteral is not { } text) { continue; }
                 var expression = SqlPersistedExpression.Load(text, "DEFAULT");
+                if (SqlSequenceDefault.IsCandidate(expression))
+                {
+                    SqlSequenceDefault.ValidateIdentity(expression, column.DefaultFunctionCalls);
+                    continue;
+                }
                 var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: state.Functions);
                 SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
                 if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
@@ -267,13 +298,22 @@ internal sealed class SqlBoundTableCache
             {
                 definition ??= check.Unresolved;
             }
+            foreach (var index in _catalog.GetIndexes(table.ObjectId))
+            {
+                if (index.Predicate is not null && GetIndexPredicate(table, index, cancellationToken) is SqlBoundFailure failure)
+                {
+                    (unresolvedIndexes ??= new())[table] = failure;
+                    definition ??= new SqlUnresolvedDefinition(index.Name, index.Predicate, ErrorMessages.PartialPredicateUnavailable);
+                }
+            }
             foreach (var domain in bound.Domains)
             {
                 unresolvedDomain ??= domain.Unresolved;
             }
         }
 
-        return new Validation(definition, unresolvedDomain);
+        Volatile.Write(ref state.HasUnresolvedIndexPredicates, unresolvedIndexes is not null);
+        return new Validation(definition, unresolvedDomain, unresolvedIndexes);
     }
 
     private Validation GetValidation(CancellationToken cancellationToken, bool countWalk = true)
@@ -596,7 +636,8 @@ internal sealed class SqlBoundTableCache
         }
     }
 
-    private sealed record Validation(SqlUnresolvedDefinition? Definition, SqlUnresolvedDomain? Domain);
+    private sealed record Validation(SqlUnresolvedDefinition? Definition, SqlUnresolvedDomain? Domain,
+        IReadOnlyDictionary<SqlCatalogTable, SqlBoundFailure>? IndexPredicates);
 
     // A refresh replaces the whole state. A slow binding retains its original environment and
     // table map and cannot publish an old result into the replacement generation.
@@ -606,14 +647,20 @@ internal sealed class SqlBoundTableCache
     {
         private readonly SqlBoundTableCache _owner;
         internal readonly ConditionalWeakTable<SqlCatalogTable, SqlBindingEntry<SqlBoundTable>> Bound = new();
+        internal readonly ConditionalWeakTable<SqlCatalogTable, ConditionalWeakTable<SqlCatalogIndex, SqlBindingEntry<SqlBoundExpression>>> IndexPredicates = new();
         internal readonly SqlFunctionEnvironment Functions;
         internal ulong ValidatedGeneration;
         internal SqlBindingEntry<Validation>? Validation;
+        internal bool HasUnresolvedIndexPredicates;
 
         internal CacheState(SqlBoundTableCache owner, SqlFunctionEnvironment functions)
         {
             _owner = owner;
             Functions = functions;
+            // A new environment has no validated predicate bindings yet. Keep the DML
+            // guard armed until validation proves this generation has no unresolved index.
+            HasUnresolvedIndexPredicates = owner._catalog.Tables.Any(table =>
+                owner._catalog.GetIndexes(table.ObjectId).Any(static index => index.Predicate is not null));
         }
 
         internal SqlBoundTable Get(SqlCatalogTable table, CancellationToken cancellationToken)

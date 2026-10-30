@@ -429,8 +429,8 @@ internal sealed partial class SqlPlanExecutor
                 var live = GetLiveIndexes(group.Key, statement);
                 foreach (var update in group)
                 {
-                    if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(live, group.Key, update.OldValues, hashes); }
-                    ValidateIndexKeysAndCollectUniqueHashes(live, group.Key, update.NewValues, hashes);
+                    if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(live, group.Key, update.OldValues, hashes, cancellationToken); }
+                    ValidateIndexKeysAndCollectUniqueHashes(live, group.Key, update.NewValues, hashes, cancellationToken);
                 }
                 await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
             }
@@ -440,7 +440,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var write in writes)
         {
             if (write.Values is not { } values) { continue; }
-            ValidateIndexKeysAndCollectUniqueHashes(directIndexes, plan.Table, values, directHashes);
+            ValidateIndexKeysAndCollectUniqueHashes(directIndexes, plan.Table, values, directHashes, cancellationToken);
         }
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, directHashes, cancellationToken, cascade: true).ConfigureAwait(false);
         var returned = plan.Returning is null ? null : new List<object?[]>(writes.Count);
@@ -465,6 +465,7 @@ internal sealed partial class SqlPlanExecutor
                     foreach (var live in directIndexes.Where(index => index.Metadata.IsUnique))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        if (!MatchesIndex(plan.Table, live.Metadata, values, prepared: true) || PartialNullKey(live.Metadata, live.KeyOrdinals, values)) { continue; }
                         var key = BuildIndexKey(plan.Table, live.KeyOrdinals, values);
                         statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(128L + key.Length);
                         var conflict = await live.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false);
@@ -501,7 +502,7 @@ internal sealed partial class SqlPlanExecutor
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     try
                     {
-                        await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
+                        await InsertIndexEntriesAsync(statement, bracket, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
                             SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                     }
                     catch (IndexUniqueViolationException exception) { throw TranslateUniqueViolation(update.Table, exception); }

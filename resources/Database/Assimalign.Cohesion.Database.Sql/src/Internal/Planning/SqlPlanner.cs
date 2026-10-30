@@ -437,6 +437,7 @@ internal sealed partial class SqlPlanner
 
         foreach (var index in indexes.OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
         {
+            if (index.Predicate is not null) { continue; }
             var seek = TryBuildSeek(table, index, predicates, out int prefixLength, out bool hasRange);
 
             if (seek is null)
@@ -1260,7 +1261,8 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists);
+        var partial = create.Predicate is null ? null : SqlPartialIndexPredicate.Declare(table, create, _catalog.DefaultCollation, _functions);
+        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists, partial);
     }
 
     private SqlDropIndexPlan PlanDropIndex(SqlDropIndexExpression drop)

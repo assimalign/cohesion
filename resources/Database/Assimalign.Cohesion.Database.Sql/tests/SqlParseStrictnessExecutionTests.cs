@@ -28,11 +28,12 @@ public sealed class SqlParseStrictnessExecutionTests
     /// CS00003 at the character and changes nothing.
     /// </summary>
     /// <param name="sql">A statement with a character outside the dialect.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character reports CS00003 and nothing executes")]
+    /// <param name="code">The syntax or recognized unsupported-surface identity.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character or deferred symbol has a coded refusal and nothing executes")]
     [InlineData("SELECT * FROM t ?;")]
-    [InlineData("SELECT * FROM t #;")]
-    [InlineData("SELECT * FROM t ^;")]
-    [InlineData("SELECT a # b FROM t;")]
+    [InlineData("SELECT * FROM t #;", "CK00001")]
+    [InlineData("SELECT * FROM t ^;", "CK00001")]
+    [InlineData("SELECT a # b FROM t;", "CK00001")]
     [InlineData("SELECT a FROM t WHERE b = ?;")]
     [InlineData("SELECT ? FROM t;")]
     [InlineData("DELETE FROM t ?;")]
@@ -51,8 +52,8 @@ public sealed class SqlParseStrictnessExecutionTests
     [InlineData("DELETE FROM t WHERE a = 1e+;")]
     // A stray character before the statement, such as a byte order mark.
     [InlineData("﻿DELETE FROM t;")]
-    public async Task ExecuteAsync_StrayCharacter_ShouldReportSyntaxErrorWithoutExecuting(string sql)
-        => await AssertRejectedAsync(sql, "CS00003");
+    public async Task ExecuteAsync_StrayCharacter_ShouldReportSyntaxErrorWithoutExecuting(string sql, string code = "CS00003")
+        => await AssertRejectedAsync(sql, code);
 
     /// <summary>
     /// ~ used to parse as bitwise NOT, whose evaluator returned NULL for a NULL operand and

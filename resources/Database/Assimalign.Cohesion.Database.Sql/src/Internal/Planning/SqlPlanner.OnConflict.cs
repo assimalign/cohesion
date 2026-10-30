@@ -25,7 +25,7 @@ internal sealed partial class SqlPlanner
         }
         else if (clause.TargetKind == SqlOnConflictTargetKind.Constraint)
         {
-            if (!_catalog.TryGetIndex(table.ObjectId, clause.ConstraintName!, out var index) || !index.IsUnique)
+            if (!_catalog.TryGetIndex(table.ObjectId, clause.ConstraintName!, out var index) || !index.IsUnique || index.Predicate is not null)
             {
                 string reason = table.Constraints.Any(constraint => string.Equals(constraint.Name, clause.ConstraintName, StringComparison.OrdinalIgnoreCase))
                     ? ErrorMessages.UpsertConstraintNotUnique : IsLegacyPrimaryKey(clause.ConstraintName!)
@@ -42,7 +42,7 @@ internal sealed partial class SqlPlanner
                 if (!table.Columns.Any(candidate => string.Equals(candidate.Name, column, StringComparison.OrdinalIgnoreCase)))
                 { throw Invalid(ErrorMessages.UpsertIndexMissing); }
             }
-            arbiters.AddRange(indexes.Where(index => index.IsUnique && columns.SetEquals(index.ColumnNames)));
+            arbiters.AddRange(indexes.Where(index => index.IsUnique && index.Predicate is null && columns.SetEquals(index.ColumnNames)));
             if (arbiters.Count == 0) { throw Invalid(ErrorMessages.UpsertIndexMissing); }
         }
 

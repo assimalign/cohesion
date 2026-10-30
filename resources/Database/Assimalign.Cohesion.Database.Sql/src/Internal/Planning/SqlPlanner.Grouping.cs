@@ -319,7 +319,7 @@ internal sealed partial class SqlPlanner
             (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
             (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated &&
                 SqlPersistedExpression.SameQuery(a.Subquery, b.Subquery),
-            (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated,
+            (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated && a.IsCaseInsensitive == b.IsCaseInsensitive,
             (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null)
                 && (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
             _ => false,

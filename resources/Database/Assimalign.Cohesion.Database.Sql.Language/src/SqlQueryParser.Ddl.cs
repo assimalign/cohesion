@@ -118,7 +118,15 @@ public sealed partial class SqlQueryParser
             SkipToClosingParenthesis(ref lexer);
         }
 
-        return new SqlCreateIndexExpression(indexName, table, columns, isUnique, ifNotExists, null,
+        SqlExpression? predicate = null;
+        if (IsKeyword(ref lexer, "WHERE"))
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.PartialIndex);
+            Advance(ref lexer);
+            predicate = ParseExpression(ref lexer);
+        }
+
+        return new SqlCreateIndexExpression(indexName, table, columns, isUnique, ifNotExists, predicate, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 

@@ -48,7 +48,9 @@ EXPLAIN with endpoint-pair partitions and separate search prefilters
 under the statement work/memory budgets; see [selector execution](DESIGN.md#gql-path-selectors-execution-1734-gq-sp2sp3).
 
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
-enforcement and node-property index creation. `AddGraph(name, graph => ...)` captures
+enforcement, database-wide node-property index names and independently named type/existence
+constraints. Named constraints validate existing data and share enforcement with property metadata;
+index/constraint drops preserve snapshot visibility. Catalog v2 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
 construction through `IDatabaseApplicationBuilder` and returns that builder. At Build the callback
 configures the sealed `GraphDatabaseEngineBuilder`: its `Options` (copied at build), the databases
 it declares (`AddDatabase(name)`: opened or created by the build, never dropped while declared), a

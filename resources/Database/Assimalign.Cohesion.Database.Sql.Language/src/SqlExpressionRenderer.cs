@@ -68,6 +68,21 @@ public static partial class SqlExpressionRenderer
             (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
     }
 
+    /// <summary>Renders CREATE INDEX, including its optional predicate, as canonical SQL.</summary>
+    /// <param name="query">The parsed index declaration.</param>
+    /// <returns>The canonical statement without a terminator.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The predicate exceeds the available stack.</exception>
+    /// <exception cref="NotSupportedException">The predicate contains an unsupported expression.</exception>
+    public static string Render(SqlCreateIndexExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return "CREATE " + (query.IsUnique ? "UNIQUE " : "") + "INDEX " +
+            (query.IfNotExists ? "IF NOT EXISTS " : "") + Identifier(query.IndexName) +
+            " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select(Identifier)) + ")" +
+            (query.Predicate is null ? "" : " WHERE " + Render(query.Predicate));
+    }
+
     private static void AppendOverride(StringBuilder builder, SqlIdentityOverride value)
     { if (value != SqlIdentityOverride.None) { builder.Append(value == SqlIdentityOverride.User ? " OVERRIDING USER VALUE" : " OVERRIDING SYSTEM VALUE"); } }
 
@@ -364,7 +379,9 @@ public static partial class SqlExpressionRenderer
         SqlQuantifiedComparisonExpression quantified => Operand(quantified.Operand, predicateLevel) + " " +
             OperatorText(quantified.Operator) + " " + quantified.Quantifier.ToString().ToUpperInvariant() +
             " (" + Select(quantified.Subquery) + ")",
-        SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
+        SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsCaseInsensitive
+            ? like.IsNegated ? " NOT ILIKE " : " ILIKE "
+            : like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel) + (like.Escape is null ? "" : " ESCAPE " + Operand(like.Escape, collateLevel)),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
         SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null => function.FunctionName,

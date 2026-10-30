@@ -83,6 +83,11 @@ Update-action snapshot conflicts retain CS04064 (40001) through the existing ser
 action syntax retains CS00003; malformed catalog action metadata retains CS06059, unsupported
 table extensions CS06060, and earlier SQL record-space formats CS06041. Compiled v8 is refused as the
 existing InvalidDocument schema.format condition.
+ILIKE and postfix casts (#1721, SQ-O1) allocate no diagnostic identity. ILIKE reuses
+CS02034 for malformed ESCAPE and CS05040 for the existing linguistic work budget.
+Postfix casts use the existing CAST CS02 conditions; malformed suffixes use CS00003.
+Regex, SIMILAR TO and deferred operators retain CK00001; ^ names exponentiation.
+
 Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
 two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
 clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
@@ -217,6 +222,9 @@ structured-carrier messages remain unprefixed.
 | New (#1717, SQ-S3) | CS03079 | Schema/identity — column has no identity (55000) |
 | New (#1717, SQ-S3) | CS03080 | Schema/dependency — sequence required by identity or column default (2BP01) |
 | New (#1717, SQ-S3) | CS03081 | Schema/ownership — invalid sequence OWNED BY target or identity ownership change (55000) |
+| New (#1630, SQ-P1) | CS03082 | Partial predicate on a primary key (42P16) |
+| New (#1630, SQ-P1) | CS03083 | Type change of a column read by a partial-index predicate (0A000) |
+| New (#1630, SQ-P1) | CS03084 | Inconsistent index predicate text/dependency metadata (42P17) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -284,6 +292,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS05087 | GROUPS requires ORDER BY (42P20) |
 | New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
 | New (#1719, SQ-R2 reader fix) | CS05090 | Execution/internal invariant — a CTE opens more readers than its plan counted (XX000) |
+| New (#1630, SQ-P1) | CS05091 | Prohibited expression or non-immutable function in a partial-index predicate (42P17) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -420,6 +429,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C2) | CG01018 | Binding/names — missing reduce/list-predicate declaration or identical accumulator and iterator names |
 | New (#1537, GQ-E1) | CG01019 | Binding/names — outer binding has a proven incompatible correlated pattern kind |
 | New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
+| New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
@@ -431,6 +441,9 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
 | New (#1735, GQ-M2 fixes) | CG03006 | Constraints — repeated or already-bound MERGE node has labels or properties |
 | New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
+| New (#1738, GQ-D1) | CG03008 | Schema — database-wide index/constraint name is already used |
+| New (#1738, GQ-D1) | CG03009 | Constraints — duplicate constraint kind or incompatible property type rule |
+| New (#1738, GQ-D1) | CG03010 | Constraints — existing data violates a newly created named constraint |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
@@ -454,6 +467,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
+| New (#1738, GQ-D1) | CG06019 | Format — graph catalog record version differs from v2; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |
@@ -520,6 +534,8 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK04005 | Transaction has already ended | — |
 | CK04006 | Transaction commit or rollback is in progress | — |
 | CK04007 | Running operation prevents transaction commit | — |
+| CK04008 | Undo marker is foreign, released, discarded or ended; undo control context is foreign, stale, a statement view or a snapshot pin (#1726) | — |
+| CK04009 | Partial undo is running or incomplete, or a statement/control/end prevents control admission; retry its target or an earlier marker, or roll back the transaction (#1726) | — |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
 | CK07003 | Session operations overlap | — |

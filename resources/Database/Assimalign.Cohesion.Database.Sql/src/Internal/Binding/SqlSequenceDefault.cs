@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -38,6 +39,17 @@ internal static class SqlSequenceDefault
         if (literal.LiteralType != SqlLiteralType.String) { throw new SqlPlanningException("CS03077", ErrorMessages.SequenceArgumentsInvalid); }
         if (!SqlSequenceExecution.TryName(literal.Value, out string schema, out string name)) { throw new SqlPlanningException("CS03077", ErrorMessages.SequenceArgumentsInvalid); }
         return catalog.FindSequence(schema, name) ?? throw new SqlPlanningException("CS03073", ErrorMessages.SequenceMissing);
+    }
+
+    // DDL and reopen must validate the same S:id vector without treating it as an F: call.
+    internal static ulong ValidateIdentity(SqlExpression expression, IReadOnlyList<string> identities)
+    {
+        if (identities.Count != 1 || !identities[0].StartsWith("S:", StringComparison.Ordinal) ||
+            !ulong.TryParse(identities[0].AsSpan(2), out ulong sequenceId))
+        { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
+        if (expression is not SqlNextValueExpression && (!TryId(expression, out ulong encodedId) || encodedId != sequenceId))
+        { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
+        return sequenceId;
     }
 
     internal static string Dependency(ulong id) => "S:" + id.ToString(CultureInfo.InvariantCulture);

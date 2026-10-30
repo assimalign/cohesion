@@ -35,7 +35,7 @@ public sealed class CatalogDecodeLocationTests
         await using var coordinator = new TransactionCoordinator(storage, storage.WriteAheadJournal, storage.Records);
         var id = Guid.NewGuid();
         byte[] original = GraphCatalogCodec.Encode(new CatalogRecord(
-            Label: new GraphLabelMetadata(id, "Person", DatabaseObjectOwner.Adhoc, null)), TransactionSequence.None);
+            label: new GraphLabelMetadata(id, "Person", DatabaseObjectOwner.Adhoc, null)), TransactionSequence.None);
         (PageId PageId, int SlotIndex) location;
         using (var bracket = storage.BeginTransaction())
         {

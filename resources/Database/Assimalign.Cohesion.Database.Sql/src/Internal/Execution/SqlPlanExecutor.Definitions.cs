@@ -146,6 +146,10 @@ internal sealed partial class SqlPlanExecutor
                     Check(text, column.DefaultFunctionCalls, $"DEFAULT of '{table.Schema}.{table.Name}.{column.Name}'");
                 }
             }
+            foreach (var index in _catalog.GetIndexes(table.ObjectId))
+            {
+                if (index.Predicate is { } predicate) { Check(predicate, index.PredicateFunctionCalls, index.Name); }
+            }
             foreach (var check in table.Constraints.Where(constraint => constraint.CheckExpression is not null))
             {
                 Check(check.CheckExpression!, check.CheckFunctionCalls, $"CHECK '{check.Name}' on '{table.Schema}.{table.Name}'");

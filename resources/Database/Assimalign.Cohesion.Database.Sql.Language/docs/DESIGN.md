@@ -1,5 +1,23 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+The current record-space format is 31; index predicates are persisted by Sql, independently
+of this parser assembly. Earlier catalog formats are refused without conversion.
+
+
+## Partial index grammar (#1630, SQ-P1)
+
+SqlCreateIndexExpression.Predicate retains the optional WHERE tree. The canonical statement
+renderer emits it after the ordered column list; scalar predicate rendering is unchanged.
+The profile adds CREATE INDEX WHERE beside CREATE INDEX (+1 clause). Parser completeness,
+positive/negative conformance and rendering cases advance together. CREATE INDEX subqueries
+reach engine predicate validation and fail with CS05091. They are never executable predicates.
+SQ-P1 deliberately advertises no implication/access optimization; see DIALECT.
+The execution conformance corpus covers bounded runtime cast slots, registration changes on
+reopen, and constraint/creation-order arbitration with deferred partial-predicate failures.
+It also covers JSON/JSONB runtime representations and domains, complete creation diagnostics,
+function-environment refresh, and bulk failure markers that retain no predicate exceptions.
+
+
 ## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
 
 ON UPDATE accepts CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION beside ON DELETE,
@@ -100,7 +118,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 30's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 31's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -1205,13 +1223,41 @@ The engine's view metadata contract is documented in DIALECT: complete common ty
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
 
+## ILIKE and postfix CAST (#1721, SQ-O1)
+
+ILIKE is contextual and adds IsCaseInsensitive to the existing LIKE AST, preserving the
+keyword/profile counts and old identifier quoting. LIKE and ILIKE share the predicate rung,
+ESCAPE operands, NULL behavior, nonassociativity and nesting guard. The matcher and effective
+collation semantics are specified in DIALECT.md and the SQL engine DESIGN.
+
+The postfix :: loop sits between ParsePrimary and unary signs; each left-associated cast
+uses Nest and the same target parser as CAST, including modifiers, aliases and quoted domains.
+It renders only as CAST, preserving every existing renderer precedence and canonical form.
+Direct +numeric remains a literal alias only when no postfix cast follows, preserving +1
+and ORDER BY +1 trees. Cast lookahead keeps +1::TEXT and + 1::TEXT at the sign rung,
+so both fail with CS02003 after casting, as unary minus does; +1::INT remains 1.
+Binary ILIKE follows LOWER(x) LIKE LOWER(p) with the engine's runtime ToLowerInvariant
+mapping: Σ differs from ς, ſ differs from s, É matches é and ΟΣ matches οσ.
+The other three collations extend PostgreSQL's nondeterministic-collation refusal with
+case-insensitive matching under their own equality. Invariant uses CompareOptions.IgnoreCase:
+ΟΣ matches ος, canonical é/é equivalence follows invariant equality, and İ differs from i
+while still matching _. The two index-backed insensitive transforms remain unchanged.
+PostgreSQL src/backend/parser/gram.y:904-914 supplies precedence; like.c:186-221 supplies
+determinism admission and lowercasing. The shared lexer is unchanged. All three language profiles
+pin ::, adjacent colons and ~~* token sequences; GQL labels retain their colon grammar.
+Deferred # and ^ receive named CK00001 refusals in SQL lexical preflight, with ^ described as
+exponentiation (PostgreSQL src/include/catalog/pg_operator.dat:2119,2300). No public interface,
+diagnostic identity, format or wire layout is added.
+Persisted-expression equality and grouping identity distinguish LIKE from ILIKE. Existing
+persisted canonical text, including contextual ilike identifiers and REGCLASS casts, keeps its form.
+
 ## Distinct predicates, truth tests and LIKE ESCAPE (#1111)
 
 Dedicated SqlDistinctExpression and SqlBooleanTestExpression nodes retain negation;
 SqlTruthValue selects TRUE, FALSE or UNKNOWN. SqlLikeExpression adds an optional Escape
 operand. Depth accounting, canonical rendering and the complete tree dump include every
 operand. The parser uses PostgreSQL's IS/comparison/predicate/ESCAPE ladder and separates
-concatenation from addition; no named clause or keyword is added. ILIKE/SIMILAR are refused
+concatenation from addition; no named clause or keyword is added. SIMILAR is refused
 positionally, so ordinary identifier quoting stays unchanged. ISNULL/NOTNULL are likewise
 postfix capability refusals. Both list and subquery IN/NOT IN forms complete at the
 closing parenthesis and can feed another predicate (gram.y:15632-15668); binary
