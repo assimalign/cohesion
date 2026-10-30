@@ -151,6 +151,19 @@ internal sealed class FaultInjectingJournalSqlStorageStrategy : SqlStorageStrate
     /// </summary>
     /// <param name="databaseName">The database name.</param>
     /// <param name="catalog">True for the database's catalog file set; false for its data set.</param>
+    internal void CopyDatabase(string source, string target)
+    {
+        lock (_sync)
+        {
+            foreach (bool catalog in new[] { false, true })
+            {
+                var files = _storages[Key(source, catalog)];
+                _storages[Key(target, catalog)] = new Files(Copy(files.Data, new FaultInjectingDataStream(this)),
+                    Copy(files.Journal, new FaultInjectingStream()), Copy(files.Backup, new MemoryStream()));
+            }
+        }
+    }
+
     internal (byte[] Data, byte[] Journal) Capture(string databaseName, bool catalog = false)
     {
         lock (_sync)

@@ -1,5 +1,19 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Anonymous savepoint adapters (#1726, XT-3)
+
+SQL row-lineage before-images join the shared ordered ledger only while a marker is live.
+A failed physical statement restores them before its suffix is discarded. Undone lineage
+retirement entries leave a marker-only list immediately, so repeated update/undo cannot grow
+behind a retained snapshot; root commit transfers surviving entries to ordinary pruning.
+The record-space adapter removes outgoing lineage when undo deletes a created predecessor or
+clears its replacement tombstone. Row/index/key-lock undo shares the kernel's reverse order.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission belong to XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit.
+
 ## Partial indexes (#1630, SQ-P1)
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
