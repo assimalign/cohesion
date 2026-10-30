@@ -28,7 +28,7 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (_subqueryValues is not { HasCorrelatedQueries: true } frame) { return ValueTask.CompletedTask; }
-        frame.BeginRow(row);
+        frame.BeginRow(row, RecursiveState?.Memory);
         return expression is null ? ValueTask.CompletedTask : PrepareExpressionAsync(expression, row, statement, cancellationToken);
     }
 
@@ -39,8 +39,15 @@ internal sealed partial class SqlPlanExecutor
         RuntimeHelpers.EnsureSufficientExecutionStack();
         cancellationToken.ThrowIfCancellationRequested();
         var frame = _subqueryValues!;
+        if (frame.Evaluated!.ContainsKey(expression)) { return; }
         var evaluator = ExecutionEvaluator(frame, cancellationToken);
         int? slot = expression switch { SqlBoundSubquery query => query.Slot, SqlBoundInSubquery member => member.Slot, SqlBoundQuantifiedComparison quantified => quantified.Slot, _ => null };
+        if (RecursiveState is not null && slot is int streamed && frame.Queries.TryGetValue(streamed, out var correlated) &&
+            correlated.IsCorrelated && expression is SqlBoundInSubquery or SqlBoundQuantifiedComparison)
+        {
+            frame.Evaluated.Add(expression, await EvaluateRecursiveSetAsync(expression, correlated, row, statement, cancellationToken).ConfigureAwait(false));
+            return;
+        }
         if (slot is int id && frame.Queries.TryGetValue(id, out var binding) && !frame.TryGet(id, out _))
         {
             if (binding.IsCorrelated || !frame.StatementValues.TryGetValue(id, out var values))

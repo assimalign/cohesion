@@ -115,10 +115,12 @@ internal sealed partial class SqlPlanner
                 column.Type.Type == DatabaseType.Null ? new DatabaseTypeInfo(DatabaseType.String) : column.Type,
                 true, collation: column.Collation, domainName: column.DomainName)).ToArray();
         // parse_cte.c:580-632 resolves unknown anchor output to text before publishing
-        // the self-reference. This binding-only relation never reaches an executor.
+        // the self-reference. Its identity binds the executor's working-table scan.
         var relation = new SqlDerivedRelation(definition.Name, anchor, columns) { IsCommonTable = true, IsRecursiveReference = true };
         state.Relations![definition.Name] = relation;
         var recursive = PlanQuery(union.Right);
+        var conversions = new List<SqlBoundExpression>();
+        var anchorConversions = new List<SqlBoundExpression>();
         var second = QueryOutput(recursive);
         if (columns.Length != second.Projections.Count)
         { throw RecursiveError("CS02065", ErrorMessages.CteRecursiveColumnCount, definition); }
@@ -139,7 +141,9 @@ internal sealed partial class SqlPlanner
                 common.Scale != first.Type.Scale || first.DomainName is not null &&
                 (next.Unknown || !string.Equals(first.DomainName, next.Domain, StringComparison.OrdinalIgnoreCase)))
             { throw TypeError(common); }
-            _ = CoerceSetValue(index, next.Type.Type, common, next.Unknown ? projection.Expression : null);
+            conversions.Add(CoerceSetValue(index, next.Type.Type, first.Type, next.Unknown ? projection.Expression : null));
+            var initial = SetColumn(output.Projections[index], output.Columns);
+            anchorConversions.Add(CoerceSetValue(index, initial.Type.Type, first.Type, initial.Unknown ? output.Projections[index].Expression : null));
             if (first.Type.Type is DatabaseType.String or DatabaseType.Character)
             {
                 var a = output.Projections[index].Metadata?.Collation.Resolve(null) ?? default;
@@ -172,7 +176,14 @@ internal sealed partial class SqlPlanner
         state.Dependencies!.Remove(relation);
         // Later WITH entries and the main query read the completed CTE; their
         // aggregates are not aggregates of this definition's recursive term.
-        return relation with { IsRecursiveReference = false };
+        var projections = columns.Select((column, index) => new SqlProjection(column.Name, null, null, column.Type.Type)
+        {
+            Value = new SqlBoundSlot(index), Collation = new SqlBoundCollation(column.Collation ?? _catalog.DefaultCollation),
+            IsNullable = true, HasOutputName = true, MaxLength = column.Type.MaxLength,
+            Metadata = new SqlProjectionMetadata(output.Projections[index].Metadata?.Collation ?? default, null, column.Type, column.DomainName),
+        }).ToArray();
+        return relation with { IsRecursiveReference = false, Query = new SqlRecursiveUnionPlan(
+            relation, new(anchor, anchorConversions), new(recursive, conversions), union.IsAll, projections, columns) };
 
         static string TypeName(DatabaseTypeInfo type, string? domain)
             => domain ?? (type.Type == DatabaseType.Null ? "NULL" : SqlType.ForStorage(type).Name);

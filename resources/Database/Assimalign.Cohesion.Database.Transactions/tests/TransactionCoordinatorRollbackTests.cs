@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// rollback starts, the transaction ends, no lock outlives the undo of its versions, and the next
 /// writer proceeds. Recovery classifies a writer whose abort record is missing as aborted.
 /// </summary>
-public class TransactionCoordinatorRollbackTests
+public partial class TransactionCoordinatorRollbackTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
     private static readonly LockResource _row = LockResource.Entry(7, 7);

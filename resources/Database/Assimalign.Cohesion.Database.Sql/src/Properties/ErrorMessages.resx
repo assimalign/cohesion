@@ -177,7 +177,6 @@
   <data name="CteRecursiveColumnCount" xml:space="preserve"><value>Recursive query '{0}' must have the same number of anchor, recursive and declared output columns.</value></data>
   <data name="CteRecursiveType" xml:space="preserve"><value>Recursive query '{0}' column {1} has type {2} in its non-recursive term but type {3} in its recursive UNION. Cast the output of the non-recursive term to the correct type.</value></data>
   <data name="CteRecursiveCollation" xml:space="preserve"><value>Recursive query '{0}' column {1} has collation '{2}' in its non-recursive term, conflicting with recursive UNION collation '{3}'. Use COLLATE to set the collation of the non-recursive term.</value></data>
-  <data name="CteRecursiveExecution" xml:space="preserve"><value>Recursive CTE planning and execution are not supported.</value></data>
   <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
   <data name="ConstantQueryWildcard" xml:space="preserve"><value>A SELECT without FROM cannot project a wildcard.</value></data>
   <data name="CountNonNegative" xml:space="preserve"><value>{0} requires a non-negative integer.</value></data>
@@ -971,6 +970,10 @@
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
   <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
+  <data name="TransactionIsolationOutside" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL requires an active transaction block.</value></data>
+  <data name="TransactionIsolationLate" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL must precede the first data statement and cannot run in a savepoint or while a statement is running.</value></data>
+  <data name="TransactionSerializable" xml:space="preserve"><value>SERIALIZABLE isolation is not supported; use REPEATABLE READ or READ COMMITTED.</value></data>
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
   <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
+  <data name="RecursiveReaderCountExceeded" xml:space="preserve"><value>The CTE '{0}' opened more readers than its execution plan counted.</value></data>
 </root>

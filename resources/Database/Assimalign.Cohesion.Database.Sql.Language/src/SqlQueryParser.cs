@@ -117,7 +117,11 @@ public sealed partial class SqlQueryParser : QueryParser
         string firstToken = CurrentText(ref lexer);
         SqlQueryExpression expression;
 
-        if (IsWord(ref lexer, "DISCARD"))
+        if (IsWord(ref lexer, "SET") && StartsSetTransaction(lexer))
+        {
+            expression = ParseTransaction(ref lexer);
+        }
+        else if (IsWord(ref lexer, "DISCARD"))
         {
             RequireSchemaClause(ref lexer, SqlClauses.DiscardAll);
             Advance(ref lexer);
@@ -308,27 +312,34 @@ public sealed partial class SqlQueryParser : QueryParser
     {
         int start = lexer.Current.Position;
         bool isStart = IsWord(ref lexer, "START");
+        bool isSet = IsWord(ref lexer, "SET");
         bool isEnd = IsKeyword(ref lexer, "END");
-        var command = isStart || IsKeyword(ref lexer, "BEGIN")
+        var command = isSet ? SqlQueryCommandType.SetTransaction : isStart || IsKeyword(ref lexer, "BEGIN")
             ? SqlQueryCommandType.Begin
             : isEnd || IsKeyword(ref lexer, "COMMIT")
                 ? SqlQueryCommandType.Commit
                 : SqlQueryCommandType.Rollback;
         Advance(ref lexer);
-        if (isStart)
+        if (isStart || isSet)
         {
-            ExpectKeyword(ref lexer, "TRANSACTION", "TRANSACTION after START");
+            ExpectKeyword(ref lexer, "TRANSACTION", isSet ? "TRANSACTION after SET" : "TRANSACTION after START");
         }
         else if (!isEnd && (IsKeyword(ref lexer, "TRANSACTION") || IsWord(ref lexer, "WORK")))
         {
             Advance(ref lexer);
+        }
+        var levels = new List<SqlTransactionIsolationLevel>();
+        if (command is SqlQueryCommandType.Begin or SqlQueryCommandType.SetTransaction)
+        {
+            if (isSet) { RequireSchemaClause(ref lexer, SqlClauses.SetTransaction); }
+            ParseTransactionModes(ref lexer, levels, isSet);
         }
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
         {
             AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseTransactionVoid);
             ConsumeRemaining(ref lexer);
         }
-        return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd));
+        return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd), levels.ToArray());
     }
 
     /// <summary>
@@ -664,6 +675,7 @@ public sealed partial class SqlQueryParser : QueryParser
             SqlQueryCommandType.Create => "CREATE",
             SqlQueryCommandType.Drop => "DROP",
             SqlQueryCommandType.Begin => "BEGIN",
+            SqlQueryCommandType.SetTransaction => "SET TRANSACTION",
             SqlQueryCommandType.Commit => "COMMIT",
             SqlQueryCommandType.Rollback => "ROLLBACK",
             _ => "SQL",

@@ -65,9 +65,9 @@ public sealed class GqlKeywordDispositionTests
         ["UNWIND"] = Parses("UNWIND [1, 2] AS a RETURN a"),
         ["FOREACH"] = Rejects("MATCH (a) FOREACH (x IN [1] | SET a.y = x)", "FOREACH"),
         ["UNION"] = Parses("RETURN 1 AS x UNION RETURN 2 AS x"),
-        ["EXCEPT"] = Rejects("RETURN 1 AS x EXCEPT RETURN 2 AS x", "EXCEPT"),
-        ["INTERSECT"] = Rejects("RETURN 1 AS x INTERSECT RETURN 2 AS x", "INTERSECT"),
-        ["OTHERWISE"] = Rejects("RETURN 1 AS x OTHERWISE RETURN 2 AS x", "OTHERWISE"),
+        ["EXCEPT"] = Parses("RETURN 1 AS x EXCEPT RETURN 2 AS x"),
+        ["INTERSECT"] = Parses("RETURN 1 AS x INTERSECT RETURN 2 AS x"),
+        ["OTHERWISE"] = Parses("RETURN 1 AS x OTHERWISE RETURN 2 AS x"),
         ["DISTINCT"] = Parses("RETURN 1 AS x UNION DISTINCT RETURN 2 AS x"),
         ["ALL"] = Parses("MATCH (a) RETURN ALL a.name"),
         ["ANY"] = Parses("MATCH ANY (a)-[]->(b) RETURN a"),
@@ -309,6 +309,7 @@ public sealed class GqlKeywordDispositionTests
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Append("REDUCE") // Lexical binding form; not an ordinary scalar function.
             .Append("ON") // Contextual MERGE branch prefix; ordinary variable spelling stays valid.
+            .Concat(new[] { "EXCEPT", "INTERSECT", "OTHERWISE" }) // Contextual query conjunctions.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

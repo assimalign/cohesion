@@ -17,6 +17,7 @@ internal sealed partial class DocumentPlanner
     {
         DocumentNestedPlan => "SelectWithSubqueries",
         DocumentNestedQueryPlan => "Subquery",
+        DocumentJoinPlan => "Select",
         DocumentPlan => "Select",
         DocumentFromPlan => "Select",
         DocumentLogicalPlan { Query.IsValue: true, IsGrouped: false } => "ProjectValue",
@@ -44,6 +45,7 @@ internal sealed partial class DocumentPlanner
 
     private static IReadOnlyList<DatabasePlanNode> DescribeNodes(DocumentStatementPlan plan)
     {
+        if (plan is DocumentJoinPlan join) { plan = join.Input; }
         var nodes = new List<DatabasePlanNode>();
         string? target = plan switch
         {
@@ -162,11 +164,13 @@ internal sealed partial class DocumentPlanner
         int AddBindings(DocumentLogicalPlan sourceLogical, int parent)
         {
             // Execution reads this chain from access upwards, preserving binding order.
-            for (int i = sourceLogical.Query.Unnest.Count - 1; i >= 0; i--)
+            for (int i = sourceLogical.Query.Bindings.Count - 1; i >= 0; i--)
             {
-                var binding = sourceLogical.Query.Unnest[i];
+                var binding = sourceLogical.Query.Bindings[i];
                 int bindingId = nodes.Count;
-                Add(binding.IsLeft ? "LeftUnnest" : "Unnest", parent, detail: binding.Variable);
+                Add(binding is OqlJoinExpression joinBinding ? joinBinding.IsNest ? joinBinding.IsLeft ? "LeftKeyNest" : "KeyNest" : joinBinding.IsLeft ? "LeftKeyJoin" : "KeyJoin" :
+                    binding.IsLeft ? "LeftUnnest" : "Unnest", parent, detail: binding is OqlJoinExpression lookup ?
+                        "collection=" + lookup.Collection + "; alias=" + binding.Variable + "; cache=statement; lookup=snapshot_key" : binding.Variable);
                 parent = bindingId;
             }
             return parent;

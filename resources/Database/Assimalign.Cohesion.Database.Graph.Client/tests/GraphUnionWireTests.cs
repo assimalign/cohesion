@@ -38,9 +38,6 @@ public sealed class GraphUnionWireTests
             ("RETURN [] AS x UNION MATCH (n:Missing) RETURN [n] AS x", "CG05001"),
             ("RETURN 0 AS k NEXT RETURN [] AS x UNION MATCH (n:Missing) RETURN [n] AS x", "CG05001"),
             ("RETURN [] AS x UNION MATCH (n:Missing) RETURN [n] AS x NEXT RETURN x", "CG05001"),
-            ("RETURN 1 AS x EXCEPT RETURN 2 AS x", "CK00001"),
-            ("RETURN 1 AS x INTERSECT RETURN 2 AS x", "CK00001"),
-            ("RETURN 1 AS x OTHERWISE RETURN 2 AS x", "CK00001"),
         })
         {
             var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(query, cancellationToken: harness.Token));

@@ -21,6 +21,11 @@ and ordering. Counts accept literals or parameters through Int64.MaxValue; inval
 CD00007. LIMIT 0 returns planned column metadata after static validation and skips all sources
 and blocking stages. Other stored and system pages retain full-result column types, including
 empty results; expression and derived sources infer theirs over the selected page.
+INNER/LEFT key JOIN and NEST use statement-snapshot document lookups with a bounded statement
+cache capped at one eighth of the statement memory grant, per-source metadata and synthetic stars.
+NEST returns zero/one-element arrays, with MISSING for unknown keys on LEFT NEST. Every SELECT
+source in a joined statement requires an explicit alias; general predicates and UPDATE/DELETE
+source joins remain deferred.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
 ANY/SOME/EVERY and array-value IN query arrays without expansion. Expression SELECTs
 return arrays on a shared nested execution context; EXISTS and IN (SELECT RAW ...) compose with

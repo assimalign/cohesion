@@ -180,7 +180,7 @@ internal sealed partial class DocumentExpressionEvaluator
                 ValidateInputs(select.Source);
                 _ = PagingCount(select.Limit, "LIMIT");
                 _ = PagingCount(select.Offset, "OFFSET");
-                foreach (var binding in select.Unnest) { ValidateInputs(binding.Collection); }
+                foreach (var binding in select.Bindings) { ValidateInputs(binding.Expression); }
                 foreach (var projection in select.Projections) { ValidateInputs(projection.Expression); }
                 ValidateInputs(select.Predicate);
                 foreach (var key in select.GroupBy) { ValidateInputs(key); }
@@ -244,7 +244,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             frames.Push(frame);
         }
-        foreach (var frame in frames) { members.Add(new(frame.Name, frame.Value)); }
+        foreach (var frame in frames) { members.Add(new(frame.Name, frame.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : frame.Value)); }
         return DocumentJsonValue.Object(members, _writeVerb, _constructorMaxDepth);
     }
 
@@ -326,6 +326,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             start = 1;
             object? value = found.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : found.Value;
+            if (value is DocumentMissing) { return DocumentMissing.Instance; }
             if (value is not JsonElement json)
             { return start == path.Segments.Count ? value : DocumentMissing.Instance; }
             current = json;
@@ -363,6 +364,8 @@ internal sealed partial class DocumentExpressionEvaluator
                 for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
                 { if (frame.Name == name) { found = frame; break; } }
             }
+            if (found?.Value is DocumentMissing missing && !ReferenceEquals(missing, DocumentMissing.Instance))
+            { return DocumentMissing.Instance; }
             source = found?.Value is DocumentEvaluationContext captured ? captured : default;
         }
         return source.Id is null ? null : expression.Member == "id" ? source.Id : (decimal)source.Version;
@@ -497,6 +500,7 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private static object? Unary(string operation, object? value) => operation switch
     {
+        ".*" => value,
         "EXISTS" => value is DocumentMissing ? value : value is JsonElement { ValueKind: JsonValueKind.Array } array ? array.GetArrayLength() > 0 : null,
         "IS MISSING" => value is DocumentMissing,
         "IS NOT MISSING" => value is not DocumentMissing,

@@ -313,6 +313,10 @@ internal static class Program
         Check("in process: DESC NULLS FIRST", await RowsAsync(session, "SELECT id FROM null_ordering ORDER BY x DESC NULLS FIRST, id"), [[2], [3], [1]]);
         Check("in process: aggregate NULL placement", await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY x NULLS LAST, id) FROM null_ordering"), [["a,c,b"]]);
         Check("in process: SELECT without FROM (#1373)", await RowsAsync(session, "SELECT (SELECT 42) WHERE 1 IN (SELECT 1) AND EXISTS (SELECT NULL)"), [[42L]]);
+        Check("in process: recursive LIMIT demand (#1719)", await RowsAsync(session,
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT n FROM r LIMIT 3"), [[1L], [2L], [3L]]);
+        Check("in process: recursive DISTINCT fixpoint (#1719)", await RowsAsync(session,
+            "WITH RECURSIVE r(n) AS (SELECT NULL UNION SELECT n FROM r) SELECT n FROM r"), [[null]]);
         Check("in process: public function timestamp (#1373)",
             new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
         Check<DateTimeOffset?>("in process: absent function timestamp (#1373)", default(SqlFunctionContext).TransactionTimestamp, null);
@@ -651,6 +655,10 @@ internal static class Program
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
         Check("over the wire: chained CTEs", await RowsAsync(connection,
             "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);
+        Check("over the wire: recursive shared demand (#1719)", await RowsAsync(connection,
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT a.n,b.n FROM r a CROSS JOIN r b LIMIT 3", timeout.Token), [[1L, 1L], [1L, 2L], [1L, 3L]]);
+        Check("over the wire: recursive DISTINCT fixpoint (#1719)", await RowsAsync(connection,
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION SELECT n FROM r) SELECT n FROM r", timeout.Token), [[1L]]);
         await connection.ExecuteAsync("CREATE TABLE cte_wire (id BIGINT)", cancellationToken: timeout.Token);
         Check("over the wire: WITH INSERT", await connection.ExecuteAsync(
             "WITH a AS (SELECT Id FROM customers) INSERT INTO cte_wire SELECT Id FROM a", cancellationToken: timeout.Token), 2L);

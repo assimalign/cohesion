@@ -1281,9 +1281,9 @@ FALSE/TRUE (PostgreSQL src/backend/executor/nodeSubplan.c:244-269,399-427).
 Scalar folding evaluates the operand once for a nonempty set and skips it for an empty
 one; preparation also skips correlated scalar children of that operand. Independent
 subqueries retain eager statement preparation.
-Comparison folding stops at a deciding result; the existing set materializer still
-reads child output first, once per statement for independent children and per frame
-for correlated children. Lazy correlated preparation follows CASE/COALESCE/Boolean
+Comparison folding stops at a deciding result. Recursive correlated sets compare
+while pulling their input; independent children retain statement materialization.
+Ordinary nonrecursive correlated children retain per-frame materialization. Lazy correlated preparation follows CASE/COALESCE/Boolean
 branches as before. No query, transaction or read view is opened by scalar evaluation.
 
 Ordinary value comparison and CHAR comparand binding are reused, including CS02055
@@ -1297,7 +1297,7 @@ vocabulary rows for array refusals and stable persisted identifier quoting, so
 no persisted contract or wire version changes. No public interface, construction
 bridge, assembly grant or project reference is added.
 
-## WITH RECURSIVE binding (#1719, SQ-R1)
+## WITH RECURSIVE binding and fixpoints (#1719, SQ-R1/SQ-R2)
 
 WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
 entries bind in dependency order and keep ordinary reachable-only materialization.
@@ -1322,13 +1322,75 @@ Top-level recursive UNION ORDER BY,
 LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
 VIEW, nested WITH and modifying CTE bodies remain CK00001.
 
-Valid recursive definitions bind all entries and the consuming statement, then
-planning, EXPLAIN and execution return CK00001 until SQ-R2, even for an unused
-recursive definition. No working-table operator or depth limit is introduced here.
-Binding defers count/seek and constant-fold evaluation once recursion is identified.
-CREATE VIEW with a recursive query body freezes ordinary anchor metadata without
-executing it; cached and reopened view use propagates the same planning refusal.
-No catalog, storage or wire format changes are needed.
+SQ-R2 executes the anchor once, then evaluates the recursive term over only the
+previous iteration's accepted rows until an iteration is empty. UNION ALL retains
+every row; UNION compares against every accepted row, with NULLs equal and the
+anchor's SQL collation and CHAR equality. Conversion to anchor types precedes
+membership checks. There is no implicit recursion-depth limit.
+
+CTE scans pull on demand. Each reader owns a position in one shared buffer; the
+furthest reader advances its producer. Working and intermediate tables are disjoint
+immutable ranges of that buffer. This avoids duplicate payload storage while
+preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
+subquery can stop production early, including when a CTE has multiple readers.
+ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
+Windows, sorts and set operations consume completed inputs; blocking consumers
+that retain unbounded input exhaust StatementMemoryBudget with CS05067. Grouping of native
+COUNT, SUM and AVG consumes rows as they arrive and retains keys and aggregate
+state; other aggregates keep their accounted, completed inputs. Infinite pipelines
+with bounded retained state, such as COUNT or a top-K sort, require cancellation;
+there is no growing state for the memory budget to refuse. Correlated IN,
+ANY/SOME and ALL compare each row as it arrives and stop at the first decisive
+comparison; UNKNOWN remains undecided until completion (PostgreSQL
+`src/backend/executor/nodeSubplan.c:399-427`). Independent sets may materialize.
+Correlated slot ownership expires when its frame advances; independent cached
+results retain their statement lifetime.
+
+The working/intermediate ranges, shared buffer, DISTINCT hash state and retained
+query scratch share StatementMemoryBudget (default 64 MiB). Reservations include
+container growth and reference-identity payload accounting; CS05067 refuses an
+over-budget recursive operation. Cancellation is checked on every produced or
+scanned row and at each iteration. All grants unwind on completion, early stop,
+refusal or cancellation. EXPLAIN shows RecursiveUnion and WorkTableScan;
+EXPLAIN ANALYZE adds iteration, accepted-row and candidate counters. Recursive iterations include the terminal empty pass; candidates include anchor and recursive rows before DISTINCT, while accepted rows count the shared output.
+
+Binding still defers count/seek and constant-fold evaluation once recursion is
+identified. Ordinary CREATE VIEW definitions containing WITH RECURSIVE freeze the
+anchor metadata, execute on demand and rebind after reopen. CREATE RECURSIVE VIEW
+remains excluded. No catalog, storage or wire format changes are needed.
+
+Only plans marked as containing recursion use the pull executor. Ordinary stored
+queries and nonrecursive WITH keep their original materialization path and object
+layouts. Recursive statements use demand-preserving nested loops and existing
+bound index probes; optional eager hash costing is bypassed. FULL consumers retain
+an independently charged right-side match bitmap. Blocking group, sort and set
+scratch uses the same reference ledger as windows, with the general statement
+budget diagnostic. The final selected result is materialized before statement
+resources are released, preserving existing session and wire lifetimes.
+
+Single-pass CTE scans reclaim consumed rows after every reader, including readers
+not opened yet, has passed them and no working range needs them. Working ranges
+expire at iteration boundaries after the old producer closes, following PostgreSQL
+`src/backend/executor/nodeRecursiveunion.c:127-144`. A circular buffer clears released
+references and reuses its slots; DISTINCT keeps its own membership references.
+Logical scan positions use Int64; buffer capacities count only retained rows.
+Reader counts follow the normalized join tree and each view runtime namespace.
+MERGE source associations and action subqueries are rescans, like UPDATE/DELETE
+join sources. An unknown plan node conservatively marks every CTE in its scope
+rescannable; entirely hidden identities also default to retaining history. Opening
+a reader after a table has exhausted its counted readers reports the internal
+invariant diagnostic CS05090 before allocating a reader or reading released rows.
+Nested-loop or correlated rescans conservatively retain history, as PostgreSQL's
+rewindable tuplestore does (`src/backend/executor/nodeCtescan.c:185-196`). Container
+reservations precede growth and include old/new overlap. There is no spill or
+row/depth default beyond retained statement memory and cancellation. All R1 grammar and binding
+restrictions remain in force. No public interface, visibility grant, project
+reference, catalog version or wire version is added.
+
+Generated graph/tree oracles cover cyclic DISTINCT closure and bag paths. Shared
+readers verify that production equals the furthest position, and 200/400-row chains
+verify 200/400 candidate visits rather than repeated prefix scans. Cancellation
+inside one growing iteration and memory refusal both leave live grant bytes zero.
 
 IsRecursiveScope records the list modifier on each AST definition, independently
 of whether it self-references. Binding retains the existing case-insensitive name
@@ -1344,7 +1406,7 @@ References re-derived from the local PostgreSQL clone: src/backend/parser/parse_
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
 (dependencies), 915-1019 (form/tails), 1027-1199 (references and joins), 1209-1277
 (set operands); parse_collate.c:807-860 (implicit default and conflicts);
-parse_agg.c:1327-1334 (aggregates). No reference code is copied.
+parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table fixpoint) and nodeCtescan.c:74-129 (shared read pointers and demand). No reference code is copied.
 
 | Code | Condition | PostgreSQL SQLSTATE |
 | --- | --- | --- |
@@ -1359,6 +1421,8 @@ parse_agg.c:1327-1334 (aggregates). No reference code is copied.
 | CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
 | CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
 | CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
+| CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
+| CS05090 | Internal invariant: a CTE opens more readers than its plan counted | XX000 |
 
 ## Subquery and insert-source operators (#1021)
 
@@ -1493,7 +1557,7 @@ evaluator layout and synchronous execution path, preserving its allocation budge
 PostgreSQL's source references and SQL-visible errors are recorded in DIALECT.md.
 Parsing and planning enforce at most 32
 subquery levels, counting derived bodies too. UPDATE SET, VALUES, CHECK/DEFAULT and LIMIT/OFFSET expression
-subqueries, nested CTEs, recursive execution and lateral joins remain
+subqueries, nested CTEs and lateral joins remain
 outside the profile. Every FROM-less SELECT uses one implicit row, with ordinary filters, aggregation and row windows. Subquery resolution binds
 each use site to its slot number when the statement is planned; it needs no
 language-assembly friend access or public AST constructors. See [DIALECT.md](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#subqueries-and-query-source-inserts-1021)
@@ -3702,15 +3766,16 @@ PostgreSQL references: tablecmds.c:3903-4062 (column identity), :4329-4385 (rela
 
 ## UPDATE final foreign-key state (#1667)
 
-Multi-row UPDATE and ON CONFLICT share BuildConstraintUpdates: outgoing and incoming
-NO ACTION/RESTRICT probes exclude old replaced heap versions and contribute every final
+Multi-row UPDATE and ON CONFLICT share BuildConstraintUpdates: outgoing probes and incoming
+NO ACTION probes exclude old replaced heap versions and contribute every final
 replacement. A removed parent key cannot authorize a new child; a self-reference can move
 with its key, and mutually referenced keys can swap if the final state is consistent.
-Incoming checks permit an old key retained by another replacement. UPDATE tombstones all
+Incoming NO ACTION checks permit an old key retained by another replacement; incoming
+RESTRICT checks run immediately against existing children and accept no substitute (#1723). UPDATE tombstones all
 replaced row/index versions before inserting any new versions in the same rollback bracket,
 so unique entries also validate the final state during a swap. Snapshot and ReadCommitted
 use the same pending view. Wire regressions select isolation via the existing server-session
-API because SQL BEGIN deliberately has no isolation clause; UPDATE/results use both transports.
+API; SQL BEGIN now also accepts isolation options (#1012); UPDATE/results use both transports.
 
 ## MERGE binding, association and execution (#1715, SQ-M1/SQ-M2/SQ-M3)
 
@@ -3747,7 +3812,7 @@ statement mark brackets materialization and writes. Keyword-spelled CTE names su
 over, partition, window and natural work after USING and as output qualifiers.
 WITH RECURSIVE before MERGE is refused at RECURSIVE with CK00001 even for acyclic
 lists (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Other consumers bind
-recursive lists before the SQ-R2 planning/execution gate described above.
+recursive lists and execute the SQ-R2 fixpoint operator described above.
 Each action retains its own bound condition/value subqueries. A lazy action frame prepares
 only reached scalar branches; independent query values cache per statement, correlated values
 expire per candidate. A failed condition never evaluates the action's values. The first matching
@@ -5644,6 +5709,59 @@ definition self-commits, 600-row unindexed apply evictions, publication timeout/
 and delayed lock continuations. LockTimeoutTests deterministically cancels between grant dequeue
 and notification until its interleaving and outcome counters move, with a time ceiling.
 
+## Transaction isolation syntax (#1012)
+
+BEGIN/START isolation options initialize the context at the requested effective level.
+READ UNCOMMITTED maps to ReadCommitted and REPEATABLE READ to Snapshot. Optionless BEGIN and
+auto-commit remain Snapshot. SET TRANSACTION configures the open block before its first admitted
+data statement. Admission and first-statement marking precede metadata interlocks, deferred
+execution and system-view write checks; even failed data/DDL attempts and plain EXPLAIN close
+configuration. Parse failures, control failures and pre-cancellation leave configuration open.
+Repeated early supported modes use the last level. Inside a block, any SERIALIZABLE mode is
+refused with CS04073; other modes retain CK00001. Outside a block, SET succeeds with Warning
+CS04071 and changes no default, including for SERIALIZABLE. Nested-BEGIN, aborted-scope and
+missing-block checks precede unsupported-level validation. Refusals preserve transaction usability.
+Savepoints remain unimplemented (#1726); future savepoint admission must join the CS04072 check.
+
+| Code | Isolation condition | SQLSTATE |
+|---|---|---|
+| CS00012 | Malformed or incomplete isolation mode | 42601 |
+| CS04071 | SET TRANSACTION outside an active block (Warning; success) | 25000 |
+| CS04072 | SET TRANSACTION after the first data statement or during an operation | 25001 |
+| CS04073 | SERIALIZABLE text isolation is unsupported | 0A000 |
+
+Early SET replaces the immutable kernel context under root transaction state admission,
+preserving id, sequence, lifecycle and the original begin snapshot. The begin-time pin starts
+before TruncateSnapshotGate; only context creation and its matching catalog capture hold the
+gate. A TRUNCATE marker can publish after the pin and before the context: the context sees the
+marker and uses the new owner. The earlier pin only retains a conservative pruning horizon.
+Immutable catalog captures are shared until committed DDL or storage replacement invalidates
+them under the catalog monitor. BEGIN captures for either initial level; only Snapshot uses the
+capture for reads. The first admitted READ COMMITTED data statement drops the transaction's
+catalog reference. Sharing avoids copying every definition for every unchanged BEGIN.
+
+The first admitted data statement or every end path releases the configuration pin exactly once;
+construction and canceled gate waits unwind both registrations. Offline storage retains
+recovery-owned cleanup. SET takes no data locks. Lock order is root state, manager registration,
+context end latch; coordinator tracking follows manager release. No storage/page latch spans
+those operations. End cores run outside root state; operation admission excludes configuration
+during data work. Auto-commit creates no configuration pin.
+If kernel disposal has claimed the private pin, cleanup leaves its abort to the kernel and
+preserves the completed transaction's outcome. A test-only rendezvous after the active-pin check
+completes kernel disposal before pin rollback resumes. Commit and rollback regressions assert
+the actual disposed-manager handoff and drained registrations.
+
+Unlike PostgreSQL's first-query snapshot acquisition (utils/time/snapmgr.c:293-337), Snapshot
+remains fixed at the original begin after early SET. Timing follows commands/variable.c:576-604,
+except that the owner also refuses idempotent late SET. Outside-block warning/no-op behavior
+follows PostgreSQL src/backend/utils/misc/guc_funcs.c:83 and src/backend/access/transam/xact.c:3763-3799.
+The kernel checks a continuously retained begin-time pin before restoring fixed visibility and
+reports the effective level through TransactionIsolationChanged. Pool return and DISCARD ALL
+keep the Snapshot default without retaining isolation state. No protocol or disk version changes.
+Nonparallel tests verify configuration/end outcomes, horizon release, TRUNCATE publication between
+pin and context, two-session visibility and InMemory/TCP diagnostics and failure recovery.
+
+
 ## SQL transaction control and the B7 seam
 
 Automatic commit follows the same cancellation boundary as every other engine (#1246):
@@ -5686,8 +5804,8 @@ next commit's, which also takes the database offline (`Database.Storage` DESIGN.
 `SqlTransactionControlTests` drives `START TRANSACTION ... END` and
 `BEGIN WORK ... ROLLBACK WORK` through `ServerTestHarness`, checking observer
 visibility across commit and restoration after rollback. Malformed
-`START TRANSACTION ISOLATION LEVEL SERIALIZABLE` returns wire `ParseFailure`
-carrying `CS00003`, opens no transaction, and permits the next statement on the
+`START TRANSACTION ISOLATION LEVEL READ` returns wire `ParseFailure`
+carrying `CS00012`, opens no transaction, and permits the next statement on the
 same connection. Protocol responses synchronize these checks without fixed sleeps.
 
 The session's transaction is the root `DatabaseSession`'s (concrete-types plan §6.4, phase 4):
@@ -5695,12 +5813,10 @@ the base registers the `SqlDatabaseTransaction` the session's BEGIN core creates
 as `CurrentTransaction` until the caller ends it, so one transaction at a time is open on a
 session. The transaction carries its MVCC context and, under `Snapshot`, the catalog capture
 its system-view statements read (taken at BEGIN). The session's default isolation value is
-`Snapshot`; BEGIN and auto-commit pass that value to the coordinator instead of embedding a
-level at each call site. Before phase 4 the session kept a `Stack<SqlTransactionScope>` with
+`Snapshot`; optionless BEGIN and auto-commit pass that value to the coordinator. Before phase 4 the session kept a `Stack<SqlTransactionScope>` with
 one root entry; B7 anticipates `SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`,
-`RELEASE [SAVEPOINT] name`, and `SET TRANSACTION ISOLATION LEVEL ...`, and will add named
-scopes and undo markers inside the one transaction, while isolation syntax sets the carried
-value. B2 implements none of that syntax or savepoint undo machinery. `Serializable` remains
+`RELEASE [SAVEPOINT] name`, and will add named scopes and undo markers inside the one
+transaction (#1726). Isolation syntax is implemented by #1012. `Serializable` remains
 rejected by the existing C# seam until the coordinator supports serialization detection.
 
 The session lifecycle below applies equally to SQL requests and C# transactions.

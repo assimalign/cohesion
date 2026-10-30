@@ -128,7 +128,7 @@ public sealed class TransactionEventSourceTests
     [InlineData("Rollback")]
     [InlineData("Dispose")]
     [InlineData("CanceledRollback")]
-    public async Task BeginSnapshotPinAsync_EachEndPath_ShouldOnlyMoveTheGauge(string end)
+    public async Task BeginSnapshotPinAsync_EachEndPath_ShouldLeaveGaugeAndRatesUnchanged(string end)
     {
         // Arrange
         var source = TransactionEventSource.Log;
@@ -146,7 +146,7 @@ public sealed class TransactionEventSourceTests
         pin.IsSnapshotPin.ShouldBeTrue();
         pin.PinStatementSnapshot().IsSnapshotPin.ShouldBeTrue();
         pin.IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
-        source.CurrentTransactions.ShouldBe(current + 1);
+        source.CurrentTransactions.ShouldBe(current);
         coordinator.GetOpenContexts().ShouldContain(pin);
         if (end == "Commit")
         {
@@ -165,7 +165,7 @@ public sealed class TransactionEventSourceTests
                 canceled.Cancel();
                 await Should.ThrowAsync<OperationCanceledException>(async () => await coordinator.RollbackAsync(pin, canceled.Token));
                 pin.State.ShouldBe(TransactionState.Active);
-                source.CurrentTransactions.ShouldBe(current + 1);
+                source.CurrentTransactions.ShouldBe(current);
                 coordinator.GetOpenContexts().ShouldContain(pin);
             }
             await coordinator.DisposeAsync();
@@ -180,6 +180,38 @@ public sealed class TransactionEventSourceTests
         storage.JournalStream.Length.ShouldBe(journalLength);
         recorder.For(storage.Name).ShouldBeEmpty();
         recorder.ShouldHaveNoInstrumentationError();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Isolation: configuration reports the effective level without another begin or gauge transition")]
+    public async Task ReplaceIsolationLevel_LevelChanges_ShouldReportEffectiveLevel()
+    {
+        // Arrange
+        var source = TransactionEventSource.Log;
+        using var storage = EventStorage.Create(UniqueName());
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        using var recorder = new TransactionEventRecorder(EventLevel.Verbose);
+        long current = source.CurrentTransactions, total = source.TotalTransactions;
+        var pin = await coordinator.BeginSnapshotPinAsync(CancellationToken.None);
+        var original = await coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
+
+        // Act
+        var replacement = coordinator.ReplaceIsolationLevel(original, IsolationLevel.Snapshot);
+        coordinator.ReplaceIsolationLevel(replacement, IsolationLevel.Snapshot);
+
+        // Assert
+        var changed = recorder.For(storage.Name).Single(item => item.EventName == "TransactionIsolationChanged");
+        changed.EventId.ShouldBe(20);
+        changed.Level.ShouldBe(EventLevel.Verbose);
+        Declared(changed.Keywords).ShouldBe(TransactionEventSource.Keywords.Transactions);
+        changed.PayloadNames.ShouldBe(["database", "transactionSequence", "isolationLevel"]);
+        changed.Payload.ShouldBe([(string)storage.Name, Sequence(original), nameof(IsolationLevel.Snapshot)]);
+        source.CurrentTransactions.ShouldBe(current + 1);
+        source.TotalTransactions.ShouldBe(total + 1);
+        recorder.For(storage.Name).Count(item => item.EventName == "TransactionBegun").ShouldBe(1);
+        recorder.ShouldHaveNoInstrumentationError();
+        await coordinator.RollbackAsync(original, CancellationToken.None);
+        await coordinator.RollbackAsync(pin, CancellationToken.None);
+        source.CurrentTransactions.ShouldBe(current);
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Transactions] - Snapshot pin: Should not track a canceled begin or a begin refused after disposal (#1351)")]

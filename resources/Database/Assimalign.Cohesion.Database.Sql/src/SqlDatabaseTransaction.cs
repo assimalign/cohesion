@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
@@ -60,20 +61,24 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     private static readonly string _failureCause = ErrorMessages.TransactionFailureCause;
 
     private readonly TransactionCoordinator _coordinator;
-    private readonly TransactionContext _context;
+    private TransactionContext _context;
+    private TransactionContext? _configurationPin;
+    private bool _dataStatementStarted;
 
     // The database whose offline state (#1243) refuses the transaction's commit and rollback and
     // makes its disposal touch nothing.
     private readonly SqlDatabase _database;
-    private readonly SqlCatalogSnapshot? _catalogSnapshot;
+    private SqlCatalogSnapshot? _catalogSnapshot;
     private Exception? _storageFailure;
 
-    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabase database, SqlCatalogSnapshot? catalogSnapshot, DateTimeOffset? transactionStart = null)
+    internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabase database, SqlCatalogSnapshot? catalogSnapshot, DateTimeOffset? transactionStart = null,
+        TransactionContext? configurationPin = null)
         : base(context.Id, context.IsolationLevel)
     {
         TransactionStart = transactionStart ?? DateTimeOffset.UtcNow;
         _coordinator = coordinator;
         _context = context;
+        _configurationPin = configurationPin;
         _database = database;
         _catalogSnapshot = catalogSnapshot;
     }
@@ -93,7 +98,50 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// which every system-view statement of the transaction reads; null for
     /// <see cref="IsolationLevel.ReadCommitted"/>, whose statements capture at their start.
     /// </summary>
-    internal SqlCatalogSnapshot? CatalogSnapshot => _catalogSnapshot;
+    internal SqlCatalogSnapshot? CatalogSnapshot => IsolationLevel == IsolationLevel.Snapshot ? _catalogSnapshot : null;
+
+    internal bool TrySetIsolationLevel(IsolationLevel isolationLevel)
+    {
+        if (_dataStatementStarted) { return false; }
+        return TryConfigureIsolationLevel(isolationLevel, () =>
+        {
+            if (_dataStatementStarted) { return false; }
+            _context = _coordinator.ReplaceIsolationLevel(_context, isolationLevel);
+            return true;
+        });
+    }
+
+    internal async ValueTask StartDataStatementAsync()
+    {
+        // Admission is already held: configuration sees RunningOperations, including the
+        // interval before this flag is published. Even a failing data statement closes SET.
+        _dataStatementStarted = true;
+        if (IsolationLevel == IsolationLevel.ReadCommitted) { _catalogSnapshot = null; }
+        await ReleaseConfigurationPinAsync().ConfigureAwait(false);
+    }
+
+    // Test-only rendezvous and observation of the disposed-manager handoff. Neither
+    // hook runs under a root/manager/context lock or changes production ownership.
+    internal static Func<ValueTask>? ConfigurationPinReleasingAsync { get; set; }
+    internal static Action? ConfigurationPinDisposalHandoff { get; set; }
+
+    private async ValueTask ReleaseConfigurationPinAsync()
+    {
+        var pin = Interlocked.Exchange(ref _configurationPin, null);
+        if (pin is not null && pin.State == TransactionState.Active && !_database.IsOffline)
+        {
+            try
+            {
+                if (ConfigurationPinReleasingAsync is { } releasing) { await releasing().ConfigureAwait(false); }
+                await _coordinator.RollbackAsync(pin).ConfigureAwait(false);
+            }
+            // Exchange gives this path sole ownership. A disposed manager, or an end
+            // already claimed on this private pin, means kernel disposal owns its abort.
+            // Pin teardown must not replace an already-completed transaction's outcome.
+            catch (ObjectDisposedException) { ConfigurationPinDisposalHandoff?.Invoke(); }
+            catch (TransactionAbortedException) { ConfigurationPinDisposalHandoff?.Invoke(); }
+        }
+    }
 
     /// <summary>Gets the number of admitted statements still running (observability for tests and diagnostics).</summary>
     internal int RunningStatements => RunningOperations;
@@ -153,7 +201,8 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         try
         {
-            await _coordinator.CommitAsync(_context).ConfigureAwait(false);
+            try { await _coordinator.CommitAsync(_context).ConfigureAwait(false); }
+            finally { await ReleaseConfigurationPinAsync().ConfigureAwait(false); }
         }
         catch (Exception error)
         {
@@ -179,7 +228,8 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         try
         {
-            await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
+            try { await _coordinator.RollbackAsync(_context).ConfigureAwait(false); }
+            finally { await ReleaseConfigurationPinAsync().ConfigureAwait(false); }
         }
         catch (Exception error)
         {

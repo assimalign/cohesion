@@ -125,6 +125,7 @@ structured-carrier messages remain unprefixed.
 | SQL0100 / CS00100 (retired) | CS00009 | Language/syntax — omitted semicolon (Information) |
 | New (#1720, SQ-H2 fixes) | CS00010 | Language/syntax — GROUPING SETS inside ROLLUP or CUBE (42601) |
 | New (#1526, SQ-W1) | CS00011 | Window function argument count or call modifier (42601) |
+| New (#1012, SQ-I1) | CS00012 | Malformed or incomplete transaction isolation mode (42601) |
 | COHSQLE005 | CS01005 | Binding/names |
 | COHSQLE006 | CS01006 | Binding/names |
 | COHSQLE008 | CS01008 | Binding/names |
@@ -245,6 +246,9 @@ structured-carrier messages remain unprefixed.
 | New (#1717, SQ-S2) | CS04068 | Transactions/session state — currval is undefined for this sequence in this session (55000) |
 | New (#1717, SQ-S2) | CS04069 | Transactions/session state — lastval is undefined or its sequence was dropped (55000) |
 | New (#1717, SQ-S2 fix) | CS04070 | Transactions/session state — DISCARD ALL inside an explicit transaction (25001) |
+| New (#1012, SQ-I1) | CS04071 | SET TRANSACTION outside a transaction block: Warning with successful no-op (25000) |
+| New (#1012, SQ-I1) | CS04072 | SET TRANSACTION after the first data statement or during an operation (25001) |
+| New (#1012, SQ-I1) | CS04073 | SERIALIZABLE text transaction isolation is unsupported (0A000) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -257,7 +261,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); sequence sorting follows ordinary, uncharged sort accounting |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); sequence sorting follows ordinary, uncharged sort accounting |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -279,6 +283,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS05086 | Offset RANGE requires exactly one ORDER BY key (42P20) |
 | New (#1526, SQ-W3) | CS05087 | GROUPS requires ORDER BY (42P20) |
 | New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
+| New (#1719, SQ-R2 reader fix) | CS05090 | Execution/internal invariant — a CTE opens more readers than its plan counted (XX000) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -327,6 +332,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
 | New (#1731, OQ-Q1) | CD00014 | Language/syntax — direct IN subquery requires SELECT RAW or SELECT VALUE |
 | New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
+| New (#1732) | CD00016 | Language/syntax — a statement containing JOIN/NEST has a SELECT source without an explicit alias |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -344,6 +350,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
 | New (#1731, OQ-Q2) | CD01033 | Binding/names — FROM expression has no explicit alias or implicit field name |
 | New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
+| New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference, missing joined alias, or ambiguous/invalid joined META receiver |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -354,6 +361,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC021 | CD02021 | Values/types |
 | COHDOC026 | CD02026 | Values/types |
 | New (#1530, OQ-I2) | CD02027 | Values/types — array index WHEN constant is not a supported scalar literal |
+| New (#1732) | CD02028 | Values/types — JOIN/NEST key is neither a string, NULL nor MISSING (arrays unsupported) |
 | COHDOC010 | CD03010 | Schema/constraints |
 | COHDOC011 | CD03011 | Schema/constraints |
 | COHDOC012 | CD03012 | Schema/constraints |
@@ -441,6 +449,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1737, GQ-Q1) | CG05029 | A composite query contains a modifying operand |
 | New (#1737, GQ-Q1) | CG05030 | UNION duplicate-elimination state exceeds the statement memory budget |
 | New (#1737, GQ-Q1 fixes) | CG05031 | Internal statement lookup unexpectedly lacks its key; original cause is retained |
+| New (#1737, GQ-Q2) | CG05032 | EXCEPT or INTERSECT retained frames/rows/hash state exceeds the statement memory budget |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
@@ -523,9 +532,9 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | Retained SELECT sources/groups, ordered candidate buckets, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
+| CD05018 | Retained SELECT sources/groups, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
-| CD05020 | Shared expression evaluation budget exhausted across a statement's subqueries and expression sources (#1731, OQ-Q3) | — |
+| CD05020 | Shared expression/lookup work budget exhausted across a statement's subqueries, expression sources and key joins (#1731, #1732) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

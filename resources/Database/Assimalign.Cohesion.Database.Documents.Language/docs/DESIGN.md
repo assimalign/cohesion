@@ -90,9 +90,11 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `RETURNING` | Yes | Affected-image expressions with optional AS labels, or one RAW/VALUE expression, on all four writes |
 | `OPTIONS` | No | INSERT/UPSERT header element; one CK00001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
-| `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST bindings |
+| `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST/JOIN/NEST bindings |
 | `DERIVED FROM` | Yes | Parenthesized SELECT, required alias, optional AS; streams its rows into the outer pipeline |
 | `EXPRESSION FROM` | Yes | Expression with outer captures inside subqueries; AS before an explicit alias; arrays expand and MISSING supplies no rows |
+| `JOIN` / `LEFT JOIN` | Yes | Scalar right-hand document-key equality, with explicit source aliases |
+| `NEST` / `LEFT NEST` | Yes | The same key lookup, binding arrays; unknown keys follow the lookup-NEST table |
 | `UNNEST` | Yes | Optional INNER; one row per array element, chainable |
 | `LEFT UNNEST` | Yes | Optional OUTER; preserves empty and non-array inputs with a MISSING variable |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
@@ -332,14 +334,14 @@ a name:
 
 - **Anywhere** (reserved unsupported SQL++ vocabulary): every occurrence except a path segment after a dot or an explicit SELECT-list AS label. All
   are lexer keywords or functions.
-- **Clause** (statements and clauses of other languages, including FETCH, NEST and WITHIN):
+- **Clause** (statements and clauses of other languages, including FETCH and WITHIN):
   the first word of the statement, or directly after the end of an operand. Names, literals,
   parameters, closing delimiters and ASC/DESC end operands. FETCH FIRST is one unsupported
   spelling at FETCH; FIRST is exempt only directly after a FETCH in construct position.
   ALL is an invalid paging count only after an actual LIMIT/OFFSET clause head; path segments
   such as c.fetch and c.limit grant no exemption to a following FIRST or ALL. These words remain
-  identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c NEST
-  reports NEST, while FROM c AS nest keeps it a name. LIMIT and OFFSET execute and are
+  identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c WITHIN
+  reports WITHIN, while FROM c AS within keeps it a name. JOIN and NEST are parsed in SELECT source clauses. LIMIT and OFFSET execute and are
   reserved; use quoted names or path segments such as d.limit. SELECT a AS limit still parses.
 - **Statement** (`DEFINE`, `MERGE` and the enabled `UPSERT` coverage entry): only the first word of the
   statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
@@ -470,7 +472,7 @@ one require an explicit alias. An inferred duplicate spans the final path-name t
 bracket-string paths and parenthesized paths. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
 preserving existing fields and AS-less aliases named every or satisfies. END was already
 reserved. ANY and SOME retain their existing reservations. UNNEST in UPDATE/DELETE, FLATTEN calls,
-JOIN, NEST, WITHIN and ANY AND EVERY remain CK00001.
+general JOIN/NEST predicates, UPDATE/DELETE source joins, WITHIN and ANY AND EVERY remain CK00001.
 UPDATE/DELETE reject UNNEST only where their grammar expects a clause; a field named unnest
 in SATISFIES remains an expression. MERGE INTO in a CASE result under SATISFIES reports the
 single MERGE construct before its internal mutation tokens are scanned.
@@ -538,8 +540,8 @@ comparisons, NOT, AND and OR. The `||` spelling lowers to the existing CONCAT ca
 DISTINCT FROM retains its operator in OqlBinaryExpression and uses shared value equality.
 The retired EXISTS binding quantifier is recognized by its
 unnested colon; an ordinary `EXISTS x IN array` remains an IN expression. Qualified-star
-syntax retains its path in a unary `.*` node so planning can name correlation before refusing
-an otherwise unsupported qualified star. ParseSelect stops at its matching closing parenthesis; recursive expression
+syntax retains its path in a unary `.*` node; joined SELECT projections execute it, while
+other qualified-star contexts keep their refusal. ParseSelect stops at its matching closing parenthesis; recursive expression
 parsing shares CD00005's 128-level limit. The capability scan admits nested SELECT in SELECT,
 INSERT, UPSERT, UPDATE and DELETE, including RETURNING. SELECT
 quantifiers and reserved labels retain their existing positional rules within nested scopes.
@@ -583,6 +585,23 @@ records the pinned Couchbase references, row semantics, star/metadata choices an
 The capability scan restores grouping state per SELECT scope, preserving contextual aliases such
 as LETTING after a grouped derived query.
 
+## Key source bindings (#1732)
+
+OqlSourceBindingExpression is a closed abstract AST family with nonvirtual expression, variable
+and preservation state. OqlUnnestExpression and OqlJoinExpression are sealed leaves. Bindings
+retains their evaluation order; Unnest remains the array-only view. SELECT's existing source slot
+holds an optional wrapper only for joined queries, preserving ordinary node size and allocations.
+The parser accepts only right-hand META(alias).id equality and keeps JOIN/NEST contextual.
+General forms, ON KEYS and UPDATE/DELETE source joins retain CK00001; explicit aliases avoid #1767.
+A joined statement requires aliases in every SELECT scope. The parser tracks actual join clauses
+and unaliased sources across recursive parsing, then resets this state for its next statement.
+The engine validates the same rule for direct ASTs before source planning. Metadata validation
+processes bindings in declaration order: UNNEST removes a shadowed captured receiver, while JOIN
+and NEST introduce their local receiver after validating the preceding key scope.
+The [dialect](DIALECT.md#key-join-and-nest-1732-oq-j1) records scalar/unknown keys, metadata,
+star shape, paging, cache/budget defaults and pinned SQL++ references. OqlKeyJoinParserTests,
+keyword disposition and the engine's profile-driven conformance corpus cover the four capabilities.
+
 ## Grammar, statement, and expression trees
 
 ```text
@@ -592,7 +611,9 @@ query        := SELECT [ALL | DISTINCT] select-kind from-clause
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
                 [LIMIT count [OFFSET count] | OFFSET count [LIMIT count]]
 count        := ['+' | '-'] integer-literal | parameter
-from-clause  := FROM (collection [AS? identifier] | subquery [AS] identifier | expression [AS identifier]) unnest*
+from-clause  := FROM (collection [AS? identifier] | subquery [AS] identifier | expression [AS identifier]) source-binding*
+source-binding := unnest | key-join
+key-join     := [INNER | LEFT [OUTER]] (JOIN | NEST) collection [AS] identifier ON META(identifier).id = expression
 unnest       := [INNER | LEFT [OUTER]] UNNEST expression [AS? identifier]
 aggregate-call := COUNT '(' '*' ')' | aggregate-name '(' [ALL | DISTINCT] expression ')'
 quantified-expression := (ANY | SOME | EVERY) identifier IN expression SATISFIES expression END
@@ -757,6 +778,7 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00013` | NULLS without FIRST or LAST, at the expected option |
 | `CD00014` | Direct IN subquery requires SELECT RAW or SELECT VALUE |
 | `CD00015` | Derived FROM subquery requires an alias |
+| `CD00016` | Every SELECT source in a joined statement requires an explicit alias |
 | `CD01033` | FROM expression requires an explicit alias or implicit field name |
 | `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
 

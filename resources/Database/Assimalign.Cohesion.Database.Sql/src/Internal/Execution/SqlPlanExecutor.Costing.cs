@@ -18,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
     // Costing follows binding, so ordinary unique lookups allocate neither a cost context nor
     // a probe. All counts are statement-local observations, never catalog statistics.
     internal SqlPlan Cost(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
-        => plan is SqlSelectPlan { Access: SqlScanPath } ||
+        => plan.ContainsRecursion || plan is SqlSelectPlan { Access: SqlScanPath } ||
            plan is SqlSelectPlan { Access: SqlIndexSeekPath { Cost: null, Index.IsUnique: true } unique } &&
                unique.EqualityValues.Count == unique.Index.ColumnNames.Count
             ? plan : CostCore(plan, statement, cancellationToken, new(ReferenceEqualityComparer.Instance));
@@ -41,6 +41,8 @@ internal sealed partial class SqlPlanExecutor
             SqlSubqueryPlan p => p with { Input = Rewrite(p.Input), Queries = p.Queries.Select(q => q with { Query = Rewrite(q.Query) }).ToArray() },
             SqlCorrelatedSubqueryPlan p => p with { Input = Rewrite(p.Input), Queries = p.Queries.Select(q => q with { Query = Rewrite(q.Query) }).ToArray() },
             SqlSetOperationPlan p => p with { Operands = p.Operands.Select(q => q with { Query = Rewrite(q.Query) }).ToList() },
+            SqlRecursiveUnionPlan p => p with { Working = RewriteRelation(p.Working),
+                Anchor = p.Anchor with { Query = Rewrite(p.Anchor.Query) }, Recursive = p.Recursive with { Query = Rewrite(p.Recursive.Query) } },
             SqlWithPlan p => p with { Input = Rewrite(p.Input), Relations = p.Relations.Select(RewriteRelation).ToArray() },
             SqlInsertSelectPlan p => p with { Source = Rewrite(p.Source) },
             _ => plan,

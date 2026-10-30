@@ -27,8 +27,12 @@ internal sealed partial class GraphPlanner
                 nodes.Add(new DatabasePlanNode
                 {
                     NodeId = id, ParentId = step.Parent,
-                    Operator = composite.Operator == GqlCompositeOperator.Union ? "Union" : "UnionAll",
-                    Detail = $"read_only=True; shared_snapshot=True; shared_budget=True; distinct={composite.Operator == GqlCompositeOperator.Union}; memory_refusal={(composite.Operator == GqlCompositeOperator.Union ? "CG05030" : "CG05020")}",
+                    Operator = composite.Operator.ToString(),
+                    Detail = $"read_only=True; shared_snapshot=True; shared_budget=True; distinct={composite.Operator is GqlCompositeOperator.Union or GqlCompositeOperator.Except or GqlCompositeOperator.Intersect}; " +
+                        (composite.Operator == GqlCompositeOperator.Otherwise ? "fallback=whole_result; lazy_right=True; errors_propagate=True; memory_refusal=CG05020" :
+                         composite.Operator is GqlCompositeOperator.Except or GqlCompositeOperator.ExceptAll or GqlCompositeOperator.Intersect or GqlCompositeOperator.IntersectAll
+                            ? $"multiplicity={(composite.Operator == GqlCompositeOperator.ExceptAll ? "max(m-n,0)" : composite.Operator == GqlCompositeOperator.IntersectAll ? "min(m,n)" : "distinct")}; memory_refusal=CG05032"
+                            : $"memory_refusal={(composite.Operator == GqlCompositeOperator.Union ? "CG05030" : "CG05020")}"),
                 });
                 pending.Push((composite.Right, id));
                 pending.Push((composite.Left, id));

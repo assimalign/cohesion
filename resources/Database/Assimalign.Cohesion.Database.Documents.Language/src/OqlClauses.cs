@@ -81,6 +81,18 @@ public static class OqlClauses
     /// <summary>Iterates an uncorrelated expression as a source.</summary>
     public const string ExpressionFrom = "EXPRESSION FROM";
 
+    /// <summary>Looks up a right-hand document by scalar key.</summary>
+    public const string Join = "JOIN";
+
+    /// <summary>Looks up a document, preserving unmatched inputs.</summary>
+    public const string LeftJoin = "LEFT JOIN";
+
+    /// <summary>Looks up a document into an array.</summary>
+    public const string Nest = "NEST";
+
+    /// <summary>Looks up a document array, preserving unmatched inputs.</summary>
+    public const string LeftNest = "LEFT NEST";
+
     /// <summary>Expands an array into inner rows.</summary>
     public const string Unnest = "UNNEST";
 

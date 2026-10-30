@@ -40,16 +40,20 @@ sequenceDiagram
     GraphConnection-->>App: GraphPath enumeration
 ```
 
-## Composite queries (#1737, GQ-Q1)
+## Composite queries (#1737, GQ-Q1/Q2)
 
-UNION and UNION ALL use the existing Execute and ExecutePaths framing. Result metadata follows
+UNION, EXCEPT, INTERSECT (DISTINCT/ALL) and OTHERWISE use existing Execute and ExecutePaths framing. Result metadata follows
 the first operand's column names; type metadata widens across operands with NULL neutral and
 DatabaseType.Null representing dynamic values. Values retain their runtime types. Value
 capability admission visits every operand before execution. UNION DISTINCT normalizes to UNION;
 NEXT consumes the complete composite binding table, including grouped selectors. InMemory
 and TCP conformance covers duplicate/NULL/scalar-list results, correlated operands, EXPLAIN,
 CG00016/CG01020/CG02017/CG05029 refusals, the #1662 entity-list gate and authenticated-session
-reuse. EXCEPT, INTERSECT and OTHERWISE retain named CK00001 refusals for GQ-Q2. No client source,
+reuse. GraphSetQueryWireTests adds multiset difference/intersection, whole-result lazy fallback
+with a throwing execution counter, left-error propagation, skipped-branch admission, metadata,
+EXPLAIN, typed paths and session reuse on both transports. CG05032 bounds set state; scalar NULLs
+and composite values retain existing codecs. OTHERWISE is a Cohesion fallback contract, with no
+Neo4j precedent. No client production source,
 protocol, capability or version changes are required.
 
 ## Correlated existence predicates (#1537)

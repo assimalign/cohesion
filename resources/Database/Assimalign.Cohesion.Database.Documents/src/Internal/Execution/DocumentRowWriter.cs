@@ -31,7 +31,7 @@ internal sealed class DocumentRowWriter : IDisposable
 
     // A lone star is emitted directly; every other named projection has a row wrapper.
     internal static bool WritesBareValue(OqlSelectExpression query)
-        => query.IsValue || query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression;
+        => query.IsValue || query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression or OqlUnaryExpression { Operator: ".*" };
 
     internal ReadOnlyMemory<byte> Write(DatabaseRow row, IReadOnlyList<DatabaseColumn> columns, bool bareValue,
         Location? location = null, string resultClause = "SELECT")

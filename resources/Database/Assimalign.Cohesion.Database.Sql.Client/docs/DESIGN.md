@@ -98,11 +98,7 @@ validation as ExecutionFailure with a reusable connection. No client API or payl
 Non-recursive WITH queries and INSERT/UPDATE/DELETE (#1116) travel through the
 existing SQL execute exchange. Wire tests pin results, exact affected counts and
 modifying-body ParseFailure diagnostics, preserving connection reuse
-and stored rows after rejection. WITH RECURSIVE (#1719, SQ-R1) executes acyclic
-lists and reports valid recursion as CK00001 / ExecutionFailure at planning;
-invalid anchor references retain CS01055. InMemory/TCP regressions pin these
-carriers and connection reuse. Runtime fixpoints remain SQ-R2. No client API or
-wire payload changes.
+and stored rows after rejection. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) executes UNION ALL and DISTINCT fixpoints, shared scans and outer LIMIT demand. InMemory/TCP regressions cover values, NULL identity, EXPLAIN iteration/row counters, CS02066/CS02067 compatibility errors, CS05067 memory refusal and connection reuse. Invalid anchor references retain CS01055. Windows over finite fixpoints execute. For unbounded inputs, blocking consumers that retain input refuse with CS05067 when they exhaust StatementMemoryBudget; bounded-state consumers run until cancellation, including infinite COUNT and top-K sorts. No client API or wire payload changes.
 
 Blank derived output names fail planning with CS05013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
@@ -648,6 +644,20 @@ No client API or protocol format changes are needed.
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Transaction isolation text (#1012)
+
+Outside a transaction block, SET TRANSACTION succeeds with Warning CS04071 through the existing
+negotiated diagnostic frame; QueryAsync exposes the warning and leaves Ready idle. InMemory/TCP
+conformance verifies the warning and continued usability. No client API or wire format changes.
+
+BEGIN/START isolation modes and early SET TRANSACTION use existing Execute, diagnostic and Ready
+frames on InMemory and TCP. READ COMMITTED and READ UNCOMMITTED see a concurrent commit on the next
+statement; REPEATABLE READ keeps the begin snapshot. CS04071/CS04072/CS04073 preserve connection
+usability and transaction state. A one-slot pool proves physical-session reuse after an early
+isolation change, with optional DISCARD ALL, restores optionless BEGIN's Snapshot behavior.
+No client API, capability bit or wire identifier changes.
+
 
 ## Server-reported transaction reset (#1540)
 

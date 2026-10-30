@@ -247,12 +247,13 @@ public sealed class SqlLanguageConformanceTests
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
         // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
-        // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one binding-only clause.
+        // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one measured fixpoint clause.
         // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
         // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
         // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
         // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(80);
+        // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(82);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -778,9 +779,14 @@ public sealed class SqlLanguageConformanceTests
             async (session, result) =>
             {
                 (await ReadRowsAsync((DatabaseResultSet)result)).ShouldHaveSingleItem().ShouldBe([7L]);
-                var error = await session.ExecuteAsync(
-                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT n FROM a;", cancellationToken: CancellationToken.None);
-                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT n FROM a LIMIT 3;", [[1L], [2L], [3L]]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION SELECT n FROM a) SELECT n FROM a;", [[1L]]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a WHERE n<3) SELECT ROW_NUMBER() OVER() FROM a;", [[1L], [2L], [3L]]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT v IN (SELECT n FROM a WHERE n>=t.v),v=ANY(SELECT n FROM a WHERE n>=t.v),v=SOME(SELECT n FROM a WHERE n>=t.v),v>ALL(SELECT n FROM a WHERE n>=t.v) FROM (SELECT 1 AS v) t;", [[true, true, true, false]]);
             }),
         [SqlClauses.Cte] = new("WITH a AS (SELECT id FROM t WHERE age > 40), b AS (SELECT id FROM a) SELECT id FROM b ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression { CommonTables.Count: 2 },
@@ -1224,6 +1230,22 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.Begin] = new("BEGIN;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin }, VerifyBeginAsync),
+        [SqlClauses.IsolationLevel] = new("BEGIN ISOLATION LEVEL READ COMMITTED;", _seed,
+            expression => expression is SqlTransactionExpression { IsolationLevels.Count: 1 },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                session.CurrentTransaction.ShouldNotBeNull().IsolationLevel.ShouldBe(IsolationLevel.ReadCommitted);
+                await ExecuteAsync(session, "ROLLBACK;");
+            }),
+        [SqlClauses.SetTransaction] = new("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;", [.. _seed, "BEGIN ISOLATION LEVEL READ COMMITTED;"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.SetTransaction },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                session.CurrentTransaction.ShouldNotBeNull().IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
+                await ExecuteAsync(session, "COMMIT;");
+            }),
         [SqlClauses.DiscardAll] = new("DISCARD ALL;", ["CREATE SEQUENCE seq;", "SELECT nextval('seq');"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Discard },
             async (session, result) =>

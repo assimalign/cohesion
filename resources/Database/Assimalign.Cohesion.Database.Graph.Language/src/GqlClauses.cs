@@ -105,6 +105,27 @@ public static class GqlClauses
     /// <summary>Concatenates read-only query results with duplicate rows preserved.</summary>
     public const string UnionAll = "UNION ALL";
 
+    /// <summary>Returns distinct rows present only in the left result.</summary>
+    public const string Except = "EXCEPT";
+
+    /// <summary>Explicitly selects distinct difference.</summary>
+    public const string ExceptDistinct = "EXCEPT DISTINCT";
+
+    /// <summary>Subtracts right multiplicities from left multiplicities.</summary>
+    public const string ExceptAll = "EXCEPT ALL";
+
+    /// <summary>Returns distinct rows shared by both results.</summary>
+    public const string Intersect = "INTERSECT";
+
+    /// <summary>Explicitly selects distinct intersection.</summary>
+    public const string IntersectDistinct = "INTERSECT DISTINCT";
+
+    /// <summary>Returns the smaller multiplicity for each shared row.</summary>
+    public const string IntersectAll = "INTERSECT ALL";
+
+    /// <summary>Evaluates the right query only when the whole left result is empty.</summary>
+    public const string Otherwise = "OTHERWISE";
+
     /// <summary>Tests whether a correlated inner graph pattern produces any row.</summary>
     public const string Exists = "EXISTS";
 

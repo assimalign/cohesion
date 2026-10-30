@@ -99,6 +99,7 @@ public sealed partial class SqlCatalog
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private ulong _ddlGeneration;
+    private SqlCatalogSnapshot? _snapshot;
     private int _recordSpaceFormatVersion = 1;
     private Collation _defaultCollation = Collation.Binary;
     private (PageId PageId, int SlotIndex)? _counterLocation;
@@ -170,7 +171,9 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value), _views.Values.Select(slot => slot.Value)) { Sequences = _sequences.Count == 0 ? [] : Sequences };
+            // Captures contain immutable definitions. Share one until a committed definition
+            // or storage-owner publication invalidates it under this same catalog monitor.
+            return _snapshot ??= new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value), _views.Values.Select(slot => slot.Value)) { Sequences = _sequences.Count == 0 ? [] : Sequences };
         }
     }
 
@@ -1620,6 +1623,7 @@ public sealed partial class SqlCatalog
         _counterLocation = location;
         _nextObjectId = identity;
         Volatile.Write(ref _ddlGeneration, generation);
+        _snapshot = null;
     }
 
     private (PageId PageId, int SlotIndex) PersistCounter(

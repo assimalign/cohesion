@@ -21,6 +21,7 @@ internal static partial class DocumentPlanExecutor
         if (logical.Limit == 0) { return ValueTask.FromResult<DatabaseResult>(CreateResult(logical, [], cancellationToken)); }
         return plan switch
         {
+            DocumentJoinPlan join => ExecuteFromAsync(database, operation, join, parameters, cancellationToken, nested, writeVerb),
             DocumentFromPlan source => ExecuteFromAsync(database, operation, source, parameters, cancellationToken, nested, writeVerb),
             DocumentPlan select => ExecuteNestedSelectAsync(database, operation, select, parameters, cancellationToken, writeVerb, nested),
             DocumentSystemCollectionPlan system => ExecuteNestedSystemCollectionAsync(database, operation, system, parameters, cancellationToken, writeVerb, nested),

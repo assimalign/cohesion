@@ -49,6 +49,10 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.ExpressionFrom)]
     [InlineData(OqlClauses.Unnest)]
     [InlineData(OqlClauses.LeftUnnest)]
+    [InlineData(OqlClauses.Join)]
+    [InlineData(OqlClauses.LeftJoin)]
+    [InlineData(OqlClauses.Nest)]
+    [InlineData(OqlClauses.LeftNest)]
     [InlineData(OqlClauses.Any)]
     [InlineData(OqlClauses.Every)]
     [InlineData(OqlClauses.Where)]
@@ -78,7 +82,7 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData("JOIN")]
+    [InlineData("ON KEYS")]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();

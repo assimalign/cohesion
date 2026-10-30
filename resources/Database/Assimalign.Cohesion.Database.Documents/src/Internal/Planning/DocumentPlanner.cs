@@ -59,6 +59,7 @@ internal sealed partial class DocumentPlanner
         OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
+        OqlSelectExpression select when select.Bindings != select.Unnest => PlanJoins(select, nested, outerNames),
         OqlSelectExpression { Source: not null } select => PlanFrom(select, nested, outerNames),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
             new DocumentSystemCollectionPlan(CreateLogicalPlan(select, _cancellationToken, _parameters, _functions, outerNames), name),
@@ -78,7 +79,7 @@ internal sealed partial class DocumentPlanner
         var nonSourceNames = NonSourceNames(logical.UnnestVariables, outerNames);
         var access = ChooseAccess(query.Predicate, query.Alias, indexes, out var accessCandidates, nonSourceNames, query.Unnest, outerNames);
         if (logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
-            access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Unnest.Count == 0 &&
+            access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Bindings.Count == 0 &&
             logical.Query.OrderBy.All(order => order.Expression is OqlPathExpression)))
         {
             access = AnalyzeOrdering(logical, access, indexes, accessCandidates, nonSourceNames);
@@ -176,22 +177,22 @@ internal sealed partial class DocumentPlanner
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken);
         long? limit = evaluator.PagingCount(query.Limit, "LIMIT");
         long offset = evaluator.PagingCount(query.Offset, "OFFSET") ?? 0;
-        var variables = query.Unnest.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { query.Alias ?? query.Collection };
-        foreach (var binding in query.Unnest)
+        var variables = query.Bindings.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { query.Alias ?? query.Collection };
+        foreach (var binding in query.Bindings)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(binding.Variable))
             { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, binding.Location); }
             if (!variables!.Add(binding.Variable))
             { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameDuplicate, binding.Location); }
-            Validate(binding.Collection, allowAggregate: false, functions: functions);
-            ValidateMetadata(binding.Collection, query.Alias ?? query.Collection, DocumentSystemCollections.Find(query.Collection) is null, outerNames);
+            Validate(binding.Expression, allowAggregate: false, functions: functions);
+            ValidateQueryMetadata(binding.Expression, query, outerNames, binding);
         }
         foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
             .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateMetadata(expression, query.Alias ?? query.Collection, DocumentSystemCollections.Find(query.Collection) is null, outerNames);
+            ValidateQueryMetadata(expression, query, outerNames);
         }
         if (query.Projections.Count == 0) { throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerCreateLogicalPlanFailure, query.Location); }
         if (query.IsValue && (query.Projections.Count != 1 || query.Projections[0].Alias is not null ||
@@ -205,7 +206,7 @@ internal sealed partial class DocumentPlanner
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
                 ? new OqlOrdering(projection.Expression, order.Descending, order.NullPlacement) : order).ToArray();
         query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
-            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source);
+            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source, bindings: query.Bindings == query.Unnest ? null : query.Bindings);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression, functions)) ||
             (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions));
         variables?.Remove(query.Alias ?? query.Collection);
@@ -224,12 +225,14 @@ internal sealed partial class DocumentPlanner
         foreach (var projection in query.Projections)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Validate(projection.Expression, allowAggregate: true, allowStar: !grouped, functions: functions);
+            if (!grouped && query.Bindings != query.Unnest && projection.Expression is OqlUnaryExpression { Operator: ".*" } qualified)
+            { Validate(qualified.Operand, allowAggregate: false, functions: functions); }
+            else { Validate(projection.Expression, allowAggregate: true, allowStar: !grouped, functions: functions); }
             if (grouped) { ValidateGrouped(projection.Expression, query, unnestVariables, scopes!, functions, groupScope, outerNames); }
             if (query.GroupAs is not null) { ValidateGroupArrayInput(projection.Expression, query, scopes!, functions); }
             string name = query.IsValue ? "value" : projection.Alias ?? projection.Expression switch
             {
-                OqlStarExpression => "document",
+                OqlStarExpression or OqlUnaryExpression { Operator: ".*" } => "document",
                 OqlPathExpression path => path.Segments.LastOrDefault().Name ?? $"column{projections.Count + 1}",
                 OqlCallExpression call => call.Name.ToLowerInvariant(),
                 OqlMetaExpression meta => meta.Member!,

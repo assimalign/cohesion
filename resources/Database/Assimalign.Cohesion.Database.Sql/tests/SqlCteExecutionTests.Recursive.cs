@@ -69,7 +69,7 @@ public sealed partial class SqlCteExecutionTests
         if (code == "CS02067") { error.Message!.ShouldContain("COLLATE", Case.Sensitive); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Recursive WITH: valid binding stops at the SQ-R2 planning gate")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Recursive WITH: valid binding creates a recursive union operator")]
     [InlineData("SELECT 1 UNION ALL SELECT n+1 FROM r WHERE n<3")]
     [InlineData("SELECT 1 UNION SELECT n FROM r")]
     [InlineData("SELECT 1 UNION ALL SELECT '3' FROM r")]
@@ -86,7 +86,7 @@ public sealed partial class SqlCteExecutionTests
     [InlineData("SELECT 'x' UNION ALL SELECT n FROM r")]
     [InlineData("SELECT 'x' COLLATE case_insensitive UNION ALL SELECT n FROM r")]
     [InlineData("SELECT CAST('x' AS VARCHAR(3)) UNION ALL SELECT CAST(n AS VARCHAR(3)) FROM r")]
-    public async Task Plan_ValidRecursion_ShouldRefuseOnlyExecutionCapability(string body)
+    public async Task Plan_ValidRecursion_ShouldCreateFixpointOperator(string body)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("recursive-bound", new());
@@ -96,48 +96,10 @@ public sealed partial class SqlCteExecutionTests
         var query = SqlQueryRequest.FromSql($"WITH RECURSIVE r(n) AS ({body}) SELECT n FROM r;");
 
         // Act
-        var error = Should.Throw<DatabaseException>(() => new SqlPlanner(database.Catalog, null).Plan(query.Statement.SqlExpression));
+        var plan = new SqlPlanner(database.Catalog, null).Plan(query.Statement.SqlExpression).ShouldBeOfType<SqlWithPlan>();
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        error.Message!.ShouldContain("Recursive CTE planning", Case.Sensitive);
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Sql] - Recursive WITH: every consuming statement binds before capability refusal")]
-    [InlineData("SELECT n FROM r")]
-    [InlineData("EXPLAIN WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT n FROM r", true)]
-    [InlineData("EXPLAIN ANALYZE WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT n FROM r", true)]
-    [InlineData("INSERT INTO t SELECT n FROM r")]
-    [InlineData("UPDATE t SET id=r.n FROM r WHERE id=r.n")]
-    [InlineData("DELETE FROM t USING r WHERE id=r.n")]
-    [InlineData("MERGE INTO t USING r ON t.id=r.n WHEN MATCHED THEN DO NOTHING")]
-    [InlineData("INSERT INTO t WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT n FROM r", true)]
-    [InlineData("CREATE TABLE copied AS WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT n FROM r WITH NO DATA", true)]
-    public async Task Execute_RecursiveConsumer_ShouldRefuseBeforeWriting(string statement, bool complete = false)
-    {
-        // Arrange
-        await using var engine = SqlDatabaseEngine.Create("recursive-consumer", new());
-        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
-        await using var session = await database.CreateSessionAsync(CancellationToken.None);
-        await SeedAsync(session);
-
-        // Act
-        var error = await RecursiveDiagnosticAsync(session,
-            (complete ? statement : "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) " + statement) + ";");
-
-        // Assert
-        error.Code.ShouldBe("CK00001");
-        if (statement.StartsWith("MERGE", StringComparison.Ordinal))
-        {
-            error.Message!.ShouldContain("WITH RECURSIVE for MERGE", Case.Sensitive);
-            error.Start.ShouldBe(5);
-        }
-        else
-        {
-            error.Message!.ShouldContain("Recursive CTE planning", Case.Sensitive);
-            session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
-        }
-        (await RowsAsync(session, "SELECT id FROM t ORDER BY id")).Select(row => row[0]).ShouldBe([1, 2, 3]);
+        plan.Relations.ShouldHaveSingleItem().Query.ShouldBeOfType<SqlRecursiveUnionPlan>();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Recursive WITH: dependency analysis and output names bind all definitions")]
@@ -191,7 +153,7 @@ public sealed partial class SqlCteExecutionTests
             .ShouldHaveSingleItem()[0].ShouldBe(3L);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Recursive WITH: view creation freezes anchor output and use remains gated")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Recursive WITH: view creation freezes anchor output and executes")]
     public async Task Execute_RecursiveViewBody_ShouldBindMetadataWithoutExecution()
     {
         // Arrange
@@ -200,11 +162,11 @@ public sealed partial class SqlCteExecutionTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
 
         // Act
-        await session.ExecuteAsync("CREATE VIEW v AS WITH RECURSIVE r(label) AS (SELECT CAST('x' AS VARCHAR(3)) COLLATE case_insensitive UNION ALL SELECT label FROM r) SELECT label FROM r;", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE VIEW v AS WITH RECURSIVE r(label) AS (SELECT CAST('x' AS VARCHAR(3)) COLLATE case_insensitive UNION SELECT label FROM r) SELECT label FROM r;", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE VIEW inferred AS WITH RECURSIVE r AS (SELECT 1 AS seed_value UNION ALL SELECT seed_value AS ignored FROM r) SELECT seed_value FROM r;", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE VIEW unknown_output AS WITH RECURSIVE r AS (SELECT NULL AS n UNION ALL SELECT n FROM r) SELECT n FROM r;", cancellationToken: CancellationToken.None);
         database.Catalog.TryGetView("dbo", "v", out var view).ShouldBeTrue();
-        var error = await RecursiveDiagnosticAsync(session, "SELECT label FROM v");
+        var rows = await RowsAsync(session, "SELECT label FROM v");
 
         // Assert
         var column = view.Columns.ShouldHaveSingleItem();
@@ -217,8 +179,7 @@ public sealed partial class SqlCteExecutionTests
         inferred.Columns[0].Type.Type.ShouldBe(DatabaseType.Int64);
         database.Catalog.TryGetView("dbo", "unknown_output", out var unknown).ShouldBeTrue();
         unknown.Columns.ShouldHaveSingleItem().Type.Type.ShouldBe(DatabaseType.String);
-        error.Code.ShouldBe("CK00001");
-        session.LastStatementMetrics!.RecordsExamined.ShouldBe(0);
+        rows.ShouldHaveSingleItem()[0].ShouldBe("x");
     }
     private static async Task<Diagnostic> RecursiveDiagnosticAsync(SqlDatabaseSession session, string sql)
     {
@@ -278,14 +239,13 @@ public sealed partial class SqlCteExecutionTests
         await session.ExecuteAsync("CREATE TABLE inputs (ci TEXT COLLATE case_insensitive, normal TEXT COLLATE binary);", cancellationToken: CancellationToken.None);
 
         // Act
-        var valid = await RecursiveDiagnosticAsync(session,
+        var valid = await RowsAsync(session,
             "WITH RECURSIVE r(n) AS (SELECT ci FROM inputs UNION ALL SELECT normal FROM r CROSS JOIN inputs) SELECT n FROM r;");
         var invalid = await RecursiveDiagnosticAsync(session,
             "WITH RECURSIVE r(n) AS (SELECT normal FROM inputs UNION ALL SELECT ci FROM r CROSS JOIN inputs) SELECT n FROM r;");
 
         // Assert
-        valid.Code.ShouldBe("CK00001");
-        valid.Message!.ShouldContain("Recursive CTE planning", Case.Sensitive);
+        valid.ShouldBeEmpty();
         invalid.Code.ShouldBe("CS02067");
     }
 }

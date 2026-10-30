@@ -390,6 +390,37 @@ public sealed class TransactionManager : IAsyncDisposable
     internal ValueTask<TransactionContext> BeginSnapshotPinAsync(CancellationToken cancellationToken) =>
         BeginAsync(IsolationLevel.Snapshot, isSnapshotPin: true, cancellationToken);
 
+    internal TransactionContext ReplaceIsolationLevel(TransactionContext context, IsolationLevel isolationLevel)
+    {
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (context.IsStatementView) { throw new ArgumentException(ErrorMessages.IsolationStatementView, nameof(context)); }
+            if (context.IsSnapshotPin) { throw new ArgumentException(ErrorMessages.IsolationSnapshotPin, nameof(context)); }
+            if (!ReferenceEquals(context.Manager, this) || !_active.TryGetValue(context.Sequence.Value, out var owned))
+            { throw new TransactionAbortedException(ErrorMessages.IsolationContextUntracked); }
+            if (!ReferenceEquals(context, owned))
+            { throw new TransactionAbortedException(ErrorMessages.IsolationHandleStale); }
+            if (context.IsolationLevel == IsolationLevel.ReadCommitted && isolationLevel != IsolationLevel.ReadCommitted)
+            {
+                // A pin registered before BEGIN has continuously protected its original floor.
+                // A later pin cannot undo pruning. Check under the same lock as pin registration,
+                // removal and PruneBound; the replacement itself protects this floor on release.
+                bool pinned = false;
+                foreach (var candidate in _active.Values)
+                {
+                    if (candidate.IsSnapshotPin && candidate.Sequence < context.Sequence &&
+                        candidate.Snapshot.Minimum <= context.BeginSnapshot.Minimum)
+                    { pinned = true; break; }
+                }
+                if (!pinned) { throw new ArgumentException(ErrorMessages.IsolationBeginPinRequired, nameof(context)); }
+            }
+            var replacement = context.ReplaceIsolationLevel(isolationLevel);
+            _active[context.Sequence.Value] = replacement;
+            return replacement;
+        }
+    }
+
     private async ValueTask<TransactionContext> BeginAsync(
         IsolationLevel isolationLevel, bool isSnapshotPin, CancellationToken cancellationToken)
     {
