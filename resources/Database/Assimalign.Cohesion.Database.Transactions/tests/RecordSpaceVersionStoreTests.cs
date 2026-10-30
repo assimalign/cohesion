@@ -207,6 +207,9 @@ public class RecordSpaceVersionStoreTests
         using var storage = new RecordStorage();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        // Reverse undo commits 128 creates before the oldest effect fails in its final batch.
+        var failing = new FailingIndex();
+        coordinator.VersionStore.RecordIndexEntryTombstoned(writer.Sequence, failing, new byte[] { 1 }, 0);
         for (int index = 0; index < 130; index++)
         {
             await coordinator.ApplyStatementAsync(writer, bracket =>
@@ -218,8 +221,6 @@ public class RecordSpaceVersionStoreTests
                 return true;
             });
         }
-        var failing = new FailingIndex();
-        coordinator.VersionStore.RecordIndexEntryTombstoned(writer.Sequence, failing, new byte[] { 1 }, 0);
 
         await Should.ThrowAsync<IOException>(() => coordinator.VersionStore.PurgeWriterAsync(writer.Sequence).AsTask());
         CountRecords(storage).ShouldBe(2);
@@ -253,10 +254,12 @@ public class RecordSpaceVersionStoreTests
         {
             oldLocation = storage.Insert(bracket, Stamped(TransactionSequence.None, writer.Sequence, 11));
             newLocation = storage.Insert(bracket, Stamped(writer.Sequence, TransactionSequence.None, 22));
+            // Arrange the logical effects so the clear callback is last in reverse undo:
+            // both real row mutations must be restored when that callback fails.
+            versions.RecordIndexEntryTombstoned(writer.Sequence, index, key, storage.PackLocation(oldLocation.PageId, oldLocation.SlotIndex));
+            versions.RecordIndexEntryCreated(writer.Sequence, index, key, storage.PackLocation(newLocation.PageId, newLocation.SlotIndex));
             versions.RecordTombstoned(writer.Sequence, oldLocation.PageId, oldLocation.SlotIndex);
             versions.RecordCreated(writer.Sequence, newLocation.PageId, newLocation.SlotIndex);
-            versions.RecordIndexEntryCreated(writer.Sequence, index, key, storage.PackLocation(newLocation.PageId, newLocation.SlotIndex));
-            versions.RecordIndexEntryTombstoned(writer.Sequence, index, key, storage.PackLocation(oldLocation.PageId, oldLocation.SlotIndex));
             return 0;
         }, CancellationToken.None);
         key[0] = 99;
