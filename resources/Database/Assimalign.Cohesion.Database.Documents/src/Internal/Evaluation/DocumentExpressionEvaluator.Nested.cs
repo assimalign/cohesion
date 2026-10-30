@@ -15,14 +15,15 @@ internal sealed partial class DocumentExpressionEvaluator
         _cancellationToken.ThrowIfCancellationRequested();
         try
         {
+            nested.ConsumeWork(_cancellationToken);
             return expression switch
             {
-                OqlSubqueryExpression subquery => await nested.EvaluateAsync(subquery, document, _cancellationToken).ConfigureAwait(false),
+                OqlSubqueryExpression subquery => await nested.EvaluateAsync(subquery, CaptureBindings(document, nested.ProjectionBindings, nested.ProjectionBase), _cancellationToken).ConfigureAwait(false),
                 OqlLiteralExpression literal => Normalize(literal.Value),
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Star(document),
-                OqlMetaExpression meta => document.Id is null ? null : meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlMetaExpression meta => ReadMetadata(meta, document),
                 OqlArrayExpression or OqlObjectExpression => (await ConstructAsync(expression, document, group, nested).ConfigureAwait(false)),
                 OqlPathExpression path => ReadPath(path, document),
                 OqlUnaryExpression unary => Unary(unary.Operator, (await EvaluateAsync(unary.Operand, document, group, nested).ConfigureAwait(false))),
@@ -67,7 +68,11 @@ internal sealed partial class DocumentExpressionEvaluator
 
     internal async ValueTask<bool> MatchesAsync(OqlExpression? expression, DocumentEvaluationContext document,
         IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
-        => expression is null || Truth(await EvaluateAsync(expression, document, group, nested).ConfigureAwait(false)) is true;
+    {
+        long before = Memory.Bytes - nested.RetainedBytes;
+        try { return expression is null || Truth(await EvaluateAsync(expression, document, group, nested).ConfigureAwait(false)) is true; }
+        finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
+    }
 
     private async ValueTask<object?> BinaryAsync(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
     {
@@ -90,8 +95,13 @@ internal sealed partial class DocumentExpressionEvaluator
         // Couchbase expression/coll_in.go:58-159: a match wins, then NULL, then MISSING.
         foreach (var item in expression.Values)
         {
-            var value = (await EvaluateAsync(item, document, group, nested).ConfigureAwait(false));
-            AddInItem(operand, value, ref missing, ref nullItem, ref matched);
+            long before = Memory.Bytes - nested.RetainedBytes;
+            try
+            {
+                var value = await EvaluateAsync(item, document, group, nested).ConfigureAwait(false);
+                AddInItem(operand, value, ref missing, ref nullItem, ref matched);
+            }
+            finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
         }
         return FinishIn(expression.Negated, operand, missing, nullItem, matched);
     }
@@ -109,8 +119,14 @@ internal sealed partial class DocumentExpressionEvaluator
         var operand = expression.Operand is null ? null : (await EvaluateAsync(expression.Operand, document, group, nested).ConfigureAwait(false));
         foreach (var branch in expression.Branches)
         {
-            var condition = (await EvaluateAsync(branch.Key, document, group, nested).ConfigureAwait(false));
-            bool matches = CaseMatches(expression, operand, condition);
+            bool matches;
+            long before = Memory.Bytes - nested.RetainedBytes;
+            try
+            {
+                var condition = await EvaluateAsync(branch.Key, document, group, nested).ConfigureAwait(false);
+                matches = CaseMatches(expression, operand, condition);
+            }
+            finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
             if (matches) { return (await EvaluateAsync(branch.Value, document, group, nested).ConfigureAwait(false)); }
         }
         // Couchbase expression/case_simple.go:83-108 and case_searched.go:73-98:
@@ -140,7 +156,12 @@ internal sealed partial class DocumentExpressionEvaluator
         foreach (var item in array.EnumerateArray())
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            if (QuantifiedResult(expression, await EvaluateAsync(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group, nested).ConfigureAwait(false)) is bool result) { return result; }
+            long before = Memory.Bytes - nested.RetainedBytes;
+            try
+            {
+                if (QuantifiedResult(expression, await EvaluateAsync(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group, nested).ConfigureAwait(false)) is bool result) { return result; }
+            }
+            finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
         }
         return expression.IsEvery;
     }
@@ -152,9 +173,15 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             foreach (var argument in call.Arguments)
             {
-                var value = (await EvaluateAsync(argument, document, group, nested).ConfigureAwait(false));
-                bool skip = SkipConditional(call.Name, value);
-                if (!skip) { return value; }
+                long before = Memory.Bytes - nested.RetainedBytes;
+                bool keep = false;
+                try
+                {
+                    var value = await EvaluateAsync(argument, document, group, nested).ConfigureAwait(false);
+                    keep = !SkipConditional(call.Name, value);
+                    if (keep) { return value; }
+                }
+                finally { if (!keep) { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); } }
             }
             return null;
         }
@@ -182,7 +209,15 @@ internal sealed partial class DocumentExpressionEvaluator
             foreach (var document in group)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                var values = star ? Array.Empty<object?>() : (await EvaluateArgumentsAsync(call.Arguments, document, null, nested).ConfigureAwait(false));
+                long inputStart = memory.Bytes - nested.RetainedBytes;
+                object?[] values;
+                try
+                {
+                    values = star ? Array.Empty<object?>() : await EvaluateArgumentsAsync(call.Arguments, document, null, nested).ConfigureAwait(false);
+                    for (int index = 0; index < values.Length; index++)
+                    { if (values[index] is JsonElement json) { values[index] = json.Clone(); } }
+                }
+                finally { memory.Release(memory.Bytes - nested.RetainedBytes - inputStart); }
                 AddAggregate(function, name, accumulator, seen, values, memory);
             }
             result = RetainAggregateResult(name, accumulator.Finish().Value, memory);
@@ -205,18 +240,53 @@ internal sealed partial class DocumentExpressionEvaluator
         IReadOnlyList<DocumentEvaluationContext>? group, DocumentNestedExecutionContext nested)
     {
         if (expression is OqlArrayExpression array)
-        { return await DocumentJsonValue.ArrayAsync(ElementsAsync(array), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false); }
-        return await DocumentJsonValue.ObjectAsync(MembersAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+        {
+            var result = await DocumentJsonValue.ArrayAsync(ElementsAsync(array), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+            Memory.Retain(result);
+            return result;
+        }
+        using var members = Memory.Reserve();
+        var memberCharges = new Dictionary<string, long>(StringComparer.Ordinal);
+        var constructed = await DocumentJsonValue.ObjectAsync(MembersAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+        // The map no longer owns the member representations. Transfer to the final
+        // JSON value, which remains expression scratch until its consumer releases it.
+        long resultBytes = 64L + Memory.ValueBytes(constructed);
+        if (resultBytes > members.Bytes) { members.Charge(resultBytes - members.Bytes); }
+        else { members.Rewind(resultBytes); }
+        members.Detach();
+        return constructed;
 
         async IAsyncEnumerable<object?> ElementsAsync(OqlArrayExpression array)
         {
             foreach (var element in array.Elements)
-            { yield return await EvaluateAsync(element, document, group, nested).ConfigureAwait(false); }
+            {
+                long before = Memory.Bytes - nested.RetainedBytes;
+                try { yield return await EvaluateAsync(element, document, group, nested).ConfigureAwait(false); }
+                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - before); }
+            }
         }
         async IAsyncEnumerable<KeyValuePair<string, object?>> MembersAsync()
         {
             foreach (var member in ((OqlObjectExpression)expression).Members)
-            { yield return new(member.Key, await EvaluateAsync(member.Value, document, group, nested).ConfigureAwait(false)); }
+            {
+                long before = Memory.Bytes - nested.RetainedBytes - members.Bytes;
+                try
+                {
+                    var value = await EvaluateAsync(member.Value, document, group, nested).ConfigureAwait(false);
+                    if (value is not DocumentMissing)
+                    {
+                        // ObjectAsync keeps the last non-MISSING value for each key
+                        // until serialization. Transfer its ownership before releasing
+                        // this member's discarded expression scratch.
+                        long bytes = 64L + Memory.ValueBytes(value);
+                        members.Charge(bytes);
+                        members.Rewind(members.Bytes - memberCharges.GetValueOrDefault(member.Key));
+                        memberCharges[member.Key] = bytes;
+                    }
+                    yield return new(member.Key, value);
+                }
+                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - members.Bytes - before); }
+            }
         }
     }
 
@@ -225,9 +295,22 @@ internal sealed partial class DocumentExpressionEvaluator
     {
         var value = await EvaluateAsync(expression.Collection, document, group, nested).ConfigureAwait(false);
         if (!TryCollection(value, out var array, out var unknown)) { return unknown; }
+        using var firstResult = expression.IsFirst ? Memory.Reserve() : null;
         if (!expression.IsFirst)
-        { return await DocumentJsonValue.ArrayAsync(MapAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false); }
-        await foreach (var mapped in MapAsync().ConfigureAwait(false)) { return mapped; }
+        {
+            var result = await DocumentJsonValue.ArrayAsync(MapAsync(), _writeVerb, _constructorMaxDepth, _resultClause).ConfigureAwait(false);
+            Memory.Retain(result);
+            return result;
+        }
+        object? first = DocumentMissing.Instance;
+        await foreach (var mapped in MapAsync().ConfigureAwait(false)) { first = mapped; break; }
+        if (first is not DocumentMissing)
+        {
+            // MapAsync released discarded operands while preserving the selected
+            // representation. Transfer that charge to the expression consumer.
+            firstResult!.Detach();
+            return first;
+        }
         return DocumentMissing.Instance;
 
         async IAsyncEnumerable<object?> MapAsync()
@@ -237,8 +320,23 @@ internal sealed partial class DocumentExpressionEvaluator
                 _cancellationToken.ThrowIfCancellationRequested();
                 var inner = document.Bind(expression.Variable, ReadJson(item));
                 if (!await MatchesAsync(expression.Predicate, inner, group, nested).ConfigureAwait(false)) { continue; }
-                var mapped = await EvaluateAsync(expression.Projection, inner, group, nested).ConfigureAwait(false);
-                if (KeepMapped(expression, mapped)) { yield return mapped; }
+                long before = Memory.Bytes - nested.RetainedBytes;
+                try
+                {
+                    var mapped = await EvaluateAsync(expression.Projection, inner, group, nested).ConfigureAwait(false);
+                    if (KeepMapped(expression, mapped))
+                    {
+                        if (firstResult is not null)
+                        {
+                            long bytes = 64L + Memory.ValueBytes(mapped);
+                            long transferred = Math.Min(bytes, Memory.Bytes - nested.RetainedBytes - before);
+                            firstResult.Adopt(transferred);
+                            firstResult.Charge(bytes - transferred);
+                        }
+                        yield return mapped;
+                    }
+                }
+                finally { Memory.Release(Memory.Bytes - nested.RetainedBytes - (firstResult?.Bytes ?? 0) - before); }
             }
         }
     }

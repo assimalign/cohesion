@@ -6,6 +6,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed class SqlOperatorWork
 {
     internal long Candidates;
+    internal long WindowTransitions;
+    internal long WindowInverseTransitions;
+    internal long WindowBoundaryVisits;
 
     private sealed class DebugView
     {

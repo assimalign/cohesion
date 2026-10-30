@@ -99,6 +99,12 @@ public static class GqlClauses
     /// <summary>Combines graph query results with a set operation.</summary>
     public const string SetOperation = "UNION";
 
+    /// <summary>Combines read-only query results with structural duplicate elimination.</summary>
+    public const string UnionDistinct = "UNION DISTINCT";
+
+    /// <summary>Concatenates read-only query results with duplicate rows preserved.</summary>
+    public const string UnionAll = "UNION ALL";
+
     /// <summary>Tests whether a correlated inner graph pattern produces any row.</summary>
     public const string Exists = "EXISTS";
 

@@ -26,6 +26,11 @@ internal static partial class GraphPlanExecutor
             if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
             throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRequestFromGqlDatabaseParse, error.Code, error.Message), statement.Diagnostics);
         }
+        if (statement.GqlExpression.Composite is not null)
+        {
+            var composite = new GraphPlanner(database, operation.Context.Snapshot).PlanComposite(statement.GqlExpression, parameters, paths, token);
+            return await ExecuteCompositeAsync(database, operation, composite, token, paths, scalarsOnly, compositeValues).ConfigureAwait(false);
+        }
         if (paths && statement.GqlExpression.CatalogSurface is not null)
         { throw new GraphPlanningException("CG05001", ErrorMessages.PathProjectionRequired, statement.GqlExpression.Location); }
         if (statement.GqlExpression.CatalogSurface is { } surface)

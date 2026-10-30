@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 public sealed class SqlOnUpdateWireTests
 {
-    public static IEnumerable<object[]> Refusals()
+    public static IEnumerable<object[]> Actions()
     {
         foreach (bool tcp in new[] { false, true })
         {
@@ -19,9 +19,9 @@ public sealed class SqlOnUpdateWireTests
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: each unimplemented action refuses every update path atomically over InMemory and TCP (#1723)")]
-    [MemberData(nameof(Refusals))]
-    public async Task ExecuteAsync_UpdateAction_ShouldRefuseAndKeepConnectionUsable(bool tcp, string action, int path)
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: every action executes on every update path over InMemory and TCP (#1723)")]
+    [MemberData(nameof(Actions))]
+    public async Task ExecuteAsync_UpdateAction_ShouldApplyAndKeepConnectionUsable(bool tcp, string action, int path)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
@@ -39,27 +39,23 @@ public sealed class SqlOnUpdateWireTests
         };
 
         // Act
-        var error = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout(30)));
+        await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout(30));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        error.Message.ShouldContain($"ON UPDATE {action} action execution", Case.Sensitive);
-        error.ConnectionUsable.ShouldBeTrue();
-        var rows = await connection.QueryAsync("SELECT id,v FROM p ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout(30));
+        var rows = await connection.QueryAsync("SELECT id,v FROM p WHERE id<>3 ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout(30));
         rows.Count.ShouldBe(2);
-        rows[0][0].ShouldBe(1); rows[0][1].ShouldBe(0);
-        rows[1][0].ShouldBe(2); rows[1][1].ShouldBe(0);
+        rows[0][0].ShouldBe(1); rows[0][1].ShouldBe(1);
+        rows[1][0].ShouldBe(20); rows[1][1].ShouldBe(1);
         var child = await connection.QueryAsync("SELECT pid FROM c", cancellationToken: SqlClientTestHarness.Timeout(30));
-        child.ShouldHaveSingleItem()[0].ShouldBe(2);
+        child.ShouldHaveSingleItem()[0].ShouldBe(action switch { "CASCADE" => 20, "SET DEFAULT" => 1, _ => (object?)null });
         var rule = await connection.QueryAsync("SELECT UPDATE_RULE,DELETE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS", cancellationToken: SqlClientTestHarness.Timeout(30));
         rule.ShouldHaveSingleItem()[0].ShouldBe(action);
         rule[0][1].ShouldBe("SET NULL");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: self-references refuse every update path over InMemory and TCP (#1723)")]
-    [MemberData(nameof(Refusals))]
-    public async Task ExecuteAsync_SelfReference_ShouldReportActionRefusal(bool tcp, string action, int path)
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: self-references execute every update path over InMemory and TCP (#1723)")]
+    [MemberData(nameof(Actions))]
+    public async Task ExecuteAsync_SelfReference_ShouldApplyActions(bool tcp, string action, int path)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
@@ -75,15 +71,11 @@ public sealed class SqlOnUpdateWireTests
         };
 
         // Act
-        var error = await Should.ThrowAsync<SqlClientException>(async () =>
-            await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout(30)));
+        await connection.ExecuteAsync(sql, cancellationToken: SqlClientTestHarness.Timeout(30));
 
         // Assert
-        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CK00001");
-        error.Message.ShouldContain($"ON UPDATE {action} action execution", Case.Sensitive);
-        error.ConnectionUsable.ShouldBeTrue();
         var row = (await connection.QueryAsync("SELECT id,pid FROM t", cancellationToken: SqlClientTestHarness.Timeout(30))).ShouldHaveSingleItem();
-        row[0].ShouldBe(1); row[1].ShouldBe(1);
+        row[0].ShouldBe(2); row[1].ShouldBe(action == "CASCADE" ? 2 : (object?)null);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: all metadata and default rules cross InMemory and TCP (#1723)")]
@@ -116,4 +108,102 @@ public sealed class SqlOnUpdateWireTests
         // Assert
         rows.ShouldHaveSingleItem()[0].ShouldBe(action.Length == 0 ? "NO ACTION" : action);
     }
+    public static IEnumerable<object[]> Restrictions()
+    {
+        foreach (bool tcp in new[] { false,true })
+        { foreach (bool self in new[] { false,true })
+          { foreach (string action in new[] { "RESTRICT","NO ACTION" })
+            { for (int path=0;path<4;path++) { yield return [tcp,self,action,path]; } } } }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: immediate RESTRICT and final NO ACTION differ on every path over both transports (#1723)")]
+    [MemberData(nameof(Restrictions))]
+    public async Task ExecuteAsync_ParentSubstitution_ShouldDistinguishActions(bool tcp,bool self,string action,int path)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp:tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
+        string fk = $"link INT REFERENCES p(k) ON UPDATE {action}";
+        await connection.ExecuteAsync("CREATE TABLE p(tag INT PRIMARY KEY,k INT UNIQUE"+(self ? ","+fk : "")+")", cancellationToken:SqlClientTestHarness.Timeout(30));
+        if (!self) { await connection.ExecuteAsync($"CREATE TABLE c({fk})", cancellationToken:SqlClientTestHarness.Timeout(30)); }
+        await connection.ExecuteAsync(self ? "INSERT INTO p VALUES(1,1,1),(2,2,NULL)" : "INSERT INTO p VALUES(1,1),(2,2)", cancellationToken:SqlClientTestHarness.Timeout(30));
+        if (!self) { await connection.ExecuteAsync("INSERT INTO c VALUES(1)", cancellationToken:SqlClientTestHarness.Timeout(30)); }
+        string sql = path switch
+        {
+            0 => "UPDATE p SET k=3-k",
+            1 => "UPDATE p SET k=3-p.k FROM (SELECT 1 AS v) s",
+            2 => "INSERT INTO p(tag,k) VALUES(1,1),(2,2) ON CONFLICT(tag) DO UPDATE SET k=3-p.k",
+            _ => "MERGE INTO p USING (SELECT 1 AS tag UNION ALL SELECT 2) s ON p.tag=s.tag WHEN MATCHED THEN UPDATE SET k=3-p.k",
+        };
+        // Act
+        if (action == "RESTRICT")
+        {
+            var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(sql,cancellationToken:SqlClientTestHarness.Timeout(30)));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03039");
+            error.ConnectionUsable.ShouldBeTrue();
+        }
+        else { (await connection.ExecuteAsync(sql,cancellationToken:SqlClientTestHarness.Timeout(30))).ShouldBe(2); }
+        // Assert
+        var parent = await connection.QueryAsync("SELECT k FROM p ORDER BY tag",cancellationToken:SqlClientTestHarness.Timeout(30));
+        parent[0][0].ShouldBe(action == "RESTRICT" ? 1 : 2);
+        parent[1][0].ShouldBe(action == "RESTRICT" ? 2 : 1);
+        var child = await connection.QueryAsync(self ? "SELECT link FROM p WHERE tag=1" : "SELECT link FROM c",cancellationToken:SqlClientTestHarness.Timeout(30));
+        child.ShouldHaveSingleItem()[0].ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: cascade conflicts preserve CS05085, rows and a usable connection (#1723)")]
+    [InlineData(false)][InlineData(true)]
+    public async Task ExecuteAsync_ConflictingCascade_ShouldPreserveDiagnostic(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp:tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
+        foreach (string sql in new[] {
+            "CREATE TABLE p(k INT PRIMARY KEY)",
+            "CREATE TABLE c(a INT UNIQUE REFERENCES p(k) ON UPDATE CASCADE,b INT DEFAULT 3 UNIQUE REFERENCES p(k) ON UPDATE SET DEFAULT)",
+            "CREATE TABLE d(k INT REFERENCES c(a) ON UPDATE CASCADE,FOREIGN KEY(k) REFERENCES c(b) ON UPDATE CASCADE)",
+            "INSERT INTO p VALUES(1),(3)","INSERT INTO c VALUES(1,1)","INSERT INTO d VALUES(1)" })
+        { await connection.ExecuteAsync(sql,cancellationToken:SqlClientTestHarness.Timeout(30)); }
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync("UPDATE p SET k=2 WHERE k=1",cancellationToken:SqlClientTestHarness.Timeout(30)));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS05085");
+        error.ConnectionUsable.ShouldBeTrue();
+        var rows = await connection.QueryAsync("SELECT a,b FROM c",cancellationToken:SqlClientTestHarness.Timeout(30));
+        rows.ShouldHaveSingleItem()[0].ShouldBe(1); rows[0][1].ShouldBe(1);
+        (await connection.QueryAsync("SELECT k FROM d",cancellationToken:SqlClientTestHarness.Timeout(30))).ShouldHaveSingleItem()[0].ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - ON UPDATE: fixed-snapshot action conflicts retain CS04064 on every path (#1723)")]
+    [MemberData(nameof(Actions))]
+    public async Task ExecuteAsync_NewerChild_ShouldRetainSnapshotDiagnostic(bool tcp,string action,int path)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp:tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
+        await using var writer = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
+        await connection.ExecuteAsync("CREATE TABLE p(id INT PRIMARY KEY)",cancellationToken:SqlClientTestHarness.Timeout(30));
+        await connection.ExecuteAsync($"CREATE TABLE c(pid INT DEFAULT 0 REFERENCES p(id) ON UPDATE {action})",cancellationToken:SqlClientTestHarness.Timeout(30));
+        await connection.ExecuteAsync("INSERT INTO p VALUES(0),(1)",cancellationToken:SqlClientTestHarness.Timeout(30));
+        await connection.ExecuteAsync("BEGIN",cancellationToken:SqlClientTestHarness.Timeout(30));
+        await writer.ExecuteAsync("INSERT INTO c VALUES(1)",cancellationToken:SqlClientTestHarness.Timeout(30));
+        string sql = path switch
+        {
+            0 => "UPDATE p SET id=2 WHERE id=1",
+            1 => "UPDATE p SET id=2 FROM (SELECT 1 AS id) s WHERE p.id=s.id",
+            2 => "INSERT INTO p VALUES(1) ON CONFLICT(id) DO UPDATE SET id=2",
+            _ => "MERGE INTO p USING (SELECT 1 AS id) s ON p.id=s.id WHEN MATCHED THEN UPDATE SET id=2",
+        };
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.ExecuteAsync(sql,cancellationToken:SqlClientTestHarness.Timeout(30)));
+        // Assert
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04064");
+        error.Message.ShouldContain($"ON UPDATE {action}",Case.Sensitive);
+        error.ConnectionUsable.ShouldBeTrue();
+        (await writer.QueryAsync("SELECT pid FROM c",cancellationToken:SqlClientTestHarness.Timeout(30))).ShouldHaveSingleItem()[0].ShouldBe(1);
+        var rows = await connection.QueryAsync("SELECT id FROM p ORDER BY id",cancellationToken:SqlClientTestHarness.Timeout(30));
+        rows.Count.ShouldBe(2); rows[0][0].ShouldBe(0); rows[1][0].ShouldBe(1);
+        await connection.ExecuteAsync("ROLLBACK",cancellationToken:SqlClientTestHarness.Timeout(30));
+    }
+
 }

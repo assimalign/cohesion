@@ -10,6 +10,7 @@
   <data name="StatementInvalid" xml:space="preserve"><value>The OQL statement has error diagnostics.</value></data>
   <data name="StatementFailed" xml:space="preserve"><value>The document statement did not complete successfully.</value></data>
   <data name="ResultTooLarge" xml:space="preserve"><value>A document result exceeds the maximum frame size.</value></data>
+  <data name="NestedWorkExceeded" xml:space="preserve"><value>The statement exceeded its shared expression evaluation work budget.</value></data>
   <data name="ServerShuttingDown" xml:space="preserve"><value>The server is shutting down.</value></data>
   <data name="CollectionNameMissing" xml:space="preserve"><value>A collection name is required.</value></data>
   <data name="CollectionAlreadyExists" xml:space="preserve"><value>Collection '{0}' already exists.</value></data>
@@ -196,9 +197,6 @@
   <data name="DocumentQueryRowRequiredDatabase" xml:space="preserve"><value>Field {0} is null.</value></data>
   <data name="CollectionsEnsureReadOnlyFailure" xml:space="preserve"><value>System collection '{0}' is read-only.</value></data>
   <data name="DocumentOperationEnsureActiveDatabase" xml:space="preserve"><value>The document operation's transaction is no longer active.</value></data>
-  <data name="DmlSubqueryDeferred" xml:space="preserve"><value>Subqueries in DML are not supported yet.</value></data>
-  <data name="DmlSourceDeferred" xml:space="preserve"><value>Expression FROM sources in DML are not supported yet.</value></data>
-  <data name="CorrelationDeferred" xml:space="preserve"><value>Correlated subqueries are not supported yet.</value></data>
   <data name="DocumentPlannerPlanFailure" xml:space="preserve"><value>The OQL statement is not supported by the document executor.</value></data>
   <data name="DocumentPlannerPlanCreateIndexFailure" xml:space="preserve"><value>CREATE INDEX requires an index name.</value></data>
   <data name="DocumentPlannerPlanCreateIndexFailure2" xml:space="preserve"><value>CREATE INDEX '{0}' requires a representable document path.</value></data>

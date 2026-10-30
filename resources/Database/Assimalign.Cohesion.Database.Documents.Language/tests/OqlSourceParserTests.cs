@@ -46,6 +46,7 @@ public sealed class OqlSourceParserTests
         // Arrange / Act
         var statement = new OqlQueryParser().Parse(text);
         // Assert
+        if (form == "DML") { statement.Diagnostics.ShouldBeEmpty(); return; }
         statement.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code && diagnostic.Message!.Contains(form, StringComparison.OrdinalIgnoreCase));
     }
 }

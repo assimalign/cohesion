@@ -352,7 +352,8 @@ public sealed class SqlCascadeDeleteDepthTests
     public async Task Wire_DeepCascade_ShouldCompleteAndKeepTheConnection()
     {
         // Arrange: the chain is seeded in process, into the database the server fronts.
-        await using var harness = await ServerTestHarness.StartAsync();
+        await using var harness = await ServerTestHarness.StartAsync(
+            configureEngine: options => options.StatementMemoryBudget = 128L * 1024 * 1024);
         harness.Engine.TryGetDatabase(ServerTestHarness.DatabaseName, out SqlDatabase? database).ShouldBeTrue();
         await using (var seeding = await database!.CreateSessionAsync())
         {
@@ -383,7 +384,9 @@ public sealed class SqlCascadeDeleteDepthTests
     private static CancellationToken Timeout() => TestTimeout.Token(timeoutSeconds);
 
     private static SqlDatabaseEngine CreateEngine()
-        => SqlDatabaseEngine.Create("cascade-depth", new SqlDatabaseEngineOptions());
+        // These are depth/atomicity tests. The 100,000-row closure now owns a real
+        // memory grant; small-budget refusal is covered by SqlOnUpdateFixTests.
+        => SqlDatabaseEngine.Create("cascade-depth", new SqlDatabaseEngineOptions { StatementMemoryBudget = 128L * 1024 * 1024 });
 
     private static (T? Result, Exception? Failure) RunOnThread<T>(int stackKilobytes, Func<T> work)
     {

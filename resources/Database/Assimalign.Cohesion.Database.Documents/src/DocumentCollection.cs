@@ -124,7 +124,7 @@ public sealed class DocumentCollection
     // The caller already owns its session operation. All writes share the lock, conflict,
     // version, content and index-maintenance path without entering a second operation.
     internal async ValueTask<Document> WriteAsync(TransactionContext context, DocumentId id, byte[] bytes,
-        DocumentVersion? expectedVersion, bool insertOnly, CancellationToken cancellationToken)
+        DocumentVersion? expectedVersion, bool insertOnly, CancellationToken cancellationToken, ulong? reservedVersion = null)
     {
         await _database.LockWriterAsync(context, cancellationToken).ConfigureAwait(false);
         EnsureCollection(context, writing: true);
@@ -137,7 +137,7 @@ public sealed class DocumentCollection
             await _database.DataStorage.TombstoneContentAsync(_database.Coordinator, context, DocumentDatabase.Content(previous.Value), cancellationToken).ConfigureAwait(false);
         }
         // Use the durable kernel allocator: versions never repeat, even after delete/reinsert or restart.
-        ulong version = (ulong)_database.DataStorage.ReserveTransactionSequence();
+        ulong version = reservedVersion ?? (ulong)_database.DataStorage.ReserveTransactionSequence();
         var entry = new DocumentCatalogEntry(_collection.Id, id.Value, version, reference.Head, reference.Length, reference.Checksum);
         await _database.Catalog.SaveDocumentAsync(entry, context, cancellationToken).ConfigureAwait(false);
         return new Document(id, new DocumentVersion(version), bytes);

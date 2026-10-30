@@ -11,7 +11,7 @@ public sealed class SqlWindowFrameBound
 
     /// <summary>Gets the boundary's position relative to the current row.</summary>
     public SqlWindowFrameBoundKind Kind { get; }
-    /// <summary>Gets the row count for an offset boundary.</summary>
+    /// <summary>Gets the row count, group count or key distance for an offset boundary.</summary>
     public SqlExpression? Offset { get; }
 }
 

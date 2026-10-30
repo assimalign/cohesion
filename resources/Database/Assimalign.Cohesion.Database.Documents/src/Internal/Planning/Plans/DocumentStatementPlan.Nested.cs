@@ -7,4 +7,4 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal sealed record DocumentNestedPlan(DocumentStatementPlan Root,
     IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan> Queries) : DocumentStatementPlan;
 
-internal sealed record DocumentNestedQueryPlan(DocumentStatementPlan Plan, bool CacheForStatement, string Owner);
+internal sealed record DocumentNestedQueryPlan(DocumentStatementPlan Plan, bool CacheForStatement, string Owner, IReadOnlySet<string> OuterNames);

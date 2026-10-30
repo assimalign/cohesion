@@ -9,15 +9,18 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 [System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 public sealed class SqlWindowExpression : SqlExpression
 {
-    internal SqlWindowExpression(SqlFunctionCallExpression function, string? name, SqlWindowSpecification? specification, Location? location)
+    internal SqlWindowExpression(SqlFunctionCallExpression function, string? name, SqlWindowSpecification? specification, Location? location, SqlWindowNullTreatment nullTreatment = SqlWindowNullTreatment.Default)
         : base(location)
     {
         Function = function;
+        NullTreatment = nullTreatment;
         WindowName = name;
         Specification = specification;
         Depth = 1 + Math.Max(function.Depth, specification?.ExpressionDepth ?? 0);
     }
 
+    /// <summary>Gets the explicit NULL treatment, or the default RESPECT NULLS behavior.</summary>
+    public SqlWindowNullTreatment NullTreatment { get; }
     /// <summary>Gets the function and its arguments.</summary>
     public SqlFunctionCallExpression Function { get; }
     /// <summary>Gets the directly referenced name in OVER name.</summary>
@@ -30,6 +33,7 @@ public sealed class SqlWindowExpression : SqlExpression
         private readonly SqlWindowExpression _value;
         public DebugView(SqlWindowExpression value) { _value = value; }
         public SqlFunctionCallExpression Function => _value.Function;
+        public SqlWindowNullTreatment NullTreatment => _value.NullTreatment;
         public string? WindowName => _value.WindowName;
         public SqlWindowSpecification? Specification => _value.Specification;
         public string? Text => _value.Text;

@@ -26,6 +26,7 @@ internal sealed partial class SqlPlanner
         {
             if (clause.Action == SqlMergeAction.Insert) { RecordIdentityUsage(table); }
             if (clause.Action == SqlMergeAction.Delete) { RecordReferentialSequenceUsage(table); }
+            if (clause.Action == SqlMergeAction.Update) { RecordReferentialSequenceUsage(table, deleting: false); }
             if (!Enum.IsDefined(clause.MatchKind) || !Enum.IsDefined(clause.Action) ||
                 clause.MatchKind == SqlMergeMatchKind.NotMatchedByTarget && clause.Action is SqlMergeAction.Update or SqlMergeAction.Delete ||
                 clause.MatchKind != SqlMergeMatchKind.NotMatchedByTarget && clause.Action == SqlMergeAction.Insert) { throw Invalid(); }

@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("GraphStagePlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphStagePlan.DebugView))]
-internal sealed record GraphStagePlan(GqlStage Stage, GraphPlan Plan)
+internal record GraphStagePlan(GqlStage Stage, GraphPlan Plan)
 {
     internal GraphProjectionKind ElementKind { get; init; }
 

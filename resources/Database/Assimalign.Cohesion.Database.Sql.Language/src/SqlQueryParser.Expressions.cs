@@ -1041,6 +1041,7 @@ public sealed partial class SqlQueryParser
             Expect(ref lexer, TokenType.RightParen, _errorWithinGroupClosingExpected);
         }
         var call = ParseCallFilter(ref lexer, new SqlFunctionCallExpression(name, args, Location.Create(1, 1, pos, callEnd), quantifier, ordering, listagg));
+        var nullTreatment = SqlWindowNullTreatment.Default;
         while (IsWindowValueModifier(lexer, name))
         {
             int modifierStart = lexer.Current.Position;
@@ -1049,9 +1050,15 @@ public sealed partial class SqlQueryParser
             form += " " + CurrentText(ref lexer).ToUpperInvariant();
             int modifierEnd = CurrentTokenEnd(ref lexer);
             Advance(ref lexer);
-            RequireSkippedConstruct(modifierStart, modifierEnd, form);
+            if (form is "IGNORE NULLS" or "RESPECT NULLS")
+            {
+                RequireSkippedConstruct(modifierStart, modifierEnd, SqlClauses.WindowNullTreatment);
+                if (nullTreatment != SqlWindowNullTreatment.Default) { AddExpectedDiagnostic(ref lexer, "one NULL treatment clause"); }
+                nullTreatment = form == "IGNORE NULLS" ? SqlWindowNullTreatment.Ignore : SqlWindowNullTreatment.Respect;
+            }
+            else { RequireSkippedConstruct(modifierStart, modifierEnd, form); }
         }
-        if (IsKeyword(ref lexer, "OVER")) { return ParseOver(ref lexer, call); }
+        if (IsKeyword(ref lexer, "OVER")) { return ParseOver(ref lexer, call, nullTreatment); }
         SkipCallExtensions(ref lexer);
         return call;
     }

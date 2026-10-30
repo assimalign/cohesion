@@ -100,6 +100,10 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
+                new("SELECT RAW g FROM items ORDER BY items.g", [[3m], [2m], [1m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT RAW g FROM items d ORDER BY d.g", [[1m], [2m], [3m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
                 new("SELECT amount = 1 IS NOT NULL, 1 = NULL IS NULL, 1 IN [1] IS NULL, 2 BETWEEN 1 AND 3 IS NOT NULL, 2 BETWEEN 1 IS NOT NULL AND 3 FROM items WHERE name = 'alpha'", [[false, false, null, false, false]]),
                 new("SELECT 'abc' LIKE 'a%' IS NOT NULL, 'a%' LIKE 'a!%' ESCAPE '!' IS NOT NULL, 'a' || 'b', MISSING IS DISTINCT FROM NULL, NULL IS NOT DISTINCT FROM NULL FROM items WHERE name = 'alpha'", [[null, null, "ab", true, true]]),
                 new("SELECT ARRAY_AGG(category) FROM items GROUP BY category HAVING ARRAY_LENGTH(ARRAY_AGG(category)) > 0 ORDER BY ARRAY_AGG(category)", [[Json("[\"a\",\"a\",\"a\"]")], [Json("[\"b\"]")]]),
@@ -116,6 +120,24 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Subquery] =
             [
+                new("SELECT RAW (SELECT RAW items.category FROM [1] AS s) FROM items GROUP BY category ORDER BY category", [[Json("[\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT RAW (SELECT RAW META(items).id FROM [1] AS s) FROM items GROUP BY META().id ORDER BY META().id", [[Json("[\"a\"]")], [Json("[\"b\"]")], [Json("[\"c\"]")], [Json("[\"d\"]")]]),
+                new("SELECT RAW (SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM [1] AS t) FROM [{n:10}] AS d GROUP BY (SELECT RAW d.n FROM [1] AS s)", [[Json("[[10]]")]]),
+                new("SELECT RAW (SELECT s.amount AS d FROM items s ORDER BY d.amount) FROM items d WHERE name = 'alpha'", [[Json("[{\"d\":2},{\"d\":6},{\"d\":4},{\"d\":null}]")]],
+                    ["CREATE INDEX collision ON items (d.amount INCLUDE MISSING)"]),
+                new("SELECT RAW (SELECT RAW META(s).id FROM items s ORDER BY META(d).id DESC LIMIT 1) FROM items d LIMIT 1", [[Json("[\"a\"]")]]),
+                new("SELECT RAW (SELECT RAW d.category FROM [1] AS s) FROM items d GROUP BY d.category ORDER BY d.category", [[Json("[\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT RAW (SELECT RAW META(s).id FROM items s WHERE d.category = 'a' ORDER BY META(s).id) FROM items d WHERE name = 'alpha'",
+                    [[Json("[\"a\",\"b\",\"c\",\"d\"]")]], ["CREATE INDEX captured ON items (d.category)"]),
+                new("SELECT RAW 1 FROM [1] AS d WHERE EVERY v IN [1,2,3] SATISFIES EXISTS (SELECT RAW v FROM [1] AS s) END", [[1m]]),
+                new("SELECT (SELECT RAW d.name FROM [1] AS s) AS names FROM items d WHERE name = 'alpha'", [[Json("[\"alpha\"]")]]),
+                new("SELECT (SELECT RAW META(d).id FROM [1] AS s) AS ids FROM items d WHERE name = 'alpha'", [[Json("[\"a\"]")]]),
+                new("SELECT (SELECT d.name AS n, COUNT(*) AS c FROM [1,2] AS s HAVING d.name = 'alpha') AS a FROM items d WHERE name = 'alpha'", [[Json("[{\"n\":\"alpha\",\"c\":2}]")]]),
+                new("SELECT (SELECT RAW v FROM d.tags AS v) AS tags FROM items d WHERE name = 'alpha'", [[Json("[\"blue\"]")]]),
+                new("UPDATE items d SET names = (SELECT RAW d.name FROM [1] AS s) WHERE EXISTS (SELECT RAW s.name FROM items s WHERE s.name = d.name)",
+                    [[Json("[\"alpha\"]")]], VerificationStatement: "SELECT names FROM items WHERE name = 'alpha'", ExpectedAffectedCount: 4),
+                new("DELETE FROM items d WHERE d.name IN (SELECT RAW s.name FROM items s WHERE s.name = 'alpha')", [["beta"], ["gamma"], ["delta"]],
+                    VerificationStatement: "SELECT name FROM items", ExpectedAffectedCount: 1),
                 new("SELECT (SELECT RAW name FROM items WHERE name = 'alpha') AS names FROM items WHERE name = 'beta'", [[Json("[\"alpha\"]")]]),
                 new("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items WHERE category = 'b')", [["gamma"]]),
                 new("SELECT (SELECT RAW name FROM items s WHERE category = 'b') AS names FROM items d WHERE name = 'alpha'", [[Json("[\"gamma\"]")]]),
@@ -259,6 +281,7 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Limit] =
             [
+                new("SELECT RAW META(items).id FROM items ORDER BY META(items).id LIMIT 2", [["a"], ["b"]]),
                 new("SELECT RAW v FROM [1/0] AS v ORDER BY v LIMIT 0", []),
                 new("SELECT DISTINCT RAW v FROM [1/0] AS v LIMIT 0", []),
                 new("SELECT COUNT(*) FROM [1/0] AS v LIMIT 0", []),

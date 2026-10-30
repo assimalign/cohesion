@@ -23,7 +23,11 @@ and quantifiers on both transports. Source/group staging now shares the statemen
 
 Expression SELECT arrays, EXISTS and IN (SELECT RAW ...) use ordinary JSON cells over InMemory
 and TCP. DocumentSubqueryWireTests checks RAW/object arrays, membership, empty EXISTS, lazy
-failure suppression, EXPLAIN cache policy, located correlation refusal and connection reuse.
+failure suppression, EXPLAIN cache policy, lexical correlation and connection reuse.
+OQ-Q3 additionally exercises correlated expression/FROM sources, SET/VALUES and INSERT SELECT,
+self-referencing UPDATE/DELETE predicates, staged statement-start RETURNING reads and located CD05020
+work refusal on InMemory and TCP. The NativeAOT guard checks correlation and mutation snapshot
+semantics on both transports. There is no new client API, frame, capability or version.
 Overdeep subquery projections return located CD05015 before the formatter on both transports,
 including the named wrapper; the same connection then successfully reads another result.
 The existing NativeAOT consumer checks arrays, EXISTS, IN and lazy conditional behavior on both

@@ -15,15 +15,15 @@ internal static partial class DocumentPlanExecutor
 {
     internal static ValueTask<DatabaseResult> ExecuteNestedQueryAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentStatementPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken,
-        DocumentNestedExecutionContext nested)
+        DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
         var logical = SourceLogical(plan);
         if (logical.Limit == 0) { return ValueTask.FromResult<DatabaseResult>(CreateResult(logical, [], cancellationToken)); }
         return plan switch
         {
-            DocumentFromPlan source => ExecuteFromAsync(database, operation, source, parameters, cancellationToken, nested),
-            DocumentPlan select => ExecuteNestedSelectAsync(database, operation, select, parameters, cancellationToken, null, nested),
-            DocumentSystemCollectionPlan system => ExecuteNestedSystemCollectionAsync(database, operation, system, parameters, cancellationToken, null, nested),
+            DocumentFromPlan source => ExecuteFromAsync(database, operation, source, parameters, cancellationToken, nested, writeVerb),
+            DocumentPlan select => ExecuteNestedSelectAsync(database, operation, select, parameters, cancellationToken, writeVerb, nested),
+            DocumentSystemCollectionPlan system => ExecuteNestedSystemCollectionAsync(database, operation, system, parameters, cancellationToken, writeVerb, nested),
             _ => throw new DocumentPlanningException("CD05001", ErrorMessages.PlanExecutorExecuteAsyncFailure),
         };
     }
@@ -32,7 +32,19 @@ internal static partial class DocumentPlanExecutor
         DocumentNestedPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         using var nested = new DocumentNestedExecutionContext(database, operation, plan.Queries, parameters, cancellationToken);
-        return await ExecuteNestedQueryAsync(database, operation, plan.Root, parameters, cancellationToken, nested).ConfigureAwait(false);
+        var memory = operation.GetStatementMemory(cancellationToken);
+        long before = memory.Bytes - nested.RetainedBytes;
+        try { return plan.Root switch
+        {
+            DocumentUpdatePlan update => await ExecuteUpdateAsync(database, operation, update, parameters, cancellationToken, nested).ConfigureAwait(false),
+            DocumentDeletePlan delete => await ExecuteDeleteAsync(database, operation, delete, parameters, cancellationToken, nested).ConfigureAwait(false),
+            DocumentInsertPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, null, true, insert.Returning, parameters, cancellationToken, nested).ConfigureAwait(false),
+            DocumentInsertSelectPlan insert => await ExecuteWriteAsync(database, operation, insert.Collection, insert.Statement, insert.Statement.Values, (insert.Source, insert.KeyOrdinal, insert.ValueOrdinal), true, insert.Returning, parameters, cancellationToken, nested).ConfigureAwait(false),
+            DocumentUpsertPlan upsert => await ExecuteWriteAsync(database, operation, upsert.Collection, upsert.Statement, upsert.Statement.Values,
+                upsert.Source is { } source ? (source, upsert.KeyOrdinal, upsert.ValueOrdinal) : null, false, upsert.Returning, parameters, cancellationToken, nested).ConfigureAwait(false),
+            _ => await ExecuteNestedQueryAsync(database, operation, plan.Root, parameters, cancellationToken, nested).ConfigureAwait(false),
+        }; }
+        catch { memory.Release(memory.Bytes - nested.RetainedBytes - before); throw; }
     }
 
     private static async ValueTask<DatabaseResult> ExecuteNestedSelectAsync(DocumentDatabase database, DocumentOperation operation,
@@ -40,7 +52,7 @@ internal static partial class DocumentPlanExecutor
     {
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation, nested: nested, sourceName: query.Alias ?? query.Collection);
         if (plan.Access is DocumentOrderingPath { Consumed: { } consumed })
         { return await ExecuteNestedOrderedSelectAsync(database, operation, plan, consumed, evaluator, cancellationToken, nested).ConfigureAwait(false); }
         var candidates = await ReadCandidatesAsync(database, operation, plan.Collection, plan.Access is DocumentOrderingPath ordering ? ordering.Input : plan.Access, cancellationToken).ConfigureAwait(false);
@@ -61,8 +73,7 @@ internal static partial class DocumentPlanExecutor
             if (PageComplete(plan.Logical, matches.Count)) { break; }
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
-            operation.Session.LastQueryDocumentsRead++;
-            var document = database.ReadDocument(entry);
+            var document = nested.ReadDocument(entry);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
             var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
                 query.Unnest.Count == 0 && query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);
@@ -93,7 +104,7 @@ internal static partial class DocumentPlanExecutor
     {
         var query = plan.Logical.Query;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb, operation.TransactionStart,
-            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation);
+            query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null, database.Engine.Functions, database.Name, operation: operation, nested: nested, sourceName: query.Alias ?? query.Collection);
         var matches = new List<DocumentEvaluationContext>();
         using var sourceMemory = evaluator.Memory.Reserve();
         foreach (var document in DocumentSystemCollections.Enumerate(database, operation.Context.Snapshot, plan.Name, cancellationToken))
@@ -125,7 +136,15 @@ internal static partial class DocumentPlanExecutor
             if ((await evaluator.MatchesAsync(logical.Query.Predicate, rows.Current, null, nested).ConfigureAwait(false)))
             {
                 sourceMemory.Charge(128L + logical.Query.Unnest.Count * 64L);
-                matches.Add(rows.Current);
+                var owned = rows.Current with { Bindings = null };
+                var frames = new Stack<DocumentVariableBinding>();
+                for (var frame = rows.Current.Bindings; frame is not null; frame = frame.Parent) { frames.Push(frame); }
+                foreach (var frame in frames)
+                {
+                    sourceMemory.Retain(frame.Value);
+                    owned = owned.Bind(frame.Name, frame.Value is JsonElement json ? json.Clone() : frame.Value);
+                }
+                matches.Add(owned);
             }
         }
     }
@@ -133,47 +152,8 @@ internal static partial class DocumentPlanExecutor
     private static async IAsyncEnumerable<DocumentEvaluationContext> ExpandNestedAsync(OqlSelectExpression query, DocumentEvaluationContext source,
         DocumentExpressionEvaluator evaluator, DocumentOperation operation, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken, DocumentNestedExecutionContext nested)
     {
-        var pending = new Stack<(DocumentEvaluationContext Row, int Next, JsonElement.ArrayEnumerator Items)>();
-        var row = source;
-        int next = 0;
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            operation.EnsureActive();
-            if (next == query.Unnest.Count) { yield return row; }
-            else
-            {
-                var binding = query.Unnest[next];
-                var value = (await evaluator.EvaluateAsync(binding.Collection, row, null, nested).ConfigureAwait(false));
-                if (value is JsonElement { ValueKind: JsonValueKind.Array } array && array.GetArrayLength() > 0)
-                {
-                    var items = array.EnumerateArray();
-                    items.MoveNext();
-                    pending.Push((row, next + 1, items));
-                    row = row.Bind(binding.Variable, items.Current);
-                    next++;
-                    continue;
-                }
-                if (binding.IsLeft)
-                {
-                    row = row.Bind(binding.Variable, DocumentMissing.Instance);
-                    next++;
-                    continue;
-                }
-            }
-            bool resumed = false;
-            while (pending.TryPop(out var frame))
-            {
-                var items = frame.Items;
-                if (!items.MoveNext()) { continue; }
-                pending.Push((frame.Row, frame.Next, items));
-                row = frame.Row.Bind(query.Unnest[frame.Next - 1].Variable, items.Current);
-                next = frame.Next;
-                resumed = true;
-                break;
-            }
-            if (!resumed) { yield break; }
-        }
+        await foreach (var row in ExpandSourceAsync(query, source, evaluator, operation, cancellationToken, nested).ConfigureAwait(false))
+        { yield return row; }
     }
 
     private static async ValueTask<DatabaseResult> ExecuteNestedRowsAsync(DocumentLogicalPlan logical, List<DocumentEvaluationContext> matches,
@@ -212,8 +192,16 @@ internal static partial class DocumentPlanExecutor
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var key = new object?[query.GroupBy.Count];
-                    for (int index = 0; index < key.Length; index++)
-                    { key[index] = await evaluator.EvaluateAsync(query.GroupBy[index], document, null, nested).ConfigureAwait(false); }
+                    long scratchStart = memory.Bytes - nested.RetainedBytes;
+                    try
+                    {
+                        for (int index = 0; index < key.Length; index++)
+                        {
+                            var value = await evaluator.EvaluateAsync(query.GroupBy[index], document, null, nested).ConfigureAwait(false);
+                            key[index] = value is JsonElement json ? json.Clone() : value;
+                        }
+                    }
+                    finally { memory.Release(memory.Bytes - nested.RetainedBytes - scratchStart); }
                     if (!groups.TryGetValue(key, out var group))
                     {
                         groupMemory.Charge(192L + key.Length * 16L);
@@ -282,6 +270,18 @@ internal static partial class DocumentPlanExecutor
                 foreach (var row in output)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    using var aliases = memory.Reserve();
+                    var previousBindings = nested.ProjectionBindings;
+                    var previousBase = nested.ProjectionBase;
+                    var projectionBindings = (DocumentVariableBinding?)null;
+                    for (int index = 0; index < query.Projections.Count; index++)
+                    {
+                        if (query.Projections[index].Alias is not string name) { continue; }
+                        aliases.Charge(64);
+                        projectionBindings = new DocumentVariableBinding(name, row.Values[index], projectionBindings);
+                    }
+                    nested.ProjectionBindings = projectionBindings;
+                    nested.ProjectionBase = row.Document.Bindings;
                     long before = memory.Bytes - nested.RetainedBytes;
                     try
                     {
@@ -290,10 +290,19 @@ internal static partial class DocumentPlanExecutor
                         { row.OrderKeys[index] = query.IsValue && logical.ProjectedOrdering[index] ? row.Values[0] :
                             await evaluator.EvaluateAsync(query.OrderBy[index].Expression, row.Document, row.Group, nested).ConfigureAwait(false); }
                     }
-                    finally { memory.Release(memory.Bytes - nested.RetainedBytes - before); }
+                    finally
+                    {
+                        nested.ProjectionBindings = previousBindings;
+                        nested.ProjectionBase = previousBase;
+                        memory.Release(memory.Bytes - nested.RetainedBytes - before);
+                    }
                     memory.Charge(32L + row.OrderKeys.Length * 16L);
                     orderBytes += 32L + row.OrderKeys.Length * 16L;
-                    foreach (var key in row.OrderKeys) { orderBytes += memory.Retain(key); }
+                    for (int index = 0; index < row.OrderKeys.Length; index++)
+                    {
+                        if (row.OrderKeys[index] is JsonElement json) { row.OrderKeys[index] = json.Clone(); }
+                        orderBytes += memory.Retain(row.OrderKeys[index]);
+                    }
                 }
                 output.Sort((left, right) =>
                 {
@@ -407,8 +416,7 @@ internal static partial class DocumentPlanExecutor
                 operation.EnsureActive();
                 if (entry.Id == previous) { continue; }
                 previous = entry.Id;
-                operation.Session.LastQueryDocumentsRead++;
-                var document = database.ReadDocument(entry);
+                    var document = nested.ReadDocument(entry);
                 using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
                 var context = new DocumentEvaluationContext(json.RootElement, entry.Id, entry.Version,
                     query.Projections.Count == 1 && query.Projections[0].Expression is OqlStarExpression ? document.Content : default);

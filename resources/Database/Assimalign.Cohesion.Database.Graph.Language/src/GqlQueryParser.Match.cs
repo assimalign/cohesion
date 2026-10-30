@@ -6,23 +6,21 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    private GqlQueryExpression ParseQuery()
+    private GqlQueryExpression ParseQuery(bool hasInput = false)
     {
         var start = Current;
         var stages = new List<GqlStage>();
         bool segmentWrites = false;
-        bool hasNamedBinding = false;
+        bool hasNamedBinding = hasInput;
         while (!Failed && Current.Type is not (TokenType.Eof or TokenType.Semicolon))
         {
             var clauseStart = Current;
-            if (Take("NEXT"))
+            if (Is("NEXT"))
             {
-                if (stages.Count == 0 || stages[^1] is GqlNextStage or GqlReturnStage { IsWith: true } || stages[^1] is not GqlReturnStage && !segmentWrites || Current.Type is TokenType.Eof or TokenType.Semicolon)
-                { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid, clauseStart); break; }
-                if (stages[^1] is not GqlReturnStage) { hasNamedBinding = false; }
-                stages.Add(new GqlNextStage(Span(clauseStart, Previous)));
-                segmentWrites = false;
-                continue;
+                if (stages.Count == 0 || stages[^1] is GqlReturnStage { IsWith: true } ||
+                    stages[^1] is not GqlReturnStage && !segmentWrites)
+                { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid, Current); }
+                break;
             }
             if (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: false }) { break; }
             if (Is("MATCH") || Is("OPTIONAL"))

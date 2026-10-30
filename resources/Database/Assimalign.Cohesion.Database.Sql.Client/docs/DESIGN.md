@@ -1,22 +1,25 @@
 # Database.Sql.Client — Design
 
-## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
 
-InMemory and TCP carry all five ON UPDATE declarations and truthful UPDATE_RULE through the
-existing exchanges, including views over INFORMATION_SCHEMA. The omitted update action is
-NO ACTION. Changing a referenced parent key under CASCADE/SET NULL/SET DEFAULT reports CK00001
-naming ON UPDATE action execution on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE,
-with unchanged parent/child rows and a usable connection. RESTRICT/NO ACTION retain their
-statement-end behavior until SQ-F2. No public client or wire format change is required.
+InMemory and TCP execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
+and MERGE, for separate and self-referencing tables. The omitted action is NO ACTION. RESTRICT
+rejects existing children immediately, without final-parent substitution; NO ACTION accepts a
+replacement final parent. CASCADE/SET NULL/SET DEFAULT compose before final validation, and
+conflicting assignments preserve CS05085 through the existing diagnostic exchange. Failures leave
+rows unchanged and connections usable. UPDATE_RULE retains truthful metadata, including views over
+INFORMATION_SCHEMA. No public client or wire format change is required.
 
-## Window ranking, navigation and frames (#1526, SQ-W1/SQ-W2)
+## Window ranking, navigation and frames (#1526, SQ-W1/SQ-W2/SQ-W3)
 
 InMemory and TCP use the existing result and diagnostic exchanges for window rankings,
 navigation, named definitions and EXPLAIN. Tests pin BIGINT ranks, DOUBLE PRECISION
 distributions, INTEGER tiles, numeric navigation default unification, coded placement/name/
 bucket and CS05079 budget refusals and reusable connections. ROWS/default-peer aggregate frames,
 FILTER, Boolean/statistical and value functions preserve types, NULLs and frame diagnostics on
-both transports; EXPLAIN includes frame boundaries and transition visits. No client surface or protocol format changes.
+both transports; EXPLAIN includes frame boundaries and transition visits. RANGE offsets,
+GROUPS, every exclusion and IGNORE NULLS use the same exchange. The wire corpus also checks
+CS02074-02076 and CS05086-05088 with reusable connections. No client surface or protocol format changes.
 
 ## Owned identity wire surface (#1717, SQ-S3)
 
@@ -148,8 +151,8 @@ protocol version, frame or metadata format changes.
 ## UPDATE final foreign-key state (#1667)
 
 Both transports pin dangling-reference rejection without writes, moving self-references,
-and consistent mutually referenced key swaps, with NO ACTION and RESTRICT under Snapshot
-and ReadCommitted. Tests begin through the existing server-session API to choose isolation;
+and consistent mutually referenced key swaps with NO ACTION under Snapshot and ReadCommitted.
+RESTRICT now refuses existing references immediately, including direct self-reference reassignment (#1723). Tests begin through the existing server-session API to choose isolation;
 the UPDATE, error, result and COMMIT exchanges all use the wire. No protocol changes.
 
 ## INSERT ... ON CONFLICT (#1118)

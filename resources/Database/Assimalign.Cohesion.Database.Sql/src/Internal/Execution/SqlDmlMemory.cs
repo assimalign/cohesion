@@ -3,10 +3,10 @@ using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-/// <summary>Owns joined DML's retained storage until the outer statement unwinds.</summary>
+/// <summary>Owns retained DML storage until its statement or closure attempt unwinds.</summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlDmlMemory")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(SqlDmlMemory.DebugView))]
-internal sealed class SqlDmlMemory : IDisposable
+internal class SqlDmlMemory : IDisposable
 {
     private readonly SqlStatementMetrics _metrics;
     private readonly long _budget;
@@ -20,6 +20,9 @@ internal sealed class SqlDmlMemory : IDisposable
         _budget = budget;
         Reserve(320); // owner, promoted join work, dictionary and initial array headers
     }
+
+    internal static SqlDmlMemory ForAttempt(SqlStatementMetrics metrics, long budget, SqlDmlMemory? retained)
+        => new AttemptMemory(metrics, budget, retained);
 
     internal void Reserve(long bytes)
     {
@@ -66,7 +69,7 @@ internal sealed class SqlDmlMemory : IDisposable
         }
     }
 
-    private void Track(object value, long bytes, bool retain, long hashChange)
+    private protected virtual void Track(object value, long bytes, bool retain, long hashChange)
     {
         if (!_objects.TryGetValue(value, out var entry) && _objects.Count == _slots)
         {
@@ -102,6 +105,23 @@ internal sealed class SqlDmlMemory : IDisposable
     }
 
     private readonly record struct Entry(long Bytes, long HashBytes, bool Retained);
+
+    // Attempts borrow objects already owned by the retained direct proposals. The
+    // extra state is confined to this leaf, preserving ordinary DML's owner size.
+    private sealed class AttemptMemory : SqlDmlMemory
+    {
+        private readonly SqlDmlMemory? _retained;
+
+        internal AttemptMemory(SqlStatementMetrics metrics, long budget, SqlDmlMemory? retained) : base(metrics, budget)
+        { _retained = retained; }
+
+        private protected override void Track(object value, long bytes, bool retain, long hashChange)
+        {
+            if (retain && hashChange == 0 && _retained?._objects.TryGetValue(value, out var entry) == true && entry.Retained)
+            { return; }
+            base.Track(value, bytes, retain, hashChange);
+        }
+    }
 
     private sealed class DebugView
     {

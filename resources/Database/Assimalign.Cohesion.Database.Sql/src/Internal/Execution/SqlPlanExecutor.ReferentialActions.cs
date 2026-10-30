@@ -29,6 +29,20 @@ internal sealed partial class SqlPlanExecutor
         return new SqlConstraintUpdates(rows);
     }
 
+    private static bool HasPendingParent(SqlBoundConstraintKey key, object?[] values, SqlConstraintUpdates updates,
+        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions, SqlStatementMetrics metrics,
+        CancellationToken cancellationToken)
+    {
+        // A unique old key can only be supplied by another pending replacement/insert.
+        // Keep the cached projected lookup; a physical parent probe would add work to
+        // every ordinary referenced-key UPDATE (#1198). Deleted proposals cannot substitute.
+        var matches = updates.Find(key, values, metrics, cancellationToken);
+        if (deletions is null || deletions.Count == 0) { return matches.Any(); }
+        foreach (var row in matches)
+        { if (!deletions.ContainsKey((key.Table.ObjectId, SqlRecordLocation.Pack(row.Location.PageId, row.Location.SlotIndex)))) { return true; } }
+        return false;
+    }
+
     // Constraint validation sees the statement's final row set. Lookups still use the
     // existing indexes and snapshot; pending replacements contribute their final keys.
     private IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> FinalConstraintRows(
@@ -52,7 +66,7 @@ internal sealed partial class SqlPlanExecutor
     }
 
     // Built after SET assignments are collected. Stable table/key projections are indexed
-    // once, using constraint equality; MERGE maintains mutable projections separately.
+    // once, using constraint equality; MERGE and DELETE closures maintain mutable projections.
     [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdates")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdates.DebugView))]
     private class SqlConstraintUpdates
@@ -221,81 +235,141 @@ internal sealed partial class SqlPlanExecutor
     private async Task<SqlConstraintUpdates> CollectReferentialUpdatesAsync(
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
         HashSet<ulong> scannedTables, SqlStatementContext statement, CancellationToken cancellationToken,
-        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>? finalRows = null)
+        Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>? finalRows = null, bool validateUpdates = false,
+        IReadOnlyList<SqlConstraintUpdate>? removedUpdates = null)
     {
         var updates = finalRows ?? new Dictionary<(ulong ObjectId, ulong Location), SqlConstraintUpdate>();
-        var final = finalRows is null ? null : new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!);
+        var final = (finalRows is not null && !validateUpdates) || (finalRows is null && statement.Metrics.HasReferentialAttempt)
+            ? new SqlMergeConstraintUpdates(updates, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!) : null;
+        SqlUpdateActionState? actionState = null;
         try
         {
+            // Freeze direct inputs before the first DELETE SET write. Every SET
+            // origin participates, including competition with direct MERGE updates.
+            // SET-only closures keep their one-pass path and mutable final projection.
             foreach (var deletion in deletions.Values)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 foreach (var reference in IncomingReferences(deletion.Table, statement, cancellationToken))
                 {
-                    var (child, constraint) = reference;
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
-                    var keys = reference.ParentKey.Read(deletion.EffectiveValues ?? deletion.Values);
-                    if (keys.Any(value => value is null)) { continue; }
-                    var matches = CollectConstraintMatches(final is null
-                        ? FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement))
-                        : FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken, deletions, final, ConstraintCurrentSnapshot(statement)), statement);
-                    var bound = _definitions.Get(child, cancellationToken);
-                    foreach (var match in matches)
+                    if (reference.Constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
+                    actionState = CreateUpdateActionState(updates, statement, cancellationToken);
+                    break;
+                }
+                if (actionState is not null) { break; }
+            }
+            HashSet<(ulong, ulong, SqlCatalogConstraint, ulong)>? appliedSets = null;
+            bool expanded;
+            do
+            {
+                long generationBefore = actionState?.Generation ?? 0;
+                foreach (var deletion in deletions.Values)
+                {
+                    foreach (var reference in IncomingReferences(deletion.Table, statement, cancellationToken))
                     {
+                        var (child, constraint) = reference;
                         cancellationToken.ThrowIfCancellationRequested();
-                        var key = (child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex));
-                        if (deletions.ContainsKey(key)) { continue; }
-                        bool added = false;
-                        if (!updates.TryGetValue(key, out var update))
+                        if (constraint.OnDelete is not (SqlCatalogReferentialAction.SetNull or SqlCatalogReferentialAction.SetDefault)) { continue; }
+                        var keys = reference.ParentKey.Read(deletion.EffectiveValues ?? deletion.Values);
+                        if (keys.Any(value => value is null)) { continue; }
+                        var actionView = final;
+                        var matches = CollectConstraintMatches(actionView is null
+                            ? FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement))
+                            : FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken, deletions, actionView, ConstraintCurrentSnapshot(statement)), statement);
+                        var bound = _definitions.Get(child, cancellationToken);
+                        foreach (var match in matches)
                         {
-                            added = true;
-                            await AcquireRowWriteLocksAsync(statement, child.ObjectId, [match.Location], cancellationToken, cascade: true).ConfigureAwait(false);
-                            EnsureSnapshotSeesCascadeRow(child, match.Location, statement,
-                                constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? "SET NULL" : "SET DEFAULT");
-                            if (scannedTables.Add(child.ObjectId))
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var key = (child.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex));
+                            if (deletions.ContainsKey(key)) { continue; }
+                            appliedSets ??= [];
+                            if (!appliedSets.Add((deletion.Table.ObjectId, SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), constraint, key.Item2))) { continue; }
+                            bool added = false;
+                            if (!updates.TryGetValue(key, out var update))
                             {
-                                EnsureCurrentDefinition(child);
-                                await AcquireReferenceIntentLocksAsync(child, statement, cancellationToken, cascade: true).ConfigureAwait(false);
+                                added = true;
+                                await AcquireRowWriteLocksAsync(statement, child.ObjectId, [match.Location], cancellationToken, cascade: true).ConfigureAwait(false);
+                                EnsureSnapshotSeesCascadeRow(child, match.Location, statement,
+                                    constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? "SET NULL" : "SET DEFAULT");
+                                if (scannedTables.Add(child.ObjectId))
+                                {
+                                    EnsureCurrentDefinition(child);
+                                    await AcquireReferenceIntentLocksAsync(child, statement, cancellationToken, cascade: true).ConfigureAwait(false);
+                                }
+                                update = new SqlConstraintUpdate(child, match.Location, match.Values, (object?[])match.Values.Clone(), []);
+                                if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                                {
+                                    memory.Retain(match.Values);
+                                    memory.Retain(update.NewValues);
+                                    memory.Reserve(384L + 32L * child.Columns.Count);
+                                }
+                                updates.Add(key, update);
                             }
-                            update = new SqlConstraintUpdate(child, match.Location, match.Values, (object?[])match.Values.Clone(), []);
-                            if (statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget) is { } memory)
+                            using var sequenceRow = SqlSequenceExecution.Current?.BeginRow(update.SequenceValues);
+                            bool changed = added;
+                            foreach (int ordinal in reference.ChildKey.Ordinals)
                             {
-                                memory.Retain(match.Values);
-                                memory.Retain(update.NewValues);
-                                memory.Reserve(384L + 32L * child.Columns.Count);
+                                string name = child.Columns[ordinal].Name;
+                                object? value = constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? null
+                                    : ResolveColumnDefault(child, ordinal, bound.DefaultValues[ordinal], statement, cancellationToken);
+                                if (value is null && !child.Columns[ordinal].IsNullable) { throw Violation(child, constraint, keys); }
+                                value = CoerceForColumn(value, child.Columns[ordinal]);
+                                if (actionState is not null)
+                                {
+                                    RecordActionProposal(actionState, key, ordinal,
+                                        (deletion.Table.ObjectId, SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), constraint),
+                                        child, update.NewValues[ordinal], value, statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget));
+                                }
+                                changed |= !Equals(update.NewValues[ordinal], value);
+                                update.NewValues[ordinal] = value;
+                                update.Assigned.Add(ordinal);
                             }
-                            updates.Add(key, update);
+                            update.SequenceValues = SqlSequenceExecution.Current?.CaptureRow();
+                            statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewValues);
+                            if (changed) { final?.Refresh(update, added); }
                         }
-                        using var sequenceRow = SqlSequenceExecution.Current?.BeginRow(update.SequenceValues);
-                        bool changed = added;
-                        foreach (int ordinal in reference.ChildKey.Ordinals)
-                        {
-                            string name = child.Columns[ordinal].Name;
-                            object? value = constraint.OnDelete == SqlCatalogReferentialAction.SetNull ? null
-                                : ResolveColumnDefault(child, ordinal, bound.DefaultValues[ordinal], statement, cancellationToken);
-                            if (value is null && !child.Columns[ordinal].IsNullable) { throw Violation(child, constraint, keys); }
-                            value = CoerceForColumn(value, child.Columns[ordinal]);
-                            changed |= !Equals(update.NewValues[ordinal], value);
-                            update.NewValues[ordinal] = value;
-                            update.Assigned.Add(ordinal);
-                        }
-                        update.SequenceValues = SqlSequenceExecution.Current?.CaptureRow();
-                        statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewValues);
-                        if (changed) { final?.Refresh(update, added); }
                     }
                 }
-            }
-            // Every composed key change must report its stored action before any
-            // table group's outgoing FK validation, including MERGE's deferred pass.
-            foreach (var update in updates.Values)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (update.Location.PageId.Value < 0) { continue; }
-                var incoming = IncomingReferences(update.Table, statement, cancellationToken);
-                for (int index = 0; index < incoming.Count; index++)
+                actionState = await ExpandUpdateActionsAsync(updates, deletions, scannedTables, statement, cancellationToken,
+                    final, actionState, removedUpdates).ConfigureAwait(false);
+                expanded = actionState is not null && actionState.Generation != generationBefore;
+                if (actionState is not null && deletions.Count != 0)
                 {
-                    var reference = incoming[index];
-                    ValidateUpdateAction(reference.ParentKey, reference.Constraint, update.OldValues, update.NewValues, statement.Metrics);
+                    // Key actions can move children onto an already deleted proposed key.
+                    // Re-open those DELETE edges until the combined closure is complete.
+                    var current = final ?? new SqlConstraintUpdates(updates);
+                    var releasedDeletes = new List<SqlParentReference>();
+                    int before = deletions.Count;
+                    foreach (var deletion in deletions.Values.ToArray())
+                    {
+                        foreach (var reference in IncomingReferences(deletion.Table, statement, cancellationToken))
+                        {
+                            if (CascadeKeys(deletion.EffectiveValues ?? deletion.Values, reference) is not { } keys) { continue; }
+                            var matches = CollectConstraintMatches(FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
+                                deletions, current, ConstraintCurrentSnapshot(statement)), statement);
+                            foreach (var match in matches)
+                            { await CollectCascadeDeletesAsync(reference.Child, match.Location, match.Values, deletions, scannedTables,
+                                releasedDeletes, statement, cancellationToken, current).ConfigureAwait(false); }
+                        }
+                    }
+                    await AcquireParentRowLocksAsync(releasedDeletes, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
+                    expanded |= deletions.Count != before;
+                }
+            } while (expanded);
+            if (actionState is not null)
+            {
+                // Composite parent keys can revise an origin over several hops. Only
+                // completed proposals decide whether independent origins disagree.
+                ValidateActionProposals(actionState, updates, cancellationToken);
+                var current = final ?? new SqlConstraintUpdates(updates);
+                foreach (var deletion in deletions.Keys)
+                {
+                    if (updates.TryGetValue(deletion, out var removed))
+                    {
+                        if (removed.Location.PageId.Value >= 0)
+                        { ValidateParentUpdate(removed.Table, removed.OldValues, removed.NewValues, statement, cancellationToken, deletions, current); }
+                        updates.Remove(deletion);
+                    }
                 }
             }
         }
@@ -307,9 +381,16 @@ internal sealed partial class SqlPlanExecutor
             throw;
         }
 
+        finally
+        {
+            // These immutable input projections are closure-only. Their retained keys
+            // release on success, retry, cancellation and every preparation exception.
+            (actionState?.Inputs as IDisposable)?.Dispose();
+        }
+
         SqlConstraintUpdates indexed = final ?? new SqlConstraintUpdates(updates);
         // MERGE validates and locks only after direct and referential actions compose.
-        if (finalRows is not null) { return indexed; }
+        if (finalRows is not null && !validateUpdates) { return indexed; }
         var references = new List<SqlParentReference>();
         var released = new List<SqlParentReference>();
         foreach (var group in updates.Values.GroupBy(update => update.Table))
@@ -319,17 +400,19 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in group)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart), update.Assigned.ToArray());
-                ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, indexed);
+                CheckDomains(bound, update.NewValues, ExecutionEvaluator(null, cancellationToken, transactionTimestamp: statement.TransactionStart),
+                    update.Location.PageId.Value < 0 ? null : update.Assigned.ToArray());
+                if (update.Location.PageId.Value >= 0)
+                { ValidateParentUpdate(table, update.OldValues, update.NewValues, statement, cancellationToken, deletions, indexed); }
                 update.NewVersion = SqlRowCodec.Encode(table, update.NewValues, statement.Transaction.Sequence);
                 statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)?.Retain(update.NewVersion);
             }
-            // PostgreSQL ri_triggers.c:2800-2813 uses current parent visibility for ReadCommitted
-            // RI writes while transaction snapshots retain their crosscheck.
+            // PostgreSQL ri_triggers.c:2800-2822 uses a fresh regular (committed)
+            // snapshot in ReadCommitted, not the all-writers child-discovery image.
             ValidateRows(table, group.Select(update => update.NewValues).ToList(), statement, cancellationToken,
-                current: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted,
-                references: references, deletions: deletions, updates: indexed);
-            CollectReleasedReferences(table, group.Select(update => update.OldValues).ToList(), released, statement, cancellationToken);
+                references: references, deletions: deletions, updates: indexed,
+                foreignKeySnapshot: statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted ? statement.Transaction.Snapshot : null);
+            CollectReleasedReferences(table, group.Where(update => update.Location.PageId.Value >= 0).Select(update => update.OldValues).ToList(), released, statement, cancellationToken);
         }
         await AcquireParentRowLocksAsync(references, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false, cascade: true).ConfigureAwait(false);
@@ -341,7 +424,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var update in group)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes);
+                if (update.Location.PageId.Value >= 0) { CollectUniqueKeyHashes(indexes, group.Key, update.OldValues, hashes); }
                 ValidateIndexKeysAndCollectUniqueHashes(indexes, group.Key, update.NewValues, hashes);
             }
             await AcquireUniqueKeyLocksAsync(statement, group.Key.ObjectId, hashes, cancellationToken, cascade: true).ConfigureAwait(false);

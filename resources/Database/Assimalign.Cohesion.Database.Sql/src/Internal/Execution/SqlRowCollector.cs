@@ -62,12 +62,14 @@ internal sealed class SqlRowCollector
     internal object?[]? Add(object?[] output, object?[] keys)
     {
         _cancellationToken.ThrowIfCancellationRequested();
-        SqlWindowMemory.For(_metrics)?.Retain(output);
-        if (keys.Length > 0) { SqlWindowMemory.For(_metrics)?.Retain(keys); }
+        var windowMemory = SqlWindowMemory.For(_metrics);
+        windowMemory?.Retain(output);
+        if (keys.Length > 0) { windowMemory?.Retain(keys); }
         long ordinal = _visited++;
         if (_orderBy.Count == 0)
         {
             if (ordinal >= _offset) { _rows.Add(output); return null; }
+            windowMemory?.ReleaseRow(output);
             return output;
         }
         var entry = new Entry(output, keys, ordinal);
@@ -76,6 +78,7 @@ internal sealed class SqlRowCollector
         ResolveCollations(refresh: !_canBound);
         if (!_canBound)
         {
+            windowMemory?.Reserve(24); // stable-sort entry capacity and growth
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -85,6 +88,7 @@ internal sealed class SqlRowCollector
         // this implementation keeps the stable input ordinal explicitly.
         if (_ordered.Count < _bound)
         {
+            windowMemory?.Reserve(24); // stable-sort entry capacity and growth
             _ordered.Add(entry);
             RecordRetainedCount();
             return null;
@@ -102,10 +106,14 @@ internal sealed class SqlRowCollector
         }
         if (_ordered.Count > 0 && Compare(entry, _ordered[0]) < 0)
         {
-            var replaced = _ordered[0].Output;
+            var replaced = _ordered[0];
             SiftDown(0, entry);
-            return replaced;
+            windowMemory?.ReleaseRow(replaced.Output);
+            windowMemory?.ReleaseRow(replaced.Keys);
+            return replaced.Output;
         }
+        windowMemory?.ReleaseRow(output);
+        windowMemory?.ReleaseRow(keys);
         return output;
     }
 
@@ -128,6 +136,14 @@ internal sealed class SqlRowCollector
         {
             _cancellationToken.ThrowIfCancellationRequested();
             _rows.Add(_ordered[i].Output);
+        }
+        if (SqlWindowMemory.For(_metrics) is { } windowMemory)
+        {
+            for (int i = 0; i < _ordered.Count; i++)
+            {
+                windowMemory.ReleaseRow(_ordered[i].Keys);
+                if (i < start || i >= start + count) { windowMemory.ReleaseRow(_ordered[i].Output); }
+            }
         }
         _ordered.Clear();
         return _rows;

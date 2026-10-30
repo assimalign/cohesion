@@ -288,7 +288,26 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private async Task<DatabaseResult> ApplyMergeAsync(SqlMergePlan plan, List<MergeWrite> writes,
+    private Task<DatabaseResult> ApplyMergeAsync(SqlMergePlan plan, List<MergeWrite> writes,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        foreach (var write in writes)
+        {
+            if ((write.Action.Action == SqlMergeAction.Delete && _catalog.HasDeleteActions(plan.Table)) ||
+                (write.Action.Action == SqlMergeAction.Update && HasUpdateActions(plan.Table, write.Action.Assignments)))
+            { return ApplyReferentialMergeAsync(plan, writes, statement, cancellationToken); }
+        }
+        return ApplyMergeCoreAsync(plan, writes, statement, cancellationToken);
+    }
+
+    private async Task<DatabaseResult> ApplyReferentialMergeAsync(SqlMergePlan plan, List<MergeWrite> writes,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        using var attempt = statement.Metrics.BeginReferentialAttempt(_definitions.StatementMemoryBudget);
+        return await ApplyMergeCoreAsync(plan, writes, statement, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<DatabaseResult> ApplyMergeCoreAsync(SqlMergePlan plan, List<MergeWrite> writes,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
         var targets = writes.Where(write => write.Candidate.Target is not null).Select(write => write.Candidate.Target!).ToArray();
@@ -343,7 +362,13 @@ internal sealed partial class SqlPlanExecutor
         ExceptionDispatchInfo? referentialFailure = null;
         try
         {
-            using var finalPending = (SqlMergeConstraintUpdates)await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates).ConfigureAwait(false);
+            // Check immediate update restrictions before changing actions, but retain
+            // MERGE's deferred error delivery after direct uniqueness validation.
+            foreach (var row in updates.Values)
+            { if (row.Location.PageId.Value >= 0) { ValidateParentUpdate(row.Table, row.OldValues, row.NewValues, statement, cancellationToken, restrictOnly: true); } }
+            foreach (var row in cascadedUpdates)
+            { ValidateParentUpdate(row.Table, row.OldValues, row.NewValues, statement, cancellationToken, restrictOnly: true); }
+            using var finalPending = (SqlMergeConstraintUpdates)await CollectReferentialUpdatesAsync(deletions, scanned, statement, cancellationToken, updates, removedUpdates: cascadedUpdates).ConfigureAwait(false);
             pending = finalPending;
             ValidateRestrictedDeletes(deletions, pending, statement, cancellationToken);
             // UPDATE's old-key NO ACTION check survives an AFTER-style cascade of its
@@ -379,6 +404,10 @@ internal sealed partial class SqlPlanExecutor
             // Direct uniqueness precedes AFTER-style FK actions, including constraints
             // on their SET rows (nodeModifyTable.c:2371-2383). No statement writes
             // after a captured failure, so it needs no further parent-row locks.
+            referentialFailure = ExceptionDispatchInfo.Capture(failure);
+        }
+        catch (SqlExecutionException failure) when (failure.Diagnostics is [{ Code: SqlExecutionException.ReferentialAssignmentConflictCode }])
+        {
             referentialFailure = ExceptionDispatchInfo.Capture(failure);
         }
         catch (SqlPlanningException failure) when (failure.Diagnostics is [{ Code: "CS03025" }])

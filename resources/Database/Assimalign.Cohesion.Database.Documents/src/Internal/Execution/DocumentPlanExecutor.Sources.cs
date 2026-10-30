@@ -14,12 +14,12 @@ namespace Assimalign.Cohesion.Database.Documents.Internal;
 internal static partial class DocumentPlanExecutor
 {
     private static DocumentExpressionEvaluator SourceEvaluator(DocumentDatabase database, DocumentOperation operation,
-        DocumentLogicalPlan logical, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        DocumentLogicalPlan logical, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
         var query = logical.Query;
-        return new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, transactionStart: operation.TransactionStart,
+        return new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken, writeVerb: writeVerb, transactionStart: operation.TransactionStart,
             starSourceName: query.Source is not null || query.Unnest.Count > 0 ? query.Alias ?? query.Collection : null,
-            functions: database.Engine.Functions, databaseName: database.Name, operation: operation);
+            functions: database.Engine.Functions, databaseName: database.Name, operation: operation, nested: nested, sourceName: query.Alias ?? query.Collection);
     }
 
     private static DocumentLogicalPlan SourceLogical(DocumentStatementPlan plan) => plan switch
@@ -35,10 +35,10 @@ internal static partial class DocumentPlanExecutor
 
     private static async ValueTask<DatabaseResult> ExecuteFromAsync(DocumentDatabase database, DocumentOperation operation,
         DocumentFromPlan plan, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken,
-        DocumentNestedExecutionContext nested)
+        DocumentNestedExecutionContext nested, string? writeVerb = null)
     {
         var logical = plan.Logical;
-        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken);
+        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken, nested, writeVerb);
         var memory = evaluator.Memory;
         if (!Streams(logical))
         {
@@ -159,9 +159,9 @@ internal static partial class DocumentPlanExecutor
                 if (value is JsonElement { ValueKind: JsonValueKind.Array } array && array.GetArrayLength() > 0)
                 {
                     // Path views borrow the current input or an active parent frame;
-                    // nested arrays have the Q1 statement owner. Other expressions
-                    // may create independent arrays that this cursor must retain.
-                    if (binding.Collection is not (OqlPathExpression or OqlSubqueryExpression)) { retained.Retain(value); }
+                    // other expressions, including uncached subqueries, produce
+                    // independent arrays that this cursor must retain and charge.
+                    if (binding.Collection is not OqlPathExpression) { retained.Retain(value); }
                     var items = array.EnumerateArray();
                     items.MoveNext();
                     pending.Push((row, next + 1, items, start));
@@ -202,7 +202,10 @@ internal static partial class DocumentPlanExecutor
             var memory = evaluator.Memory;
             long before = memory.Bytes - nested.RetainedBytes;
             object? value;
-            try { value = await evaluator.EvaluateAsync(expression.Logical.Query.Source!, default, null, nested).ConfigureAwait(false); }
+            var sourceEvaluator = new DocumentExpressionEvaluator(null, parameters, cancellationToken,
+                transactionStart: operation.TransactionStart, functions: database.Engine.Functions,
+                databaseName: database.Name, operation: operation, nested: nested);
+            try { value = await sourceEvaluator.EvaluateAsync(expression.Logical.Query.Source!, default, null, nested).ConfigureAwait(false); }
             finally { memory.Release(memory.Bytes - nested.RetainedBytes - before); }
             using var retained = memory.Reserve();
             retained.Retain(value);
@@ -243,8 +246,7 @@ internal static partial class DocumentPlanExecutor
         {
             cancellationToken.ThrowIfCancellationRequested();
             operation.EnsureActive();
-            operation.Session.LastQueryDocumentsRead++;
-            var document = database.ReadDocument(entry);
+            var document = nested.ReadDocument(entry);
             using var rowMemory = evaluator.Memory.Reserve();
             rowMemory.Charge(128L + document.Content.Length);
             using var json = JsonDocument.Parse(document.Content, new JsonDocumentOptions { MaxDepth = 128 });
@@ -260,7 +262,7 @@ internal static partial class DocumentPlanExecutor
         var logical = SourceLogical(plan);
         // A derived input can have its own empty window even when the outer query has none.
         if (logical.Limit == 0) { yield break; }
-        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken);
+        var evaluator = SourceEvaluator(database, operation, logical, parameters, cancellationToken, nested);
         if (!Streams(logical))
         {
             await using var result = (DatabaseResultSet)await ExecuteNestedQueryAsync(database, operation, plan, parameters,

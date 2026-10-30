@@ -16,6 +16,8 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteJoinedUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await PrepareJoinedUpdateIntentsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        if (HasUpdateActions(plan.Table, plan.Assignments))
+        { return await ExecuteReferentialUpdateAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
             Enumerable.Repeat(true, plan.Source!.Associations.Columns.Count).ToArray());
         var indexes = GetLiveIndexes(plan.Table, statement);
@@ -71,6 +73,11 @@ internal sealed partial class SqlPlanExecutor
         var references = new List<SqlParentReference>();
         var pendingUpdates = BuildConstraintUpdates(plan.Table,
             replacements.Select(row => (SqlRecordLocation.Pack(row.PageId, row.SlotIndex), row.OldValues, row.NewValues)), plan.Assignments);
+        foreach (var replacement in replacements)
+        {
+            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken, updates: pendingUpdates);
+        }
+
         ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken,
             references: references, updates: pendingUpdates);
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
@@ -85,11 +92,6 @@ internal sealed partial class SqlPlanExecutor
                 return !ValuesEqual(replacements[index].NewValues[ordinal], replacements[index].OldValues[ordinal]);
             }));
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
-
-        foreach (var replacement in replacements)
-        {
-            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken, updates: pendingUpdates);
-        }
 
         // Unique key locks after the row locks (the lock-ordering rule): both the
         // old key (its entry is tombstoned) and the new key (its entry is
@@ -199,6 +201,8 @@ internal sealed partial class SqlPlanExecutor
                     // manager's deadlock detection rather than on a global ordering.
                     await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken, cascade: true).ConfigureAwait(false);
 
+                    using var attempt = _catalog.HasDeleteActions(plan.Table)
+                        ? statement.Metrics.BeginReferentialAttempt(_definitions.StatementMemoryBudget) : null;
                     var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
                     var returningTargets = plan.Returning is null ? null : targets.Select(target =>
                         SqlRecordLocation.Pack(target.Location.PageId, target.Location.SlotIndex)).ToHashSet();

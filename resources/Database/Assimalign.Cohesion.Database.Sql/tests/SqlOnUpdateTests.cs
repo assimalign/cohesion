@@ -20,7 +20,7 @@ public sealed class SqlOnUpdateTests : IDisposable
 {
     private readonly string _rootPath = Path.Combine(Path.GetTempPath(), "cohesion-on-update", Guid.NewGuid().ToString("N"));
 
-    public static IEnumerable<object[]> Refusals()
+    public static IEnumerable<object[]> Actions()
     {
         foreach (string action in new[] { "CASCADE", "SET NULL", "SET DEFAULT" })
         {
@@ -32,16 +32,16 @@ public sealed class SqlOnUpdateTests : IDisposable
         }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: every update path refuses unimplemented actions before rows change (#1723)")]
-    [MemberData(nameof(Refusals))]
-    public async Task ExecuteAsync_ChangingReferencedKey_ShouldRefuseBeforeWrites(string action, int path, bool referenced)
+    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: every update path executes changing actions atomically (#1723)")]
+    [MemberData(nameof(Actions))]
+    public async Task ExecuteAsync_ChangingReferencedKey_ShouldApplyActions(string action, int path, bool referenced)
     {
         // Arrange: a preceding non-key target and MERGE insert expose premature writes.
         await using var engine = SqlDatabaseEngine.Create("on-update", new());
         var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE p(id INT PRIMARY KEY, v INT)");
-        await ExecuteAsync(session, $"CREATE TABLE c(pid INT DEFAULT 2 REFERENCES p(id) ON UPDATE {action})");
+        await ExecuteAsync(session, $"CREATE TABLE c(pid INT DEFAULT 1 REFERENCES p(id) ON UPDATE {action})");
         await ExecuteAsync(session, "INSERT INTO p VALUES(1,0),(2,0)");
         if (referenced) { await ExecuteAsync(session, "INSERT INTO c VALUES(2)"); }
         string sql = path switch
@@ -53,21 +53,20 @@ public sealed class SqlOnUpdateTests : IDisposable
         };
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+        await ExecuteAsync(session, sql);
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-        error.Message.ShouldContain($"ON UPDATE {action} action execution", Case.Sensitive);
-        (await RowsAsync(session, "SELECT id,v FROM p ORDER BY id")).ShouldBe([[1, 0], [2, 0]]);
-        (await RowsAsync(session, "SELECT pid FROM c")).ShouldBe(referenced ? [[2]] : []);
+        (await RowsAsync(session, "SELECT id,v FROM p WHERE id<>3 ORDER BY id")).ShouldBe([[1, 1], [20, 1]]);
+        object? expected = action switch { "CASCADE" => 20, "SET DEFAULT" => 1, _ => null };
+        (await RowsAsync(session, "SELECT pid FROM c")).ShouldBe(referenced ? [[expected]] : []);
         // Unchanged referenced keys and other-column changes execute normally.
         await ExecuteAsync(session, "UPDATE p SET id=id,v=3");
-        (await RowsAsync(session, "SELECT v FROM p ORDER BY id")).ShouldBe([[3], [3]]);
+        (await RowsAsync(session, "SELECT v FROM p ORDER BY id")).ShouldBe(path == 3 ? [[3], [3], [3]] : [[3], [3]]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: self-referencing updates report action execution before outgoing FK failures (#1723)")]
-    [MemberData(nameof(Refusals))]
-    public async Task ExecuteAsync_SelfReference_ShouldRefuseActionBeforeOutgoingValidation(string action, int path, bool referenced)
+    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: self-referencing updates execute every action (#1723)")]
+    [MemberData(nameof(Actions))]
+    public async Task ExecuteAsync_SelfReference_ShouldApplyActions(string action, int path, bool referenced)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("on-update-self", new());
@@ -84,19 +83,17 @@ public sealed class SqlOnUpdateTests : IDisposable
         };
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+        await ExecuteAsync(session, sql);
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-        error.Message.ShouldContain($"ON UPDATE {action} action execution", Case.Sensitive);
-        (await RowsAsync(session, "SELECT id,pid FROM t")).ShouldBe(referenced ? [[1, 1]] : [[1, null]]);
+        (await RowsAsync(session, "SELECT id,pid FROM t")).ShouldBe(referenced && action == "CASCADE" ? [[2, 2]] : [[2, null]]);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: another final parent cannot bypass the interim action refusal (#1723)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - ON UPDATE: changing actions still execute when another parent supplies the old key (#1723)")]
     [InlineData("CASCADE")]
     [InlineData("SET NULL")]
     [InlineData("SET DEFAULT")]
-    public async Task ExecuteAsync_FinalParentSubstitution_ShouldStillRefuseChangingAction(string action)
+    public async Task ExecuteAsync_FinalParentSubstitution_ShouldApplyChangingAction(string action)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("on-update-swap", new());
@@ -108,13 +105,11 @@ public sealed class SqlOnUpdateTests : IDisposable
         await ExecuteAsync(session, "INSERT INTO c VALUES(1)");
 
         // Act
-        var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE p SET id=3-id"));
+        await ExecuteAsync(session, "UPDATE p SET id=3-id");
 
         // Assert
-        error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-        error.Message.ShouldContain($"ON UPDATE {action} action execution", Case.Sensitive);
         (await RowsAsync(session, "SELECT id FROM p ORDER BY id")).ShouldBe([[1], [2]]);
-        (await RowsAsync(session, "SELECT pid FROM c")).ShouldBe([[1]]);
+        (await RowsAsync(session, "SELECT pid FROM c")).ShouldBe(action == "CASCADE" ? [[2]] : [[null]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - ON UPDATE: changing only compiled action metadata replaces the FK and reconciles (#1723)")]

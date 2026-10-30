@@ -41,6 +41,7 @@
   <data name="GqlQueryParserParseLabelPrimaryVoid3" xml:space="preserve"><value>Expected a label name, '%', '!' or '('.</value></data>
   <data name="QueryParserParseLabeledPredicateVoid" xml:space="preserve"><value>Repeated ':' labels are a node-pattern convenience; write n:A&amp;B in a predicate.</value></data>
   <data name="MergeSinglePath" xml:space="preserve"><value>MERGE requires exactly one complete path.</value></data>
+  <data name="CompositeOperandRequired" xml:space="preserve"><value>A composite operation requires a query operand.</value></data>
   <data name="GqlQueryParserParseQueryVoid" xml:space="preserve"><value>NEXT requires a RETURN or data-modifying segment and a following segment.</value></data>
   <data name="GqlQueryParserParseQueryVoid2" xml:space="preserve"><value>RETURN * requires at least one named binding.</value></data>
   <data name="GqlQueryParserParseQueryVoid3" xml:space="preserve"><value>Expected FIRST or LAST after NULLS.</value></data>

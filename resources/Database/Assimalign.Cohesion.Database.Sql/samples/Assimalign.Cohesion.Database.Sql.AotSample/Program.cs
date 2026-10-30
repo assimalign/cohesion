@@ -242,6 +242,9 @@ internal static class Program
         Check("in process: ROWS frames, aggregate FILTER and value functions", await RowsAsync(session,
             "SELECT Id,SUM(Score) FILTER(WHERE Score>0) OVER w,FIRST_VALUE(Score) OVER w,LAST_VALUE(Score) OVER w,NTH_VALUE(Score,2) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
             [[1L,100m,100L,100L,null],[2L,300m,100L,200L,200L]]);
+        Check("in process: RANGE distances, GROUPS and exclusion", await RowsAsync(session,
+            "SELECT Id,SUM(Score) OVER(ORDER BY Id RANGE 1 PRECEDING EXCLUDE CURRENT ROW),AVG(Score) OVER(ORDER BY Id GROUPS 1 PRECEDING EXCLUDE TIES),LEAD(Score) IGNORE NULLS OVER(ORDER BY Id) FROM customers ORDER BY Id"),
+            [[1L,null,100m,200L],[2L,100m,150m,null]]);
         Check("in process: ordered native and application frame aggregates", await RowsAsync(session,
             "SELECT Id,SUM(Score ORDER BY Id DESC) FILTER(WHERE Score>0) OVER w,product(Score) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
             [[1L,100m,100L],[2L,300m,20000L]]);
@@ -405,17 +408,17 @@ internal static class Program
                 $"SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_NAME='update_fk_{actionIndex}'"), [[action]]);
             if (actionIndex < 3)
             {
-                CheckFailure("in process: ON UPDATE refusal " + action, await FailureAsync(async () =>
-                    await session.ExecuteAsync("UPDATE update_parent SET id=2", cancellationToken: CancellationToken.None)), "CK00001: ON UPDATE " + action + " action execution");
-                Check("in process: ON UPDATE atomicity " + action, await RowsAsync(session, "SELECT id FROM update_parent"), [[1]]);
+                await session.ExecuteAsync($"INSERT INTO update_child_{actionIndex} VALUES(1)", cancellationToken:CancellationToken.None);
+                await session.ExecuteAsync("UPDATE update_parent SET id=2", cancellationToken:CancellationToken.None);
+                Check("in process: ON UPDATE action " + action, await RowsAsync(session,$"SELECT pid FROM update_child_{actionIndex}"), action == "CASCADE" ? [[2]] : [[null]]);
+                await session.ExecuteAsync("UPDATE update_parent SET id=1", cancellationToken:CancellationToken.None);
             }
             await session.ExecuteAsync($"DROP TABLE update_child_{actionIndex}", cancellationToken: CancellationToken.None);
         }
         await session.ExecuteAsync("CREATE TABLE update_self (id INT PRIMARY KEY, pid INT REFERENCES update_self(id) ON UPDATE CASCADE)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO update_self VALUES (1,1)", cancellationToken: CancellationToken.None);
-        CheckFailure("in process: self ON UPDATE refusal", await FailureAsync(async () =>
-            await session.ExecuteAsync("UPDATE update_self SET id=2", cancellationToken: CancellationToken.None)), "CK00001: ON UPDATE CASCADE action execution");
-        Check("in process: self ON UPDATE atomicity", await RowsAsync(session, "SELECT id,pid FROM update_self"), [[1,1]]);
+        await session.ExecuteAsync("UPDATE update_self SET id=2", cancellationToken:CancellationToken.None);
+        Check("in process: self ON UPDATE action", await RowsAsync(session,"SELECT id,pid FROM update_self"), [[2,2]]);
         await session.ExecuteAsync("CREATE TABLE expression_clock (id INT DEFAULT CAST('3' AS INT), stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO expression_clock DEFAULT VALUES", cancellationToken: CancellationToken.None);

@@ -74,8 +74,12 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
-Foreign-key ON UPDATE metadata (#1723, SQ-F1) adds no identity: unimplemented changing-action
-execution uses structured CK00001 before row writes on every update path. Malformed/duplicate
+Foreign-key ON UPDATE execution (#1723, SQ-F2) adds CS05085 for different action origins
+proposing conflicting stored values. A same-parent-row/constraint revisit replaces its earlier
+proposal; actions match the statement's completed direct assignments. Every referential closure,
+including plain UPDATE, upsert and DELETE, obeys CS05067's retained-memory budget.
+RESTRICT uses the existing CS03039 FK violation immediately; NO ACTION checks statement-end state.
+Update-action snapshot conflicts retain CS04064 (40001) through the existing serialization condition. Malformed/duplicate
 action syntax retains CS00003; malformed catalog action metadata retains CS06059, unsupported
 table extensions CS06060, and earlier SQL record-space formats CS06041. Compiled v8 is refused as the
 existing InvalidDocument schema.format condition.
@@ -174,6 +178,9 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W2) | CS02071 | NULL frame offset (22004) |
 | New (#1526, SQ-W2) | CS02072 | Negative frame offset (22013) |
 | New (#1526, SQ-W2) | CS02073 | Noninteger NTH_VALUE index (42804) |
+| New (#1526, SQ-W3) | CS02074 | Unsupported RANGE offset ordering-key domain (0A000) |
+| New (#1526, SQ-W3) | CS02075 | Incompatible RANGE offset domain (0A000) |
+| New (#1526, SQ-W3) | CS02076 | Negative or NaN RANGE offset (22013) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -250,7 +257,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state and rewrite/backfill chunks; sequence sorting follows ordinary, uncharged sort accounting |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); sequence sorting follows ordinary, uncharged sort accounting |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
@@ -268,6 +275,10 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
 | New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
 | New (#1526, SQ-W2 fixes) | CS05084 | Window frame recomputation exceeds 1,000,000 candidate input visits per statement (54000) |
+| New (#1723, SQ-F2) | CS05085 | Execution — conflicting replacement of one column through referential actions (27000) |
+| New (#1526, SQ-W3) | CS05086 | Offset RANGE requires exactly one ORDER BY key (42P20) |
+| New (#1526, SQ-W3) | CS05087 | GROUPS requires ORDER BY (42P20) |
+| New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -389,6 +400,8 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C1 fixes) | CG00012 | Language/syntax — list slice omits both bounds; rejected during planning |
 | New (#1537, GQ-E1) | CG00013 | Language/syntax — EXISTS omits its nonempty braced pattern |
 | New (#1736, GQ-C3) | CG00014 | Language — pattern comprehension requires a nonempty path and projection |
+| New (#1737, GQ-Q1) | CG00015 | A composite operation is missing its query operand |
+| New (#1737, GQ-Q1) | CG00016 | UNION and UNION ALL are mixed within one composite tree |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |
@@ -398,11 +411,13 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C1) | CG01017 | Binding/names — missing/empty comprehension iterator declaration in a hand-built AST |
 | New (#1736, GQ-C2) | CG01018 | Binding/names — missing reduce/list-predicate declaration or identical accumulator and iterator names |
 | New (#1537, GQ-E1) | CG01019 | Binding/names — outer binding has a proven incompatible correlated pattern kind |
+| New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
 | New (#1736, GQ-C2) | CG02015 | Values/types — reduce or list predicate source is neither list nor NULL |
 | New (#1537, GQ-E1) | CG02016 | Values/types — runtime correlated argument has an incompatible entity kind |
+| New (#1737, GQ-Q1) | CG02017 | Composite operand result shapes are incompatible |
 | COHDBG003 | CG03003 | Schema/constraints |
 | New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
 | New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
@@ -423,6 +438,9 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C2) | CG05026 | Planning — reduce shape/type analysis exceeds 65,536 visited nodes or closure steps |
 | New (#1537, GQ-E1) | CG05027 | Execution — malformed or missing correlated subplan or missing argument |
 | New (#1736, GQ-C3) | CG05028 | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
+| New (#1737, GQ-Q1) | CG05029 | A composite query contains a modifying operand |
+| New (#1737, GQ-Q1) | CG05030 | UNION duplicate-elimination state exceeds the statement memory budget |
+| New (#1737, GQ-Q1 fixes) | CG05031 | Internal statement lookup unexpectedly lacks its key; original cause is retained |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
@@ -507,6 +525,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CD05016 | Result byte/frame limit exceeded | — |
 | CD05018 | Retained SELECT sources/groups, ordered candidate buckets, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
+| CD05020 | Shared expression evaluation budget exhausted across a statement's subqueries and expression sources (#1731, OQ-Q3) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

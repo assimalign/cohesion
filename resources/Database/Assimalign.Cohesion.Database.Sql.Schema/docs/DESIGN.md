@@ -13,7 +13,7 @@ Constraint migration equality includes OnUpdate, so a metadata-only change is a 
 The runtime and Sdk.Database share v9; every earlier artifact, applied marker and pending target,
 including v8 with foreign keys, is refused before identity/hash comparison. Rebuild artifacts and
 recreate affected databases. There is no compatibility reader. SQL renders and persists the action;
-actual CASCADE/SET NULL/SET DEFAULT update execution belongs to SQ-F2. No new interface or
+SQ-F2 executes CASCADE/SET NULL/SET DEFAULT updates without another compiled format change. No new interface or
 cross-assembly access seam is introduced.
 
 ## SQL type aliases (#1108)

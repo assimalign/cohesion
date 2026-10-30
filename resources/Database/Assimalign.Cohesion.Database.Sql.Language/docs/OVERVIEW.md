@@ -1,8 +1,9 @@
 # Assimalign.Cohesion.Database.Sql.Language — Overview
 
 Foreign keys retain and render all five ON UPDATE actions beside ON DELETE, in either order.
-Omitted actions default to NO ACTION. The profile advertises declaration support; changing-action
-execution reports CK00001 until SQ-F2 (#1723). See [DIALECT.md](DIALECT.md).
+Omitted actions default to NO ACTION. All five actions execute on UPDATE, UPDATE FROM,
+ON CONFLICT DO UPDATE and MERGE; RESTRICT checks immediately and NO ACTION checks the final
+statement state (#1723, SQ-F2). See [DIALECT.md](DIALECT.md).
 
 The SQL language front-end of the Cohesion Data Platform: a recursive-descent
 parser (`SqlQueryParser`) producing a full clause-level AST over the shared lexer
@@ -16,8 +17,8 @@ Aggregate calls retain FILTER conditions, DISTINCT/ALL and ordered inputs. The e
 profile includes BOOL_AND/BOOL_OR/EVERY and sample/population variance and standard deviation
 (#1720, SQ-H1). GROUPING SETS, ROLLUP, CUBE, empty sets, GROUP BY DISTINCT and
 GROUPING/GROUPING_ID subtotal masks execute (#1720, SQ-H2). Ranking, LAG/LEAD, OVER and named WINDOW definitions execute (#1526, SQ-W1);
-ROWS and offset-free RANGE frames, aggregate windows with FILTER and value functions execute;
-RANGE offsets, GROUPS, EXCLUDE and value modifiers remain deferred.
+ROWS, RANGE distances, GROUPS, EXCLUDE, aggregate windows with FILTER, value functions and
+IGNORE/RESPECT NULLS execute (#1526, SQ-W3). FROM FIRST/LAST retain named refusals.
 
 - **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE (recursive bodies bind; execution is deferred to SQ-R2; WITH RECURSIVE before MERGE reports CK00001), plus `SELECT` (INNER/LEFT/RIGHT/FULL/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`

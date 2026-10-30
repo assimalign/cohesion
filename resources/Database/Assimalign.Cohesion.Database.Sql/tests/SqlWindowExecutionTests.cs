@@ -322,6 +322,7 @@ public sealed class SqlWindowExecutionTests
                 await ExecuteAsync(session, "CREATE TABLE t(id INT,p INT);");
                 await ExecuteAsync(session, "INSERT INTO t VALUES(1,1),(2,1),(3,2);");
                 await ExecuteAsync(session, "CREATE VIEW v AS SELECT id,ROW_NUMBER() OVER b AS n,LAG(id) OVER b AS previous FROM t WINDOW a AS(PARTITION BY p),b AS(a ORDER BY id);");
+                await ExecuteAsync(session, "CREATE VIEW v2 AS SELECT id,SUM(id) OVER(ORDER BY p RANGE 1 PRECEDING EXCLUDE TIES) AS n,LAST_VALUE(id) IGNORE NULLS OVER(ORDER BY p GROUPS CURRENT ROW) AS last FROM t;");
             }
             // Act
             await using var reopened = SqlDatabaseEngine.Create("window-views", new() { RootPath = root });
@@ -330,6 +331,8 @@ public sealed class SqlWindowExecutionTests
             var rows = await RowsAsync(reader, "SELECT id,n,previous FROM v ORDER BY id;");
             // Assert
             rows[0].ShouldBe([1,1L,null]); rows[1].ShouldBe([2,2L,1]); rows[2].ShouldBe([3,1L,null]);
+            var advanced = await RowsAsync(reader, "SELECT id,n,last FROM v2 ORDER BY id");
+            advanced[0].ShouldBe([1,1L,2]); advanced[1].ShouldBe([2,2L,2]); advanced[2].ShouldBe([3,6L,3]);
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }

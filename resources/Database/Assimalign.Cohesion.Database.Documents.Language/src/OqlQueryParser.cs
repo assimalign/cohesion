@@ -243,13 +243,8 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         List<(string, Lexeme)> result = [];
         int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
-        bool statementWithoutQuery = statementStart < _tokens.Count &&
-            (IsWord(_tokens[statementStart], "DELETE") || IsWord(_tokens[statementStart], "UPDATE") || IsWord(_tokens[statementStart], "CREATE") ||
-                IsWord(_tokens[statementStart], "DROP"));
         var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
-        bool selected = false;
         bool hasGroupBy = false;
-        bool returningList = false;
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
@@ -349,7 +344,6 @@ public sealed partial class OqlQueryParser : QueryParser
             if (value == "RETURNING" && index > statementStart && parentheses == 0 && EndsOperand(index - 1) &&
                 !IsWord(_tokens[index - 1], "INTO") && !IsWord(_tokens[index - 1], "FROM") && !IsWord(_tokens[index - 1], "AS"))
             {
-                returningList = true;
                 inSelectList = true;
             }
 
@@ -450,17 +444,8 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (value == "SELECT")
             {
-                // Only SELECT statements and INSERT/UPSERT SELECT have a query of their own.
-                // A SELECT inside an expression is nested even when it is the first one.
-                if (statementWithoutQuery || selected || parentheses > 0 || returningList)
-                {
-                    if (statementWithoutQuery || !IsWord(_tokens[statementStart], "SELECT"))
-                    { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("SUBQUERY in DML", Profile.Language, Span(token, token))); }
-                }
-
                 if (parentheses > 0)
                 { (selectScopes ??= new()).Push((parentheses, inSelectList, selectHead, hasGroupBy)); }
-                selected = true;
                 selectHead = index;
                 inSelectList = true;
                 hasGroupBy = false;
@@ -563,11 +548,6 @@ public sealed partial class OqlQueryParser : QueryParser
                 break;
             }
 
-            // Each operand of a set operation starts its own SELECT, which is not a subquery.
-            if (value is "UNION" or "INTERSECT" or "EXCEPT")
-            {
-                selected = false;
-            }
         }
         return result;
     }

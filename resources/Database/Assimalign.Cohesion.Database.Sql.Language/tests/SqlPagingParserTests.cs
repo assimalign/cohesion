@@ -137,10 +137,10 @@ public sealed class SqlPagingParserTests
     [InlineData("SELECT * FROM t FETCH FIRST (SELECT id FROM t) ROWS ONLY", "FETCH")]
     [InlineData("SELECT * FROM t FETCH FIRST (1 + (SELECT id FROM t)) ROWS ONLY", "FETCH")]
     [InlineData("SELECT TOP (SELECT id FROM t) * FROM t", "TOP")]
-    [InlineData("SELECT TOP 1 id FROM t WINDOW w AS (GROUPS CURRENT ROW)", "GROUPS")]
-    [InlineData("SELECT * FROM t WINDOW w AS (GROUPS CURRENT ROW) FETCH FIRST ROW ONLY", "GROUPS")]
-    [InlineData("SELECT SUM(id) OVER (ORDER BY id RANGE 1 PRECEDING) FROM t", "RANGE")]
-    [InlineData("SELECT SUM(id) OVER (ORDER BY id GROUPS UNBOUNDED PRECEDING) FROM t", "GROUPS")]
+    [InlineData("SELECT TOP 1 NTH_VALUE(id,1) FROM LAST OVER() FROM t", "FROM LAST")]
+    [InlineData("SELECT * FROM t WINDOW w AS (ORDER BY id GROUPS CURRENT ROW) FETCH FIRST ROW ONLY FOR UPDATE", "FOR UPDATE/SHARE")]
+    [InlineData("SELECT NTH_VALUE(id,1) FROM LAST OVER (ORDER BY id RANGE 1 PRECEDING) FROM t", "FROM LAST")]
+    [InlineData("SELECT NTH_VALUE(id,1) FROM FIRST OVER (ORDER BY id GROUPS UNBOUNDED PRECEDING) FROM t", "FROM FIRST")]
     public void Parse_ExcludedPaging_ShouldNameTheConstruct(string sql, string construct)
     {
         // Arrange / Act

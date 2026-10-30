@@ -251,8 +251,8 @@ public sealed class SqlLanguageConformanceTests
         // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
         // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
         // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
-        // Two explicit window frame clauses (#1526, SQ-W2).
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(77);
+        // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(80);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -860,7 +860,13 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L],[2L],[3L]]),
         [SqlClauses.WindowRows] = Query("SELECT SUM(age ORDER BY id DESC) FILTER(WHERE age>0) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Rows }, [[36m],[81m],[86m]]),
-        [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE UNBOUNDED PRECEDING) FROM t ORDER BY id;",
+        [SqlClauses.WindowGroups] = Query("SELECT SUM(age) OVER(ORDER BY id GROUPS 1 PRECEDING) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[36m],[81m],[86m]]),
+        [SqlClauses.WindowExclude] = Query("SELECT SUM(age) OVER(ORDER BY id ROWS 1 PRECEDING EXCLUDE CURRENT ROW) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36m],[45m]]),
+        [SqlClauses.WindowNullTreatment] = Query("SELECT LAG(age) IGNORE NULLS OVER(ORDER BY id) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36],[45]]),
+        [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE 1 PRECEDING) FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Range }, [[36],[45],[41]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
@@ -1132,18 +1138,49 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) =>
             {
                 await ExecuteAsync(session, "INSERT INTO c VALUES (1);");
-                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE t SET id=9 WHERE id=1;"));
-                error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[1]]);
+                await ExecuteAsync(session, "UPDATE t SET id=9 WHERE id=1;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[9]]);
                 await ExpectRowsAsync(session, "SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;", [["CASCADE"]]);
+                await ExecuteAsync(session, "TRUNCATE t,c;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES(1,'replacement',1);");
+                await ExecuteAsync(session, "INSERT INTO c VALUES(1);");
+                await ExecuteAsync(session, "UPDATE t SET id=2;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[2]]);
                 await ExecuteAsync(session, "CREATE TABLE p_image(id TEXT COLLATE case_insensitive PRIMARY KEY);");
                 await ExecuteAsync(session, "CREATE TABLE c_image(pid TEXT COLLATE case_insensitive REFERENCES p_image(id) ON UPDATE CASCADE);");
                 await ExecuteAsync(session, "INSERT INTO p_image VALUES('Ada');");
                 await ExecuteAsync(session, "INSERT INTO c_image VALUES('Ada');");
-                var imageError = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, "UPDATE p_image SET id='ADA';"));
-                imageError.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CK00001");
-                await ExpectRowsAsync(session, "SELECT id FROM p_image;", [["Ada"]]);
-                await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["Ada"]]);
+                await ExecuteAsync(session, "UPDATE p_image SET id='ADA';");
+                await ExpectRowsAsync(session, "SELECT id FROM p_image;", [["ADA"]]);
+                await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["ADA"]]);
+                await ExecuteAsync(session, "CREATE TABLE self_update(id INT PRIMARY KEY,pid INT REFERENCES self_update(id) ON UPDATE CASCADE);");
+                await ExecuteAsync(session, "INSERT INTO self_update VALUES(1,NULL),(2,1);");
+                await ExpectRowsAsync(session, "UPDATE self_update SET id=id+10,pid=pid RETURNING id,pid;", [[11,null],[12,1]]);
+                await ExpectRowsAsync(session, "SELECT id,pid FROM self_update ORDER BY id;", [[11,null],[12,11]]);
+                string[] actions = ["SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
+                for (int index = 0; index < actions.Length; index++)
+                {
+                    string parent = "update_rule_p_" + index, child = "update_rule_c_" + index;
+                    await ExecuteAsync(session, $"CREATE TABLE {parent}(id INT PRIMARY KEY);");
+                    await ExecuteAsync(session, $"INSERT INTO {parent} VALUES(1),(2);");
+                    await ExecuteAsync(session, $"CREATE TABLE {child}(pid INT DEFAULT 2 REFERENCES {parent}(id) ON UPDATE {actions[index]});");
+                    await ExecuteAsync(session, $"INSERT INTO {child} VALUES(1);");
+                    if (index < 2)
+                    {
+                        await ExecuteAsync(session,$"UPDATE {parent} SET id=9 WHERE id=1;");
+                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",index == 0 ? [[null]] : [[2]]);
+                    }
+                    else if (index == 2)
+                    {
+                        var restrict = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;"));
+                        restrict.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03039");
+                    }
+                    else
+                    {
+                        await ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;");
+                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",[[1]]);
+                    }
+                }
             }),
         [SqlClauses.References] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
         [SqlClauses.Cascade] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE CASCADE);", SqlReferentialAction.Cascade,

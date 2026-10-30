@@ -26,7 +26,7 @@ internal sealed partial class DocumentPlanner
         // Do not capture a new group-frame local in ordinary planning's existing lambdas:
         // even one additional closure slot would change its pinned allocation measurements.
         var bound = scopes.FindGroup(query);
-        return EquivalentExpression(left, right, query.Alias, variables, scopes, bound, bound);
+        return EquivalentExpression(left, right, query, variables, scopes, bound, bound);
     }
 
     private static DocumentBindingScope? GroupScope(OqlSelectExpression query, IReadOnlySet<string>? unnestVariables)
@@ -53,6 +53,11 @@ internal sealed partial class DocumentPlanner
     private static void ValidateGroupArrayInput(OqlExpression expression, OqlSelectExpression query, DocumentBindingScopes scopes, DocumentFunctionCatalog functions,
         bool aggregateInput = false, DocumentBindingScope? local = null)
     {
+        if (expression is OqlSubqueryExpression subquery && aggregateInput)
+        {
+            ValidateGroupedCaptures(subquery.Query, query, null, scopes, functions, local, null, groupArrayInput: true);
+            return;
+        }
         if (expression is OqlPathExpression { Segments.Count: > 0 } path && aggregateInput &&
             path.Segments[0].Name == query.GroupAs && DocumentBindingScope.Resolve(local, query.GroupAs, out _) is null)
         { throw new DocumentPlanningException("CD01031", ErrorMessages.GroupArrayAggregateInput, expression.Location); }

@@ -93,6 +93,8 @@ public sealed partial class GraphDatabase
     private Exception TranslateStatementFailure(Exception error) => TranslateKernelFailure(error) switch
     {
         var translated when !ReferenceEquals(translated, error) => translated,
+        _ when error is System.Collections.Generic.KeyNotFoundException => new DatabaseException(ErrorMessages.StatementKeyMissing,
+            [new Types.Diagnostic { Code = "CG05031", Message = ErrorMessages.StatementKeyMissing, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when error is InvalidOperationException => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "CG03003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         // A label expression or predicate nested deeper than this thread's stack: the walks

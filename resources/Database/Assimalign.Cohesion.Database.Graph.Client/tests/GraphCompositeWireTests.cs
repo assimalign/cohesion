@@ -157,7 +157,7 @@ public sealed class GraphCompositeWireTests
         channel.SetAgreement(ProtocolReadyMessage.Decode(ready.Payload.Span));
         Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         // Act
-        foreach (string statement in new[] { "MATCH (a)-[r:T*0]->(b) RETURN r", "MATCH (a)-[r]->{1,3}(b) RETURN r", "MATCH ((x)->(y)){1,3} RETURN *", "MATCH (a)-[r]->{1,3}(b) WITH r RETURN r", "LET l = [1,2] RETURN l", "LET l = [[1]] FOR x IN l RETURN x", "LET l = [1] WITH l RETURN l", "RETURN [1] AS l NEXT RETURN l", "RETURN [1,NULL]", "RETURN {k:1}", "INSERT (:Unwritten) RETURN [1]", "INSERT (:Unwritten) RETURN {k:1}" })
+        foreach (string statement in new[] { "MATCH (a)-[r:T*0]->(b) RETURN r", "MATCH (a)-[r]->{1,3}(b) RETURN r", "MATCH ((x)->(y)){1,3} RETURN *", "MATCH (a)-[r]->{1,3}(b) WITH r RETURN r", "LET l = [1,2] RETURN l", "LET l = [[1]] FOR x IN l RETURN x", "LET l = [1] WITH l RETURN l", "RETURN [1] AS l NEXT RETURN l", "RETURN [1,NULL]", "RETURN NULL AS x UNION RETURN [1] AS x", "RETURN NULL AS x UNION ALL MATCH (n:Missing) RETURN [n] AS x", "RETURN {k:1}", "INSERT (:Unwritten) RETURN [1]", "INSERT (:Unwritten) RETURN {k:1}" })
         {
             await Execute(statement);
             var failure = await Read();

@@ -217,7 +217,7 @@ public sealed class DocumentSourceTests
         nested.Select(row => row.GetValue(0)).ShouldBe(new object?[] { 1m, 2m });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - FROM: correlation and unbound expression aliases retain named refusals")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - FROM: correlation executes and unbound expression aliases retain diagnostics")]
     [InlineData("SELECT (SELECT RAW v FROM d.tags AS v) FROM items d", "CK00001")]
     [InlineData("SELECT (SELECT RAW v FROM d AS v) FROM items d", "CK00001")]
     [InlineData("SELECT (SELECT RAW v FROM [d.n] AS v) FROM items d", "CK00001")]
@@ -235,6 +235,21 @@ public sealed class DocumentSourceTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await DocumentSubqueryTests.SeedAsync(session);
         // Act / Assert
+        if (code == "CK00001")
+        {
+            var result = await session.ExecuteAsync(query, cancellationToken: CancellationToken.None);
+            result.Diagnostics.ShouldBeEmpty();
+            if (query.StartsWith("SELECT", StringComparison.Ordinal))
+            {
+                var rows = new List<DatabaseRow>();
+                await foreach (var row in ((DatabaseResultSet)result).GetRowsAsync(CancellationToken.None)) { rows.Add(row); }
+                rows.Count.ShouldBe(3);
+                session.LastQuerySubqueriesExecuted.ShouldBe(3);
+                await ((DatabaseResultSet)result).DisposeAsync();
+            }
+            else { (await DocumentSubqueryTests.RowsAsync(session, "SELECT * FROM items")).Count.ShouldBe(4); }
+            return;
+        }
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(query, cancellationToken: CancellationToken.None));
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == code);
     }

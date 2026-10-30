@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
-## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
 
 SQL catalog format advances 29 -> 30 and table extension 7 -> 8. Each constraint stores a
 mandatory OnUpdate byte beside OnDelete. All five actions survive decode, CHECK call-vector
@@ -23,34 +23,95 @@ the omitted NO ACTION default. Persistent views and declared provisioning script
 metadata. No wire frame or client contract changes. InMemory/TCP conformance covers metadata,
 refusals and usable connections.
 
-All update paths share ValidateParentUpdate before physical row application. A changed referenced
-key under CASCADE/SET NULL/SET DEFAULT throws structured CK00001 naming ON UPDATE action
-execution, before considering child presence or final-parent substitution. Self-references check
-changing actions before outgoing FK validation can mistake the pending key change for an orphan.
-Action eligibility compares the binary stored key representation through the row codec, so case-only,
-accent-only and other representation changes cannot disappear under key collation. Both refusal
-sites share this predicate (PostgreSQL src/backend/utils/adt/ri_triggers.c:4237-4250,
-datum_image_eq). Parent-presence and RESTRICT/NO ACTION checks retain collation-aware equality.
-DELETE, DELETE USING and MERGE compose their SET NULL/DEFAULT updates and check every incoming
-update action before any table group's outgoing FK validation; chain order cannot mask CK00001.
-That branch inspects pending rows only for changing actions; ordinary DML gains no allocation. Unchanged keys and
-unrelated-column changes remain executable. RESTRICT/NO ACTION deliberately keep today's
-statement-end parent validation until SQ-F2 adds immediate RESTRICT and action closure; no stored
-changing action silently becomes RESTRICT. Sequence-before-table lock ordering and ordinary-DML
-Release allocation guards are retained. No new diagnostic identity is needed: unsupported action
-execution uses CK00001; syntax and metadata errors keep their existing owning conditions.
-PostgreSQL src/backend/parser/gram.y:4581-4689 defines ordering/defaults; ri_triggers.c:897-955
-records the future RESTRICT/NO ACTION distinction. See Sql.Language DIALECT for the interim contract.
+UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE execute CASCADE, SET NULL and SET DEFAULT
+through one pre-apply worklist. Delete SET actions seed the same worklist when they change a
+key another table references. Matching uses the pre-action child state, so a key swap does not
+reassociate already-cascaded children with another parent's old key. Composed assignments retain
+all untouched columns. Each parent-row/constraint origin can revise its earlier proposal as a
+composite key moves in multiple hops; different origins proposing different stored values fail
+with CS05085, including conflicting diamonds and cycles. An unchanged cell introduces no proposal;
+conflicts compare each origin's completed value after expansion, allowing intermediate composite-key
+revisions to converge. First-pass DELETE SET writes retain their origins and match subsequent update
+actions against the direct inputs from before those SET writes. Different DELETE/UPDATE replacements
+therefore fail with CS05085; equal replacements converge without recursion. This explicit conflict
+rule differs from PostgreSQL's trigger-order-dependent result for mixed DELETE/UPDATE actions.
+Direct assignments are the child image used for action matching: a key still equal to the old
+parent key receives the action, including an explicit self-assignment; a directly moved key keeps
+its assigned value. This follows PostgreSQL src/backend/utils/adt/ri_triggers.c:1274-1313's
+UPDATE ... WHERE old-key query and replaces the first pass's direct-assignment conflict policy.
+RETURNING uses each direct proposal before subsequent actions, consistently across all four paths (PostgreSQL src/backend/executor/nodeModifyTable.c:2754,
+src/backend/commands/trigger.c:5190-5246). A subsequent
+delete of the same physical parent row through the same edge composes with its update; independent
+parent replacements still conflict. MERGE also
+retains key events for proposed updates subsequently removed by a delete cascade and revisits
+delete edges after updates, completing the combined closure before deferred validation. Re-keyed
+pending inserts use their initial proposal as the old key image, allowing actions to reach their
+pending descendants without inventing a physical predecessor.
 
-## Window stage (#1526, SQ-W1/SQ-W2)
+Action eligibility uses F1's single ReferencedKeyChanged predicate: binary stored key images
+through the row codec (PostgreSQL src/backend/utils/adt/ri_triggers.c:4237-4250, datum_image_eq).
+Thus case/accent changes fire actions even under an equality collation; unchanged stored keys do
+not. A NULL component of the old key matches no children (MATCH SIMPLE). RESTRICT checks existing
+referencing rows immediately, before accepting final-parent substitution or referential updates;
+this includes a self-reference directly reassigned by the same statement. NO ACTION validates the
+whole final state and accepts a different final parent supplying the old key. This implements the
+owner's immediate distinction, following ri_triggers.c:897-904,945-955; PostgreSQL itself uses a
+nondeferrable AFTER trigger for RESTRICT. Parent/child matching remains collation-aware.
+
+SET DEFAULT evaluates the bound default per affected row, including sequence and identity defaults;
+a missing default assigns NULL. Normal coercion, domain, NOT NULL, CHECK, unique and final FK checks
+apply to the complete closure. Fixed-snapshot child crosschecks and stale update versions retain
+structured CS04064 and name the actual ON UPDATE action; delete diagnostics keep their prior contract.
+Sequence grant discovery follows reachable update actions and mixed
+delete/update chains before taking any table lock; a newly published sequence-backed action without
+its planned grant retains retryable CS04067. Sequence allocations retain their existing nontransactional
+gap semantics on abandoned preparation attempts. No format bump beyond F1's catalog 30 / compiled v9,
+new public interface, protocol frame or client API is required.
+
+Lock/latch order is sequence objects, adjacent table IS in ObjectId order and own IX, sorted target
+rows, discovered rows before reading their children, acquired/released parent shares, sorted unique
+keys, apply gate, then storage/index latches. No latch or catalog monitor spans a wait. Discovered
+closure inversions use #1420's first-two-refusal release/retry and retained waits thereafter; upsert
+restarts its existing unwritten arbitration and retains completed wait grants. Its metadata intents
+preceding the arbitration mark retain their existing transaction duration. Failure/cancellation
+before apply releases preparation grants; admitted physical writes roll back in one statement bracket.
+Closure attempts own disposable memory ledgers, separate from retained direct proposals. Every
+path, including plain UPDATE, upsert and DELETE, charges closure rows, projections and directories
+against the statement budget; failure and retry release the abandoned attempt before waiting.
+DELETE maintains one mutable projection directory and refreshes changed rows incrementally. Another
+pass runs only when visible key actions or newly reached deletes can expose further work. Final
+foreign-key validation uses a fresh committed READ COMMITTED snapshot (ri_triggers.c:2800-2822),
+never the all-writers snapshot used for lock-protected child discovery. Action eligibility metadata
+is cached by case-insensitive schema/table name once per catalog generation, so TRUNCATE and physical
+rewrite owner changes preserve eligibility, memory charging and sequence admission. The immutable
+directory is built under the catalog monitor and published with Volatile.Write. Other SQ-F1/SQ-F2
+object-id directories are statement-local and expire before storage bindings can change. Unrelated assignments and insert-only upserts retain their
+ordinary execution path. Ordinary DML keeps the existing Release allocation guards. Large depth/work acceptance fixtures
+request an explicit memory grant; separate small-budget cases verify refusal and cleanup. Nonparallel tests record actual waits,
+exercise success, constraint failure, cancellation and session teardown, and race parent updates
+against child inserts/deletes until update/insert/delete/wait counters advance. Both transports
+cover every action/path, self-references, immediate/final timing, coded conflicts and usable connections.
+
+Plain ON DELETE CASCADE closures now obey StatementMemoryBudget too. The conservative charge is
+about 840 bytes per two-column row, so the default 64 MiB grant caps such a closure at about
+79,900 rows (other retained statement work can lower that cap). The 100,000-row chain from #1164
+needs about 84 MB and an explicitly larger StatementMemoryBudget. The worklist still has no depth
+limit; CS05067 refuses an over-budget closure before physical writes and releases its grant.
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS05085 | Conflicting replacement of one column through referential actions; PostgreSQL nodeModifyTable.c:2607-2630 uses triggered_data_change_violation for conflicting triggered writes | 27000 |
+
+
+## Window stage (#1526, SQ-W1/SQ-W2/SQ-W3)
 
 OVER accepts inline PARTITION BY and ORDER BY (including direction and NULLS FIRST/LAST),
 OVER name, and parenthesized copies of earlier named windows. WINDOW definitions appear
 after HAVING and before the query tail. Names use the existing case-insensitive identifier
 rules. A copied window cannot specify PARTITION BY; it can supply ORDER BY only if its base
-has none. Definitions cannot reference themselves or later definitions. ROWS frames,
-offset-free RANGE, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute as
-described below; deferred frame forms retain named CK00001 refusals.
+has none. Definitions cannot reference themselves or later definitions. ROWS, RANGE and
+GROUPS frames, exclusion, aggregate windows and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute
+as described below.
 
 ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE and LAG/LEAD execute after
 WHERE, grouping and HAVING, before DISTINCT, final ORDER BY and pagination. SELECT output
@@ -84,8 +145,8 @@ functions and sort_shared for each group. Window inputs, augmented result rows, 
 key payloads and partition scratch reserve the statement grant before retention; CS05079 refuses
 an excess and every reservation unwinds on success, error or cancellation. Whole input and
 output rows remain charged until the stage ends; scratch releases at each partition boundary.
-Accounting is deliberately conservative for aliased values and retained intermediate outputs;
-SQ-W3 refines full retained-memory accounting. There is no spill. LIMIT cannot truncate the
+Reference-identity ownership avoids duplicate payload charges; consumed input rows and
+partition state release as described under SQ-W3 below. There is no spill. LIMIT cannot truncate the
 input partitions. Window-free queries retain their existing plan and object layouts.
 Named-window enumeration uses separate iterators so extra retained enumerators do not
 increase ordinary query or persisted-view traversal allocations.
@@ -132,8 +193,8 @@ Offsets beyond the partition, including Int64.MaxValue, clamp without arithmetic
 Without an explicit frame, ORDER BY uses RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW,
 including every current-row peer; without ORDER BY the frame is the whole partition.
 Explicit offset-free RANGE also executes, including CURRENT ROW peer boundaries and
-UNBOUNDED FOLLOWING. RANGE with offsets, GROUPS, EXCLUDE, FROM FIRST/LAST and
-IGNORE/RESPECT NULLS remain named CK00001 refusals. Explicit frames do not change
+UNBOUNDED FOLLOWING. RANGE offsets, GROUPS, EXCLUDE and NULL treatment execute as
+described under SQ-W3 below; FROM FIRST/LAST retain CK00001. Explicit frames do not change
 ranking/navigation semantics. A named window with an explicit frame may be referenced
 by OVER name, but cannot be copied by OVER(name) or another named definition (CS01066).
 
@@ -143,31 +204,19 @@ CK00001. Existing engine aggregate-input ORDER BY and WITHIN GROUP execute as we
 this extends PostgreSQL, which refuses aggregate-local ORDER BY with OVER. FILTER runs
 before input expressions. Empty frames return COUNT zero and other native aggregates NULL.
 The result type, collation, coercions and numeric rounding are the ordinary aggregate's.
-FIRST_VALUE, LAST_VALUE and NTH_VALUE respect NULLs and read the selected frame member;
+FIRST_VALUE, LAST_VALUE and NTH_VALUE default to RESPECT NULLS and read the selected frame member;
 an empty frame or missing nth member returns NULL. NTH_VALUE's index is evaluated per
 current row; NULL yields NULL and nonpositive values report CS05082 (22016), even for
 an empty frame. NTH_VALUE accepts the engine's signed integer types, including BIGINT;
 a noninteger index reports CS02073 (42804). Value types follow the first argument, including CHAR and its collation.
 
-Native frames reuse one accumulator while their head stays fixed, including bounded
-PRECEDING heads clamped to the partition start. They consume each qualifying input once,
-reading a non-consuming native final result. Equal frames share the previously computed
-result. SUM, COUNT, MIN, MAX, AVG, Boolean and statistical native aggregates ignore
-aggregate-local ORDER BY when evaluating frames, including its key expressions, so ordering
-does not disable incremental transitions. FILTER still runs before argument evaluation.
-Application aggregates and ordered string aggregates preserve their specified input order.
-Ordinary application accumulator Finish remains once-only. Recomputed frames (including
-native frames whose head moves) charge each candidate input visit before FILTER or any
-input expression/transition against a fixed 1,000,000-visit statement cap. CS05084 (54000)
-refuses the next visit and releases all reservations. The cap spans functions, partitions
-and window stages sharing the statement, including under LIMIT; equal cached frames spend
-no visits. SQL has no general statement work budget, so this fixed cap bounds otherwise
-quadratic fallback work without changing the public accumulator contract. String output cost is
-also proportional to the total returned text. Native ordered/string buffers and accumulator
-scratch charge CS05079's statement grant. Ordered aggregate inputs evaluate their arguments
-and keys once after FILTER; their actual retained payload and conservative stable-sort scratch
-reserve the grant before buffering. Those reservations release on success, refusal or cancellation;
-complete retained-memory refinement remains SQ-W3.
+Native growing and moving frames use the incremental states described under SQ-W3.
+Application and order-sensitive aggregates preserve their input order and use the existing
+1,000,000 candidate-visit recomputation cap (CS05084), shared across statement stages.
+Ordered aggregate inputs evaluate their arguments and keys once after FILTER, reserving
+computed payloads and sort buffers before retention. String accumulators charge their
+retained builder chunks as well as output values. Finished values are admitted while input,
+sort and builder buffers still overlap. Reservations unwind on every exit.
 No public accumulator contract, disk version or wire format changes.
 EXPLAIN retains frame boundaries for each function and ANALYZE reports frame_visits,
 counting candidate aggregate inputs before FILTER. Frames do not split shared sort groups,
@@ -193,6 +242,122 @@ utils/adt/windowfuncs.c:656-723 (frame value functions). No live PostgreSQL comp
 | CS05083 | OVER on a scalar function (42809) |
 | CS05084 | Statement window frame recomputation exceeds 1,000,000 input visits (54000) |
 
+
+### RANGE, GROUPS, exclusion and moving state (#1526, SQ-W3)
+
+RANGE offset frames require exactly one ORDER BY key. Integer keys accept signed integer
+offsets; DECIMAL accepts integer/decimal offsets; REAL/DOUBLE accept numeric offsets.
+DATE, TIME, TIMESTAMP, TIMESTAMPTZ and INTERVAL keys accept INTERVAL offsets. Other key
+domains and incompatible offsets report CS02074 and CS02075. NULL offsets retain CS02071;
+negative or NaN RANGE offsets report CS02076. Floating positive infinity is a valid offset.
+Offsets initialize once per execution, including across partitions, and empty inputs do not
+initialize them. GROUPS counts peer groups, accepts the ROWS integer-offset domain and
+requires ORDER BY (CS05087). Offset RANGE ordering arity reports CS05086.
+
+Distance boundaries follow ordering direction, including DESC, explicit NULL placement and
+peer-inclusive zero offsets. A NULL current key's offset boundary is its NULL peer boundary;
+non-NULL frames compare NULL candidates by sort placement. Exact numeric boundaries use
+scaled integers without overflowing a key's storage type. Floating infinities follow PostgreSQL
+in_range, including the indeterminate infinity +/- infinity case. SQL retains its established
+NaN-low ordering, a documented departure from PostgreSQL's NaN-high ordering. Temporal offsets
+use the engine's existing TimeSpan INTERVAL duration, with wall-clock TIMESTAMP and UTC
+TIMESTAMPTZ identity. TIME distances never wrap at midnight. Calendar months and infinite
+temporal values are outside the engine's scalar domain; RANGE adds neither. TIME uses the
+whole duration because TimeSpan does not retain PostgreSQL's separate month/day/time fields.
+Unrepresentable timestamp/date or interval boundaries retain CS02048 (22008) and CS02062 (22015), respectively.
+
+EXCLUDE NO OTHERS is the default. EXCLUDE CURRENT ROW removes just the current row;
+EXCLUDE GROUP removes all current ordering peers; EXCLUDE TIES keeps the current row if
+it belongs to the frame and removes its other peers. These rules also apply to ROWS and to
+windows without ORDER BY, where the whole partition is one peer group. Exclusion affects
+aggregate/value functions; ranking and navigation remain frame-independent. Canonical SQL
+omits explicit NO OTHERS, which is semantically identical to omission.
+
+The local PostgreSQL grammar implements IGNORE/RESPECT NULLS, so these clauses execute for
+LAG, LEAD, FIRST_VALUE, LAST_VALUE and NTH_VALUE. Omission means RESPECT NULLS; explicit
+RESPECT is retained in canonical SQL. IGNORE skips NULL argument values when counting
+navigation/frame members; offset zero still reads the current row. Incompatible functions
+report CS05088. FROM FIRST/LAST has no implementation in the local PostgreSQL grammar and
+retains its named CK00001 refusals. Value-function NULL skipping scans the selected members;
+it does not promise the moving-aggregate complexity bound.
+
+Native SUM, COUNT, AVG, Boolean and statistical functions use inverse transitions when their
+arguments and FILTER contain neither volatile functions nor subqueries. Safe MIN/MAX inputs
+use monotonic queues. A frame after exclusion is represented by at most three intervals,
+whose endpoints advance monotonically. For safe inputs, each function evaluates FILTER once
+per visited input and evaluates its argument only when FILTER admits that input. Cached
+arguments, FILTER
+outcomes and all interval states release at the partition boundary. Exact decimal SUM/AVG and
+statistics retain scaled BigInteger sums (and squares for statistics), rounding only the result;
+small decimal terms survive cancellation of large terms. Floating statistics use exact binary sums and squares
+in units of 2^-1074, rounding the final quotient to DOUBLE; nonfinite inputs are tracked
+separately so removing them restores finite results. Native aggregate-local ordering remains ignored.
+
+Volatile inputs (including nextval, setval, a registered random function and application
+functions unless marked Stable or Immutable) and subquery arguments/FILTER use the restart
+path. When the frame head
+moves, arguments and FILTER are evaluated again over the new frame, including correlated
+subplans and prepared branch predicates on a previously visited row. The existing CS05084
+recomputation cap applies. This follows PostgreSQL executor/nodeWindowAgg.c:3002-3033;
+inverse transitions and cached inputs remain enabled for safe expressions.
+
+EXPLAIN ANALYZE reports frame_visits (distinct evaluated native inputs; fallback candidate
+visits), transitions, inverse_transitions and boundary_visits. RANGE boundaries use advancing
+cursors; GROUPS uses a partition peer index. Safe native transition work is O(n), including
+exclusion; MIN/MAX queue comparisons are amortized O(n). The existing 1,000,000-visit CS05084 cap remains
+for application aggregates and order-sensitive recomputation, and application Finish stays
+once-only. Application accumulator internals remain application-owned; the engine accounts
+its fixed state handle, evaluated inputs and sort buffers without inspecting opaque user state.
+
+Window ownership uses a reference-identity ledger with exact power-of-two entry/bucket array
+charges, including simultaneous old/new arrays during growth. Aliased scalar, text, CHAR and
+binary payloads are charged once. Augmented rows replace consumed input rows, and the input
+list drops its capacity. Keys release before an incompatible sort; shared sorts retain their
+keys. Partition peer indexes, argument caches, monotonic queues, exact transition limbs and
+string-builder chunks reserve before retention and release at the partition boundary.
+Correlated argument-result vectors and temporary rows release with their partition; nested
+window outputs are immediately adopted by the enclosing owner when their inner stage completes.
+DISTINCT scratch and final-collector keys share the same owner. Matching statement metrics
+prevent an inherited execution context from charging an independent statement; native string
+builder accounting is enabled only by the window executor.
+Output cells remain charged until the stage ends. Reference-buffer capacity/growth and fixed
+operator scratch use explicit bounded allowances; these are logical retained-memory charges,
+not a claim that GC heap measurements equal the grant. The ownership ledger itself is charged.
+Final ordered collectors remove discarded outputs and keys from the partition cleanup owner
+before releasing their ledger charges, including bounded LIMIT heaps. Cleanup uses counted
+reference-identity membership with bounded dictionary-capacity allowances and O(1) removal.
+Previously materialized statement subquery vectors and CTE/relation rows are admitted when
+the window owner starts (CS05067 on failed admission); payload aliases remain charged once.
+Scalar, EXISTS and IN/quantified subquery caches share this admission path. Plain children
+clear their owned source cells and buffers after copying the cached values, including unread
+EXISTS rows, so completed async frames cannot keep discarded payloads alive across admission. Computed IN-list
+inputs use normal expression evaluation and retention; ARRAY subqueries remain unsupported.
+There is no spill, and success/refusal/cancellation releases the entire grant. Window-free
+queries retain their existing layouts and allocation costs. No public accumulator contract,
+compiled-schema/catalog version or wire format changed.
+
+The committed full-output fixture admits 138,961 two-window rows and 162,448 moving-AVG
+rows under the default 64 MiB grant, with the next row refused and the grant released.
+The former 2,000-row shrinking-SUM cap refusal now succeeds with 2,000 input visits and
+1,999 inverse transitions, while Release guards retain the window-free allocation costs.
+
+Independent membership tests cover every legal bound category and all exclusions in ROWS,
+GROUPS and all twelve supported RANGE key types, both directions and NULL placements;
+native aggregates are also compared with ordinary recomputation. InMemory/TCP, EXPLAIN,
+persisted-view reload, budget boundaries and NativeAOT checks exercise the same behavior.
+References re-derived from the local PostgreSQL source: parser/parse_clause.c:2913-2959,
+parser/gram.y:16757-16761, utils/adt/float.c:1068-1135, int.c:652-731,
+date.c:1065-1084,2215-2258, timestamp.c:3864-3979, numeric.c:2582-2687,
+executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL comparison is claimed.
+
+| Code | Condition |
+| --- | --- |
+| CS02074 | Unsupported RANGE ordering-key domain (0A000) |
+| CS02075 | Incompatible RANGE offset domain (0A000) |
+| CS02076 | Negative or NaN RANGE offset (22013) |
+| CS05086 | Offset RANGE requires exactly one ordering key (42P20) |
+| CS05087 | GROUPS requires ORDER BY (42P20) |
+| CS05088 | NULL treatment on an incompatible function (42601) |
 
 ## Owned identity sequences (#1717, SQ-S3)
 
@@ -3376,8 +3541,7 @@ resolve those columns to the primary key first (including the legacy fallback),
 then to a matching unique index ordered deterministically by name. Foreign keys
 report `MATCH_OPTION = 'NONE'`; UPDATE_RULE and DELETE_RULE each report the stored
 RESTRICT, CASCADE, NO ACTION, SET NULL or SET DEFAULT action. Omitted SQL actions default
-to NO ACTION. Constraints are not deferrable; SQ-F1 retains statement-end parent-key
-checks for RESTRICT and NO ACTION updates until SQ-F2 implements immediate RESTRICT.
+to NO ACTION. Constraints are not deferrable; RESTRICT checks updates immediately and NO ACTION checks the complete statement state.
 
 Constraint names remain unique within a table, as the catalog already requires,
 rather than within the entire SQL schema. Consequently `CHECK_CONSTRAINTS` and
@@ -5728,8 +5892,7 @@ transitive closure of child deletions into the same statement apply bracket (see
 snapshot fixed at the transaction's begin, every child version in that closure must
 be one the snapshot sees
 ([Cascades under a fixed snapshot](#cascades-under-a-fixed-snapshot-1370)). Parent key
-updates under RESTRICT/NO ACTION retain statement-end checks in SQ-F1. ON UPDATE changing
-actions are persisted; execution refuses with CK00001 before row writes until SQ-F2.
+updates execute their stored ON UPDATE action through the same statement closure; RESTRICT is immediate and NO ACTION sees its final state.
 
 Checks require Boolean predicates made from supported deterministic row
 expressions. Parameters, subqueries, aggregates, unsupported functions and casts

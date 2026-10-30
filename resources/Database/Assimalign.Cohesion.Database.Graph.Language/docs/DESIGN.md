@@ -185,13 +185,15 @@ The function table advertises the aggregates and core scalar functions listed be
 | `QUANTIFIED PATH` | ISO edge/subpath `{m,n}`, `{m}`, `{m,}`, `{,n}`, `{,}`, `+`, `*`; Cypher bracketed `*m..n` | Enumerates paths under the outer mode, including zero-length matches; group variables bind source-ordered lists |
 | `EXISTS` | `EXISTS { MATCH pattern [WHERE predicate] ... }` or `EXISTS { pattern [, pattern] [WHERE predicate] }`; scalar NOT supplies NOT EXISTS | Correlated semi/anti apply, isolated scope, Boolean result and first-match exit |
 | `WHERE` | Boolean and scalar expressions: comparisons, labels, AND/OR/XOR/NOT, IS null/truth tests, arithmetic, concatenation, IN lists and string predicates | Keeps TRUE only; see [DIALECT.md](DIALECT.md) and scalar expressions below |
-| `EXPLAIN` | One linear statement of the supported stages | Shared description rows without executing any read expansion or write; Cohesion extension |
+| `EXPLAIN` | One supported linear or composite statement | Shared description rows without executing any read expansion or write; Cohesion extension |
 | `LET` | One or more `variable = expression` assignments | Adds new value bindings in assignment order; rebinding is CG03003 |
 | `FILTER` | Predicate, optionally preceded by WHERE | Keeps TRUE only; FALSE and UNKNOWN drop the row |
 | `FOR` | `FOR variable IN expression` | Expands a list; NULL yields zero rows; a non-list is CG02013 |
 | `UNWIND` | Cypher spelling `UNWIND expression AS variable` | The same list expansion, with the scalar divergence below |
 | `NEXT` | Separates linear segments after RETURN or a modifying segment | Carries projected columns, or one empty binding after a modifying segment without RETURN |
 | `WITH` | Cypher projection spelling, including DISTINCT/ALL, star, GROUP BY, ordering/paging and WHERE | Projects a new scope; applies WHERE after ordering/paging |
+| `UNION [DISTINCT]` | Complete read-only operands with matching columns | Existing structural tuple equality removes duplicates; all operands are planned first |
+| `UNION ALL` | The same operands, without mixing modes | Streams every occurrence in operand order into the ordinary final result collector |
 | `RETURN` | Optional DISTINCT/ALL, either `*` or value expressions with optional `AS` aliases; also standalone | Projects expressions, expands named bindings in declaration order, then eliminates duplicate tuples for DISTINCT; path requests require one entity or path column |
 | `GROUP BY` | ISO names of non-aggregated RETURN items, equivalent input expressions, or the empty grouping set `()`; omission uses the same implicit keys | Bounded hash grouping before projection, DISTINCT, ordering and paging; aggregate placement and scope are validated before execution |
 | `ORDER BY` | One or more expression keys with optional ASC/ASCENDING/DESC/DESCENDING and NULLS FIRST/LAST after RETURN or WITH | Orders projected rows and paths by the total order below, after DISTINCT |
@@ -605,11 +607,72 @@ The [engine's catalog section](../../Assimalign.Cohesion.Database.Graph/docs/DES
 defines ordered result columns, SQL-consistent ownership vocabulary and session snapshot behavior.
 The parser describes only the metadata subject; it never accesses or caches catalog state.
 
+## Composite queries: UNION and UNION ALL (#1737, GQ-Q1)
+
+A query may combine complete read-only operands with `UNION` or `UNION ALL`. Both
+have the same precedence and associate left; parentheses explicitly group operands (a Cohesion
+extension). NEXT has lower precedence: each of its segments is a complete composite expression.
+A NEXT inside a parenthesized operand remains in that operand. WITH stays operand-local. The immutable
+`GqlCompositeQuery(Left, Operator, Right)` tree retains that grouping; `GqlQueryExpression.Composite`
+is null for linear statements. A composite inside a NEXT pipeline is represented by the sealed
+`GqlCompositeStage`, with ordinary stages and GqlNextStage preserving source order. Rendering uses the existing explicit-stack path/scalar renderer,
+including read stages and per-operand projections. Unaliased parsed projections retain their
+normalized expression text so canonical quoting cannot rename a result column.
+The stage/body reference is shared with the composite body so ordinary AST object size is unchanged.
+Capability scanning recursively visits query groups with fresh query context and relative nesting
+depth. Pattern groups, scalar parentheses and EXISTS bodies keep their separate contexts.
+
+Every operand must be read-only and return the same ordinal, case-sensitive column names in the
+same order. Proven incompatible value kinds (including list/map and entity kinds) fail before
+execution; all numeric kinds are compatible, NULL imposes no kind, and unknown property kinds
+are checked when rows arrive. Runtime incompatible kinds also fail without publishing partial
+results. Collection contents retain the existing heterogeneous structural-value contract; proven
+incompatible nested entity kinds are refused. Mixing UNION and UNION ALL anywhere in one tree,
+including a parenthesized group, is refused. Bare UNION and explicit UNION DISTINCT both mean
+distinct and may mix; rendering normalizes UNION DISTINCT to UNION. EXCEPT, INTERSECT and OTHERWISE
+remain CK00001 naming the form until GQ-Q2. The deferred words remain contextual names in scalar/binding slots.
+
+ORDER BY, OFFSET/SKIP and LIMIT belong to each operand's RETURN. A tail after the final RETURN
+therefore affects only the last operand. There is no global composite ordering/page clause;
+a suffix after a parenthesized composite is CK00001. Output visits operands in source order;
+UNION keeps the first occurrence, and UNION ALL preserves all occurrences, although applications
+must use ORDER BY when ordering is part of their query contract. Column names come from the first
+operand; numeric metadata widens across operands, NULL is neutral, and incompatible or dynamic
+values use the existing DatabaseType.Null (unknown). Actual values retain their CLR types.
+EXPLAIN plans every operand and preserves the binary grouping in Union/UnionAll nodes; NEXT
+pipelines place those groups alongside ordered Next and subsequent stage nodes.
+
+Local Neo4j reference (no code copied), relative to `C:/Source/repos/neo4j/neo4j`:
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticError.scala:735-737,755-763`
+supplies matching-column and mixed-mode refusals; the consulted v25 parser is
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:75-77,138-140,166-176`.
+NEXT precedence follows Neo4j's parser test
+`community/cypher/front-end/parser/parser-test/src/test/scala/org/neo4j/cypher/internal/ast/factory/query/NextStatementParserTest.scala:350-378`
+(P12) and `Cypher25Parser.g4:67-77`; line 76 also admits explicit DISTINCT.
+The independently maintained [TuGraph GQL grammar](https://github.com/TuGraph-family/gql-grammar/blob/main/GQLParser.g4#L665-L713)
+uses a left-recursive composite expression, and its
+[primitive result rule](https://github.com/TuGraph-family/gql-grammar/blob/main/GQLParser.g4#L790-L805)
+attaches ordering/paging to RETURN. These are grammar references, not an ISO conformance claim
+for Cohesion's parentheses extension.
+
+`GqlCompositeQueryParserTests`, the keyword disposition corpus and the live profile corpus
+cover the admitted forms and deferred operators. Diagnostics: CG00015 missing operand,
+CG00016 mixed UNION modes, CG01020 column names/order/count mismatch, CG02017 incompatible
+result shape, CG05029 modifying operand, and CG05030 UNION distinct-state memory refusal.
+
+NEXT passes each variable's proven binding kind as well as its value shape into every operand;
+named paths remain valid for ExecutePaths and path property access remains a planning CG03003,
+even on empty inputs. Union boundaries use decoded variable names for later references and star.
+Runtime type and nullability reconciliation also applies to a union ending a NEXT chain.
+Standalone ORDER BY/OFFSET/SKIP/LIMIT after NEXT retains CK00001 naming the unsupported form.
+INSERT followed by NEXT RETURN * parses, but its empty final projection is CG05001 during planning,
+before acquiring the writer lock or applying any mutation.
+
 ## Linear composition (#1145)
 
 The stage list is the planner/executor input. A leading NEXT or WITH immediately followed by NEXT is CG00002. A hand-built RETURN predicate is CG05001; predicates belong to WITH. The original constructors retain the owner-selected single-segment facade for hand-built ASTs; SHOW composition is rejected through either shape. Empty or missing mandatory stage operands are refused by the planner with CG05001. NEXT and FOR are profile keywords and also remain legal variable names and aliases, so `RETURN a AS next NEXT ...` and property keys named next or for remain valid.
 
-LET adds new bindings, evaluating comma-separated assignments in order. Value variables may hold maps, lists or entities; member access admits maps/entities, preserving the accessed value shape. A known scalar owner is CG03003 during planning; an invalid runtime container is CG02013. FILTER (also FILTER WHERE) keeps only TRUE. FOR and Cypher UNWIND expand a list per incoming row; NULL gives zero rows. A non-list, including string or byte[], is CG02013. The ISO WITH ORDINALITY and WITH OFFSET suffixes are excluded with one CK00001 naming FOR ORDINALITY/OFFSET SUFFIX. FOREACH, CALL, NEXT YIELD and UNION remain capability refusals. Standalone ORDER BY/OFFSET/SKIP/LIMIT stages, including after LET, FILTER, FOR or writes, remain CK00001 under the owner default.
+LET adds new bindings, evaluating comma-separated assignments in order. Value variables may hold maps, lists or entities; member access admits maps/entities, preserving the accessed value shape. A known scalar owner is CG03003 during planning; an invalid runtime container is CG02013. FILTER (also FILTER WHERE) keeps only TRUE. FOR and Cypher UNWIND expand a list per incoming row; NULL gives zero rows. A non-list, including string or byte[], is CG02013. The ISO WITH ORDINALITY and WITH OFFSET suffixes are excluded with one CK00001 naming FOR ORDINALITY/OFFSET SUFFIX. FOREACH, CALL and NEXT YIELD remain capability refusals; UNION is a composite-query conjunction. Standalone ORDER BY/OFFSET/SKIP/LIMIT stages, including after LET, FILTER, FOR or writes, remain CK00001 under the owner default.
 
 RETURN followed by NEXT and WITH retain only aliased columns and bare-variable projections. Carried names are decoded variable names, including under star; displayed quotes and grouping do not create different bindings. Duplicate carried bindings are CG01015 during planning, including EXPLAIN. Star expands all current bindings in scope order, including LET/FOR values and the preceding projection's order. Unaliased computed columns are accepted but cannot be referenced in a later stage; this is an explicit superset divergence from Cypher. WITH DISTINCT uses the same exact numeric tuple comparer as RETURN DISTINCT. Entity kinds, optionality, possible composite values and Int64 COUNT types survive boundaries. An unbound variable is CG05001; LET/FOR rebinding, a scalar used as an entity, or a later reference to a deleted variable is CG03003. A NEXT after a modifying segment without RETURN starts with one empty binding and no scope.
 
