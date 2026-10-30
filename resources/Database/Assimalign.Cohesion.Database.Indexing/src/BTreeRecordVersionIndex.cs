@@ -41,6 +41,18 @@ public sealed class BTreeRecordVersionIndex : RecordVersionIndex
         return new BTreeRecordVersionIndex(index);
     }
 
+    /// <summary>Compares bindings by the logical tree they undo, across statement and manager instances.</summary>
+    /// <param name="obj">The binding to compare.</param>
+    /// <returns>True when both bindings address the same tree in the same storage.</returns>
+    public override bool Equals(object? obj)
+        // The latch registry is keyed by storage and the fixed root page. A replacement
+        // manager can attach a new BTreeIndex handle without changing this tree identity.
+        => obj is BTreeRecordVersionIndex other && ReferenceEquals(_index.Latch, other._index.Latch);
+
+    /// <summary>Returns the hash of this binding's logical tree identity.</summary>
+    /// <returns>A hash shared by every binding to this tree in this storage.</returns>
+    public override int GetHashCode() => _index.Latch.GetHashCode();
+
     /// <inheritdoc />
     protected override ValueTask EraseCoreAsync(
         StorageTransaction transaction,

@@ -4,6 +4,13 @@
 
 Every model needs ordered lookups: SQL secondary indexes, document indexes, graph adjacency, the KV primary structure. Building four bespoke trees would quadruple the hardest code in the platform, so index structures live in the kernel and models bring only their key extraction. The SQL engine is the first real consumer (#912): CREATE/DROP INDEX, write-path maintenance, and planner seeks all compose this package's manager, trees, and cursors.
 
+## Undo binding identity (#1726)
+
+`BTreeRecordVersionIndex` compares and hashes by logical tree: the shared latch identifies its
+storage and fixed root page, including handles reattached through another manager. Adapters
+created by different statements therefore preserve an earlier same-writer tombstone across a
+marker. No persisted layout or public member beyond the equality/hash overrides is added.
+
 ## Latest live-entry lookup (#1118)
 
 BTreeIndex.FindLiveEntryAsync accepts a transaction and, when the index was created with a

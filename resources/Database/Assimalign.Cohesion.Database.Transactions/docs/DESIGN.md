@@ -34,8 +34,10 @@ XT-3's adapters. Distinct markers at the same position remain distinct scopes. R
 the target and its descendants while retaining their effects. Rollback discards descendants,
 undoes the suffix in reverse order and retains the target for reuse. Earlier same-writer
 tombstones survive repeated deletion records: undo builds a set from the retained prefix,
-comparing index keys by bytes and adapters by identity/equality. Model adapters must reuse one
-identity per logical index, or supply equivalent equality (XT-3). This follows PostgreSQL's
+comparing index keys by bytes. Every `RecordVersionIndex` recorded under markers must compare
+equal and hash equal by logical index across adapter instances. `BTreeRecordVersionIndex`
+supplies that equality; the Graph and Documents `IndexUndo` adapters are XT-3's obligation.
+This follows PostgreSQL's
 release-to-target and rollback/restart semantics (`src/backend/access/transam/xact.c:4595-4607,
 4707-4733`, rechecked locally); name resolution belongs to XT-4.
 
