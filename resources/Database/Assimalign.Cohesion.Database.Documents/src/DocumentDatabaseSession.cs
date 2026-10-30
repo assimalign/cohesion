@@ -408,6 +408,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <inheritdoc />
     protected override ValueTask<DatabaseResult> ExecuteCoreAsync(DocumentQueryRequest request, CancellationToken cancellationToken)
     {
+        if (request.Statement.OqlExpression is not OqlTransactionExpression { Command: OqlTransactionCommand.Rollback or OqlTransactionCommand.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
         if (request.Statement.OqlExpression is OqlTransactionExpression transaction &&
@@ -464,6 +467,24 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         ThrowIfNotOpen();
         cancellationToken.ThrowIfCancellationRequested();
+        if (expression.SavepointName is { } name)
+        {
+            try
+            {
+                if (expression.Command == OqlTransactionCommand.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+                else if (expression.Command == OqlTransactionCommand.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+                else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            }
+            catch (Exception error)
+            {
+                // A failed physical undo remains retryable. AbortTransactionAsync refuses
+                // to abort that fenced transaction; ordinary control failures keep this
+                // model's existing failed-statement rule.
+                await AbortTransactionAsync(error).ConfigureAwait(false);
+                throw;
+            }
+            return DocumentCommandResult.Success;
+        }
         if (expression.Command == OqlTransactionCommand.Begin)
         {
             try

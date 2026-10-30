@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+Standalone named controls retain TransactionCommand and SavepointName. The name reuses the
+existing standalone body reference, preserving every ordinary GqlQueryExpression allocation.
+Three profile clauses and parser/keyword conformance corpora advance together; no lexer keyword
+or graph expression syntax changes. SQL savepoint forms are documented Cohesion extensions.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+
 ## SQL operator isolation (#1721)
 
 The shared lexer is unchanged. The operator corpus pins # as Unrecognized, ~, &, |

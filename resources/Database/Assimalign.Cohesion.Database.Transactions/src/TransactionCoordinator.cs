@@ -550,6 +550,63 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
     }
 
+    /// <summary>Creates a memory-only undo scope on an active transaction.</summary>
+    /// <param name="context">The current lifecycle context owned by this coordinator.</param>
+    /// <param name="cancellationToken">Observed before admission; admitted controls complete.</param>
+    /// <returns>The owned scope token.</returns>
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
+    public async ValueTask<TransactionSavepoint> CreateSavepointAsync(TransactionContext context, CancellationToken cancellationToken = default)
+        => new(this, context, await CreateUndoMarkerAsync(context, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>Releases an undo scope and every newer scope, retaining their effects.</summary>
+    /// <param name="context">The current lifecycle context.</param>
+    /// <param name="savepoint">The scope owned by this coordinator and transaction.</param>
+    /// <param name="cancellationToken">Observed before admission.</param>
+    /// <returns>A task representing completion.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
+    public ValueTask ReleaseSavepointAsync(TransactionContext context, TransactionSavepoint savepoint, CancellationToken cancellationToken = default)
+        => ReleaseUndoMarkerAsync(context, RequireSavepoint(context, savepoint), cancellationToken);
+
+    /// <summary>Undoes effects after a scope, discarding descendants and retaining the target.</summary>
+    /// <param name="context">The current lifecycle context.</param>
+    /// <param name="savepoint">The owned target; after incomplete undo only this or an outer scope is admitted.</param>
+    /// <param name="cancellationToken">Observed before admission; admitted undo completes.</param>
+    /// <returns>A task representing completion.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
+    public ValueTask RollbackToSavepointAsync(TransactionContext context, TransactionSavepoint savepoint, CancellationToken cancellationToken = default)
+        => RollbackToUndoMarkerAsync(context, RequireSavepoint(context, savepoint), cancellationToken);
+
+    /// <summary>Classifies a kernel undo refusal without parsing message text.</summary>
+    /// <param name="exception">The failure to classify.</param>
+    /// <returns>The structured CK04 code, or null for another failure.</returns>
+    public static string? GetUndoFailureCode(Exception exception)
+        => TransactionRecordSpace.GetUndoFailureCode(exception);
+
+    /// <summary>Gets whether incomplete undo fences reads, writes and commit for this context.</summary>
+    /// <param name="context">The context whose shared lifecycle is inspected.</param>
+    /// <returns>True while undo needs retry or whole rollback.</returns>
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    public static bool IsPartialUndoPending(TransactionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.PartialUndoPending;
+    }
+
+    private TransactionUndoMarker RequireSavepoint(TransactionContext context, TransactionSavepoint savepoint)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(savepoint);
+        if (!ReferenceEquals(this, savepoint.Coordinator) || !ReferenceEquals(context, savepoint.Context))
+        { throw new TransactionUndoException("CK04008", ErrorMessages.UndoMarkerInvalid); }
+        return savepoint.Marker;
+    }
+
     // These anonymous controls remain internal until named/session scopes are integrated.
     internal ValueTask<TransactionUndoMarker> CreateUndoMarkerAsync(TransactionContext context, CancellationToken cancellationToken = default)
         => RunUndoControlAsync(context, null, rollback: false, release: false, cancellationToken);

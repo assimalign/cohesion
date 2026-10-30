@@ -1,5 +1,29 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Named savepoint integration (#1726, XT-4)
+
+The SQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+[SAVEPOINT] name through protected root controls before opening autocommit work. Names and
+duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
+the existing model adapters. The enclosing transaction stays open and can commit after undo.
+SQL statement failures remain statement-atomic. SET TRANSACTION inside an active savepoint
+is CS04074; releasing the last scope permits otherwise-early configuration again. A retained
+ROLLBACK TO target still refuses SET. Existing CS04072 late-data and CS04073 unsupported-level
+conditions keep their meanings.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+| CS04074 | SET TRANSACTION inside an active savepoint |
+
 ## Directed index keys (#1631, SQ-K1)
 
 Each SqlCatalogIndex carries an immutable KeyOrders vector, one effective order per key
@@ -59,7 +83,7 @@ never-marked writers populate no directory. Restore and retirement update it und
 links monitor, and root end removes that writer's entries. Repeated undo retains only live links.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
-format changes. Named controls and language/session admission belong to XT-4. The engine tests
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
 and without the root commit. Reader progress is required inside physical undo for pinned Snapshot
 and fresh READ COMMITTED transactions, with deterministic monitor-entry counters for undo/prune.
@@ -5918,7 +5942,8 @@ Repeated early supported modes use the last level. Inside a block, any SERIALIZA
 refused with CS04073; other modes retain CK00001. Outside a block, SET succeeds with Warning
 CS04071 and changes no default, including for SERIALIZABLE. Nested-BEGIN, aborted-scope and
 missing-block checks precede unsupported-level validation. Refusals preserve transaction usability.
-Savepoints remain unimplemented (#1726); future savepoint admission must join the CS04072 check.
+An active savepoint refuses SET TRANSACTION with CS04074 (#1726); releasing the last scope
+reopens configuration only while no data statement has started.
 
 | Code | Isolation condition | SQLSTATE |
 |---|---|---|
@@ -5926,6 +5951,7 @@ Savepoints remain unimplemented (#1726); future savepoint admission must join th
 | CS04071 | SET TRANSACTION outside an active block (Warning; success) | 25000 |
 | CS04072 | SET TRANSACTION after the first data statement or during an operation | 25001 |
 | CS04073 | SERIALIZABLE text isolation is unsupported | 0A000 |
+| CS04074 | SET TRANSACTION inside an active savepoint | 25001 |
 
 Early SET replaces the immutable kernel context under root transaction state admission,
 preserving id, sequence, lifecycle and the original begin snapshot. The begin-time pin starts
@@ -6011,9 +6037,8 @@ as `CurrentTransaction` until the caller ends it, so one transaction at a time i
 session. The transaction carries its MVCC context and, under `Snapshot`, the catalog capture
 its system-view statements read (taken at BEGIN). The session's default isolation value is
 `Snapshot`; optionless BEGIN and auto-commit pass that value to the coordinator. Before phase 4 the session kept a `Stack<SqlTransactionScope>` with
-one root entry; B7 anticipates `SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`,
-`RELEASE [SAVEPOINT] name`, and will add named scopes and undo markers inside the one
-transaction (#1726). Isolation syntax is implemented by #1012. `Serializable` remains
+one root entry; named SAVEPOINT, ROLLBACK TO and RELEASE now add in-memory nested scopes
+inside that one transaction (#1726), with newest-name lookup and PostgreSQL descendant rules. Isolation syntax is implemented by #1012. `Serializable` remains
 rejected by the existing C# seam until the coordinator supports serialization detection.
 
 The session lifecycle below applies equally to SQL requests and C# transactions.

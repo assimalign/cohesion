@@ -108,7 +108,7 @@ public sealed partial class GqlQueryParser : QueryParser
         bool schemaStatement = IsSchemaStart();
         bool catalogStatement = Is("SHOW");
         bool transactionStatement = Is(GqlTransactionVocabulary.Start) || Is(GqlTransactionVocabulary.Begin) ||
-            Is(GqlTransactionVocabulary.Commit) || Is(GqlTransactionVocabulary.Rollback);
+            Is(GqlTransactionVocabulary.Commit) || Is(GqlTransactionVocabulary.Rollback) || Is("SAVEPOINT") || Is("RELEASE");
         if (catalogStatement) { FindCatalogMutation(); }
         else if (!transactionStatement && !schemaStatement) { FindUnsupported(); }
         GqlQueryExpression expression;
@@ -122,14 +122,22 @@ public sealed partial class GqlQueryParser : QueryParser
         {
             var first = Current;
             var command = Is(GqlTransactionVocabulary.Start) || Is(GqlTransactionVocabulary.Begin) ? GqlTransactionCommand.Start
-                : Is(GqlTransactionVocabulary.Commit) ? GqlTransactionCommand.Commit : GqlTransactionCommand.Rollback;
+                : Is(GqlTransactionVocabulary.Commit) ? GqlTransactionCommand.Commit : Is("SAVEPOINT") ? GqlTransactionCommand.Savepoint :
+                    Is("RELEASE") ? GqlTransactionCommand.ReleaseSavepoint : GqlTransactionCommand.Rollback;
             _position++;
             if (first.Text.Equals(GqlTransactionVocabulary.Start, StringComparison.OrdinalIgnoreCase))
             { Expect(GqlTransactionVocabulary.Transaction); }
             else if (first.Text.Equals(GqlTransactionVocabulary.Begin, StringComparison.OrdinalIgnoreCase))
             { Take(GqlTransactionVocabulary.Transaction); }
+            string? name = null;
+            if (command == GqlTransactionCommand.Rollback && Take("TO")) { command = GqlTransactionCommand.RollbackToSavepoint; }
+            if (command is GqlTransactionCommand.Savepoint or GqlTransactionCommand.ReleaseSavepoint or GqlTransactionCommand.RollbackToSavepoint)
+            {
+                if (command != GqlTransactionCommand.Savepoint) { Take("SAVEPOINT"); }
+                name = Identifier();
+            }
             expression = new GqlQueryExpression(Array.Empty<GqlStage>(), Span(first, _tokens[_position - 1]))
-            { TransactionCommand = command };
+            { TransactionCommand = command, SavepointName = name };
         }
         else if (Is("EXPLAIN"))
         {

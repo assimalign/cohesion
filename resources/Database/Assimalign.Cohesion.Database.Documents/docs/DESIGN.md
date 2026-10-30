@@ -1,5 +1,27 @@
 # Documents engine design
 
+## Named savepoint integration (#1726, XT-4)
+
+The OQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+[SAVEPOINT] name through protected root controls before opening autocommit work. Names and
+duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
+the existing model adapters. The enclosing transaction stays open and can commit after undo.
+Ordinary failed statements and invalid named controls preserve this model's full-abort rule.
+Only whole ROLLBACK recovers those failures; ROLLBACK TO preserves CD04101. This is the recorded
+2026-10-25 owner decision, differing from PostgreSQL's aborted-subtransaction recovery.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog publication retains earlier same-writer metadata while that writer has markers.
@@ -15,7 +37,7 @@ tombstones that predecessor and its unique postings normally. Undo observers reu
 stamp-read buffer, including for chunks, rather than making another copy.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
-format changes. Named controls and language/session admission belong to XT-4. The engine tests
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
 and without the root commit. Live-catalog tests cover full rollback and rollback-to followed by
 full rollback. Pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
@@ -325,7 +347,7 @@ COMMIT/ROLLBACK without a current transaction reports CD04104. OQL collection an
 including conditional no-ops, reports CD04105 inside an explicit transaction and aborts it before
 catalog mutation. C# collection operations keep their existing transactional API contract.
 DDL refusal follows [SQL++ transaction restrictions](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/n1ql-language-reference/transaction-restrictions.adoc#L1).
-SAVEPOINT and SET TRANSACTION remain deferred. The language's DIALECT records exact spellings.
+SAVEPOINT, RELEASE and ROLLBACK TO execute through the root; SET TRANSACTION remains deferred. The language's DIALECT records exact spellings.
 
 The wire server dispatches the same controls on its connection-owned session (#1725 OQ-T2).
 Documents negotiates transaction-status and sends Ready with Idle (I), Active (T), or Failed (E)
@@ -376,9 +398,8 @@ not this interactive session protocol. No reference-engine code was copied.
 ### Failed statements in explicit transactions (#1225)
 
 A statement that fails inside an explicit transaction aborts the whole transaction. Document
-storage cannot undo one statement: a `PutAsync` writes its content chunks, tombstones the old
-chain and publishes catalog and index entries through separate physical brackets, and
-`Database.Transactions` undoes a writer only as a whole transaction, with no savepoints. Until
+writes can span separate physical brackets. The owner retained this failure rule with named
+savepoints (#1726, 2026-10-25); a failed statement is recovered only by whole ROLLBACK. Until
 #1225 the session then dropped the rolled-back transaction from view, so the next statement
 silently ran in autocommit and the caller's `RollbackAsync` threw. The session now follows the
 contract the Graph engine set in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),

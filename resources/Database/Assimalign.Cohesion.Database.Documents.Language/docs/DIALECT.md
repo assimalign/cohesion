@@ -1,5 +1,36 @@
 # OQL SQL++ dialect
 
+## Named savepoints (#1726, XT-4)
+
+OQL accepts SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK [WORK | TRAN | TRANSACTION]
+TO [SAVEPOINT] name. SAVEPOINT and the TO SAVEPOINT form follow Couchbase
+[SAVEPOINT](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/savepoint.html)
+and [ROLLBACK TRANSACTION](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/rollback-transaction.html).
+RELEASE and omission of SAVEPOINT after TO are Cohesion extensions. Names preserve decoded
+identifier spelling and compare ordinally; double-quoted identifiers support doubled quotes.
+Canonical rendering quotes the decoded name. All savepoint words remain contextual; the profile
+adds three clauses. Unlike Couchbase's duplicate-name replacement, PostgreSQL duplicate stacking
+is the owner-selected behavior. Ordinary Documents failures still abort the entire transaction
+and retain CD04101; only whole ROLLBACK recovers them (owner, 2026-10-25). SET TRANSACTION remains
+CK00001, as before.
+
+Duplicate names are allowed; the newest matching scope wins. RELEASE discards the named scope
+and every newer scope, retaining their effects. ROLLBACK TO undoes rows, index entries and scoped
+locks after its target, discards newer scopes and keeps the target for repeated rollback. The
+root transaction stays open and can continue work and commit. Commands require an explicit
+transaction (CK04012); an unknown name is CK04013. Successful controls return affected count zero.
+Pre-canceled controls change nothing; admitted undo completes despite later cancellation.
+Incomplete undo reports Faulted transaction status and CK04009 for all work except rollback to
+the same or an outer retained scope, or whole ROLLBACK. Pool return rolls back and clears names.
+
+PostgreSQL nested-scope behavior follows the locally rechecked
+src/backend/access/transam/xact.c:4426-4498,4511-4607,4620-4733. Markers remain in memory and use
+the existing durable row/index operations; storage remains format 4. SavepointConformanceTests,
+NamedSavepointTests and NamedSavepointWireTests are the parser, in-process and InMemory/TCP
+conformance corpora. The named tests include injected undo failure, lock-wait wakeup and
+counter-driven non-parallel races against root rollback/disposal; adapter tests cover copied
+live crash images with and without the enclosing commit.
+
 SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
 `~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix
 casts remain outside this language's scalar grammar;
@@ -28,8 +59,8 @@ Wire command validation and response serialization failures also abort explicit 
 size failure retains CD05016 before later statements receive CD04101.
 OQL CREATE/DROP COLLECTION/INDEX in an explicit transaction gives CD04105 and aborts it,
 including conditional no-ops. C# collection operations retain their existing transaction contract.
-SAVEPOINT, ROLLBACK TO SAVEPOINT and SET TRANSACTION remain CK00001; the rollback form reports
-the unsupported clause at `TO`. EXPLAIN accepts no
+SAVEPOINT, RELEASE and ROLLBACK TO follow the named-scope contract above; SET TRANSACTION
+remains CK00001. EXPLAIN accepts no
 transaction control. Unsupported isolation spellings are CD00002.
 
 On InMemory and TCP, controls require the negotiated transaction-status capability; every control

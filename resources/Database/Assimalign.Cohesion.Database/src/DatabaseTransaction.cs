@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.Tracing;
 using System.Threading;
 using System.Threading.Tasks;
@@ -75,7 +76,23 @@ public abstract class DatabaseTransaction : IAsyncDisposable
 
     // The failure that aborted the transaction, or why the session's teardown ended it; recorded
     // only while the caller has not ended the transaction itself.
-    private Exception? _failure;
+    // An aborted transaction cannot use its names again. The normal path and the lazy
+    // name stack therefore share the former failure reference, keeping unmarked object size.
+    private object? _scopeState;
+    private Exception? Failure
+    {
+        get => _scopeState as Exception;
+        set => _scopeState = value;
+    }
+    private List<(string Name, TransactionSavepoint Token)>? Savepoints
+    {
+        get => _scopeState as List<(string Name, TransactionSavepoint Token)>;
+        set
+        {
+            // End cleanup must retain an abort cause for later CommitAsync refusals.
+            if (value is not null || _scopeState is List<(string Name, TransactionSavepoint Token)>) { _scopeState = value; }
+        }
+    }
 
     // Whether the caller (or the session's teardown) ended the transaction: a commit or rollback
     // started, or the transaction was disposed or closed.
@@ -85,6 +102,118 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     // is refused while any runs.
     private int _operations;
     private int _disposed;
+    private readonly TransactionCoordinator? _savepointCoordinator;
+    private TransactionContext? _savepointContext;
+
+    /// <summary>Initializes a transaction with the kernel binding used for named undo scopes.</summary>
+    /// <param name="coordinator">The owning coordinator.</param>
+    /// <param name="context">The current transaction context.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    protected DatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context)
+        : this((context ?? throw new ArgumentNullException(nameof(context))).Id, context.IsolationLevel)
+    {
+        ArgumentNullException.ThrowIfNull(coordinator);
+        ArgumentNullException.ThrowIfNull(context);
+        _savepointCoordinator = coordinator;
+        _savepointContext = context;
+    }
+
+    /// <summary>Gets the coordinator supplied by the kernel-bound constructor.</summary>
+    /// <exception cref="InvalidOperationException">The transaction has no kernel binding.</exception>
+    protected TransactionCoordinator KernelCoordinator => _savepointCoordinator ?? throw new InvalidOperationException(ErrorMessages.SavepointBindingMissing);
+
+    /// <summary>Gets the current context supplied by the kernel-bound constructor or isolation replacement.</summary>
+    /// <exception cref="InvalidOperationException">The transaction has no kernel binding.</exception>
+    protected TransactionContext KernelContext => _savepointContext ?? throw new InvalidOperationException(ErrorMessages.SavepointBindingMissing);
+
+    /// <summary>Updates the current context after an admitted isolation replacement.</summary>
+    /// <param name="context">The replacement lifecycle handle.</param>
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    protected void UpdateSavepointContext(TransactionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _savepointContext = context;
+    }
+
+    /// <summary>Gets whether the transaction currently contains a named undo scope.</summary>
+    protected internal bool HasSavepoints => Savepoints is { Count: > 0 };
+    internal bool PartialUndoPending => UndoPending;
+    private bool UndoPending => _savepointContext is not null && TransactionCoordinator.IsPartialUndoPending(_savepointContext);
+
+    // Session operation -> transaction end gate -> root monitor. Release the monitor before
+    // manager admission -> context end latch -> ledger monitor/lock table; no root monitor
+    // spans storage/page/index latches or awaits. _operations == -1 excludes direct typed
+    // operations while a control owns the gate. Finally restores it on every failure path.
+    internal async ValueTask ExecuteSavepointAsync(string name, DatabaseSavepointOperation operation, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfOffline();
+        await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        bool admitted = false;
+        int targetIndex = -1;
+        try
+        {
+            lock (_sync)
+            {
+                if (_ended || Failure is not null || GetKernelState() != TransactionState.Active) { throw CreateRefusal(); }
+                if (_operations != 0) { throw ControlBusyRefusal(); }
+                if (operation != DatabaseSavepointOperation.Rollback && UndoPending) { throw UndoRefusal(); }
+                _operations = -1;
+                admitted = true;
+            }
+            if (_savepointCoordinator is null || _savepointContext is null)
+            { throw DatabaseException.CreateRootFailure("CK04012", ErrorMessages.SavepointBindingMissing); }
+            if (operation == DatabaseSavepointOperation.Create)
+            {
+                var scopes = Savepoints ??= new();
+                scopes.EnsureCapacity(scopes.Count + 1);
+                var token = await _savepointCoordinator.CreateSavepointAsync(_savepointContext, cancellationToken).ConfigureAwait(false);
+                scopes.Add((name, token));
+                return;
+            }
+            int index = Savepoints?.FindLastIndex(scope => string.Equals(scope.Name, name, StringComparison.Ordinal)) ?? -1;
+            if (index < 0)
+            {
+                if (UndoPending) { throw UndoRefusal(); }
+                throw DatabaseException.CreateRootFailure("CK04013", ErrorMessages.SavepointUnknown);
+            }
+            targetIndex = index;
+            if (operation == DatabaseSavepointOperation.Release)
+            {
+                await _savepointCoordinator.ReleaseSavepointAsync(_savepointContext, Savepoints![index].Token, cancellationToken).ConfigureAwait(false);
+                Savepoints.RemoveRange(index, Savepoints.Count - index);
+            }
+            else
+            {
+                await _savepointCoordinator.RollbackToSavepointAsync(_savepointContext, Savepoints![index].Token, cancellationToken).ConfigureAwait(false);
+                Savepoints.RemoveRange(index + 1, Savepoints.Count - index - 1);
+            }
+        }
+        catch (Exception failure)
+        {
+            // Admitted rollback discards descendants before its first physical batch. Mirror
+            // that scope lifetime even if undo fails; the retained target remains retryable.
+            if (operation == DatabaseSavepointOperation.Rollback && targetIndex >= 0 && UndoPending)
+            { Savepoints!.RemoveRange(targetIndex + 1, Savepoints.Count - targetIndex - 1); }
+            if (TransactionCoordinator.GetUndoFailureCode(failure) is { } code)
+            {
+                throw new DatabaseException(failure.Message, [new Assimalign.Cohesion.Database.Types.Diagnostic
+                { Code = code, Message = failure.Message, Severity = Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error }], failure);
+            }
+            throw;
+        }
+        finally
+        {
+            if (admitted) { lock (_sync) { _operations = 0; } }
+            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
+            _endGate.Release();
+        }
+    }
+
+    private static DatabaseException ControlBusyRefusal() => DatabaseException.CreateRootFailure("CK04009", ErrorMessages.SavepointControlBusy);
+
+    private static DatabaseException UndoRefusal() => DatabaseException.CreateRootFailure("CK04009", ErrorMessages.SavepointUndoPending);
 
     /// <summary>
     /// Initializes a new transaction with its identity and isolation level.
@@ -122,7 +251,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             // Lock order: root transaction state -> manager registration -> context end latch.
             // The coordinator's tracking lock follows manager release. No storage/page latch or
             // lock-manager grant is acquired here. End cores run after releasing root state.
-            if (!IsUsableLocked || _operations != 0) { return false; }
+            if (!IsUsableLocked || _operations != 0 || HasSavepoints) { return false; }
             if (!configure()) { return false; }
             _isolationLevel = isolationLevel;
             return true;
@@ -150,7 +279,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
 
                 // An active kernel transaction refuses work once an operation failed in it; only a
                 // rollback can end it then.
-                return _failure is not null ? TransactionState.Faulted : state;
+                return Failure is not null || UndoPending ? TransactionState.Faulted : state;
             }
         }
     }
@@ -199,7 +328,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
     }
 
-    private bool IsUsableLocked => !_ended && _failure is null && GetKernelState() == TransactionState.Active;
+    private bool IsUsableLocked => !_ended && Failure is null && _operations >= 0 && GetKernelState() == TransactionState.Active && !UndoPending;
 
     /// <summary>
     /// Commits the transaction, or, when an operation aborted it or the kernel ended it under its
@@ -238,12 +367,12 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                     {
                         // A transaction an operation aborted keeps reporting why nothing committed, so
                         // the outcome never depends on whether the session's teardown ended it first.
-                        throw _failure is not null
-                            ? CreateAbortedException(_failure, commit: true)
+                        throw Failure is not null
+                            ? CreateAbortedException(Failure, commit: true)
                             : DatabaseException.CreateRootFailure("CK04005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TransactionCommitAsyncDatabase, state));
                     }
 
-                    failure = _failure;
+                    failure = Failure;
 
                     // Under the end gate an ended transaction whose kernel transaction is still active
                     // had a commit or rollback the kernel refused before it started (it refuses every
@@ -256,6 +385,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                         throw DatabaseException.CreateRootFailure("CK04007", ErrorMessages.TransactionCommitAsyncDatabase2);
                     }
 
+                    if (!aborted && UndoPending) { throw UndoRefusal(); }
                     _ended = true;
                 }
 
@@ -273,7 +403,8 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             }
             finally
             {
-                _endGate.Release();
+                if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
+            _endGate.Release();
             }
         }
         catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
@@ -330,6 +461,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
         finally
         {
+            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
             _endGate.Release();
         }
     }
@@ -365,7 +497,8 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             }
             finally
             {
-                _endGate.Release();
+                if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
+            _endGate.Release();
             }
         }
         finally
@@ -394,10 +527,10 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         {
             // This failure aborts the transaction when it is the first one the open transaction
             // records; a later failure, or one after its caller ended it, changes nothing.
-            aborted = !_ended && _failure is null;
+            aborted = !_ended && Failure is null;
             if (!_ended)
             {
-                _failure ??= cause;
+                Failure ??= cause;
             }
         }
 
@@ -413,6 +546,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
         finally
         {
+            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
             _endGate.Release();
         }
     }
@@ -436,7 +570,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             {
                 if (!_ended)
                 {
-                    _failure ??= cause;
+                    Failure ??= cause;
                 }
 
                 _ended = true;
@@ -451,6 +585,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
         finally
         {
+            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
             _endGate.Release();
         }
     }
@@ -482,7 +617,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     {
         lock (_sync)
         {
-            if (_operations == 0)
+            if (_operations <= 0)
             {
                 throw new InvalidOperationException(ErrorMessages.TransactionEndOperationFailure);
             }
@@ -502,9 +637,11 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     {
         lock (_sync)
         {
-            if (_failure is not null)
+            if (UndoPending) { return UndoRefusal(); }
+            if (_operations < 0) { return ControlBusyRefusal(); }
+            if (Failure is not null)
             {
-                return CreateAbortedException(_failure, commit: false);
+                return CreateAbortedException(Failure, commit: false);
             }
 
             if (_ended)

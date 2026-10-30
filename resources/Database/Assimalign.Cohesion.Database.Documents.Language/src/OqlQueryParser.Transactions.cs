@@ -9,17 +9,21 @@ public sealed partial class OqlQueryParser
         var start = Current;
         bool requiresKind = Is("START");
         var command = Is("COMMIT") ? OqlTransactionCommand.Commit :
-            Is("ROLLBACK") ? OqlTransactionCommand.Rollback : OqlTransactionCommand.Begin;
+            Is("ROLLBACK") ? OqlTransactionCommand.Rollback : Is("SAVEPOINT") ? OqlTransactionCommand.Savepoint :
+            Is("RELEASE") ? OqlTransactionCommand.ReleaseSavepoint : OqlTransactionCommand.Begin;
         Advance();
-        bool hasKind = Take("WORK") || Take("TRAN") || Take("TRANSACTION");
+        bool hasKind = (command is OqlTransactionCommand.Begin or OqlTransactionCommand.Commit or OqlTransactionCommand.Rollback) && (Take("WORK") || Take("TRAN") || Take("TRANSACTION"));
         if (requiresKind && !hasKind)
         {
             Error("CD00002", ErrorMessages.TransactionKindRequired, Current);
         }
 
-        if (command == OqlTransactionCommand.Rollback && Is("TO"))
+        string? name = null;
+        if (command == OqlTransactionCommand.Rollback && Take("TO")) { command = OqlTransactionCommand.RollbackToSavepoint; }
+        if (command is OqlTransactionCommand.Savepoint or OqlTransactionCommand.ReleaseSavepoint or OqlTransactionCommand.RollbackToSavepoint)
         {
-            _diagnostics.Add(QueryDiagnostics.UnsupportedClause("TO", Profile.Language, Span(Current, Current)));
+            if (command != OqlTransactionCommand.Savepoint) { Take("SAVEPOINT"); }
+            name = Identifier();
         }
 
         var isolation = OqlTransactionIsolation.Snapshot;
@@ -37,6 +41,6 @@ public sealed partial class OqlQueryParser
             }
         }
 
-        return new OqlTransactionExpression(command, isolation, Span(start, Previous));
+        return new OqlTransactionExpression(name is { Length: 0 } ? OqlTransactionCommand.Begin : command, isolation, Span(start, Previous), name);
     }
 }

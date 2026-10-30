@@ -54,8 +54,8 @@ public sealed class OqlTransactionParserTests
     [InlineData("ROLLBACK extra", "CD00002")]
     [InlineData("BEGIN; COMMIT", "CD00002")]
     [InlineData("EXPLAIN BEGIN", "CK00001")]
-    [InlineData("SAVEPOINT point", "CK00001")]
-    [InlineData("ROLLBACK TO SAVEPOINT point", "CK00001")]
+    [InlineData("SAVEPOINT", "CD00002")]
+    [InlineData("ROLLBACK TO SAVEPOINT", "CD00002")]
     [InlineData("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", "CK00001")]
     public void Parse_InvalidControl_ShouldReportCodedError(string source, string code)
     {
@@ -97,22 +97,21 @@ public sealed class OqlTransactionParserTests
         alias.ShouldBe("savepoint");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Transactions: rollback to a savepoint is refused at TO")]
-    [InlineData("ROLLBACK TO SAVEPOINT point")]
-    [InlineData("ROLLBACK WORK TO SAVEPOINT point")]
-    [InlineData("ROLLBACK TRAN TO SAVEPOINT point")]
-    [InlineData("ROLLBACK TRANSACTION TO SAVEPOINT point")]
-    public void Parse_RollbackToSavepoint_ShouldReportUnsupportedTo(string source)
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Transactions: rollback to a savepoint rejects trailing input")]
+    [InlineData("ROLLBACK TO SAVEPOINT point extra")]
+    [InlineData("ROLLBACK WORK TO SAVEPOINT point extra")]
+    [InlineData("ROLLBACK TRAN TO SAVEPOINT point extra")]
+    [InlineData("ROLLBACK TRANSACTION TO SAVEPOINT point extra")]
+    public void Parse_RollbackToSavepointSuffix_ShouldReportSyntax(string source)
     {
         // Arrange / Act
         var statement = new OqlQueryParser().Parse(source);
 
         // Assert
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("CK00001");
-        diagnostic.Start.ShouldBe(source.IndexOf("TO", StringComparison.Ordinal));
-        diagnostic.End.ShouldBe(diagnostic.Start + 2);
-        diagnostic.Message.ShouldNotBeNull().ShouldContain("TO", Case.Sensitive);
+        diagnostic.Code.ShouldBe("CD00002");
+        diagnostic.Start.ShouldBe(source.IndexOf("extra", StringComparison.Ordinal));
+        diagnostic.End.ShouldBe(source.Length);
     }
 
     [Fact(DisplayName = "Cohesion Test [Documents.Language] - Transactions: invalid direct AST enums are refused")]

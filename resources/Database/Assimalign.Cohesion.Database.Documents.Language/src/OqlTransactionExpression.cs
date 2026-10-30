@@ -12,13 +12,18 @@ public sealed class OqlTransactionExpression : OqlExpression
     /// <summary>Initializes a transaction control statement.</summary>
     /// <param name="command">The transaction operation.</param>
     /// <param name="isolation">The isolation level for BEGIN; ignored for COMMIT and ROLLBACK.</param>
+    /// <param name="savepointName">The decoded savepoint name for a named control.</param>
     /// <param name="location">The source span, with an exclusive end offset.</param>
+    /// <exception cref="ArgumentException">A named control has no savepoint name.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The command or isolation value is undefined.</exception>
     public OqlTransactionExpression(OqlTransactionCommand command,
-        OqlTransactionIsolation isolation = OqlTransactionIsolation.Snapshot, Location? location = null) : base(location)
+        OqlTransactionIsolation isolation = OqlTransactionIsolation.Snapshot, Location? location = null, string? savepointName = null) : base(location)
     {
         if (!Enum.IsDefined(command)) { throw new ArgumentOutOfRangeException(nameof(command)); }
         if (!Enum.IsDefined(isolation)) { throw new ArgumentOutOfRangeException(nameof(isolation)); }
+        if (command is OqlTransactionCommand.Savepoint or OqlTransactionCommand.ReleaseSavepoint or OqlTransactionCommand.RollbackToSavepoint)
+        { ArgumentException.ThrowIfNullOrEmpty(savepointName); }
+        SavepointName = savepointName;
         Command = command;
         Isolation = isolation;
     }
@@ -28,6 +33,25 @@ public sealed class OqlTransactionExpression : OqlExpression
 
     /// <summary>Gets the isolation level for BEGIN; ignored for COMMIT and ROLLBACK.</summary>
     public OqlTransactionIsolation Isolation { get; }
+
+    /// <summary>Gets the decoded savepoint name, or null for another control.</summary>
+    public string? SavepointName { get; }
+
+    /// <summary>Renders canonical OQL transaction control text.</summary>
+    /// <returns>The control with its quoted identifier, when present.</returns>
+    public override string ToString()
+    {
+        string command = Command switch
+        {
+            OqlTransactionCommand.Begin => Isolation == OqlTransactionIsolation.ReadCommitted ? "BEGIN ISOLATION LEVEL READ COMMITTED" : "BEGIN",
+            OqlTransactionCommand.Commit => "COMMIT",
+            OqlTransactionCommand.Rollback => "ROLLBACK",
+            OqlTransactionCommand.Savepoint => "SAVEPOINT",
+            OqlTransactionCommand.ReleaseSavepoint => "RELEASE SAVEPOINT",
+            _ => "ROLLBACK TO SAVEPOINT",
+        };
+        return SavepointName is { } name ? command + " \"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"" : command;
+    }
 
     private sealed class DebugView
     {

@@ -43,8 +43,6 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     private static readonly string _operationsAborted = ErrorMessages.TransactionOperationsAborted;
     private static readonly string _failureCause = ErrorMessages.TransactionFailureCause;
 
-    private readonly TransactionCoordinator _coordinator;
-    private readonly TransactionContext _context;
     private GraphMergeLocks? _mergeLocks;
     internal GraphMergeLocks MergeLocks => _mergeLocks ??= new();
 
@@ -53,10 +51,8 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     private readonly GraphDatabase _database;
 
     internal GraphDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, GraphDatabase database, DateTimeOffset transactionStart)
-        : base(context.Id, context.IsolationLevel)
+        : base(coordinator, context)
     {
-        _coordinator = coordinator;
-        _context = context;
         _database = database;
         TransactionStart = transactionStart;
     }
@@ -64,7 +60,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     /// <summary>
     /// Gets the MVCC transaction context the transaction's statements run under.
     /// </summary>
-    internal TransactionContext Context => _context;
+    internal TransactionContext Context => KernelContext;
 
     internal DateTimeOffset TransactionStart { get; }
 
@@ -101,7 +97,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
     internal ValueTask AbortForFailedStatementAsync(Exception cause) => AbortAsync(cause);
 
     /// <inheritdoc />
-    protected override TransactionState GetKernelState() => _context.State;
+    protected override TransactionState GetKernelState() => KernelContext.State;
 
     /// <inheritdoc />
     /// <remarks>
@@ -119,7 +115,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
             if (_database.BeforeTransactionEndAsync is { } beforeEnd) { await beforeEnd().ConfigureAwait(false); }
             // Like a rollback, a commit that started runs to completion: a cancellation here would
             // only turn into a kernel abort of work the caller asked to keep.
-            await _coordinator.CommitAsync(_context).ConfigureAwait(false);
+            await KernelCoordinator.CommitAsync(KernelContext).ConfigureAwait(false);
         }
         catch (Exception error)
         {
@@ -149,7 +145,7 @@ public sealed class GraphDatabaseTransaction : DatabaseTransaction
         try
         {
             if (_database.BeforeTransactionEndAsync is { } beforeEnd) { await beforeEnd().ConfigureAwait(false); }
-            await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
+            await KernelCoordinator.RollbackAsync(KernelContext).ConfigureAwait(false);
         }
         catch (Exception error)
         {

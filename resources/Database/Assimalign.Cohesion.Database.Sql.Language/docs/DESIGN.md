@@ -1,5 +1,13 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+Transaction AST nodes retain the normalized SavepointName. The contextual parser and renderer
+accept standalone SAVEPOINT, RELEASE and ROLLBACK TO; the three adjacent profile clauses and
+complete-statement/execution corpora advance together. Core spelling follows ISO, optional
+SAVEPOINT follows PostgreSQL. Unquoted names fold to lowercase; quoted names preserve case.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+
 ## Index key order grammar (#1631, SQ-K1)
 
 SqlCreateIndexExpression.KeyOrders retains effective per-column direction and NULL placement.
@@ -866,7 +874,7 @@ its ordinary bare output alias before SET.
 CORRESPONDING, nested or data-modifying CTEs,
 FROM FIRST/LAST, LATERAL,
 UPDATE SET subqueries,
-RETURNING subqueries/OLD/NEW/INTO, savepoints and cost-hint syntax.
+RETURNING subqueries/OLD/NEW/INTO and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
 
@@ -878,7 +886,8 @@ renderer emits canonical BEGIN or SET TRANSACTION with comma-separated modes. Bo
 have live execution cases. CS00012 identifies malformed isolation syntax. Runtime admission precedes DDL interlocks; outside a block SET returns success with Warning CS04071 and no default change, as documented in DIALECT. READ ONLY/READ WRITE and
 [NOT] DEFERRABLE retain CK00001 naming the complete form. SERIALIZABLE parses and execution inside a transaction block refuses
 it with CS04073. No reserved keywords or formats change. DIALECT records effective isolation,
-early SET timing and the begin-time snapshot difference from PostgreSQL. Savepoints remain #1726.
+early SET timing and the begin-time snapshot difference from PostgreSQL. Active savepoint
+scopes refuse SET TRANSACTION with CS04074 (#1726).
 
 | Code | Condition | SQLSTATE |
 |---|---|---|
@@ -911,17 +920,12 @@ asserts both forms rather than exempting transaction control from the common pol
 The PostgreSQL grammar maps START TRANSACTION to its start node and END to its
 commit node, with WORK/TRANSACTION sharing `opt_transaction`
 (`src/backend/parser/gram.y:11358-11365`, `11471-11485`, local reference clone).
-The family deliberately stops short of that broader grammar: END WORK and
-END TRANSACTION, AND [NO] CHAIN, ROLLBACK [WORK] TO
-[SAVEPOINT], BEGIN TRAN and named transactions, and COMMIT PREPARED remain
-`CS00003`. ABORT [WORK|TRANSACTION], SAVEPOINT, RELEASE, and
-PREPARE TRANSACTION remain `CS00002`. Savepoint support belongs to #1726.
-
-B7 anticipates **`SAVEPOINT <name>`**, **`ROLLBACK TO [SAVEPOINT] <name>`**,
-and **`RELEASE [SAVEPOINT] <name>`**. Those forms remain outside this family, reserved for #1726. The session owns
-exactly one root transaction through `DatabaseSession`, plus a defaulted value of
-the existing transaction coordinator's `IsolationLevel`. Savepoints can add scope
-markers within that transaction, and isolation syntax configures that transaction before its first data statement.
+The family retains CS00003 for END WORK/TRANSACTION, AND [NO] CHAIN, BEGIN TRAN or named
+transactions and COMMIT PREPARED. ABORT and PREPARE TRANSACTION retain CS00002. Named
+SAVEPOINT/RELEASE/ROLLBACK TO now use the normalized transaction AST (#1726). The session
+continues to own one root transaction; the root base owns its lazy stack of memory-only scopes.
+Isolation syntax configures that transaction before its first data statement and while no
+savepoint is active.
 
 ## Constraint normalization and persistence
 

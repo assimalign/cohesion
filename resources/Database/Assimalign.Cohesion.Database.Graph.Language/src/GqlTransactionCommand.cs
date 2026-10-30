@@ -10,5 +10,11 @@ public enum GqlTransactionCommand : byte
     /// <summary>COMMIT the explicit transaction.</summary>
     Commit,
     /// <summary>ROLLBACK the explicit transaction, including a failed transaction.</summary>
-    Rollback
+    Rollback,
+    /// <summary>Create a named undo scope (Cohesion extension).</summary>
+    Savepoint,
+    /// <summary>Release a named undo scope and descendants (Cohesion extension).</summary>
+    ReleaseSavepoint,
+    /// <summary>Undo to a named scope, retaining it (Cohesion extension).</summary>
+    RollbackToSavepoint
 }

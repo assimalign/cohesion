@@ -259,6 +259,7 @@ structured-carrier messages remain unprefixed.
 | New (#1012, SQ-I1) | CS04071 | SET TRANSACTION outside a transaction block: Warning with successful no-op (25000) |
 | New (#1012, SQ-I1) | CS04072 | SET TRANSACTION after the first data statement or during an operation (25001) |
 | New (#1012, SQ-I1) | CS04073 | SERIALIZABLE text transaction isolation is unsupported (0A000) |
+| New (#1726, XT-4) | CS04074 | SET TRANSACTION inside an active named savepoint (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -543,6 +544,8 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK04009 | Partial undo or failed statement memory compensation is running or incomplete, or a statement/control/end prevents control admission; retry its target or an earlier marker, or roll back the transaction (#1726) | — |
 | CK04010 | An open write stream prevents undo marker creation, release or rollback-to (#1726) | — |
 | CK04011 | A transaction has reached the supported limit of 65,535 open write streams (#1726) | — |
+| CK04012 | Savepoint control requires an explicit transaction with an owned kernel binding (#1726) | — |
+| CK04013 | The named savepoint does not exist in the current transaction (#1726) | — |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
 | CK07003 | Session operations overlap | — |

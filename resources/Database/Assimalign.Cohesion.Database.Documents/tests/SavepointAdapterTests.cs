@@ -130,7 +130,7 @@ public sealed class SavepointAdapterTests
         await using var committedObserver = await database.CreateSessionAsync();
         var committedCollection = await committedObserver.GetCollectionAsync("items");
         await collection.PutAsync(session, "one", """{"n":1}"""u8.ToArray());
-        var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
+        (await session.ExecuteAsync("SAVEPOINT marker")).Status.ShouldBe(DatabaseResultStatus.Success);
         await collection.PutAsync(session, "one", """{"n":2}"""u8.ToArray());
         await collection.PutAsync(session, "two", """{"n":9}"""u8.ToArray());
         await session.CreateCollectionAsync("transient");
@@ -144,7 +144,9 @@ public sealed class SavepointAdapterTests
         }, async () =>
         {
             await collection.PutAsync(session, "one", """{"n":2}"""u8.ToArray());
-            await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);
+            UndoMarkerDriver.SetBatchObserver(database.Coordinator, UndoReaderProbe.BatchObserver);
+            try { (await session.ExecuteAsync("ROLLBACK TO marker")).Status.ShouldBe(DatabaseResultStatus.Success); }
+            finally { UndoMarkerDriver.SetBatchObserver(database.Coordinator, null); }
         });
         Encoding.UTF8.GetString((await collection.GetAsync(session, "one"))!.Value.Content.Span).ShouldBe("""{"n":1}""");
         (await collection.GetAsync(session, "two")).ShouldBeNull();

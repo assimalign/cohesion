@@ -301,6 +301,9 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// </remarks>
     protected override ValueTask<DatabaseResult> ExecuteCoreAsync(GraphRequest request, CancellationToken cancellationToken)
     {
+        if (request.Statement.GqlExpression is not GqlQueryExpression { TransactionCommand: GqlTransactionCommand.Rollback or GqlTransactionCommand.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
         if (request.Statement.GqlExpression.TransactionCommand != GqlTransactionCommand.None &&
@@ -379,6 +382,24 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
             throw error;
         }
         var transaction = CurrentTransaction;
+        if (expression.SavepointName is { } name)
+        {
+            try
+            {
+                if (expression.TransactionCommand == GqlTransactionCommand.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+                else if (expression.TransactionCommand == GqlTransactionCommand.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+                else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            }
+            catch (Exception error)
+            {
+                // A failed physical undo remains retryable. AbortTransactionAsync refuses
+                // to abort that fenced transaction; ordinary control failures keep this
+                // model's existing failed-statement rule.
+                await AbortTransactionAsync(error).ConfigureAwait(false);
+                throw;
+            }
+            return new GraphMutationResult(0, []);
+        }
         if (expression.TransactionCommand == GqlTransactionCommand.Start)
         {
             ThrowIfTransactionRefuses();

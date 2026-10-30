@@ -1,5 +1,14 @@
 # Assimalign.Cohesion.Database.Documents.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+OqlTransactionExpression carries the decoded SavepointName and canonical quoted rendering.
+SAVEPOINT, RELEASE and ROLLBACK TO are standalone controls; optional WORK/TRAN/TRANSACTION
+remain accepted before TO. The words stay contextual. Three profile clauses advance together
+with positive/malformed and keyword-disposition corpora. Names are ordinal; duplicate stacking
+and RELEASE follow the PostgreSQL owner decision rather than Couchbase duplicate replacement.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+
 The package owns the document model's OQL grammar, statement and expression trees, diagnostics,
 and conformance corpus. `OqlQueryParser` derives from the shared `QueryParser` and declares
 `OqlLanguageProfile.Instance` as its profile. The shared `TokenLexer` provides tokenization;
@@ -83,7 +92,9 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | --- | --- | --- |
 | `BEGIN` | Yes | Session transaction start; START requires WORK, TRAN or TRANSACTION |
 | `COMMIT` | Yes | Optional WORK, TRAN or TRANSACTION |
-| `ROLLBACK` | Yes | Optional WORK, TRAN or TRANSACTION; savepoints remain deferred |
+| `ROLLBACK` | Yes | Optional WORK, TRAN or TRANSACTION; optional TO [SAVEPOINT] name |
+| `SAVEPOINT` | Yes | Named scopes, newest duplicate wins; requires an explicit block |
+| `RELEASE [SAVEPOINT]` | Yes | Cohesion extension; releases the target and descendants |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` labels; a lone `*` returns the stored document |
 | `DISTINCT` | Yes | Optional quantifier directly after SELECT; ALL is the default |
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
@@ -854,7 +865,8 @@ accidental syntax or missing-collection error. Projection, filtering, grouping, 
 reuse ordinary SELECT syntax; no separate metadata API or statement class is introduced.
 The engine design documents the field shapes, snapshot visibility, and read-only rules.
 `CREATE DATABASE`,
-`DROP DATABASE`, `USE`, and transaction savepoints remain unsupported.
+`DROP DATABASE` and `USE` remain unsupported. Named transaction savepoints execute through
+the owning session as described above.
 Multiple statements per parse are rejected. Logical database creation and deletion remain
 engine-side C# operations.
 

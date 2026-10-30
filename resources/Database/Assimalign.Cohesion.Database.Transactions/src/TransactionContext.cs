@@ -135,7 +135,7 @@ public sealed class TransactionContext
         get
         {
             if (_transaction is not null) { return _transaction.PartialUndoPending; }
-            lock (_endSync) { return (_admission & partialUndoFlag) != 0; }
+            return (Volatile.Read(ref _admission) & partialUndoFlag) != 0;
         }
     }
 

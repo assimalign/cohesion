@@ -142,7 +142,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 expression = EmptyExpression();
             }
         }
-        else if (Is("BEGIN") || Is("START") || Is("COMMIT") || Is("ROLLBACK"))
+        else if (Is("BEGIN") || Is("START") || Is("COMMIT") || Is("ROLLBACK") || Is("SAVEPOINT") || Is("RELEASE"))
         {
             expression = ParseTransaction();
         }

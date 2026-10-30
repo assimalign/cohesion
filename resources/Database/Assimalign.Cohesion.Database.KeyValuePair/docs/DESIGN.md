@@ -1,5 +1,23 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Named savepoint integration (#1726, XT-4)
+
+The explicit transaction binds its kernel coordinator/context to the root base, so incomplete
+partial undo also fences typed reads and commit. This model gains no text grammar.
+Existing streamed-write control refusals and statement failure rules are unchanged.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 The existing record-space and BTreeRecordVersionIndex adapters already cover every
@@ -9,7 +27,7 @@ the same shared reverse ledger, leaving pre-marker mappings and CAS stamps intac
 catalog DDL retains its existing independent transaction posture; no syntax is added here.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
-format changes. Named controls and language/session admission belong to XT-4. The engine tests
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
 and without the root commit. The reader probe requires both pinned Snapshot and fresh READ COMMITTED
 reads to start and finish inside physical undo after page latches are released.

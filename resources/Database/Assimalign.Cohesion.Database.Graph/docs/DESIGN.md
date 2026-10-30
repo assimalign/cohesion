@@ -1,5 +1,27 @@
 # Graph engine design
 
+## Named savepoint integration (#1726, XT-4)
+
+The GQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+[SAVEPOINT] name through protected root controls before opening autocommit work. Names and
+duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
+the existing model adapters. The enclosing transaction stays open and can commit after undo.
+Ordinary failed statements and invalid named controls preserve this model's full-abort rule.
+Only whole ROLLBACK recovers those failures; ROLLBACK TO preserves CG04007. This is the recorded
+2026-10-25 owner decision, differing from PostgreSQL's aborted-subtransaction recovery.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog undo removes the exact undone metadata reference, including definition,
@@ -19,7 +41,7 @@ lookup moves to the publication decision without adding a lock or lookup to unma
 Only marker registration/release copies these snapshots; the last release restores null.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
-format changes. Named controls and language/session admission belong to XT-4. The engine tests
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
 and without the root commit. A deterministic after-apply hook races a claimed host rollback;
 pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
@@ -764,11 +786,10 @@ Graph validates the finished ON CREATE row before publication.
 
 ### Failed statements in explicit transactions (#1188)
 
-A statement that fails inside an explicit transaction aborts the whole transaction. Graph storage
-cannot undo one statement: a statement writes catalog definitions, records and index entries
-through separate physical brackets, and `Database.Transactions` undoes a writer only as a whole
-transaction, with no savepoints. The SQL session's contract, where the failed statement writes
-nothing and the transaction stays active, is therefore unavailable, and the session follows Neo4j:
+A statement that fails inside an explicit transaction aborts the whole transaction. Graph writes
+can span separate physical brackets. The owner retained this full-abort rule with named savepoints
+(#1726, 2026-10-25): ROLLBACK TO does not recover ordinary failed statements. The session
+continues to follow the existing Neo4j-style failure contract:
 
 1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
    transaction blocks no other writer while it waits for the caller. (When the undo itself fails,

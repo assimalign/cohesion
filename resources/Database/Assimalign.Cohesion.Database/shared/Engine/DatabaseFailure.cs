@@ -33,6 +33,12 @@ internal static class DatabaseFailure
         return null;
     }
 
+    internal static DatabaseException? TranslateUndoFailure(Exception error)
+        => Transactions.TransactionCoordinator.GetUndoFailureCode(error) is { } code
+            ? new DatabaseException(error.Message, [new Types.Diagnostic
+            { Code = code, Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error)
+            : null;
+
     internal static bool IsStorageFailure(Exception error)
         => Find<StorageOfflineException>(error) is null
             && (Find<StorageException>(error) is not null || Find<IOException>(error) is not null

@@ -285,7 +285,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// walk over the statement does.
     /// </remarks>
     protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
-        => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
+    {
+        try { return ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken); }
+        catch (DatabaseException) { ThrowIfPartialUndoPending(); throw; }
+    }
 
     /// <summary>Executes one request with a receipt that cannot attach to any later session request.</summary>
     internal ValueTask<DatabaseResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
@@ -546,6 +549,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private async ValueTask<DatabaseResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
+        if (request.Statement.SqlExpression is not SqlTransactionExpression { CommandType: SqlQueryCommandType.Rollback or SqlQueryCommandType.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
         // must not become a full ROLLBACK while savepoints remain unsupported).
@@ -916,6 +922,13 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
+        if (control.SavepointName is { } name)
+        {
+            if (control.CommandType == SqlQueryCommandType.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else if (control.CommandType == SqlQueryCommandType.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+        }
         var transaction = CurrentTransaction;
         bool serializable = control.IsolationLevels.Contains(SqlTransactionIsolationLevel.Serializable);
         var isolationLevel = control.IsolationLevels.Count == 0 ? _isolationLevel : control.IsolationLevels[^1] switch
@@ -931,6 +944,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     [new Diagnostic { Code = "CS04071", Message = ErrorMessages.TransactionIsolationOutside, Severity = DiagnosticSeverity.Warning }]);
             }
             ThrowIfTransactionRefuses();
+            if (transaction.HasSavepointScope) { return TransactionDiagnostic("CS04074", ErrorMessages.TransactionIsolationSavepoint); }
             if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
             return transaction.TrySetIsolationLevel(isolationLevel)
                 ? new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0)

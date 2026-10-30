@@ -349,6 +349,49 @@ public abstract class DatabaseSession : IAsyncDisposable
         }
     }
 
+    /// <summary>Refuses ordinary statements while partial undo needs recovery, without taking an additional lock.</summary>
+    /// <exception cref="DatabaseException">Partial undo is incomplete.</exception>
+    protected void ThrowIfPartialUndoPending()
+    {
+        if (Volatile.Read(ref _transaction) is { PartialUndoPending: true })
+        { throw DatabaseException.CreateRootFailure("CK04009", ErrorMessages.SavepointUndoPending); }
+    }
+
+    /// <summary>Creates a named savepoint in the explicit transaction.</summary>
+    /// <param name="name">The language-normalized savepoint identifier.</param>
+    /// <param name="cancellationToken">Observed before control admission.</param>
+    /// <returns>A task representing completion.</returns>
+    /// <exception cref="DatabaseException">There is no explicit transaction or it refuses the control.</exception>
+    protected ValueTask CreateSavepointAsync(string name, CancellationToken cancellationToken = default)
+        => ExecuteSavepointAsync(name, DatabaseSavepointOperation.Create, cancellationToken);
+
+    /// <summary>Releases the newest named savepoint and its descendants.</summary>
+    /// <param name="name">The language-normalized identifier.</param>
+    /// <param name="cancellationToken">Observed before control admission.</param>
+    /// <returns>A task representing completion.</returns>
+    /// <exception cref="DatabaseException">The transaction or savepoint is absent, or control is refused.</exception>
+    protected ValueTask ReleaseSavepointAsync(string name, CancellationToken cancellationToken = default)
+        => ExecuteSavepointAsync(name, DatabaseSavepointOperation.Release, cancellationToken);
+
+    /// <summary>Undoes to the newest named savepoint, retaining it and discarding descendants.</summary>
+    /// <param name="name">The language-normalized identifier.</param>
+    /// <param name="cancellationToken">Observed before admission; admitted undo completes.</param>
+    /// <returns>A task representing completion.</returns>
+    /// <exception cref="DatabaseException">The transaction or savepoint is absent, or control is refused.</exception>
+    protected ValueTask RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default)
+        => ExecuteSavepointAsync(name, DatabaseSavepointOperation.Rollback, cancellationToken);
+
+    private async ValueTask ExecuteSavepointAsync(string name, DatabaseSavepointOperation operation, CancellationToken cancellationToken)
+    {
+        if (!TryEnterOperation()) { throw DatabaseException.CreateRootFailure("CK04009", ErrorMessages.SavepointControlBusy); }
+        try
+        {
+            var transaction = CurrentTransaction ?? throw DatabaseException.CreateRootFailure("CK04012", ErrorMessages.SavepointOutsideTransaction);
+            await transaction.ExecuteSavepointAsync(name, operation, cancellationToken).ConfigureAwait(false);
+        }
+        finally { ExitOperation(); }
+    }
+
     /// <summary>
     /// Throws <see cref="DatabaseException"/> once the session is closed.
     /// </summary>

@@ -1,5 +1,15 @@
 # Graph client design
 
+## Named savepoint wire conformance (#1726, XT-4)
+
+The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
+control frame, protocol version, client API or result shape is added. InMemory and TCP tests
+exercise duplicate names, nested release/undo, repeated rollback to the retained target, work
+continued after undo and root commit, peer isolation and the model's failure rule. CK04012 and
+CK04013 remain structured diagnostics. An active savepoint transaction returned to the pool
+is rolled back; tests rent the exact authenticated server session again and prove the old name
+and uncommitted rows are absent. Faulted partial undo uses existing Ready E and pool rollback.
+
 ## Named schema constraints (#1738, GQ-D1)
 
 Typed schema changes are visible through the existing SHOW exchanges on InMemory and TCP.
