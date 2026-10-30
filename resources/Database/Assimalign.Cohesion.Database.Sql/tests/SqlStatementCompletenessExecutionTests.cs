@@ -73,7 +73,8 @@ public sealed class SqlStatementCompletenessExecutionTests
     /// data if that prefix ran. Both session seams refuse it and the tables are unchanged.
     /// </summary>
     /// <param name="sql">The statement whose tail the parser used to drop.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: a statement with leftover text reports CS00003 and changes nothing")]
+    /// <param name="code">The syntax or recognized unsupported-surface identity.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Completeness: a statement with leftover text has a coded refusal and changes nothing")]
     [InlineData("DELETE FROM t WHRE id = 1;")]
     [InlineData("UPDATE t SET name = 'z' WHRE id = 1;")]
     [InlineData("UPDATE t SET name = u.name FROM u FROM v WHERE t.id = u.id;")]
@@ -85,7 +86,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("UPDATE t SET name = 'it''s WHERE id = 1;")]
     [InlineData("DELETE FROM t /* WHERE id = 1;")]
     [InlineData("DELETE FROM t /* /* nested */ WHERE id = 1;")]
-    [InlineData("DELETE FROM t # WHERE id = 1;")]
+    [InlineData("DELETE FROM t # WHERE id = 1;", "CK00001")]
     [InlineData("UPDATE t SET age = 0 WHERE flag NOT FALSE;")]
     [InlineData("DELETE FROM t WHERE NOT (flag NOT NULL);")]
     [InlineData("DELETE FROM t WHERE (id = 1;")]
@@ -99,7 +100,7 @@ public sealed class SqlStatementCompletenessExecutionTests
     [InlineData("INSERT INTO t VALUES (5, 'x', 1, TRUE), ();")]
     [InlineData("INSERT INTO t (id, name,, age) VALUES (5, 'x', 1);")]
     [InlineData("DELETE FROM t WHRE id = 1 RETURNING *;")]
-    public async Task ExecuteAsync_LeftoverText_ShouldReportSyntaxErrorWithoutMutation(string sql)
+    public async Task ExecuteAsync_LeftoverText_ShouldReportSyntaxErrorWithoutMutation(string sql, string code = "CS00003")
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("sql-completeness", new SqlDatabaseEngineOptions());
@@ -114,8 +115,8 @@ public sealed class SqlStatementCompletenessExecutionTests
         var typed = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest(parsed), CancellationToken.None).AsTask());
 
         // Assert
-        textError.Message.ShouldContain("CS00003", Case.Sensitive);
-        typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == "CS00003" && diagnostic.Severity == DiagnosticSeverity.Error);
+        textError.Message.ShouldContain(code, Case.Sensitive);
+        typed.Diagnostics.ShouldNotBeNull().ShouldContain(diagnostic => diagnostic.Code == code && diagnostic.Severity == DiagnosticSeverity.Error);
         session.CurrentTransaction.ShouldBeNull();
         (await SnapshotAsync(session)).ShouldBe(before);
     }

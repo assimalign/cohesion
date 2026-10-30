@@ -14,6 +14,33 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 /// </summary>
 public class SqlCastParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Unary plus: postfix casts bind inside the sign (#1721)")]
+    [InlineData("+1::TEXT")]
+    [InlineData("+ 1::TEXT")]
+    [InlineData("+1 /* cast */ ::INT")]
+    [InlineData("+1::INT::TEXT")]
+    [InlineData("+x::INT")]
+    public void Parse_PlusPostfixCast_ShouldEncloseCast(string expression)
+    {
+        // Arrange / Act
+        var statement = Parse("SELECT " + expression);
+        // Assert
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        var sign = statement.SqlExpression.ShouldBeOfType<SqlSelectExpression>().Columns[0].Expression.ShouldBeOfType<SqlUnaryExpression>();
+        sign.Operator.ShouldBe(SqlUnaryOperator.Plus);
+        sign.Operand.ShouldBeOfType<SqlCastExpression>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Language] - Unary plus: plain and ORDER BY numeric aliases keep literal trees (#1721)")]
+    public void Parse_PlusLiteralAliases_ShouldRetainCanonicalTree()
+    {
+        // Arrange / Act
+        var select = Parse("SELECT +1 ORDER BY +1").SqlExpression.ShouldBeOfType<SqlSelectExpression>();
+        // Assert
+        select.Columns[0].Expression.ShouldBeOfType<SqlLiteralExpression>().Value.ShouldBe("1");
+        SqlExpressionRenderer.Render(select).ShouldBe("SELECT 1 ORDER BY 1");
+    }
+
     [Theory(DisplayName = "Cohesion Test [Database.Sql.Language] - CAST: Resolves shared target identities")]
     [InlineData("BOOL", DatabaseType.Boolean)]
     [InlineData("BOOLEAN", DatabaseType.Boolean)]

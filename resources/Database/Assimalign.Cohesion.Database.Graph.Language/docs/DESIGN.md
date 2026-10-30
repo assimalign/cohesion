@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
+## SQL operator isolation (#1721)
+
+The shared lexer is unchanged. Profile conformance pins :: as ColonColon, separated
+colons as individual Colon tokens, and `~~*` and `!~~*` as individual tilde/bang/asterisk tokens.
+SQL casts do not become expression syntax here; adjacent colons preserve the existing
+parser refusal and GQL label grammar. No language vocabulary or persisted text changes.
+
 ## Left-arrow tokenization (#1647)
 
 `GqlLanguageProfile` explicitly enables the shared `RecognizeLeftArrow` option. Incoming

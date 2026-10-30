@@ -379,7 +379,9 @@ public static partial class SqlExpressionRenderer
         SqlQuantifiedComparisonExpression quantified => Operand(quantified.Operand, predicateLevel) + " " +
             OperatorText(quantified.Operator) + " " + quantified.Quantifier.ToString().ToUpperInvariant() +
             " (" + Select(quantified.Subquery) + ")",
-        SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
+        SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsCaseInsensitive
+            ? like.IsNegated ? " NOT ILIKE " : " ILIKE "
+            : like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel) + (like.Escape is null ? "" : " ESCAPE " + Operand(like.Escape, collateLevel)),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
         SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null => function.FunctionName,

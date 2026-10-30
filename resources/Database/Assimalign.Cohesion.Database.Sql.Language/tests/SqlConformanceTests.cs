@@ -35,6 +35,8 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
+    [InlineData("SELECT +1::TEXT, + 1::INT, +x::INT FROM t ORDER BY +1;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT 'Σ' COLLATE binary ILIKE 'ς', 'ΟΣ' COLLATE invariant ILIKE 'ος';", SqlQueryCommandType.Select)]
     [InlineData("CREATE TABLE t(id SERIAL2);", SqlQueryCommandType.Create)]
     [InlineData("CREATE TABLE t(id SERIAL4);", SqlQueryCommandType.Create)]
     [InlineData("CREATE TABLE t(id SERIAL8);", SqlQueryCommandType.Create)]
@@ -75,6 +77,7 @@ public class SqlConformanceTests
     [InlineData("SELECT DISTINCT u.name AS n, COUNT(*) FROM dbo.users u INNER JOIN orders o ON u.id = o.user_id WHERE u.age >= 21 AND o.total > 100.50 GROUP BY u.name HAVING COUNT(*) > 5 ORDER BY n DESC LIMIT 10 OFFSET 20;", SqlQueryCommandType.Select)]
     [InlineData("SELECT CASE WHEN age >= 18 THEN 'adult' ELSE 'minor' END FROM people;", SqlQueryCommandType.Select)]
     [InlineData("SELECT CAST(price AS DECIMAL(10, 2)) FROM products;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT -price::DECIMAL(10, 2)::TEXT FROM products WHERE name NOT ILIKE 'A!%' ESCAPE '!';", SqlQueryCommandType.Select)]
     [InlineData("SELECT name FROM t WHERE note LIKE 'a%' AND x NOT BETWEEN 1 AND 9 AND y IS NOT NULL;", SqlQueryCommandType.Select)]
     [InlineData("INSERT INTO users (id, name) VALUES (1, 'Ada'), (2, 'Grace');", SqlQueryCommandType.Insert)]
     [InlineData("INSERT INTO users (id, name) VALUES (1, DEFAULT), (DEFAULT, 'Grace');", SqlQueryCommandType.Insert)]

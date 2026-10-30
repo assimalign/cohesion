@@ -121,7 +121,7 @@ internal static class SqlTreeDump
                 builder.Append(')');
                 break;
             case SqlLikeExpression like:
-                builder.Append("Like(").Append(like.IsNegated).Append(", ");
+                builder.Append(like.IsCaseInsensitive ? "ILike(" : "Like(").Append(like.IsNegated).Append(", ");
                 Append(builder, like.Operand);
                 builder.Append(", ");
                 Append(builder, like.Pattern);

@@ -490,7 +490,8 @@ Session/setval behavior follows local PostgreSQL src/backend/commands/sequence.c
 option defaults and restart follow :1415-1587. Privileges remain out of scope (#177).
 
 Sequence calls and REGCLASS remain refused in persisted CHECK, domain, view and SQL
-function expressions with CS03074 (0A000). Column sequence defaults use the early-bound
+function expressions with CS03074 (0A000). This includes CREATE DOMAIN DEFAULT nextval,
+with or without a REGCLASS cast; refusal occurs at declaration. Column sequence defaults use the early-bound
 dependency path below: RESTRICT refuses and CASCADE removes dependent defaults. OWNED BY, SERIAL aliases, identity restart/overriding and backfill execute through the SQ-S3 owned-sequence path. Compiled schemas do not declare
 standalone sequences, and declared provisioning scripts refuse sequence DDL with
 CS03074 until their receipt/ownership model can represent it.
@@ -612,7 +613,12 @@ all sequences owned by every table in the truncate closure; CONTINUE IDENTITY pr
 
 A column DEFAULT may be nextval with a constant name, numeric sequence id or constant REGCLASS
 cast, or NEXT VALUE FOR an already published named sequence. It records an early-bound sequence dependency in
-the persisted call-identity vector. DROP SEQUENCE RESTRICT names the dependent default;
+the persisted call-identity vector. Reopen retains that identity for NEXTVAL(name),
+NEXTVAL(name::REGCLASS), NEXTVAL(name : : REGCLASS), NEXTVAL(CAST(name AS REGCLASS))
+and NEXT VALUE FOR (#1770), including the allocator's established reservation gaps.
+A dangling or replaced persisted sequence id is catalog damage (CS06061); a normal CASCADE
+removes the default, so recreating its sequence name never retargets that default.
+DROP SEQUENCE RESTRICT names the dependent default;
 CASCADE atomically removes the default. Dynamic references and compound sequence defaults
 remain CS03074, as do CHECK, domain, view, index and SQL-function sequence expressions.
 Declared provisioning scripts continue to refuse standalone sequence DDL. VALUES expressions
@@ -1285,7 +1291,7 @@ reports `CS00003` at the literal; it also used to fail only at execution.
 | `DELETE FROM t WHRE id = 1` | Leftover text after the DELETE; the message adds that `WHRE` was read as an alias of table `t` | `id` |
 | `UPDATE t SET a = 1 WHRE id = 1`, `UPDATE t SET a = 1 FROM u FROM v` | Leftover text after the UPDATE | `WHRE`, the second `FROM` |
 | `SELECT ... LIMIT 1 FETCH FIRST 1 ROW ONLY` | two row-limit clauses in one SELECT | `FETCH` |
-| `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin a recognized predicate: BETWEEN, IN and LIKE execute; unsupported ILIKE/SIMILAR forms use CK00001. It used to parse as `x AND NOT y` | the token after `NOT` |
+| `a NOT NULL`, `flag NOT FALSE`, `x NOT y` | `NOT` after an operand must begin a recognized predicate: BETWEEN, IN, LIKE and ILIKE execute; unsupported SIMILAR forms use CK00001. It used to parse as `x AND NOT y` | the token after `NOT` |
 | `WHERE id = :id`, `SET a = :a`, `WHERE id = ;`, a statement ending in `WHERE` or `=` | Expected an expression; the NULL literal the parser used to substitute is gone | the token, or the end of the text |
 | `WHERE (id = 1`, `id IN (1, 2`, `id BETWEEN 1 2`, `CASE WHEN c 'a' END`, `ORDER id`, `UPDATE t;`, `DELETE;`, `VALUES (1), ()` | The missing token, keyword, name or value | where it was expected |
 | `VARCHAR(25 5)`, `DECIMAL(10, 2, 5)`, `VARCHAR(-5)`, `CHAR(MAX)` | Type arguments must be one or two unsigned integer literals, except MAX on VARCHAR/NVARCHAR/VARBINARY | the first offending token |
@@ -3378,7 +3384,7 @@ and ROLLBACK, before transaction state changes. Unbound references fail
 with CS01020 before any row is read or written, including empty inputs. SQL
 GROUP BY compares parameter references by bare name. Operand `?` and `:name`
 report one CS00003 at their complete span and name the supported forms; a trailing
-stray `?` keeps its generic message. SQL `::` reports CK00001 naming CAST(x AS type).
+stray `?` keeps its generic message. SQL `expr::type` uses the CAST target grammar and renders as `CAST(expr AS type)`.
 ParameterConformanceTests, ParameterBindingTests and SqlParameterWireTests cover
 these rules without changing SQL request payloads.
 
@@ -3522,12 +3528,50 @@ INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 31 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
-identifier positions keep their meaning. ILIKE, NOT ILIKE, SIMILAR TO and NOT SIMILAR
-TO are recognized positionally and report one CK00001; ordinary identifiers
-`ilike` and `similar` retain their canonical spelling. Binary `&`, `|`, `<<`, `>>`,
-`::` casts (use CAST(x AS type)), IS JSON, IS OF and IS NORMALIZED likewise report
+identifier positions keep their meaning. SIMILAR TO and NOT SIMILAR TO report one
+CK00001; ordinary identifiers `ilike` and `similar` retain their canonical spelling.
+Binary `&`, `|`, `#` (XOR), `<<`, `>>`, `^` (exponentiation, never XOR),
+IS JSON, IS OF and IS NORMALIZED likewise report
 one CK00001 at the operator. Missing FROM/comparands or ESCAPE operands remain
-CS00003 at the offending or missing token. Adjacent `<-` retains CS00003.
+CS00003 at the offending or missing token. Adjacent `<-` is less-than followed by a unary minus operand (#1647).
+
+## ILIKE and postfix casts (#1721, SQ-O1)
+
+ILIKE and NOT ILIKE use LIKE's precedence, ESCAPE rules, NULL behavior and
+bounded cancellable matcher. Escape recognition happens before case mapping. Binary is
+deterministic: ILIKE lowercases both operands with SQL LOWER's own ToLowerInvariant()
+mapping, then matches ordinally, following PostgreSQL's builtin C.UTF-8 rule. That mapping
+comes from the .NET globalization implementation and is not pinned to Unicode 17.0.
+Thus sigma Σ and final sigma ς remain distinct, as do long s ſ and s; É matches é,
+ΟΣ matches οσ, and the Kelvin sign K matches k as LOWER does.
+case_insensitive, case_accent_insensitive and invariant are nondeterministic. PostgreSQL
+refuses ILIKE under nondeterministic collations; Cohesion extends it to match
+case-insensitively under each collation's own equality. The two index-backed insensitive
+collations retain their pinned transforms, including accent removal for the latter.
+Invariant uses its existing linguistic comparer with CompareOptions.IgnoreCase,
+preserving canonical equivalence: é matches decomposed é, as invariant equality does.
+ΟΣ matches ος and σ matches ς. The comparer distinguishes İ from i, while İ matches
+the single-scalar wildcard _. Invariant retains its globalization refusal.
+The database default, column and explicit
+COLLATE candidates resolve exactly as for LIKE, including ESCAPE and subquery collations.
+For example 'É' COLLATE binary ILIKE 'e' is FALSE, while the same expression under
+case_accent_insensitive is TRUE. No invariant uppercasing overrides these choices.
+The existing CS02034 escape failure and CS05040 linguistic work budget apply to both
+forms. Fixed patterns compile once; dynamic patterns compile when evaluated.
+
+expr::type accepts every CAST target, including modifiers, multiword names and quoted
+domains. It binds tighter than unary signs and all binary operators and chains left to
+right: -x::TEXT::INT means -CAST(CAST(x AS TEXT) AS INT). Canonical rendering always
+uses CAST. The existing CAST admission and CS02 failures also apply, including the existing
+CHECK restriction on casts. Direct +numeric remains the existing literal alias when no
+postfix cast follows, keeping +1 and ORDER BY +1 unchanged. Both `+1::TEXT` and
+`+ 1::TEXT` apply unary plus to CAST(1 AS TEXT) and fail with CS02003, just like the
+minus forms; +1::INT is 1. Other types require contiguous ::; the previously accepted
+REGCLASS separated-colon spelling remains available. ILIKE remains contextual; ordinary
+identifiers and stored canonical text are unchanged, so this run changes no SQL or
+compiled-schema format. Regex, SIMILAR TO and bitwise execution remain deferred.
+PostgreSQL references: src/backend/parser/gram.y:904-914 and
+src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
 
 ## Literals
 
@@ -3865,7 +3909,7 @@ lengths can compare equal under the index's collation.
   to #1447; both rewrite refusals name the column and direct callers to an explicit table-copy
   migration. Code-first validation on populated tables runs on the provisioning worker.
   Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
-  CHARACTER VARYING is accepted as VARCHAR; bpchar, :: casts and character typed-string prefixes
+  CHARACTER VARYING is accepted as VARCHAR; bpchar and character typed-string prefixes
   remain excluded. See [Type names](#type-names-the-sqltypenames-table) and [Literals](#literals).
   The overflow code is CS02012/22001; its shared message still names character varying(n).
   PostgreSQL anchors: varchar.c:130 (input), :219 (padded output), :271 (explicit coercion),
@@ -4308,7 +4352,7 @@ pin in the same change.
 | `CK00001` | Error | Recognized clause, keyword, function, operator or type modifier is not supported by the SQL model surface, including prefix and infix `~` (#1101), temporal precision and INTERVAL field qualifiers in declarations and CAST (#1438); the message names the construct and, for a modifier, its declaration |
 | `CS00001` | Error | Empty query text |
 | `CS00002` | Error | Unknown command (recognized unsupported clauses use `CK00001`) |
-| `CS00003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?`, `#`, `^` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an incomplete or malformed IS predicate; `NOT` after an operand without a recognized predicate; an incomplete LIKE ESCAPE; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and missing set operands or an unparenthesized operand window before a set operator; malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
+| `CS00003` | Error | Malformed syntax: text after a complete statement or after its terminating `;`; a missing expression, closing token, keyword, name or `VALUES` row; an unterminated string, quoted identifier or block comment; a character outside the dialect, such as `?` or a non-ASCII digit, which binds no alias or column (#1101); a numeric literal whose exponent has no digits; an incomplete or malformed IS predicate; `NOT` after an operand without a recognized predicate; an incomplete LIKE ESCAPE; mixed or duplicate pagination clauses, incomplete FETCH, or malformed TOP; an incomplete `IF [NOT] EXISTS`; `ALTER` without `TABLE`; an unknown or incomplete `ALTER TABLE` action; and missing set operands or an unparenthesized operand window before a set operator; malformed transaction-control, JOIN, GROUP BY, HAVING, CAST, COLLATE, or constraint/DDL syntax |
 | `CS00004` | — | Retired (E3): an unknown CAST target type was a parse error; a name that is not a built-in type is now resolved by the engine, and one it does not know is `CS02010` |
 | `CS00005` | Error | Invalid type modifiers at any declaration or CAST: malformed arguments (including CHAR(MAX)), out-of-range length/precision/scale (including FLOAT outside 1..53 bits), arguments a type does not take, or a rejected type spelling (BIT, SMALLDATETIME, TIME WITH TIME ZONE); names the declaration and reason. Temporal precision and INTERVAL qualifiers use CK00001 |
 | `CS00006` | Error | Expression nesting exceeds the limit (256 levels by default, configurable within 32..4096), or parentheses nest deeper than the limit; an `AND`/`OR` chain counts one level. The rest of the statement is not parsed. An engine also reports it for a typed request whose statement nests deeper than the engine's limit (#1151) |
@@ -4344,13 +4388,13 @@ pin in the same change.
 | `CS03031` | Error | DROP SCHEMA targets dbo, which code-first provisioning requires |
 | `CS05032` | Error | DISTINCT/ALL/input ORDER BY on a scalar function, or DISTINCT input ordering whose keys are absent from the arguments (PostgreSQL 42809 / 42P10) |
 | `CS03033` | Error | Invalid persisted view declaration/replacement, changed recorded column identity, oversized view record, or otherwise uncoded stored-body binding failure |
-| `CS05040` | Error | Invariant LIKE or NOT LIKE exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
+| `CS05040` | Error | Invariant LIKE, ILIKE or their NOT forms exceeded its polynomial work budget; located ExecutionFailure leaves the connection usable (#1166) |
 | `CS06041` | Error | Storage/index operation failed (I/O SQLSTATE 58030); ExecutionFailure preserves the connection and aborts an explicit transaction (#1364) |
 | `CS05042` | Error | Encoded row, index key or catalog definition exceeds its size limit, or catalog DDL generation is exhausted (SQLSTATE 54000, program_limit_exceeded); the statement writes nothing and an explicit transaction remains active (#1266, #1653) |
 | `CS05043` | Error | Server-side statement timeout (SQLSTATE 57014, query_canceled); failed statement changes and new lock resources are rolled back/released, and the session and explicit transaction remain usable (#1231) |
 | `CS04044` | Error | Individual lock-wait timeout, including unique-key waits (SQLSTATE 55P03, lock_not_available); same statement-atomic failure contract as CS05043 (#1231) |
 | `CS05045` | Error | Result encoding/preparation failed. Writing statements prepare header/rows before commit and any result frame; DML failures roll back only the statement. Read-only SELECT, EXPLAIN, system views and SHOW encode during delivery and may fail after partial frames, which the client discards. Includes encoding failures or a header/row above ProtocolFrameHeader.MaxPayloadLength (currently 16 MiB); there is no aggregate result cap. Size refusals map to SQLSTATE 54000 and report encoded size and frame limit. The connection and explicit transaction remain usable on result failures; transport failures are terminal (#1651). |
-| `CS02034` | Error | Invalid LIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
+| `CS02034` | Error | Invalid LIKE/ILIKE ESCAPE: escape is neither empty nor one Unicode scalar, or a pattern ends with the escape character (SQLSTATE 22025); ExecutionFailure leaves the connection usable |
 | `CS03035` | Error | ON CONFLICT has no matching unique arbiter, a named target is not a unique index, or DO UPDATE omitted its target (PostgreSQL 42P10) |
 | `CS05036` | Error | ON CONFLICT DO UPDATE or MERGE cannot affect a row a second time (PostgreSQL 21000) |
 | `CS05085` | Error | Conflicting replacement of one column through referential actions (27000) |

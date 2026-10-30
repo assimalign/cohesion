@@ -123,7 +123,7 @@ public sealed class SqlKeywordDispositionTests
         ["IN"] = Parses("SELECT a FROM t WHERE a IN (1, 2)"),
         ["EXISTS"] = Parses("SELECT a FROM t WHERE EXISTS (SELECT b FROM u)"),
         ["BETWEEN"] = Parses("SELECT a FROM t WHERE a BETWEEN 1 AND 2"),
-        ["ILIKE"] = Rejects("SELECT a FROM t WHERE a ILIKE 'x%'", "ILIKE"),
+        ["ILIKE"] = Parses("SELECT a FROM t WHERE a ILIKE 'x%'"),
         ["SIMILAR"] = Rejects("SELECT a FROM t WHERE a SIMILAR TO 'x%'", "SIMILAR TO"),
         ["LIKE"] = Parses("SELECT a FROM t WHERE a LIKE 'x%'"),
         ["IS"] = Parses("SELECT a FROM t WHERE a IS NULL"),

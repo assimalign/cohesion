@@ -16,7 +16,8 @@ public enum SqlUnaryOperator
 
     /// <summary>
     /// ISO unary plus (<c>+</c>): the operand's value with its type unchanged. A <c>+</c>
-    /// directly before a numeric literal is part of the literal and builds no unary node.
+    /// directly before a numeric literal is part of the literal and builds no unary node,
+    /// unless a postfix cast follows that literal.
     /// </summary>
     Plus,
 }

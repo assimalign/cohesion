@@ -83,6 +83,11 @@ Update-action snapshot conflicts retain CS04064 (40001) through the existing ser
 action syntax retains CS00003; malformed catalog action metadata retains CS06059, unsupported
 table extensions CS06060, and earlier SQL record-space formats CS06041. Compiled v8 is refused as the
 existing InvalidDocument schema.format condition.
+ILIKE and postfix casts (#1721, SQ-O1) allocate no diagnostic identity. ILIKE reuses
+CS02034 for malformed ESCAPE and CS05040 for the existing linguistic work budget.
+Postfix casts use the existing CAST CS02 conditions; malformed suffixes use CS00003.
+Regex, SIMILAR TO and deferred operators retain CK00001; ^ names exponentiation.
+
 Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
 two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
 clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.

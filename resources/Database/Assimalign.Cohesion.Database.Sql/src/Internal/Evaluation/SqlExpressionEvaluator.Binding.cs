@@ -313,7 +313,7 @@ internal sealed partial class SqlExpressionEvaluator
                 if (TryLikeConstant(pattern, out var patternValue) && patternValue is not null)
                 {
                     compiled = SqlLikePattern.Compile(LikeText(patternValue), LikeText(escapeValue), _cancellationToken);
-                    if (effective.IsFixed) { compiled = compiled.Normalize(effective.Resolve(null)); }
+                    if (effective.IsFixed) { compiled = compiled.Normalize(effective.Resolve(null), like.IsCaseInsensitive); }
                 }
             }
         }
@@ -321,7 +321,7 @@ internal sealed partial class SqlExpressionEvaluator
         {
             throw exception.At(like.Location);
         }
-        return new SqlBoundLike(operand, pattern, escape, like.IsNegated, effective, compiled, like.Location);
+        return new SqlBoundLike(operand, pattern, escape, like.IsNegated, effective, compiled, like.Location, like.IsCaseInsensitive);
     }
 
     private static bool TryLikeConstant(SqlBoundExpression expression, out object? value)

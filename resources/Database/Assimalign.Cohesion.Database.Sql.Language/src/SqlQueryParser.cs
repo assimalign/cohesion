@@ -455,9 +455,10 @@ public sealed partial class SqlQueryParser : QueryParser
     /// literal, quoted identifier or block comment without its closing delimiter runs to
     /// the end of the text as one token, so the clause it swallowed vanished without a
     /// diagnostic: <c>DELETE FROM t /* WHERE id = 1;</c> deleted every row (#1068). A
-    /// character outside the dialect, such as <c>?</c>, <c>#</c> or a zero-width space,
+    /// character outside the dialect, such as <c>?</c> or a zero-width space,
     /// lexes as <see cref="TokenType.Unrecognized"/>. It used to lex as a one-character
-    /// identifier that the parser bound as an alias or a column (#1101).
+    /// identifier that the parser bound as an alias or a column (#1101). Deferred PostgreSQL
+    /// # and ^ symbols receive the existing unsupported-surface identity instead (#1721).
     /// </summary>
     private void RejectLexicalErrors(TokenLexer lexer)
     {
@@ -478,6 +479,12 @@ public sealed partial class SqlQueryParser : QueryParser
                 case TokenType.Comment when value.StartsWith("/*", StringComparison.Ordinal) && !IsTerminatedBlockComment(value):
                     AddSyntaxDiagnostic(position, position + 2,
                         ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid3);
+                    break;
+                case TokenType.Unrecognized when value.SequenceEqual("#") || value.SequenceEqual("^"):
+                    _sawUnrecognizedCharacter = true;
+                    AddUnsupportedSurfaceDiagnostic(position, position + value.Length,
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeferredOperator,
+                            value.SequenceEqual("#") ? "# (bitwise XOR)" : "^ (exponentiation)"));
                     break;
                 case TokenType.Unrecognized:
                     _sawUnrecognizedCharacter = true;

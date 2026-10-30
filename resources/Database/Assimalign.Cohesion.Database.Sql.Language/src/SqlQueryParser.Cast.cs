@@ -8,6 +8,33 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 
 public sealed partial class SqlQueryParser
 {
+    private SqlExpression ParsePostfixCasts(ref TokenLexer lexer, SqlExpression primary)
+    {
+        while (!NestingExceeded && lexer.Current.Type is TokenType.Colon or TokenType.ColonColon)
+        {
+            var lookahead = lexer;
+            bool pair = lookahead.Current.Type == TokenType.ColonColon;
+            AdvancePastComments(ref lookahead);
+            if (!pair && lookahead.Current.Type == TokenType.Colon) { pair = true; AdvancePastComments(ref lookahead); }
+            if (!pair || lexer.Current.Type == TokenType.Colon && !IsWord(ref lookahead, "REGCLASS")) { break; }
+            RequireSchemaClause(ref lexer, SqlClauses.Cast);
+            lexer = lookahead;
+            TrackToken(ref lexer);
+            string targetType = string.Empty;
+            DatabaseTypeInfo? targetTypeInfo = null;
+            if (IsIdentifierOrKeyword(ref lexer))
+            {
+                targetType = ParseDefinitionType(ref lexer,
+                    string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorCastTargetSubject, CurrentText(ref lexer)), out targetTypeInfo);
+            }
+            else { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseCastVoid3); }
+            primary = Nest(ref lexer, new SqlCastExpression(primary, targetType, targetTypeInfo,
+                Location.Create(1, 1, primary.Location!.Start, _lastTokenEnd)));
+            if (targetType.Length == 0) { break; }
+        }
+        return primary;
+    }
+
     private SqlExpression ParseCast(ref TokenLexer lexer)
     {
         int start = lexer.Current.Position;

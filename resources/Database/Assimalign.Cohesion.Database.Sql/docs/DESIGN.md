@@ -519,7 +519,10 @@ The retirement probe warms append and removal and takes the minimum of three equ
 100-owner rounds, excluding confirmed process-shared scratch-buffer misses. Both standalone
 and identity CACHE default to 1; the established durable reservation limit remains 32.
 Column DEFAULT nextval/NEXT VALUE FOR retains an S:object-id dependency in the existing
-persisted call vector. RESTRICT identifies the dependent default; CASCADE clears defaults
+persisted call vector. Reopen validates these S: identities through the same sequence-default
+validator as DDL (#1770); ordinary F: function pins keep their strict name/signature validation.
+The catalog still refuses dangling or replaced sequence ids and malformed default vectors with
+CS06061. RESTRICT identifies the dependent default; CASCADE clears defaults
 atomically. Compound and dynamic sequence defaults, views and other persisted contexts keep
 CS03074. Schema CASCADE clears cross-schema defaults. Default DDL takes Shared sequence grants before
 table grants and revalidates every S:id under the publication monitor; deletion during a wait
@@ -7646,6 +7649,45 @@ Diagnostic overflow is preflighted before output and retains a source-order pref
 CK07001 with exact retained/omitted counts; the original Error category/message or
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
+
+## ILIKE and postfix casts (#1721, SQ-O1)
+
+ILIKE and NOT ILIKE reuse SqlLikeExpression, its bound node and the bounded,
+iterative LIKE matcher. IsCaseInsensitive participates in grouping and persisted-tree
+identity; child walkers, collation resolution, NULLs, ESCAPE, eager constant validation,
+CS02034, CS05040 and statement cancellation use the existing paths. Tokenization precedes
+casing. Binary is deterministic and follows LOWER(x) LIKE LOWER(p), using exactly SQL
+LOWER's ToLowerInvariant() mapping before ordinal matching. LOWER uses the .NET
+globalization implementation rather than a pinned Unicode version; ILIKE stays consistent
+with it. Σ differs from final sigma ς, long s ſ differs from s, É matches é, ΟΣ matches οσ,
+and Kelvin sign K matches k as LOWER does. The other three collations are nondeterministic:
+PostgreSQL refuses ILIKE for them, while Cohesion extends it to case-insensitive matching
+under each collation's own equality. The two insensitive index-backed collations retain
+their pinned transforms, including accent removal. Invariant passes CompareOptions.IgnoreCase
+through every existing linguistic comparison and search, retaining its work budget,
+cancellation and globalization refusal. ΟΣ matches ος and σ matches ς; canonical é/é
+equivalence follows invariant equality. İ differs from i under the comparer but matches _.
+Normalized fixed patterns are cached; dynamic patterns compile per evaluation.
+PostgreSQL src/backend/utils/adt/like.c:186-221 supplies nondeterministic refusal and LOWER
+before deterministic matching; DIALECT records Cohesion's nondeterministic extension.
+
+Postfix :: targets share CAST's type-name/modifier/domain parser and existing cast binder.
+They bind above unary signs and every binary operator, associate left to right, and render as
+CAST. PostgreSQL src/backend/parser/gram.y:904-914 supplies that precedence. The earlier
+REGCLASS suffix's separated-colon spelling remains accepted; other types require the
+existing contiguous :: token. Direct numeric plus retains its documented literal alias only
+without a following cast, preserving +1 and ORDER BY +1. A postfix cast keeps the sign
+outside the cast: +1::TEXT and + 1::TEXT fail with CS02003, while +1::INT is 1.
+ILIKE remains contextual, preserving identifier quoting.
+Regex and SIMILAR TO remain CK00001. Bitwise operators remain deferred to SQ-O2; ^ is
+recognized as deferred exponentiation, never XOR, and # as deferred bitwise XOR.
+
+The persisted-expression audit found unchanged canonical text and tree interpretation for
+existing views, CHECKs, column/domain defaults, SQL functions, generated declaration metadata
+and compiled-schema expressions, so SQL format 30 and compiled-schema v9 remain unchanged
+in this run. New :: trees use existing CAST text and ILIKE retains its own spelling;
+canonical/tree comparisons, renderer fixed points and durable reopen tests cover that
+contract without changing catalog fields, compiled codecs or value wire representation.
 
 ## Predicate execution (#1111, #1166)
 

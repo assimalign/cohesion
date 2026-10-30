@@ -32,6 +32,13 @@ existing tokens and introduce no keyword reservations.
 | IS DISTINCT FROM | Binary expression | FALSE only for definite SQL++ equality after top-level unknown handling |
 | IS NOT DISTINCT FROM | Binary expression | SQL++ equality after top-level unknown handling |
 
+## SQL operator isolation (#1721)
+
+The shared lexer is unchanged. Profile conformance pins :: as ColonColon, separated
+colons as individual Colon tokens, and `~~*` and `!~~*` as individual tilde/bang/asterisk tokens.
+SQL casts do not become expression syntax here; adjacent colons preserve the existing
+parser refusal and GQL label grammar. No language vocabulary or persisted text changes.
+
 ## Less-than followed by minus (#1647)
 
 OQL leaves the shared profile's `RecognizeLeftArrow` option disabled. `a<-1` and `a <- 1` parse
