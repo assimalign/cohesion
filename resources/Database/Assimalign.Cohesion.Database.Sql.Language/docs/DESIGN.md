@@ -8,7 +8,9 @@ src/backend/commands/indexcmds.c:2255-2270: ASC NULLS LAST and DESC NULLS FIRST.
 omits default options. Constraint column lists retain their column-only grammar and coded
 syntax refusal (PostgreSQL src/backend/parser/gram.y:4321,8422-8495). The profile gains one
 clause; parser completeness and positive/negative and live execution corpora cover it. SQ-K1
-changes no ORDER BY planning or result wire types. Catalog 32 and compiled v11 fence the
+changes no ORDER BY grammar or result wire types. SQ-K3 adds engine order matching, forward/
+backward sort avoidance and order costing; the live index-order corpus now asserts both scan
+directions and zero retained sort rows (see DIALECT). Catalog 32 and compiled v11 fence the
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 

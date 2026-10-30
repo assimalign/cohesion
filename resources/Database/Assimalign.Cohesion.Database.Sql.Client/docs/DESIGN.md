@@ -4,8 +4,10 @@
 
 InMemory and TCP carry per-column directions and NULL placement, composite seeks/ranges,
 canonical INDEXES metadata and CS00003 constraint-list refusals. Tests retain usable connections
-and verify that matching ORDER BY retains its ordering keys. No client API or wire format change
-is needed; order-based sort avoidance remains SQ-K3.
+and verify that matching ORDER BY retains its ordering keys. SQ-K3 adds equality-prefix mixed
+orders, fully reversed scans, partial-index implication, LIMIT/OFFSET and OrderedIndexScan EXPLAIN
+with direction and sort_removed=true on both transports. No client API or wire format change is
+needed; existing result and plan columns carry the behavior.
 
 
 ## Partial indexes over the existing exchange (#1630, SQ-P1/SQ-P2)

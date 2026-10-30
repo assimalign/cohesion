@@ -71,8 +71,53 @@ internal sealed partial class SqlPlanExecutor
 
         SqlPlan CostSelect(SqlSelectPlan select)
         {
-            var chosen = Choose(select.Table, select.Access);
+            var chosen = select.Access is SqlOrderedIndexPath ordered ? ChooseOrdered(select, ordered) : Choose(select.Table, select.Access);
             return ReferenceEquals(chosen, select.Access) ? select : select with { Access = chosen };
+        }
+
+        SqlAccessPath ChooseOrdered(SqlSelectPlan select, SqlOrderedIndexPath original)
+        {
+            SqlIndexSeekPath best = original;
+            BTreeRangeCount? bestCount = null;
+            double bestWork = double.PositiveInfinity;
+            double window = select.IsDistinct ? double.PositiveInfinity : CostCount(select.Limit, double.PositiveInfinity) + CostCount(select.Offset, 0);
+            foreach (var candidate in original.Cost!.Alternatives)
+            {
+                var count = Probe(select.Table, candidate);
+                if (count is null) { continue; }
+                double rows = Estimate(count);
+                // Retain the established four sequential-row units per random heap fetch.
+                // A comparison costs one eighth of a sequential row. A bounded sorter
+                // compares against its retained top-N window, but still reads all candidates.
+                double work = candidate is SqlOrderedIndexPath
+                    ? 4 * Math.Min(rows, window) : 4 * rows + SortWork(rows);
+                if (work < bestWork) { best = candidate; bestCount = count; bestWork = work; }
+            }
+            if (bestCount is null) { return original; }
+            if (bestCount.Value.Count > 16)
+            {
+                var total = Probe(select.Table, null);
+                // An unbounded unconditional index proves the same candidate population
+                // as the table, so its estimate also permits comparing full-scan work.
+                bool wholeTable = original.Index.Predicate is null && original.EqualityValues.Count == 0 && original.Lower is null && original.Upper is null;
+                // Residual selectivity is unknown: the ordered top-N estimate assumes every
+                // visited visible candidate qualifies. Execution always checks the full WHERE.
+                if (total is { } observed && (observed.IsComplete || wholeTable) && Estimate(total) + SortWork(Estimate(total)) < bestWork)
+                { return new SqlScanPath { Cost = new([]) { Estimate = total } }; }
+            }
+            return best with { Cost = new([]) { Estimate = bestCount } };
+
+            double SortWork(double rows) => rows * Math.Log2(Math.Min(rows, window) + 1) / 8;
+
+            // Never execute count expressions during costing: volatile/deferred values
+            // initialize once at execution. Fixed integers and supplied parameters are safe.
+            static double CostCount(SqlRowCount? count, double absent)
+            {
+                if (count is null) { return absent; }
+                if (count.Expression is null) { return count.Count; }
+                object? value = count.Expression switch { SqlBoundConstant constant => constant.Value, SqlBoundParameter parameter => parameter.Value, _ => null };
+                return value switch { sbyte n when n >= 0 => n, short n when n >= 0 => n, int n when n >= 0 => n, long n when n >= 0 => n, _ => double.PositiveInfinity };
+            }
         }
 
         BTreeRangeCount? Probe(SqlCatalogTable table, SqlIndexSeekPath? seek)

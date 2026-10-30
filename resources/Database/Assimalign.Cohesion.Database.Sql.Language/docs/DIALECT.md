@@ -22,10 +22,23 @@ are unchanged by direction. SQL keys now canonicalize signed zeros together and 
 NaN in one class below negative infinity, matching SQL comparison. Row values keep their IEEE
 representation. Floating predicate access remains conservatively restricted as before.
 
-Every ORDER BY still uses an explicit sort, including matching and fully reversed key orders.
-Order matching, cost credit for ordered access and sort avoidance belong to SQ-K3; LIKE-prefix
-bounds are future work beside that ordered access. Both existing wire transports carry these
-declarations, metadata and results without a protocol change.
+A matching single-table ORDER BY may use an OrderedIndexScan without sorting (#1631, SQ-K3).
+Keys must be a contiguous prefix of the suffix after equality-bound index keys (including IS NULL), with identical
+resolved collations, directions and NULL placement. Reversing every direction and every NULL
+placement together permits a backward scan; partial reversal, computed keys, missing equality
+prefixes and incompatible collations retain sorting. Pass-through aliases/ordinals can match.
+A partial index also needs the query's proven predicate implication. ORDER BY's existing defaults
+remain ASC NULLS FIRST and DESC NULLS LAST, so explicitly align NULL placement with index DDL.
+Equal ordering keys have unspecified tie order; use a unique final key to pin paginated row identity.
+
+Costing credits the avoided sort and top-N work against random base-row fetches; a large full
+ordered scan can lose to heap-scan-plus-sort. Both directions retain the statement's MVCC snapshot
+and full WHERE check. Non-DISTINCT LIMIT/OFFSET stops after enough qualifying entries; DISTINCT
+consumes all candidates before duplicate elimination. Subqueries, volatile projections, recursive
+queries, joins, grouping, windows and JSON ordering retain their existing sort path. EXPLAIN
+reports OrderedIndexScan, direction=forward/backward and sort_removed=true, with implication proof
+for partial indexes. Index-only reads and INCLUDE remain T3 (#1739); LIKE-prefix bounds remain
+future work. Existing InMemory and TCP result/EXPLAIN exchanges carry this behavior unchanged.
 
 
 ## Partial indexes (#1630, SQ-P1/SQ-P2)

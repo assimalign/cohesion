@@ -1143,7 +1143,11 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) =>
             {
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name;", [[1]]);
-                session.LastStatementMetrics!.AccessPath.ShouldBe("seek:ix_order");
+                session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_order:forward");
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name DESC NULLS LAST LIMIT 1;", [[1]]);
+                session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_order:backward");
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
             }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },

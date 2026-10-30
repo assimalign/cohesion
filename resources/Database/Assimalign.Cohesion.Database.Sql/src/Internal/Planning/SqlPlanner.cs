@@ -270,7 +270,7 @@ internal sealed partial class SqlPlanner
             BindCount(select.Limit, LimitClause(select)),
             BindCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
+            SelectOrderedAccessPath(table!, select, projections, ordering, where, evaluator), orderByProjections);
     }
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
