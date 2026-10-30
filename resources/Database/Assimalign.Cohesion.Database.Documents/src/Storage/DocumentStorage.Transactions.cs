@@ -19,6 +19,11 @@ public sealed partial class DocumentStorage : Assimalign.Cohesion.Database.Stora
     /// <summary>Gets the shared version store's record adapter.</summary>
     public TransactionRecordSpace Records { get; }
 
+    internal Action<TransactionSequence, bool>? UndoScopesChanged { get; set; }
+    internal Action<PageId, int, ReadOnlyMemory<byte>>? CreatedVersionUndone { get; set; }
+    internal void RegisterWriteStream(TransactionContext context) => ((DocumentTransactionRecordSpace)Records).RegisterWriteStream(context);
+    internal void UnregisterWriteStream(TransactionContext context) => ((DocumentTransactionRecordSpace)Records).UnregisterWriteStream(context);
+
     /// <summary>Opens an existing document file set through shared physical recovery.</summary>
     /// <param name="data">The data stream.</param>
     /// <param name="journal">The journal stream.</param>

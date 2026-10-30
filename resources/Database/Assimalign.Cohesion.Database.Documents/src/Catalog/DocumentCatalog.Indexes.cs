@@ -613,6 +613,9 @@ public sealed partial class DocumentCatalog
             _metadata = metadata;
         }
 
+        public override bool Equals(object? obj) => obj is IndexUndo other && ReferenceEquals(_catalog, other._catalog) && _metadata.ObjectId == other._metadata.ObjectId;
+        public override int GetHashCode() => HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_catalog), _metadata.ObjectId);
+
         protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)
             => _catalog.ResolveIndex(_metadata).EraseAsync(transaction, new IndexKey(key), entryReference, writer, cancellationToken);

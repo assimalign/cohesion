@@ -1,5 +1,25 @@
 # Documents engine design
 
+## Anonymous savepoint adapters (#1726, XT-3)
+
+Catalog publication retains earlier same-writer metadata while that writer has markers.
+The record-space undo adapter removes only the exact undone page/slot reference and retires
+an empty directory chain; older collection, document and index generations remain available.
+IndexUndo equality/hash use the immutable catalog identity and physical index generation,
+independent of the apply gate. Open chunk streams refuse marker controls with CK04010 and
+refuse a 65,536th registration with CK04011 and release registration once on completion, failure or cancellation. Completed chains undo with
+metadata and postings through ordinary physical operations; no whole-catalog reload occurs.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission belong to XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit.
+
+| Code | Condition |
+|---|---|
+| CK04010 | An open write stream prevents marker create, release or rollback-to |
+| CK04011 | The transaction already has 65,535 open write streams |
+
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
