@@ -5,7 +5,7 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.Language;
 
-/// <summary>Represents BEGIN, SET TRANSACTION, COMMIT, ROLLBACK, or DISCARD ALL session control.</summary>
+/// <summary>Represents transaction, named savepoint, isolation or DISCARD ALL session control.</summary>
 public sealed class SqlTransactionExpression : SqlQueryExpression
 {
     internal SqlTransactionExpression(SqlQueryCommandType commandType, Location location,

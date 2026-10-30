@@ -2,7 +2,9 @@
 
 ## Savepoint grammar and rendering (#1726, XT-4)
 
-OqlTransactionExpression carries the decoded SavepointName and canonical quoted rendering.
+OqlTransactionExpression carries the parser-owned decoded SavepointName and canonical quoted
+rendering. Its public constructor retains the enum/location surface; a named control without
+a parsed name refuses construction, rather than turning into a whole rollback.
 SAVEPOINT, RELEASE and ROLLBACK TO are standalone controls; optional WORK/TRAN/TRANSACTION
 remain accepted before TO. The words stay contextual. Three profile clauses advance together
 with positive/malformed and keyword-disposition corpora. Names are ordinal; duplicate stacking

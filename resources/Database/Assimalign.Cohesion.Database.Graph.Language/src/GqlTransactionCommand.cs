@@ -1,6 +1,6 @@
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
-/// <summary>The ISO transaction control statement carried by an Execute request.</summary>
+/// <summary>The transaction control carried by an Execute request, including Cohesion savepoint extensions.</summary>
 public enum GqlTransactionCommand : byte
 {
     /// <summary>An ordinary query or catalog statement.</summary>

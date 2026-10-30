@@ -41,6 +41,9 @@ public sealed partial class OqlQueryParser
             }
         }
 
-        return new OqlTransactionExpression(name is { Length: 0 } ? OqlTransactionCommand.Begin : command, isolation, Span(start, Previous), name);
+        // A missing name already owns a syntax diagnostic. Keep its recovery tree inert.
+        return name is { Length: 0 }
+            ? new OqlTransactionExpression(OqlTransactionCommand.Begin, isolation, Span(start, Previous))
+            : new OqlTransactionExpression(command, isolation, Span(start, Previous), name);
     }
 }

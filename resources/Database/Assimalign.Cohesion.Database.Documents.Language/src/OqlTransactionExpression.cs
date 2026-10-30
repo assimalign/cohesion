@@ -4,20 +4,27 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
 
-/// <summary>A BEGIN, START, COMMIT or ROLLBACK statement executed by the owning session.</summary>
+/// <summary>A transaction or named savepoint control executed by the owning session.</summary>
 [global::System.Diagnostics.DebuggerDisplay("OqlTransactionExpression {Command}")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(OqlTransactionExpression.DebugView))]
 public sealed class OqlTransactionExpression : OqlExpression
 {
     /// <summary>Initializes a transaction control statement.</summary>
     /// <param name="command">The transaction operation.</param>
-    /// <param name="isolation">The isolation level for BEGIN; ignored for COMMIT and ROLLBACK.</param>
-    /// <param name="savepointName">The decoded savepoint name for a named control.</param>
+    /// <param name="isolation">The isolation level used only for BEGIN.</param>
     /// <param name="location">The source span, with an exclusive end offset.</param>
     /// <exception cref="ArgumentException">A named control has no savepoint name.</exception>
     /// <exception cref="ArgumentOutOfRangeException">The command or isolation value is undefined.</exception>
     public OqlTransactionExpression(OqlTransactionCommand command,
-        OqlTransactionIsolation isolation = OqlTransactionIsolation.Snapshot, Location? location = null, string? savepointName = null) : base(location)
+        OqlTransactionIsolation isolation = OqlTransactionIsolation.Snapshot, Location? location = null)
+        : this(command, isolation, location, null)
+    {
+    }
+
+    // Names enter only through the parser, as in SQL/GQL. The public constructor
+    // retains its existing enum/location surface; named controls need parsed names.
+    internal OqlTransactionExpression(OqlTransactionCommand command,
+        OqlTransactionIsolation isolation, Location? location, string? savepointName) : base(location)
     {
         if (!Enum.IsDefined(command)) { throw new ArgumentOutOfRangeException(nameof(command)); }
         if (!Enum.IsDefined(isolation)) { throw new ArgumentOutOfRangeException(nameof(isolation)); }
@@ -31,7 +38,7 @@ public sealed class OqlTransactionExpression : OqlExpression
     /// <summary>Gets the transaction operation.</summary>
     public OqlTransactionCommand Command { get; }
 
-    /// <summary>Gets the isolation level for BEGIN; ignored for COMMIT and ROLLBACK.</summary>
+    /// <summary>Gets the isolation level used only for BEGIN.</summary>
     public OqlTransactionIsolation Isolation { get; }
 
     /// <summary>Gets the decoded savepoint name, or null for another control.</summary>

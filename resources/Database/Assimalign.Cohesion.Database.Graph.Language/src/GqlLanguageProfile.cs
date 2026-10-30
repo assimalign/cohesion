@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <summary>
 /// Provides the lexical vocabulary and clause capabilities for the Graph Query Language (GQL).
 /// </summary>
-/// <remarks>The executable ISO/IEC 39075 subset includes documented Cohesion CREATE and SHOW extensions.</remarks>
+/// <remarks>The executable ISO/IEC 39075 subset includes documented Cohesion CREATE, SHOW and savepoint extensions.</remarks>
 public static class GqlLanguageProfile
 {
     // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.

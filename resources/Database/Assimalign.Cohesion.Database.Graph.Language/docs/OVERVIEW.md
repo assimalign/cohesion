@@ -57,6 +57,9 @@ bindings stream and an unordered LIMIT can stop upstream work; final results rem
 This changes no grammar or wire bytes; remote execution uses the server engine ceilings.
 
 Standalone BEGIN [TRANSACTION] / START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540, #1725).
+Named SAVEPOINT, RELEASE [SAVEPOINT] and ROLLBACK TO [SAVEPOINT] execute as Cohesion
+extensions with nested PostgreSQL scopes (#1726). See [DIALECT.md](DIALECT.md) for name
+lookup, retained rollback targets and the model's whole-transaction failure rule.
 
 ## Graph diagnostic conventions (#1470)
 

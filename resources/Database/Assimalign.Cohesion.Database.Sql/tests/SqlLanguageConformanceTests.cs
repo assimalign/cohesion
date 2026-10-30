@@ -277,7 +277,8 @@ public sealed class SqlLanguageConformanceTests
         // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
         // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
         // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(84);
+        // Named savepoint controls (#1726, XT-4) add exactly three measured clauses.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(87);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 

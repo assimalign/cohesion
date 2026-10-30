@@ -35,6 +35,16 @@ public sealed class SavepointConformanceTests
         reparsed.OqlExpression.ShouldBeOfType<OqlTransactionExpression>().SavepointName.ShouldBe(control.SavepointName);
     }
 
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - Savepoints: hand-built controls cannot omit their name (#1726)")]
+    [InlineData(OqlTransactionCommand.Savepoint)]
+    [InlineData(OqlTransactionCommand.ReleaseSavepoint)]
+    [InlineData(OqlTransactionCommand.RollbackToSavepoint)]
+    public void Construct_NamedCommandWithoutName_ShouldRefuse(OqlTransactionCommand command)
+    {
+        // Arrange / Act / Assert
+        Should.Throw<System.ArgumentException>(() => new OqlTransactionExpression(command));
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - Savepoints: missing names and unconsumed suffixes refuse (#1726)")]
     [InlineData("SAVEPOINT")]
     [InlineData("SAVEPOINT \"\"")]
