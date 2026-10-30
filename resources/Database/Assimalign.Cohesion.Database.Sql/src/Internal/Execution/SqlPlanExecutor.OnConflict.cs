@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,7 +20,7 @@ internal sealed partial class SqlPlanExecutor
     private static readonly string _upsertIndexesChanged = ErrorMessages.UpsertIndexesChanged;
     private sealed record SqlUpsertWrite(ulong? OldLocation, object?[]? OldValues, object?[] Values, byte[] Record);
     private sealed record SqlPartialUpsertPreparation(IEnumerable<(object?[] Values, IndexKey[] Keys)> Rows,
-        Dictionary<(object?[] Values, SqlCatalogIndex Index), DatabaseException> Failures);
+        HashSet<(object?[] Values, SqlCatalogIndex Index)> Failures);
 
     private static void EnsureUpsertIndexes(SqlCatalogTable table, List<SqlLiveIndex> indexes, SqlOnConflictPlan? plan)
     {
@@ -63,7 +62,7 @@ internal sealed partial class SqlPlanExecutor
             var hashes = new List<ulong>();
             // Build each proposal's keys once, sharing them between locking, arbitration and
             // pending inserts. Without side-effecting defaults the full batch precedes lookup.
-            // Prelocking must not change error order: save predicate failures beside their
+            // Prelocking must not change error order: mark predicate failures beside their
             // row/index, with no key to lock. Raise only when arbitration reaches that index,
             // after this row's CHECKs and any earlier conflicting arbiter (execIndexing.c:615-653).
             SqlPartialUpsertPreparation? partialPreparation = null;
@@ -115,8 +114,12 @@ internal sealed partial class SqlPlanExecutor
                 {
                     var arbiter = arbiters[arbiterIndex];
                     int ordinal = arbiterOrdinals[arbiterIndex];
-                    if (partialPreparation is not null && partialPreparation.Failures.TryGetValue((proposal.Values, arbiter.Metadata), out var failure))
-                    { ExceptionDispatchInfo.Throw(failure); }
+                    if (partialPreparation is not null && partialPreparation.Failures.Contains((proposal.Values, arbiter.Metadata)))
+                    {
+                        // Immutable predicates reproduce their error at the ordered boundary.
+                        // Retain only a marker during preparation, never an exception per row.
+                        _ = MatchesIndex(table, arbiter.Metadata, proposal.Values, cancellationToken: cancellationToken, record: false);
+                    }
                     var key = proposal.Keys[ordinal];
                     if (key.Length == 0) { continue; } // This partial arbiter does not cover this proposed key.
                     if (pending.TryGetValue((arbiter.Metadata.Name, key), out var prior))
@@ -327,7 +330,7 @@ internal sealed partial class SqlPlanExecutor
     private SqlPartialUpsertPreparation PreparePartialUpsert(SqlCatalogTable table, List<SqlLiveIndex> indexes,
         IEnumerable<object?[]> proposals, CancellationToken cancellationToken)
     {
-        var failures = new Dictionary<(object?[], SqlCatalogIndex), DatabaseException>();
+        var failures = new HashSet<(object?[], SqlCatalogIndex)>();
         return new(proposals.Select(Prepare), failures);
 
         (object?[] Values, IndexKey[] Keys) Prepare(object?[] values)
@@ -340,9 +343,9 @@ internal sealed partial class SqlPlanExecutor
                 {
                     bool matches;
                     try { matches = MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false); }
-                    catch (DatabaseException failure)
+                    catch (DatabaseException)
                     {
-                        failures[(values, index.Metadata)] = failure;
+                        failures.Add((values, index.Metadata));
                         continue;
                     }
                     if (!matches || PartialNullKey(index.Metadata, index.KeyOrdinals, values)) { continue; }

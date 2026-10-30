@@ -19,6 +19,10 @@ slots by a column's storage type, a literal's type or a function's declared resu
 and NULLIF contribute every alternative, including unreachable branches. Unknown result sets
 retain the conservative all-slot check. Explicit and implicit conversions share this admission;
 an unrelated registered cast does not refuse an INT-to-INT or NUMERIC-to-INT predicate.
+The converter owns the dispatch mapping used by admission: JSON and JSONB alternatives contribute
+their TEXT and BYTEA runtime slots, with the SQL slot also checked for a statically JSON/JSONB
+operand. Domains use their base representation. Creation refusals use complete CS05091 sentences;
+the unresolved CS01009 write diagnostic retains its contextual registration fragments.
 Binding errors retain CS01 identities; Boolean
 requirements retain CS02003. CS03082 rejects a partial primary key. CS03083 refuses TYPE
 on a predicate column, including widening without conversion: drop and recreate the index around the type change. CS03084
@@ -45,8 +49,9 @@ cardinality probes, constraint lookups and foreign-key targets. Targeted ON CONF
 still refuses partial indexes. Untargeted DO NOTHING checks every unique index using each proposed
 row's own membership; FALSE/UNKNOWN and NULL-containing partial keys do not arbitrate or take key
 locks. Proposed CHECKs precede arbitration. Sorted batch locking prepares each predicate result
-or saves its failure per row/index; an errored predicate contributes no lock. Arbitration visits
-creation order and stops at the first conflict, raising a saved failure only when it reaches that
+or records a failure marker per row/index; an errored predicate contributes no lock. No exception
+is retained per failing row. Arbitration visits creation order and stops at the first conflict,
+re-evaluating the immutable predicate to raise its error only when it reaches that
 index. Catalog index lists follow the already persisted registration vector, preserving this
 order across dropped dictionary slots, reopen and storage rewrites; table-declared primary keys
 precede later indexes. PostgreSQL executor/nodeModifyTable.c:1108 checks constraints first,
@@ -76,6 +81,10 @@ SQL definition rebinds them; dropping the affected index also restores write ava
 Unresolved state belongs to that function-environment generation and is cleared when catalog
 validation finds no unresolved predicate. Writes to tables without partial indexes return before
 catalog validation, even when another table remains unresolved and unrelated DDL invalidates it.
+Every new function environment starts with validation armed if any partial index exists; function
+and domain DDL cannot clear write refusal before validation. Stored-predicate CS05091 and missing
+function/result-contract failures become unresolved regardless of their binding path, including
+domain parameters and results. CS06058/CS06059 remain catalog damage and refuse the open.
 
 
 ### Partial-index diagnostics

@@ -47,6 +47,8 @@
   <data name="PartialPredicateUnavailable" xml:space="preserve"><value>whose persisted immutable function contract this engine cannot resolve</value></data>
   <data name="PartialPredicateCastUnavailable" xml:space="preserve"><value>whose reachable cast from {0} to {1} is application-registered and has no immutable contract</value></data>
   <data name="PartialPredicateDomainUnavailable" xml:space="preserve"><value>whose domain {0} no longer has an immutable check</value></data>
+  <data name="PartialPredicateCastInvalid" xml:space="preserve"><value>An index predicate cannot use the application-registered cast from {0} to {1} because it has no immutable contract.</value></data>
+  <data name="PartialPredicateDomainInvalid" xml:space="preserve"><value>An index predicate cannot use domain {0} because its check is not immutable.</value></data>
   <data name="PartialPredicateBindingFailed" xml:space="preserve"><value>Index predicate '{0}' ({1}) does not bind: {2} {3}</value></data>
   <data name="PartialPredicateTypeChange" xml:space="preserve"><value>Column '{0}' is read by partial index '{1}'; drop the index before changing the column type.</value></data>
   <data name="IndexKeyTooLarge" xml:space="preserve"><value>Index key for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>

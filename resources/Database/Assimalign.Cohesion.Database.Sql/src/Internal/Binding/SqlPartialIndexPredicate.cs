@@ -72,9 +72,17 @@ internal static class SqlPartialIndexPredicate
             return scope.BindPredicate(expression);
         }
         catch (SqlPartialIndexRegistrationException failure)
-        { return Unresolved(index, failure.Signature, failure.Message); }
+        { return Unresolved(index, failure.Signature, failure.Reason); }
         catch (SqlFunctionResultMismatchException mismatch)
         { return Unresolved(index, mismatch.Call.FunctionName, mismatch.Message); }
+        catch (DatabaseException failure) when (
+            !failure.Diagnostics.Any(diagnostic => diagnostic.Code is "CS06058" or "CS06059") &&
+            failure.Diagnostics.Any(diagnostic => diagnostic.Code is "CS05091" or SqlEvaluationException.UnregisteredFunctionCode))
+        {
+            // Creation already validated this text. Every binding path, including domain
+            // parameters and nested calls, must defer a changed registration consistently.
+            return Unresolved(index, index.Predicate!, failure.Message);
+        }
         catch (DatabaseException failure)
         {
             // As for CHECK, only a changed application contract explains an unresolved
@@ -132,14 +140,30 @@ internal static class SqlPartialIndexPredicate
         // Dispatch uses the value's runtime type, not CASE's inferred type. Check the
         // union of all alternatives (including unreachable ones), or every slot if unknown.
         uint types = RuntimeTypes(operand, scope);
+        uint slots = types == uint.MaxValue ? uint.MaxValue : 0;
+        for (int type = 0; type < conversions.Length; type++)
+        {
+            if ((types & (1u << type)) != 0)
+            { slots |= 1u << (int)SqlCastConverter.DispatchType(DatabaseType.Null, (DatabaseType)type); }
+        }
+        var operandType = scope.StaticTypeOf(operand);
+        if (operandType is DatabaseType.Json or DatabaseType.JsonBinary)
+        { slots |= 1u << (int)SqlCastConverter.DispatchType(operandType, operandType); }
         for (int slot = 0; slot < conversions.Length; slot++)
         {
-            if ((types & (1u << slot)) != 0 && conversions[slot] is { } conversion && !SqlStandardCasts.Contains(conversion))
+            if ((slots & (1u << slot)) != 0 && conversions[slot] is { } conversion && !SqlStandardCasts.Contains(conversion))
             { throw new SqlPartialIndexRegistrationException(conversion.Source.Name + " -> " + conversion.Target.Name,
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateCastInvalid, conversion.Source.Name, conversion.Target.Name),
                 string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateCastUnavailable, conversion.Source.Name, conversion.Target.Name), location); }
         }
+        ValidateDomain(target, location);
+    }
+
+    private static void ValidateDomain(SqlType target, Assimalign.Cohesion.Database.Language.Location? location)
+    {
         if (target.Check is { Volatility: not SqlFunctionVolatility.Immutable })
         { throw new SqlPartialIndexRegistrationException(target.Name,
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateDomainInvalid, target.Name),
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateDomainUnavailable, target.Name), location); }
     }
 
@@ -218,6 +242,7 @@ internal static class SqlPartialIndexPredicate
             { throw new SqlPlanningException("CS01009", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlFunctionMissing, call.FunctionName), call.Location); }
             if (function is not null && (function.Kind != SqlFunctionKind.Scalar || function.Volatility != SqlFunctionVolatility.Immutable))
             { throw new SqlPlanningException("CS05091", ErrorMessages.PartialPredicateInvalid, call.Location); }
+            if (function is not null) { ValidateDomain(function.ReturnType, call.Location); }
         }
         foreach (var child in SqlPlanner.Children(expression)) { Validate(child, table, scope); }
     }

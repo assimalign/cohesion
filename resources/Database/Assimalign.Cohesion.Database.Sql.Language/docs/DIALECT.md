@@ -17,6 +17,9 @@ predicate function, with its registration weakened from IMMUTABLE, with an incom
 or with a reachable cast/domain check that lost its immutable contract, SELECT, catalog reads and
 DROP INDEX work. Every write to the table refuses CS01009 naming the cause, regardless of short
 circuits or empty inputs. Malformed stored expressions and dependency vectors still fail the open.
+JSON/JSONB alternatives include their TEXT/BYTEA runtime conversion slots, including domains over
+these types. A statically JSON/JSONB operand also checks its SQL slot. Domain parameters and function
+results must retain immutable checks; function/domain DDL preserves unresolved write refusal.
 
 A partial UNIQUE index enforces only matching non-NULL keys; any NULL key component permits
 duplicates. It cannot enforce a primary key or serve as a foreign-key target. Ordinary unique
@@ -37,6 +40,8 @@ Each proposed row's CHECKs run first. Arbiters are visited in index creation ord
 primary key first), stopping at the first conflict. A later partial predicate's evaluation error
 is raised only when arbitration reaches it. Up-front sorted key locking retains this error order;
 an errored predicate contributes no key lock.
+Preparation retains failure markers; reaching one re-evaluates its immutable predicate to raise
+the error without retaining an exception for each failed proposal.
 NULL-containing partial keys neither conflict nor take uniqueness locks, including on deletion.
 
 COHESION_SCHEMA.INDEXES and its nonstandard INFORMATION_SCHEMA.INDEXES alias expose nullable

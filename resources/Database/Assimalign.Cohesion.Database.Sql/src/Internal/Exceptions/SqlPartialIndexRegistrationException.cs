@@ -6,11 +6,11 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>A reachable predicate conversion no longer has a proven immutable registration.</summary>
 internal sealed class SqlPartialIndexRegistrationException : DatabaseException
 {
-    internal SqlPartialIndexRegistrationException(string signature, string reason, Location? location)
-        : base(reason, [new Diagnostic
+    internal SqlPartialIndexRegistrationException(string signature, string message, string reason, Location? location)
+        : base(message, [new Diagnostic
         {
             Code = "CS05091",
-            Message = reason,
+            Message = message,
             Severity = DiagnosticSeverity.Error,
             Location = location is null ? null : DiagnosticLocation.Absolute,
             Start = location?.Start,
@@ -19,7 +19,9 @@ internal sealed class SqlPartialIndexRegistrationException : DatabaseException
         }])
     {
         Signature = signature;
+        Reason = reason;
     }
 
     internal string Signature { get; }
+    internal string Reason { get; }
 }

@@ -652,6 +652,10 @@ internal sealed class SqlBoundTableCache
         {
             _owner = owner;
             Functions = functions;
+            // A new environment has no validated predicate bindings yet. Keep the DML
+            // guard armed until validation proves this generation has no unresolved index.
+            HasUnresolvedIndexPredicates = owner._catalog.Tables.Any(table =>
+                owner._catalog.GetIndexes(table.ObjectId).Any(static index => index.Predicate is not null));
         }
 
         internal SqlBoundTable Get(SqlCatalogTable table, CancellationToken cancellationToken)

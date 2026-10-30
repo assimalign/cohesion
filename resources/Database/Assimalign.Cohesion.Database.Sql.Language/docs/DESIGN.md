@@ -14,6 +14,8 @@ reach engine predicate validation and fail with CS05091. They are never executab
 SQ-P1 deliberately advertises no implication/access optimization; see DIALECT.
 The execution conformance corpus covers bounded runtime cast slots, registration changes on
 reopen, and constraint/creation-order arbitration with deferred partial-predicate failures.
+It also covers JSON/JSONB runtime representations and domains, complete creation diagnostics,
+function-environment refresh, and bulk failure markers that retain no predicate exceptions.
 
 
 ## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
