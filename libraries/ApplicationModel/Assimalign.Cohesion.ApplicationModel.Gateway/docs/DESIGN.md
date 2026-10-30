@@ -497,6 +497,25 @@ supervision's, which waits for health and liveness. *Rejected:* `DeployResourceA
 handle with a failure task. The gateway would have to dispose each handle, and the provider would
 keep watching a workload nobody waits for; a cancelled watch ends with the wait.
 
+**G37 — A gateway program stops on its signals and reports its steps (2026-10-29).** A gateway
+program is an entry point like any resource, but its run registered no shutdown signal: Ctrl+C or a
+platform's SIGTERM ended the process mid-save unless the program wired up its own cancellation. And
+the run said nothing until it ended, so a deployment could be followed only through its final
+exception.
+- **Signals.** `RunAsync` registers Core's `AppEnvironment.RegisterShutdown` for the run's duration,
+  the registration every host's `RunAsync` uses too (Hosting's now delegates to it). SIGINT, SIGQUIT
+  and SIGTERM stop the run as cancelling its token does: it drains, returns, and leaves what it
+  deployed running. Inside an in-process program's `AppEnvironmentScope`, the scope's shutdown
+  stands in for the signals, as it does for any host.
+- **Events.** An internal event source reports each transition (Diagnostics, below).
+
+The gateway program still owns its infrastructure: `await using` it ahead of the gateway, so it is
+disposed once the run has returned, and an in-process infrastructure stops its programs last-first.
+*Rejected:* making `ApplicationGateway` a `Host<TContext>`. A host reports a failed start through
+its own wrapping, has no way to fail a run that already started (`RecordSuperseded` does), and would
+reshape every error the gateway reports, for the signals and lifecycle reporting this decision adds
+directly.
+
 **G9 — No HTTP here, yet; it will be a transport over Web (owner direction, 2026-10-29).** COHLIB001
 bars a library from referencing Web, and COHRES003 bars Web (any resource package) from referencing
 a `Gateway*` assembly, so neither side can bind the other today. The options were: serve HTTP from
@@ -518,8 +537,28 @@ source-generated JSON contexts.
 
 ## Diagnostics
 
-None. The library raises no events yet; a missed startup window and a refused publication are
-candidates for an event source.
+The library reports through one internal event source, `Assimalign.Cohesion.ApplicationModel.Gateway`
+(G37): one event per transition of a run and of each resource's step, so a deployment can be
+followed as it happens. Tools enable it by name; a gateway program forwards it into its logging with
+`Assimalign.Cohesion.Logging.EventSource`. Every event's first payload is the gateway's name, and a
+resource is `{provider}/{name}`. It has no counters.
+
+| Id | Event | Level | Payload |
+| --- | --- | --- | --- |
+| 1 | `RunStarting` | Informational | `gateway`, `epoch` |
+| 2 | `ResourcePlanned` | Informational | `gateway`, `resource`, `change` (`None`, `Create`, `Update`) |
+| 3 | `ResourceDeploying` | Informational | `gateway`, `resource`, `deployment` |
+| 4 | `ResourceReady` | Informational | `gateway`, `resource` |
+| 5 | `ResourceMissed` | Error | `gateway`, `resource`, `windowSeconds` |
+| 6 | `ResourceStopped` | Error | `gateway`, `resource`, `failure` (exception type, or `ended`), `failureMessage` |
+| 7 | `ResourceSkipped` | Warning | `gateway`, `resource` |
+| 8 | `ResourceRetired` | Informational | `gateway`, `resource` |
+| 9 | `RunStarted` | Informational | `gateway`, `resources` |
+| 10 | `RunSuperseded` | Warning | `gateway`, `epoch` |
+| 11 | `RunStopped` | Informational | `gateway` |
+| 12 | `RunFailed` | Error | `gateway`, `failure` (exception type), `failureMessage` |
+
+An exception is written as its type's full name and its message, never its stack.
 
 ## Open questions
 

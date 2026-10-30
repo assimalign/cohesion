@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace Assimalign.Cohesion.Hosting.Internal;
@@ -20,12 +18,12 @@ namespace Assimalign.Cohesion.Hosting.Internal;
 /// A run inside an <see cref="AppEnvironmentScope"/> shares its process with other programs, so the
 /// process's signals are not its own: it stops on the scope's <see cref="AppEnvironmentScope.Shutdown"/>,
 /// which the host of programs that entered the scope signals, and registers no process signal.
+/// Both are Core's <see cref="AppEnvironment.RegisterShutdown"/>, which any entry-point program
+/// shares, a gateway's included.
 /// </para>
 /// </remarks>
 internal static class HostShutdownSignals
 {
-    private static readonly PosixSignal[] _signals = [PosixSignal.SIGINT, PosixSignal.SIGQUIT, PosixSignal.SIGTERM];
-
     /// <summary>
     /// Registers every shutdown signal the platform delivers, or inside a scope the scope's
     /// shutdown, until the returned registration is disposed.
@@ -34,29 +32,7 @@ internal static class HostShutdownSignals
     /// <returns>The registration, which removes the handlers when disposed.</returns>
     public static IDisposable Register(Action requestShutdown)
     {
-        if (AppEnvironment.Current is { } scope)
-        {
-            return scope.Shutdown.Register(requestShutdown);
-        }
-
-        var registrations = new List<PosixSignalRegistration>(_signals.Length);
-        foreach (PosixSignal signal in _signals)
-        {
-            try
-            {
-                registrations.Add(PosixSignalRegistration.Create(signal, context =>
-                {
-                    context.Cancel = true;
-                    requestShutdown();
-                }));
-            }
-            catch (PlatformNotSupportedException)
-            {
-                // The platform delivers no such signal, as in a browser.
-            }
-        }
-
-        return new Registration(registrations);
+        return AppEnvironment.RegisterShutdown(requestShutdown);
     }
 
     /// <summary>
@@ -78,24 +54,6 @@ internal static class HostShutdownSignals
         {
             // A cancellation callback failed after every callback ran, so the run still received
             // the request.
-        }
-    }
-
-    private sealed class Registration : IDisposable
-    {
-        private readonly List<PosixSignalRegistration> _registrations;
-
-        public Registration(List<PosixSignalRegistration> registrations)
-        {
-            _registrations = registrations;
-        }
-
-        public void Dispose()
-        {
-            foreach (PosixSignalRegistration registration in _registrations)
-            {
-                registration.Dispose();
-            }
         }
     }
 }

@@ -124,6 +124,10 @@ the host of programs cancels to stop it, and registers no process signal. So a g
 SIGTERM for itself and stops its programs in the order it chooses, and a program's `Program.cs` needs
 no change to run in process.
 
+The registration itself is Core's `AppEnvironment.RegisterShutdown` (2026-10-29), which the
+application-model gateway's run uses too; Hosting's internal `HostShutdownSignals` keeps only the
+test seam and the never-throwing request that cancels the run.
+
 Before this (2026-10-28), nothing in Hosting handled a signal. SIGTERM, which Kubernetes and Docker
 send to stop a container, ended the process without stopping the host and cut off in-flight work;
 only the retired resource-process runner had subscribed to it.

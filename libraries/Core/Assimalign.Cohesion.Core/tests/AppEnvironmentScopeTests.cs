@@ -173,6 +173,55 @@ public class AppEnvironmentScopeTests
             CancellationToken.None));
     }
 
+    [Fact(DisplayName = DisplayPrefix + "A shutdown registration inside a scope fires on the scope's shutdown")]
+    public void RegisterShutdown_InScope_ShouldFireOnTheScopesShutdown()
+    {
+        // Arrange
+        using var shutdown = new CancellationTokenSource();
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(new Dictionary<string, string>(), shutdown.Token);
+        int requests = 0;
+
+        // Act
+        IDisposable registration;
+        using (AppEnvironment.Enter(scope))
+        {
+            registration = AppEnvironment.RegisterShutdown(() => Interlocked.Increment(ref requests));
+        }
+
+        shutdown.Cancel();
+        registration.Dispose();
+
+        // Assert
+        requests.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A disposed shutdown registration no longer fires")]
+    public void RegisterShutdown_AfterDispose_ShouldNotFire()
+    {
+        // Arrange
+        using var shutdown = new CancellationTokenSource();
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(new Dictionary<string, string>(), shutdown.Token);
+        int requests = 0;
+
+        // Act
+        using (AppEnvironment.Enter(scope))
+        {
+            AppEnvironment.RegisterShutdown(() => Interlocked.Increment(ref requests)).Dispose();
+        }
+
+        shutdown.Cancel();
+
+        // Assert
+        requests.ShouldBe(0);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A shutdown registration outside a scope registers the process's signals and releases them")]
+    public void RegisterShutdown_OutsideScope_ShouldRegisterAndRelease()
+    {
+        // Act & Assert: the process's signals are registered and removed without a signal sent.
+        Should.NotThrow(() => AppEnvironment.RegisterShutdown(static () => { }).Dispose());
+    }
+
     [Fact(DisplayName = DisplayPrefix + "A configuration key's variable separates its sections with double underscores")]
     public void Configuration_WithColonSeparatedKey_ShouldReturnTheBridgeVariable()
     {

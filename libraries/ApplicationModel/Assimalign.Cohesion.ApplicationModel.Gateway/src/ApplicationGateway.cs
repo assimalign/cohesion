@@ -91,6 +91,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private long _epoch;
     private CancellationTokenSource? _run;
     private ApplicationGatewayException? _superseded;
+    private int _signalled;
     private int _lifecycle;
 
     internal ApplicationGateway(
@@ -206,8 +207,12 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             throw new InvalidOperationException(ErrorMessages.ApplicationGatewayAlreadyRun);
         }
 
-        // The run's own token stops it when the caller cancels or a later run takes the record over.
+        // The run's own token stops it when the caller cancels, a shutdown signal arrives, or a later
+        // run takes the record over. A signal stops the run as cancelling it does: Ctrl+C at a console
+        // or a platform's SIGTERM drains the gateway instead of ending the process mid-save. Inside an
+        // in-process program's scope, the scope's shutdown stands in for the signals.
         using var run = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        using IDisposable signals = AppEnvironment.RegisterShutdown(() => RequestShutdown(run));
         Volatile.Write(ref _run, run);
         CancellationToken token = run.Token;
         int transportsStarted = 0;
@@ -222,6 +227,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             ApplicationGatewayRecord record = await _store.AcquireAsync(model.Name, token).ConfigureAwait(false)
                 ?? throw new InvalidOperationException(Format(ErrorMessages.GatewayRecordNull, model.Name));
             Volatile.Write(ref _epoch, record.Epoch);
+            ApplicationGatewayEventSource.Log.RunStarting(model.Name, record.Epoch);
             CreateResources(model, record, steps);
 
             // The gateway receives publications from here, so its transports start before it joins
@@ -254,16 +260,18 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             }
 
             _started.TrySetResult();
+            ApplicationGatewayEventSource.Log.RunStarted(model.Name, _ordered.Length);
 
             Task renewals = membership is null
                 ? Task.CompletedTask
                 : RenewMembershipAsync(model, _parent!, membership.Lease, token);
             await Task.WhenAll(ExpireAsync(token), renewals).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (Volatile.Read(ref _superseded) is null && cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (Volatile.Read(ref _superseded) is null && (cancellationToken.IsCancellationRequested || Volatile.Read(ref _signalled) != 0))
         {
-            // Cancellation stops the gateway; what it deployed keeps running.
-            _started.TrySetCanceled(cancellationToken);
+            // Cancellation or a shutdown signal stops the gateway; what it deployed keeps running.
+            _started.TrySetCanceled(cancellationToken.IsCancellationRequested ? cancellationToken : token);
+            ApplicationGatewayEventSource.Log.RunStopped(Name);
         }
         catch (Exception exception)
         {
@@ -272,6 +280,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             failed = true;
             Exception reported = Volatile.Read(ref _superseded) ?? exception;
             _started.TrySetException(reported);
+            ApplicationGatewayEventSource.Log.RunFailed(Name, reported);
             ExceptionDispatchInfo.Throw(reported);
         }
         finally
@@ -294,6 +303,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             return earlier;
         }
 
+        ApplicationGatewayEventSource.Log.RunSuperseded(Name, Volatile.Read(ref _epoch));
         Volatile.Write(ref _lifecycle, stopped);
         try
         {
@@ -307,6 +317,21 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
 
         return superseded;
+    }
+
+    // A shutdown signal, or in process the scope's shutdown, stops the run as cancelling it does. It
+    // never throws: a signal handler that throws ends the process.
+    private void RequestShutdown(CancellationTokenSource run)
+    {
+        Volatile.Write(ref _signalled, 1);
+        try
+        {
+            _ = run.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run already ended.
+        }
     }
 
     // Stops the transports that started, last first. One that fails to stop does not keep the others
@@ -895,6 +920,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
                 {
                     // Something the step waits for did not start, so the step does not deploy.
                     step.Skip();
+                    ApplicationGatewayEventSource.Log.ResourceSkipped(Name, step.Resource);
                     return;
                 }
             }
@@ -936,13 +962,24 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         string revision = string.Concat(Fingerprint(manifest), ":", plan.Revision);
         DeploymentId? deployment = plan.Change == InfrastructureChange.None ? null : DeploymentOf(revision, manifest, settings);
         resource.Plan(plan.Change, revision, deployment);
+        ApplicationGatewayEventSource.Log.ResourcePlanned(Name, manifest, plan.Change);
         if (deployment is { } id)
         {
+            ApplicationGatewayEventSource.Log.ResourceDeploying(Name, manifest, id);
             await _infrastructure.DeployResourceAsync(model, manifest, settings, id, cancellationToken).ConfigureAwait(false);
             await SaveAsync(cancellationToken).ConfigureAwait(false);
 
             if (!await WaitForStartAsync(model, resource, id, cancellationToken).ConfigureAwait(false))
             {
+                if (resource.IsStopped)
+                {
+                    ApplicationGatewayEventSource.Log.ResourceStopped(Name, manifest, resource.StopCause);
+                }
+                else
+                {
+                    ApplicationGatewayEventSource.Log.ResourceMissed(Name, manifest, StartupTimeout);
+                }
+
                 // A new resource that never started is removed; an update's previous instances are
                 // the platform's to keep or replace.
                 if (resource.Change == InfrastructureChange.Create)
@@ -964,6 +1001,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             await SaveAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        ApplicationGatewayEventSource.Log.ResourceReady(Name, manifest);
         return true;
     }
 
@@ -1050,6 +1088,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         foreach (ApplicationResourceRecord retired in Volatile.Read(ref _retiredResources))
         {
             await _infrastructure.TeardownResourceAsync(model, new ApplicationResourceManifest(retired.Provider, retired.Name, [], [], []), cancellationToken).ConfigureAwait(false);
+            ApplicationGatewayEventSource.Log.ResourceRetired(Name, retired.Provider, retired.Name);
             Volatile.Write(ref _retiredResources, Array.FindAll(Volatile.Read(ref _retiredResources), entry => !ReferenceEquals(entry, retired)));
             await SaveAsync(cancellationToken).ConfigureAwait(false);
         }

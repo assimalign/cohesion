@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace Assimalign.Cohesion;
@@ -21,6 +22,7 @@ namespace Assimalign.Cohesion;
 public static partial class AppEnvironment
 {
     private static readonly AsyncLocal<AppEnvironmentScope?> _current = new();
+    private static readonly PosixSignal[] _shutdownSignals = [PosixSignal.SIGINT, PosixSignal.SIGQUIT, PosixSignal.SIGTERM];
 
     /// <summary>
     /// Gets the scope the current flow runs in, or <see langword="null"/> when it reads the
@@ -47,6 +49,58 @@ public static partial class AppEnvironment
         AppEnvironmentScope? previous = _current.Value;
         _current.Value = scope;
         return new ScopeExit(previous);
+    }
+
+    /// <summary>
+    /// Registers a request for the shutdown of the program the current flow runs: on the process's
+    /// shutdown signals, or, inside an <see cref="AppEnvironmentScope"/>, on the scope's
+    /// <see cref="AppEnvironmentScope.Shutdown"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SIGINT and SIGQUIT are Ctrl+C and its relatives at a console, and SIGTERM is how a platform such
+    /// as Kubernetes or Docker stops a container. Left alone, each ends the process at once and cuts
+    /// off its work. A registration cancels each signal's default action and calls
+    /// <paramref name="requestShutdown"/> instead, once per signal received, so the program drains and
+    /// the process exits when its entry point returns. A platform that delivers none of a signal, such
+    /// as a browser, skips it.
+    /// </para>
+    /// <para>
+    /// A program inside a scope shares its process with other programs, so the process's signals are
+    /// not its own. It registers on the scope's shutdown instead, which the host of the programs
+    /// signals, and registers no process signal.
+    /// </para>
+    /// </remarks>
+    /// <param name="requestShutdown">Requests the program's shutdown. It must not throw: a signal handler that throws ends the process.</param>
+    /// <returns>The registration, which removes the handlers when disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="requestShutdown"/> is <see langword="null"/>.</exception>
+    public static IDisposable RegisterShutdown(Action requestShutdown)
+    {
+        ArgumentNullException.ThrowIfNull(requestShutdown);
+
+        if (_current.Value is { } scope)
+        {
+            return scope.Shutdown.Register(requestShutdown);
+        }
+
+        var registrations = new List<PosixSignalRegistration>(_shutdownSignals.Length);
+        foreach (PosixSignal signal in _shutdownSignals)
+        {
+            try
+            {
+                registrations.Add(PosixSignalRegistration.Create(signal, context =>
+                {
+                    context.Cancel = true;
+                    requestShutdown();
+                }));
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // The platform delivers no such signal.
+            }
+        }
+
+        return new SignalRegistration(registrations);
     }
 
     /// <summary>
@@ -437,6 +491,24 @@ public static partial class AppEnvironment
 
             _isDisposed = true;
             _current.Value = _previous;
+        }
+    }
+
+    private sealed class SignalRegistration : IDisposable
+    {
+        private readonly List<PosixSignalRegistration> _registrations;
+
+        public SignalRegistration(List<PosixSignalRegistration> registrations)
+        {
+            _registrations = registrations;
+        }
+
+        public void Dispose()
+        {
+            foreach (PosixSignalRegistration registration in _registrations)
+            {
+                registration.Dispose();
+            }
         }
     }
 }

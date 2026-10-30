@@ -169,8 +169,8 @@ None. The package raises no events and has no event source.
 3. **Process-wide state in programs.** Each Web application that `CreateBuilder(args)` builds
    registers its default event-source forwarding, which listens process-wide, so two in-process Web
    programs each forward the other's events. Console output is not attributed per program.
-4. **The gateway program's signals.** `ApplicationGateway.RunAsync` registers no shutdown signal,
-   so a gateway program cancels it itself (for example on `Console.CancelKeyPress`) before it
-   disposes the infrastructure. A hosted gateway would own SIGTERM.
+4. **The gateway program's signals — settled by Gateway G37.** `ApplicationGateway.RunAsync` stops on
+   SIGINT, SIGQUIT and SIGTERM, so a gateway program that `await using`s its infrastructure ahead of
+   the gateway stops its programs once the run returns.
 5. **Supervision.** The retired package restarted failing members; this one restarts nothing.
    Restarting a program belongs with health and liveness, which the model has not settled.

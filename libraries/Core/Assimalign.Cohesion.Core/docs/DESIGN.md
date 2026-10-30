@@ -166,8 +166,11 @@ starts. Inside a scope:
   endpoints, or configuration from the process. Every other variable, such as `PATH`, reads through
   to the process.
 - `GetValues` is the merged snapshot, which the environment-variable configuration source loads.
-- Hosting's `RunAsync` stops on the scope's `Shutdown` instead of registering the process's
-  SIGINT, SIGQUIT, and SIGTERM, which stay with the host of programs.
+- `RegisterShutdown(callback)` registers on the scope's `Shutdown` instead of the process's
+  SIGINT, SIGQUIT, and SIGTERM, which stay with the host of programs. Outside a scope it registers
+  the signals, cancels each one's default action, and calls the callback instead. Every entry-point
+  run uses it: Hosting's `RunAsync` and the application-model gateway's (2026-10-29), so a program
+  that stops on signals in its own process stops on its scope in a host of programs, with no change.
 
 It lives in Core because every reader of the contract already does, and both sides of the line,
 the Configuration and Hosting readers and the gateway that writes the scope, reference Core. It
