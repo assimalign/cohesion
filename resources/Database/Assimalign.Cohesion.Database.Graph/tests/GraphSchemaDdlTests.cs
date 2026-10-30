@@ -7,6 +7,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Graph.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -14,6 +15,91 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 
 public sealed class GraphSchemaDdlTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph] - Schema DDL: budget refusals leave no rule or discovered tokens")]
+    [InlineData(0L, null)]
+    [InlineData(null, 0L)]
+    [InlineData(null, 1L)]
+    public async Task Execute_RefusedBudget_ShouldRollbackEveryTokenAsync(long? work, long? memory)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("ddl-budget", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var schema = GraphSchema.Open(database, session);
+        var request = GraphQueryRequest.FromGql("CREATE INDEX ix FOR (n:Fresh) ON (n.p)", null,
+            new GraphQueryLimits { WorkUnits = work, MemoryBytes = memory });
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
+        // Assert
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(memory == 1 ? "CG05020" : "CG08021");
+        (await schema.GetLabelsAsync(CancellationToken.None)).ShouldBeEmpty();
+        (await schema.GetRelationshipTypesAsync(CancellationToken.None)).ShouldBeEmpty();
+        (await schema.GetIndexesAsync(CancellationToken.None)).ShouldBeEmpty();
+        (await schema.GetConstraintsAsync(CancellationToken.None)).ShouldBeEmpty();
+        (await GraphCatalogIntrospectionTests.Rows(session, "SHOW PROPERTY KEYS")).ShouldBeEmpty();
+        (await session.ExecuteAsync("CREATE INDEX ix FOR (n:Fresh) ON (n.p)", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph] - Schema DDL: scans and backfill exhaust budgets and roll back all discoveries")]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, false, false, true)]
+    public async Task Execute_ExhaustedBudget_ShouldRollbackRuleAndAllowRetryAsync(bool constraint, bool relationship, bool backfillMemory, bool backfillWork)
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("ddl-budget", new());
+        var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        var schema = GraphSchema.Open(database, session);
+        for (int i = 0; i < 10; i++)
+        {
+            await session.ExecuteAsync(relationship ? "INSERT (a)-[:N {p:1}]->(a)" : "INSERT (:N {p:1})", cancellationToken: CancellationToken.None);
+        }
+        var labels = await schema.GetLabelsAsync(CancellationToken.None);
+        var types = await schema.GetRelationshipTypesAsync(CancellationToken.None);
+        var properties = await GraphCatalogIntrospectionTests.Rows(session, "SHOW PROPERTY KEYS");
+        bool populatedIndex = backfillMemory || backfillWork;
+        string text = constraint ? "CREATE CONSTRAINT rule FOR " + (relationship ? "()-[n:N]-()" : "(n:N)") + " REQUIRE n.fresh IS :: INTEGER"
+            : "CREATE INDEX rule FOR (n:N) ON (n." + (populatedIndex ? "p" : "fresh") + ")";
+        var request = GraphQueryRequest.FromGql(text, null, backfillMemory
+            ? new GraphQueryLimits { MemoryBytes = 8800 } : new GraphQueryLimits { WorkUnits = backfillWork ? 11 : 1 });
+        long postings = relationship ? database.Store.RelationshipTypeEntriesVisited : database.Store.LabelEntriesVisited;
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(request, CancellationToken.None));
+        // Assert: work admission stops the scan; memory admits some backfill entries.
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(backfillMemory ? "CG05020" : "CG05004");
+        long visited = (relationship ? database.Store.RelationshipTypeEntriesVisited : database.Store.LabelEntriesVisited) - postings;
+        visited.ShouldBeGreaterThan(0);
+        if (backfillWork) { visited.ShouldBe(10); session.LastStatementMetrics!.Physical.ShouldBe(12); }
+        else { visited.ShouldBeLessThan(10); }
+        if (backfillMemory)
+        {
+            session.LastStatementMetrics!.Physical.ShouldBeGreaterThan(1);
+            session.LastStatementMetrics.Memory.PeakRetainedBytes.ShouldBeGreaterThan(8192);
+        }
+        session.LastStatementMetrics!.Memory.ActiveLeases.ShouldBe(0);
+        session.LastStatementMetrics.Memory.RetainedBytes.ShouldBe(0);
+        (await schema.GetLabelsAsync(CancellationToken.None)).ShouldBe(labels);
+        (await schema.GetRelationshipTypesAsync(CancellationToken.None)).ShouldBe(types);
+        (await schema.GetIndexesAsync(CancellationToken.None)).ShouldBeEmpty();
+        (await schema.GetConstraintsAsync(CancellationToken.None)).ShouldBeEmpty();
+        var after = await GraphCatalogIntrospectionTests.Rows(session, "SHOW PROPERTY KEYS");
+        after.Count.ShouldBe(properties.Count);
+        for (int row = 0; row < after.Count; row++) { after[row].ShouldBe(properties[row]); }
+        var reader = await database.Coordinator.BeginAsync(IsolationLevel.Snapshot, CancellationToken.None);
+        try { database.Store.HasIndex("N", populatedIndex ? "p" : "fresh", reader.Snapshot).ShouldBeFalse(); }
+        finally { await database.Coordinator.RollbackAsync(reader, CancellationToken.None); }
+        (await session.ExecuteAsync(text, cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
+        if (constraint) { (await schema.GetConstraintsAsync(CancellationToken.None)).ShouldHaveSingleItem().Name.ShouldBe("rule"); }
+        else
+        {
+            (await schema.GetIndexesAsync(CancellationToken.None)).ShouldHaveSingleItem().Name.ShouldBe("rule");
+            if (populatedIndex) { (await GraphCatalogIntrospectionTests.Rows(session, "MATCH (n:N {p:1}) RETURN n.p")).Count.ShouldBe(10); }
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph] - Schema DDL: named node and relationship constraints discover tokens and drop independently")]
     [InlineData(false)]
     [InlineData(true)]

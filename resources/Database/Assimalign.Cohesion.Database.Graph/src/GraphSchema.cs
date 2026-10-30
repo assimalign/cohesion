@@ -16,6 +16,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 /// Reads follow the session transaction. Schema writes run in their own autocommit transaction;
 /// Cohesion refuses schema writes inside explicit transactions (CG04025), aborting the transaction.
 /// Invalid caller arguments are checked before statement admission. Unknown-label reads warn.
+/// Schema writes use the engine's statement work and retained-memory budgets; exhaustion
+/// reports CG05004 or CG05020 and rolls back the complete schema operation.
 /// </para>
 /// <para>
 /// <b>Shape (concrete-types plan, phase 4, #1260).</b> One sealed type with a private constructor
@@ -173,6 +175,7 @@ public sealed partial class GraphSchema
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     /// <exception cref="DatabaseException">Schema writes inside an explicit transaction are refused (CG04025, Cohesion policy).</exception>
+    /// <exception cref="DatabaseException">The statement work or retained-memory budget is exhausted (CG05004/CG05020).</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata definition, CancellationToken cancellationToken = default)
     {
         GraphCatalogCodec.Validate(new CatalogRecord(property: definition));
@@ -185,10 +188,11 @@ public sealed partial class GraphSchema
             if (label.Id != Guid.Empty) { EnsureMutable(label.Name, label.Owner, label.OwningSchema, "ALTER LABEL"); }
             if (type.Id != Guid.Empty) { EnsureMutable(type.Name, type.Owner, type.OwningSchema, "ALTER RELATIONSHIP TYPE"); }
             _database.Catalog.EnsurePropertyKeyCompatible(definition, latest);
+            using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
             if (label.Id != Guid.Empty)
-            { foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken)) { Validate(node.Properties); } }
+            { foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add)) { Validate(node.Properties); } }
             else if (type.Id != Guid.Empty)
-            { foreach (var edge in _database.Store.StreamRelationshipTypes([type.Name], latest, cancellationToken)) { Validate(edge.Properties); } }
+            { foreach (var edge in _database.Store.StreamRelationshipTypes([type.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add)) { Validate(edge.Properties); } }
             await _database.Catalog.SavePropertyKeyAsync(definition, op.Context, cancellationToken).ConfigureAwait(false);
             void Validate(IReadOnlyDictionary<string, object?> properties)
             {
@@ -220,6 +224,7 @@ public sealed partial class GraphSchema
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     /// <exception cref="DatabaseException">Schema writes inside an explicit transaction are refused (CG04025, Cohesion policy).</exception>
+    /// <exception cref="DatabaseException">The statement work or retained-memory budget is exhausted (CG05004/CG05020).</exception>
     public ValueTask CreateIndexAsync(string label, string name, string propertyKey, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
@@ -246,6 +251,7 @@ public sealed partial class GraphSchema
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     /// <exception cref="DatabaseException">Schema writes inside an explicit transaction are refused (CG04025, Cohesion policy).</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is null or whitespace; checked before statement admission.</exception>
+    /// <exception cref="DatabaseException">The statement work or retained-memory budget is exhausted (CG05004/CG05020).</exception>
     public ValueTask DropLabelAsync(string name, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -253,7 +259,8 @@ public sealed partial class GraphSchema
         {
             var label = Label(name, op);
             EnsureMutable(label.Name, label.Owner, label.OwningSchema, "DROP LABEL");
-            if (_database.Store.StreamLabels([name], _database.LatestSnapshot(op.Context), cancellationToken).Any()) { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
+            using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+            if (_database.Store.StreamLabels([name], _database.LatestSnapshot(op.Context), cancellationToken, op.QueryBudget.Consume, memory.Add).Any()) { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
             foreach (var index in _database.Catalog.GetIndexes(label.Id, op.Context.Snapshot))
             {
                 await _database.Store.DropIndexAsync(name, index.PropertyKey, op.Context, cancellationToken).ConfigureAwait(false);
@@ -279,6 +286,7 @@ public sealed partial class GraphSchema
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">An autocommit statement's commit record could not be confirmed durable.</exception>
     /// <exception cref="DatabaseException">Schema writes inside an explicit transaction are refused (CG04025, Cohesion policy).</exception>
     /// <exception cref="ArgumentException"><paramref name="name"/> is null or whitespace; checked before statement admission.</exception>
+    /// <exception cref="DatabaseException">The statement work or retained-memory budget is exhausted (CG05004/CG05020).</exception>
     public ValueTask DropRelationshipTypeAsync(string name, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -290,7 +298,8 @@ public sealed partial class GraphSchema
                     ErrorMessages.RelationshipTypeUnknown, name), Severity = Types.DiagnosticSeverity.Error }]);
             EnsureMutable(type.Name, type.Owner, type.OwningSchema, "DROP RELATIONSHIP TYPE");
             var latest = _database.LatestSnapshot(op.Context);
-            if (_database.Store.StreamRelationshipTypes([name], latest, cancellationToken).Any())
+            using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+            if (_database.Store.StreamRelationshipTypes([name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add).Any())
             { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.DropRelationshipTypeAsyncDatabase); }
             await _database.Catalog.DeleteRelationshipTypeAsync(type.Id, op.Context, cancellationToken).ConfigureAwait(false);
         }, cancellationToken);
@@ -364,6 +373,7 @@ public sealed partial class GraphSchema
     /// <exception cref="DatabaseTransactionAbortedException">The schema changed after the transaction snapshot (CG04007).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The autocommit commit could not be confirmed durable.</exception>
     /// <exception cref="DatabaseException">Schema writes inside an explicit transaction are refused (CG04025, Cohesion policy).</exception>
+    /// <exception cref="DatabaseException">The statement work or retained-memory budget is exhausted (CG05004/CG05020).</exception>
     public ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, CancellationToken cancellationToken = default)
     {
         // Caller-contract failures precede statement admission and leave explicit transactions usable.
@@ -427,12 +437,14 @@ public sealed partial class GraphSchema
     private GraphLabelMetadata Label(string name, GraphOperation operation)
         => _database.Catalog.FindLabel(name, operation.Context.Snapshot) ?? throw DatabaseException.CreateGraphFailure("CG01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphSchemaLabelDatabase, name));
 
-    private async ValueTask WriteAsync(Func<GraphOperation, ValueTask> action, CancellationToken token)
+    private async ValueTask WriteAsync(Func<GraphOperation, ValueTask> action, CancellationToken token,
+        Protocol.GraphQueryLimits? limits = null, Assimalign.Cohesion.Database.Language.Location? location = null)
     {
         await _database.RunAsync(_session, async op =>
         {
             if (_session.CurrentTransaction is not null)
             { throw DatabaseException.CreateGraphFailure("CG04025", ErrorMessages.SchemaExplicitTransaction); }
+            _session.StartQueryBudget(op, limits, location);
             await _database.LockWriterAsync(op, token).ConfigureAwait(false);
             await action(op).ConfigureAwait(false);
             return true;

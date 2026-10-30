@@ -19,7 +19,9 @@ Standalone commands run on the session's database:
 - `CREATE INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property)`;
 - `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS NOT NULL`;
 - `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS :: type`;
-- constraint relationship patterns use `FOR ()-[r:TYPE]-()` and `REQUIRE r.property`;
+- constraint relationship patterns use `FOR ()-[r:TYPE]-()` and `REQUIRE r.property`, with
+  optional arrows (`()-[r:TYPE]->()`, `()<-[r:TYPE]-()`, `()<-[r:TYPE]->()`); rendering
+  normalizes all forms to the undirected pattern;
 - `DROP INDEX name [IF EXISTS]` and `DROP CONSTRAINT name [IF EXISTS]`;
 - Cohesion definition extensions `CREATE LABEL name [IF NOT EXISTS]`,
   `CREATE RELATIONSHIP TYPE name [IF NOT EXISTS]`, and their `DROP ... [IF EXISTS]` forms.
@@ -39,6 +41,12 @@ only forbids mixing schema and data writes in one transaction. A refused admitte
 aborts the explicit transaction; rollback restores session use. Typed argument checks precede
 admission and leave an explicit transaction usable. Auto-commit DDL owns one transaction,
 including token discovery, validation, physical indexes and catalog publication.
+
+Schema statements validate GraphQueryLimits inside their admitted operation (CG08021 for
+invalid limits). Owner validation scans and index backfill consume the statement work budget
+(CG05004); cursor buffers and retained backfill entries share its memory budget (CG05020).
+Exhaustion rolls back the rule, name reservation and every newly discovered token. Typed
+schema writes use the engine's statement limits.
 
 Indexes discover missing label/property tokens. Text constraints discover missing label/type/property
 tokens. A refused or failed creation leaves none of its new tokens. Discovered properties are

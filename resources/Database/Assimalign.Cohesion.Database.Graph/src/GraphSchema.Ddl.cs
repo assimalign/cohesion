@@ -18,7 +18,8 @@ namespace Assimalign.Cohesion.Database.Graph;
 
 public sealed partial class GraphSchema
 {
-    internal async ValueTask<DatabaseResult> ExecuteDdlAsync(GqlSchemaCommand command, IReadOnlyDictionary<string, object?>? parameters, CancellationToken token)
+    internal async ValueTask<DatabaseResult> ExecuteDdlAsync(GqlSchemaCommand command, IReadOnlyDictionary<string, object?>? parameters,
+        Protocol.GraphQueryLimits? limits, Assimalign.Cohesion.Database.Language.Location? location, CancellationToken token)
     {
         long affected = 0;
         await WriteAsync(async op =>
@@ -37,17 +38,18 @@ public sealed partial class GraphSchema
                     if (!exists) { if (command.IfExists) { return; } throw DatabaseException.CreateGraphFailure("CG01002", string.Format(CultureInfo.CurrentCulture,
                         relationship ? ErrorMessages.RelationshipTypeUnknown : ErrorMessages.GraphSchemaLabelDatabase, name)); }
                     var latest = _database.LatestSnapshot(op.Context);
+                    using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
                     if (relationship)
                     {
                         EnsureMutable(name, type!.Value.Owner, type.Value.OwningSchema, "DROP RELATIONSHIP TYPE");
-                        if (_database.Store.StreamRelationshipTypes([name], latest, token).Any())
+                        if (_database.Store.StreamRelationshipTypes([name], latest, token, op.QueryBudget.Consume, memory.Add).Any())
                         { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.DropRelationshipTypeAsyncDatabase); }
                         await _database.Catalog.DeleteRelationshipTypeAsync(type.Value.Id, op.Context, token).ConfigureAwait(false);
                     }
                     else
                     {
                         EnsureMutable(name, label!.Value.Owner, label.Value.OwningSchema, "DROP LABEL");
-                        if (_database.Store.StreamLabels([name], latest, token).Any())
+                        if (_database.Store.StreamLabels([name], latest, token, op.QueryBudget.Consume, memory.Add).Any())
                         { throw DatabaseException.CreateGraphFailure("CG03003", ErrorMessages.GraphSchemaDropLabelAsyncDatabase); }
                         foreach (var index in _database.Catalog.GetIndexes(label.Value.Id, op.Context.Snapshot))
                         { await _database.Store.DropIndexAsync(name, index.PropertyKey, op.Context, token).ConfigureAwait(false); }
@@ -97,7 +99,7 @@ public sealed partial class GraphSchema
                 }
             }
             affected = 1;
-        }, token).ConfigureAwait(false);
+        }, token, limits, location).ConfigureAwait(false);
         return new GraphMutationResult(affected, []);
     }
 
@@ -160,16 +162,18 @@ public sealed partial class GraphSchema
         await _database.Catalog.SaveIndexAsync(new GraphIndexMetadata(metadata, name, propertyKey), op.Context, cancellationToken).ConfigureAwait(false);
         if (!_database.Catalog.GetDeclaredPropertyKeys(metadata, op.Context.Snapshot).Any(key => key.Name == propertyKey))
         { await _database.Catalog.SavePropertyKeyAsync(new(metadata, propertyKey), op.Context, cancellationToken).ConfigureAwait(false); }
-        await _database.Store.CreateIndexAsync(label, propertyKey, op.Context, cancellationToken).ConfigureAwait(false);
+        using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
+        await _database.Store.CreateIndexAsync(label, propertyKey, op.Context, op.QueryBudget.Consume, memory.Add, cancellationToken).ConfigureAwait(false);
     }
 
     private async ValueTask CreateConstraintCoreAsync(GraphOperation op, GraphConstraintMetadata constraint, CancellationToken cancellationToken)
     {
         await _database.Catalog.CreateConstraintAsync(constraint, op.Context, cancellationToken).ConfigureAwait(false);
         var latest = _database.LatestSnapshot(op.Context);
+        using var memory = new GraphMemoryOwner(op.QueryBudget!.Memory);
         if (_database.Catalog.FindLabel(constraint.DefinitionId, latest) is { } label)
         {
-            foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken))
+            foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 Validate(node.Properties);
@@ -178,7 +182,7 @@ public sealed partial class GraphSchema
         else
         {
             var type = _database.Catalog.FindRelationshipType(constraint.DefinitionId, latest)!.Value;
-            foreach (var edge in _database.Store.StreamRelationshipTypes([type.Name], latest, cancellationToken))
+            foreach (var edge in _database.Store.StreamRelationshipTypes([type.Name], latest, cancellationToken, op.QueryBudget.Consume, memory.Add))
             {
                 Validate(edge.Properties);
             }

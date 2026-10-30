@@ -98,6 +98,17 @@ before discovery, including requests queued behind committing or rolling-back re
 Catalog-level staging tests preserve the lower layer's stale-snapshot and lock-handoff coverage;
 public-schema tests now assert the explicit-transaction refusal.
 
+Every admitted schema write starts and validates its statement budget inside the operation,
+after the explicit-transaction refusal and before writer-lock acquisition. Text requests use
+their lower GraphQueryLimits; typed writes use engine ceilings. Validation and definition-drop
+scans charge the same owner-posting work and cursor-memory callbacks as ordinary statements.
+Index backfill reserves growing entry-buffer capacity and owned keys before retaining them,
+stores only source references and keys, and charges both scans and tree insertions. An internal
+callback overload preserves the public storage boundary. All memory grants unwind with the
+schema operation; CG05004/CG05020 exhaustion rolls back rules, name reservations, physical
+index writes and discovered tokens through the normal failed-statement path. Invalid limits
+retain CG08021. No diagnostic identity or persisted format changes.
+
 Defaults (including generated-name hashing, scalar aliases, conditional matching, affected counts,
 definition syntax and SHOW CONSTRAINTS ordering) are specified in Graph.Language DIALECT.
 Generated identifiers depend only on semantic names/types and have no runtime hash randomization.

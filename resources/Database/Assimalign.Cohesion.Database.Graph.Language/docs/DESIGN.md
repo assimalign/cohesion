@@ -88,8 +88,16 @@ must match its property reference (CG01022). The dedicated parser branch skips o
 unsupported-function discovery, preserving one CK00001 for T3 forms and removing ON noise.
 SchemaCommand.ToString renders semantic fields with escaped double-quoted identifiers and
 canonical scalar names; it never depends on retained source text. The command is an optional
-query-expression property; the existing pipeline remains unchanged. DIALECT specifies syntax,
+query-expression property stored in the existing body slot alongside the mutually exclusive
+pipeline and composite forms, preserving ordinary query-expression allocation size. Malformed
+hand-built combinations retain both operands only for the existing execution refusal. DIALECT specifies syntax,
 conditionals, naming, transaction policy and token lifetime; Graph DESIGN owns coordination.
+
+Relationship schema patterns accept optional incoming and outgoing arrows, including both,
+and render as undirected patterns because constraints apply to a relationship type regardless
+of direction. Relationship indexes retain one named CK00001 without syntax diagnostics. This
+follows the local Neo4j grammar at
+`C:/Source/repos/neo4j/neo4j/community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:1202`.
 
 ## Parser and expression tree
 

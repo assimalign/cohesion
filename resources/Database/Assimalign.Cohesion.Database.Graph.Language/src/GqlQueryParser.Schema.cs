@@ -33,13 +33,18 @@ public sealed partial class GqlQueryParser
             Expect("FOR");
             Expect(TokenType.LeftParen, "'('");
             bool relationship = Take(TokenType.RightParen);
-            if (relationship) { Expect(TokenType.Minus, "'-'"); Expect(TokenType.LeftBracket, "'['"); }
+            if (relationship)
+            {
+                if (!Take(TokenType.LeftArrow)) { Expect(TokenType.Minus, "'-'"); }
+                Expect(TokenType.LeftBracket, "'['");
+            }
             string variable = Identifier();
             Expect(TokenType.Colon, "':'");
             string definition = Identifier(allowKeyword: true);
             if (relationship)
             {
-                Expect(TokenType.RightBracket, "']'"); Expect(TokenType.Minus, "'-'");
+                Expect(TokenType.RightBracket, "']'");
+                if (!Take(TokenType.RightArrow)) { Expect(TokenType.Minus, "'-'"); }
                 Expect(TokenType.LeftParen, "'('"); Expect(TokenType.RightParen, "')'");
             }
             else { Expect(TokenType.RightParen, "')'"); }

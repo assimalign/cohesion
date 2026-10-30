@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Shouldly;
 using Xunit;
@@ -6,6 +7,44 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Tests;
 
 public sealed class GqlSchemaDdlParserTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - Schema DDL: relationship arrows normalize to an undirected constraint")]
+    [InlineData("()-[r:T]->()")]
+    [InlineData("()<-[r:T]-()")]
+    [InlineData("()-[r:T]-()")]
+    [InlineData("()<-[r:T]->()")]
+    public void Parse_RelationshipArrows_ShouldNormalizeConstraint(string pattern)
+    {
+        // Arrange
+        var parser = new GqlQueryParser();
+        const string normalized = "CREATE CONSTRAINT \"c\" FOR ()-[\"r\":\"T\"]-() REQUIRE \"r\".\"p\" IS NOT NULL";
+        // Act
+        var parsed = (GqlQueryStatement)parser.Parse("CREATE CONSTRAINT c FOR " + pattern + " REQUIRE r.p IS NOT NULL");
+        var rendered = (GqlQueryStatement)parser.Parse(parsed.GqlExpression.ToString());
+        // Assert
+        parsed.Diagnostics.ShouldBeEmpty();
+        parsed.GqlExpression.ToString().ShouldBe(normalized);
+        rendered.Diagnostics.ShouldBeEmpty();
+        rendered.GqlExpression.SchemaCommand.ShouldBe(parsed.GqlExpression.SchemaCommand);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph.Language] - Schema DDL: standalone commands preserve ordinary query allocation size")]
+    public void Construct_OrdinaryExpression_ShouldPreserveAllocationSize()
+    {
+        // Arrange: warm cached empty arrays and retain every measured object against elimination.
+        var expressions = new GqlQueryExpression[256];
+        for (int i = 0; i < expressions.Length; i++) { expressions[i] = Create(); }
+        // Act
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < expressions.Length; i++) { expressions[i] = Create(); }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        GC.KeepAlive(expressions);
+        // Assert: the existing body slot holds stages, a composite or standalone DDL.
+        allocated.ShouldBe(256L * 136);
+
+        static GqlQueryExpression Create() => new(Array.Empty<GqlMatchClause>(), Array.Empty<GqlPathPattern>(),
+            Array.Empty<string>(), false, Array.Empty<GqlProjection>());
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph.Language] - Schema DDL: every supported form renders and reparses")]
     [InlineData("CREATE INDEX ix FOR (n:N) ON (n.p)")]
     [InlineData("CREATE INDEX IF NOT EXISTS FOR (n:N) ON (n.p)")]
@@ -40,6 +79,9 @@ public sealed class GqlSchemaDdlParserTests
     [InlineData("CREATE UNIQUE INDEX ix FOR (n:N) ON (n.p)", "UNIQUE INDEX")]
     [InlineData("CREATE INDEX ix FOR (n:N) ON (n.p,n.q)", "COMPOSITE INDEX")]
     [InlineData("CREATE INDEX ix FOR ()-[r:T]-() ON (r.p)", "RELATIONSHIP PROPERTY INDEX")]
+    [InlineData("CREATE INDEX ix FOR ()-[r:T]->() ON (r.p)", "RELATIONSHIP PROPERTY INDEX")]
+    [InlineData("CREATE INDEX ix FOR ()<-[r:T]-() ON (r.p)", "RELATIONSHIP PROPERTY INDEX")]
+    [InlineData("CREATE INDEX ix FOR ()<-[r:T]->() ON (r.p)", "RELATIONSHIP PROPERTY INDEX")]
     [InlineData("CREATE CONSTRAINT c FOR (n:N) REQUIRE n.p IS UNIQUE", "UNIQUE CONSTRAINT")]
     [InlineData("CREATE CONSTRAINT c FOR (n:N) REQUIRE n.p IS NODE UNIQUE", "UNIQUE CONSTRAINT")]
     [InlineData("CREATE CONSTRAINT c FOR ()-[r:T]-() REQUIRE r.p IS RELATIONSHIP UNIQUE", "UNIQUE CONSTRAINT")]

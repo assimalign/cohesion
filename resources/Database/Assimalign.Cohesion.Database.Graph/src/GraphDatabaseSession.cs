@@ -348,7 +348,8 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
             await AbortTransactionAsync(error).ConfigureAwait(false);
             throw error;
         }
-        return await GraphSchema.Open(_database, this).ExecuteDdlAsync(command, request.Parameters, token).ConfigureAwait(false);
+        return await GraphSchema.Open(_database, this).ExecuteDdlAsync(command, request.Parameters,
+            request.Limits, request.Statement.GqlExpression.Location, token).ConfigureAwait(false);
     }
 
     private static bool ValidSchemaCommand(GqlSchemaCommand command)
