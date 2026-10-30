@@ -73,13 +73,16 @@ Read-only statements warn with structured CG01023 for each distinct, ordinal, st
 entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship
 property-map keys and entity fields in RETURN, WHERE and ORDER BY, including aliases, lexical
 collections, correlated patterns, NEXT and composite operands. A name known on any label or
-relationship type suppresses the warning, even when absent on the entity being read. Missing map
+relationship type, or stored by an unlabeled entity or on a schema-owned definition, suppresses the
+warning, even when absent on the entity being read. Parenthesized and typed member accesses in
+ORDER BY use the projected alias's type, including when it shadows an incoming binding. Missing map
 fields, dynamic subscripts (`n[$key]` or `n['key']`) and writing statements do not warn. Values,
 row counts and explicit transaction state retain their normal behavior. EXPLAIN reports these
 warnings too. Each warning carries the property name and, when available, the first field-access
 span; pattern map keys and unlocated typed ASTs have no span. Diagnostics are available on typed
 results and through the negotiated wire Diagnostics channel. Property discovery follows the
-statement snapshot and rolls back with its write; removing a value retains discovered metadata.
+statement snapshot and rolls back with its write; removing a value retains discovery across reopen.
+Writing statements skip this analysis inside correlated reads as well as in the outer query.
 
 SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
 `~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix

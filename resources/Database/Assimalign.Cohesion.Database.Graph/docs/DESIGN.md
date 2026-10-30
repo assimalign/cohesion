@@ -3,20 +3,27 @@
 ## Unknown entity properties (#1249, #1738, GQ-D3)
 
 Read-only planning reports structured warning CG01023 for a statically named property unknown
-across all label and relationship-type metadata. MATCH property-map keys and entity field accesses
+across stored entity discoveries and label and relationship-type metadata. MATCH property-map keys and entity field accesses
 in predicates, projections, ordering, lexical collections and correlated subplans share the
 statement's token resolver. Composite operands and NEXT segments share it too: one warning per
 ordinal property name, using the first validated occurrence's expression span when present. Pattern keys have no AST span.
-Known names on another owner, map fields and dynamic subscripts do not warn. Writing statements
-return no property warnings. Results, explicit transactions and ordinary execution are preserved;
+Known names on another owner, map fields and dynamic subscripts do not warn. Every property-access
+AST form resolves ORDER BY aliases before classifying its receiver. Writing statements skip property
+analysis, including correlated EXISTS and pattern comprehensions. Results, explicit transactions and ordinary execution are preserved;
 EXPLAIN performs the same admission and reports the same warnings without execution.
 
 The catalog maintains a property-name directory alongside its existing version directory, loaded
 from existing v2 records and updated on publication and undo. Resolution checks snapshot-visible
 writer stamps in memory, without decoding catalog records or scanning labels, types or entities.
-Removal of an entity value retains its discovered metadata. Known probes allocate no warning state;
-only misses allocate the ordinal de-duplication set and resource-formatted diagnostics. Resolver and
-ordinary planner object sizes stay fixed. Isolated Release scalar/aggregate dispatch remains
+Entity records currently embed string keys; there is no separate property-token identity to consult.
+Unlabeled writes and undeclared keys on schema-owned definitions therefore save untyped kind-3
+discovery records with private identities, using the same publication, visibility and undo path.
+They do not attach metadata to a definition or change its declared rules. Removal of a value retains
+its discovery across reopen. The existing record codec and format fence remain unchanged.
+Resolution and warning admission share one cached result per ordinal name across the statement.
+Known-only caches are borrowed during planning and returned on success or failure; diagnostic lists
+remain owned by their results. Only misses allocate diagnostic state and formatted messages.
+Resolver and ordinary planner object sizes stay fixed. Isolated Release scalar/aggregate dispatch remains
 17,130.368 / 58,094.944 B/query, matching the base; read-path allocation guards remain in force.
 The typed DatabaseResult.Diagnostics carrier and negotiated wire Diagnostics messages already
 carry warnings; no public API, assembly reference, disk format or wire change is required.

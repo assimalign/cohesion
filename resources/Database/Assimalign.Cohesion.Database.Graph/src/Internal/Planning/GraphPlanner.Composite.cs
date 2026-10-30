@@ -14,7 +14,8 @@ internal sealed partial class GraphPlanner
         bool paths, CancellationToken token, IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null, GraphReductionWork? sharedWork = null, GraphTokenResolver? tokens = null)
     {
         ValidateCompositeReadOnly(query, token);
-        tokens ??= new GraphTokenResolver(_database.Catalog, _snapshot);
+        using var ownedTokens = tokens is null ? new GraphTokenResolver(_database.Catalog, _snapshot) : null;
+        tokens ??= ownedTokens!;
         var normalized = inputShapes is not null ? parameters : ParameterBindings.Normalize(parameters, name => new GraphPlanningException("CG01014",
             string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
         var operation = query.Composite!.Operator;

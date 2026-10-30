@@ -42,6 +42,8 @@ public sealed class GraphCatalog
 
     // Per-instance fault/record-visit seam, reached only by this model's tests.
     internal Action? BeforeRecordRead { get; set; }
+    internal Action? BeforePropertyCheck { get; set; }
+    internal Action<string>? BeforePropertyKeyLookup { get; set; }
     internal Action? BeforeDirectoryKeyVisit { get; set; }
 
     private GraphCatalog(GraphStorage storage, TransactionCoordinator coordinator)
@@ -222,6 +224,7 @@ public sealed class GraphCatalog
     // metadata or scanning definitions on the read path. Undone versions leave this directory.
     internal bool HasPropertyKey(string name, TransactionSnapshot snapshot)
     {
+        BeforePropertyKeyLookup?.Invoke(name);
         lock (_sync)
         {
             if (!_propertyNames.TryGetValue(name, out var versions)) { return false; }
@@ -231,6 +234,18 @@ public sealed class GraphCatalog
             }
             return false;
         }
+    }
+
+    // Entity records persist string keys, rather than separate property-token identities.
+    // Reuse kind-3 catalog records for discoveries without a mutable definition. A fresh
+    // private identity keeps them outside every definition's metadata and avoids reserving
+    // a public GUID or adding a second registry/record format. Add and undo maintain the
+    // same database-wide name directory as declared keys.
+    internal ValueTask DiscoverPropertyKeyAsync(string name, TransactionContext context, CancellationToken token)
+    {
+        if (HasPropertyKey(name, context.Snapshot)) { return default; }
+        return SaveAsync(new CatalogRecord(property: new GraphPropertyKeyMetadata(Guid.NewGuid(), name)),
+            null, context, token);
     }
 
     internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
