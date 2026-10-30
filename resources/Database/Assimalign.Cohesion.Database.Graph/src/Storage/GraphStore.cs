@@ -68,6 +68,8 @@ public sealed partial class GraphStore
     }
 
     private Dictionary<ulong, RecordSpaceVersionStore>? _scopeWriters;
+    internal RecordSpaceVersionStore? ScopeLedger(TransactionSequence writer)
+        => Volatile.Read(ref _scopeWriters)?.GetValueOrDefault(writer.Value);
     // Test-only seam in the window after apply admission ends, before the caller resumes.
     internal Action? AfterApply { get; set; }
 

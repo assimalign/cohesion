@@ -721,7 +721,15 @@ reference to an immutable evaluation key, including every bound id and equality.
 whose inputs change must use a fresh key. This one-entry cache retains no factory closure and
 cannot grow with distinct input rows; the executor accounts evaluated operands and both complete probe results.
 
-GraphMergeLocks is lazy and transaction-owned, including across statements. A new parent/entry
+GraphMergeLocks is lazy and transaction-owned, including across statements. For marked writers,
+tracker parent/entry/escalation before-images join the existing ordered undo ledger through
+ordinary apply admission. Root ends drain those memory-only brackets before removing the ledger,
+so a late tracker publication cannot orphan undo after rollback. No tracker monitor spans
+admission, an apply-gate wait or a lock request. ROLLBACK TO restores the pre-marker tracker and
+its retained memory charge before releasing scoped grants; RELEASE transfers those effects to
+the enclosing scope. Repeated undo and later MERGE therefore reacquire released grants without
+a spurious CG05020. This follows PostgreSQL lock owner removal/reassignment
+(src/backend/storage/lmgr/lock.c:2633-2723,2727-2805). A new parent/entry
 charges 640 bytes to the acquiring operation's existing query-memory budget (CG05020 on refusal),
 covering manager state and local bookkeeping. Each MERGE statement also accounts for all retained
 pattern state from earlier statements; 256 additional bytes cover its statement cache. All query
@@ -729,7 +737,7 @@ leases end with the statement, so the tracker never retains a completed query's 
 workspaces. A smaller later query budget refuses even a previously held pattern if the retained
 state exceeds that limit, aborting the explicit transaction. Each pattern first takes parent
 IntentExclusive. After 128 distinct entry resources, new patterns use a single Exclusive object
-lock in the same namespace. The earlier, at most 128 entry grants remain held through undo and
+lock in the same namespace. The earlier, at most 128 entry grants remain held until their owning scope is undone or
 normal coordinator release; escalation never grows that set. This caps both retained lock state
 and the manager's end walk without a new kernel release API or an unsafe early release. The
 parent protocol preserves phantom serialization. While the writer lock remains, production never
@@ -3550,7 +3558,7 @@ collisions and retained versions; ordering its `m` visible matches adds `O(m log
 
 #### Storage: Atomicity, conflicts and recovery
 
-All graph writers acquire the shared database-level exclusive lock and retain it until
+All graph writers acquire the shared database-level exclusive lock and retain it until their owning savepoint is undone or until
 logical commit/rollback; readers use MVCC snapshots. A weakly associated per-transaction
 async gate serializes complete store mutations, including statement views of the same
 transaction, from lookup and encoding through directory publication. The gate is allocated
