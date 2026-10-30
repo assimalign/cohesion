@@ -76,6 +76,7 @@ public sealed class TransactionContext
     private const int streamUnit = 1 << 16;
     private const int applyMask = streamUnit - 1;
     private const byte markedFlag = 8;
+    private const byte liveScopesFlag = 16;
     // Reuse the former end boolean's byte. A second boolean grows every statement pin
     // by eight aligned bytes; lifecycle and pending-undo bits share this existing storage.
     private byte _admission;
@@ -176,7 +177,18 @@ public sealed class TransactionContext
 
     internal bool HasOpenWriteStreams => (Volatile.Read(ref (_transaction ?? this)._applying) & ~applyMask) != 0;
     internal bool HadUndoMarkers => (Volatile.Read(ref (_transaction ?? this)._admission) & markedFlag) != 0;
-    internal void MarkUndoScopes() { lock (_endSync) { (_transaction ?? this)._admission |= markedFlag; } }
+    // Ledger and lock-table monitors are released before this lifecycle latch. The
+    // admitted control keeps its apply count until this bit and its ledger agree.
+    internal void MarkUndoScopes(bool active = true)
+    {
+        lock (_endSync)
+        {
+            var owner = _transaction ?? this;
+            owner._admission = active
+                ? (byte)(owner._admission | markedFlag | liveScopesFlag)
+                : (byte)(owner._admission & ~liveScopesFlag);
+        }
+    }
 
     internal void BeginWriteStream()
     {
@@ -316,6 +328,10 @@ public sealed class TransactionContext
             { throw new TransactionAbortedException(ErrorMessages.IsolationStatementRunning); }
             if ((owner._admission & partialUndoFlag) != 0)
             { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
+            // Marker completion sets this bit before dropping its apply count, under
+            // this same latch. A replacement sees either that count or the live scope.
+            if ((owner._admission & liveScopesFlag) != 0)
+            { throw new ArgumentException(ErrorMessages.IsolationSavepointActive, "context"); }
             return new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
         }
     }

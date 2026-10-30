@@ -29,7 +29,8 @@ Graph/Documents statement failure still aborts the whole transaction: ROLLBACK T
 that failure (owner decision, 2026-10-25), unlike PostgreSQL aborted subtransactions. The read
 fence uses a volatile read of the existing kernel admission flags, adding no monitor or allocated
 object to a transaction that never creates a savepoint. CK04012 requires an explicit bound
-transaction; CK04013 denotes an absent name. All three language clients retain their negotiated
+transaction; CK04013 denotes an absent name. The coordinator records the actual scope-discard transition in error-only exception metadata keyed by its opaque owned token. The root trims descendants only with that attempt's evidence; a canceled or refused pre-admission outer retry cannot discard a still-live inner name. This also preserves newest-name lookup when discarded descendants shadow an older duplicate. No public member or unmarked transaction field is added. Unexpected cancellation thrown by admitted undo is CK04009; an owned carrier retains its original cause and admission evidence until model translation, keeping pre-admission cancellation distinct. Exception-data synchronization follows kernel release and never spans callbacks or root/kernel calls. UpdateSavepointContext requires this active transaction's immutable id and sequence and the admitted configuration callback; validation adds no tracking monitor or snapshot allocation. RunningOperations counts admitted work and hides the control/configuration reservations, always reporting a nonnegative number. Offline and aborted/ended causes precede the retry fence.
+All three language clients retain their negotiated
 Ready I/T/E and rollback-on-pool-return contracts.
 
 PostgreSQL references rechecked in the local clone: src/backend/access/transam/xact.c:4426-4498

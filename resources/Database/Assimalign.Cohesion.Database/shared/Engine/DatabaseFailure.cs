@@ -40,8 +40,43 @@ internal static class DatabaseFailure
             { Code = code, Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error)
             : null;
 
+    // Named controls first use the model's ordinary statement translator. Only then may a
+    // still-active undo fence replace its code, retaining that translated cause. Cancellation
+    // before admission and lifecycle/corruption failures keep their existing contracts.
+    internal static Exception TranslateSavepointFailure(Exception reported, Transactions.TransactionContext? context)
+    {
+        bool admittedCancellation = false;
+        if (Find<OperationCanceledException>(reported) is { } cancellation)
+        {
+            // No root/kernel lock is held or acquired under exception-data sync. The root's
+            // owned carrier distinguishes a fault in undo from cancellation before admission.
+            var data = cancellation.Data;
+            lock (data.SyncRoot)
+            {
+                admittedCancellation = data[typeof(Transactions.TransactionSavepoint)] is true;
+                data.Remove(typeof(Transactions.TransactionSavepoint));
+            }
+        }
+        return context is not null && Transactions.TransactionCoordinator.IsPartialUndoPending(context)
+            && (reported is not OperationCanceledException || admittedCancellation)
+            && Find<DatabaseOfflineException>(reported) is null
+            && Find<DatabaseTransactionCommitUnconfirmedException>(reported) is null
+            && Find<StorageOfflineException>(reported) is null
+            && reported is not DatabaseException { Diagnostics: [{ Code: "CK07004" }, ..] }
+            && Find<ObjectDisposedException>(reported) is null
+            && !IsCorruption(reported)
+            ? reported is DatabaseException { Diagnostics: [{ Code: "CK04009" }, ..] } ? reported
+                : new DatabaseException(reported.Message, [new Types.Diagnostic
+                { Code = "CK04009", Message = reported.Message, Severity = Types.DiagnosticSeverity.Error }], reported)
+            : reported;
+    }
+
+    internal static bool IsCorruption(Exception error)
+        => Find<DatabaseCorruptionException>(error) is not null
+            || StorageCorruptionException.Find(error) is not null || Find<IndexCorruptionException>(error) is not null;
+
     internal static bool IsStorageFailure(Exception error)
-        => error is not DatabaseException { Diagnostics: [{ Code: "CK04009" }, ..] }
+        => IsCorruption(error) || (error is not DatabaseException { Diagnostics: [{ Code: "CK04009" }, ..] }
             && Transactions.TransactionCoordinator.GetUndoFailureCode(error) != "CK04009"
             && Find<StorageOfflineException>(error) is null
             && (Find<StorageException>(error) is not null || Find<IOException>(error) is not null
@@ -49,6 +84,6 @@ internal static class DatabaseFailure
                 || (Find<IndexException>(error) is not null
                     && (error is not (DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException
                             or Transactions.TransactionAbortedException or Transactions.TransactionDeadlockException)
-                        || Find<IndexCorruptionException>(error) is not null)));
+                        || Find<IndexCorruptionException>(error) is not null))));
 
 }

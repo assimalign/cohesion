@@ -22,6 +22,9 @@ transaction (CK04012); an unknown name is CK04013. Successful controls return af
 Pre-canceled controls change nothing; admitted undo completes despite later cancellation.
 Incomplete undo reports Faulted transaction status and CK04009 for all work except rollback to
 the same or an outer retained scope, or whole ROLLBACK. Pool return rolls back and clears names.
+Failed named controls use the statement error translator; incomplete undo reports CK04009 with
+the translated cause and Ready E on the open connection. Offline, disposed and corruption errors
+keep precedence; corruption aborts the transaction.
 
 PostgreSQL nested-scope behavior follows the locally rechecked
 src/backend/access/transam/xact.c:4426-4498,4511-4607,4620-4733. Markers remain in memory and use

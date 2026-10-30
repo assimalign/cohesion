@@ -121,7 +121,7 @@ public sealed class NamedSavepointTests
         });
 
         // Act
-        try { await Should.ThrowAsync<InvalidOperationException>(async () => await session.ExecuteAsync("ROLLBACK TO target")); }
+        try { (await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("ROLLBACK TO target"))).Diagnostics[0].Code.ShouldBe("CK04009"); }
         finally { UndoMarkerDriver.SetBatchObserver(database.Coordinator, null); }
 
         // Assert

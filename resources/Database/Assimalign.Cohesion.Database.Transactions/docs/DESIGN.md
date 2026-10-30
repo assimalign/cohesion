@@ -19,6 +19,8 @@ now execute named controls. Root end releases every marker through the existing 
 
 ## Isolation configuration (#1012)
 
+Isolation replacement refuses a context with live savepoint tokens, even at the same level, with ArgumentException. Releasing the final scope permits replacement again. Registration precedes the context latch. Marker completion updates a live-scope bit in the existing admission byte under that latch before dropping its apply count, so replacement sees either the running control or its live scopes. Ledger and lock-table monitors are released before taking the latch. A refused replacement leaves every token usable (#1726).
+
 ReplaceIsolationLevel returns an immutable replacement context with the same id, sequence and
 begin snapshot. Earlier handles and statement views share one end/apply lifecycle. Registration
 changes under manager lock before coordinator tracking; those locks are never nested. The context

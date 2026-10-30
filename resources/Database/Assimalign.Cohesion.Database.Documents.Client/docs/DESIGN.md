@@ -9,6 +9,7 @@ continued after undo and root commit, peer isolation and the model's failure rul
 CK04013 remain structured diagnostics. An active savepoint transaction returned to the pool
 is rolled back; tests rent the exact authenticated server session again and prove the old name
 and uncommitted rows are absent. Faulted partial undo uses existing Ready E and pool rollback.
+Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.
 
 ## Array-posting NativeAOT guard (#1530)
 

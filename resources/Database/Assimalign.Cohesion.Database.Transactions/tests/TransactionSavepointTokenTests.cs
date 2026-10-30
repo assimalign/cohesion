@@ -12,6 +12,30 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 [Collection("Undo substrate")]
 public sealed class TransactionSavepointTokenTests
 {
+    [Theory(DisplayName = "Cohesion Test [Transactions] - Live savepoint tokens refuse even same-level isolation replacement (#1726)")]
+    [InlineData(IsolationLevel.Snapshot)]
+    [InlineData(IsolationLevel.ReadCommitted)]
+    public async Task ReplaceIsolationLevel_LiveTokens_ShouldRefuseWithoutInvalidatingThem(IsolationLevel level)
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var context = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var outer = await coordinator.CreateSavepointAsync(context);
+        var inner = await coordinator.CreateSavepointAsync(context);
+
+        // Act / Assert
+        Should.Throw<ArgumentException>(() => coordinator.ReplaceIsolationLevel(context, level));
+        await coordinator.ReleaseSavepointAsync(context, inner);
+        Should.Throw<ArgumentException>(() => coordinator.ReplaceIsolationLevel(context, level));
+        await coordinator.RollbackToSavepointAsync(context, outer);
+        await coordinator.ReleaseSavepointAsync(context, outer);
+        var replacement = coordinator.ReplaceIsolationLevel(context, level);
+        replacement.Id.ShouldBe(context.Id);
+        replacement.IsolationLevel.ShouldBe(level);
+        await coordinator.RollbackAsync(replacement);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Transactions] - Savepoint tokens: foreign coordinators and contexts cannot use a live scope (#1726)")]
     public async Task ReleaseSavepointAsync_ForeignOwner_ShouldRefuseWithoutInvalidatingScope()
     {

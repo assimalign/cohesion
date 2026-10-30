@@ -36,6 +36,8 @@
   <data name="SessionCreateClosedExceptionDatabase" xml:space="preserve"><value>The session is closed.</value></data>
   <data name="SavepointControlBusy" xml:space="preserve"><value>A statement or another control is already running on this session or transaction.</value></data>
   <data name="SavepointBindingMissing" xml:space="preserve"><value>This transaction has no savepoint binding.</value></data>
+  <data name="SavepointContextConfigurationRequired" xml:space="preserve"><value>The savepoint context can change only during admitted isolation configuration.</value></data>
+  <data name="SavepointContextOwnerInvalid" xml:space="preserve"><value>The context does not belong to this active transaction.</value></data>
   <data name="SavepointOutsideTransaction" xml:space="preserve"><value>Savepoint commands require an explicit transaction.</value></data>
   <data name="SavepointUnknown" xml:space="preserve"><value>The named savepoint does not exist.</value></data>
   <data name="SavepointUndoPending" xml:space="preserve"><value>Partial undo requires retry of the same or an outer savepoint, or ROLLBACK.</value></data>

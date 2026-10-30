@@ -216,10 +216,13 @@ public sealed class TransactionUndoLockTests
             // Act
             await Should.ThrowAsync<System.IO.IOException>(() => coordinator.CreateUndoMarkerAsync(writer).AsTask());
             active.ShouldBeFalse();
+            writer = coordinator.ReplaceIsolationLevel(writer, IsolationLevel.Snapshot);
             var marker = await coordinator.CreateUndoMarkerAsync(writer);
+            Should.Throw<ArgumentException>(() => coordinator.ReplaceIsolationLevel(writer, IsolationLevel.Snapshot));
             await coordinator.ReleaseUndoMarkerAsync(writer, marker);
             // Assert: an unpublished earlier token would keep registration active.
             active.ShouldBeFalse();
+            writer = coordinator.ReplaceIsolationLevel(writer, IsolationLevel.Snapshot);
             await coordinator.CreateUndoMarkerAsync(writer);
         }
         finally { await coordinator.DisposeAsync(); }

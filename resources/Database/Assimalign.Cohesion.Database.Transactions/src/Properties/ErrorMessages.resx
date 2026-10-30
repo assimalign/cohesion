@@ -42,4 +42,5 @@
   <data name="IsolationStatementRunning" xml:space="preserve"><value>A statement apply is running; transaction isolation cannot change.</value></data>
   <data name="IsolationTransactionEnding" xml:space="preserve"><value>The transaction is ending or has ended; isolation cannot change.</value></data>
   <data name="IsolationBeginPinRequired" xml:space="preserve"><value>Restoring fixed begin visibility from READ COMMITTED requires an active begin-time snapshot pin.</value></data>
+  <data name="IsolationSavepointActive" xml:space="preserve"><value>Isolation cannot change while savepoint tokens are live.</value></data>
 </root>

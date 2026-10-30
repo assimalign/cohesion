@@ -132,12 +132,22 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <exception cref="InvalidOperationException">The transaction has no kernel binding.</exception>
     protected TransactionContext KernelContext => _savepointContext ?? throw new InvalidOperationException(ErrorMessages.SavepointBindingMissing);
 
-    /// <summary>Updates the current context after an admitted isolation replacement.</summary>
+    /// <summary>Updates the current context during this transaction's admitted isolation configuration.</summary>
     /// <param name="context">The replacement lifecycle handle.</param>
     /// <exception cref="ArgumentNullException">The context is null.</exception>
+    /// <exception cref="ArgumentException">The context belongs to another transaction or is not active.</exception>
+    /// <exception cref="InvalidOperationException">Isolation configuration is not running on this thread.</exception>
     protected void UpdateSavepointContext(TransactionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        // TryConfigureIsolationLevel owns _sync and its -2 reservation throughout the callback.
+        if (!Monitor.IsEntered(_sync) || _operations != -2 || _ended || Failure is not null)
+        { throw new InvalidOperationException(ErrorMessages.SavepointContextConfigurationRequired); }
+        // Identity and ordering sequence are immutable across isolation replacement. Checking
+        // those owned values adds no manager/tracking monitor or snapshot allocation to SET.
+        if (_savepointContext is null || context.Id != _id || context.Sequence != _savepointContext.Sequence ||
+            context.State != TransactionState.Active)
+        { throw new ArgumentException(ErrorMessages.SavepointContextOwnerInvalid, nameof(context)); }
         _savepointContext = context;
     }
 
@@ -198,14 +208,36 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
         catch (Exception failure)
         {
-            // Admitted rollback discards descendants before its first physical batch. Mirror
-            // that scope lifetime even if undo fails; the retained target remains retryable.
-            if (operation == DatabaseSavepointOperation.Rollback && targetIndex >= 0 && UndoPending)
-            { Savepoints!.RemoveRange(targetIndex + 1, Savepoints.Count - targetIndex - 1); }
+            // Only this attempt's kernel admission can discard descendants. A pending fence
+            // alone says nothing about a canceled/refused outer retry. The coordinator stamps
+            // every caught failure with this owned token's actual scope-discard transition.
+            bool scopeDiscarded = false;
+            if (operation == DatabaseSavepointOperation.Rollback && targetIndex >= 0)
+            {
+                var token = Savepoints![targetIndex].Token;
+                var data = failure.Data;
+                // End gate -> exception-data sync root; kernel admission has ended. Never
+                // call root/kernel/ledger code while locked. Adapters may reuse an exception.
+                lock (data.SyncRoot)
+                {
+                    scopeDiscarded = data[token] is true;
+                    data.Remove(token); // Consumed evidence must not retain the coordinator.
+                }
+                if (scopeDiscarded) { Savepoints.RemoveRange(targetIndex + 1, Savepoints.Count - targetIndex - 1); }
+            }
             if (TransactionCoordinator.GetUndoFailureCode(failure) is { } code)
             {
                 throw new DatabaseException(failure.Message, [new Assimalign.Cohesion.Database.Types.Diagnostic
                 { Code = code, Message = failure.Message, Severity = Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error }], failure);
+            }
+            if (scopeDiscarded && UndoPending && failure is OperationCanceledException canceled)
+            {
+                // Undo ignores cancellation after admission. Give its unexpected cancellation
+                // fault an owned carrier, so a reused adapter exception cannot share this witness
+                // with another attempt. The model translates it, then consumes the witness.
+                var reported = new OperationCanceledException(canceled.Message, canceled, canceled.CancellationToken);
+                reported.Data[typeof(TransactionSavepoint)] = true;
+                throw reported;
             }
             throw;
         }
@@ -258,9 +290,16 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             // The coordinator's tracking lock follows manager release. No storage/page latch or
             // lock-manager grant is acquired here. End cores run after releasing root state.
             if (!IsUsableLocked || _operations != 0 || HasSavepoints) { return false; }
-            if (!configure()) { return false; }
-            _isolationLevel = isolationLevel;
-            return true;
+            // Reuse the operation field: -2 reserves this synchronous callback without adding
+            // per-transaction state. The monitor excludes ends; finally covers refusal/throw.
+            _operations = -2;
+            try
+            {
+                if (!configure()) { return false; }
+                _isolationLevel = isolationLevel;
+                return true;
+            }
+            finally { _operations = 0; }
         }
     }
 
@@ -321,7 +360,9 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets the number of operations of the transaction still running (<see cref="TryBeginOperation"/>).
+    /// Gets the nonnegative number of admitted statements, commands or streams still running
+    /// (<see cref="TryBeginOperation"/>). A serialized transaction control or isolation
+    /// configuration is not an operation and reports zero.
     /// </summary>
     protected int RunningOperations
     {
@@ -329,7 +370,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         {
             lock (_sync)
             {
-                return _operations;
+                return Math.Max(0, _operations);
             }
         }
     }
@@ -643,8 +684,9 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     {
         lock (_sync)
         {
-            if (UndoPending) { return UndoRefusal(); }
-            if (_operations < 0) { return ControlBusyRefusal(); }
+            // The leaf's offline observation is nonblocking. Lifecycle/abort causes win over
+            // the retry fence, including an offline disposal that skipped physical rollback.
+            if (GetOfflineRefusal() is { } offline) { return offline; }
             if (Failure is not null)
             {
                 return CreateAbortedException(Failure, commit: false);
@@ -656,6 +698,9 @@ public abstract class DatabaseTransaction : IAsyncDisposable
                     ? DatabaseException.CreateRootFailure("CK04006", ErrorMessages.TransactionCreateRefusalDatabase)
                     : DatabaseException.CreateRootFailure("CK04005", ErrorMessages.TransactionCreateRefusalDatabase2);
             }
+
+            if (UndoPending) { return UndoRefusal(); }
+            if (_operations < 0) { return ControlBusyRefusal(); }
 
             return CreateAbortedException(null, commit: false);
         }

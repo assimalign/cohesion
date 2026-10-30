@@ -16,6 +16,8 @@ root reports Faulted while the kernel remains Active and retryable. Pre-canceled
 no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
 format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
 
+Named controls dispatch before async frame creation; their translation locals never grow ordinary control frames. Every named control uses the ordinary statement failure translator before reporting CK04009 for an incomplete kernel undo. The translated failure is retained as its cause. Offline, disposed and corruption failures take precedence; corruption aborts the writer (#1364). The server handles a recoverable failure as a statement error followed by Ready E, so retry or whole rollback uses the same connection.
+
 | Code | Savepoint condition |
 |---|---|
 | CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |

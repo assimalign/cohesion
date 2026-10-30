@@ -1,5 +1,9 @@
 # Graph client design
 
+## Named savepoint failure recovery (#1726)
+
+Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.
+
 ## Named savepoint wire conformance (#1726, XT-4)
 
 The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
