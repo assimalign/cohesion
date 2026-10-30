@@ -22,6 +22,43 @@ public sealed class TransactionUndoAdmissionTests
 
     public TransactionUndoAdmissionTests(ITestOutputHelper output) { _output = output; }
 
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Undo: empty suffix completes while another writer holds the apply gate")]
+    public async Task RollbackToMarker_EmptySuffix_ShouldSkipBusyApplyGate()
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var other = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var marker = await coordinator.CreateUndoMarkerAsync(writer);
+        using var entered = new ManualResetEventSlim();
+        using var resume = new ManualResetEventSlim();
+        int applies = 0;
+        var applying = DedicatedTestTask.Run(() => coordinator.ApplyStatementAsync(other, _ =>
+        {
+            Interlocked.Increment(ref applies);
+            entered.Set();
+            resume.Wait(_timeout).ShouldBeTrue();
+            return 0;
+        }).AsTask());
+        try
+        {
+            entered.Wait(_timeout).ShouldBeTrue();
+            // Act
+            await coordinator.RollbackToUndoMarkerAsync(writer, marker).AsTask().WaitAsync(_timeout);
+            // Assert
+            applies.ShouldBe(1);
+            writer.PartialUndoPending.ShouldBeFalse();
+        }
+        finally
+        {
+            resume.Set();
+            await applying.WaitAsync(_timeout);
+        }
+        await coordinator.CommitAsync(writer);
+        await coordinator.CommitAsync(other);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Transactions] - Undo: release between validation and admission leaves the writer usable")]
     [InlineData(false)]
     [InlineData(true)]
@@ -109,7 +146,16 @@ public sealed class TransactionUndoAdmissionTests
             statement = DedicatedTestTask.Run(() => coordinator.ApplyStatementAsync(writer,
                 _ => Interlocked.Increment(ref statements), canceled.Token).AsTask());
             observedWait = await Task.WhenAny(waiting.Task, statement).WaitAsync(_timeout) == waiting.Task;
-            if (cancel) { canceled.Cancel(); }
+            if (cancel)
+            {
+                canceled.Cancel();
+                // Cancellation must finish while the control is still suspended, releasing
+                // the database-wide gate for unrelated writers.
+                await Should.ThrowAsync<OperationCanceledException>(() => statement.WaitAsync(_timeout));
+                var other = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+                (await coordinator.ApplyStatementAsync(other, _ => 9).AsTask().WaitAsync(_timeout)).ShouldBe(9);
+                await coordinator.CommitAsync(other);
+            }
         }
         finally
         {

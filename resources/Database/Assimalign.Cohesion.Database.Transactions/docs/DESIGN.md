@@ -76,8 +76,10 @@ searches parent savepoints from a failed subtransaction and restarts the selecte
 `TransactionUndoException` CK04009 while the transaction remains Active and retryable.
 Statement admission decides its refusal inside the existing end latch: ending/ended takes
 precedence over pending undo and reports `TransactionAbortedException`. Statements wait on
-that latch for a memory-only create/release, whose exit wakes them to recheck cancellation
-before admission. The ordinary apply path adds no cancellation check, lock or allocation.
+that latch for a memory-only create/release, counting their wait in admission so later controls
+cannot starve them. The contention path polls cancellation while the control remains in flight.
+An empty rollback suffix completes without the apply gate. Root ends drain admitted rollback-to
+lookup and gate waits, which can wait behind another writer. The ordinary apply path adds no cancellation check, lock or allocation.
 The root end claim clears the pending retry bit under its existing latch, including when
 physical whole undo will be deferred; the ending bit remains authoritative. Storage faults retain the existing offline
 rule. Cancellation is checked before admission; once admitted, lookup construction and the

@@ -604,7 +604,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 throw;
             }
 
-            _versionStore.BuildRollbackLookup(context.Sequence, marker!);
+            if (!_versionStore.BuildRollbackLookup(context.Sequence, marker!))
+            {
+                // Exclusive writer admission makes an empty suffix independent of the gate.
+                await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                undoOwner.CompletePartialUndo();
+                return marker!;
+            }
             // Admission freezes this writer's ledger and end before prefix work. Other
             // writers retain the apply gate until physical undo actually needs it.
             await _applyGate.WaitAsync().ConfigureAwait(false);
@@ -685,6 +691,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// applied after the rollback's undo would carry a sequence every snapshot then
     /// reads as committed, and nothing would ever undo it.
     /// </exception>
+    /// <exception cref="TransactionUndoException">CK04009: partial undo is running or incomplete.</exception>
+    /// <exception cref="OperationCanceledException">Gate acquisition or a wait for a memory-only undo control was canceled.</exception>
+    /// <remarks>Waits for the database apply gate and any admitted marker create or release.</remarks>
     public async ValueTask<T> ApplyStatementAsync<T>(
         TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply,

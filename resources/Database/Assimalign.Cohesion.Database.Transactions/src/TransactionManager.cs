@@ -616,8 +616,12 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <see cref="TransactionContext.ExitApply"/>.
     /// </summary>
     /// <param name="context">The context the statement runs under, or a statement wrapper sharing its sequence.</param>
+    /// <param name="cancellationToken">Cancels a wait for a memory-only undo control.</param>
     /// <returns>The manager's context for the transaction.</returns>
     /// <exception cref="TransactionAbortedException">The transaction has ended or its end has begun.</exception>
+    /// <exception cref="TransactionUndoException">CK04009: partial undo is running or incomplete.</exception>
+    /// <exception cref="OperationCanceledException">A wait for a memory-only undo control was canceled.</exception>
+    /// <remarks>Waits for an admitted marker create or release; waiting statements block new controls.</remarks>
     internal TransactionContext EnterApply(TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);

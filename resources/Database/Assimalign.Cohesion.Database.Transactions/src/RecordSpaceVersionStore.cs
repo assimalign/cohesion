@@ -118,7 +118,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
         }
     }
 
-    internal void BuildRollbackLookup(TransactionSequence writer, TransactionUndoMarker marker)
+    internal bool BuildRollbackLookup(TransactionSequence writer, TransactionUndoMarker marker)
     {
         List<LedgerEntry>? entries;
         lock (_sync) { _ledger.TryGetValue(writer.Value, out entries); }
@@ -152,6 +152,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
         }
 
         lock (_sync) { _undoScopes![writer.Value].TombstonesToUndo = tombstonesToUndo; }
+        return entries is not null && entries.Count > marker.Position;
     }
 
     internal async ValueTask RollbackToMarkerUnderGateAsync(TransactionSequence writer, TransactionUndoMarker marker)

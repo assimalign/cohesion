@@ -303,9 +303,29 @@ public sealed class TransactionContext
 
                 // Create/release are short, memory-only controls and never need the apply
                 // gate held by this waiter. Recheck end/pending after every wake-up.
-                waitingForUndoControl?.Invoke();
-                Monitor.Wait(_endSync);
-                cancellationToken.ThrowIfCancellationRequested();
+                // Count the waiter before releasing the latch: back-to-back controls
+                // must yield to a statement that already waited for one.
+                _applying++;
+                try
+                {
+                    waitingForUndoControl?.Invoke();
+                    while ((_admission & undoControlFlag) != 0 &&
+                        (_admission & endingFlag) == 0 && State == TransactionState.Active)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        // Only memory-control contention polls; ordinary applies retain
+                        // their existing allocation and cancellation-check cost.
+                        Monitor.Wait(_endSync, 50);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                catch
+                {
+                    ExitApply();
+                    throw;
+                }
+                // The latch stays held from dropping the wait count through admission.
+                ExitApply();
             }
 
             _applying++;
@@ -349,9 +369,10 @@ public sealed class TransactionContext
     /// </summary>
     /// <returns>A task that completes when no apply of the context is running.</returns>
     /// <remarks>
-    /// The wait observes no token and is bounded: an apply runs inside the
-    /// coordinator's apply gate, where nothing it awaits may actually wait (the gate's
-    /// own invariant). A started rollback therefore still always completes.
+    /// The wait observes no token. It drains statements, memory-only controls and admitted
+    /// rollback-to operations. A rollback-to retains admission while building its lookup
+    /// and waiting uncancellably for the database apply gate, so a root end can wait behind
+    /// another writer's statement. Inside a physical apply, model lock waits are forbidden.
     /// </remarks>
     internal Task WaitForAppliesAsync()
     {
