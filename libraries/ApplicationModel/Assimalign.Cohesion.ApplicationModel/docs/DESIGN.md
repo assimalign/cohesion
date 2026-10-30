@@ -31,7 +31,7 @@ flowchart LR
 | --- | --- |
 | `IApplicationResource` | The base of the three forms: `Provider`, `Name`, and the `Id` derived from them. |
 | `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`, `InstanceKey`, `ActionName`, `DeploymentId` | Identity value objects. Ids are version 5 UUIDs of the names; an instance key is a ULID per process start; a deployment id is a version 5 UUID of what a gateway deployed (ApplicationModel.Gateway G34). |
-| `ApplicationInstanceManifest`, `ApplicationActionDescriptor`, `ApplicationActionKind` | What an instance publishes about itself: its identity, key, the deployment that started it, and its actions. |
+| `ApplicationInstanceManifest`, `ApplicationActionDescriptor`, `ApplicationActionKind` | What an instance publishes about itself: its identity, key, the deployment that started it, where its control plane serves (C5), and its actions. |
 | `ApplicationActionContext`, `ApplicationActionResult`, `ApplicationActionStatus` | One invocation of an action, on an instance or a gateway's infrastructure action, and its outcome. |
 | `ApplicationActionSnapshot` | One action's state after a write, as a gateway records and replays it. |
 | `IApplicationContentSerializer`, `ApplicationContentException` | The format of action content, and the refusal of content that does not bind. |
@@ -72,6 +72,31 @@ this decision the contracts and the instance side were `Resource`-prefixed (`Res
 - `ApplicationResource` before every resource-level name: it collides with `ApplicationResourceManifest`
   and `IApplicationResourceAction`, and adds eleven characters to each name.
 - `Resource` as the only prefix: it would undo the `IApplicationResource` family.
+
+**C5 — An instance's control plane has one HTTP binding, which its gateway calls (2026-10-30).** A
+gateway runs an operator's action on an instance and restores a write on the others through the
+instance's control plane (ApplicationModel.Gateway G38). The binding is therefore a contract between
+the gateway and every area, not one area's choice:
+- **Address.** The manifest names the absolute URL the control plane serves at
+  (`ApplicationInstanceManifest.ControlPlaneEndpoint`), as the instance's environment named it
+  (`COHESION_CONTROL_PLANE_ENDPOINT`). The platform hands each instance an address the gateway
+  reaches, and the area's server listens there: on Kubernetes the pod's own address, never a value
+  its pods share. The routes resolve against it, and a server serves them at its root. An instance
+  with no control plane names none; the gateway cannot call it, and it receives a write when it
+  next publishes.
+- **Routes.** `GET /manifest`; `GET /actions/{name}` reads an action and `POST /actions/{name}`
+  writes it, with the body as its input; `PUT /state/{name}` restores its state, with the body as
+  the snapshot's value.
+- **Bodies.** JSON both ways. An action or a restore answers with its `ApplicationActionResult`:
+  `{status, output?, reason?, state?}`.
+- **Statuses.** `200` succeeded, `400` rejected, `404` no such action, `405` operation not accepted,
+  each with a result. Any other status, or one without a result, such as the bare `404` of a server
+  that serves no control plane at the address, is no answer.
+
+The gateway's default instance client calls it, and Web.Hosting.ApplicationModel serves it (W1);
+every area's server serves the same binding. It is anonymous until authentication ships with the
+gateway's HTTP transport. *Rejected:* each area naming its own routes in its manifest. The gateway,
+and every operator tool after it, would carry a route table per area for the same two operations.
 
 ## AOT
 

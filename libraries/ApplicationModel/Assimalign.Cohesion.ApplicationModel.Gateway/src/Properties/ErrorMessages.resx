@@ -52,4 +52,9 @@
   <data name="GatewayResourceEnded" xml:space="preserve"><value>{0} (ended)</value></data>
   <data name="GatewayRecordNull" xml:space="preserve"><value>The record store returned no record when gateway '{0}' took its record over.</value></data>
   <data name="GatewayRecordSuperseded" xml:space="preserve"><value>Gateway '{0}' stopped: a later run of it took its record over, so this run, epoch {1}, can no longer save it.</value></data>
+  <data name="GatewayInstanceUnavailable" xml:space="preserve"><value>Gateway '{0}' could not run action '{3}' on {1}/{2}: no registered instance that declares it serves a control plane the gateway reached.</value></data>
+  <data name="InstanceClientResultNull" xml:space="preserve"><value>The instance client returned null instead of a result.</value></data>
+  <data name="InstanceControlPlaneMissing" xml:space="preserve"><value>Instance {0} of {1}/{2} serves no control plane.</value></data>
+  <data name="InstanceControlPlaneUnsupported" xml:space="preserve"><value>The HTTP instance client calls absolute http and https control-plane endpoints, not '{0}'.</value></data>
+  <data name="InstanceAnswerMissing" xml:space="preserve"><value>The control plane at '{0}' answered HTTP {1} without an action result.</value></data>
 </root>

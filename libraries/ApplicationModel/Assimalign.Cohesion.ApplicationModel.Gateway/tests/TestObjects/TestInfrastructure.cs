@@ -17,8 +17,12 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 {
     private readonly Lock _calls = new();
     private readonly List<string> _events = [];
+    private TestInstanceClient? _client;
 
     public IApplicationInstancePublisher? Gateway { get; set; }
+
+    /// <summary>How a gateway over the platform calls its instances' control planes.</summary>
+    public TestInstanceClient Client => _client ??= new TestInstanceClient(this);
 
     public HashSet<ResourceName> Silent { get; } = [];
 

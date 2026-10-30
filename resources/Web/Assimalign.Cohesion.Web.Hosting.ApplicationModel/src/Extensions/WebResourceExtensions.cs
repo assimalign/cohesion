@@ -92,7 +92,7 @@ public static class WebResourceExtensions
             ApplicationInstanceControlPlane GetControlPlane(WebApplicationContext context)
             {
                 return controlPlane ??= ApplicationInstanceControlPlane.Create(
-                    new WebResource(name, deployment, context.Settings, CreateAddedActions(addedActions, context)),
+                    new WebResource(name, deployment, controlPlaneEndpoint, context.Settings, CreateAddedActions(addedActions, context)),
                     serializer);
             }
 

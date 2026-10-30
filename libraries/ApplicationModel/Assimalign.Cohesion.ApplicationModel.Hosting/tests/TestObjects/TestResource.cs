@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
@@ -19,6 +20,8 @@ internal sealed class TestResource : IApplicationResourceInstance
     public InstanceKey Key { get; init; } = InstanceKey.New();
 
     public DeploymentId? Deployment { get; init; }
+
+    public Uri? ControlPlaneEndpoint { get; init; }
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; init; }
 

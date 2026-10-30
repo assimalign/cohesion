@@ -118,6 +118,6 @@ public abstract class ApplicationInstancePublisher : IApplicationInstancePublish
             throw new ArgumentException(ErrorMessages.InProcessEndpointInvalid, nameof(endpoint));
         }
 
-        return InProcessApplicationInstancePublisher.Register(endpoint, publisher);
+        return InProcessApplicationInstancePublisher.AddEndpoint(endpoint, publisher);
     }
 }

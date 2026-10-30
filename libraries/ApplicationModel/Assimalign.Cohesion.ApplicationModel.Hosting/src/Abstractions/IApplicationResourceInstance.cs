@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Assimalign.Cohesion.ApplicationModel.Hosting;
@@ -41,6 +42,18 @@ public interface IApplicationResourceInstance : IApplicationResource
     /// publishes, so an instance an earlier deployment left running cannot stand in for it.
     /// </remarks>
     DeploymentId? Deployment { get; }
+
+    /// <summary>
+    /// Gets the absolute URL this instance's control plane serves at, or <see langword="null"/> when
+    /// the instance serves none.
+    /// </summary>
+    /// <remarks>
+    /// A platform names the address its gateway reaches the instance at
+    /// (<see cref="AppEnvironment.Variables.ControlPlaneEndpoint"/>), and the area's control-plane
+    /// server listens there. The instance repeats it in its manifest, so the gateway can run an
+    /// operator's action on the instance and restore a write made on another one.
+    /// </remarks>
+    Uri? ControlPlaneEndpoint { get; }
 
     /// <summary>
     /// Gets the actions this instance's control plane executes.

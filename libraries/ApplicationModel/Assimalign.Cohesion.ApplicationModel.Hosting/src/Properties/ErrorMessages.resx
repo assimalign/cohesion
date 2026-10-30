@@ -10,6 +10,7 @@
   <data name="InstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
   <data name="ResourceActionsMissing" xml:space="preserve"><value>The resource returned no action collection.</value></data>
   <data name="ResourceHealthContributorsMissing" xml:space="preserve"><value>The resource returned no health contributor collection.</value></data>
+  <data name="ControlPlaneEndpointRelative" xml:space="preserve"><value>A control-plane endpoint is an absolute URL: the gateway calls it from wherever the gateway runs.</value></data>
   <data name="ResourceActionNull" xml:space="preserve"><value>The resource's action collection contains null.</value></data>
   <data name="ApplicationActionKindInvalid" xml:space="preserve"><value>Action '{0}' must accept Read, Write, or both, and nothing else.</value></data>
   <data name="ApplicationActionStateReadOnly" xml:space="preserve"><value>Action '{0}' has state but does not accept writes. Only a write changes state, so only a writable action may have it.</value></data>

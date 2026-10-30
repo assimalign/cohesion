@@ -57,13 +57,13 @@ lists both, because an area builds against both.
 
 | Type | Role |
 | --- | --- |
-| `IApplicationResourceInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), `Deployment` (the deployment that started it, which its environment names and its manifest repeats; ApplicationModel.Gateway G34), its actions and health contributors. `Id` derives from provider and name. |
+| `IApplicationResourceInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), `Deployment` (the deployment that started it, which its environment names and its manifest repeats; ApplicationModel.Gateway G34), `ControlPlaneEndpoint` (where its control plane serves, which its manifest names so its gateway can call it; D18), its actions and health contributors. `Id` derives from provider and name. |
 | `IApplicationInstanceAction` | A named operation. `Kind` says which operations it accepts (`Read`, `Write`, or both); `State`, when present, is what its writes change. |
 | `IApplicationActionState`, `ApplicationActionState<TState>` | The state a stateful action's writes change. A snapshot is the whole value, written by the content serializer; restoring one applies it. |
 | `ApplicationActionContext`, `ApplicationActionResult` | One invocation and its outcome. The context carries the control plane's content serializer, which reads the input and writes the output. |
 | `IApplicationContentSerializer`, `JsonApplicationContentSerializer`, `ApplicationContentException` | The format of everything an instance exchanges (D12). JSON over source-generated contexts is the default; content the instance refuses is an `ApplicationContentException`. |
 | `ApplicationActionSnapshot` | One action's state, as a gateway keeps it until the next deployment. |
-| `ApplicationInstanceManifest`, `ApplicationActionDescriptor` | What an instance publishes about itself when its host starts. |
+| `ApplicationInstanceManifest`, `ApplicationActionDescriptor` | What an instance publishes about itself when its host starts, its control plane's endpoint included. |
 | `IApplicationInstanceControlPlane`, `ApplicationInstanceControlPlane` | The instance's actions and state: a plain object with no lifecycle that executes actions and restores snapshots from the moment it is created (D15). |
 | `IApplicationInstanceService`, `ApplicationInstanceService` | The `IHostLifecycleService` an area registers: it publishes the manifest and restores the answer in `StartingAsync`, renews the lease, and stops renewing in `StopAsync` (D15). In-process code finds the control plane among the host's services through it. |
 | `IApplicationInstancePublisher`, `ApplicationInstancePublisher`, `ApplicationInstancePublisherOptions` | The seam to the gateway, its abstract base, and the options of the HTTP publisher `ApplicationInstancePublisher.Create` returns (D13). Publication answers with an `ApplicationInstancePublication` (snapshots and a lease); `RenewAsync` renews the lease (D14). A local gateway accepts anonymous publication. |
@@ -270,6 +270,19 @@ registration is removed only by its own handle. A call made while nothing is reg
 to an HTTP endpoint that nothing listens on does. *Rejected:* an ambient publisher the program would
 pick up (D1 forbids it here), and handing the program the gateway object (Gateway.InProcess I5).
 
+**D18 — The manifest names the control plane, so the gateway can call it (2026-10-30).** The
+gateway ran no action on an instance and restored no write itself: it knew an instance's address only
+when it had assigned it. `IApplicationResourceInstance.ControlPlaneEndpoint` is the absolute URL the
+instance's control plane serves at, as its environment named it, and `ApplicationInstanceControlPlane`
+repeats it in the manifest (`ApplicationInstanceManifest.ControlPlaneEndpoint`) and refuses a relative
+one. The platform hands each instance an address its gateway reaches, and the area's server listens
+there, so the gateway calls the instance where it published from: an operator's action, and a restore
+of a write made on another instance (ApplicationModel.Gateway G38), over the binding every area's
+server serves (ApplicationModel C5). An instance with no control-plane server names none; its gateway
+unregisters it after a write, and it restores the write when it publishes again. *Rejected:* the
+platform reporting each instance's address to the gateway. A provider does not know instance keys, and
+an in-process provider would report what it had just assigned.
+
 ## Concurrency
 
 Reads run concurrently. Writes and restores run one at a time per resource, under one gate, so the
@@ -312,8 +325,10 @@ None. The library raises no events and has no event source.
 4. **Attaching the control plane.** How does an executable with `CohesionApplicationModel=enabled`
    create and register its control plane without an ambient registry (D1)?
 5. **Management routes.** `/resources/providers/{provider}/controls` has no segment for the
-   application resource or the instance an action addresses.
-6. **Push order on the gateway-to-instance channel.** When a gateway that forgot an instance
-   answers its new publication, a push the gateway sends afterward can reach the instance first,
-   and the late answer then overwrites the newer state. Snapshots need a version the instance checks
-   before it applies one. This belongs with the channel.
+   application resource or the instance an action addresses. The gateway's `ExecuteAsync` addresses
+   the resource and picks the instance (ApplicationModel.Gateway G38); its HTTP routes come with the
+   gateway's transport.
+6. **Restore order.** Since ApplicationModel.Gateway G38 the gateway restores writes on running
+   instances. When a gateway that forgot an instance answers its new publication, a restore it sends
+   afterward can reach the instance first, and the late answer then overwrites the newer state until
+   the next write. Snapshots need a version the instance checks before it applies one.

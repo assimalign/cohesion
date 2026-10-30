@@ -11,13 +11,16 @@ record is [DESIGN.md](DESIGN.md).
 ## Scope
 
 - In scope: `ApplicationGateway` and its `ApplicationBuilder`; the `IApplicationGateway`,
-  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, `IApplicationGatewayTransport`, and
-  `IInfrastructureProvider` seams; the
+  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, `IApplicationGatewayTransport`,
+  `IApplicationInstanceClient` (with its default HTTP client for the control-plane binding), and
+  `IInfrastructureProvider` seams; an operator's actions on a resource's instances
+  (`ApplicationGateway.ExecuteAsync`); the
   deployment of a resource (`IApplicationResourceDeployment`, `ApplicationResourceDeployment`,
   `IApplicationResourceAction`); the `IApplicationGatewayStore` record with its JSON file store; and
   `ApplicationGatewayException`.
-- Out of scope: HTTP (the publication endpoint, joins, and management routes are transport-neutral
-  here), platform providers, and identity and authentication.
+- Out of scope: serving HTTP (the publication endpoint, joins, and management routes are
+  transport-neutral here; the gateway only calls its instances' control planes over HTTP), platform
+  providers, and identity and authentication.
 
 ## Dependencies
 
@@ -59,3 +62,15 @@ runs and stops them when the run ends. A child gateway in the same process joins
 `gateway.JoinAsync(manifest)`, using the gateway as its `IApplicationParentGateway`. To run every
 resource inside the gateway program's own process, use Gateway.InProcess:
 `builder.UseInProcess(infrastructure)` sets its infrastructure, which is also its transport.
+
+An operator manages a resource through the gateway. The action runs on one instance's control plane,
+and a write's state is recorded and restored on every other instance; an instance that starts later
+restores it when it publishes:
+
+```csharp
+ApplicationActionResult result = await gateway.ExecuteAsync(
+    "Web",
+    "orders-api",
+    "cors",
+    ApplicationActionContext.Create(ApplicationActionKind.Write, serializer, """{"origins":["https://partner.example"]}"""u8.ToArray()));
+```

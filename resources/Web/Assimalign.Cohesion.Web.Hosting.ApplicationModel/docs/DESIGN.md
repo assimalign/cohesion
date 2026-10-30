@@ -69,9 +69,11 @@ stops them in reverse. A managed instance runs like this:
 | `POST /actions/{name}` | Writes an action; the body is its input. |
 | `PUT /state/{name}` | Restores an action's state; the body is the snapshot's value. |
 
-Bodies are JSON, labeled `application/json`. A result is
+These routes are the control-plane binding every area serves and every gateway calls
+(ApplicationModel C5). Bodies are JSON, labeled `application/json`. A result is
 `{status, output?, reason?, state?: {action, value}}`. Statuses are 200 (succeeded), 400 (rejected),
-404 (no such action), and 405 (operation not accepted); any other failure is the engine's 500.
+404 (no such action), and 405 (operation not accepted); any other failure is the engine's 500. The
+server serves the routes at its root, so the endpoint the resource names is its listener's address.
 
 The `cors` action's content is the default policy in camel case, such as
 `{"origins": ["https://shop.example"], "methods": ["GET"], "allowCredentials": false}`. An empty
@@ -143,6 +145,16 @@ control-plane port of the program's own. With Web.Hosting binding the platform's
 the same `Program.cs` (`CreateBuilder(args)`, `AddResource(name)`) runs on any platform and in
 process. The in-process end-to-end test runs two such programs, one calling the other at the address
 its setting received.
+
+**W8 — The manifest names the control plane, and the gateway manages the resource through it
+(2026-10-30).** The resource names its `ControlPlaneEndpoint` in its manifest
+(ApplicationModel.Hosting D18), the address its server listens on, so its gateway runs an operator's
+action there and restores a write made on another instance (ApplicationModel.Gateway G38). The
+management end-to-end test runs `orders-api` in the gateway's process and a second instance beside
+it: a CORS write through the gateway runs on the earliest instance, is recorded, changes the origin
+both instances allow, and a restarted instance starts with it. A restore can reach an instance only
+once its server listens, after its publication (W2); one sent earlier fails, the gateway unregisters
+the instance, and the instance takes the state from its next publication.
 
 ## Open questions
 

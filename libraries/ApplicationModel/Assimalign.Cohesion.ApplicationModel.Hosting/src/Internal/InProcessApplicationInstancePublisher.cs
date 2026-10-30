@@ -41,7 +41,7 @@ internal sealed class InProcessApplicationInstancePublisher : ApplicationInstanc
         return endpoint.IsAbsoluteUri && string.Equals(endpoint.Scheme, InProcessScheme, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static IDisposable Register(Uri endpoint, IApplicationInstancePublisher publisher)
+    public static IDisposable AddEndpoint(Uri endpoint, IApplicationInstancePublisher publisher)
     {
         string key = endpoint.AbsoluteUri;
         if (!_endpoints.TryAdd(key, publisher))

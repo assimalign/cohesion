@@ -31,4 +31,12 @@ public enum ApplicationGatewayErrorCode
     /// A later run of the gateway took its record over, so this run can no longer save it and stops.
     /// </summary>
     RecordSuperseded,
+
+    /// <summary>
+    /// No registered instance that declares an operator's action could run it: the resource has no
+    /// such instance that serves a control plane, or the gateway reached none of them. The inner
+    /// exception is the failure, or an <see cref="System.AggregateException"/> of each, when the
+    /// gateway called any.
+    /// </summary>
+    InstanceUnavailable,
 }

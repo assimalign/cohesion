@@ -10,7 +10,7 @@ speak through the same types without either loading the other's code. The design
 
 - In scope: `IApplicationResource`, the base of a resource's definition, deployment, and instances;
   the identity value objects (`ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
-  `InstanceKey`, `ActionName`); the instance manifest (`ApplicationInstanceManifest`,
+  `InstanceKey`, `ActionName`, `DeploymentId`); the instance manifest (`ApplicationInstanceManifest`,
   `ApplicationActionDescriptor`, `ApplicationActionKind`); invocation (`ApplicationActionContext`,
   `ApplicationActionResult`, `ApplicationActionStatus`); state (`ApplicationActionSnapshot`); content
   (`IApplicationContentSerializer`, `ApplicationContentException`); and publication
@@ -28,7 +28,13 @@ An instance publishes its manifest through the seam, and its gateway answers wit
 restore:
 
 ```csharp
-ApplicationInstanceManifest manifest = new("Web", "orders-api", InstanceKey.New(), actions);
+ApplicationInstanceManifest manifest = new(
+    "Web",
+    "orders-api",
+    InstanceKey.New(),
+    Deployment: null,
+    ControlPlaneEndpoint: new Uri("http://10.0.0.5:9090/"),
+    actions);
 ApplicationInstancePublication publication = await publisher.PublishAsync(manifest, cancellationToken);
 ```
 

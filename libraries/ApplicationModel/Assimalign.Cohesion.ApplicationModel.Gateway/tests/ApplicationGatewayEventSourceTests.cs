@@ -119,6 +119,31 @@ public sealed class ApplicationGatewayEventSourceTests
         Describe(recorder, "events-stop").ShouldContain("ResourceStopped Database.Sql/db System.InvalidOperationException Disk is full.");
     }
 
+    [Fact(DisplayName = DisplayPrefix + "An operator's write reports the action, the recorded state, and an instance the gateway could not restore")]
+    public async Task ExecuteAsync_ShouldReportTheActionTheRecordAndADroppedInstance()
+    {
+        // Arrange
+        using var recorder = new EventSourceRecorder(ApplicationGatewayEventSource.Log, EventLevel.Informational);
+        var infrastructure = new TestInfrastructure();
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("events-action");
+        builder.AddResource("Web", "api");
+        await using RunningGateway running = await RunningGateway.StartAsync(infrastructure, new InMemoryApplicationGatewayStore(), builder.Build());
+        await Task.Delay(5);
+        TestInstance second = await infrastructure.StartInstanceAsync("Web", "api");
+        infrastructure.Client.Unreachable[second.Key] = true;
+
+        // Act
+        await running.Gateway.ExecuteAsync("Web", "api", TestManifests.LogLevel, ApplicationActionContext.Create(
+            ApplicationActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
+
+        // Assert
+        string[] events = Describe(recorder, "events-action");
+        events.ShouldContain("ActionExecuted Web/api log-level Write Succeeded");
+        events.ShouldContain("StateRecorded Web/api log-level 1");
+        events.ShouldContain("InstanceDropped Web/api System.Net.Http.HttpRequestException");
+        Level(recorder, "events-action", "InstanceDropped").ShouldBe(EventLevel.Warning);
+    }
+
     private static IApplicationModel CreateModel(string gateway)
     {
         IApplicationModelBuilder builder = ApplicationModel.CreateBuilder(gateway);
@@ -127,8 +152,8 @@ public sealed class ApplicationGatewayEventSourceTests
         return builder.Build();
     }
 
-    // One gateway's events, each as its name and the payload a test compares; a deployment's id is
-    // left out, because it differs per run.
+    // One gateway's events, each as its name and the payload a test compares; a deployment's id and
+    // an instance's key are left out, because they differ per run.
     private static string[] Describe(EventSourceRecorder recorder, string gateway)
     {
         return [.. recorder.Events
@@ -139,6 +164,9 @@ public sealed class ApplicationGatewayEventSourceTests
                 "RunStopped" => written.EventName!,
                 "RunFailed" => $"{written.EventName} {written.Payload![1]}",
                 "ResourceMissed" => $"{written.EventName} {written.Payload![1]}",
+                "ActionExecuted" => $"{written.EventName} {written.Payload![1]} {written.Payload[2]} {written.Payload[3]} {written.Payload[5]}",
+                "StateRecorded" => $"{written.EventName} {written.Payload![1]} {written.Payload[2]} {written.Payload[4]}",
+                "InstanceDropped" => $"{written.EventName} {written.Payload![1]} {written.Payload[3]}",
                 _ => string.Join(" ", [written.EventName, .. written.Payload!.Skip(1)]),
             })];
     }

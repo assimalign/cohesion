@@ -50,6 +50,15 @@ public interface IApplicationGatewayBuilder
     IApplicationGatewayBuilder UseTransport(IApplicationGatewayTransport transport);
 
     /// <summary>
+    /// Sets how the gateway calls its instances' control planes; over HTTP unless set.
+    /// </summary>
+    /// <param name="client">The client.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="client"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The gateway is built.</exception>
+    IApplicationGatewayBuilder UseInstanceClient(IApplicationInstanceClient client);
+
+    /// <summary>
     /// Sets where the gateway keeps its record, so a restarted gateway reconciles against it; the
     /// record stays in memory unless set.
     /// </summary>

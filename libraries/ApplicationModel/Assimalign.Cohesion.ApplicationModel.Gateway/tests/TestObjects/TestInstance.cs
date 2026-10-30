@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,6 +21,7 @@ internal sealed class TestInstance : IApplicationResourceInstance, IApplicationI
         Name = name;
         Settings = settings;
         Deployment = deployment;
+        ControlPlaneEndpoint = new Uri($"test://instances/{Key}/");
     }
 
     public LogLevelSetting Level => _state.Value;
@@ -35,6 +37,9 @@ internal sealed class TestInstance : IApplicationResourceInstance, IApplicationI
 
     /// <summary>The deployment that started the instance, which its workload ran with.</summary>
     public DeploymentId? Deployment { get; }
+
+    /// <summary>Where the test platform's instance client reaches the control plane.</summary>
+    public Uri? ControlPlaneEndpoint { get; }
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions => [this];
 

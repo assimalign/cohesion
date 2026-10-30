@@ -5,7 +5,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 /// <summary>
 /// The gateway's diagnostics: one event per transition of a run and of each resource's step, so a
-/// deployment can be followed as it happens rather than read from the run's final exception.
+/// deployment can be followed as it happens rather than read from the run's final exception, and one
+/// per operator action, recorded write, and instance the gateway could not call.
 /// </summary>
 /// <remarks>
 /// Tools enable it by its assembly name, <c>Assimalign.Cohesion.ApplicationModel.Gateway</c>; a gateway
@@ -89,7 +90,7 @@ internal sealed class ApplicationGatewayEventSource : EventSource
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
-            ResourceRetired(gateway.Value, string.Concat(provider.Value, "/", name.Value));
+            ResourceRetired(gateway.Value, Describe(provider, name));
         }
     }
 
@@ -129,6 +130,35 @@ internal sealed class ApplicationGatewayEventSource : EventSource
         }
     }
 
+    [NonEvent]
+    public void ActionExecuted(GatewayName gateway, ProviderName provider, ResourceName name, ActionName action, ApplicationActionKind operation, InstanceKey instance, ApplicationActionStatus status)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            ActionExecuted(gateway.Value, Describe(provider, name), action.Value, operation.ToString(), instance.ToString(), status.ToString());
+        }
+    }
+
+    [NonEvent]
+    public void StateRecorded(GatewayName gateway, ProviderName provider, ResourceName name, ActionName action, InstanceKey instance, int restores)
+    {
+        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
+        {
+            StateRecorded(gateway.Value, Describe(provider, name), action.Value, instance.ToString(), restores);
+        }
+    }
+
+    // A refusal's reason is left out: a control plane's rejection can echo the content it refused.
+    [NonEvent]
+    public void InstanceDropped(GatewayName gateway, ProviderName provider, ResourceName name, InstanceKey instance, Exception? failure, ApplicationActionStatus? refusal)
+    {
+        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
+        {
+            string kind = failure?.GetType().FullName ?? refusal?.ToString() ?? "NoControlPlane";
+            InstanceDropped(gateway.Value, Describe(provider, name), instance.ToString(), kind, failure?.Message ?? string.Empty);
+        }
+    }
+
     [Event(1, Level = EventLevel.Informational, Message = "Gateway {0} took its record over at epoch {1}.")]
     private void RunStarting(string gateway, long epoch) => WriteEvent(1, gateway, epoch);
 
@@ -165,8 +195,22 @@ internal sealed class ApplicationGatewayEventSource : EventSource
     [Event(12, Level = EventLevel.Error, Message = "Gateway {0} failed: {1}: {2}")]
     private void RunFailed(string gateway, string failure, string failureMessage) => WriteEvent(12, gateway, failure, failureMessage);
 
+    [Event(13, Level = EventLevel.Informational, Message = "Gateway {0} ran {3} of {2} on {1} instance {4}: {5}.")]
+    private void ActionExecuted(string gateway, string resource, string action, string operation, string instance, string status) => WriteEvent(13, gateway, resource, action, operation, instance, status);
+
+    [Event(14, Level = EventLevel.Informational, Message = "Gateway {0} recorded the {2} write on {1} instance {3} and restores it on {4} other instances.")]
+    private void StateRecorded(string gateway, string resource, string action, string instance, int restores) => WriteEvent(14, gateway, resource, action, instance, restores);
+
+    [Event(15, Level = EventLevel.Warning, Message = "Gateway {0} unregistered {1} instance {2}, which it could not call: {3} {4}. The instance publishes again when it next renews.")]
+    private void InstanceDropped(string gateway, string resource, string instance, string failure, string failureMessage) => WriteEvent(15, gateway, resource, instance, failure, failureMessage);
+
     private static string Describe(ApplicationResourceManifest resource)
     {
         return string.Concat(resource.Provider.Value, "/", resource.Name.Value);
+    }
+
+    private static string Describe(ProviderName provider, ResourceName name)
+    {
+        return string.Concat(provider.Value, "/", name.Value);
     }
 }

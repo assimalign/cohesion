@@ -84,6 +84,17 @@ public class ApplicationBuilderTests
         Should.Throw<InvalidOperationException>(() => builder.UseInfrastructure(new TestInfrastructure()));
         Should.Throw<InvalidOperationException>(() => builder.StartupTimeout = TimeSpan.FromSeconds(1));
         Should.Throw<InvalidOperationException>(() => builder.AddResource("Web", "orders-api"));
+        Should.Throw<InvalidOperationException>(() => builder.UseInstanceClient(new TestInfrastructure().Client));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance client is required when one is set")]
+    public void UseInstanceClient_WithNull_ShouldThrow()
+    {
+        // Arrange
+        ApplicationBuilder builder = ApplicationGateway.CreateBuilder("root");
+
+        // Act & Assert
+        Should.Throw<ArgumentNullException>(() => builder.UseInstanceClient(null!));
     }
 
     [Fact(DisplayName = DisplayPrefix + "Time limits must be positive")]

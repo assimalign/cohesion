@@ -18,7 +18,7 @@ public class ResourceJsonContextTests
     public void Serialize_Manifest_ShouldRoundTrip()
     {
         // Arrange
-        var resource = new TestResource(new LogLevelAction());
+        var resource = new TestResource(new LogLevelAction()) { Deployment = DeploymentId.New(), ControlPlaneEndpoint = new Uri("http://10.0.0.5:9090/") };
         ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(resource, TestSerializer.Json).Manifest;
 
         // Act
@@ -30,6 +30,8 @@ public class ResourceJsonContextTests
         read.Provider.ShouldBe(manifest.Provider);
         read.Name.ShouldBe(manifest.Name);
         read.Key.ShouldBe(manifest.Key);
+        read.Deployment.ShouldBe(manifest.Deployment);
+        read.ControlPlaneEndpoint.ShouldBe(manifest.ControlPlaneEndpoint);
         read.Actions.ShouldBe(manifest.Actions);
     }
 

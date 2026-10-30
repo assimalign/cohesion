@@ -66,8 +66,8 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
     /// <returns>The control plane.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// The resource's provider, name, or key is <see langword="default"/>; it returns a
-    /// <see langword="null"/> collection; one of its actions is <see langword="null"/>, has no
+    /// The resource's provider, name, or key is <see langword="default"/>; its control-plane endpoint
+    /// is relative; it returns a <see langword="null"/> collection; one of its actions is <see langword="null"/>, has no
     /// name, shares a name with another, declares an operation other than Read or Write, or has
     /// state without accepting writes; or <paramref name="serializer"/> cannot write an action's state.
     /// </exception>
@@ -94,6 +94,12 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
         if (resource.HealthContributors is null)
         {
             throw new ArgumentException(ErrorMessages.ResourceHealthContributorsMissing, nameof(resource));
+        }
+
+        // The gateway calls the endpoint from wherever it runs, so a relative one reaches nothing.
+        if (resource.ControlPlaneEndpoint is { IsAbsoluteUri: false })
+        {
+            throw new ArgumentException(ErrorMessages.ControlPlaneEndpointRelative, nameof(resource));
         }
 
         IReadOnlyCollection<IApplicationInstanceAction> declared = resource.Actions
@@ -149,7 +155,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
 
         descriptors.Sort(static (left, right) => left.Name.CompareTo(right.Name));
 
-        var manifest = new ApplicationInstanceManifest(resource.Provider, resource.Name, resource.Key, resource.Deployment, descriptors.AsReadOnly());
+        var manifest = new ApplicationInstanceManifest(resource.Provider, resource.Name, resource.Key, resource.Deployment, resource.ControlPlaneEndpoint, descriptors.AsReadOnly());
         return new ApplicationInstanceControlPlane(resource, serializer, actions.ToFrozenDictionary(), manifest);
     }
 

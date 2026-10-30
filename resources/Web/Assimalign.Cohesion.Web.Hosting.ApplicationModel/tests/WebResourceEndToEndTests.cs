@@ -43,6 +43,7 @@ public sealed class WebResourceEndToEndTests
         manifest.Provider.ShouldBe((ProviderName)"Web");
         manifest.Name.ShouldBe((ResourceName)"orders-api");
         manifest.Key.ShouldBe(instance.Resource.Key);
+        manifest.ControlPlaneEndpoint.ShouldBe(instance.ControlPlane.BaseAddress);
         manifest.Actions.ShouldHaveSingleItem().ShouldBe(new ApplicationActionDescriptor("cors", ApplicationActionKind.ReadWrite, IsStateful: true));
     }
 

@@ -15,10 +15,12 @@
 A gateway runs one gateway's application model. It deploys the model's resources through an
 infrastructure provider, receives the manifests the deployed resources' instances publish, keeps
 each resource's deployment (its instances and the state written since the gateway was deployed),
-and exposes each resource's infrastructure actions. A child gateway joins its parent and fills its
-settings in from the parent's outputs; the parent knows nothing of a child before it joins. The
-library is transport-neutral and platform-neutral: a transport binds its endpoints, and an
-infrastructure provider supplies the platform.
+and exposes each resource's infrastructure actions. An operator manages a resource through it: the
+gateway runs the action on one instance's control plane and keeps a write on every instance. A child
+gateway joins its parent and fills its settings in from the parent's outputs; the parent knows
+nothing of a child before it joins. The library is transport-neutral and platform-neutral: a
+transport binds its endpoints, and an infrastructure provider supplies the platform. It calls its
+instances' control planes over HTTP itself, with the BCL's client, and serves no HTTP.
 
 The arrow below means "references". A platform package, such as a Kubernetes provider, references
 the gateway; the gateway references the definitions, which reference the shared contracts. The
@@ -110,19 +112,57 @@ flowchart LR
 East therefore deploys `orders-db` and `orders-cache` at the same time, then `orders-api` once both
 are ready.
 
+## Managing a resource
+
+An operator changes a running resource through the gateway (G38). `ExecuteAsync` runs the action on
+the earliest started instance that declares it, at the control-plane endpoint its manifest names. A
+write to a stateful action is recorded and saved, then restored on every other instance at once. An
+instance the gateway cannot restore is unregistered, and restores the write when it publishes again;
+an instance that starts later restores it from its publication's answer.
+
+```mermaid
+sequenceDiagram
+    participant Op as Operator
+    participant GW as ApplicationGateway
+    participant Store as Gateway store
+    participant A as Earliest instance
+    participant B as Other instance
+    participant C as Instance started later
+    Op->>GW: ExecuteAsync(resource, action, write)
+    GW->>A: POST /actions/{name}
+    A-->>GW: result with the state's snapshot
+    GW->>GW: record the snapshot
+    GW->>Store: SaveAsync(record)
+    GW->>B: PUT /state/{name}
+    alt B restores it
+        B-->>GW: succeeded
+    else B is unreachable, refuses, or names no control plane
+        GW->>GW: unregister B
+    end
+    GW-->>Op: the result
+    opt B was unregistered and still runs
+        B->>GW: RenewAsync, answered unknown
+        B->>GW: PublishAsync(manifest)
+        GW-->>B: the recorded snapshots
+    end
+    C->>GW: PublishAsync(manifest)
+    GW-->>C: the recorded snapshots, restored before it serves
+```
+
 ## The types
 
 | Type | Role |
 | --- | --- |
-| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`Model`, `RunAsync`), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationParentGateway` (`JoinAsync`, a child's join). `RecordAsync` records a write's snapshot and saves the record. Exposes `Name`, `Resources` (the aggregates), `Children`, `StartupTimeout`, `LeaseDuration`, and `Started`. `CreateBuilder(name)` creates its builder. |
-| `ApplicationBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure (`UseInfrastructure`), the record store (`UseStore`), the parent (`UseParent`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
+| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`Model`, `RunAsync`), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationParentGateway` (`JoinAsync`, a child's join). `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Resources` (the aggregates), `Children`, `StartupTimeout`, `LeaseDuration`, and `Started`. `CreateBuilder(name)` creates its builder. |
+| `ApplicationBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure (`UseInfrastructure`), the record store (`UseStore`), the parent (`UseParent`), the transports (`UseTransport`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
 | `IApplicationParentGateway`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
+| `IApplicationInstanceClient` | How the gateway calls its instances' control planes, at the endpoint each manifest names: an action, and a restore (G38). The default is an internal HTTP client of the control-plane binding (ApplicationModel C5); `UseInstanceClient` sets another. |
 | `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), watches the deployment's workload until an instance publishes and reports one that stops first (`WatchResourceAsync`, G36), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IApplicationResourceDeployment`, `ApplicationResourceDeployment`, `IApplicationResourceAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
 | `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read, plus the epoch of the run that holds it. `AcquireAsync` takes the record over with a higher epoch, `SaveAsync` refuses a save from an earlier one, and `LoadAsync` reads without taking anything over (G35). Children are not recorded. |
 | `JsonFileApplicationGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. Every read and write holds an exclusive lock on the gateway's lock file, so taking over and saving are atomic across processes. The local default; a platform package backs the store with durable storage of its own. |
-| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`), a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `ResourceFailed` for a workload that stopped before an instance published, with its failure as the inner exception; `OutputMissing` for a setting whose output the provider or the parent did not report), and a run a later one superseded (`RecordSuperseded`). |
+| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`), a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `ResourceFailed` for a workload that stopped before an instance published, with its failure as the inner exception; `OutputMissing` for a setting whose output the provider or the parent did not report), a run a later one superseded (`RecordSuperseded`), and an operator's action no instance could run (`InstanceUnavailable`). |
 
 In ApplicationModel.Definition: `IApplicationModel.Role` and `ApplicationGatewayRole` say whether a
 gateway joins a parent, and `IApplicationParent` names the parent's outputs a model's settings use.
@@ -516,6 +556,45 @@ its own wrapping, has no way to fail a run that already started (`RecordSupersed
 reshape every error the gateway reports, for the signals and lifecycle reporting this decision adds
 directly.
 
+**G38 — An operator's action runs on one instance, and a write reaches every instance
+(2026-10-30).** The gateway recorded a write's snapshot (`RecordAsync`) and named the instances that
+had to restore it, but nothing called an instance: an operator wrote to one instance's control plane
+directly, and the restores were the caller's. `ExecuteAsync` closes the loop.
+- **Reach.** Each manifest names the instance's control plane (ApplicationModel C5), and the gateway
+  calls it through an `IApplicationInstanceClient`: over HTTP unless the builder sets another
+  (`UseInstanceClient`). The HTTP client is here, on the BCL's `HttpClient`, so a gateway that runs
+  only in process still reaches its programs' loopback control planes. Serving HTTP stays a
+  transport's (G9).
+- **Run.** The action runs on one registered instance that declares it and names a control plane,
+  the earliest started first, because one that registered a moment ago may not serve its control
+  plane yet. An action no registered instance declares answers `NotFound` without a call. A write
+  to an action without state runs on that one instance only, and leaves nothing to record.
+- **Keep.** After a successful write to a stateful action, the gateway records the snapshot the
+  instance answered with (G28), saves the record, and restores the snapshot on every other instance
+  that declares the action stateful, all at once, before it answers the operator. Writes to a
+  resource run one at a time, from the call to the instance to the last restore, so a restore of an
+  earlier write never lands after a later one's and every instance ends with the state the record
+  holds; reads run at any time.
+- **Heal.** An instance the client gets no answer from, one that refuses a restore, and one that
+  names no control plane are unregistered. If one still runs, its next renewal finds it unknown, so
+  it publishes again and the answer carries the recorded state (G15). An action that got no answer
+  moves on to the next instance; when none answers, the call fails with `InstanceUnavailable`. A
+  restore the operator's cancellation interrupts unregisters its instance too, so no instance stays
+  registered without the write.
+
+The same path covers a restore that reaches an instance before its control plane listens: the
+instance registers when it publishes, before its control-plane server starts
+(Web.Hosting.ApplicationModel W2), so the restore fails and the instance takes the state from its
+next publication. Still open: rolling a live change out in batches with a health check after each
+(open question 4); snapshot versions, so a late publication answer cannot overwrite a newer restore
+(ApplicationModel.Hosting open question 6); and authenticating the calls (open question 6).
+
+*Rejected:*
+- Running a write on every instance instead of restoring its snapshot. A write's effect can depend
+  on the state it meets, so N runs could leave N states; one snapshot leaves one.
+- Keeping an instance whose restore failed registered and retrying it. That needs a retry queue per
+  instance; unregistering reuses publication, the path every new instance already takes.
+
 **G9 — No HTTP here, yet; it will be a transport over Web (owner direction, 2026-10-29).** COHLIB001
 bars a library from referencing Web, and COHRES003 bars Web (any resource package) from referencing
 a `Gateway*` assembly, so neither side can bind the other today. The options were: serve HTTP from
@@ -539,7 +618,8 @@ source-generated JSON contexts.
 
 The library reports through one internal event source, `Assimalign.Cohesion.ApplicationModel.Gateway`
 (G37): one event per transition of a run and of each resource's step, so a deployment can be
-followed as it happens. Tools enable it by name; a gateway program forwards it into its logging with
+followed as it happens, and one per operator action, recorded write, and instance the gateway
+unregistered because it could not call it (G38). Tools enable it by name; a gateway program forwards it into its logging with
 `Assimalign.Cohesion.Logging.EventSource`. Every event's first payload is the gateway's name, and a
 resource is `{provider}/{name}`. It has no counters.
 
@@ -557,27 +637,33 @@ resource is `{provider}/{name}`. It has no counters.
 | 10 | `RunSuperseded` | Warning | `gateway`, `epoch` |
 | 11 | `RunStopped` | Informational | `gateway` |
 | 12 | `RunFailed` | Error | `gateway`, `failure` (exception type), `failureMessage` |
+| 13 | `ActionExecuted` | Informational | `gateway`, `resource`, `action`, `operation` (`Read`, `Write`), `instance`, `status` |
+| 14 | `StateRecorded` | Informational | `gateway`, `resource`, `action`, `instance` (the write's), `restores` (how many other instances it restores on) |
+| 15 | `InstanceDropped` | Warning | `gateway`, `resource`, `instance`, `failure` (exception type, a refused restore's status, or `NoControlPlane`), `failureMessage` (empty for a refusal) |
 
-An exception is written as its type's full name and its message, never its stack.
+An exception is written as its type's full name and its message, never its stack. A refused
+restore is written as its status only: a control plane's reason can echo the content it refused. No
+event carries an action's input, output, or state.
 
 ## Open questions
 
 1. **HTTP binding** (G9): settled as a transport over a private Web reference. Still open: the
-   package's name and where it lives, its routes for publications, renewals, and joins, and
-   authentication.
+   package's name and where it lives, its routes for publications, renewals, joins, and an operator's
+   actions (`ExecuteAsync`, G38), and authentication. Calling instances needs no transport: the
+   gateway's HTTP client covers it (G38).
 2. **Instance liveness.** Resolved by leases (G15). A lease only bounds how long a dead instance stays
    registered; asking the platform which instances run would detect a death sooner.
 3. **Startup failure scope.** Only missed new resources are torn down (G13). Should a failed startup
    tear down the whole deployment instead, or roll updates back?
 4. **Rollout strategy.** An update's rollout is the platform's. Rolling a change through a logical
-   resource's instances a few at a time, such as a restart caused by a dependency's new output, needs
-   the gateway-to-instance channel (question 5).
-5. **Controls fan-out.** Executing a control on one instance and restoring its snapshot on the others
-   needs a gateway-to-instance channel, and so the instance's address in its manifest (chunk 1's
-   instance-address question). The aggregate's `Record` already names the targets.
+   resource's instances a few at a time, such as a restart caused by a dependency's new output, can
+   use the instance client (G38), which now restores a write on every instance at once; batches with
+   a health check after each are not built.
+5. **Controls fan-out — settled by G38.** The manifest names the instance's control plane, and
+   `ExecuteAsync` runs an action on one instance and restores a write's snapshot on the others.
 6. **Gateway-level routes and identity.** Gateway-wide `/controls` and `/infra`, the tenant id in the
-   routes, and authentication: today the gateway accepts publications anonymously, which suits only
-   a local gateway.
+   routes, and authentication: today the gateway accepts publications anonymously and calls its
+   instances' control planes anonymously (G38), which suits only a local gateway.
 7. **Build-time infrastructure actions.** Actions a program declares at build time need a slot on
    the descriptor and the manifest.
 8. **Deployment order — settled.** Dependencies order deployment within a gateway (G17); across

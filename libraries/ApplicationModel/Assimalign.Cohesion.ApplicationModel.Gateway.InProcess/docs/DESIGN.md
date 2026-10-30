@@ -143,6 +143,14 @@ the whole window. A deployment whose program no longer runs has ended.
 `endpoint` = `http://127.0.0.1:<port>` for a running program, so a dependent's setting that uses
 `orders.Endpoint` receives the address the program serves.
 
+**I12 — The gateway reaches a program's control plane over loopback HTTP (2026-10-30).** A program's
+control plane listens on the loopback port its scope names (I4), and its manifest names that address
+(ApplicationModel.Hosting D18). The gateway runs an operator's action and restores a write there with
+its own HTTP client (Gateway G38), as it would on any platform, so in process needs no client of its
+own. *Rejected:* calling the program's control plane object through the channel. The channel carries
+publications from programs to the gateway; calls in the other direction would need a registry of
+control planes by instance, and would skip the binding every other platform uses.
+
 ## Non-goals
 
 - Isolation comparable to separate processes. A program that crashes the process, exhausts memory,

@@ -25,6 +25,9 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 // transitions leave pending atomically, so a registration that races the deadline either wins or is
 // refused. Planning, registration, renewal, and expiry share one lock, so an instance that renews or
 // publishes again while its lease expires is either kept or dropped whole, never half.
+//
+// An operator's writes through the gateway run one at a time, from the call to the instance to the
+// last restore, so every instance ends with the state the record holds.
 [DebuggerDisplay("{Aggregate.Manifest.Provider}/{Aggregate.Manifest.Name} {Change}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayResource
@@ -61,6 +64,9 @@ internal sealed class GatewayResource
     }
 
     public ApplicationResourceDeployment Aggregate { get; }
+
+    // Held by an operator's write from the call to the instance until every restore has ended.
+    public SemaphoreSlim Writes { get; } = new(1, 1);
 
     // The resource as declared for the provider's platform: the model's manifest with only that
     // platform's extensions. The provider sees this, and the definition fingerprints it.

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -14,10 +15,11 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 /// </summary>
 internal sealed class WebResource : IApplicationResourceInstance
 {
-    public WebResource(ResourceName name, DeploymentId? deployment, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IApplicationInstanceAction> addedActions)
+    public WebResource(ResourceName name, DeploymentId? deployment, Uri controlPlaneEndpoint, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IApplicationInstanceAction> addedActions)
     {
         Name = name;
         Deployment = deployment;
+        ControlPlaneEndpoint = controlPlaneEndpoint;
         Actions = [.. CreateActions(settings), .. addedActions];
     }
 
@@ -28,6 +30,9 @@ internal sealed class WebResource : IApplicationResourceInstance
     public InstanceKey Key { get; } = InstanceKey.New();
 
     public DeploymentId? Deployment { get; }
+
+    // Where the control-plane server listens, which the gateway calls.
+    public Uri? ControlPlaneEndpoint { get; }
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; }
 
