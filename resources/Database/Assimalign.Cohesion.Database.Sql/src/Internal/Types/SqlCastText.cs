@@ -1,7 +1,6 @@
 using System;
 using System.Globalization;
 using System.Text;
-using System.Text.Json;
 
 using Assimalign.Cohesion.Database.Sql.Language;
 
@@ -85,10 +84,6 @@ internal static class SqlCastText
 
     private static void ValidateJson(byte[] bytes)
     {
-        try
-        {
-            using var document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 128 });
-        }
-        catch (JsonException exception) { throw new FormatException(ErrorMessages.CastJsonText, exception); }
+        using var document = SqlJsonAccess.Read(bytes);
     }
 }

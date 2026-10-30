@@ -62,6 +62,14 @@ An in-memory regression returns an authenticated rental to its pool and leaves t
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
 
+## JSON access wire conformance (#1722, SQ-N1)
+
+InMemory and TCP preserve JSON text, JSONB bytes, unescaped extraction text, Boolean
+predicates and typed scalar conversions. Tests distinguish missing members, JSON null
+and SQL NULL, exercise negative indexes and retain usable connections after CS01067,
+CS02078, CS02079 and existing cast/range errors. Invalid JSON assignments leave rows
+unchanged. The client API, protocol format and value representation remain unchanged.
+
 ## Integer bitwise wire conformance (#1721, SQ-O2)
 
 InMemory and TCP preserve SMALLINT, INTEGER and BIGINT cells for &, |, #, prefix ~,

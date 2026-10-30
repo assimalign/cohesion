@@ -319,9 +319,11 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic:
                 return ArithmeticType(arithmetic.Operator, StaticTypeOf(arithmetic.Left), StaticTypeOf(arithmetic.Right));
+            case SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator):
+                return SqlJsonAccess.ResultType(json.Operator, StaticTypeOf(json.Left));
             case SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator):
                 return SqlBitwise.ResultType(bitwise.Operator, StaticTypeOf(bitwise.Left), StaticTypeOf(bitwise.Right));
-            case SqlBinaryExpression or SqlLogicalExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
+            case SqlBinaryExpression or SqlLogicalExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression
                 or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression:
                 return DatabaseType.Boolean;
             case SqlSubqueryExpression:

@@ -17,7 +17,7 @@ public sealed partial class SqlQueryParser
     //   ParseAnd                → ParseNot (AND ParseNot)*     one n-ary node per chain
     //   ParseNot                 → NOT ParseNot | ParseComparison
     //   ParseComparison          → IS (low), comparison, BETWEEN/IN/LIKE (high), nonassociative
-    //   ParseConcat              → ParseAddition ((|| | & | | | # | << | >>) ParseAddition)*
+    //   ParseConcat              → ParseAddition ((|| | & | | | # | << | >> | -> | ->>) ParseAddition)*
     //   ParseAddition            → ParseMultiplication ((+|-) ParseMultiplication)*
     //   ParseMultiplication     → ParseCollate ((*|/|%) ParseCollate)*
     //   ParseUnary              → (-|+) ParseUnary | ~ ParseAddition | ParsePrimary (:: type)*
@@ -197,12 +197,36 @@ public sealed partial class SqlQueryParser
                     previous = 1;
                     continue;
                 }
-                if (IsWord(ref lexer, "JSON") || IsWord(ref lexer, "OF") || IsWord(ref lexer, "NORMALIZED"))
+                if (IsWord(ref lexer, "JSON"))
+                {
+                    int jsonEnd = CurrentTokenEnd(ref lexer);
+                    Advance(ref lexer);
+                    var kind = SqlJsonKind.Value;
+                    if (IsWord(ref lexer, "VALUE")) { jsonEnd = CurrentTokenEnd(ref lexer); Advance(ref lexer); }
+                    else if (IsWord(ref lexer, "ARRAY")) { kind = SqlJsonKind.Array; jsonEnd = CurrentTokenEnd(ref lexer); Advance(ref lexer); }
+                    else if (IsWord(ref lexer, "OBJECT")) { kind = SqlJsonKind.Object; jsonEnd = CurrentTokenEnd(ref lexer); Advance(ref lexer); }
+                    else if (IsWord(ref lexer, "SCALAR")) { kind = SqlJsonKind.Scalar; jsonEnd = CurrentTokenEnd(ref lexer); Advance(ref lexer); }
+                    if (IsWord(ref lexer, "WITH") || IsWord(ref lexer, "WITHOUT"))
+                    {
+                        string option = CurrentText(ref lexer).ToUpperInvariant();
+                        int optionEnd = CurrentTokenEnd(ref lexer);
+                        Advance(ref lexer);
+                        if (IsWord(ref lexer, "UNIQUE")) { optionEnd = CurrentTokenEnd(ref lexer); Advance(ref lexer); }
+                        if (IsWord(ref lexer, "KEYS")) { optionEnd = CurrentTokenEnd(ref lexer); Advance(ref lexer); }
+                        RequireSkippedConstruct(pos, optionEnd, "IS JSON " + option + " UNIQUE KEYS");
+                        SkipQueryRemainder(ref lexer);
+                        break;
+                    }
+                    left = Nest(ref lexer, new SqlIsJsonExpression(left, kind, negated, Location.Create(1, 1, pos, jsonEnd)));
+                    previous = 1;
+                    continue;
+                }
+                if (IsWord(ref lexer, "OF") || IsWord(ref lexer, "NORMALIZED"))
                 {
                     RejectPredicateOperator(ref lexer, pos, "IS " + (negated ? "NOT " : "") + CurrentText(ref lexer).ToUpperInvariant());
                     break;
                 }
-                AddExpectedDiagnostic(ref lexer, "NULL, TRUE, FALSE, UNKNOWN or DISTINCT FROM after IS [NOT]");
+                AddExpectedDiagnostic(ref lexer, "NULL, TRUE, FALSE, UNKNOWN, JSON or DISTINCT FROM after IS [NOT]");
                 break;
             }
 
@@ -433,19 +457,26 @@ public sealed partial class SqlQueryParser
             Advance(ref lexer);
             if (shift) { Advance(ref lexer); }
             var right = ParseOperand(ref lexer, OperandRule.Addition);
-            int end = op == SqlBinaryOperator.Concat ? pos : pos + (shift ? 2 : 1);
+            int end = op == SqlBinaryOperator.Concat ? pos : op is SqlBinaryOperator.JsonAccess or SqlBinaryOperator.JsonTextAccess
+                ? pos + (shift ? 3 : 2) : pos + (shift ? 2 : 1);
             left = Nest(ref lexer, new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, end)));
         }
         return left;
     }
 
     // Keep the shared lexer's tokenization byte-for-byte unchanged for OQL and GQL.
-    // SQL interprets # locally and joins only adjacent angle brackets into a shift.
+    // SQL interprets # locally, joins adjacent angle brackets into a shift, and joins
+    // the existing graph arrow with an immediately adjacent > for JSON text access.
     private static bool TryGetGenericOperator(TokenLexer lexer, out SqlBinaryOperator op, out bool shift)
     {
         shift = false;
         switch (lexer.Current.Type)
         {
+            case TokenType.RightArrow:
+                int arrowEnd = lexer.Current.Position + 2;
+                shift = lexer.MoveNext() && lexer.Current.Type == TokenType.GreaterThan && lexer.Current.Position == arrowEnd;
+                op = shift ? SqlBinaryOperator.JsonTextAccess : SqlBinaryOperator.JsonAccess;
+                return true;
             case TokenType.Concat: op = SqlBinaryOperator.Concat; return true;
             case TokenType.Ampersand: op = SqlBinaryOperator.BitwiseAnd; return true;
             case TokenType.Pipe: op = SqlBinaryOperator.BitwiseOr; return true;

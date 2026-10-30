@@ -96,6 +96,15 @@
   <data name="CastUtf8Text" xml:space="preserve">
     <value>CAST text must be valid UTF-8.</value>
   </data>
+  <data name="JsonInputInvalid" xml:space="preserve">
+    <value>JSON input is malformed, exceeds depth 128, has an invalid Unicode escape or is not valid UTF-8.</value>
+  </data>
+  <data name="JsonScalarKindInvalid" xml:space="preserve">
+    <value>Cannot cast JSON {0} to {1}.</value>
+  </data>
+  <data name="JsonSignatureInvalid" xml:space="preserve">
+    <value>JSON access requires JSON or JSONB and a TEXT or INTEGER selector; IS JSON requires character or JSON input.</value>
+  </data>
   <data name="CastJsonText" xml:space="preserve">
     <value>Invalid JSON text (maximum depth 128).</value>
   </data>

@@ -494,7 +494,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("UPDATE t SET a =", "Expected an expression before the end of the statement.", "")]
     [InlineData("DELETE FROM t WHERE", "Expected an expression before the end of the statement.", "")]
     [InlineData("SELECT +", "Expected an expression before the end of the statement.", "")]
-    [InlineData("SELECT id FROM t WHERE a IS;", "Expected NULL, TRUE, FALSE, UNKNOWN or DISTINCT FROM after IS [NOT] but found ';'.", ";")]
+    [InlineData("SELECT id FROM t WHERE a IS;", "Expected NULL, TRUE, FALSE, UNKNOWN, JSON or DISTINCT FROM after IS [NOT] but found ';'.", ";")]
     public void Parse_MissingExpression_ShouldReportSyntaxError(string sql, string message, string located)
     {
         // Act

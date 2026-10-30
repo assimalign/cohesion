@@ -32,6 +32,7 @@ internal sealed partial class SqlPlanner
             SqlCastExpression x => ContainsWindow(x.Operand),
             SqlCollateExpression x => ContainsWindow(x.Operand),
             SqlDistinctExpression x => ContainsWindow(x.Left) || ContainsWindow(x.Right),
+            SqlIsJsonExpression x => ContainsWindow(x.Operand),
             SqlBooleanTestExpression x => ContainsWindow(x.Operand),
             SqlIsNullExpression x => ContainsWindow(x.Operand),
             SqlBetweenExpression x => ContainsWindow(x.Operand) || ContainsWindow(x.Low) || ContainsWindow(x.High),

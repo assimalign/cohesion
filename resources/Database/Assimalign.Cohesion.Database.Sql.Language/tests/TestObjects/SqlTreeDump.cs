@@ -80,6 +80,11 @@ internal static class SqlTreeDump
                 Append(builder, distinct.Right);
                 builder.Append(')');
                 break;
+            case SqlIsJsonExpression json:
+                builder.Append("IsJson(").Append(json.Kind).Append(", ").Append(json.IsNegated).Append(", ");
+                Append(builder, json.Operand);
+                builder.Append(')');
+                break;
             case SqlBooleanTestExpression test:
                 builder.Append("BooleanTest(").Append(test.TruthValue).Append(", ").Append(test.IsNegated).Append(", ");
                 Append(builder, test.Operand);

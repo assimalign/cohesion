@@ -132,6 +132,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return BindDistinct(distinct, out collation, statisticsInput);
             case SqlBooleanTestExpression test:
                 return BindBooleanTest(test, out collation, statisticsInput);
+            case SqlIsJsonExpression json:
+                return BindIsJson(json, out collation, statisticsInput);
             case SqlIsNullExpression isNull:
                 return BindIsNull(isNull, out collation, statisticsInput);
             case SqlBetweenExpression between:
@@ -192,6 +194,14 @@ internal sealed partial class SqlExpressionEvaluator
     {
         var left = Bind(binary.Left, out SqlCollationCandidate leftCollation, statisticsInput: statisticsInput);
         var right = Bind(binary.Right, out SqlCollationCandidate rightCollation, statisticsInput: statisticsInput);
+        if (SqlJsonAccess.IsOperator(binary.Operator))
+        {
+            var source = ValidateJsonOperand(binary.Left, selector: false, predicate: false);
+            ValidateJsonOperand(binary.Right, selector: true, predicate: false);
+            if (TryJsonIndexLiteral(binary.Right, out int index)) { right = new SqlBoundConstant(index); }
+            collation = binary.Operator == SqlBinaryOperator.JsonTextAccess ? rightCollation : default;
+            return new SqlBoundJsonAccess(left, right, source, binary.Operator == SqlBinaryOperator.JsonTextAccess, binary.Location);
+        }
         if (binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan
             or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual)
         {
