@@ -11,6 +11,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Transactions.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Sql.Tests;
@@ -18,6 +19,51 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection("Savepoint engine races")]
 public sealed class SavepointAdapterTests
 {
+    [Theory(DisplayName = "Cohesion Test [SQL] - Undo and prune: unmarked records and absent lineage take no links lock")]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task UndoAndPrune_UnmarkedOrAbsentLineage_ShouldTakeNoLinksLock(int scenario)
+    {
+        // Arrange: real rows exercise both the update (clear deleter) and delete adapters.
+        await using var engine = SqlDatabaseEngine.Create("undo-links", new());
+        var database = await engine.CreateDatabaseAsync("source");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, value INT)");
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 0)");
+        if (scenario == 0)
+        {
+            await using var transaction = await session.BeginTransactionAsync();
+            await session.ExecuteAsync("UPDATE t SET value = 1");
+            int before = database.DataStorage.RowVersionLinks.ForgetLockCount;
+            // Act
+            await transaction.RollbackAsync();
+            // Assert
+            (database.DataStorage.RowVersionLinks.ForgetLockCount - before).ShouldBe(0);
+            return;
+        }
+        if (scenario == 1)
+        {
+            // Act
+            await session.ExecuteAsync("DELETE FROM t");
+            int pruneBefore = database.DataStorage.RowVersionLinks.ForgetLockCount;
+            await database.Coordinator.VersionStore.PruneAsync(new TransactionSequence(ulong.MaxValue));
+            // Assert
+            (database.DataStorage.RowVersionLinks.ForgetLockCount - pruneBefore).ShouldBe(0);
+            return;
+        }
+
+        // A marked writer with an unrelated link must still avoid locking for an absent key.
+        await using var marked = await session.BeginTransactionAsync();
+        var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, marked.Context);
+        await session.ExecuteAsync("INSERT INTO t VALUES (2, 0), (3, 0)");
+        await session.ExecuteAsync("UPDATE t SET value = 1 WHERE id = 2");
+        int absentBefore = database.DataStorage.RowVersionLinks.ForgetLockCount;
+        await UndoMarkerDriver.UndoAsync(database.Coordinator, marked.Context, marker);
+        (database.DataStorage.RowVersionLinks.ForgetLockCount - absentBefore).ShouldBe(0);
+        await marked.RollbackAsync();
+    }
+
     [Fact(DisplayName = "Cohesion Test [SQL] - Savepoint adapters: failed statements and repeated undo retain exactly the prefix lineage")]
     public async Task Undo_FailedStatementAndRepeatedReuse_ShouldRestoreLineageAndRetirement()
     {
@@ -61,13 +107,20 @@ public sealed class SavepointAdapterTests
         await session.ExecuteAsync("INSERT INTO t VALUES (1, 0)");
         await using var observer = await database.CreateSessionAsync();
         await using var observation = await observer.BeginTransactionAsync();
+        await using var committedObserver = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("UPDATE t SET value = 1 WHERE id = 1");
         var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
         await session.ExecuteAsync("UPDATE t SET value = 2 WHERE id = 1");
         await session.ExecuteAsync("INSERT INTO t VALUES (2, 9)");
         // Act
-        await UndoReaderProbe.RunAsync(async () => { (await Values(observer)).ShouldBe([0L]); }, async () =>
+        await UndoReaderProbe.RunAsync(async () =>
+        {
+            (await Values(observer)).ShouldBe([0L]);
+            await using var fresh = await committedObserver.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+            (await Values(committedObserver)).ShouldBe([0L]);
+            await fresh.CommitAsync();
+        }, async () =>
         {
             await session.ExecuteAsync("UPDATE t SET value = 2 WHERE id = 1");
             await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);

@@ -9,11 +9,15 @@ writers. Restore is idempotent across failed undo brackets and whole-transaction
 never materializes the full graph. IndexUndo equality/hash use the immutable store identity and
 physical index generation. Shared record/index undo restores postings and constraints with
 these directories before marker-scoped locks are released.
+Entity/definition publication and its directory before-image are recorded inside the admitted
+apply, before the physical bracket commits. A host rollback claiming the end after apply therefore
+sees the complete ordered ledger; no late directory entry can outlive or reorder that undo.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
 format changes. Named controls and language/session admission belong to XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
-and without the root commit.
+and without the root commit. A deterministic after-apply hook races a claimed host rollback;
+pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
 
 ## Database-wide schema names and named constraints (#1738, GQ-D1)
 

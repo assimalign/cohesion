@@ -31,15 +31,17 @@ internal sealed class SqlTransactionRecordSpace : TransactionRecordSpace
     protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
     {
         _storage.UpdateRow(transaction, pageId, slotIndex, record);
-        if (RecordVersionStamp.ReadStamps(record).Deleter == TransactionSequence.None)
-        { _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex)); }
+        ulong location = SqlRecordLocation.Pack(pageId, slotIndex);
+        if (_storage.RowVersionLinks.HasUndoLink(location) && RecordVersionStamp.ReadStamps(record).Deleter == TransactionSequence.None)
+        { _storage.RowVersionLinks.Forget(location); }
     }
 
     /// <inheritdoc />
     protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)
     {
         _storage.DeleteRow(transaction, pageId, slotIndex);
-        _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex));
+        ulong location = SqlRecordLocation.Pack(pageId, slotIndex);
+        if (_storage.RowVersionLinks.HasUndoLink(location)) { _storage.RowVersionLinks.Forget(location); }
     }
 
     /// <inheritdoc />

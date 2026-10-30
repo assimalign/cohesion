@@ -68,6 +68,8 @@ public sealed partial class GraphStore
     }
 
     private Dictionary<ulong, RecordSpaceVersionStore>? _scopeWriters;
+    // Test-only seam in the window after apply admission ends, before the caller resumes.
+    internal Action? AfterApply { get; set; }
 
     private void UndoScopesChanged(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger)
     {
@@ -196,7 +198,7 @@ public sealed partial class GraphStore
         var changes = indexes.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
             && node.Properties.ContainsKey(index.PropertyKey!))
             .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), node.Id))).ToArray();
-        var inserted = await ApplyAsync(context, async bracket =>
+        await ApplyAsync(context, async bracket =>
         {
             if (record.LabelIds!.Length != 0) { await EnsureLabelsAsync(context, cancellationToken).ConfigureAwait(false); }
             var location = Insert(bracket, bytes, context);
@@ -206,9 +208,9 @@ public sealed partial class GraphStore
                 await InsertIndexAsync(change.Id, change.Key, location, context, cancellationToken).ConfigureAwait(false);
             }
             SaveRegistrations(bracket);
+            Add(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
         return node;
     }
 
@@ -288,7 +290,7 @@ public sealed partial class GraphStore
         EnsureNew(2, id);
         byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship, TypeId: typeId), context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes);
-        var inserted = await ApplyAsync(context, async bracket =>
+        await ApplyAsync(context, async bracket =>
         {
             await EnsureAdjacencyAsync(context, cancellationToken).ConfigureAwait(false);
             await EnsureRelationshipTypesAsync(context, cancellationToken).ConfigureAwait(false);
@@ -296,9 +298,9 @@ public sealed partial class GraphStore
             await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             await InsertRelationshipTypeAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
+            Add(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
         return record.Relationship!.Value;
     }
 
@@ -691,7 +693,12 @@ public sealed partial class GraphStore
 
     private async ValueTask<T> ApplyAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
-        try { return await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            AfterApply?.Invoke();
+            return result;
+        }
         catch { OpenIndexes(); throw; }
     }
 

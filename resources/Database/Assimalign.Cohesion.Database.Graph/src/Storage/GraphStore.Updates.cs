@@ -51,7 +51,7 @@ public sealed partial class GraphStore
         var changes = definitions.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
             && node.Properties.ContainsKey(index.PropertyKey!))
             .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), id))).ToArray();
-        var inserted = await ApplyAsync(context, async bracket =>
+        await ApplyAsync(context, async bracket =>
         {
             if (record.LabelIds!.Length != 0) { await EnsureLabelsAsync(context, cancellationToken).ConfigureAwait(false); }
             var location = Insert(bracket, bytes, context);
@@ -66,9 +66,9 @@ public sealed partial class GraphStore
             { await InsertIndexAsync(change.Id, change.Key, location, context, cancellationToken).ConfigureAwait(false); }
             Tombstone(bracket, prior.Reference, context);
             SaveRegistrations(bracket);
+            Add(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
         return node;
     }
 
@@ -98,16 +98,16 @@ public sealed partial class GraphStore
             Revision: checked(prior.Record.Revision + 1), TypeId: prior.Record.TypeId);
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         record = GraphRecordCodec.Decode(bytes);
-        var inserted = await ApplyAsync(context, async bracket =>
+        await ApplyAsync(context, async bracket =>
         {
             var location = Insert(bracket, bytes, context);
             await RemoveRelationshipAsync(prior, bracket, context, cancellationToken).ConfigureAwait(false);
             await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             await InsertRelationshipTypeAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
+            Add(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
         return record.Relationship;
     }
 

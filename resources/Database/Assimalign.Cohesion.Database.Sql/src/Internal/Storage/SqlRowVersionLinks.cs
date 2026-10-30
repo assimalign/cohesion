@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,13 +23,21 @@ internal sealed class SqlRowVersionLinks
     private readonly Queue<(ulong Predecessor, Link Link)> _retired = [];
 
     private Dictionary<ulong, UndoScope>? _scopes;
+    // Exact, lock-free admission for undo cleanup. Only writers that have used markers
+    // populate this map; ordinary lineage keeps its original allocation/locking shape.
+    private ConcurrentDictionary<ulong, ulong>? _undoLinks;
+    internal int ForgetLockCount { get; private set; }
+
+    internal bool HasUndoLink(ulong predecessor) => _undoLinks?.ContainsKey(predecessor) == true;
 
     internal void Forget(ulong predecessor, TransactionSequence writer = default)
     {
         lock (_sync)
         {
+            ForgetLockCount++;
             if (_scopes?.TryGetValue(writer.Value, out var scope) == true && scope.Active) { RecordUndo(predecessor, writer, scope); }
             _links.Remove(predecessor);
+            UntrackUndoLink(predecessor);
         }
     }
 
@@ -40,6 +49,7 @@ internal sealed class SqlRowVersionLinks
             if (_scopes?.TryGetValue(writer.Value, out scope) == true && scope.Active) { RecordUndo(predecessor, writer, scope); }
             var link = new Link(successor, writer);
             _links[predecessor] = link;
+            if (scope is not null) { TrackUndoLink(predecessor, writer, scope); }
             if (scope?.Active == true) { scope.Retired.Add((predecessor, link)); }
             else { _retired.Enqueue((predecessor, link)); }
         }
@@ -51,8 +61,13 @@ internal sealed class SqlRowVersionLinks
         {
             if (active)
             {
-                _scopes ??= new();
-                if (!_scopes.TryGetValue(writer.Value, out var scope)) { _scopes.Add(writer.Value, scope = new UndoScope(ledger)); }
+                // Allocate before publication: failed marker creation must not leave
+                // a scope whose presence directory was never initialized.
+                var scopes = _scopes ?? new Dictionary<ulong, UndoScope>();
+                var undoLinks = _undoLinks ?? new ConcurrentDictionary<ulong, ulong>();
+                if (!scopes.TryGetValue(writer.Value, out var scope)) { scopes.Add(writer.Value, scope = new UndoScope(ledger)); }
+                _scopes = scopes;
+                _undoLinks = undoLinks;
                 scope.Active = true;
             }
             else if (_scopes?.TryGetValue(writer.Value, out var scope) == true) { scope.Active = false; }
@@ -66,6 +81,9 @@ internal sealed class SqlRowVersionLinks
             if (_scopes is null || !_scopes.Remove(context.Sequence.Value, out var scope)) { return; }
             if (context.State == TransactionState.Committed)
             { foreach (var entry in scope.Retired) { _retired.Enqueue(entry); } }
+            foreach (ulong predecessor in scope.Touched)
+            { _undoLinks?.TryRemove(new KeyValuePair<ulong, ulong>(predecessor, context.Sequence.Value)); }
+            if (_scopes.Count == 0) { _scopes = null; _undoLinks = null; }
         }
     }
 
@@ -77,11 +95,30 @@ internal sealed class SqlRowVersionLinks
         {
             lock (_sync)
             {
-                if (existed) { _links[predecessor] = before; } else { _links.Remove(predecessor); }
+                if (existed)
+                {
+                    _links[predecessor] = before;
+                    TrackUndoLink(predecessor, writer, scope);
+                }
+                else { _links.Remove(predecessor); UntrackUndoLink(predecessor); }
                 if (scope.Retired.Count > retired) { scope.Retired.RemoveRange(retired, scope.Retired.Count - retired); }
             }
         });
         scope.Ledger.RecordIndexEntryCreated(writer, undo, ReadOnlyMemory<byte>.Empty, 0);
+    }
+
+    private void TrackUndoLink(ulong predecessor, TransactionSequence writer, UndoScope scope)
+    {
+        if (_scopes?.ContainsKey(writer.Value) != true) { return; }
+        UntrackUndoLink(predecessor);
+        scope.Touched.Add(predecessor);
+        _undoLinks![predecessor] = writer.Value;
+    }
+
+    private void UntrackUndoLink(ulong predecessor)
+    {
+        if (_undoLinks?.TryRemove(predecessor, out var owner) == true && _scopes?.TryGetValue(owner, out var scope) == true)
+        { scope.Touched.Remove(predecessor); }
     }
 
     internal int RetainedCount
@@ -97,6 +134,7 @@ internal sealed class SqlRowVersionLinks
         internal RecordSpaceVersionStore Ledger { get; }
         internal bool Active { get; set; }
         internal List<(ulong Predecessor, Link Link)> Retired { get; } = new();
+        internal HashSet<ulong> Touched { get; } = new();
         private sealed class DebugView { public DebugView(UndoScope value) { _ = value; } }
     }
 
@@ -145,7 +183,7 @@ internal sealed class SqlRowVersionLinks
                     cancellationToken.ThrowIfCancellationRequested();
                     _retired.Dequeue();
                     if (_links.TryGetValue(entry.Predecessor, out var current) && current == entry.Link)
-                    { _links.Remove(entry.Predecessor); }
+                    { _links.Remove(entry.Predecessor); UntrackUndoLink(entry.Predecessor); }
                     removed++;
                 }
                 if (removed < 1024)
