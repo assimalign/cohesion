@@ -187,6 +187,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS02074 | Unsupported RANGE offset ordering-key domain (0A000) |
 | New (#1526, SQ-W3) | CS02075 | Incompatible RANGE offset domain (0A000) |
 | New (#1526, SQ-W3) | CS02076 | Negative or NaN RANGE offset (22013) |
+| New (#1721, SQ-O2) | CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |

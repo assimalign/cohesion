@@ -895,6 +895,7 @@ internal sealed partial class SqlExpressionEvaluator
                 SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                     or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
                 SqlBinaryOperator.Concat => SqlCastText.Format(leftValue) + SqlCastText.Format(rightValue),
+                var op when SqlBitwise.IsBinary(op) => SqlBitwise.Binary(op, leftValue, rightValue, binary.Location),
                 _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateBinarySqlPlanning, binary.Operator), binary.Location),
             };
         }
@@ -945,6 +946,7 @@ internal sealed partial class SqlExpressionEvaluator
                     ? operand
                     : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
                 SqlUnaryOperator.Not => Box(!BooleanValue(operand, "NOT", unary.Location)!.Value),
+                SqlUnaryOperator.BitwiseNot => SqlBitwise.Not(operand, unary.Location),
                 _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateUnarySqlPlanning, unary.Operator), unary.Location),
             };
         }

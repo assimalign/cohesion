@@ -204,6 +204,13 @@ internal sealed partial class SqlExpressionEvaluator
             left = JsonBinaryToText(binary.Left, left);
             right = JsonBinaryToText(binary.Right, right);
         }
+        if (SqlBitwise.IsBinary(binary.Operator))
+        {
+            SqlBitwise.Validate(StaticTypeOf(binary.Left), SqlBitwise.Text(binary.Operator), binary.Left.Location);
+            SqlBitwise.Validate(StaticTypeOf(binary.Right), SqlBitwise.Text(binary.Operator), binary.Right.Location);
+            if (left is SqlBoundParameter { Value: { } a }) { SqlBitwise.ValueType(a, SqlBitwise.Text(binary.Operator), binary.Left.Location); }
+            if (right is SqlBoundParameter { Value: { } b }) { SqlBitwise.ValueType(b, SqlBitwise.Text(binary.Operator), binary.Right.Location); }
+        }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
             SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), binary.Location);
@@ -519,6 +526,11 @@ internal sealed partial class SqlExpressionEvaluator
 
         var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation, requireBoolean: unary.Operator == SqlUnaryOperator.Not, statisticsInput: statisticsInput);
         collation = CollationOf(unary, [operandCollation]);
+        if (unary.Operator == SqlUnaryOperator.BitwiseNot)
+        {
+            SqlBitwise.Validate(StaticTypeOf(unary.Operand), "~", unary.Operand.Location);
+            if (operand is SqlBoundParameter { Value: { } value }) { SqlBitwise.ValueType(value, "~", unary.Operand.Location); }
+        }
         var bound = new SqlBoundUnary(unary.Operator, operand, unary.Location);
 
         // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant

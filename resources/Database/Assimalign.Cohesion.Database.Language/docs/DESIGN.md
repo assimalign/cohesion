@@ -155,13 +155,16 @@ language's syntax code. The rules, shared by SQL, OQL and GQL:
   gql-label-direction (label-expression operators and `IS`). gql-label-direction (#1139) has
   flipped its pins and added one: the GQL tilde edge, `UNDIRECTED EDGE`, stays `CK00001` until
   the graph engine stores undirected relationships.
-- **A stray character is `TokenType.Unrecognized`.** The lexer reports a character outside every
-  language as `Unrecognized`, never as `Identifier`. Examples are `?`, `#`, `^`, `§`, a
-  backtick, or a zero-width space. A surrogate pair is one token. Only ASCII digits make a numeric
+- **An unclassified character is `TokenType.Unrecognized`.** Characters outside the lexer's
+  fixed token classes stay raw tokens, never identifiers: `?`, `#`, `^`, `§`, a backtick,
+  or a zero-width space. SQL interprets raw `#` as XOR (#1721) and recognizes `^` as deferred
+  exponentiation; OQL and GQL retain their character refusals. A surrogate pair is one token.
+  Only ASCII digits make a numeric
   literal, so a Unicode decimal digit outside a name, such as Arabic-Indic `٣` or fullwidth `１`,
   is `Unrecognized` too; `char.IsDigit` used to lex it as an integer that the engines could not
   convert. Inside a name such a digit stays part of the identifier. `Unrecognized` is appended
-  after `Eof`, so every existing member keeps its value. Each parser reports the character with its own
+  after `Eof`, so every existing member keeps its value. Outside a recognized construct,
+  each parser reports the character with its own
   syntax code at the character's span: `CS00003`, `CD00002` or `CG00002`. The message is
   `Unexpected character '<c>'`, or `U+<hex>` for an invisible or supplementary character. The
   statement then binds nothing. OQL and GQL stop before syntax parsing for these characters,

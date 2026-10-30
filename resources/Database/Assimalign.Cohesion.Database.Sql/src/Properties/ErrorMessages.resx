@@ -666,6 +666,9 @@
   <data name="UnregisteredDomainSqlEvaluation" xml:space="preserve"><value>{0}, so the column cannot be written and the write is refused. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column.</value></data>
   <data name="ExceptionDivisionByZeroSqlEvaluation" xml:space="preserve"><value>Division by zero: the right operand of '{0}' is zero.</value></data>
   <data name="NumericValueOutOfRangeSqlEvaluation" xml:space="preserve"><value>Numeric value out of range: {0}</value></data>
+  <data name="BitwiseOperandType" xml:space="preserve">
+    <value>Operator {0} requires SMALLINT, INTEGER or BIGINT operands; received {1}.</value>
+  </data>
   <data name="InvalidOperandTypeSqlEvaluation" xml:space="preserve"><value>Invalid operand type: unary '{0}' requires a numeric operand, but the operand is {1}.</value></data>
   <data name="ReferenceNotAllowedSqlEvaluation" xml:space="preserve"><value>Column reference '{0}' is not allowed in {1}, which has no columns in scope. Use literals, parameters and expressions over them{2}.</value></data>
   <data name="SignatureMismatchSqlEvaluation" xml:space="preserve"><value>Function '{0}' takes {1} but was called with {2}. Accepted: {3}.</value></data>

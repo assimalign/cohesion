@@ -107,6 +107,13 @@ public sealed partial class SqlQueryParser : QueryParser
         bool skippedStrayCharacter = false;
         while (lexer.Current.Type == TokenType.Unrecognized)
         {
+            // # is an operator only inside an expression. Lexical preflight deliberately
+            // leaves it to SQL syntax, so recovery must still refuse it at the command head.
+            if (lexer.Current.Value.SequenceEqual("#"))
+            {
+                AddExpectedDiagnostic(ref lexer, ErrorMessages.SqlStatementSubject);
+                _sawUnrecognizedCharacter = true;
+            }
             skippedStrayCharacter = true;
             Advance(ref lexer);
         }
@@ -480,11 +487,15 @@ public sealed partial class SqlQueryParser : QueryParser
                     AddSyntaxDiagnostic(position, position + 2,
                         ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid3);
                     break;
-                case TokenType.Unrecognized when value.SequenceEqual("#") || value.SequenceEqual("^"):
+                case TokenType.Unrecognized when value.SequenceEqual("#"):
+                    // SQL consumes this spelling as XOR; other language profiles keep their
+                    // existing lexical refusal and the shared token type stays unchanged.
+                    break;
+                case TokenType.Unrecognized when value.SequenceEqual("^"):
                     _sawUnrecognizedCharacter = true;
                     AddUnsupportedSurfaceDiagnostic(position, position + value.Length,
                         string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeferredOperator,
-                            value.SequenceEqual("#") ? "# (bitwise XOR)" : "^ (exponentiation)"));
+                            "^ (exponentiation)"));
                     break;
                 case TokenType.Unrecognized:
                     _sawUnrecognizedCharacter = true;

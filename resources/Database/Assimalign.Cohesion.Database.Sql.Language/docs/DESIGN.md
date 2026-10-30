@@ -1223,6 +1223,34 @@ The engine's view metadata contract is documented in DIALECT: complete common ty
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
 
+
+## Integer bitwise operators (#1721, SQ-O2)
+
+The existing binary/unary nodes carry integer bitwise operations. All binary operators
+share the generic precedence level with concatenation; prefix ~ binds at that level
+below addition. Canonical rendering preserves these trees, with no changed old branch
+or identifier rule. SQL consumes # and adjacent shift-token pairs locally; the shared
+lexer, token values and other language profiles remain unchanged. PostgreSQL anchors:
+parser/gram.y:904-914,15368-15371 and include/catalog/pg_operator.dat:2274-2328.
+
+Binding accepts SMALLINT/INTEGER/BIGINT storage types and untyped NULL only. CS02077
+(42804) names an invalid bitwise operand before empty inputs or unselected CASE arms.
+Results retain the wider operand width, including shift counts under the explicit T2
+owner rule. Untyped NULL propagates NULL; two untyped NULLs default to INTEGER metadata.
+Right shifts are arithmetic, counts wrap modulo the promoted width (including 16-bit
+operands and negative counts), and left shifts wrap without overflow diagnostics.
+The dialect records these choices against PostgreSQL's INTEGER-count shift signatures.
+
+Views, defaults and CHECKs round-trip through reopen. No format or wire change is
+needed; 21,008 baseline canonical comparisons against 8ac5744fa are identical and
+reload with identical trees. Existing canonical expressions retain their interpretation. The engine oracle
+checks 3,537 typed boundaries/counts against independent .NET operators; all three
+profile corpora pin token isolation, including GQL labels and arrows.
+
+| Code | Condition |
+| --- | --- |
+| CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
+
 ## ILIKE and postfix CAST (#1721, SQ-O1)
 
 ILIKE is contextual and adds IsCaseInsensitive to the existing LIKE AST, preserving the
@@ -1245,7 +1273,7 @@ while still matching _. The two index-backed insensitive transforms remain uncha
 PostgreSQL src/backend/parser/gram.y:904-914 supplies precedence; like.c:186-221 supplies
 determinism admission and lowercasing. The shared lexer is unchanged. All three language profiles
 pin ::, adjacent colons and ~~* token sequences; GQL labels retain their colon grammar.
-Deferred # and ^ receive named CK00001 refusals in SQL lexical preflight, with ^ described as
+SQ-O2 consumes # in SQL syntax; ^ retains its named CK00001 lexical refusal as
 exponentiation (PostgreSQL src/include/catalog/pg_operator.dat:2119,2300). No public interface,
 diagnostic identity, format or wire layout is added.
 Persisted-expression equality and grouping identity distinguish LIKE from ILIKE. Existing

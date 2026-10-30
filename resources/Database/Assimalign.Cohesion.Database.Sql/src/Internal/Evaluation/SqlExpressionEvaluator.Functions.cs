@@ -305,7 +305,7 @@ internal sealed partial class SqlExpressionEvaluator
                 return cast.TargetTypeInfo?.Type ?? TryResolveCastTarget(cast)?.Storage.Type ?? DatabaseType.Null;
             case SqlUnaryExpression { Operator: SqlUnaryOperator.Not }:
                 return DatabaseType.Boolean;
-            case SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus:
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.BitwiseNot } plus:
                 return StaticTypeOf(plus.Operand);
             case SqlUnaryExpression negation:
                 return StaticTypeOf(negation.Operand) switch
@@ -319,6 +319,8 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic:
                 return ArithmeticType(arithmetic.Operator, StaticTypeOf(arithmetic.Left), StaticTypeOf(arithmetic.Right));
+            case SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator):
+                return SqlBitwise.ResultType(StaticTypeOf(bitwise.Left), StaticTypeOf(bitwise.Right));
             case SqlBinaryExpression or SqlLogicalExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
                 or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression:
                 return DatabaseType.Boolean;

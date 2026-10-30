@@ -471,7 +471,10 @@ public static partial class SqlExpressionRenderer
         SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } => multiplicativeLevel,
+        SqlBinaryExpression { Operator: SqlBinaryOperator.BitwiseAnd or SqlBinaryOperator.BitwiseOr
+            or SqlBinaryOperator.BitwiseXor or SqlBinaryOperator.ShiftLeft or SqlBinaryOperator.ShiftRight } => concatLevel,
         SqlBinaryExpression binary => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, binary.Operator)),
+        SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } => concatLevel,
         SqlUnaryExpression => unaryLevel,
         SqlCollateExpression => collateLevel,
         _ => primaryLevel,
@@ -525,6 +528,11 @@ public static partial class SqlExpressionRenderer
         SqlBinaryOperator.Divide => "/",
         SqlBinaryOperator.Modulo => "%",
         SqlBinaryOperator.Concat => "||",
+        SqlBinaryOperator.BitwiseAnd => "&",
+        SqlBinaryOperator.BitwiseOr => "|",
+        SqlBinaryOperator.BitwiseXor => "#",
+        SqlBinaryOperator.ShiftLeft => "<<",
+        SqlBinaryOperator.ShiftRight => ">>",
         SqlBinaryOperator.Equal => "=",
         SqlBinaryOperator.NotEqual => "<>",
         SqlBinaryOperator.LessThan => "<",
@@ -543,6 +551,13 @@ public static partial class SqlExpressionRenderer
             // plain EXISTS, or to an operand that starts with one, would fold into it.
             string operand = Operand(unary.Operand, notLevel);
             return "NOT " + (operand.StartsWith("EXISTS (", StringComparison.Ordinal) ? "(" + operand + ")" : operand);
+        }
+
+        if (unary.Operator == SqlUnaryOperator.BitwiseNot)
+        {
+            // An equal-level operand needs grouping: ~(a & b), not ~a & b.
+            // Separate prefix operators so their spellings cannot become a regex operator.
+            return "~" + Operand(unary.Operand, additiveLevel);
         }
 
         string sign = unary.Operator switch

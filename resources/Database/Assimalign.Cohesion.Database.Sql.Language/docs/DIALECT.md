@@ -330,6 +330,7 @@ executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL compari
 | CS02074 | Unsupported RANGE ordering-key domain (0A000) |
 | CS02075 | Incompatible RANGE offset domain (0A000) |
 | CS02076 | Negative or NaN RANGE offset (22013) |
+| CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
 | CS05086 | Offset RANGE requires exactly one ordering key (42P20) |
 | CS05087 | GROUPS requires ORDER BY (42P20) |
 | CS05088 | NULL treatment on an incompatible function (42601) |
@@ -3390,7 +3391,7 @@ these rules without changing SQL request payloads.
 
 Precedence, low to high: `OR` < `AND` < `NOT` < `IS` tests and distinct
 predicates < comparison (`=`, `<>`, `<`, `>`, `<=`, `>=`) < `[NOT] BETWEEN`,
-`[NOT] IN`, `[NOT] LIKE` < `ESCAPE` < concatenation (`||`) < additive (`+`, `-`)
+`[NOT] IN`, `[NOT] LIKE` < `ESCAPE` < generic operators (`||`, `&`, `|`, `#`, `<<`, `>>`, prefix `~`) < additive (`+`, `-`)
 < multiplicative (`*`, `/`, `%`) < `COLLATE` < unary signs (`-`, `+`) < primary.
 This follows PostgreSQL `src/backend/parser/gram.y:847-853,904-910`.
 Compared with the earlier ladder, IS moves below comparison, BETWEEN/IN/LIKE
@@ -3425,22 +3426,12 @@ levels by default (configurable per engine within 32..4096), and its parentheses
 most as many pairs; a chain of `AND` (or `OR`) terms is one level however long, and
 deeper text reports `CS00006` (see [Expression nesting limit](#expression-nesting-limit-1151)).
 
-`~` is recognized but not part of the dialect, and is rejected at parse time with
-one `CK00001` at the operator (#1101). In prefix position (`~a`, bitwise NOT)
-the message names the prefix `~` operator. That covers every operand position,
-including a rule that takes a primary directly, such as a `LIKE` pattern
-(`LIKE ~'x'`) or a column `DEFAULT ~1`, and a run of prefix operators (`~ ~a`) is
-one diagnostic. In infix position (`a ~ 'x'`, PostgreSQL's regular-expression
-match) it names the infix operator as written. The infix form is recognized
-wherever an additive operator may follow an operand, and after a predicate that
-completes on its own (`a IS NULL ~ 'x'`, `a IN (1, 2) ~ 'x'`, `a LIKE 'x' ~ 'y'`,
-`BETWEEN 1 AND 2 ~ 3`). PostgreSQL's operators built on `~` are one operator each:
-`~*`, `!~` and `!~*` (regular-expression match) and `~~`, `~~*`, `!~~` and `!~~*`
-(LIKE match). `~` used to parse as bitwise NOT, and the evaluator returned NULL
-for a NULL operand and threw per row otherwise. So `SELECT ~NULL;` and `~` over an
-empty table succeeded, and an infix `~` fell to the leftover-token check with a
-generic message. None of them executes now, on either session seam or over the
-wire.
+Prefix `~` is integer bitwise NOT (#1721, below). Infix `a ~ 'x'` remains
+PostgreSQL regular-expression matching and reports one located CK00001 naming the infix
+operator. The deferred family remains `~*`, `!~`, `!~*`, `~~`, `~~*`, `!~~`,
+and `!~~*`. Contiguous compound spellings remain deferred in prefix positions too;
+use `~ ~1` or `~(~1)` for two bitwise NOTs. Each deferred form is reported once, including after completed
+IS, IN, LIKE and BETWEEN predicates. SIMILAR TO remains deferred too.
 
 ## Distinct predicates, Boolean tests and LIKE ESCAPE (#1111)
 
@@ -3530,8 +3521,7 @@ ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
 identifier positions keep their meaning. SIMILAR TO and NOT SIMILAR TO report one
 CK00001; ordinary identifiers `ilike` and `similar` retain their canonical spelling.
-Binary `&`, `|`, `#` (XOR), `<<`, `>>`, `^` (exponentiation, never XOR),
-IS JSON, IS OF and IS NORMALIZED likewise report
+`^` (exponentiation, never XOR), IS JSON, IS OF and IS NORMALIZED report
 one CK00001 at the operator. Missing FROM/comparands or ESCAPE operands remain
 CS00003 at the offending or missing token. Adjacent `<-` is less-than followed by a unary minus operand (#1647).
 
@@ -3569,9 +3559,46 @@ postfix cast follows, keeping +1 and ORDER BY +1 unchanged. Both `+1::TEXT` and
 minus forms; +1::INT is 1. Other types require contiguous ::; the previously accepted
 REGCLASS separated-colon spelling remains available. ILIKE remains contextual; ordinary
 identifiers and stored canonical text are unchanged, so this run changes no SQL or
-compiled-schema format. Regex, SIMILAR TO and bitwise execution remain deferred.
+compiled-schema format. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bitwise execution below.
 PostgreSQL references: src/backend/parser/gram.y:904-914 and
 src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
+
+## Integer bitwise operators (#1721, SQ-O2)
+
+`&` is AND, `|` is OR, `#` is XOR, prefix `~` is NOT, and `<<` / `>>`
+are left and arithmetic right shifts. SMALLINT, INTEGER and BIGINT operands retain their
+16-, 32- and 64-bit widths. Mixed widths promote to the wider operand, including shift
+counts, following the owner-approved T2 rule; PostgreSQL's catalog instead declares
+INTEGER counts with the left operand's result type. Every noninteger operand (including
+TINYINT, NUMERIC, floating, text, Boolean, binary and temporal values) fails during binding
+with CS02077 (42804), including typed NULLs, empty inputs and unselected CASE branches.
+An untyped NULL operand propagates NULL; two untyped NULLs use INTEGER result metadata.
+Domains over the three accepted storage types use their underlying integer width.
+
+All five binary operators share PostgreSQL's generic-operator precedence with concatenation:
+above predicates/comparisons and below addition/subtraction, associating left.
+`1 | 2 & 3` means `(1 | 2) & 3`, yielding INTEGER 3. Prefix `~` takes that
+same precedence: `~1 + 2` means `~(1 + 2)`. Unary signs and `::` still bind
+more tightly. Parentheses preserve a right-nested generic expression. Adjacent angle
+brackets form shifts; spaces/comments between the brackets are syntax errors.
+
+Counts are reduced modulo the promoted operand width, including negative counts and
+counts at or above the width. Right shifts extend the sign bit; left-shift overflow wraps
+in two's complement. Thus `1::SMALLINT << 16::SMALLINT` is SMALLINT 1,
+`1 << 32` is INTEGER 1, and `(-8)::INT >> 2` is INTEGER -2. The explicit
+16-bit modulo rule and all-width count promotion are Cohesion's owner-approved choices;
+they avoid depending on a C compiler's undefined out-of-range shift behavior.
+
+Canonical text preserves these operators in views, column defaults and CHECK constraints
+across reopen. The old renderer branches and all existing identifier rules retain their
+canonical forms; no SQL, compiled-schema or wire version changes. SQL handles `#` and
+shift pairs locally, leaving shared tokens and OQL/GQL behavior unchanged. All three
+profile corpora pin `#`, `~`, `&`, `|`, `<<`, `>>`; GQL additionally
+pins label operators and graph arrows. InMemory and TCP preserve typed values and CS02077.
+
+PostgreSQL references (local clone): `src/backend/parser/gram.y:904-914,15368-15371`;
+`src/include/catalog/pg_operator.dat:2274-2328`;
+`src/backend/utils/adt/int.c:1401-1527`, `int8.c:1215-1271`.
 
 ## Literals
 

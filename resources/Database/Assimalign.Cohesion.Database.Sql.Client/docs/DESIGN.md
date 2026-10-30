@@ -52,6 +52,13 @@ An in-memory regression returns an authenticated rental to its pool and leaves t
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
 
+## Integer bitwise wire conformance (#1721, SQ-O2)
+
+InMemory and TCP preserve SMALLINT, INTEGER and BIGINT cells for &, |, #, prefix ~,
+<< and >>, including NULL and modulo-width shift results. CS02077 rejects noninteger
+operands through the existing structured diagnostics and leaves the connection usable.
+No client API or value-wire change is needed.
+
 ## ILIKE and postfix CAST wire conformance (#1721)
 
 The existing exchange carries collation-aware ILIKE/NOT ILIKE, NULL Boolean cells,
