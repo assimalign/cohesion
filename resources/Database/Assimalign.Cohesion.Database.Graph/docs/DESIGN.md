@@ -9,9 +9,14 @@ writers. Restore is idempotent across failed undo brackets and whole-transaction
 never materializes the full graph. IndexUndo equality/hash use the immutable store identity and
 physical index generation. Shared record/index undo restores postings and constraints with
 these directories before marker-scoped locks are released.
-Entity/definition publication and its directory before-image are recorded inside the admitted
-apply, before the physical bracket commits. A host rollback claiming the end after apply therefore
-sees the complete ordered ledger; no late directory entry can outlive or reorder that undo.
+Marked entity/definition publication and its directory before-image are recorded inside the
+admitted apply, before the physical bracket commits. A host rollback claiming the end after apply
+therefore sees the complete ordered ledger; no late marked directory entry can outlive or reorder
+that undo. Unmarked writers publish only after successful bracket commit, so a refused commit
+cannot leave label/type tokens, counts or entity references for rolled-back pages. Scope registration
+publishes immutable dictionary snapshots under the existing catalog monitor; the existing writer
+lookup moves to the publication decision without adding a lock or lookup to unmarked writes.
+Only marker registration/release copies these snapshots; the last release restores null.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
 format changes. Named controls and language/session admission belong to XT-4. The engine tests

@@ -70,7 +70,8 @@ public sealed partial class GraphStore
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         var entries = GetNodes(label, latest).Where(node => node.Properties.ContainsKey(propertyKey))
             .Select(node => (Found: Find(1, node.Id, latest)!.Value, Key: Composite(GraphRecordCodec.Key(node.Properties[propertyKey]), node.Id))).ToArray();
-        await ApplyAsync(context, async bracket =>
+        bool published = false;
+        ulong inserted = await ApplyAsync(context, async bracket =>
         {
             var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
             foreach (var entry in entries)
@@ -80,9 +81,10 @@ public sealed partial class GraphStore
             }
             var location = Insert(bracket, bytes, context);
             SaveRegistrations(bracket);
-            Add(record, location, context.Sequence);
+            published = PublishMarked(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
+        if (!published) { Add(record, inserted, context.Sequence); }
     }
 
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>

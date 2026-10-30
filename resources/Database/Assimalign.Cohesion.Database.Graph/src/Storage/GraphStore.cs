@@ -75,8 +75,12 @@ public sealed partial class GraphStore
     {
         lock (_sync)
         {
-            if (active) { (_scopeWriters ??= new())[writer.Value] = ledger; }
-            else { _scopeWriters?.Remove(writer.Value); }
+            if (!active && (_scopeWriters is null || !_scopeWriters.ContainsKey(writer.Value))) { return; }
+            // Published snapshots are immutable so statement publication needs no extra lock.
+            var writers = _scopeWriters is null ? new Dictionary<ulong, RecordSpaceVersionStore>() : new(_scopeWriters);
+            if (active) { writers[writer.Value] = ledger; }
+            else { writers.Remove(writer.Value); }
+            Volatile.Write(ref _scopeWriters, writers.Count == 0 ? null : writers);
         }
     }
 
@@ -198,7 +202,8 @@ public sealed partial class GraphStore
         var changes = indexes.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
             && node.Properties.ContainsKey(index.PropertyKey!))
             .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), node.Id))).ToArray();
-        await ApplyAsync(context, async bracket =>
+        bool published = false;
+        ulong inserted = await ApplyAsync(context, async bracket =>
         {
             if (record.LabelIds!.Length != 0) { await EnsureLabelsAsync(context, cancellationToken).ConfigureAwait(false); }
             var location = Insert(bracket, bytes, context);
@@ -208,9 +213,10 @@ public sealed partial class GraphStore
                 await InsertIndexAsync(change.Id, change.Key, location, context, cancellationToken).ConfigureAwait(false);
             }
             SaveRegistrations(bracket);
-            Add(record, location, context.Sequence);
+            published = PublishMarked(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
+        if (!published) { Add(record, inserted, context.Sequence); }
         return node;
     }
 
@@ -290,7 +296,8 @@ public sealed partial class GraphStore
         EnsureNew(2, id);
         byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship, TypeId: typeId), context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes);
-        await ApplyAsync(context, async bracket =>
+        bool published = false;
+        ulong inserted = await ApplyAsync(context, async bracket =>
         {
             await EnsureAdjacencyAsync(context, cancellationToken).ConfigureAwait(false);
             await EnsureRelationshipTypesAsync(context, cancellationToken).ConfigureAwait(false);
@@ -298,9 +305,10 @@ public sealed partial class GraphStore
             await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             await InsertRelationshipTypeAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
-            Add(record, location, context.Sequence);
+            published = PublishMarked(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
+        if (!published) { Add(record, inserted, context.Sequence); }
         return record.Relationship!.Value;
     }
 
@@ -498,13 +506,20 @@ public sealed partial class GraphStore
         _coordinator.VersionStore.RecordTombstoned(context.Sequence, reference.PageId, reference.SlotIndex);
     }
 
-    private void Add(GraphRecord record, ulong location, TransactionSequence writer, bool prune = true)
+    private bool PublishMarked(GraphRecord record, ulong location, TransactionSequence writer)
+    {
+        var writers = Volatile.Read(ref _scopeWriters);
+        if (writers is null || !writers.TryGetValue(writer.Value, out var ledger)) { return false; }
+        Add(record, location, writer, ledger: ledger);
+        return true;
+    }
+
+    private void Add(GraphRecord record, ulong location, TransactionSequence writer, bool prune = true, RecordSpaceVersionStore? ledger = null)
     {
         var (page, slot) = GraphStorage.UnpackLocation(location);
         lock (_sync)
         {
-            RecordSpaceVersionStore? ledger = null;
-            bool marked = _scopeWriters?.TryGetValue(writer.Value, out ledger) == true;
+            bool marked = ledger is not null;
             var undo = marked ? CaptureDirectoryUndo(record) : null;
             RememberLabels(record);
             RememberRelationshipType(record);
