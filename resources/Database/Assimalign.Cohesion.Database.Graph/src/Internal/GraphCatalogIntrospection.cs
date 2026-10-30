@@ -74,6 +74,14 @@ internal static class GraphCatalogIntrospection
                 }
                 else { Ownership(kind, id, definition, "PROPERTY KEY", property.Name, owner, schema); }
             }
+            if (surface == GqlCatalogSurface.ObjectOwnership)
+            {
+                foreach (var constraint in catalog.GetConstraints(id, snapshot))
+                {
+                    token.ThrowIfCancellationRequested();
+                    Ownership(kind, id, definition, "CONSTRAINT", constraint.Name, owner, schema);
+                }
+            }
         }
 
         void Ownership(string kind, Guid id, string definition, string objectType, string objectName,

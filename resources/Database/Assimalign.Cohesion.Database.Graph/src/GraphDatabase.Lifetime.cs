@@ -135,9 +135,8 @@ public sealed partial class GraphDatabase
         _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: true }
             => new DatabaseTransactionAbortedException(error.Message, [new Types.Diagnostic
             { Code = "CG04007", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
-        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsCallerError: true }
-            => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "CG03003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsCallerError: true } catalog
+            => new DatabaseException(error.Message, catalog.Diagnostics, error),
         _ => error,
     };
 

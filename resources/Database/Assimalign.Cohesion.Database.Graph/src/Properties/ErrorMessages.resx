@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="SchemaNameDuplicate" xml:space="preserve"><value>Schema name '{0}' already identifies an index or constraint in this database.</value></data>
+  <data name="SchemaNameMissing" xml:space="preserve"><value>{0} '{1}' does not exist in this database.</value></data>
+  <data name="ConstraintConflict" xml:space="preserve"><value>A constraint or property definition already constrains '{0}' with an incompatible type or the same constraint kind.</value></data>
+  <data name="ConstraintTypeUnsupported" xml:space="preserve"><value>Property type '{0}' is not supported by graph storage.</value></data>
+  <data name="ConstraintDataViolation" xml:space="preserve"><value>Existing data violates constraint '{0}' on property '{1}'.</value></data>
+  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 2. Recreate the database.</value></data>
   <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}'.</value></data>
   <data name="CatalogIdentityMismatch" xml:space="preserve"><value>Definition '{0}' already has a different identity.</value></data>
   <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>
@@ -179,7 +185,7 @@
   <data name="ShortestPathDirectionInvalid" xml:space="preserve"><value>A shortest-path search requires a defined graph direction.</value></data>
   <data name="GraphDatabaseTraverseAsyncDatabase" xml:space="preserve"><value>CG05001: Traversal depth and direction must be valid.</value></data>
   <data name="DatabaseRequireOwnSessionDatabase" xml:space="preserve"><value>CG07005: The session belongs to another database or engine.</value></data>
-  <data name="ValidatePropertiesAsyncDatabase" xml:space="preserve"><value>CG03003: Property '{0}' does not match the graph definition.</value></data>
+  <data name="ValidatePropertiesAsyncDatabase" xml:space="preserve"><value>Property '{0}' does not match the graph definition.</value></data>
   <data name="GraphDatabaseTypeOfDatabase" xml:space="preserve"><value>CG03003: Unsupported graph property value.</value></data>
   <data name="GraphDatabaseLockWriterAsyncDatabase" xml:space="preserve"><value>The graph operation's transaction ended while waiting for the writer lock.</value></data>
   <data name="EngineDropDatabaseCoreAsyncFailure" xml:space="preserve"><value>Database '{0}' does not exist.</value></data>

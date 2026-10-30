@@ -432,7 +432,7 @@ public sealed class GqlLabelChainExecutionTests
         // Act
         var insert = await Should.ThrowAsync<DatabaseException>(async () =>
             await session.ExecuteAsync("INSERT (:X {name: '" + longName + "'})", cancellationToken: CancellationToken.None));
-        var build = await Should.ThrowAsync<DatabaseException>(async () => await schema.CreateIndexAsync("Y", "by_name", "name"));
+        var build = await Should.ThrowAsync<DatabaseException>(async () => await schema.CreateIndexAsync("Y", "y_by_name", "name"));
         var inline = await ColumnAsync(session, "MATCH (n:X {name: '" + longName + "'}) RETURN n.name");
         var equality = await ColumnAsync(session, "MATCH (n:X) WHERE n.name = '" + longName + "' RETURN n.name");
 
@@ -467,7 +467,7 @@ public sealed class GqlLabelChainExecutionTests
         for (int i = 0; i < 20; i++) { await schema.CreateIndexAsync(hundred[i], "ix" + i.ToString(CultureInfo.InvariantCulture), "zz"); }
         await schema.CreateIndexAsync("A", "by_q", "q");
         await schema.CreateIndexAsync("A", "by_p", "p");
-        await schema.CreateIndexAsync("B", "by_p", "p");
+        await schema.CreateIndexAsync("B", "b_by_p", "p");
         string conjunction = string.Join("&", hundred);
         string sameKey = "MATCH (n:" + conjunction + ") WHERE " + string.Join(" AND ", Enumerable.Repeat("n.name = 'all'", chainLength)) + " RETURN n.name";
         string distinctKeys = "MATCH (n:" + conjunction + ") WHERE " +

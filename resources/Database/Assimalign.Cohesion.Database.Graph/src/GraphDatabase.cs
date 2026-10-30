@@ -82,11 +82,24 @@ public sealed partial class GraphDatabase : DatabaseInstance
         // Indexing owns the B-tree page format (#1194) and checks each tree's root
         // page as it attaches the tree. That happens inside the store's open, after
         // the recovery scrub has written to the database, so the check runs here
-        // first: a database whose indexes this engine cannot read is refused before
-        // anything is written to it.
+        // first: a database whose indexes or catalog this engine cannot read is refused before
+        // any logical write. Physical journal redo runs first until Storage #1744 is fixed.
         try
         {
             GraphStore.EnsureIndexFormat(storage);
+            GraphCatalog.EnsureFormat(storage);
+        }
+        catch (GraphCatalogException exception)
+        {
+            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (exception.Diagnostics is [{ Code: "CG06019" }, ..])
+            {
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.DatabaseOpenRefused, name, exception.Message);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = "CG06019", Message = message, Severity = DiagnosticSeverity.Error }], exception);
+            }
+            throw new DatabaseException(exception.Message, exception.Diagnostics, exception);
         }
         catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
@@ -556,7 +569,9 @@ public sealed partial class GraphDatabase : DatabaseInstance
             bool present = properties?.TryGetValue(key.Name, out value) == true && value is not null;
             if (!deferRequired && key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name));
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = "CG03003", Message = message, Severity = DiagnosticSeverity.Error }]);
             }
         }
         // Discovery records untyped keys; explicitly supplied metadata can constrain them.

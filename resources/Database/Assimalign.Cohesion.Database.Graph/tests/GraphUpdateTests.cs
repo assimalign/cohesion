@@ -179,7 +179,8 @@ public sealed class GraphUpdateTests
         var error = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync($"MATCH (a:P) {update}"));
 
         // Assert
-        error.Message.ShouldContain("CG03003", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
+        error.Message.ShouldNotContain("CG03003", Case.Sensitive);
         (await Read(await session.ExecuteAsync("MATCH (a:P) RETURN a.required"))).Single()[0].ShouldBe(1L);
     }
 

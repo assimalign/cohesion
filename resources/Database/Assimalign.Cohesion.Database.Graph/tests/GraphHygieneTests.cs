@@ -50,8 +50,8 @@ public sealed class GraphHygieneTests
         var label = new GraphLabelMetadata(Guid.NewGuid(), name);
 
         // Act
-        byte[] exact = GraphCatalogCodec.Encode(new CatalogRecord(Label: label), new TransactionSequence(1));
-        var overflow = new CatalogRecord(Label: label with { Name = name + "x" });
+        byte[] exact = GraphCatalogCodec.Encode(new CatalogRecord(label: label), new TransactionSequence(1));
+        var overflow = new CatalogRecord(label: label with { Name = name + "x" });
 
         // Assert
         exact.Length.ShouldBe(SlottedPage.MaxRecordSize);

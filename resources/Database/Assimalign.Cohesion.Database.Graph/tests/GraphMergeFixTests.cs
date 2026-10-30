@@ -76,7 +76,8 @@ public sealed class GraphMergeFixTests
         (await GraphMergeExecutionTests.Read(result)).Single()[0].ShouldBe("x");
         if (transaction is not null) { transaction.State.ShouldBe(TransactionState.Active); await transaction.CommitAsync(); }
         var missing = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync("MERGE " + pattern.Replace("id:1", "id:2", StringComparison.Ordinal)));
-        missing.Message.ShouldStartWith("CG03003:", Case.Sensitive);
+        missing.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
+        missing.Message.ShouldNotStartWith("CG03003:", Case.Sensitive);
         string match = relationship ? "MATCH ()-[n:Person]->()" : "MATCH (n:Person)";
         (await GraphMergeExecutionTests.Rows(session, match + " RETURN count(*)")).Single()[0].ShouldBe(1L);
     }

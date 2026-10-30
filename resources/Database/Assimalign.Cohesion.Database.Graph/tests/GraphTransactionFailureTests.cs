@@ -179,7 +179,8 @@ public sealed class GraphTransactionFailureTests
         await transaction.RollbackAsync();
 
         // Assert
-        error.Message.ShouldStartWith("CG03003", Case.Sensitive);
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
+        error.Message.ShouldNotStartWith("CG03003", Case.Sensitive);
         (await Rows(session, "SHOW LABELS")).Select(row => row.GetString(2)).ShouldBe(["Required"]);
         (await Rows(session, "SHOW RELATIONSHIP TYPES")).ShouldBeEmpty();
         (await Rows(session, "MATCH (n:Required) RETURN n.name")).ShouldBeEmpty();

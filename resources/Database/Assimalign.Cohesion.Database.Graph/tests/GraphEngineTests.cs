@@ -115,7 +115,8 @@ public sealed class GraphEngineTests
         await schema.SaveLabelAsync(label);
         await schema.SavePropertyKeyAsync(new(label.Id, "age", DatabaseType.Int64, true));
         var error = await Should.ThrowAsync<DatabaseException>(async () => await db.CreateNodeAsync(session, ["Person"]));
-        error.Message.ShouldContain("CG03003");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
+        error.Message.ShouldNotContain("CG03003", Case.Sensitive);
         await Should.ThrowAsync<DatabaseException>(async () => await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = "old" }));
         (await db.CreateNodeAsync(session, ["Person"], new Dictionary<string, object?> { ["age"] = 42L })).Properties["age"].ShouldBe(42L);
     }
