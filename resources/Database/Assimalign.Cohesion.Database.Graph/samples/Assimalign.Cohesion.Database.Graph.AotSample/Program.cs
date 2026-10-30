@@ -230,6 +230,9 @@ await using (var known = (DatabaseResultSet)await session.ExecuteAsync(
     if (known.Diagnostics.Count != 0) { throw new InvalidOperationException("Known property/map AOT diagnostics failed."); }
     checks++;
 }
+foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:1})", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:2})", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT (:SavepointNative {n:3})", "RELEASE parent", "COMMIT" })
+{ await session.ExecuteAsync(command, cancellationToken: CancellationToken.None); }
+await Check("MATCH (n:SavepointNative) RETURN n.n", [[3L]]);
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

@@ -271,6 +271,7 @@ public sealed class BlobDatabase : DatabaseInstance
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateKernelFailure(Exception error) => error switch
     {
+        _ when DatabaseFailure.TranslateUndoFailure(error) is { } undo => undo,
         DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
             or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
         DatabaseException { Diagnostics.Count: > 0 } => error,

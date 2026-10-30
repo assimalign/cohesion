@@ -1004,6 +1004,7 @@
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
   <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
   <data name="TransactionIsolationOutside" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL requires an active transaction block.</value></data>
+  <data name="TransactionIsolationSavepoint" xml:space="preserve"><value>SET TRANSACTION is not allowed inside a savepoint.</value></data>
   <data name="TransactionIsolationLate" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL must precede the first data statement and cannot run in a savepoint or while a statement is running.</value></data>
   <data name="TransactionSerializable" xml:space="preserve"><value>SERIALIZABLE isolation is not supported; use REPEATABLE READ or READ COMMITTED.</value></data>
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>

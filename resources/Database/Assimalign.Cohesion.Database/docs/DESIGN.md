@@ -1,5 +1,42 @@
 # Assimalign.Cohesion.Database — Design
 
+## Named savepoint admission (#1726, XT-4)
+
+The protected non-virtual session controls CreateSavepointAsync, ReleaseSavepointAsync and
+RollbackToSavepointAsync use the owning root transaction. Its name stack allocates only on first
+SAVEPOINT. Its name stack shares the former failure reference because abort discards all
+names. Kernel bindings move from the five leaves into the root, preserving unmarked real
+transaction object sizes and allocation counts. Names compare ordinally after language normalization, and reverse lookup chooses the
+newest duplicate. RELEASE removes the target and descendants without undo; ROLLBACK TO removes
+descendants and retains the target, including after an incomplete physical undo. The root's
+kernel-bound protected constructor and UpdateSavepointContext retain the current context across
+early isolation replacement. HasSavepoints closes configuration while a named scope is active.
+The stateless shared engine classifier also translates CK04 undo/compensation failures into
+structured root diagnostics, retaining their causes. No public interface, virtual control, shipped friend assembly or new control frame is introduced.
+
+Controls take session operation admission, then the transaction end gate, then root state. The
+root monitor is released before kernel manager admission/context end latch and ledger/lock-table
+work; no root monitor spans storage/page/index latches or awaits. A negative existing operation
+count excludes typed statement admission during the control. The finally path restores admission
+and releases the end gate after success, failure or cancellation. Root rollback, disposal and
+session teardown drain an admitted control through that gate. End cleanup discards names
+without calling leaf code from the gate-release finally, while preserving an abort cause. The source states this lock order.
+
+Incomplete undo leaves the kernel Active and exposes Faulted session status, with CK04009 for
+reads, writes, BEGIN, RELEASE, SAVEPOINT and COMMIT. Commit refuses before claiming the end.
+Only ROLLBACK TO its retained target or an outer scope, or whole ROLLBACK, recovers it. Ordinary
+Graph/Documents statement failure still aborts the whole transaction: ROLLBACK TO cannot recover
+that failure (owner decision, 2026-10-25), unlike PostgreSQL aborted subtransactions. The read
+fence uses a volatile read of the existing kernel admission flags, adding no monitor or allocated
+object to a transaction that never creates a savepoint. CK04012 requires an explicit bound
+transaction; CK04013 denotes an absent name. The coordinator records the actual scope-discard transition in error-only exception metadata keyed by its opaque owned token. The root trims descendants only with that attempt's evidence; a canceled or refused pre-admission outer retry cannot discard a still-live inner name. This also preserves newest-name lookup when discarded descendants shadow an older duplicate. No public member or unmarked transaction field is added. Unexpected cancellation thrown by admitted undo is CK04009; an owned carrier retains its original cause and admission evidence until model translation, keeping pre-admission cancellation distinct. Exception-data synchronization follows kernel release and never spans callbacks or root/kernel calls. UpdateSavepointContext requires this active transaction's immutable id and sequence and the admitted configuration callback; validation adds no tracking monitor or snapshot allocation. RunningOperations counts admitted work and hides the control/configuration reservations, always reporting a nonnegative number. Offline and aborted/ended causes precede the retry fence.
+All three language clients retain their negotiated
+Ready I/T/E and rollback-on-pool-return contracts.
+
+PostgreSQL references rechecked in the local clone: src/backend/access/transam/xact.c:4426-4498
+(definition and explicit-block admission), 4511-4607 (newest-name lookup and descendant release),
+4620-4733 (rollback, descendant discard and target restart). No reference code is copied.
+
 ## Early transaction configuration (#1012)
 
 The protected TryConfigureIsolationLevel operation owns the root's mutable effective isolation

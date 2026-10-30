@@ -110,7 +110,7 @@ public sealed class SavepointAdapterTests
         await using var committedObserver = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("UPDATE t SET value = 1 WHERE id = 1");
-        var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
+        (await session.ExecuteAsync("SAVEPOINT marker")).Status.ShouldBe(DatabaseResultStatus.Success);
         await session.ExecuteAsync("UPDATE t SET value = 2 WHERE id = 1");
         await session.ExecuteAsync("INSERT INTO t VALUES (2, 9)");
         // Act
@@ -123,7 +123,9 @@ public sealed class SavepointAdapterTests
         }, async () =>
         {
             await session.ExecuteAsync("UPDATE t SET value = 2 WHERE id = 1");
-            await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);
+            UndoMarkerDriver.SetBatchObserver(database.Coordinator, UndoReaderProbe.BatchObserver);
+            try { (await session.ExecuteAsync("ROLLBACK TO marker")).Status.ShouldBe(DatabaseResultStatus.Success); }
+            finally { UndoMarkerDriver.SetBatchObserver(database.Coordinator, null); }
         });
         (await Values(session)).ShouldBe([1L]);
         database.DataStorage.RowVersionLinks.Count.ShouldBe(1);

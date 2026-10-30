@@ -226,6 +226,11 @@ internal static class Program
     {
         engine.TryGetDatabase(databaseName, out SqlDatabase? database);
         await using SqlDatabaseSession session = await database!.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE savepoint_native(id INT PRIMARY KEY)");
+        foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT INTO savepoint_native VALUES(1)", "SAVEPOINT duplicate", "INSERT INTO savepoint_native VALUES(2)", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT INTO savepoint_native VALUES(3)", "RELEASE parent", "COMMIT" })
+        { await session.ExecuteAsync(command); }
+        Check("in process: named savepoint duplicate/release/undo/commit", await RowsAsync(session, "SELECT id FROM savepoint_native"), [[3]]);
+        await session.ExecuteAsync("DROP TABLE savepoint_native");
         await session.ExecuteAsync("CREATE SCHEMA native_namespace", cancellationToken: CancellationToken.None);
         Check("in process: CREATE SCHEMA and SCHEMATA", await RowsAsync(session,
             "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'native_namespace'"), [["native_namespace"]]);

@@ -7,6 +7,16 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 
 public sealed partial class SqlQueryParser
 {
+    private string ParseSavepointName(ref TokenLexer lexer)
+    {
+        if (!IsIdentifierOrKeyword(ref lexer)) { AddExpectedDiagnostic(ref lexer, "savepoint name"); return string.Empty; }
+        string name = CurrentIdentifierText(ref lexer);
+        if (lexer.Current.Type != TokenType.QuotedIdentifier) { name = name.ToLowerInvariant(); }
+        if (name.Length == 0) { AddExpectedDiagnostic(ref lexer, "savepoint name"); }
+        Advance(ref lexer);
+        return name;
+    }
+
     private static bool StartsSetTransaction(TokenLexer lexer)
         => MoveTypeLookahead(ref lexer) && IsWord(ref lexer, "TRANSACTION");
 

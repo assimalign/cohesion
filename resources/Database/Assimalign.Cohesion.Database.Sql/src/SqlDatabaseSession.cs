@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -285,7 +286,16 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// walk over the statement does.
     /// </remarks>
     protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
-        => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
+    {
+        try { return ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken); }
+        catch (DatabaseException)
+        {
+            if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
+            _database.ThrowIfOffline();
+            ThrowIfPartialUndoPending();
+            throw;
+        }
+    }
 
     /// <summary>Executes one request with a receipt that cannot attach to any later session request.</summary>
     internal ValueTask<DatabaseResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
@@ -293,6 +303,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
+        if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
         if (!_resetValuesCaptured)
         {
             _initialStatementTimeout = _statementTimeout;
@@ -304,6 +315,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         return request.Statement.SqlExpression is SqlTransactionExpression || (statementTimeout == TimeSpan.Zero && lockTimeout == TimeSpan.Zero)
             ? ExecuteUntimedRequestAsync(request, cancellationToken, scriptReceipt)
             : ExecuteTimedRequestAsync(request, statementTimeout, lockTimeout, cancellationToken, scriptReceipt);
+    }
+
+    private void ThrowIfFencedDatabaseDisposed()
+    {
+        // Preserve the existing CS04005 outcome for a transaction the kernel already ended.
+        // During the earlier disposed-admission window, a live retry fence cannot hide disposal.
+        if (CurrentTransaction is { } transaction && TransactionCoordinator.IsPartialUndoPending(transaction.Context))
+        { throw new ObjectDisposedException(nameof(SqlDatabase)); }
     }
 
     private async ValueTask<DatabaseResult> ExecuteTimedRequestAsync(SqlQueryRequest request, TimeSpan statementTimeout,
@@ -409,6 +428,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     // or allocations. Preserve concrete exception contracts and any more specific expression span.
     private static void ThrowLocatedFailure(DatabaseException failure, SqlQueryExpression expression)
     {
+        // A named fence retains the model-translated cause directly. Ordinary statement
+        // compensation errors keep their existing location and exception-chain contracts.
+        if (expression is SqlTransactionExpression { SavepointName: not null } &&
+            failure.Diagnostics is [{ Code: "CK04009" }, ..]) { return; }
         var original = failure;
         var location = expression.Location;
         if (expression.Text is { } text)
@@ -546,9 +569,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private async ValueTask<DatabaseResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
+        if (request.Statement.SqlExpression is not SqlTransactionExpression { CommandType: SqlQueryCommandType.Rollback or SqlQueryCommandType.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
-        // must not become a full ROLLBACK while savepoints remain unsupported).
+        // must not become a full ROLLBACK when its name or suffix is malformed).
         foreach (var diagnostic in request.Statement.Diagnostics)
         {
             if (diagnostic.Severity == DiagnosticSeverity.Error)
@@ -913,7 +939,38 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         Location = DiagnosticLocation.Absolute,
     };
 
-    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
+    // Dispatch before creating either async state machine: named failure translation must
+    // add no fields or allocations to an ordinary BEGIN/COMMIT/ROLLBACK control frame.
+    private ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
+        SqlTransactionExpression control, CancellationToken cancellationToken)
+        => control.SavepointName is { } name
+            ? ExecuteSavepointControlAsync(control, name, cancellationToken)
+            : ExecuteWholeTransactionControlAsync(control, cancellationToken);
+
+    private async ValueTask<DatabaseResult> ExecuteSavepointControlAsync(
+        SqlTransactionExpression control, string name, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (control.CommandType == SqlQueryCommandType.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else if (control.CommandType == SqlQueryCommandType.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+        }
+        catch (Exception error)
+        {
+            var reported = DatabaseFailure.TranslateSavepointFailure(_database.TranslateFailure(error), CurrentTransaction?.Context);
+            if (DatabaseFailure.IsCorruption(reported) && CurrentTransaction is { } failed)
+            {
+                failed.RecordStorageFailure(reported);
+                await failed.AbortStorageFailureAsync().ConfigureAwait(false);
+            }
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteWholeTransactionControlAsync(
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
@@ -931,6 +988,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     [new Diagnostic { Code = "CS04071", Message = ErrorMessages.TransactionIsolationOutside, Severity = DiagnosticSeverity.Warning }]);
             }
             ThrowIfTransactionRefuses();
+            if (transaction.HasSavepointScope) { return TransactionDiagnostic("CS04074", ErrorMessages.TransactionIsolationSavepoint); }
             if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
             return transaction.TrySetIsolationLevel(isolationLevel)
                 ? new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0)

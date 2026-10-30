@@ -1,5 +1,14 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+Standalone named controls retain TransactionCommand and SavepointName. The name reuses the
+existing standalone body reference, preserving every ordinary GqlQueryExpression allocation.
+Three profile clauses and parser/keyword conformance corpora advance together; no lexer keyword
+or graph expression syntax changes. SQL savepoint forms are documented Cohesion extensions.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+The parser and renderer corpus covers both TO forms with no modifier or WORK and TRANSACTION (PostgreSQL src/backend/parser/gram.y:11414-11431,11483-11486).
+
 ## SQL operator isolation (#1721)
 
 JSON access isolation (#1722) pins -> and ->> as the existing RightArrow and

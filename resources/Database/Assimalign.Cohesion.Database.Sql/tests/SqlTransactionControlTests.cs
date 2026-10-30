@@ -219,7 +219,7 @@ public sealed class SqlTransactionControlTests
         await using var session = await database.CreateSessionAsync();
         await session.ExecuteAsync("BEGIN");
         var transaction = session.CurrentTransaction.ShouldNotBeNull();
-        var invalid = (SqlQueryStatement)new SqlQueryParser().Parse("ROLLBACK TO marker");
+        var invalid = (SqlQueryStatement)new SqlQueryParser().Parse("ROLLBACK TO marker extra");
 
         var result = await Should.ThrowAsync<DatabaseParseException>(() => session.ExecuteAsync(new SqlQueryRequest(invalid)).AsTask());
         result.Diagnostics.ShouldNotBeEmpty();

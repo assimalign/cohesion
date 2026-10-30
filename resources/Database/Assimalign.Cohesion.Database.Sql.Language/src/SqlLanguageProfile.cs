@@ -160,6 +160,9 @@ public static class SqlLanguageProfile
         SqlClauses.SetTransaction,
         SqlClauses.Commit,
         SqlClauses.Rollback,
+        SqlClauses.Savepoint,
+        SqlClauses.ReleaseSavepoint,
+        SqlClauses.RollbackToSavepoint,
         SqlClauses.Transaction,
     ];
 

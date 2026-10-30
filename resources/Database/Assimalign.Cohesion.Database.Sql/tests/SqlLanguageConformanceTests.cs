@@ -277,7 +277,8 @@ public sealed class SqlLanguageConformanceTests
         // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
         // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
         // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(84);
+        // Named savepoint controls (#1726, XT-4) add exactly three measured clauses.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(87);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -1313,6 +1314,15 @@ public sealed class SqlLanguageConformanceTests
                 await using var observer = await session.Database.CreateSessionAsync();
                 await ExpectRowsAsync(observer, "SELECT id FROM t WHERE id = 4;", [[4]]);
             }),
+        [SqlClauses.Savepoint] = new("SAVEPOINT scope;", [.. _seed, "BEGIN;"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Savepoint },
+            async (session, _) => { await ExecuteAsync(session, "ROLLBACK TO scope;"); await ExecuteAsync(session, "COMMIT;"); }),
+        [SqlClauses.ReleaseSavepoint] = new("RELEASE scope;", [.. _seed, "BEGIN;", "SAVEPOINT scope;", "INSERT INTO t VALUES (4, 'new', 1);"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.ReleaseSavepoint },
+            async (session, _) => { await ExecuteAsync(session, "COMMIT;"); await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [2], [3], [4]]); }),
+        [SqlClauses.RollbackToSavepoint] = new("ROLLBACK TO scope;", [.. _seed, "BEGIN;", "SAVEPOINT scope;", "INSERT INTO t VALUES (4, 'new', 1);"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.RollbackToSavepoint },
+            async (session, _) => { await ExecuteAsync(session, "COMMIT;"); await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [2], [3]]); }),
         [SqlClauses.Rollback] = new("ROLLBACK;", [.. _seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);", "DELETE FROM t WHERE id = 2;"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Rollback },
             async (session, _) =>

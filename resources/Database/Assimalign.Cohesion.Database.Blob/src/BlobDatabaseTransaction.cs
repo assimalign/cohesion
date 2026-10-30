@@ -40,25 +40,21 @@ namespace Assimalign.Cohesion.Database.Blob;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Blob.BlobDatabaseTransaction.DebugView))]
 public sealed class BlobDatabaseTransaction : DatabaseTransaction
 {
-    private readonly TransactionCoordinator _coordinator;
-    private readonly TransactionContext _context;
 
     // The database whose offline state (#1243) refuses the transaction's commit and rollback and
     // makes its disposal touch nothing.
     private readonly BlobDatabase _database;
 
     internal BlobDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, BlobDatabase database)
-        : base(context.Id, context.IsolationLevel)
+        : base(coordinator, context)
     {
-        _coordinator = coordinator;
-        _context = context;
         _database = database;
     }
 
     /// <summary>
     /// Gets the MVCC transaction context the transaction's operations run under.
     /// </summary>
-    internal TransactionContext Context => _context;
+    internal TransactionContext Context => KernelContext;
 
     /// <summary>
     /// Gets whether operations may run in the transaction: the caller has not ended it, no
@@ -93,7 +89,7 @@ public sealed class BlobDatabaseTransaction : DatabaseTransaction
     internal ValueTask AbortForFailedOperationAsync(Exception cause) => AbortAsync(cause);
 
     /// <inheritdoc />
-    protected override TransactionState GetKernelState() => _context.State;
+    protected override TransactionState GetKernelState() => KernelContext.State;
 
     /// <inheritdoc />
     /// <remarks>
@@ -109,7 +105,7 @@ public sealed class BlobDatabaseTransaction : DatabaseTransaction
         {
             // Like a rollback, a commit that started runs to completion: a cancellation here would
             // only turn into a kernel abort of work the caller asked to keep.
-            await _coordinator.CommitAsync(_context).ConfigureAwait(false);
+            await KernelCoordinator.CommitAsync(KernelContext).ConfigureAwait(false);
         }
         catch (Exception error)
         {
@@ -135,7 +131,7 @@ public sealed class BlobDatabaseTransaction : DatabaseTransaction
     {
         try
         {
-            await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
+            await KernelCoordinator.RollbackAsync(KernelContext).ConfigureAwait(false);
         }
         catch (Exception error)
         {

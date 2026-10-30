@@ -37,6 +37,33 @@ in-process, typed AST, InMemory and TCP behavior, including continued authentica
 | --- | --- | --- |
 | CG01023 | Warning | Statically named entity property is unknown database-wide in a read-only statement |
 
+## Named savepoint integration (#1726, XT-4)
+
+The GQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+[SAVEPOINT] name through protected root controls before opening autocommit work. Names and
+duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
+the existing model adapters. The enclosing transaction stays open and can commit after undo.
+Ordinary failed statements and invalid named controls preserve this model's full-abort rule.
+Only whole ROLLBACK recovers those failures; ROLLBACK TO preserves CG04007. This is the recorded
+2026-10-25 owner decision, differing from PostgreSQL's aborted-subtransaction recovery.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+Named controls dispatch before async frame creation; their translation locals never grow ordinary control frames. Every named control uses the ordinary statement failure translator before reporting CK04009 for an incomplete kernel undo. The translated failure is retained as its cause. Offline, disposed and corruption failures take precedence; corruption aborts the writer (#1364). The server handles a recoverable failure as a statement error followed by Ready E, so retry or whole rollback uses the same connection.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+
+The central advertised-clause execution matrix also proves each savepoint AST command and
+its row visibility/effects through a live session; the unmapped-clause guard remains intact.
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog undo removes the exact undone metadata reference, including definition,
@@ -56,7 +83,7 @@ lookup moves to the publication decision without adding a lock or lookup to unma
 Only marker registration/release copies these snapshots; the last release restores null.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
-format changes. Named controls and language/session admission belong to XT-4. The engine tests
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
 and without the root commit. A deterministic after-apply hook races a claimed host rollback;
 pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
@@ -731,7 +758,15 @@ reference to an immutable evaluation key, including every bound id and equality.
 whose inputs change must use a fresh key. This one-entry cache retains no factory closure and
 cannot grow with distinct input rows; the executor accounts evaluated operands and both complete probe results.
 
-GraphMergeLocks is lazy and transaction-owned, including across statements. A new parent/entry
+GraphMergeLocks is lazy and transaction-owned, including across statements. For marked writers,
+tracker parent/entry/escalation before-images join the existing ordered undo ledger through
+ordinary apply admission. Root ends drain those memory-only brackets before removing the ledger,
+so a late tracker publication cannot orphan undo after rollback. No tracker monitor spans
+admission, an apply-gate wait or a lock request. ROLLBACK TO restores the pre-marker tracker and
+its retained memory charge before releasing scoped grants; RELEASE transfers those effects to
+the enclosing scope. Repeated undo and later MERGE therefore reacquire released grants without
+a spurious CG05020. This follows PostgreSQL lock owner removal/reassignment
+(src/backend/storage/lmgr/lock.c:2633-2723,2727-2805). A new parent/entry
 charges 640 bytes to the acquiring operation's existing query-memory budget (CG05020 on refusal),
 covering manager state and local bookkeeping. Each MERGE statement also accounts for all retained
 pattern state from earlier statements; 256 additional bytes cover its statement cache. All query
@@ -739,7 +774,7 @@ leases end with the statement, so the tracker never retains a completed query's 
 workspaces. A smaller later query budget refuses even a previously held pattern if the retained
 state exceeds that limit, aborting the explicit transaction. Each pattern first takes parent
 IntentExclusive. After 128 distinct entry resources, new patterns use a single Exclusive object
-lock in the same namespace. The earlier, at most 128 entry grants remain held through undo and
+lock in the same namespace. The earlier, at most 128 entry grants remain held until their owning scope is undone or
 normal coordinator release; escalation never grows that set. This caps both retained lock state
 and the manager's end walk without a new kernel release API or an unsafe early release. The
 parent protocol preserves phantom serialization. While the writer lock remains, production never
@@ -801,11 +836,10 @@ Graph validates the finished ON CREATE row before publication.
 
 ### Failed statements in explicit transactions (#1188)
 
-A statement that fails inside an explicit transaction aborts the whole transaction. Graph storage
-cannot undo one statement: a statement writes catalog definitions, records and index entries
-through separate physical brackets, and `Database.Transactions` undoes a writer only as a whole
-transaction, with no savepoints. The SQL session's contract, where the failed statement writes
-nothing and the transaction stays active, is therefore unavailable, and the session follows Neo4j:
+A statement that fails inside an explicit transaction aborts the whole transaction. Graph writes
+can span separate physical brackets. The owner retained this full-abort rule with named savepoints
+(#1726, 2026-10-25): ROLLBACK TO does not recover ordinary failed statements. The session
+continues to follow the existing Neo4j-style failure contract:
 
 1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
    transaction blocks no other writer while it waits for the caller. (When the undo itself fails,
@@ -880,8 +914,13 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
 
 The session's explicit-transaction lifecycle, where Faulted is the new state:
 
+UndoPending is a recovery path also reported as TransactionState.Faulted; it does not
+represent an ordinary statement-aborted transaction. Only its named rollback retry or whole
+rollback recovers it, as described in the savepoint contract above.
+
 ```mermaid
 stateDiagram-v2
+    state "Faulted: incomplete undo" as UndoPending
     [*] --> Idle
     Idle --> Idle: autocommit statement succeeds or fails
     Idle --> Active: BeginTransactionAsync
@@ -890,6 +929,10 @@ stateDiagram-v2
     Faulted --> Faulted: statement or BEGIN refused with CG04007
     Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
     Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with CG04007
+    Active --> UndoPending: partial undo fails
+    UndoPending --> Active: ROLLBACK TO retained or outer scope
+    UndoPending --> UndoPending: other work refused with CK04009
+    UndoPending --> Idle: ROLLBACK or DisposeAsync
 ```
 
 The reference engines agree on the failure and the refusal; they differ only on COMMIT. Citations
@@ -3552,7 +3595,7 @@ collisions and retained versions; ordering its `m` visible matches adds `O(m log
 
 #### Storage: Atomicity, conflicts and recovery
 
-All graph writers acquire the shared database-level exclusive lock and retain it until
+All graph writers acquire the shared database-level exclusive lock and retain it until their owning savepoint is undone or until
 logical commit/rollback; readers use MVCC snapshots. A weakly associated per-transaction
 async gate serializes complete store mutations, including statement views of the same
 transaction, from lookup and encoding through directory publication. The gate is allocated

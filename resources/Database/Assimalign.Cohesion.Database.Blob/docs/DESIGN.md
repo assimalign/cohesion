@@ -1,5 +1,23 @@
 # Blob engine design
 
+## Named savepoint integration (#1726, XT-4)
+
+The explicit transaction binds its kernel coordinator/context to the root base, so incomplete
+partial undo also fences typed reads and commit. This model gains no text grammar.
+Existing streamed-write control refusals and statement failure rules are unchanged.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog publication retains earlier same-writer metadata while markers are live. Undo
@@ -13,7 +31,7 @@ the committed predecessor for live reads and the next save's tombstone. The undo
 the confirmed stamp-read bytes; chunks receive no second copy for that observer.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
-format changes. Named controls and language/session admission belong to XT-4. The engine tests
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
 and without the root commit. Live-catalog tests cover full rollback and rollback-to followed by
 full rollback. Pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
@@ -483,10 +501,10 @@ removed yet (#1226, `Database.Transactions` DESIGN.md, "Ending a transaction").
 
 ### Failed operations in explicit transactions (#1225)
 
-An operation that fails inside an explicit transaction aborts the whole transaction. Blob
-storage cannot undo one operation: an upload writes a physical bracket per chunk, and a delete
-tombstones the chain chunk by chunk and its metadata separately, while `Database.Transactions`
-undoes a writer only as a whole transaction, with no savepoints. Until #1225 the session then
+An operation that fails inside an explicit transaction still aborts the whole transaction
+(owner, 2026-10-25, #1726). An upload writes a physical bracket per chunk, and a delete
+tombstones the chain chunk by chunk and its metadata separately. The partial-undo substrate
+preserves this failure rule; marker controls also refuse while a write stream is open (CK04010). Until #1225 the session then
 dropped the rolled-back transaction from view, so the next operation silently ran in autocommit
 and the caller's `RollbackAsync` threw. The session now follows the contract the Graph engine set
 in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),
