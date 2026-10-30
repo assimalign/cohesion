@@ -1,5 +1,14 @@
 # Graph client design
 
+## Named schema constraints (#1738, GQ-D1)
+
+Typed schema changes are visible through the existing SHOW exchanges on InMemory and TCP.
+SHOW PROPERTY KEYS returns effective named/unnamed rules; SHOW OBJECT OWNERSHIP includes
+CONSTRAINT names with inherited parent authority. Column shapes stay fixed. Wire regressions
+create type/existence rules locally, verify metadata, exercise rejected CREATE/INSERT writes,
+drop independent rules and indexes, and retain one authenticated session. Enforcement failures
+carry structured CG03003. No client production source, capability or wire version changes.
+
 ## Terminal TCP conformance (#1087)
 
 The real GraphClient and model server run missing-database handshakes on InMemory and
