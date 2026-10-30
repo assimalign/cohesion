@@ -445,9 +445,9 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
-    /// Requires key equality to match evaluator equality. Floating signed zeros
-    /// share SQL equality but not key bytes, so floating keys must scan even with
-    /// an index present. Timestamps qualify: their keys encode only the ticks
+    /// Requires key equality to match evaluator equality. Floating join admission
+    /// remains conservative even after SQL key identity canonicalization (#1631).
+    /// Timestamps qualify: their keys encode only the ticks
     /// (TIMESTAMP) or the instant (TIMESTAMPTZ), the identity the comparer uses.
     /// </summary>
     private static bool CanSeekJoinEquality(DatabaseType inner, DatabaseType outer)

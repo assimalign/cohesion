@@ -45,7 +45,7 @@ public sealed class CompiledPartialIndexTests
         after.Hash.ShouldNotBe(before.Hash);
         plan.Operations.Count.ShouldBe(2);
         Should.Throw<SqlSchemaValidationException>(() => SqlCompiledSchemaSerializer.Deserialize(
-            before.CanonicalDocument.Replace("database-schema/v10", "database-schema/v9", StringComparison.Ordinal)));
+            before.CanonicalDocument.Replace("database-schema/v11", "database-schema/v10", StringComparison.Ordinal)));
     }
 
     private static SqlCompiledSchema Schema(string predicate) => new(SqlCompiledSchema.CurrentFormat, "app", true, [],

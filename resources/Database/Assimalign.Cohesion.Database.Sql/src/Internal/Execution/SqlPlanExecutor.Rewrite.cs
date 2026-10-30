@@ -61,9 +61,9 @@ internal sealed partial class SqlPlanExecutor
         var mapping = previous.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
             .ToDictionary(pair => pair.ObjectId, pair => pair.Replacement);
         var indexes = oldIndexes.Select(index => new SqlCatalogIndex(mapping[index.TableObjectId].ObjectId,
-            index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls)).ToArray();
+            index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders)).ToArray();
         if (additionalIndexes is { Count: > 0 })
-        { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls))).ToArray(); }
+        { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders))).ToArray(); }
         var created = new List<SqlCatalogIndex>();
         bool published = false;
         Exception? operationFailure = null;
@@ -222,7 +222,7 @@ internal sealed partial class SqlPlanExecutor
                         foreach (var index in indexes)
                         {
                             if (!MatchesIndex(replacement, index.Metadata, values, prepared: true)) { continue; }
-                            await index.Index.InsertVersionAsync(bracket, BuildIndexKey(replacement, index.Ordinals, values),
+                            await index.Index.InsertVersionAsync(bracket, BuildIndexKey(replacement, index.Ordinals, values, index.Metadata.KeyOrders),
                                 SqlRecordLocation.Pack(location.PageId, location.SlotIndex), version.Writer,
                                 TransactionSequence.None, cancellationToken).ConfigureAwait(false);
                         }

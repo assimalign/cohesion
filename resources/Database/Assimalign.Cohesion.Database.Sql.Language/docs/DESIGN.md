@@ -1,6 +1,18 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
-The current record-space format is 31; index predicates are persisted by Sql, independently
+## Index key order grammar (#1631, SQ-K1)
+
+SqlCreateIndexExpression.KeyOrders retains effective per-column direction and NULL placement.
+The parser accepts ASC/DESC before NULLS FIRST/LAST, once each. Defaults follow PostgreSQL
+src/backend/commands/indexcmds.c:2255-2270: ASC NULLS LAST and DESC NULLS FIRST. Rendering
+omits default options. Constraint column lists retain their column-only grammar and coded
+syntax refusal (PostgreSQL src/backend/parser/gram.y:4321,8422-8495). The profile gains one
+clause; parser completeness and positive/negative and live execution corpora cover it. SQ-K1
+changes no ORDER BY planning or result wire types. Catalog 32 and compiled v11 fence the
+persisted contract; earlier artifacts are refused, with no upgrade reader.
+
+
+The current record-space format is 32; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -118,7 +130,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 31's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 32's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL

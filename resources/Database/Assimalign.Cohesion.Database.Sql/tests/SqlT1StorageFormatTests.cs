@@ -61,6 +61,6 @@ public sealed class SqlT1StorageFormatTests
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () =>
             await reopening.OpenDatabaseAsync("app", CancellationToken.None));
         refusal.Message.ShouldContain($"uses data-storage format {version}", Case.Sensitive);
-        refusal.Message.ShouldContain("supports only format 31", Case.Sensitive);
+        refusal.Message.ShouldContain("supports only format 32", Case.Sensitive);
     }
 }

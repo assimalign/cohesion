@@ -92,7 +92,7 @@ internal static class SqlRowCodec
     /// </summary>
     // Format 30 adds foreign-key ON UPDATE metadata to table extension 8; rows and
     // format-29 identity/owned-sequence records are unchanged (#1723, SQ-F1).
-    internal const int RecordSpaceFormatVersion = 31;
+    internal const int RecordSpaceFormatVersion = 32;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
@@ -253,10 +253,9 @@ internal static class SqlRowCodec
     /// collation and temporal values encode their <see cref="ToKeyIdentity"/>
     /// form, so for every key type except floating point two keys are byte-equal
     /// exactly when <see cref="SqlValueComparer"/> calls their values equal.
-    /// Floating keys keep the IEEE bytes, so positive and negative zero stay
-    /// distinct keys although SQL calls them equal; that is why the planner never
-    /// seeks a signed-zero equality or a floating range, and joins never seek
-    /// floating keys.
+    /// SqlIndexKeyEncoding then normalizes IEEE signed zeros and NaN to SQL
+    /// equality/order and applies the declared direction and NULL placement.
+    /// The planner retains its conservative floating seek admission.
     /// </summary>
     internal static void AppendKeyValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation collation)
     {

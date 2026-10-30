@@ -41,6 +41,9 @@
   <data name="RowTooLarge" xml:space="preserve"><value>Row for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
   <data name="PartialPredicateDependencies" xml:space="preserve"><value>Persisted index predicate column dependencies do not match its expression.</value></data>
   <data name="PartialPredicateMetadataInvalid" xml:space="preserve"><value>Index predicate metadata requires nonempty text and cannot declare dependencies without a predicate.</value></data>
+  <data name="IndexKeyOrderInvalid" xml:space="preserve">
+    <value>Index key orders must match the key columns and contain only supported directions and NULL placements; primary keys require the default order.</value>
+  </data>
   <data name="PartialPrimaryKey" xml:space="preserve"><value>A primary key cannot have an index predicate.</value></data>
   <data name="PartialPredicateInvalid" xml:space="preserve"><value>An index predicate must be immutable and row-local; parameters, sequences, subqueries, aggregates and windows are prohibited.</value></data>
   <data name="PartialPredicateUnprepared" xml:space="preserve"><value>Index predicate membership was not prepared before applying the write.</value></data>

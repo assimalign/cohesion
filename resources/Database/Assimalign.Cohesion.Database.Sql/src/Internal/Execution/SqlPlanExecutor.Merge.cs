@@ -466,7 +466,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (!MatchesIndex(plan.Table, live.Metadata, values, prepared: true) || PartialNullKey(live.Metadata, live.KeyOrdinals, values)) { continue; }
-                        var key = BuildIndexKey(plan.Table, live.KeyOrdinals, values);
+                        var key = BuildIndexKey(plan.Table, live.KeyOrdinals, values, live.Metadata.KeyOrders);
                         statement.Metrics.DmlMemory(_definitions.StatementMemoryBudget)!.Reserve(128L + key.Length);
                         var conflict = await live.Index.FindLiveEntryAsync(statement.Transaction, key, cancellationToken).ConfigureAwait(false);
                         if (!proposedKeys.Add((live.Metadata.Name, key)) || conflict is { } location && !removed.Contains(location))

@@ -33,7 +33,7 @@ public sealed class SqlSchemaFormatTests
         var detail = error.Errors.ShouldHaveSingleItem();
         detail.Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
         detail.Declaration.ShouldBe("schema.format");
-        error.Message.ShouldContain("cohesion/database-schema/v10");
+        error.Message.ShouldContain("cohesion/database-schema/v11");
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Schema format: v4 SDK artifacts cannot enter Apply or Verify")]
@@ -164,7 +164,7 @@ public sealed class SqlSchemaFormatTests
         detail.Code.ShouldBe(SqlSchemaValidationErrorCode.InvalidDocument);
         detail.Declaration.ShouldBe("schema.format");
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v10", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v11", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         error.Message.ShouldContain("recreate", Case.Sensitive);
     }
