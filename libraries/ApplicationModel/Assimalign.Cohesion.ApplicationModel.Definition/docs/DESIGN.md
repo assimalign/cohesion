@@ -299,9 +299,14 @@ None. The library raises no events and has no event source.
    resource of the root set, an external service, or both? Permissions are only recorded until then.
 2. **Permission vocabulary.** A permission is checked against its grammar only. The target's
    provider should declare the permissions it accepts; that arrives with the area packages.
-3. **Depth.** A child may have children of its own; each joins its own parent. A setting may use
-   only its parent's outputs: a grandparent's would need the parent to relay them, or the child to
-   join both.
+3. **Depth and reach.** A child may have children of its own; each joins its own parent. A setting
+   may use only its parent's outputs. *Proposal (2026-10-29, awaiting the owner):* values flow both
+   ways through the join. Each renewal carries the child's exported outputs up, and the parent's
+   answer relays any value a child's settings use: its own, its parent's, or a sibling's. The parent
+   becomes the hub and every gateway keeps one connection. It needs an export marker, so only
+   outputs a gateway exports leave it; sibling and ancestor references in the model; and a value
+   that changes at its source reaches its consumer on the consumer's next run, as a parent's value
+   does today.
 4. **Deployment manifest — withdrawn by D21.** Children no longer receive a deployment manifest from
    their parent; each deploys with its own pipeline. The `/infra` routes' transport is still open.
 5. **Area verbs.** `set.AddWeb("orders-api")` and resource options belong to the area packages, once
@@ -324,3 +329,15 @@ None. The library raises no events and has no event source.
     gateway. A reference to a parent's resource, like the output placeholders, could carry them.
 11. **Names among a parent's children.** A child that joins under a name already joined replaces the
     earlier one, so two gateways with one name would replace each other on every renewal.
+12. **Claims (proposal, 2026-10-29, awaiting the owner).** The retired design let one application's
+    code add entries to a claimable section of another resource's configuration: orders-api's
+    database in orders-db, its client in IdentityHub, its namespace in the ConfigurationStore. A
+    claim survived the target's redeploys, conflicted with another owner's claim on the same key,
+    and was removed only by its owner. D4's replacement, an action the downstream calls on the
+    upstream at run time, is recorded as the upstream's state: one value per action with no owner,
+    which the upstream's next revision clears and the downstream's removal never withdraws.
+    *Proposal:* a claim is declared on the dependency in the claimant's own code
+    (`api.DependsOn(db, permissions).Claim("databases", "orders", value)`), so it is desired state the
+    gateway holds, not operator state. The gateway that runs the target restores claims with its
+    state when an instance publishes, and across gateways they travel with the join, which also
+    answers question 10.
