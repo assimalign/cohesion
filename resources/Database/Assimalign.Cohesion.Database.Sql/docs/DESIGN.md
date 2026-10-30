@@ -32,9 +32,8 @@ exercise the cursor even when runtime costing chooses a broad table scan.
 
 The planner derives bounds from `=`, `<`, `<=`, `>`, `>=` and BETWEEN with directed indexes. LIKE remains
 a residual filter after an equality-prefix seek; LIKE-prefix bounds are future work beside
-SQ-K3's ordered access. Every ORDER BY still sorts, including matching and fully reversed
-orders; SQ-K3 owns order matching, order costing and sort avoidance. Conservative floating
-predicate admission remains unchanged even though floating key equality/order now matches SQL
+SQ-K3's ordered access. Matching ORDER BY can use forward or backward index scans without
+sorting (SQ-K3, below). Conservative floating predicate admission remains unchanged even though floating key equality/order now matches SQL
 comparison. Schema snapshots, migration
 comparison and runtime/SDK renderers preserve key order through replacement and recovery.
 
@@ -44,6 +43,70 @@ comparison and runtime/SDK renderers preserve key order through replacement and 
 
 Malformed persisted order vectors retain CS06059; unsupported index extensions retain CS06060;
 earlier SQL data-storage formats retain CS06041. Constraint key options retain CS00003.
+
+## ORDER BY from index order (#1631, SQ-K3)
+
+Single-table SELECT compares bound source columns (including pass-through aliases and ordinals)
+with a contiguous prefix of the index suffix after equality-bound leading columns (including IS NULL). Every requested
+key must match its column's resolved collation and direction, or every direction must be
+reversed together. NULL placement must also agree (or reverse) whenever that key can contain NULL. Partial reversal, skipped unconstrained leading keys,
+computed ordering expressions and different collations retain sorting. The comparison follows
+PostgreSQL src/backend/optimizer/path/pathkeys.c:720-814, particularly :771-780 for reversal.
+Partial indexes additionally require SQ-P2's strong implication proof; EXPLAIN retains that proof.
+
+SqlOrderedIndexPath is a derived transient access record. Existing path, planner and statement
+object layouts stay unchanged. The catalog publishes immutable table-specific index vectors with
+its metadata changes. Planning takes the existing catalog lock only to obtain the queried table's
+vector, then matches outside it. The precheck and allocating pass share one matcher and reuse
+ordinary access's validated equality prefix and partial-index proof. Declining orders allocate
+neither an index list nor candidate paths. Complete unique equality lookups bypass ordered
+candidate construction and costing probes because at most one row can qualify. Integer, decimal, IEEE, Boolean, binary, GUID, temporal
+and index-backed text/CHAR codecs have the same order as the SQL comparer. JSON ordering remains
+on the existing sorter. Queries with scalar subqueries, volatile projections, recursive demand,
+joins, groups or windows retain their existing sorting operators. DISTINCT can omit sorting but
+still consumes all candidates before duplicate elimination and pagination.
+
+ORDER BY keeps its existing defaults, ASC NULLS FIRST and DESC NULLS LAST. Index DDL defaults
+remain PostgreSQL's ASC NULLS LAST and DESC NULLS FIRST. NULL placement is irrelevant for a key
+that cannot be NULL in returned rows: declared NOT NULL (including primary keys), an equality-bound
+prefix, a mandatory local NULL-rejecting conjunct, or a proven partial-index predicate supplies
+the proof. Ordering reuses SQ-P2's shared NULL-rejection rule: strict comparisons against any
+operand (including parameters), IN, BETWEEN, LIKE and IS NOT NULL reject NULL. Only mandatory AND
+conjuncts qualify; OR/NOT and the NULL-extended side of an outer join supply no proof. Joins
+retain their existing sorting stage. Equal ordering keys retain
+SQL's unspecified tie order; a final unique key is needed for deterministic LIMIT/OFFSET identity.
+
+Execution resolves the planned tree identity once before removing the sort. Missing or replaced
+trees use the heap scan and original sort. A resolved handle remains valid under the statement's
+reclamation horizon after detachment. Both directions use the existing incremental BTreeCursor,
+checking index and base-row visibility against the same statement snapshot and retaining the full
+WHERE residual. No index-only execution is claimed. The latch order remains transaction/key locks,
+tree read latch, then page pin/pool monitor; each batch releases all latches before predicates or
+projection run. Non-DISTINCT LIMIT/OFFSET stops after enough qualifying rows, disposing the cursor
+even on cancellation, failure or early termination. No row/index write-maintenance path changes.
+
+Order costing uses the existing bounded transient probes and four sequential-row work units per
+random heap fetch. Sorting contributes n*log2(min(n, LIMIT+OFFSET)+1)/8 work units. An ordered
+path credits the eliminated sort and, for fixed integer counts or supplied integer parameters,
+estimates heap visits as min(candidate rows, (LIMIT+OFFSET)/residual selectivity). An exact
+sibling probe supplies its count divided by the table count; an incomplete table probe supplies
+its known lower bound (at least 1,024). Remaining residual restrictions use PostgreSQL
+src/include/utils/selfuncs.h:34-55 defaults: equality 0.005, one inequality 1/3, a two-sided range
+0.005 and LIKE 0.005; independent conjuncts multiply. Restrictions enforced by the candidate or
+counted sibling are not charged again. Deferred count expressions execute only at startup;
+DISTINCT gets no early-stop credit. The winning full unbounded unconditional index proves the same population as the heap, permitting
+scan-versus-sort comparison even when its probe is a lower bound; selective paths still require
+an exact base count before abandoning index access. These are planning heuristics, never persisted
+statistics. A selective ordered path wins while a broad heap-fetch path can lose to scan-plus-sort.
+
+EXPLAIN emits OrderedIndexScan with direction=forward/backward and sort_removed=true; the SELECT
+retains its bound order_keys and reports order_source=index. The generated oracle covers four key
+order vectors, explicit NULL placements, equality prefixes, collation ties and pagination against
+an unindexed forced-sort table. Work counters demonstrate 1,024 -> 10 heap visits and 10 -> 0
+retained sort rows for LIMIT 7 OFFSET 3. Counter-driven nonparallel readers overlap committing key
+changes and physical rollback in both directions under Snapshot and READ COMMITTED. InMemory and
+TCP carry the same descriptions and rows. No new diagnostics, public APIs, formats or wire types
+are added; catalog 32 and compiled schema v11 from SQ-K1 remain current.
 
 ## Anonymous savepoint adapters (#1726, XT-3)
 
@@ -5164,7 +5227,7 @@ description + exported registrations), the engine binds them.
   boundary (`IndexUniqueViolationException` translated — the child-root error
   policy); the statement's bracket has rolled back, the session stays usable.
   Unconditional unique keys treat NULL as a value (stricter than ANSI); partial unique keys retain NULL-distinct semantics. Every ORDER BY sorts in
-  memory after its access path; indexes never supply result order. Physical SQL index order matches SqlValueComparer, including NaN and signed zero; future sort elision still needs matching NULL placement.
+  memory after its access path; matching directed indexes can supply result order (SQ-K3). Physical SQL index order matches SqlValueComparer, including NaN and signed zero; NULL placement must agree only for keys that can contain NULL.
 - **A failed statement's pages are restored where no seek sees them half done** (#1371).
   A multi-row `INSERT` (or `INSERT ... SELECT`, `ExecuteInsertRowsAsync` in
   `src/Internal/Execution/SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row and its entries, splitting

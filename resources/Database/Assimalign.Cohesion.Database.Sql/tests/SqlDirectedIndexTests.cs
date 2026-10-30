@@ -63,7 +63,7 @@ public sealed class SqlDirectedIndexTests
         await NullPrefix(database, session, [null], "a IS NULL");
         await NullPrefix(database, session, [0, null], "a=0 AND b IS NULL");
 
-        // A direction changes physical access only: matching and reversed ORDER BY still sort.
+        // Ordering keys remain in EXPLAIN, including when ordered access removes the sort.
         var explain = await Rows(session, "EXPLAIN SELECT id FROM t WHERE a=0 ORDER BY " + order);
         explain.ShouldContain(row => (row[5] as string ?? "").Contains("order_keys=", StringComparison.Ordinal) && !(row[5] as string ?? "").Contains("order_keys=0", StringComparison.Ordinal));
         explain = await Rows(session, "EXPLAIN SELECT id FROM t WHERE a=0 ORDER BY b DESC,c ASC");

@@ -90,7 +90,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   full pool, so unrelated runtime retention cannot decide its bound (DESIGN, bounded build validation).
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
-  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates, including GROUPING SETS, ROLLUP, CUBE and GROUPING masks;
+  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST` and costed forward/backward matching index scans, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates, including GROUPING SETS, ROLLUP, CUBE and GROUPING masks;
   `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE
   (recursive bodies execute demand-driven UNION ALL/DISTINCT fixpoints; WITH RECURSIVE
   before MERGE reports CK00001 at RECURSIVE), with ordered SELECT definitions

@@ -270,7 +270,7 @@ internal sealed partial class SqlPlanner
             BindCount(select.Limit, LimitClause(select)),
             BindCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
+            SelectOrderedAccessPath(table!, select, projections, ordering, where, evaluator), orderByProjections);
     }
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
@@ -390,12 +390,21 @@ internal sealed partial class SqlPlanner
     /// choice can cost performance but never correctness.
     /// </summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope = null)
-        => SelectAccessPath(table, where is null ? [] : [where], scope);
+        => SelectAccessPath(table, where, scope, out _);
+
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope,
+        out Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates)
+        => SelectAccessPath(table, where is null ? [] : [where], scope, out predicates);
 
     // A caller may supply only the conjuncts applicable to its input and that input's scope.
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
+        => SelectAccessPath(table, conjuncts, scope, out _);
+
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope,
+        out Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates)
     {
+        predicates = null;
         if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
@@ -409,7 +418,7 @@ internal sealed partial class SqlPlanner
         }
 
         // Top-level AND conjuncts → per-column sargable predicates.
-        var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
+        predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
         foreach (var conjunct in conjuncts) { CollectSargablePredicates(table, conjunct, predicates, scope); }
 
         if (predicates.Count == 0 && !HasPartialIndexes(indexes))

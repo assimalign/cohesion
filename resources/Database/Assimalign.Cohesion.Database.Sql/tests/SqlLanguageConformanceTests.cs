@@ -1134,7 +1134,7 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) =>
             {
                 await ExecuteAsync(session, "INSERT INTO t VALUES(4,'Ada',-1);");
-                await ExpectRowsAsync(session, "SELECT id FROM t WHERE name='Ada' ORDER BY id;", [[1],[4]]);
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE name='Ada' ORDER BY id+0;", [[1],[4]]);
                 session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
                 await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET age=1 WHERE id=4;"));
             }),
@@ -1143,7 +1143,17 @@ public sealed class SqlLanguageConformanceTests
             async (session, _) =>
             {
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name;", [[1]]);
-                session.LastStatementMetrics!.AccessPath.ShouldBe("seek:ix_order");
+                session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_order:forward");
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name DESC NULLS LAST LIMIT 1;", [[1]]);
+                session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_order:backward");
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id LIMIT 2;", [[1],[2]]);
+                session.LastStatementMetrics!.RecordsExamined.ShouldBe(2);
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
+                await ExecuteAsync(session, "CREATE INDEX ix_age_default ON t(age);");
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age>35 ORDER BY age LIMIT 2;", [[1],[3]]);
+                session.LastStatementMetrics!.PeakOrderedRows.ShouldBe(0);
             }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },

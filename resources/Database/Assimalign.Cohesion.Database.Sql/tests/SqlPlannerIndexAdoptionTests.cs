@@ -160,7 +160,8 @@ public sealed class SqlPlannerIndexAdoptionTests
         foreach (string predicate in new[] { "id = 7", "id BETWEEN 5 AND 12", "id = 9", "id = 8" })
         {
             var viaSeek = await Rows(session, $"SELECT id, v FROM indexed WHERE {predicate} ORDER BY id");
-            MetricsOf(session).AccessPath.ShouldBe("seek:ix_id");
+            MetricsOf(session).AccessPath.ShouldBe("ordered:ix_id:forward");
+            MetricsOf(session).PeakOrderedRows.ShouldBe(0);
 
             var viaScan = await Rows(session, $"SELECT id, v FROM plain WHERE {predicate} ORDER BY id");
             MetricsOf(session).AccessPath.ShouldBe("scan");
@@ -221,7 +222,8 @@ public sealed class SqlPlannerIndexAdoptionTests
         // Act + Assert
         Ids(await Rows(session, "SELECT id FROM t WHERE id BETWEEN 10 AND 20 ORDER BY id"))
             .ShouldBe(Enumerable.Range(10, 11).ToArray());
-        MetricsOf(session).AccessPath.ShouldBe("seek:ix_id");
+        MetricsOf(session).AccessPath.ShouldBe("ordered:ix_id:forward");
+        MetricsOf(session).PeakOrderedRows.ShouldBe(0);
         MetricsOf(session).RecordsExamined.ShouldBe(11);
 
         Ids(await Rows(session, "SELECT id FROM t WHERE id > 10 AND id < 20 ORDER BY id"))
