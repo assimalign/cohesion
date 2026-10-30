@@ -1,0 +1,74 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+using Shouldly;
+using Xunit;
+
+using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Graph.Catalog;
+using Assimalign.Cohesion.Database.Types;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions.Tests.TestObjects;
+
+namespace Assimalign.Cohesion.Database.Graph.Tests;
+
+[Collection("Savepoint engine races")]
+public sealed class SavepointAdapterTests
+{
+    [Theory(DisplayName = "Cohesion Test [Graph] - Savepoint adapters: catalog tokens, constraints, graph directories and indexes follow undo and recovery")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Undo_ModelWrites_ShouldMatchOracleAndCrashImage(bool commit)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy();
+        await using var engine = GraphDatabaseEngine.Create("savepoints", new() { StorageStrategy = strategy, CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromHours(1), MaintenanceInterval = TimeSpan.FromHours(1) });
+        var database = await engine.CreateDatabaseAsync("source");
+        await using var session = await database.CreateSessionAsync();
+        await session.ExecuteAsync("INSERT (:Item {value: 0})");
+        var schema = GraphSchema.Open(database, session);
+        await schema.CreateIndexAsync("Item", "by_value", "value");
+        var label = (await schema.GetLabelsAsync()).Single(item => item.Name == "Item");
+        await using var observer = await database.CreateSessionAsync();
+        await using var observation = await observer.BeginTransactionAsync();
+        await using var transaction = await session.BeginTransactionAsync();
+        await session.ExecuteAsync("MATCH (n:Item) SET n.value = 1");
+        var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
+        await session.ExecuteAsync("MATCH (n:Item) SET n.value = 2");
+        await session.ExecuteAsync("INSERT (:Transient {value: 9})");
+        await database.Catalog.CreateConstraintAsync(new GraphConstraintMetadata(label.Id, "marker_rule", "value", DatabaseType.Int64), transaction.Context);
+        // Act
+        await UndoReaderProbe.RunAsync(async () => { (await Values(observer, "MATCH (n:Item) RETURN n.value")).ShouldBe([0L]); }, async () =>
+        {
+            await session.ExecuteAsync("MATCH (n:Item) SET n.value = 2");
+            await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);
+        });
+        (await Values(session, "MATCH (n:Item) RETURN n.value")).ShouldBe([1L]);
+        (await Values(session, "MATCH (n:Transient) RETURN n.value")).ShouldBeEmpty();
+        database.Catalog.FindConstraint("marker_rule", transaction.Context.Snapshot).ShouldBeNull();
+        await session.ExecuteAsync("MATCH (n:Item) SET n.value = 3");
+        await session.ExecuteAsync("INSERT (:Transient {value: 9})");
+        if (commit) { await transaction.CommitAsync(); }
+        database.DataStorage.WriteBackDirtyPages(int.MaxValue);
+        database.DataStorage.WriteAheadJournal.Flush(forceDurable: false);
+        strategy.CopyDatabase("source", "image");
+        var image = await engine.OpenDatabaseAsync("image");
+        await using var reader = await image.CreateSessionAsync();
+        // Assert
+        (await Values(reader, "MATCH (n:Item) RETURN n.value")).ShouldBe([commit ? 3L : 0L]);
+        (await Values(reader, "MATCH (n:Transient) RETURN n.value")).ShouldBe(commit ? new long[] { 9 } : Array.Empty<long>());
+    }
+
+    private static async Task<long[]> Values(GraphDatabaseSession session, string text)
+    {
+        var result = (await session.ExecuteAsync(text)).ShouldBeAssignableTo<DatabaseResultSet>()!;
+        var values = new List<long>();
+        await foreach (var row in result.GetRowsAsync()) { values.Add(Convert.ToInt64(row.GetValue(0))); }
+        return values.ToArray();
+    }
+}

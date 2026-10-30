@@ -63,6 +63,66 @@ public sealed partial class GraphStore
             _records[key] = versions;
         }
         OpenIndexes();
+        storage.UndoScopesChanged = UndoScopesChanged;
+        storage.UndoTransactionEnded = context => UndoScopesChanged(context.Sequence, false, _coordinator.VersionStore);
+    }
+
+    private Dictionary<ulong, RecordSpaceVersionStore>? _scopeWriters;
+
+    private void UndoScopesChanged(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger)
+    {
+        lock (_sync)
+        {
+            if (active) { (_scopeWriters ??= new())[writer.Value] = ledger; }
+            else { _scopeWriters?.Remove(writer.Value); }
+        }
+    }
+
+    private RecordVersionIndex CaptureDirectoryUndo(GraphRecord record)
+    {
+        var key = (record.Kind, record.Id);
+        bool existed = _records.TryGetValue(key, out var before);
+        bool definition = _definitionIds.Contains(record.Id);
+        var labels = record.Node?.Labels.Select(label => (Name: label,
+            Tokens: _labelTokens.TryGetValue(label, out var tokens) ? new HashSet<Guid>(tokens) : null,
+            Count: _labelCardinalities.GetValueOrDefault(label))).ToArray();
+        string? type = record.Relationship?.Type;
+        var typeTokens = type is not null && _relationshipTypeTokens.TryGetValue(type, out var known) ? new HashSet<Guid>(known) : null;
+        long typeCount = type is not null ? _relationshipTypeCardinalities.GetValueOrDefault(type) : 0;
+        return new DirectoryUndo(() =>
+        {
+            lock (_sync)
+            {
+                if (existed) { _records[key] = before; } else { _records.Remove(key); }
+                if (record.Kind == 3 && !definition) { _definitionIds.Remove(record.Id); }
+                if (labels is not null)
+                {
+                    foreach (var label in labels)
+                    {
+                        if (label.Tokens is null) { _labelTokens.Remove(label.Name); _labelCardinalities.Remove(label.Name); }
+                        else { _labelTokens[label.Name] = new HashSet<Guid>(label.Tokens); _labelCardinalities[label.Name] = label.Count; }
+                    }
+                }
+                if (type is not null)
+                {
+                    if (typeTokens is null) { _relationshipTypeTokens.Remove(type); _relationshipTypeCardinalities.Remove(type); }
+                    else { _relationshipTypeTokens[type] = new HashSet<Guid>(typeTokens); _relationshipTypeCardinalities[type] = typeCount; }
+                }
+            }
+        });
+    }
+
+    [System.Diagnostics.DebuggerDisplay("DirectoryUndo")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(DirectoryUndo.DebugView))]
+    private sealed class DirectoryUndo : RecordVersionIndex
+    {
+        private readonly Action _restore;
+        internal DirectoryUndo(Action restore) { _restore = restore; }
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
+        { _restore(); return default; }
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken) => default;
+        protected override void OnStatementRolledBackCore() => _restore();
+        private sealed class DebugView { public DebugView(DirectoryUndo value) { _ = value; } }
     }
 
     /// <summary>Loads graph directories and physical B+Tree registrations.</summary>
@@ -439,6 +499,9 @@ public sealed partial class GraphStore
         var (page, slot) = GraphStorage.UnpackLocation(location);
         lock (_sync)
         {
+            RecordSpaceVersionStore? ledger = null;
+            bool marked = _scopeWriters?.TryGetValue(writer.Value, out ledger) == true;
+            var undo = marked ? CaptureDirectoryUndo(record) : null;
             RememberLabels(record);
             RememberRelationshipType(record);
             var next = new Reference(page, slot, writer, record.Revision);
@@ -446,13 +509,14 @@ public sealed partial class GraphStore
             { versions = new VersionChain { Head = next }; }
             else
             {
-                if (prune) { Sweep(ref versions, record.Kind, record.Id); }
+                if (prune && !marked) { Sweep(ref versions, record.Kind, record.Id); }
                 versions.Older = new History(versions.Head, versions.Older);
                 versions.Head = next;
             }
             versions.RelationshipType = record.Relationship?.Type;
             _records[(record.Kind, record.Id)] = versions;
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
+            if (undo is not null) { ledger!.RecordIndexEntryCreated(writer, undo, ReadOnlyMemory<byte>.Empty, 0); }
         }
     }
 

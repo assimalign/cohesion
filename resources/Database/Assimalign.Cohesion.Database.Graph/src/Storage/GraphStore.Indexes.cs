@@ -324,6 +324,9 @@ public sealed partial class GraphStore
             _id = id;
         }
 
+        public override bool Equals(object? obj) => obj is IndexUndo other && ReferenceEquals(_store, other._store) && _id == other._id;
+        public override int GetHashCode() => HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_store), _id);
+
         protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)
             => _store._indexes.TryGetIndex(_id, treeName, out var index)

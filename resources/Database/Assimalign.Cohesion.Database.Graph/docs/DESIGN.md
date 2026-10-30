@@ -1,5 +1,20 @@
 # Graph engine design
 
+## Anonymous savepoint adapters (#1726, XT-3)
+
+Catalog undo removes the exact undone metadata reference, including definition,
+child-name and schema-name directory routes. GraphStore journals before-images of the affected
+entity chain, definition membership, label/type tokens and advisory counts only for marked
+writers. Restore is idempotent across failed undo brackets and whole-transaction abort, and
+never materializes the full graph. IndexUndo equality/hash use the immutable store identity and
+physical index generation. Shared record/index undo restores postings and constraints with
+these directories before marker-scoped locks are released.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission belong to XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit.
+
 ## Database-wide schema names and named constraints (#1738, GQ-D1)
 
 Index and constraint names share one database-wide, ordinal case-sensitive namespace. A name

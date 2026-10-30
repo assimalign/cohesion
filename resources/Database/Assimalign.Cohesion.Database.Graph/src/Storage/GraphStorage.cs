@@ -16,6 +16,9 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
     public StorageJournal WriteAheadJournal => WriteAheadLog;
     /// <summary>Gets the stamped-record adapter for the transaction coordinator.</summary>
     public TransactionRecordSpace Records { get; }
+    internal Action<PageId, int, ReadOnlyMemory<byte>>? CatalogVersionUndone { get; set; }
+    internal Action<TransactionSequence, bool, RecordSpaceVersionStore>? UndoScopesChanged { get; set; }
+    internal Action<TransactionContext>? UndoTransactionEnded { get; set; }
     /// <summary>Creates a graph file set, taking ownership of its streams.</summary>
     /// <param name="data">Data stream.</param><param name="journal">Journal stream.</param><param name="backup">Backup stream.</param><param name="name">Database name.</param>
     /// <returns>The initialized storage.</returns>
@@ -96,6 +99,9 @@ public sealed class GraphStorage : Assimalign.Cohesion.Database.Storage.Storage
         {
             _storage = storage;
         }
+        protected override void OnCreatedVersionUndoneCore(PageId page, int slot, ReadOnlyMemory<byte> record) => _storage.CatalogVersionUndone?.Invoke(page, slot, record);
+        protected override void OnUndoScopesChangedCore(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger) => _storage.UndoScopesChanged?.Invoke(writer, active, ledger);
+        protected override void OnTransactionEndedCore(TransactionContext context) => _storage.UndoTransactionEnded?.Invoke(context);
         protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
         protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => _storage.UpdateEntry(transaction, pageId, slotIndex, record);
         protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex) => _storage.DeleteEntry(transaction, pageId, slotIndex);
