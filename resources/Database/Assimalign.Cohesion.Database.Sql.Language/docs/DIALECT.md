@@ -439,7 +439,8 @@ Session/setval behavior follows local PostgreSQL src/backend/commands/sequence.c
 option defaults and restart follow :1415-1587. Privileges remain out of scope (#177).
 
 Sequence calls and REGCLASS remain refused in persisted CHECK, domain, view and SQL
-function expressions with CS03074 (0A000). Column sequence defaults use the early-bound
+function expressions with CS03074 (0A000). This includes CREATE DOMAIN DEFAULT nextval,
+with or without a REGCLASS cast; refusal occurs at declaration. Column sequence defaults use the early-bound
 dependency path below: RESTRICT refuses and CASCADE removes dependent defaults. OWNED BY, SERIAL aliases, identity restart/overriding and backfill execute through the SQ-S3 owned-sequence path. Compiled schemas do not declare
 standalone sequences, and declared provisioning scripts refuse sequence DDL with
 CS03074 until their receipt/ownership model can represent it.
@@ -561,7 +562,12 @@ all sequences owned by every table in the truncate closure; CONTINUE IDENTITY pr
 
 A column DEFAULT may be nextval with a constant name, numeric sequence id or constant REGCLASS
 cast, or NEXT VALUE FOR an already published named sequence. It records an early-bound sequence dependency in
-the persisted call-identity vector. DROP SEQUENCE RESTRICT names the dependent default;
+the persisted call-identity vector. Reopen retains that identity for NEXTVAL(name),
+NEXTVAL(name::REGCLASS), NEXTVAL(name : : REGCLASS), NEXTVAL(CAST(name AS REGCLASS))
+and NEXT VALUE FOR (#1770), including the allocator's established reservation gaps.
+A dangling or replaced persisted sequence id is catalog damage (CS06061); a normal CASCADE
+removes the default, so recreating its sequence name never retargets that default.
+DROP SEQUENCE RESTRICT names the dependent default;
 CASCADE atomically removes the default. Dynamic references and compound sequence defaults
 remain CS03074, as do CHECK, domain, view, index and SQL-function sequence expressions.
 Declared provisioning scripts continue to refuse standalone sequence DDL. VALUES expressions

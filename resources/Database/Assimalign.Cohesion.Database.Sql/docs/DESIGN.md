@@ -423,7 +423,10 @@ The retirement probe warms append and removal and takes the minimum of three equ
 100-owner rounds, excluding confirmed process-shared scratch-buffer misses. Both standalone
 and identity CACHE default to 1; the established durable reservation limit remains 32.
 Column DEFAULT nextval/NEXT VALUE FOR retains an S:object-id dependency in the existing
-persisted call vector. RESTRICT identifies the dependent default; CASCADE clears defaults
+persisted call vector. Reopen validates these S: identities through the same sequence-default
+validator as DDL (#1770); ordinary F: function pins keep their strict name/signature validation.
+The catalog still refuses dangling or replaced sequence ids and malformed default vectors with
+CS06061. RESTRICT identifies the dependent default; CASCADE clears defaults
 atomically. Compound and dynamic sequence defaults, views and other persisted contexts keep
 CS03074. Schema CASCADE clears cross-schema defaults. Default DDL takes Shared sequence grants before
 table grants and revalidates every S:id under the publication monitor; deletion during a wait

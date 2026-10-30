@@ -21,6 +21,29 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: sequence dependencies remain limited to column defaults (#1770)")]
+    [InlineData("CREATE TABLE checked(v INT CHECK(nextval('s') > 0))")]
+    [InlineData("CREATE VIEW v AS SELECT nextval('s') AS n")]
+    [InlineData("CREATE FUNCTION f() RETURNS BIGINT VOLATILE RETURN nextval('s')")]
+    [InlineData("CREATE DOMAIN d AS BIGINT DEFAULT nextval('s')")]
+    [InlineData("CREATE DOMAIN d AS BIGINT CHECK(nextval('s') > 0)")]
+    [InlineData("CREATE TABLE compound(v BIGINT DEFAULT nextval('s') + 1)")]
+    public async Task ExecuteAsync_PersistedSequenceCorpus_ShouldRefuseUnsupportedDependencies(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sequence-context-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s");
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+
+        // Assert
+        failure.Diagnostics[0].Code.ShouldBe("CS03074");
+        await ExpectRowsAsync(session, "SELECT nextval('s')", [[1L]]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: TYPE narrowing preserves only excess trailing spaces (#1447)")]
     [InlineData("TEXT")]
     [InlineData("VARCHAR(8)")]

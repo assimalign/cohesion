@@ -103,11 +103,7 @@ internal sealed partial class SqlPlanExecutor
         var expression = SqlPersistedExpression.Load(column.DefaultLiteral!, subject);
         if (SqlSequenceDefault.IsCandidate(expression))
         {
-            if (column.DefaultFunctionCalls.Count != 1 || !column.DefaultFunctionCalls[0].StartsWith("S:", StringComparison.Ordinal) ||
-                !ulong.TryParse(column.DefaultFunctionCalls[0].AsSpan(2), out ulong sequenceId))
-            { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
-            if (expression is not SqlNextValueExpression && (!SqlSequenceDefault.TryId(expression, out ulong encodedId) || encodedId != sequenceId))
-            { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed); }
+            ulong sequenceId = SqlSequenceDefault.ValidateIdentity(expression, column.DefaultFunctionCalls);
             return new SqlBoundDefault(new SqlBoundSequence(expression is SqlNextValueExpression ? "NEXT VALUE FOR" : "NEXTVAL", [new SqlBoundConstant(checked((long)sequenceId))]), column, true);
         }
         if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })

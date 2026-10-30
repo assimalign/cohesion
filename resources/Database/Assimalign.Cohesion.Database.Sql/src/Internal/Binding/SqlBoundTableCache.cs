@@ -256,6 +256,11 @@ internal sealed class SqlBoundTableCache
             {
                 if (column.DefaultLiteral is not { } text) { continue; }
                 var expression = SqlPersistedExpression.Load(text, "DEFAULT");
+                if (SqlSequenceDefault.IsCandidate(expression))
+                {
+                    SqlSequenceDefault.ValidateIdentity(expression, column.DefaultFunctionCalls);
+                    continue;
+                }
                 var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: state.Functions);
                 SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
                 if (SqlDefinitionBinder.HasUnavailableCall(expression, scope))
