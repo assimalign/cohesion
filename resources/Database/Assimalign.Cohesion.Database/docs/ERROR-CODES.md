@@ -433,6 +433,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1537, GQ-E1) | CG01019 | Binding/names — outer binding has a proven incompatible correlated pattern kind |
 | New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
 | New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
+| New (#1738, GQ-D2) | CG01022 | Binding/names — schema property references a variable other than its FOR declaration |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
@@ -451,6 +452,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
 | New (#1735, GQ-M1) | CG04024 | Transactions/locking — retryable stale Snapshot MERGE pattern decision |
+| New (#1738, GQ-D2) | CG04025 | Transactions — schema DDL inside an explicit transaction (Cohesion policy) |
 | COHDBG001 | CG05001 | Execution/budgets |
 | COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
 | COHDBG008 | CG05008 | Execution/budgets |

@@ -308,6 +308,9 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
         {
             return ExecuteTransactionControlAsync(request, cancellationToken);
         }
+        if (request.Statement.GqlExpression.SchemaCommand is { } schema &&
+            !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { return ExecuteSchemaAsync(request, schema, cancellationToken); }
         return _database.RunAsync(this, operation =>
         {
             StartQueryBudget(operation, request.Limits, request.Statement.GqlExpression.Location);
@@ -333,6 +336,33 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
             return GraphPlanExecutor.ExecuteAsync(_database, operation, request.Statement,
                 request.Parameters, cancellationToken, paths: request.Paths, scalarsOnly: request.ScalarsOnly, compositeValues: request.CompositeValues);
         }, cancellationToken);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteSchemaAsync(GraphRequest request, GqlSchemaCommand command, CancellationToken token)
+    {
+        if (request.Paths || request.Statement.GqlExpression.Stages.Count != 0 || request.Statement.GqlExpression.Composite is not null ||
+            request.Statement.GqlExpression.CatalogSurface is not null || !ValidSchemaCommand(command) ||
+            request.Statement.GqlExpression.TransactionCommand != GqlTransactionCommand.None || request.Statement.GqlExpression.IsExplain)
+        {
+            var error = new GraphPlanningException("CG05001", ErrorMessages.SchemaStandaloneRequired, request.Statement.GqlExpression.Location);
+            await AbortTransactionAsync(error).ConfigureAwait(false);
+            throw error;
+        }
+        return await GraphSchema.Open(_database, this).ExecuteDdlAsync(command, request.Parameters,
+            request.Limits, request.Statement.GqlExpression.Location, token).ConfigureAwait(false);
+    }
+
+    private static bool ValidSchemaCommand(GqlSchemaCommand command)
+    {
+        if (!Enum.IsDefined(command.Kind) || command.Name is not null && string.IsNullOrWhiteSpace(command.Name)) { return false; }
+        if (command.Drop || command.Kind is GqlSchemaObjectKind.Label or GqlSchemaObjectKind.RelationshipType)
+        {
+            return command.Name is not null && command.Definition is null && command.Variable is null &&
+                command.Property is null && command.Type is null && !command.Relationship;
+        }
+        if (string.IsNullOrWhiteSpace(command.Definition) || string.IsNullOrWhiteSpace(command.Property) ||
+            string.IsNullOrWhiteSpace(command.Variable) || command.Type is { } type && !Enum.IsDefined(type)) { return false; }
+        return command.Kind != GqlSchemaObjectKind.Index || !command.Relationship && command.Type is null;
     }
 
     internal GraphPlanExecutor.ExpansionBudget? LastStatementMetrics { get; private set; }

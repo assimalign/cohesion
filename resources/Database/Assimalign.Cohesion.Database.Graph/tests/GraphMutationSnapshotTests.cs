@@ -79,7 +79,7 @@ public sealed class GraphMutationSnapshotTests
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var token = timeout.Token;
         await using var engine = GraphDatabaseEngine.Create("mutation-snapshots", new());
-        int queued = 0, completed = 0, conflicts = 0;
+        int queued = 0, completed = 0, conflicts = 0, policyRefusals = 0;
         var elapsed = Stopwatch.StartNew();
         do
         {
@@ -94,20 +94,36 @@ public sealed class GraphMutationSnapshotTests
                 mode == 1 ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, token);
             var label = new GraphLabelMetadata(Guid.NewGuid(), "Fresh");
             var type = new GraphRelationshipTypeMetadata(Guid.NewGuid(), "FreshR");
-            var schema = GraphSchema.Open(db, first);
+            // Catalog-level staging retains snapshot/serialization coverage beneath the public DDL policy.
             switch (scenario)
             {
-                case "Label": case "Schema": await schema.SaveLabelAsync(label, token); break;
+                case "Label": case "Schema":
+                    await db.LockWriterAsync(writer.Context, token);
+                    await db.Catalog.SaveLabelAsync(label, writer.Context, token); break;
                 case "NodeKey": await db.CreateNodeAsync(first, ["N"], new Dictionary<string, object?> { ["fresh"] = 1L }, token); break;
-                case "RelationshipType": await schema.SaveRelationshipTypeAsync(type, token); break;
+                case "RelationshipType":
+                    await db.LockWriterAsync(writer.Context, token);
+                    await db.Catalog.SaveRelationshipTypeAsync(type, writer.Context, token); break;
                 case "DeleteNode": await first.ExecuteAsync("MATCH (n:N) SET n.x=1", cancellationToken: token); break;
                 case "DeleteRelationship": await first.ExecuteAsync("MATCH ()-[r:R]->() SET r.x=1", cancellationToken: token); break;
             }
 
             // Act: the call runs synchronously as far as its writer-lock wait.
             var pending = MutateAsync();
-            pending.IsCompleted.ShouldBeFalse();
             queued++;
+            if (scenario == "Schema" && mode != 0)
+            {
+                pending.IsCompleted.ShouldBeTrue();
+                var refusal = await Should.ThrowAsync<DatabaseException>(() => pending);
+                refusal.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG04025");
+                transaction!.State.ShouldBe(TransactionState.Faulted);
+                await transaction.RollbackAsync(token);
+                await writer.CommitAsync(token);
+                policyRefusals++;
+            }
+            else
+            {
+            pending.IsCompleted.ShouldBeFalse();
             await writer.CommitAsync(token);
 
             // Assert
@@ -133,6 +149,8 @@ public sealed class GraphMutationSnapshotTests
                 }
             }
 
+            }
+
             async Task MutateAsync()
             {
                 switch (scenario)
@@ -152,7 +170,9 @@ public sealed class GraphMutationSnapshotTests
             }
         } while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || queued < 2) && elapsed.Elapsed < TimeSpan.FromSeconds(20));
         queued.ShouldBeGreaterThanOrEqualTo(2);
-        completed.ShouldBe(mode == 2 ? 0 : queued);
-        conflicts.ShouldBe(mode == 2 ? queued : 0);
+        bool policy = scenario == "Schema" && mode != 0;
+        completed.ShouldBe(mode == 2 || policy ? 0 : queued);
+        conflicts.ShouldBe(mode == 2 && !policy ? queued : 0);
+        policyRefusals.ShouldBe(policy ? queued : 0);
     }
 }

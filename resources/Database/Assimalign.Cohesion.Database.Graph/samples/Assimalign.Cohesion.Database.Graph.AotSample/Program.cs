@@ -194,6 +194,24 @@ await schema.DropConstraintAsync("schema_exists", CancellationToken.None);
 await session.ExecuteAsync("MATCH (n:SchemaSmoke) REMOVE n.p", cancellationToken: CancellationToken.None);
 await schema.DropConstraintAsync("schema_type", CancellationToken.None);
 await schema.DropIndexAsync("schema_index", CancellationToken.None);
+await session.ExecuteAsync("CREATE INDEX ddl_index FOR (n:FreshDdl) ON (n.p)", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("CREATE CONSTRAINT ddl_required FOR (n:FreshDdl) REQUIRE n.p IS NOT NULL", cancellationToken: CancellationToken.None);
+await using (var shown = (DatabaseResultSet)await session.ExecuteAsync("SHOW CONSTRAINTS", cancellationToken: CancellationToken.None))
+{
+    int rows = 0;
+    await foreach (var row in shown.GetRowsAsync(CancellationToken.None))
+    {
+        if (!Equals(row.GetValue(4), "ddl_required") || !Equals(row.GetValue(7), true))
+        { throw new InvalidOperationException("Schema DDL AOT SHOW mismatch."); }
+        rows++;
+    }
+    if (rows != 1) { throw new InvalidOperationException("Schema DDL AOT row count mismatch."); }
+    checks++;
+}
+await session.ExecuteAsync("DROP CONSTRAINT ddl_required", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("DROP INDEX ddl_index", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("DROP LABEL FreshDdl", cancellationToken: CancellationToken.None);
+
 if ((await schema.GetConstraintsAsync(CancellationToken.None)).Count != 0 ||
     await schema.FindIndexAsync("schema_index", CancellationToken.None) is not null)
 { throw new InvalidOperationException("Named schema AOT drop failed."); }

@@ -4,15 +4,70 @@ Typed GraphSchema manages database-wide index/constraint names (#1738, GQ-D1). N
 and existence constraints are independently droppable; creation checks existing data and all
 entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their combined type and
 required state; SHOW OBJECT OWNERSHIP includes named CONSTRAINT rows with parent ownership.
-The existing column contracts remain fixed. Typed schema writes still join explicit transactions
-in D1; text DDL, transaction-policy refusal and new-label index tokens belong to D2. SHOW
-CONSTRAINTS is not added here. Duplicate names use CG03008, conflicting rules CG03009,
+The existing column contracts remain fixed. D2 adds the schema commands and transaction policy below. Duplicate names use CG03008, conflicting rules CG03009,
 invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v1 refuses with
 CG06019; only v2 is read.
 
 A named constraint may repeat an identical unnamed property rule. The declarations are
 independent: dropping that constraint preserves the unnamed rule. Typed GetPropertyKeysAsync
 returns declared metadata only; SHOW PROPERTY KEYS continues to report effective rules.
+
+## Schema DDL (#1738, GQ-D2; #1249)
+
+Standalone commands run on the session's database:
+
+- `CREATE INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property)`;
+- `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS NOT NULL`;
+- `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS :: type`;
+- constraint relationship patterns use `FOR ()-[r:TYPE]-()` and `REQUIRE r.property`, with
+  optional arrows (`()-[r:TYPE]->()`, `()<-[r:TYPE]-()`, `()<-[r:TYPE]->()`); rendering
+  normalizes all forms to the undirected pattern;
+- `DROP INDEX name [IF EXISTS]` and `DROP CONSTRAINT name [IF EXISTS]`;
+- Cohesion definition extensions `CREATE LABEL name [IF NOT EXISTS]`,
+  `CREATE RELATIONSHIP TYPE name [IF NOT EXISTS]`, and their `DROP ... [IF EXISTS]` forms.
+
+Types are BOOLEAN (alias BOOL), INT8, INT16, INT32, INT64 (aliases INTEGER and INT),
+FLOAT32, FLOAT64 (alias FLOAT), DECIMAL and STRING. Type rules allow absent/NULL properties;
+existence rules require non-NULL. Matching uses the stored scalar type without coercion.
+These spellings follow the approved Neo4j-style DDL surface, with Cohesion's existing scalar
+storage types. INTEGER/INT mean Int64 here; CAST retains its documented Int32 meaning.
+UNIQUE, composite constraints/indexes, relationship property indexes, closed graph types and
+unsupported constraint types refuse with CK00001 naming the form. A mismatched FOR variable is CG01022.
+No DDL parameters, query composition or EXPLAIN are admitted; identifiers retain ordinary quoting.
+
+Cohesion refuses every schema write inside an explicit transaction with structured CG04025,
+including typed GraphSchema writes and conditional no-ops. This is a Cohesion policy: Neo4j
+only forbids mixing schema and data writes in one transaction. A refused admitted statement
+aborts the explicit transaction; rollback restores session use. Typed argument checks precede
+admission and leave an explicit transaction usable. Auto-commit DDL owns one transaction,
+including token discovery, validation, physical indexes and catalog publication.
+
+Schema statements validate GraphQueryLimits inside their admitted operation (CG08021 for
+invalid limits). Owner validation scans and index backfill consume the statement work budget
+(CG05004); cursor buffers and retained backfill entries share its memory budget (CG05020).
+Exhaustion rolls back the rule, name reservation and every newly discovered token. Typed
+schema writes use the engine's statement limits.
+
+Indexes discover missing label/property tokens. Text constraints discover missing label/type/property
+tokens. A refused or failed creation leaves none of its new tokens. Discovered properties are
+untyped metadata and remain known after dropping the last rule. No graph entity is inserted.
+IF NOT EXISTS suppresses an existing rule of the same kind with that name, or an equivalent
+rule over the same owner/property/type, even with another name; a cross-kind name collision
+still reports CG03008 and incompatible rules CG03009. IF EXISTS suppresses an absent drop.
+A real create/drop reports affected count 1, a conditional no-op 0. Nonempty definitions
+cannot be dropped (CG03003); dropping an empty definition removes its child rules and indexes.
+
+Generated names are `index_<sha256>` or `constraint_<sha256>`, with all 64 lowercase hexadecimal
+digest characters. SHA-256 hashes UTF-8 concatenated fields, each prefixed by its invariant
+UTF-8 byte length and a colon: object kind (Index/Constraint), owner kind (node/relationship),
+owner name, property name, and canonical type enum name (or exists). Variable names, aliases,
+whitespace and IF NOT EXISTS do not affect identity. Explicit names and schema-rule lookup
+remain ordinal and case-sensitive across the shared database-wide namespace.
+
+SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
+CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
+name, followed by relationship type name then constraint name. Other SHOW column contracts
+stay fixed. Graph catalog v2 and graph format 5 remain unchanged. D3 adds unknown-property warnings.
 
 SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
 `~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix

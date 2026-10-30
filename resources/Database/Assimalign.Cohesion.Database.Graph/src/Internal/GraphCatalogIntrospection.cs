@@ -50,7 +50,7 @@ internal static class GraphCatalogIntrospection
                 }
             }
         }
-        if (surface is GqlCatalogSurface.RelationshipTypes or GqlCatalogSurface.PropertyKeys or GqlCatalogSurface.ObjectOwnership)
+        if (surface is GqlCatalogSurface.RelationshipTypes or GqlCatalogSurface.PropertyKeys or GqlCatalogSurface.Constraints or GqlCatalogSurface.ObjectOwnership)
         {
             foreach (var type in catalog.GetRelationshipTypes(snapshot))
             {
@@ -64,6 +64,11 @@ internal static class GraphCatalogIntrospection
         void AddDefinition(string kind, Guid id, string definition, DatabaseObjectOwner owner, string? schema)
         {
             if (surface == GqlCatalogSurface.ObjectOwnership) { Ownership(kind, id, definition, kind, definition, owner, schema); }
+            if (surface == GqlCatalogSurface.Constraints)
+            {
+                foreach (var constraint in catalog.GetConstraints(id, snapshot))
+                { token.ThrowIfCancellationRequested(); rows.Add([name, kind, id, definition, constraint.Name, constraint.PropertyKey, constraint.Type?.ToString(), constraint.Type is null]); }
+            }
             if (surface is not (GqlCatalogSurface.PropertyKeys or GqlCatalogSurface.ObjectOwnership)) { return; }
             foreach (var property in catalog.GetPropertyKeys(id, snapshot))
             {
@@ -104,6 +109,10 @@ internal static class GraphCatalogIntrospection
             GqlCatalogSurface.Indexes =>
                 [("DATABASE_NAME", DatabaseType.String), ("LABEL_ID", DatabaseType.Guid), ("LABEL_NAME", DatabaseType.String),
                  ("INDEX_NAME", DatabaseType.String), ("PROPERTY_KEY", DatabaseType.String), ("IS_UNIQUE", DatabaseType.Boolean)],
+            GqlCatalogSurface.Constraints =>
+                [("DATABASE_NAME", DatabaseType.String), ("DEFINITION_TYPE", DatabaseType.String), ("DEFINITION_ID", DatabaseType.Guid),
+                 ("DEFINITION_NAME", DatabaseType.String), ("CONSTRAINT_NAME", DatabaseType.String), ("PROPERTY_KEY", DatabaseType.String),
+                 ("DATA_TYPE", DatabaseType.String), ("IS_REQUIRED", DatabaseType.Boolean)],
             GqlCatalogSurface.ObjectOwnership =>
                 [("DATABASE_NAME", DatabaseType.String), ("DEFINITION_TYPE", DatabaseType.String), ("DEFINITION_ID", DatabaseType.Guid),
                  ("DEFINITION_NAME", DatabaseType.String), ("OBJECT_TYPE", DatabaseType.String), ("OBJECT_NAME", DatabaseType.String),

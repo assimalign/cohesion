@@ -12,6 +12,9 @@ public class GqlQueryParserTests
 {
     [Theory]
     [InlineData("MATCH (a) SET a.age = 5")]
+    [InlineData("CREATE CONSTRAINT c FOR ()-[r:T]->() REQUIRE r.p IS NOT NULL")]
+    [InlineData("CREATE CONSTRAINT c FOR ()<-[r:T]-() REQUIRE r.p IS NOT NULL")]
+    [InlineData("CREATE CONSTRAINT c FOR ()-[r:T]-() REQUIRE r.p IS NOT NULL")]
     [InlineData("MATCH (a) REMOVE a.age")]
     [InlineData("MATCH (a:Person) RETURN a")]
     [InlineData("UNWIND [1, 2] AS a RETURN a")]

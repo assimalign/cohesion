@@ -60,8 +60,8 @@ public sealed class GraphCatalogErrorTests
         (await schema.GetLabelsAsync(CancellationToken.None)).ShouldHaveSingleItem().ShouldBe(label);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog: a stale engine snapshot reports a structured retryable conflict")]
-    public async Task SaveLabelAsync_NameCreatedAfterSnapshot_ShouldReportStructuredConflict()
+    [Fact(DisplayName = "Cohesion Test [Database.Graph] - Catalog: explicit schema writes refuse before catalog mutation")]
+    public async Task SaveLabelAsync_ExplicitTransaction_ShouldRefuseBeforeCatalogMutation()
     {
         // Arrange
         await using var engine = GraphDatabaseEngine.Create("catalog-snapshot", new());
@@ -73,13 +73,11 @@ public sealed class GraphCatalogErrorTests
         await GraphSchema.Open(database, first).SaveLabelAsync(label, CancellationToken.None);
 
         // Act
-        var failure = await Should.ThrowAsync<DatabaseTransactionAbortedException>(async () =>
+        var failure = await Should.ThrowAsync<DatabaseException>(async () =>
             await GraphSchema.Open(database, second).SaveLabelAsync(label, CancellationToken.None));
 
         // Assert
-        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG04007");
-        failure.Message.ShouldNotStartWith("CG04007:", Case.Sensitive);
-        failure.InnerException.ShouldBeOfType<GraphCatalogException>().IsConflict.ShouldBeTrue();
+        failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG04025");
         transaction.State.ShouldBe(TransactionState.Faulted);
         await transaction.RollbackAsync(CancellationToken.None);
     }

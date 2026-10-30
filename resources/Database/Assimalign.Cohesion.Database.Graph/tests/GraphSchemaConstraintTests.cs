@@ -273,8 +273,14 @@ public sealed class GraphSchemaConstraintTests
         await one.SaveLabelAsync(new(a, "A"), timeout.Token);
         await one.SaveLabelAsync(new(b, "B"), timeout.Token);
         await using var transaction = await first.BeginTransactionAsync(IsolationLevel.ReadCommitted, timeout.Token);
-        if (firstIndex) { await one.CreateIndexAsync("A", "shared", "p", timeout.Token); }
-        else { await one.CreateConstraintAsync(new(a, "shared", "p"), timeout.Token); }
+        // Stage substrate metadata directly: public schema operations now require autocommit.
+        await database.LockWriterAsync(transaction.Context, timeout.Token);
+        if (firstIndex)
+        {
+            await database.Catalog.SaveIndexAsync(new(a, "shared", "p"), transaction.Context, timeout.Token);
+            await database.Store.CreateIndexAsync("A", "p", transaction.Context, timeout.Token);
+        }
+        else { await database.Catalog.CreateConstraintAsync(new(a, "shared", "p"), transaction.Context, timeout.Token); }
         var queued = (secondIndex ? two.CreateIndexAsync("B", "shared", "p", timeout.Token)
             : two.CreateConstraintAsync(new(b, "shared", "p"), timeout.Token)).AsTask();
         queued.IsCompleted.ShouldBeFalse();

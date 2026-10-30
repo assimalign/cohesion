@@ -77,7 +77,7 @@ public class GqlLanguageProfileTests
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
             GqlClauses.Match, GqlClauses.QuantifiedPath, GqlClauses.PathMode, GqlClauses.PathSelector, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.SetOperation, GqlClauses.UnionDistinct, GqlClauses.UnionAll, GqlClauses.Except, GqlClauses.ExceptDistinct, GqlClauses.ExceptAll, GqlClauses.Intersect, GqlClauses.IntersectDistinct, GqlClauses.IntersectAll, GqlClauses.Otherwise, GqlClauses.Next, GqlClauses.With, GqlClauses.GroupBy, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Exists, GqlClauses.Case, GqlClauses.ListComprehension, GqlClauses.PatternComprehension, GqlClauses.ListSlice, GqlClauses.Reduce, GqlClauses.ListPredicate, GqlClauses.Create, GqlClauses.Insert, GqlClauses.Merge,
-            GqlClauses.Set, GqlClauses.Remove, GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Filter, GqlClauses.Let, GqlClauses.For, GqlClauses.Unwind, GqlClauses.Show,
+            GqlClauses.Set, GqlClauses.Remove, GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Filter, GqlClauses.Let, GqlClauses.For, GqlClauses.Unwind, GqlClauses.Show, GqlClauses.CreateIndex, GqlClauses.DropIndex, GqlClauses.CreateConstraint, GqlClauses.DropConstraint, GqlClauses.CreateLabel, GqlClauses.DropLabel, GqlClauses.CreateRelationshipType, GqlClauses.DropRelationshipType,
             GqlClauses.LabelExpression]);
     }
 
