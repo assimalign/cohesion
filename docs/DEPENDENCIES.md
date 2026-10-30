@@ -29,12 +29,12 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 662 |
-| Shipped library/resource projects | 237 |
+| Projects indexed | 622 |
+| Shipped library/resource projects | 217 |
 | Library areas | 21 |
 | Resource areas | 18 |
-| Declared project references | 705 |
-| Declared shared-source links | 64 |
+| Declared project references | 665 |
+| Declared shared-source links | 61 |
 
 ## Ambiguous project names
 
@@ -583,59 +583,51 @@ flowchart LR
 
 ### `resources/ApiManager`
 
-3 shipped projects.
+2 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["ApiManager"]
-    N1["ApiManager.ApplicationModel"]
-    N2["ApiManager.Hosting"]
-    N2 --> N0
+    N1["ApiManager.Hosting"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.ApiManager` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.ApiManager.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.ApiManager.Hosting` | `Assimalign.Cohesion.ApiManager`<br>`Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/ConfigurationStore`
 
-5 shipped projects.
+3 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["ConfigurationStore"]
-    N1["ConfigurationStore.ApplicationModel"]
-    N2["ConfigurationStore.ApplicationModel.Orchestration"]
-    N3["ConfigurationStore.Client"]
-    N4["ConfigurationStore.Hosting"]
-    N2 --> N3
-    N4 --> N0
+    N1["ConfigurationStore.Client"]
+    N2["ConfigurationStore.Hosting"]
+    N2 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.ConfigurationStore` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.ConfigurationStore.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
-| `Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ConfigurationStore.Client` | — | — | — |
 | `Assimalign.Cohesion.ConfigurationStore.Client` | `Assimalign.Cohesion.Core` | — | — | — |
 | `Assimalign.Cohesion.ConfigurationStore.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.ConfigurationStore`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/Database`
 
-39 shipped projects.
+38 shipped projects.
 
 _More than twelve projects: the table below is the area's graph (see the node ceiling in `.claude/rules/documentation.md`)._
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Database` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.Database.Execution`<br>`Assimalign.Cohesion.Database.Indexing`<br>`Assimalign.Cohesion.Database.Language`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Security`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions`<br>`Assimalign.Cohesion.Database.Types` | `Assimalign.Cohesion.Web` | — | — |
-| `Assimalign.Cohesion.Database.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.Database.Blob` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database`<br>`Assimalign.Cohesion.Database.Blob.Protocol`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Storage`<br>`Assimalign.Cohesion.Database.Transactions` | — | `Assimalign.Cohesion.Database/Engine` | — |
 | `Assimalign.Cohesion.Database.Blob.Client` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Database.Blob.Protocol`<br>`Assimalign.Cohesion.Database.Client`<br>`Assimalign.Cohesion.Database.Protocol`<br>`Assimalign.Cohesion.Database.Types` | — | — | — |
 | `Assimalign.Cohesion.Database.Blob.Protocol` | `Assimalign.Cohesion.Database.Protocol` | — | — | — |
@@ -676,175 +668,177 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 
 ### `resources/EmailHub`
 
-3 shipped projects.
+2 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["EmailHub"]
-    N1["EmailHub.ApplicationModel"]
-    N2["EmailHub.Hosting"]
-    N2 --> N0
+    N1["EmailHub.Hosting"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.EmailHub` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.EmailHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.EmailHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.EmailHub`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/EventHub`
 
-3 shipped projects.
+2 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["EventHub"]
-    N1["EventHub.ApplicationModel"]
-    N2["EventHub.Hosting"]
-    N2 --> N0
+    N1["EventHub.Hosting"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.EventHub` | `Assimalign.Cohesion.Connections` | — | — | — |
-| `Assimalign.Cohesion.EventHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.EventHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.EventHub`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/IdentityHub`
 
-5 shipped projects.
+4 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["IdentityHub"]
-    N1["IdentityHub.ApplicationModel"]
-    N2["IdentityHub.Client"]
-    N3["IdentityHub.Hosting"]
-    N4["IdentityHub.Models"]
-    N0 --> N4
-    N2 --> N4
-    N3 --> N0
+    N1["IdentityHub.Client"]
+    N2["IdentityHub.Hosting"]
+    N3["IdentityHub.Models"]
+    N0 --> N3
+    N1 --> N3
+    N2 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityHub.Models`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
-| `Assimalign.Cohesion.IdentityHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.IdentityHub.Client` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityHub.Models`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
 | `Assimalign.Cohesion.IdentityHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.IdentityHub` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting`<br>`Assimalign.Cohesion.Web.SecurityHeaders` | — | — |
 | `Assimalign.Cohesion.IdentityHub.Models` | `Assimalign.Cohesion.Core`<br>`Assimalign.Cohesion.IdentityModel` | — | — | — |
 
 ### `resources/IoTHub`
 
-3 shipped projects.
+2 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["IoTHub"]
-    N1["IoTHub.ApplicationModel"]
-    N2["IoTHub.Hosting"]
-    N2 --> N0
+    N1["IoTHub.Hosting"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.IoTHub` | `Assimalign.Cohesion.Connections` | — | — | — |
-| `Assimalign.Cohesion.IoTHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.IoTHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.IoTHub` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/LoadBalancer`
 
-3 shipped projects.
+2 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["LoadBalancer"]
-    N1["LoadBalancer.ApplicationModel"]
-    N2["LoadBalancer.Hosting"]
-    N2 --> N0
+    N1["LoadBalancer.Hosting"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.LoadBalancer` | `Assimalign.Cohesion.Http` | — | — | — |
-| `Assimalign.Cohesion.LoadBalancer.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.LoadBalancer.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.LoadBalancer` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/LogSpace`
 
-4 shipped projects.
+3 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["LogSpace"]
-    N1["LogSpace.ApplicationModel"]
-    N2["LogSpace.Hosting"]
-    N3["LogSpace.Telemetry"]
-    N2 --> N0
+    N1["LogSpace.Hosting"]
+    N2["LogSpace.Telemetry"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.LogSpace` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.LogSpace.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.LogSpace.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.LogSpace` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Http.RequestLimits`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 | `Assimalign.Cohesion.LogSpace.Telemetry` | — | — | — | — |
 
 ### `resources/MediaHub`
 
-3 shipped projects.
+2 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["MediaHub"]
-    N1["MediaHub.ApplicationModel"]
-    N2["MediaHub.Hosting"]
-    N2 --> N0
+    N1["MediaHub.Hosting"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.MediaHub` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.MediaHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.MediaHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.MediaHub` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/MessageHub`
 
-4 shipped projects.
+3 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
     N0["MessageHub"]
-    N1["MessageHub.ApplicationModel"]
-    N2["MessageHub.Client"]
-    N3["MessageHub.Hosting"]
-    N3 --> N0
+    N1["MessageHub.Client"]
+    N2["MessageHub.Hosting"]
+    N2 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.MessageHub` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.MessageHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.MessageHub.Client` | — | — | — | — |
 | `Assimalign.Cohesion.MessageHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.MessageHub` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/NatGateway`
+
+2 shipped projects.
+
+Intra-area references:
+
+```mermaid
+flowchart LR
+    N0["NatGateway"]
+    N1["NatGateway.Hosting"]
+    N1 --> N0
+```
+
+| Project | References | Private references | Shared source | Packages |
+| --- | --- | --- | --- | --- |
+| `Assimalign.Cohesion.NatGateway` | `Assimalign.Cohesion.Core` | — | — | — |
+| `Assimalign.Cohesion.NatGateway.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.NatGateway` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+
+### `resources/NotificationHub`
 
 3 shipped projects.
 
@@ -852,19 +846,37 @@ Intra-area references:
 
 ```mermaid
 flowchart LR
-    N0["NatGateway"]
-    N1["NatGateway.ApplicationModel"]
-    N2["NatGateway.Hosting"]
+    N0["NotificationHub"]
+    N1["NotificationHub.Client"]
+    N2["NotificationHub.Hosting"]
     N2 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
-| `Assimalign.Cohesion.NatGateway` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.NatGateway.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
-| `Assimalign.Cohesion.NatGateway.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.NatGateway` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+| `Assimalign.Cohesion.NotificationHub` | `Assimalign.Cohesion.Core` | — | — | — |
+| `Assimalign.Cohesion.NotificationHub.Client` | — | — | — | — |
+| `Assimalign.Cohesion.NotificationHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.NotificationHub` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
-### `resources/NotificationHub`
+### `resources/Rezolvr`
+
+2 shipped projects.
+
+Intra-area references:
+
+```mermaid
+flowchart LR
+    N0["Rezolvr"]
+    N1["Rezolvr.Hosting"]
+    N1 --> N0
+```
+
+| Project | References | Private references | Shared source | Packages |
+| --- | --- | --- | --- | --- |
+| `Assimalign.Cohesion.Rezolvr` | `Assimalign.Cohesion.Core` | — | — | — |
+| `Assimalign.Cohesion.Rezolvr.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Rezolvr` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
+
+### `resources/Scheduler`
 
 4 shipped projects.
 
@@ -872,117 +884,64 @@ Intra-area references:
 
 ```mermaid
 flowchart LR
-    N0["NotificationHub"]
-    N1["NotificationHub.ApplicationModel"]
-    N2["NotificationHub.Client"]
-    N3["NotificationHub.Hosting"]
-    N3 --> N0
-```
-
-| Project | References | Private references | Shared source | Packages |
-| --- | --- | --- | --- | --- |
-| `Assimalign.Cohesion.NotificationHub` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.NotificationHub.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
-| `Assimalign.Cohesion.NotificationHub.Client` | — | — | — | — |
-| `Assimalign.Cohesion.NotificationHub.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.NotificationHub` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
-
-### `resources/Rezolvr`
-
-3 shipped projects.
-
-Intra-area references:
-
-```mermaid
-flowchart LR
-    N0["Rezolvr"]
-    N1["Rezolvr.ApplicationModel"]
-    N2["Rezolvr.Hosting"]
-    N2 --> N0
-```
-
-| Project | References | Private references | Shared source | Packages |
-| --- | --- | --- | --- | --- |
-| `Assimalign.Cohesion.Rezolvr` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.Rezolvr.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
-| `Assimalign.Cohesion.Rezolvr.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Rezolvr` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
-
-### `resources/Scheduler`
-
-5 shipped projects.
-
-Intra-area references:
-
-```mermaid
-flowchart LR
     N0["Scheduler"]
-    N1["Scheduler.ApplicationModel"]
-    N2["Scheduler.Cron"]
-    N3["Scheduler.Hosting"]
-    N4["Scheduler.Timer"]
+    N1["Scheduler.Cron"]
+    N2["Scheduler.Hosting"]
+    N3["Scheduler.Timer"]
+    N1 --> N0
     N2 --> N0
     N3 --> N0
-    N4 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.Scheduler` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.Scheduler.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.Scheduler.Cron` | `Assimalign.Cohesion.Scheduler` | — | — | — |
 | `Assimalign.Cohesion.Scheduler.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.Scheduler` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 | `Assimalign.Cohesion.Scheduler.Timer` | `Assimalign.Cohesion.Scheduler` | — | — | — |
 
 ### `resources/SecretStore`
 
-5 shipped projects.
-
-Intra-area references:
-
-```mermaid
-flowchart LR
-    N0["SecretStore"]
-    N1["SecretStore.ApplicationModel"]
-    N2["SecretStore.ApplicationModel.Orchestration"]
-    N3["SecretStore.Client"]
-    N4["SecretStore.Hosting"]
-    N2 --> N1
-    N2 --> N3
-    N4 --> N0
-    N4 --> N1
-    N4 --> N3
-```
-
-| Project | References | Private references | Shared source | Packages |
-| --- | --- | --- | --- | --- |
-| `Assimalign.Cohesion.SecretStore` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.SecretStore.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | `Assimalign.Cohesion.SecretStore.ApplicationModel/Commands` | — |
-| `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.SecretStore.Client` | — | `Assimalign.Cohesion.SecretStore.ApplicationModel/Commands` | — |
-| `Assimalign.Cohesion.SecretStore.Client` | `Assimalign.Cohesion.Core` | — | `Assimalign.Cohesion.SecretStore.Client/Certificates` | — |
-| `Assimalign.Cohesion.SecretStore.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.SecretStore` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | `Assimalign.Cohesion.SecretStore.ApplicationModel/Commands`<br>`Assimalign.Cohesion.SecretStore.Client/Certificates` | — |
-
-### `resources/VpnGateway`
-
 3 shipped projects.
 
 Intra-area references:
 
 ```mermaid
 flowchart LR
-    N0["VpnGateway"]
-    N1["VpnGateway.ApplicationModel"]
-    N2["VpnGateway.Hosting"]
+    N0["SecretStore"]
+    N1["SecretStore.Client"]
+    N2["SecretStore.Hosting"]
     N2 --> N0
+    N2 --> N1
+```
+
+| Project | References | Private references | Shared source | Packages |
+| --- | --- | --- | --- | --- |
+| `Assimalign.Cohesion.SecretStore` | `Assimalign.Cohesion.Core` | — | — | — |
+| `Assimalign.Cohesion.SecretStore.Client` | `Assimalign.Cohesion.Core` | — | `Assimalign.Cohesion.SecretStore.Client/Certificates` | — |
+| `Assimalign.Cohesion.SecretStore.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.SecretStore` | `Assimalign.Cohesion.Connections`<br>`Assimalign.Cohesion.Connections.Security`<br>`Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.IdentityModel`<br>`Assimalign.Cohesion.IdentityModel.Token`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | `Assimalign.Cohesion.SecretStore.Client/Certificates` | — |
+
+### `resources/VpnGateway`
+
+2 shipped projects.
+
+Intra-area references:
+
+```mermaid
+flowchart LR
+    N0["VpnGateway"]
+    N1["VpnGateway.Hosting"]
+    N1 --> N0
 ```
 
 | Project | References | Private references | Shared source | Packages |
 | --- | --- | --- | --- | --- |
 | `Assimalign.Cohesion.VpnGateway` | `Assimalign.Cohesion.Core` | — | — | — |
-| `Assimalign.Cohesion.VpnGateway.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.VpnGateway.Hosting` | `Assimalign.Cohesion.ApplicationModel.Hosting`<br>`Assimalign.Cohesion.DependencyInjection`<br>`Assimalign.Cohesion.Hosting`<br>`Assimalign.Cohesion.Hosting.Health`<br>`Assimalign.Cohesion.Hosting.Telemetry`<br>`Assimalign.Cohesion.VpnGateway` | `Assimalign.Cohesion.Connections.Tcp`<br>`Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Connections`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.Hosting` | — | — |
 
 ### `resources/Web`
 
-37 shipped projects.
+36 shipped projects.
 
 _More than twelve projects: the table below is the area's graph (see the node ceiling in `.claude/rules/documentation.md`)._
 
@@ -991,7 +950,6 @@ _More than twelve projects: the table below is the area's graph (see the node ce
 | `Assimalign.Cohesion.Web` | `Assimalign.Cohesion.Http` | — | — | — |
 | `Assimalign.Cohesion.Web.Antiforgery` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Http.Antiforgery`<br>`Assimalign.Cohesion.Http.Forms`<br>`Assimalign.Cohesion.Http.Streaming`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing`<br>`Assimalign.Cohesion.Web.Server` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Api` | `Assimalign.Cohesion.Web`<br>`Assimalign.Cohesion.Web.ProblemDetails`<br>`Assimalign.Cohesion.Web.Routing` | — | — | — |
-| `Assimalign.Cohesion.Web.ApplicationModel` | `Assimalign.Cohesion.ApplicationModel.Definition`<br>`Assimalign.Cohesion.ApplicationModel.Hosting` | — | — | — |
 | `Assimalign.Cohesion.Web.Authentication` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.Security.DataProtection`<br>`Assimalign.Cohesion.Web` | — | `Assimalign.Cohesion.Core/ComponentIntegration` | — |
 | `Assimalign.Cohesion.Web.Authentication.Bearer` | `Assimalign.Cohesion.Http`<br>`Assimalign.Cohesion.IdentityModel.Token.JsonWebToken`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
 | `Assimalign.Cohesion.Web.Authentication.Certificate` | `Assimalign.Cohesion.Http.Tls`<br>`Assimalign.Cohesion.Web.Authentication`<br>`Assimalign.Cohesion.Web.Server` | — | — | — |
@@ -1034,18 +992,17 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | Assembly | Referenced by | Top referrers |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Http` | 102 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Connections.NamedPipes.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, … |
-| `Assimalign.Cohesion.ApplicationModel.Hosting` | 81 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApiManager.ApplicationModel.Tests, Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApiManager.Hosting.Tests, … |
 | `Assimalign.Cohesion.Core` | 81 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.ApiManager, Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Definition, … |
 | `Assimalign.Cohesion.Web` | 76 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Hosting.Tests, … |
 | `Assimalign.Cohesion.Connections` | 44 | Assimalign.Cohesion.Amqp.Connections, Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory, Assimalign.Cohesion.Connections.NamedPipes, … |
+| `Assimalign.Cohesion.ApplicationModel.Hosting` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApiManager.Hosting.Tests, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, … |
 | `Assimalign.Cohesion.Web.Hosting` | 43 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.Connections.Tcp` | 42 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.Database.Blob.Client.Tests, Assimalign.Cohesion.Database.Blob.Tests, … |
 | `Assimalign.Cohesion.Web.Routing` | 37 | Assimalign.Cohesion.IntegrationCheck, Assimalign.Cohesion.SourceGeneration.Web.Tests, Assimalign.Cohesion.Web.Antiforgery, Assimalign.Cohesion.Web.Antiforgery.Tests, … |
 | `Assimalign.Cohesion.Http.Connections` | 32 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.Connections.NamedPipes.Tests, Assimalign.Cohesion.Connections.Tcp.Tests, Assimalign.Cohesion.EmailHub.Hosting, … |
 | `Assimalign.Cohesion.Connections.InMemory` | 30 | Assimalign.Cohesion.Amqp.Connections.Tests, Assimalign.Cohesion.Connections.InMemory.Tests, Assimalign.Cohesion.Connections.Security.Tests, Assimalign.Cohesion.Connections.Tests, … |
-| `Assimalign.Cohesion.Hosting` | 30 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, Assimalign.Cohesion.ApplicationModel.Hosting, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, … |
-| `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | 30 | Assimalign.Cohesion.ApiManager.Hosting.Tests, Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, … |
-| `Assimalign.Cohesion.ApplicationModel.Definition` | 28 | Assimalign.Cohesion.ApiManager.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Definition.Tests, Assimalign.Cohesion.ApplicationModel.Gateway, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, … |
+| `Assimalign.Cohesion.Hosting` | 28 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests, Assimalign.Cohesion.ApplicationModel.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, … |
+| `Assimalign.Cohesion.IdentityModel.Token.JsonWebToken` | 28 | Assimalign.Cohesion.ApiManager.Hosting.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.Database.Hosting.Tests, … |
 | `Assimalign.Cohesion.Http.Streaming` | 25 | Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.ServerSentEvents, Assimalign.Cohesion.Http.ServerSentEvents.Examples.Sse, Assimalign.Cohesion.Http.ServerSentEvents.Tests, … |
 | `Assimalign.Cohesion.Web.Testing` | 25 | Assimalign.Cohesion.Web.Antiforgery.Tests, Assimalign.Cohesion.Web.Api.Tests, Assimalign.Cohesion.Web.Authentication.Bearer.Tests, Assimalign.Cohesion.Web.Authentication.Cookie.Tests, … |
 | `Assimalign.Cohesion.DependencyInjection` | 23 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.DependencyInjection.Tests, … |
@@ -1053,15 +1010,16 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Http.Forwarded` | 20 | Assimalign.Cohesion.Http.Antiforgery, Assimalign.Cohesion.Http.Antiforgery.Tests, Assimalign.Cohesion.Http.Forwarded.Tests, Assimalign.Cohesion.Web.Authentication.Cookie, … |
 | `Assimalign.Cohesion.Database.Types` | 19 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Documents, … |
 | `Assimalign.Cohesion.Hosting.Health` | 19 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.Database.Hosting.Tests, … |
-| `Assimalign.Cohesion.IdentityModel` | 19 | Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, Assimalign.Cohesion.IdentityHub.Client, … |
 | `Assimalign.Cohesion.FileSystem` | 17 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
 | `Assimalign.Cohesion.Hosting.Telemetry` | 17 | Assimalign.Cohesion.ApiManager.Hosting, Assimalign.Cohesion.ConfigurationStore.Hosting, Assimalign.Cohesion.Database.Hosting, Assimalign.Cohesion.EmailHub.Hosting, … |
-| `Assimalign.Cohesion.IdentityModel.Token` | 15 | Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests, Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.IdentityHub.Hosting.Tests, … |
+| `Assimalign.Cohesion.IdentityModel` | 17 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub, Assimalign.Cohesion.IdentityHub.Client, Assimalign.Cohesion.IdentityHub.Hosting, … |
 | `Assimalign.Cohesion.Database.Protocol` | 14 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Blob.Protocol, … |
+| `Assimalign.Cohesion.IdentityModel.Token` | 13 | Assimalign.Cohesion.ConfigurationStore.Hosting.Tests, Assimalign.Cohesion.IdentityHub.Hosting, Assimalign.Cohesion.IdentityHub.Hosting.Tests, Assimalign.Cohesion.IdentityModel.AotSample, … |
+| `Assimalign.Cohesion.Web.Authentication` | 13 | Assimalign.Cohesion.IntegrationCheck, Assimalign.Cohesion.Web.AotGuard, Assimalign.Cohesion.Web.Authentication.Bearer, Assimalign.Cohesion.Web.Authentication.Certificate, … |
 
 ## Harnesses
 
-316 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+296 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1076,7 +1034,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | `examples/` | 5 |
 | `fixtures/` | 14 |
 | `samples/` | 12 |
-| `tests/` | 285 |
+| `tests/` | 265 |
 
 Samples, which live in the repository-root `samples/` tree:
 

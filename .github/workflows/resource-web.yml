@@ -53,14 +53,12 @@ jobs:
         os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # Every buildable Web project is listed so the area's dependency-rule guard
         # (build/Targets/Build.Rules.targets, COHRES001/COHRES002) executes in CI for
-        # each of them - most importantly Web.Hosting and the NuGet-only
-        # Web.ApplicationModel control-plane package.
+        # each of them - most importantly Web.Hosting.
         # One leg per OS builds and tests the whole area: the inner list is a single matrix value
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.Web',
             'Assimalign.Cohesion.Web.Antiforgery',
-            'Assimalign.Cohesion.Web.ApplicationModel',
             'Assimalign.Cohesion.Web.Api',
             'Assimalign.Cohesion.Web.Authentication',
             'Assimalign.Cohesion.Web.Authentication.Bearer',

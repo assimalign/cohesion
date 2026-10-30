@@ -11,9 +11,10 @@
 > retired gateway's HTTP front end, was removed on 2026-10-29; the gateway's HTTP surface returns as
 > a transport. The linked area records describe the retired design.
 
-The L2 application-composition and orchestration plane: the declarative application model every
-resource area's `<Area>.ApplicationModel` package builds on, plus the gateway family that
-describes and realizes resource manifests without loading their runtimes.
+The L2 application-composition and orchestration plane: the shared contracts, the definitions a
+gateway program declares, and the instance side every area's `<Area>.Hosting.ApplicationModel`
+package builds on, plus the gateway family that deploys and manages resources without loading their
+runtimes.
 
 The area's architecture record lives in
 [docs/libraries/ApplicationModel/DESIGN.md](../../docs/libraries/ApplicationModel/DESIGN.md);

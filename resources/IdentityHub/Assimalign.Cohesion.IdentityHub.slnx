@@ -17,19 +17,6 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
 	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/src/Assimalign.Cohesion.IdentityHub.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/Assimalign.Cohesion.IdentityHub.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Client/src/Assimalign.Cohesion.IdentityHub.Client.csproj" />

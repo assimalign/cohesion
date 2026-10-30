@@ -12,27 +12,21 @@ An arrow means "references": `MessageHub.Hosting --> MessageHub` reads
 ```mermaid
 flowchart LR
     P0["MessageHub — area root"]
-    P1["MessageHub.ApplicationModel"]
     P2["MessageHub.Client"]
     P3["MessageHub.Hosting — runtime module"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
     P0 --> CORE
-    P1 --> APPMODEL
-    P1 --> HOSTFAM
     P3 --> HOSTFAM
     P3 --> P0
     P3 -->|"private"| PRIV
-    P1 -.->|"COHRES001 ✗"| P3
+    P0 -.->|"COHRES001 ✗"| P3
 ```
 
 Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
 rejects: **no library in the area may reference its own `MessageHub.Hosting` runtime
-module**, and the declarative `.ApplicationModel` package in particular never does — generated
-code in an opted-in consumer executable joins the two sides at run time through
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. The area root and its feature
+module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
 The full reference graph for every Cohesion assembly, including the exact external dependencies
@@ -43,8 +37,6 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 - `Assimalign.Cohesion.MessageHub` defines the public area-root application and builder contracts alongside the existing message-hub abstraction.
 - `Assimalign.Cohesion.MessageHub.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
 - `Assimalign.Cohesion.MessageHub.Client` contains the existing client-side contract surface and remains an early implementation.
-
-- `Assimalign.Cohesion.MessageHub.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
 
 ## Layering and dependencies
 

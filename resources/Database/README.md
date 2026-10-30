@@ -51,18 +51,14 @@ An arrow means "references": `Database.Hosting --> Database` reads
 ```mermaid
 flowchart LR
     P0["Database — area root"]
-    P1["Database.ApplicationModel"]
     P2["Database.Client"]
     P3["Database.Hosting — runtime module"]
     P4["Database.Testing"]
     GRAPH["Database.Graph"]
     GRAPHCLI["Database.Graph.Client — NuGet-only"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
     P0 -->|"private"| PRIV
-    P1 --> APPMODEL
-    P1 --> HOSTFAM
     P2 --> Wire["Database.Protocol / Types"]
     GRAPH --> P0
     GRAPHCLI --> GraphWire["Database.Graph.Protocol"]
@@ -73,14 +69,12 @@ flowchart LR
     P3 -->|"private"| PRIV
     P4 --> P3
     P4 --> HOSTFAM
-    P1 -.->|"COHRES001 ✗"| P3
+    P0 -.->|"COHRES001 ✗"| P3
 ```
 
 Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
 rejects: **no library in the area may reference its own `Database.Hosting` runtime
-module**, and the declarative `.ApplicationModel` package in particular never does — generated
-code in an opted-in consumer executable joins the two sides at run time through
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. The area root and its feature
+module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
 `Database.Testing → Database.Hosting` is the one solid edge that crosses that line, and it is the
@@ -179,7 +173,6 @@ Each implemented remote client references its model Protocol and shared Client/P
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection settings, pooling, handshake, framing, and model-exchange lifetime; model clients materialize results |
 | `Assimalign.Cohesion.Database.Security` | Child root — the authentication contract (`DatabaseAuthenticator`, an abstract base the application implements, and its `AllowAll`) |
 | `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements `DatabaseApplication.CreateBuilder(args)`, which honors an enabled executable's ambient `Hosting.Resources` `ResourceContext` and generated default-control-plane registration and stays plain otherwise. Every model engine opens or creates the databases its builder declares (a SQL engine also provisions their schemas) inside application Build, so they exist before any server accepts. The internal admin service privately hosts `Web.Hosting` + `Web.Health` for health, readiness, liveness, endpoint observation, commands, and graceful stop. |
-| `Assimalign.Cohesion.Database.ApplicationModel` | Manifest-backed `DatabaseResource : PlannedResource`, `AddDatabase(manifest, options)`, the platform-neutral Database planner (stable identity, sized per-replica volume claims, one headless governing service), and the Database default-control-plane factory registered by generated executable code through `Hosting.Resources` |
 | `Assimalign.Cohesion.Database.Testing` | The area's sole hosting-isolation exemption holder; `DatabaseApplicationTestFactory.FromProgram<Program>()` runs the resource's real entry point inside `Hosting.Resources` `ResourceRuntime.CreateScope(...)`, waits on the `admin` control plane, and stops it through the graceful control-plane path |
 | `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost` | Non-packable `Sdk.Database` executable with `CohesionApplicationModel=enabled` and build-time schema compilation; composes a SQL table/index schema and the TCP server in `Program.cs`, provisions that compiled schema before accept, and supplies the real-process E2E apphost (`ReferenceOutputAssembly=false`) |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |

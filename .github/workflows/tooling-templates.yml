@@ -5,10 +5,8 @@ on:
       - "tooling/templates/**"
       - "sdks/**"
       - "libraries/App/**"
-      # Template gateway programs call the ApplicationModel, area-verb and Orchestration APIs directly.
+      # Template gateway programs call the ApplicationModel APIs directly.
       - "libraries/ApplicationModel/**"
-      - "resources/*/Assimalign.Cohesion.*.ApplicationModel/**"
-      - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       # Database template programs compose the Hosting, Sql and Sql.Schema builder APIs, the
@@ -35,8 +33,6 @@ on:
       - "sdks/**"
       - "libraries/App/**"
       - "libraries/ApplicationModel/**"
-      - "resources/*/Assimalign.Cohesion.*.ApplicationModel/**"
-      - "resources/*/Assimalign.Cohesion.*.ApplicationModel.Orchestration/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
       - "resources/Database/Assimalign.Cohesion.Database*/**"
@@ -132,20 +128,10 @@ jobs:
             'Assimalign.Cohesion.Http.Connections'
             # Sdk.Gateway injects no area client, so neither Web nor the Database.Client closure reaches
             # a template restore.
-            'Assimalign.Cohesion.Web.ApplicationModel'
-            'Assimalign.Cohesion.Database.ApplicationModel'
-            'Assimalign.Cohesion.ConfigurationStore.ApplicationModel'
-            # The landing-zone Platform and root set gateways reference the opt-in store providers
-            # explicitly; each Orchestration package depends on ApplicationModel and its area client.
+            # The landing-zone gateways still reference the store-provider packages deleted on
+            # 2026-10-30, which depended on these clients; the templates are rebuilt with the SDK.
             'Assimalign.Cohesion.SecretStore.Client'
             'Assimalign.Cohesion.ConfigurationStore.Client'
-            'Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration'
-            'Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration'
-            'Assimalign.Cohesion.IdentityHub.ApplicationModel'
-            'Assimalign.Cohesion.SecretStore.ApplicationModel'
-            'Assimalign.Cohesion.Rezolvr.ApplicationModel'
-            'Assimalign.Cohesion.VpnGateway.ApplicationModel'
-            'Assimalign.Cohesion.LogSpace.ApplicationModel'
           )
           $inventoryById = @{}
           foreach ($item in @(Get-CohesionReleaseLibrary -RepositoryDirectory $repository)) {

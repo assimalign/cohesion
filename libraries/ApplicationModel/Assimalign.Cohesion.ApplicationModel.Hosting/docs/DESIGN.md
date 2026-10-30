@@ -299,9 +299,9 @@ own resource lists. An action is a standalone object, so such an area can list
 selected Web actions explicitly; nothing is exposed by nesting, and enabling the Application Model on
 it creates its control plane only.
 
-Under the requested rule change, an area's implementation of this library (its actions and its
-control-plane wiring) and of the Application Model consolidate into `<Area>.ApplicationModel`.
-That change lands with the chunk that first builds such a package.
+An area's implementation of this library (its actions and its control-plane wiring) ships as
+`<Area>.Hosting.ApplicationModel`; Web's is the first. The area `<Area>.ApplicationModel` packages of
+the retired design were deleted on 2026-10-30 (owner): a gateway declares any resource generically.
 
 ## AOT
 

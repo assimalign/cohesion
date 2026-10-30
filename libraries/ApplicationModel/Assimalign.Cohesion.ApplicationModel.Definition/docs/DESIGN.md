@@ -309,8 +309,10 @@ None. The library raises no events and has no event source.
    does today.
 4. **Deployment manifest — withdrawn by D21.** Children no longer receive a deployment manifest from
    their parent; each deploys with its own pipeline. The `/infra` routes' transport is still open.
-5. **Area verbs.** `set.AddWeb("orders-api")` and resource options belong to the area packages, once
-   area implementations consolidate into `<Area>.ApplicationModel`.
+5. **Area verbs — settled 2026-10-30 (owner).** Areas ship no definition package: the area
+   `<Area>.ApplicationModel` packages of the retired design were deleted, and a model declares any
+   resource with `AddResource(provider, name)`. An area package returns only when the area has
+   something of its own to declare.
 6. **Static assets.** The SDK will generate assets for each `CohesionResourceReference` that the
    gateway needs. A descriptor and its manifest record have no slot for them yet; the slot's shape
    comes with the generation that fills it.

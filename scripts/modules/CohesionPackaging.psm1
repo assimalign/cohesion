@@ -201,19 +201,15 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/ApiManager
     'resources/ApiManager/Assimalign.Cohesion.ApiManager'
-    'resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel'
     'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting'
 
     # resources/ConfigurationStore
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore'
-    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel'
-    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting'
 
     # resources/Database
     'resources/Database/Assimalign.Cohesion.Database'
-    'resources/Database/Assimalign.Cohesion.Database.ApplicationModel'
     'resources/Database/Assimalign.Cohesion.Database.Blob'
     'resources/Database/Assimalign.Cohesion.Database.Blob.Client'
     'resources/Database/Assimalign.Cohesion.Database.Blob.Protocol'
@@ -249,83 +245,67 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/EmailHub
     'resources/EmailHub/Assimalign.Cohesion.EmailHub'
-    'resources/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel'
     'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting'
 
     # resources/EventHub
     'resources/EventHub/Assimalign.Cohesion.EventHub'
-    'resources/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel'
     'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting'
 
     # resources/IdentityHub
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub'
-    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models'
 
     # resources/IoTHub
     'resources/IoTHub/Assimalign.Cohesion.IoTHub'
-    'resources/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel'
     'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting'
 
     # resources/LoadBalancer
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer'
-    'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel'
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting'
 
     # resources/LogSpace
     'resources/LogSpace/Assimalign.Cohesion.LogSpace'
-    'resources/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel'
     'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting'
 
     # resources/MediaHub
     'resources/MediaHub/Assimalign.Cohesion.MediaHub'
-    'resources/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel'
     'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting'
 
     # resources/MessageHub
     'resources/MessageHub/Assimalign.Cohesion.MessageHub'
-    'resources/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel'
     'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting'
 
     # resources/NatGateway
     'resources/NatGateway/Assimalign.Cohesion.NatGateway'
-    'resources/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel'
     'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting'
 
     # resources/NotificationHub
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub'
-    'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel'
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting'
 
     # resources/Rezolvr
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr'
-    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting'
 
     # resources/Scheduler
     'resources/Scheduler/Assimalign.Cohesion.Scheduler'
-    'resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer'
 
     # resources/SecretStore
     'resources/SecretStore/Assimalign.Cohesion.SecretStore'
-    'resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel'
-    'resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Client'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting'
 
     # resources/VpnGateway
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway'
-    'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel'
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting'
 
     # resources/Web
     'resources/Web/Assimalign.Cohesion.Web'
     'resources/Web/Assimalign.Cohesion.Web.Antiforgery'
-    'resources/Web/Assimalign.Cohesion.Web.ApplicationModel'
     'resources/Web/Assimalign.Cohesion.Web.Api'
     'resources/Web/Assimalign.Cohesion.Web.Authentication'
     'resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer'

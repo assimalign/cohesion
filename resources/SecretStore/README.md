@@ -10,35 +10,23 @@ An arrow means "references": `SecretStore.Hosting --> SecretStore` reads
 ```mermaid
 flowchart LR
     P0["SecretStore — area root"]
-    P1["SecretStore.ApplicationModel"]
     P2["SecretStore.Client"]
     P3["SecretStore.Hosting — runtime module"]
-    P4["SecretStore.ApplicationModel.Orchestration — opt-in gateway providers"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
     P0 --> CORE
-    P1 --> APPMODEL
-    P1 --> HOSTFAM
     P2 --> CORE
     P3 --> HOSTFAM
     P3 --> P0
     P3 -->|"private"| PRIV
-    P4 --> APPMODEL
-    P4 --> P2
-    P1 -.->|"COHRES001 ✗"| P3
-    P4 -.->|"COHRES004 ✗"| HOSTFAM
+    P0 -.->|"COHRES001 ✗"| P3
 ```
 
 Solid edges are the references this area permits. Dotted edges are references the build
 rejects. The `COHRES001` edge is the rule for the whole area: **no library in the area may
-reference its own `SecretStore.Hosting` runtime module**, and the declarative `.ApplicationModel` package in particular never does — generated
-code in an opted-in consumer executable joins the two sides at run time through
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. The area root and its feature
-libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`); the
-dotted `COHRES004` edge marks that rule for the `.Orchestration` package, which references only
-`Assimalign.Cohesion.ApplicationModel` and the client.
+reference its own `SecretStore.Hosting` runtime module**. The area root and its feature
+libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
 The full reference graph for every Cohesion assembly, including the exact external dependencies
 collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
@@ -48,8 +36,6 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 - `Assimalign.Cohesion.SecretStore` defines the public area-root application and builder contracts alongside the existing secret-store abstraction.
 - `Assimalign.Cohesion.SecretStore.Hosting` provides the concrete creation entry point, protected file store, trust verifier, private CA, and `/cohesion/v1` HTTP protocol host.
 - `Assimalign.Cohesion.SecretStore.Client` is the thin, Core-only HTTP protocol client that the opt-in orchestration package uses on a gateway's behalf to read secret bytes and PEM certificates and to post trust grants. A gateway never references it directly.
-- `Assimalign.Cohesion.SecretStore.ApplicationModel` owns the typed resource descriptor, single-replica StatefulSet planner, and default resource control plane injected by `Sdk.SecretStore`.
-- `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` is the opt-in gateway package: `builder.UseSecretStore(store)` registers the store as the source of `<store>:<key>` secret and certificate mounts and resolves `secretstore.add-secret` sources at delivery, and `.AsCertificateAuthority()` / `.AsTrustStore()` make it the application's certificate authority and trusted-issuer store. It references only `Assimalign.Cohesion.ApplicationModel` and the client, and is never injected: a gateway references it and registers it explicitly.
 
 ## Layering and dependencies
 
@@ -75,10 +61,6 @@ The SecretStore wire knowledge a gateway needs — secret and certificate reads,
 - [Hosting design](./Assimalign.Cohesion.SecretStore.Hosting/docs/DESIGN.md)
 - [Client overview](./Assimalign.Cohesion.SecretStore.Client/docs/OVERVIEW.md)
 - [Client design](./Assimalign.Cohesion.SecretStore.Client/docs/DESIGN.md)
-- [ApplicationModel overview](./Assimalign.Cohesion.SecretStore.ApplicationModel/docs/OVERVIEW.md)
-- [ApplicationModel design](./Assimalign.Cohesion.SecretStore.ApplicationModel/docs/DESIGN.md)
-- [Orchestration overview](./Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration/docs/OVERVIEW.md)
-- [Orchestration design](./Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration/docs/DESIGN.md)
 
 ## Declarative control-plane commands
 
@@ -87,7 +69,7 @@ The SecretStore wire knowledge a gateway needs — secret and certificate reads,
 | `secretstore.add-secret` | `AddSecret` | secret path |
 | `secretstore.issue-certificate` | `IssueCertificate` | certificate name |
 
-The [ApplicationModel](Assimalign.Cohesion.SecretStore.ApplicationModel/docs/OVERVIEW.md) declares
+The ApplicationModel declares
 commands; [Hosting](Assimalign.Cohesion.SecretStore.Hosting/docs/DESIGN.md) applies them; the gateway's
 generic `ResourceControlPlaneCommandClient` (`Assimalign.Cohesion.ApplicationModel.Gateway`) delivers them
 to the resource control plane. Before delivery, the `SecretStoreAddSecretInputResolver` that

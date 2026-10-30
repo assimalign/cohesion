@@ -38,19 +38,6 @@
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
-	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.LogSpace.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.LogSpace.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.LogSpace.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.LogSpace.ApplicationModel/src/Assimalign.Cohesion.LogSpace.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.LogSpace.ApplicationModel/tests/Assimalign.Cohesion.LogSpace.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/LogSpace/Assimalign.Cohesion.LogSpace.Refs/">
 		<File Path="Assimalign.Cohesion.LogSpace.Refs/Directory.Build.props" />
 	</Folder>

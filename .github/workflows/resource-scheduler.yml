@@ -51,7 +51,6 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.Scheduler',
-            'Assimalign.Cohesion.Scheduler.ApplicationModel',
             'Assimalign.Cohesion.Scheduler.Cron',
             'Assimalign.Cohesion.Scheduler.Hosting',
             'Assimalign.Cohesion.Scheduler.Timer'

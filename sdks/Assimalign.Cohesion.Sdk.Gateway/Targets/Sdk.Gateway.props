@@ -27,10 +27,9 @@
 		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
 
 		<!--
-			No resource-kind or client-package table: the gateway's Program.cs composes each
-			resource with the hand-written verb of the area's ApplicationModel package over the
-			generated Manifests member (builder.AddWeb(Manifests.X, options)), or with
-			builder.AddResource(Manifests.X) for a kind that has none.
+			No resource-kind or client-package table: the gateway's Program.cs declares each
+			resource itself (builder.AddResource(provider, name)); areas ship no ApplicationModel
+			package since 2026-10-30.
 		-->
 
 		<!-- Provider-name to package-id map. Only the selected names are restored. -->

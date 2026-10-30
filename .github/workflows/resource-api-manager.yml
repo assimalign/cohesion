@@ -51,7 +51,6 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.ApiManager',
-            'Assimalign.Cohesion.ApiManager.ApplicationModel',
             'Assimalign.Cohesion.ApiManager.Hosting'
         ]]
     steps:

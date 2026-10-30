@@ -13,25 +13,17 @@ An arrow means "references": `ConfigurationStore.Hosting --> ConfigurationStore`
 ```mermaid
 flowchart LR
     P0["ConfigurationStore — area root"]
-    P1["ConfigurationStore.ApplicationModel"]
     P2["ConfigurationStore.Client"]
     P3["ConfigurationStore.Hosting — runtime module"]
-    P4["ConfigurationStore.ApplicationModel.Orchestration — opt-in"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
     P0 --> CORE
-    P1 --> APPMODEL
-    P1 --> HOSTFAM
     P2 --> CORE
     P3 --> P0
     P3 --> HOSTFAM
     P3 -->|"private"| PRIV
-    P4 --> APPMODEL
-    P4 --> P2
-    P1 -.->|"COHRES001 ✗"| P3
-    P4 -.->|"COHRES004 ✗"| HOSTFAM
+    P0 -.->|"COHRES001 ✗"| P3
 ```
 
 Solid edges are the references this area permits. The dotted edges are the ones the build
@@ -49,8 +41,6 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 ## Projects
 
 - `Assimalign.Cohesion.ConfigurationStore` defines the public area-root application and builder contracts alongside the existing loader abstraction.
-- `Assimalign.Cohesion.ConfigurationStore.ApplicationModel` supplies the manifest-backed typed resource, strict StatefulSet planner, and default control plane.
-- `Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration` is the opt-in gateway provider package: `builder.UseConfigurationStore(store)` registers a `ConfigurationStoreSourceProvider` that resolves `<store>:<namespace>` Configuration mounts through the store's control plane. It references only `Assimalign.Cohesion.ApplicationModel` and the client, and is NuGet-only.
 - `Assimalign.Cohesion.ConfigurationStore.Client` is the thin, Core-only HTTP protocol client that the opt-in orchestration package uses on a gateway's behalf to read configuration namespace snapshots. A gateway never references it directly.
 - `Assimalign.Cohesion.ConfigurationStore.Hosting` provides the concrete creation entry point, durable store, ES256 bootstrap verification, and HTTP protocol host.
 
@@ -77,10 +67,6 @@ verb for the typed resource and planner.
 
 - [Root overview](./Assimalign.Cohesion.ConfigurationStore/docs/OVERVIEW.md)
 - [Root design](./Assimalign.Cohesion.ConfigurationStore/docs/DESIGN.md)
-- [ApplicationModel overview](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/OVERVIEW.md)
-- [ApplicationModel design](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/DESIGN.md)
-- [ApplicationModel.Orchestration overview](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/docs/OVERVIEW.md)
-- [ApplicationModel.Orchestration design](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.ConfigurationStore.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.ConfigurationStore.Hosting/docs/DESIGN.md)
 - [Client overview](./Assimalign.Cohesion.ConfigurationStore.Client/docs/OVERVIEW.md)

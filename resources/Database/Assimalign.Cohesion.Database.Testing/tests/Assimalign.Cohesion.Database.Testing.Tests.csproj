@@ -18,7 +18,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Blob.Protocol" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Database.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Client" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Client" />
 		<!-- Opens the stopped sample's files to check the schema hash its engine build recorded

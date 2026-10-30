@@ -12,26 +12,20 @@ An arrow means "references": `EmailHub.Hosting --> EmailHub` reads
 ```mermaid
 flowchart LR
     P0["EmailHub — area root"]
-    P1["EmailHub.ApplicationModel"]
     P2["EmailHub.Hosting — runtime module"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
     P0 --> CORE
-    P1 --> APPMODEL
-    P1 --> HOSTFAM
     P2 --> P0
     P2 --> HOSTFAM
     P2 -->|"private"| PRIV
-    P1 -.->|"COHRES001 ✗"| P2
+    P0 -.->|"COHRES001 ✗"| P2
 ```
 
 Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
 rejects: **no library in the area may reference its own `EmailHub.Hosting` runtime
-module**, and the declarative `.ApplicationModel` package in particular never does — generated
-code in an opted-in consumer executable joins the two sides at run time through
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. The area root and its feature
+module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
 The full reference graph for every Cohesion assembly, including the exact external dependencies
@@ -41,8 +35,6 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.EmailHub` defines the public area-root application and builder contracts alongside the existing email-hub abstraction.
 - `Assimalign.Cohesion.EmailHub.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
-
-- `Assimalign.Cohesion.EmailHub.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
 
 ## Layering and dependencies
 

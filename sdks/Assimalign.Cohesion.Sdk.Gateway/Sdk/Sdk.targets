@@ -25,11 +25,9 @@
 		names the area: Assimalign.Cohesion.Sdk.Web is the Web area. A reference may state
 		the area itself with Area metadata, which wins over the attribute; a project on the
 		base SDK, a referenced gateway, a missing project, and a manifest package name no
-		area. Those areas drive exactly two injections below: the area's ApplicationModel
-		package, whose hand-written Add<Area> verb the gateway's Program.cs calls over the
-		generated Manifests member, and, when the gateway hosts its members in process, the
-		area's shared framework. Every other area package is the consumer's own explicit
-		reference.
+		area. Those areas drive one injection below: when the gateway hosts its members in
+		process, the area's shared framework. Areas ship no ApplicationModel package of their
+		own since 2026-10-30, so every area package is the consumer's own explicit reference.
 	-->
 	<ItemGroup>
 		<_CohesionGatewayReferencedProject Include="@(CohesionResourceReference->WithMetadataValue('Extension', '.csproj'))">
@@ -48,26 +46,13 @@
 	</PropertyGroup>
 	<ItemGroup>
 		<_CohesionGatewayReferencedArea Include="$(_CohesionGatewayReferencedAreas)" Exclude="Gateway" />
-		<_CohesionGatewayReferencedAreaModel Include="@(_CohesionGatewayReferencedArea)">
-			<PackageId>Assimalign.Cohesion.%(Identity).ApplicationModel</PackageId>
-			<ProjectPath>$(CohesionRepositoryDirectory)resources\%(Identity)\Assimalign.Cohesion.%(Identity).ApplicationModel\src\Assimalign.Cohesion.%(Identity).ApplicationModel.csproj</ProjectPath>
-		</_CohesionGatewayReferencedAreaModel>
-		<_CohesionGatewayReferencedAreaModel Update="@(_CohesionGatewayReferencedAreaModel)">
-			<ProjectExists Condition="'$(CohesionRepositoryDirectory)' != ''">$([System.IO.File]::Exists('%(_CohesionGatewayReferencedAreaModel.ProjectPath)'))</ProjectExists>
-			<ProjectExists Condition="'$(CohesionRepositoryDirectory)' == ''">False</ProjectExists>
-		</_CohesionGatewayReferencedAreaModel>
 	</ItemGroup>
 	<PropertyGroup>
 		<_CohesionGatewayReferencedAreaFrameworks>@(_CohesionGatewayReferencedArea->'Assimalign.Cohesion.App.%(Identity)')</_CohesionGatewayReferencedAreaFrameworks>
 	</PropertyGroup>
 
 	<!--
-		Nothing else is injected by convention. Store, certificate-authority, and trust providers
-		come from opt-in <Area>.ApplicationModel.Orchestration packages that the gateway
-		references and registers explicitly in its Program.cs, and credential issuers and caller
-		authenticators are assigned on builder.Providers there as well. Resource commands travel
-		through the generic control-plane command client, so no area client package is restored
-		here.
+		Nothing else is injected by convention. No area client package is restored here either.
 	-->
 	<ItemGroup>
 		<!-- Refresh metadata whose consumer-facing properties are set after Sdk.props. -->
@@ -79,14 +64,6 @@
 		<_CohesionGatewayInProcessPackage Include="@(CohesionGatewayPackage->WithMetadataValue('Identity', 'InProcess'))" />
 		<_CohesionGatewayDockerPackage Include="@(CohesionGatewayPackage->WithMetadataValue('Identity', 'Docker'))" />
 		<_CohesionGatewayKubernetesPackage Include="@(CohesionGatewayPackage->WithMetadataValue('Identity', 'Kubernetes'))" />
-
-		<!-- Referenced areas: the area's ApplicationModel, as a repository project or the frozen package. -->
-		<CohesionProjectReference
-			Include="@(_CohesionGatewayReferencedAreaModel->WithMetadataValue('ProjectExists', 'True')->'%(PackageId)')"
-			Condition="'$(CohesionRepositoryDirectory)' != ''" />
-		<CohesionPackageReference
-			Include="@(_CohesionGatewayReferencedAreaModel->WithMetadataValue('ProjectExists', 'False')->'%(PackageId)')"
-			Version="$(CohesionVersion)" />
 
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" ProjectPath="$(_CohesionGatewayInProcessProject)" Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionRepositoryDirectory)' != ''" />
 		<CohesionPackageReference Include="@(_CohesionGatewayInProcessPackage->'%(PackageId)')" Version="@(_CohesionGatewayInProcessPackage->'%(Version)')" Condition="'$(_CohesionGatewayInProcessSelected)' == 'True' and '$(CohesionRepositoryDirectory)' == ''" />

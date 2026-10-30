@@ -48,20 +48,11 @@ internal sealed class ConsumerWorkspace : IDisposable
         "Assimalign.Cohesion.Hosting.Resources",
         "Assimalign.Cohesion.Http",
         "Assimalign.Cohesion.Http.Connections",
-        "Assimalign.Cohesion.Security.DataProtection",
-        // No Web or Web.Routing package: nothing in the gateway closure references the Web area
-        // outside its ApplicationModel.
-        "Assimalign.Cohesion.Web.ApplicationModel",
-        "Assimalign.Cohesion.Database.ApplicationModel",
-        "Assimalign.Cohesion.ConfigurationStore.ApplicationModel",
-        "Assimalign.Cohesion.SecretStore.ApplicationModel",
-        "Assimalign.Cohesion.IdentityHub.ApplicationModel",
-        "Assimalign.Cohesion.Rezolvr.ApplicationModel",
-        "Assimalign.Cohesion.LogSpace.ApplicationModel"
-        // No area client package: Sdk.Gateway injects none and the gateway libraries reference
-        // none (commands use the generic control-plane client; stores come from the opt-in
-        // Orchestration packages), so no client closure, such as Database.Client's Database roots
-        // and FileSystem, reaches a gateway consumer's restore.
+        "Assimalign.Cohesion.Security.DataProtection"
+        // No Web or Web.Routing package and no area ApplicationModel package: areas ship none
+        // since 2026-10-30. No area client package either: Sdk.Gateway injects none and the
+        // gateway libraries reference none, so no client closure, such as Database.Client's
+        // Database roots and FileSystem, reaches a gateway consumer's restore.
     ];
 
     private static readonly string _repositoryRoot = FindRepositoryRoot();
