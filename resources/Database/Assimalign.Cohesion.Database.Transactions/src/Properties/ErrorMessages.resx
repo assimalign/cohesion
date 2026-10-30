@@ -17,6 +17,7 @@
   <data name="LockManagerDeadlockFailure" xml:space="preserve"><value>Transaction {0} was chosen as the deadlock victim requesting {1} on {2}.</value></data>
   <data name="LockManagerFailEndedFailure" xml:space="preserve"><value>Transaction {0} ended while it waited for {1} on {2}; the request was not granted.</value></data>
   <data name="CoordinatorThrowIfInsideApplyFailure" xml:space="preserve"><value>A checkpoint or version purge cannot run inside a statement apply: the statement holds the apply gate maintenance waits for. Run maintenance after the statement completes.</value></data>
+  <data name="CommitAbortedByDisposal" xml:space="preserve"><value>Transaction {0} aborted: manager disposal began while commit drained a failed statement compensation.</value></data>
   <data name="TransactionManagerCommitAsyncFailure" xml:space="preserve"><value>Transaction {0} aborted: the commit record could not be written.</value></data>
   <data name="TransactionManagerEnterApplyFailure" xml:space="preserve"><value>Transaction {0} ended while its statement was running; the statement was not applied.</value></data>
   <data name="TransactionManagerClaimEndFailure" xml:space="preserve"><value>The transaction context was not created by this manager.</value></data>

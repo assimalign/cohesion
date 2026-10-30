@@ -105,6 +105,20 @@ public sealed class LockManager
     // it replaced, including re-acquisitions whose mode mask does not change.
     private Dictionary<ulong, List<ScopeGrant>>? _scopeGrants;
 
+    internal (int Writers, int Grants)? ScopeGrantCounts
+    {
+        get
+        {
+            lock (_sync)
+            {
+                if (_scopeGrants is null) { return null; }
+                int grants = 0;
+                foreach (var journal in _scopeGrants.Values) { grants += journal.Count; }
+                return (_scopeGrants.Count, grants);
+            }
+        }
+    }
+
     // Every resource an owner was granted or queued for, so its release and AbandonPending visit
     // only the owner's entries instead of enumerating the whole table, which cost every transaction
     // end time in proportion to every other transaction's locks and to the table's high-water mark

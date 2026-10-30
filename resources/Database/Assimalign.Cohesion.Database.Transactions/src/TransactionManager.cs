@@ -74,6 +74,7 @@ public sealed class TransactionManager : IAsyncDisposable
     private static readonly string _errorTransactionManagerEnterApplyFailure = ErrorMessages.TransactionManagerEnterApplyFailure;
 
     private static readonly string _errorTransactionManagerCommitAsyncFailure = ErrorMessages.TransactionManagerCommitAsyncFailure;
+    private static readonly string _errorCommitAbortedByDisposal = ErrorMessages.CommitAbortedByDisposal;
 
     private readonly TransactionLog _log;
     private readonly LockManager _lockManager;
@@ -478,6 +479,9 @@ public sealed class TransactionManager : IAsyncDisposable
         return context;
     }
 
+    // Deterministic seam after a draining commit observes compensation failure.
+    internal Action? FailedCompensationDrained { get; set; }
+
     /// <summary>
     /// Commits the specified transaction. A writer returns only after its commit record is
     /// durable per the engine's durability policy; a read-only transaction writes no record
@@ -493,7 +497,8 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <exception cref="TransactionAbortedException">
     /// Thrown when the transaction was aborted by conflict or deadlock resolution; when
     /// the commit record could not be written, in which case the transaction was
-    /// rolled back and ends as <see cref="TransactionState.Faulted"/>; or, before the
+    /// rolled back and ends as <see cref="TransactionState.Faulted"/>; when manager disposal
+    /// wins a failed-compensation drain and aborts the transaction; or, before the
     /// commit starts, when the transaction is not active or its commit or rollback is
     /// already running.
     /// </exception>
@@ -516,6 +521,7 @@ public sealed class TransactionManager : IAsyncDisposable
             await owned.WaitForAppliesAsync().ConfigureAwait(false);
             if (owned.HasFailedCompensation)
             {
+                FailedCompensationDrained?.Invoke();
                 bool closing;
                 lock (_sync)
                 {
@@ -524,7 +530,12 @@ public sealed class TransactionManager : IAsyncDisposable
                     closing = _disposed;
                     if (!closing) { owned.ReopenAfterFailedCompensation(); }
                 }
-                if (closing) { await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false); }
+                if (closing)
+                {
+                    await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
+                    throw new TransactionAbortedException(
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorCommitAbortedByDisposal, owned.Sequence));
+                }
                 throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
             }
 

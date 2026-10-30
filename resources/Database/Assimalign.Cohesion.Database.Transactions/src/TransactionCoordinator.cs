@@ -715,7 +715,10 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// applied after the rollback's undo would carry a sequence every snapshot then
     /// reads as committed, and nothing would ever undo it.
     /// </exception>
-    /// <exception cref="TransactionUndoException">CK04009: partial undo is running or incomplete.</exception>
+    /// <exception cref="TransactionUndoException">
+    /// CK04009: partial undo is running or incomplete. Failed statement compensation retains
+    /// the statement and repair failures in an inner <see cref="AggregateException"/>.
+    /// </exception>
     /// <exception cref="OperationCanceledException">Gate acquisition or a wait for a memory-only undo control was canceled.</exception>
     /// <remarks>Waits for the database apply gate and any admitted marker create or release.</remarks>
     public async ValueTask<T> ApplyStatementAsync<T>(
@@ -753,7 +756,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     bracket.Commit(awaitDurability: durable);
                     return result;
                 }
-                catch
+                catch (Exception statementFailure)
                 {
                     bool restoring = bracket.IsActive;
                     if (bracket.IsActive)
@@ -781,10 +784,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     if (restoring)
                     {
                         try { _versionStore.DiscardStatementSuffix(context.Sequence); }
-                        catch
+                        catch (Exception repairFailure)
                         {
                             owner.MarkPartialUndoPending();
-                            throw;
+                            throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending,
+                                new AggregateException(statementFailure, repairFailure));
                         }
                     }
                     throw;

@@ -1,6 +1,6 @@
 using System;
 using System.Diagnostics;
-using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,36 +12,34 @@ using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests.TestObjects;
 
-// Test-only reflection keeps anonymous controls internal to Transactions. Linked model
-// tests neither widen the shipped API nor need a foreign InternalsVisibleTo grant.
+// Deviates from the repo foreign-test public-surface rule per owner direction for #1726:
+// temporary UnsafeAccessor bindings remain test-only until XT-4.
+// Test-only accessors keep anonymous controls internal until XT-4 supplies the language
+// surface. Linked model tests need no foreign InternalsVisibleTo or runtime inspection.
 internal sealed class UndoMarkerDriver : TransactionRecordSpace
 {
-    private static readonly Func<TransactionCoordinator, TransactionContext, CancellationToken, ValueTask<object>> _create =
-        typeof(TransactionRecordSpace).GetMethod("CreateUndoMarkerAsync", BindingFlags.Static | BindingFlags.NonPublic)!
-            .CreateDelegate<Func<TransactionCoordinator, TransactionContext, CancellationToken, ValueTask<object>>>();
-    private static readonly Func<TransactionCoordinator, TransactionContext, object, CancellationToken, ValueTask> _release =
-        typeof(TransactionRecordSpace).GetMethod("ReleaseUndoMarkerAsync", BindingFlags.Static | BindingFlags.NonPublic)!
-            .CreateDelegate<Func<TransactionCoordinator, TransactionContext, object, CancellationToken, ValueTask>>();
-    private static readonly Func<TransactionCoordinator, TransactionContext, object, CancellationToken, ValueTask> _undo =
-        typeof(TransactionRecordSpace).GetMethod("RollbackToUndoMarkerAsync", BindingFlags.Static | BindingFlags.NonPublic)!
-            .CreateDelegate<Func<TransactionCoordinator, TransactionContext, object, CancellationToken, ValueTask>>();
-    private static readonly Func<Exception, string?> _code =
-        typeof(TransactionRecordSpace).GetMethod("GetUndoFailureCode", BindingFlags.Static | BindingFlags.NonPublic)!
-            .CreateDelegate<Func<Exception, string?>>();
-    private static readonly Action<RecordSpaceVersionStore, Action?> _observeBatch =
-        typeof(RecordSpaceVersionStore).GetProperty("UndoBatchApplied", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetSetMethod(nonPublic: true)!.CreateDelegate<Action<RecordSpaceVersionStore, Action?>>();
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "CreateUndoMarkerAsync")]
+    private static extern ValueTask<object> CreateMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken);
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "ReleaseUndoMarkerAsync")]
+    private static extern ValueTask ReleaseMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken);
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "RollbackToUndoMarkerAsync")]
+    private static extern ValueTask UndoMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken);
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "GetUndoFailureCode")]
+    private static extern string? FailureCode(TransactionRecordSpace? declaringType, Exception exception);
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_UndoBatchApplied")]
+    private static extern void ObserveBatch(RecordSpaceVersionStore store, Action? observer);
+
     internal static ValueTask<object> CreateAsync(TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken = default)
-        => _create(coordinator, context, cancellationToken);
+        => CreateMarker(null, coordinator, context, cancellationToken);
     internal static ValueTask ReleaseAsync(TransactionCoordinator coordinator, TransactionContext context, object marker)
-        => _release(coordinator, context, marker, default);
+        => ReleaseMarker(null, coordinator, context, marker, default);
     internal static async ValueTask UndoAsync(TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken = default)
     {
-        _observeBatch(coordinator.VersionStore, UndoReaderProbe.BatchObserver);
-        try { await _undo(coordinator, context, marker, cancellationToken); }
-        finally { _observeBatch(coordinator.VersionStore, null); }
+        ObserveBatch(coordinator.VersionStore, UndoReaderProbe.BatchObserver);
+        try { await UndoMarker(null, coordinator, context, marker, cancellationToken); }
+        finally { ObserveBatch(coordinator.VersionStore, null); }
     }
-    internal static string? Code(Exception exception) => _code(exception);
+    internal static string? Code(Exception exception) => FailureCode(null, exception);
     internal void FinishStream(TransactionContext context) => EndWriteStream(context);
     protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => throw new NotSupportedException();
     protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => throw new NotSupportedException();

@@ -104,12 +104,16 @@ object, delegate or collection is added to transactions that never set a marker.
 
 If a statement's memory compensation fails after bracket rollback, the complete suffix stays
 in the ledger and CK04009 fences writes and commit until rollback-to or whole rollback repairs
-it. A commit already draining that statement rechecks the fence without another ordinary-path
+it. The statement reports CK04009 with an AggregateException containing the original statement
+failure followed by the compensation failure, preserving both exception objects. A commit already
+draining that statement rechecks the fence without another ordinary-path
 latch acquisition and returns its end claim to the still-active writer. Created-version undo
 reuses the confirmed stamp-read bytes for catalog unlink on partial and full rollback; it never
 copies a second SQL row or document/blob chunk just to invoke an unused observer.
 Returning the claim is serialized with manager disposal; if disposal has already begun, the
-draining commit owns whole rollback instead, so disposal cannot lose an active writer.
+draining commit owns whole rollback instead, so disposal cannot lose an active writer. That commit
+reports TransactionAbortedException after the writer becomes Faulted; CK04009 is reserved for the
+still-active writer whose end claim was returned.
 
 Markers have no durable identities. Partial undo uses the existing physical WAL operations and
 root-writer stamps. A later root commit makes the remaining prefix and preceding undo durable
@@ -1491,6 +1495,9 @@ Each is `null` unless a test sets it and runs once per corresponding operation, 
 The manager's `ApplyWaitingForUndoControl()` hook records a statement reaching its memory-control
 wait under the context end latch. Each rewritten test asserts that its hook fired: the
 `Checkpoint` helper of the rollback tests starts its capture unset and requires it set.
+The manager's internal FailedCompensationDrained hook runs after the drain observes the fence and
+before disposal arbitration, with neither manager nor context latch held. The disposal race test
+requires exactly one callback and verifies the aborted state and released holdings.
 
 **Stream-level triggers cover the rest.** #1252 made every journal append a write into a
 user-space buffer, so a failed journal write now happens at a drain, and a failed drain
@@ -1667,6 +1674,9 @@ arms the `LockWaitBlocked` timer only while a listener takes the source's warnin
 Static composition, contracts and value objects; `FrozenSet<ulong>` for the active
 set. The shared composition and engine adapters use ordinary calls and BCL
 synchronization. No reflection, dynamic code generation, or `Microsoft.Extensions.*`.
+Foreign marker tests temporarily bind the internal static controls and batch-observer setter with
+UnsafeAccessor until XT-4 supplies the language surface. Lock-journal tests read a nullable internal
+count snapshot through this project's existing test grant; the ordinary grant path does not read it.
 The event source writes only strings, integers and doubles, which bind to the trim-safe
 `WriteEvent` overloads; a NativeAOT application receives its events only with
 `<EventSourceSupport>true</EventSourceSupport>`, and nothing depends on delivery.

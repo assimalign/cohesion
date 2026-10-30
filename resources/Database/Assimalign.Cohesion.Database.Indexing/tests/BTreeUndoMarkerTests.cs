@@ -1,6 +1,5 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,8 +14,14 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
 public sealed class BTreeUndoMarkerTests
 {
+    // Deviates from the repo foreign-test public-surface rule per owner direction for #1726.
+    // Temporary foreign-test access to the anonymous controls, until XT-4.
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "CreateUndoMarkerAsync")]
+    private static extern ValueTask<object> CreateMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken);
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "RollbackToUndoMarkerAsync")]
+    private static extern ValueTask UndoMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken);
+
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Undo: a second statement adapter cannot clear a pre-marker row and unique-index tombstone")]
-    [UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "Test-only reflection awaits the internal marker's ValueTask and reads its Task result; no shipped boundary is widened.")]
     public async Task RollbackToMarker_DuplicateThroughSecondBinding_ShouldKeepEarlierTombstone()
     {
         // Arrange: actual rows and a unique tree share the coordinator's physical brackets.
@@ -57,13 +62,7 @@ public sealed class BTreeUndoMarkerTests
             return 0;
         });
 
-        // Test-only reflection reaches the deliberately internal marker control without an
-        // assembly grant, extra project reference, or new shipped API.
-        var pendingMarker = typeof(TransactionCoordinator).GetMethod("CreateUndoMarkerAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(coordinator, new object[] { writer, CancellationToken.None })!;
-        var task = (Task)pendingMarker.GetType().GetMethod("AsTask")!.Invoke(pendingMarker, null)!;
-        await task;
-        var marker = task.GetType().GetProperty("Result")!.GetValue(task)!;
+        var marker = await CreateMarker(null, coordinator, writer, CancellationToken.None);
         await coordinator.ApplyStatementAsync<int>(writer, async _ =>
         {
             await index!.DeleteAsync(writer, key, row); // physically a no-op
@@ -72,9 +71,7 @@ public sealed class BTreeUndoMarkerTests
         });
 
         // Act
-        var undo = (ValueTask)typeof(TransactionCoordinator).GetMethod("RollbackToUndoMarkerAsync", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(coordinator, new object[] { writer, marker, CancellationToken.None })!;
-        await undo;
+        await UndoMarker(null, coordinator, writer, marker, CancellationToken.None);
         await coordinator.CommitAsync(writer);
 
         // Assert: both the row and its tree entry remain deleted, so the key can be reused.

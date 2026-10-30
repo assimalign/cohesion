@@ -96,16 +96,18 @@ public sealed class TransactionUndoMarkerFixTests
         var marker = await coordinator.CreateUndoMarkerAsync(writer);
         int value = 0;
         var repair = new MemoryRepair(() => value = 0) { Fail = true };
+        var statementFailure = new InvalidOperationException("Injected statement failure");
 
         // Act: the physical bracket is rolled back before compensation throws.
-        await Should.ThrowAsync<IOException>(() => coordinator.ApplyStatementAsync<int>(writer, (Func<StorageTransaction, int>)(_ =>
+        var failure = await Should.ThrowAsync<TransactionUndoException>(() => coordinator.ApplyStatementAsync<int>(writer, (Func<StorageTransaction, int>)(_ =>
         {
             coordinator.VersionStore.RecordIndexEntryCreated(writer.Sequence, repair, ReadOnlyMemory<byte>.Empty, 0);
             value = 7;
-            throw new InvalidOperationException("Injected statement failure");
+            throw statementFailure;
         })).AsTask());
 
         // Assert
+        AssertCompensationFailure(failure, statementFailure, repair.Failure);
         value.ShouldBe(7);
         coordinator.VersionStore.TrackedVersionCount.ShouldBe(1);
         (await Should.ThrowAsync<TransactionUndoException>(() => coordinator.CommitAsync(writer).AsTask())).Code.ShouldBe("CK04009");
@@ -134,24 +136,37 @@ public sealed class TransactionUndoMarkerFixTests
         var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int value = 0;
         var repair = new MemoryRepair(() => value = 0) { Fail = true };
+        var statementFailure = new InvalidOperationException("Injected statement failure");
         var statement = coordinator.ApplyStatementAsync<int>(writer, async _ =>
         {
             coordinator.VersionStore.RecordIndexEntryCreated(writer.Sequence, repair, ReadOnlyMemory<byte>.Empty, 0);
             value = 7;
             await finish.Task;
-            throw new InvalidOperationException("Injected statement failure");
+            throw statementFailure;
         }).AsTask();
         var commit = coordinator.CommitAsync(writer).AsTask();
         commit.IsCompleted.ShouldBeFalse();
-        var disposal = dispose ? coordinator.DisposeAsync().AsTask() : null;
-        if (disposal is not null) { disposal.IsCompleted.ShouldBeFalse(); }
+        Task? disposal = null;
+        int drains = 0;
+        coordinator.Manager.FailedCompensationDrained = () =>
+        {
+            drains++;
+            if (dispose)
+            {
+                disposal = coordinator.DisposeAsync().AsTask();
+                disposal.IsCompleted.ShouldBeFalse();
+            }
+        };
 
         // Act
         finish.TrySetResult();
-        await Should.ThrowAsync<IOException>(() => statement);
+        var failure = await Should.ThrowAsync<TransactionUndoException>(() => statement);
+        AssertCompensationFailure(failure, statementFailure, repair.Failure);
 
         // Assert: the returned end claim admits repair by rollback-to.
-        (await Should.ThrowAsync<TransactionUndoException>(() => commit)).Code.ShouldBe("CK04009");
+        if (dispose) { await Should.ThrowAsync<TransactionAbortedException>(() => commit); }
+        else { (await Should.ThrowAsync<TransactionUndoException>(() => commit)).Code.ShouldBe("CK04009"); }
+        drains.ShouldBe(1);
         if (disposal is not null)
         {
             await disposal.WaitAsync(_timeout);
@@ -168,14 +183,56 @@ public sealed class TransactionUndoMarkerFixTests
         await coordinator.CommitAsync(writer);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Commit: disposal winning a failed-compensation drain reports an aborted transaction")]
+    public async Task Commit_DisposalWinsFailedCompensationDrain_ShouldReportAborted()
+    {
+        // Arrange: hold an admitted apply so commit claims the end before the fence appears.
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        await coordinator.LockManager.AcquireAsync(writer.Sequence, LockResource.Entry(1, 1), LockMode.Exclusive);
+        var owner = coordinator.Manager.EnterApply(writer);
+        Task? disposal = null;
+        int drains = 0;
+        coordinator.Manager.FailedCompensationDrained = () =>
+        {
+            drains++;
+            disposal = coordinator.DisposeAsync().AsTask();
+            disposal.IsCompleted.ShouldBeFalse();
+        };
+        var commit = coordinator.CommitAsync(writer).AsTask();
+        commit.IsCompleted.ShouldBeFalse();
+
+        // Act: the same fence and exit ordering used by failed statement compensation.
+        owner.MarkPartialUndoPending();
+        owner.ExitApply();
+        await Should.ThrowAsync<TransactionAbortedException>(() => commit);
+        await disposal.ShouldNotBeNull().WaitAsync(_timeout);
+
+        // Assert: disposal won, so retrying partial undo is no longer possible.
+        drains.ShouldBe(1);
+        writer.State.ShouldBe(TransactionState.Faulted);
+        coordinator.LockManager.HeldModes(writer.Sequence, LockResource.Entry(1, 1)).ShouldBe((byte)0);
+    }
+
+    private static void AssertCompensationFailure(TransactionUndoException failure, Exception statement, Exception repair)
+    {
+        failure.Code.ShouldBe("CK04009");
+        var causes = failure.InnerException.ShouldBeOfType<AggregateException>().InnerExceptions;
+        causes.Count.ShouldBe(2);
+        causes[0].ShouldBeSameAs(statement);
+        causes[1].ShouldBeSameAs(repair);
+    }
+
     private sealed class MemoryRepair : RecordVersionIndex
     {
         private readonly Action _restore;
         internal MemoryRepair(Action restore) { _restore = restore; }
         internal bool Fail { get; set; }
+        internal IOException Failure { get; } = new("Injected compensation failure");
         protected internal override void OnStatementRolledBackCore()
         {
-            if (Fail) { throw new IOException("Injected compensation failure"); }
+            if (Fail) { throw Failure; }
             _restore();
         }
         protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)

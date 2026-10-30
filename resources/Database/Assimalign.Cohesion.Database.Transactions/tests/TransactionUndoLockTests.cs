@@ -1,7 +1,7 @@
 using System;
 using System.Diagnostics;
-using System.Collections;
-using System.Reflection;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,15 +29,14 @@ public sealed class TransactionUndoLockTests
         var second = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var firstMarker = await coordinator.CreateUndoMarkerAsync(first);
         var secondMarker = await coordinator.CreateUndoMarkerAsync(second);
-        var field = typeof(LockManager).GetField("_scopeGrants", BindingFlags.Instance | BindingFlags.NonPublic)!;
         // Act / Assert
         await coordinator.ReleaseUndoMarkerAsync(first, firstMarker);
-        ((IDictionary)field.GetValue(coordinator.LockManager)!).Count.ShouldBe(1);
+        coordinator.LockManager.ScopeGrantCounts.ShouldNotBeNull().Writers.ShouldBe(1);
         await coordinator.ReleaseUndoMarkerAsync(second, secondMarker);
-        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        coordinator.LockManager.ScopeGrantCounts.ShouldBeNull();
         await coordinator.CreateUndoMarkerAsync(first);
         await coordinator.CommitAsync(first);
-        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        coordinator.LockManager.ScopeGrantCounts.ShouldBeNull();
         await coordinator.CommitAsync(second);
     }
 
@@ -49,9 +48,13 @@ public sealed class TransactionUndoLockTests
     public void MarkerControl_AnonymousSeam_ShouldRemainInternal(string name)
     {
         // Arrange / Act
-        var method = typeof(TransactionRecordSpace).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!;
-        // Assert
-        method.IsAssembly.ShouldBeTrue();
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (!File.Exists(Path.Combine(directory.FullName, ".claude", "CLAUDE.md")))
+        { directory = directory.Parent ?? throw new DirectoryNotFoundException(); }
+        string path = Path.Combine(directory.FullName, "resources", "Database", "Assimalign.Cohesion.Database.Transactions", "src", "TransactionRecordSpace.cs");
+        string declaration = File.ReadLines(path).Single(line => line.Contains($" {name}(", StringComparison.Ordinal));
+        // Assert: inspect source declarations without reflecting over runtime internals.
+        declaration.TrimStart().ShouldStartWith("internal static ");
     }
 
     [Fact(DisplayName = "Cohesion Test [Transactions] - Stream boundary: end validates a null owner")]
@@ -90,17 +93,15 @@ public sealed class TransactionUndoLockTests
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var marker = await coordinator.CreateUndoMarkerAsync(writer);
-        var field = typeof(LockManager).GetField("_scopeGrants", BindingFlags.Instance | BindingFlags.NonPublic)!;
         // Act
         for (int i = 0; i < 1_000; i++)
         { await coordinator.LockManager.AcquireAsync(writer.Sequence, LockResource.Entry(1, (ulong)(i % 3)), LockMode.Exclusive); }
         // Assert
-        var journals = (IDictionary)field.GetValue(coordinator.LockManager)!;
-        ((ICollection)journals[writer.Sequence.Value]!).Count.ShouldBe(3);
+        coordinator.LockManager.ScopeGrantCounts.ShouldBe((1, 3));
         await coordinator.ReleaseUndoMarkerAsync(writer, marker);
-        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        coordinator.LockManager.ScopeGrantCounts.ShouldBeNull();
         await coordinator.LockManager.AcquireAsync(writer.Sequence, LockResource.Entry(1, 10), LockMode.Exclusive);
-        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        coordinator.LockManager.ScopeGrantCounts.ShouldBeNull();
         await coordinator.RollbackAsync(writer);
     }
 
