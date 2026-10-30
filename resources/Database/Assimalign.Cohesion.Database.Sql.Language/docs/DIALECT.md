@@ -15,15 +15,17 @@ NULL_PLACEMENT: DESC is reported when descending, FIRST only for ascending NULLS
 and LAST only for descending NULLS LAST. Other cells are NULL, denoting the defaults.
 
 Equality-prefix and range access uses each component's declared order, including descending
-bounds and LIKE prefixes already derived by the planner. NULL placement is independent of
-value direction. Unique equality and the existing unconditional/partial NULL uniqueness rules
+bounds. The planner derives bounds from `=`, `<`, `<=`, `>`, `>=` and BETWEEN. LIKE remains a
+residual filter after an equality-prefix seek. NULL placement is independent of value direction.
+Unique equality and the existing unconditional/partial NULL uniqueness rules
 are unchanged by direction. SQL keys now canonicalize signed zeros together and place every
 NaN in one class below negative infinity, matching SQL comparison. Row values keep their IEEE
 representation. Floating predicate access remains conservatively restricted as before.
 
 Every ORDER BY still uses an explicit sort, including matching and fully reversed key orders.
-Order matching, cost credit for ordered access and sort avoidance belong to SQ-K3. Both existing
-wire transports carry these declarations, metadata and results without a protocol change.
+Order matching, cost credit for ordered access and sort avoidance belong to SQ-K3; LIKE-prefix
+bounds are future work beside that ordered access. Both existing wire transports carry these
+declarations, metadata and results without a protocol change.
 
 
 ## Partial indexes (#1630, SQ-P1)

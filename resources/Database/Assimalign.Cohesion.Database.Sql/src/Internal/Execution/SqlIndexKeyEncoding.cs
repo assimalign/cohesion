@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 
 using Assimalign.Cohesion.Database.Indexing;
@@ -47,20 +48,29 @@ internal static class SqlIndexKeyEncoding
     internal static IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek, int[] indexOrdinals, Collation defaultCollation)
     {
         var prefixWriter = new DatabaseKeyWriter();
-        Span<int> ends = seek.EqualityValues.Count <= 64 ? stackalloc int[seek.EqualityValues.Count] : new int[seek.EqualityValues.Count];
-
-        for (int i = 0; i < seek.EqualityValues.Count; i++)
+        int[]? rented = null;
+        Span<int> ends = seek.EqualityValues.Count <= 64 ? stackalloc int[seek.EqualityValues.Count]
+            : (rented = ArrayPool<int>.Shared.Rent(seek.EqualityValues.Count));
+        byte[] prefix;
+        try
         {
-            int ordinal = indexOrdinals[i];
-            SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
-                table.Columns[ordinal].Collation ?? defaultCollation);
-            ends[i] = prefixWriter.Length;
+            for (int i = 0; i < seek.EqualityValues.Count; i++)
+            {
+                int ordinal = indexOrdinals[i];
+                SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
+                    table.Columns[ordinal].Collation ?? defaultCollation);
+                ends[i] = prefixWriter.Length;
+            }
+
+            prefix = prefixWriter.ToArray();
+            for (int i = 0, offset = 0; i < seek.EqualityValues.Count; offset = ends[i++])
+            {
+                Transform(prefix.AsSpan(offset, ends[i] - offset), seek.Index.KeyOrders[i]);
+            }
         }
-
-        byte[] prefix = prefixWriter.ToArray();
-        for (int i = 0, offset = 0; i < seek.EqualityValues.Count; offset = ends[i++])
+        finally
         {
-            Transform(prefix.AsSpan(offset, ends[i] - offset), seek.Index.KeyOrders[i]);
+            if (rented is not null) { ArrayPool<int>.Shared.Return(rented); }
         }
 
         if (seek.Lower is null && seek.Upper is null)
@@ -83,6 +93,7 @@ internal static class SqlIndexKeyEncoding
 
         var rangeOrder = seek.Index.KeyOrders[seek.EqualityValues.Count];
         bool descending = ((int)rangeOrder & 2) != 0;
+        bool nullsFirst = ((int)rangeOrder & 1) != 0;
         if ((descending ? seek.Upper : seek.Lower) is { } lower)
         {
             byte[] lowerKey = AppendComponent(prefix, rangeType, lower.Value, rangeCollation, rangeOrder);
@@ -93,6 +104,12 @@ internal static class SqlIndexKeyEncoding
                 ? new IndexKey(lowerKey)
                 : PrefixSuccessor(lowerKey) is { } lowerSuccessor ? new IndexKey(lowerSuccessor) : null;
             startInclusive = true;
+        }
+        else if (nullsFirst)
+        {
+            // Comparison bounds never contain NULL. Skip its entire component
+            // block, including every suffix, when this physical side is open.
+            start = new IndexKey(AppendMarker(prefix, 0x01));
         }
 
         if ((descending ? seek.Lower : seek.Upper) is { } upper)
@@ -106,8 +123,20 @@ internal static class SqlIndexKeyEncoding
                 : new IndexKey(upperKey);
             endInclusive = false;
         }
+        else if (!nullsFirst)
+        {
+            end = new IndexKey(AppendMarker(prefix, 0xFF));
+        }
 
         return new IndexKeyRange(start, end, startInclusive, endInclusive);
+    }
+
+    private static byte[] AppendMarker(byte[] prefix, byte marker)
+    {
+        var combined = new byte[prefix.Length + 1];
+        prefix.CopyTo(combined, 0);
+        combined[^1] = marker;
+        return combined;
     }
 
     private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value, Collation collation, SqlCatalogIndexKeyOrder order)

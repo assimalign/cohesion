@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -1099,19 +1100,29 @@ internal sealed partial class SqlPlanExecutor
     {
         var writer = new DatabaseKeyWriter();
 
-        Span<int> ends = keyOrdinals.Length <= 64 ? stackalloc int[keyOrdinals.Length] : new int[keyOrdinals.Length];
-        for (int i = 0; i < keyOrdinals.Length; i++)
+        int[]? rented = null;
+        Span<int> ends = keyOrdinals.Length <= 64 ? stackalloc int[keyOrdinals.Length]
+            : (rented = ArrayPool<int>.Shared.Rent(keyOrdinals.Length));
+        byte[] encoded;
+        try
         {
-            int ordinal = keyOrdinals[i];
-            SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
-                table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
-            ends[i] = writer.Length;
-        }
+            for (int i = 0; i < keyOrdinals.Length; i++)
+            {
+                int ordinal = keyOrdinals[i];
+                SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
+                    table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
+                ends[i] = writer.Length;
+            }
 
-        byte[] encoded = writer.ToArray();
-        for (int i = 0, start = 0; i < keyOrdinals.Length; start = ends[i++])
+            encoded = writer.ToArray();
+            for (int i = 0, start = 0; i < keyOrdinals.Length; start = ends[i++])
+            {
+                SqlIndexKeyEncoding.Transform(encoded.AsSpan(start, ends[i] - start), keyOrders?[i] ?? default);
+            }
+        }
+        finally
         {
-            SqlIndexKeyEncoding.Transform(encoded.AsSpan(start, ends[i] - start), keyOrders?[i] ?? default);
+            if (rented is not null) { ArrayPool<int>.Shared.Return(rented); }
         }
         var key = new IndexKey(encoded);
         IndexKeyBuilt?.Invoke(key);

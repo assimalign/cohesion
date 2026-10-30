@@ -23,13 +23,19 @@ All maintenance, build, rewrite, conflict and undo paths use the same key transf
 never changes key equality; creation-order arbitration and the existing partial-index NULL-key
 lock exemption remain intact. Equality prefixes transform every participating component. A range
 on a descending component swaps its logical lower/upper bounds before the existing inclusive/
-exclusive prefix-successor arithmetic. LIKE-derived bounds use this path too. Detached-plan
-range oracles exercise the cursor even when runtime costing chooses a broad table scan.
+exclusive prefix-successor arithmetic. When an open physical side faces NULLs, comparison
+ranges stop before the NULLS LAST marker or start after the NULLS FIRST block; equality-only
+prefixes, including NULL, keep their complete suffix range. Cost probes and row fetches use
+these same bounds. Component-boundary workspace uses the stack through 64 columns and a
+pooled buffer beyond that, returned even if encoding fails. Detached-plan range oracles
+exercise the cursor even when runtime costing chooses a broad table scan.
 
-The planner continues to serve its existing predicate forms with directed indexes. Every ORDER
-BY still sorts, including matching and fully reversed orders; SQ-K3 owns order matching, order
-costing and sort avoidance. Conservative floating predicate admission remains unchanged even
-though floating key equality/order now matches SQL comparison. Schema snapshots, migration
+The planner derives bounds from `=`, `<`, `<=`, `>`, `>=` and BETWEEN with directed indexes. LIKE remains
+a residual filter after an equality-prefix seek; LIKE-prefix bounds are future work beside
+SQ-K3's ordered access. Every ORDER BY still sorts, including matching and fully reversed
+orders; SQ-K3 owns order matching, order costing and sort avoidance. Conservative floating
+predicate admission remains unchanged even though floating key equality/order now matches SQL
+comparison. Schema snapshots, migration
 comparison and runtime/SDK renderers preserve key order through replacement and recovery.
 
 | Code | Condition | SQLSTATE |
