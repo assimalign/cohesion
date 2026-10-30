@@ -45,4 +45,6 @@
   <data name="GatewayInfrastructureMissing" xml:space="preserve"><value>Gateway '{0}' has no infrastructure provider; call UseInfrastructure before Build.</value></data>
   <data name="GatewayParentMissing" xml:space="preserve"><value>The model of gateway '{0}' joins parent '{1}', but the gateway has no connection to it; call UseParent with the parent gateway.</value></data>
   <data name="ApplicationGatewayAlreadyBuilt" xml:space="preserve"><value>The gateway is already built; its builder accepts no changes.</value></data>
+  <data name="GatewayRecordNull" xml:space="preserve"><value>The record store returned no record when gateway '{0}' took its record over.</value></data>
+  <data name="GatewayRecordSuperseded" xml:space="preserve"><value>Gateway '{0}' stopped: a later run of it took its record over, so this run, epoch {1}, can no longer save it.</value></data>
 </root>

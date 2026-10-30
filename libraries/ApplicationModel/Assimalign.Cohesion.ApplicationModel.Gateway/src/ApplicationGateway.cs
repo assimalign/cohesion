@@ -5,6 +5,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -87,6 +88,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private GatewayResource[] _ordered = [];
     private ApplicationResourceRecord[] _retiredResources = [];
     private ReadOnlyCollection<IApplicationResourceDeployment> _aggregates = ReadOnlyCollection<IApplicationResourceDeployment>.Empty;
+    private long _epoch;
+    private CancellationTokenSource? _run;
+    private ApplicationGatewayException? _superseded;
     private int _lifecycle;
 
     internal ApplicationGateway(
@@ -188,8 +192,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// <see cref="StartupTimeout"/> (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/> or
     /// <see cref="ApplicationGatewayErrorCode.OutputMissing"/>); a created or updated resource
     /// published no manifest within <see cref="StartupTimeout"/> of its deployment
-    /// (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>); or a setting uses an output its
-    /// resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>).
+    /// (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>); a setting uses an output its
+    /// resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>); or
+    /// a later run of this gateway took its record over, so this run stopped
+    /// (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>).
     /// </exception>
     public async Task RunAsync(CancellationToken cancellationToken = default)
     {
@@ -198,6 +204,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             throw new InvalidOperationException(ErrorMessages.ApplicationGatewayAlreadyRun);
         }
 
+        // The run's own token stops it when the caller cancels or a later run takes the record over.
+        using var run = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Volatile.Write(ref _run, run);
+        CancellationToken token = run.Token;
         int transportsStarted = 0;
         bool failed = false;
         try
@@ -205,14 +215,18 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             IApplicationModel model = _model;
             GatewayStep[] steps = GatewayStep.Order(model.Manifest);
 
-            ApplicationGatewayRecord? record = await _store.LoadAsync(model.Name, cancellationToken).ConfigureAwait(false);
+            // Taking the record over fences off every earlier run of this gateway: the store refuses
+            // their saves from here, so the newest run wins and the older one stops.
+            ApplicationGatewayRecord record = await _store.AcquireAsync(model.Name, token).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(Format(ErrorMessages.GatewayRecordNull, model.Name));
+            Volatile.Write(ref _epoch, record.Epoch);
             CreateResources(model, record, steps);
 
             // The gateway receives publications from here, so its transports start before it joins
             // its parent or deploys: an instance the previous run left can publish meanwhile.
             foreach (IApplicationGatewayTransport transport in _transports)
             {
-                await transport.StartAsync(this, cancellationToken).ConfigureAwait(false);
+                await transport.StartAsync(this, token).ConfigureAwait(false);
                 transportsStarted++;
             }
 
@@ -221,15 +235,15 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             ApplicationGatewayMembership? membership = null;
             if (_parent is not null)
             {
-                membership = await JoinParentAsync(model, _parent, cancellationToken).ConfigureAwait(false);
+                membership = await JoinParentAsync(model, _parent, token).ConfigureAwait(false);
                 _received = Receive(membership);
             }
 
-            await DeployAsync(model, steps, cancellationToken).ConfigureAwait(false);
+            await DeployAsync(model, steps, token).ConfigureAwait(false);
 
             // Retire what the model no longer declares only once the deployment has started, so a
             // failed deployment leaves the previous one's resources running.
-            await RetireAsync(model, cancellationToken).ConfigureAwait(false);
+            await RetireAsync(model, token).ConfigureAwait(false);
 
             // Every registered instance, the adopted ones included, has one full lease from here.
             foreach (GatewayResource resource in _ordered)
@@ -241,26 +255,56 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
             Task renewals = membership is null
                 ? Task.CompletedTask
-                : RenewMembershipAsync(model, _parent!, membership.Lease, cancellationToken);
-            await Task.WhenAll(ExpireAsync(cancellationToken), renewals).ConfigureAwait(false);
+                : RenewMembershipAsync(model, _parent!, membership.Lease, token);
+            await Task.WhenAll(ExpireAsync(token), renewals).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (Volatile.Read(ref _superseded) is null && cancellationToken.IsCancellationRequested)
         {
             // Cancellation stops the gateway; what it deployed keeps running.
             _started.TrySetCanceled(cancellationToken);
         }
         catch (Exception exception)
         {
-            // Every other failure ends the run; Started reports it before the caller sees it.
+            // Every other failure ends the run; Started reports it before the caller sees it. A run a
+            // later one superseded reports that, whatever the supersession interrupted.
             failed = true;
-            _started.TrySetException(exception);
-            throw;
+            Exception reported = Volatile.Read(ref _superseded) ?? exception;
+            _started.TrySetException(reported);
+            ExceptionDispatchInfo.Throw(reported);
         }
         finally
         {
             Volatile.Write(ref _lifecycle, stopped);
+            Volatile.Write(ref _run, null);
             await StopTransportsAsync(transportsStarted, failed).ConfigureAwait(false);
         }
+    }
+
+    // Ends this run once a later run of the gateway took the record over. This one can no longer
+    // save it, so it takes no more publications or joins, and its run stops with the reason.
+    private ApplicationGatewayException Supersede()
+    {
+        var superseded = new ApplicationGatewayException(
+            ApplicationGatewayErrorCode.RecordSuperseded,
+            Format(ErrorMessages.GatewayRecordSuperseded, Name, Volatile.Read(ref _epoch)));
+        if (Interlocked.CompareExchange(ref _superseded, superseded, null) is { } earlier)
+        {
+            return earlier;
+        }
+
+        Volatile.Write(ref _lifecycle, stopped);
+        try
+        {
+            // Asynchronously: whatever waits on the run's token continues on the thread pool, not
+            // on the publication or write that found the record taken over.
+            _ = Volatile.Read(ref _run)?.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run already ended.
+        }
+
+        return superseded;
     }
 
     // Stops the transports that started, last first. One that fails to stop does not keep the others
@@ -298,8 +342,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// <exception cref="ArgumentException">The manifest has no instance key or no action list.</exception>
     /// <exception cref="ApplicationGatewayException">
     /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>), does
-    /// not run the resource (<see cref="ApplicationGatewayErrorCode.ResourceUnknown"/>), or stopped
-    /// accepting it after it missed its startup window (<see cref="ApplicationGatewayErrorCode.ResourceTornDown"/>).
+    /// not run the resource (<see cref="ApplicationGatewayErrorCode.ResourceUnknown"/>), stopped
+    /// accepting it after it missed its startup window (<see cref="ApplicationGatewayErrorCode.ResourceTornDown"/>),
+    /// or found while saving the registration that a later run took its record over
+    /// (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>).
     /// </exception>
     public ValueTask<ApplicationInstancePublication> PublishAsync(ApplicationInstanceManifest manifest, CancellationToken cancellationToken = default)
     {
@@ -420,8 +466,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// <exception cref="InvalidOperationException"><paramref name="source"/> is not registered.</exception>
     /// <exception cref="ArgumentException">The source instance does not declare the snapshot's action stateful.</exception>
     /// <exception cref="ApplicationGatewayException">
-    /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>) or does
-    /// not run the resource (<see cref="ApplicationGatewayErrorCode.ResourceUnknown"/>).
+    /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>), does
+    /// not run the resource (<see cref="ApplicationGatewayErrorCode.ResourceUnknown"/>), or found while
+    /// saving that a later run took its record over (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>).
     /// </exception>
     public ValueTask<IReadOnlyList<InstanceKey>> RecordAsync(
         ProviderName provider,
@@ -931,17 +978,25 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
     }
 
-    // Saves never overlap, and each writes the whole record as it stands when the save begins.
+    // Saves never overlap, and each writes the whole record as it stands when the save begins. A
+    // save the store refuses means a later run took the record over: this run stops, and whatever
+    // asked for the save fails.
     private async Task SaveAsync(CancellationToken cancellationToken)
     {
+        bool saved;
         await _saves.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await _store.SaveAsync(CreateRecord(), cancellationToken).ConfigureAwait(false);
+            saved = await _store.SaveAsync(CreateRecord(), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _saves.Release();
+        }
+
+        if (!saved)
+        {
+            throw Supersede();
         }
     }
 
@@ -980,7 +1035,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         // A retired resource stays recorded until its teardown succeeds, so a failed run retries it.
         resources.AddRange(Volatile.Read(ref _retiredResources));
 
-        return new ApplicationGatewayRecord(Name, resources.AsReadOnly());
+        return new ApplicationGatewayRecord(Name, resources.AsReadOnly()) { Epoch = Volatile.Read(ref _epoch) };
     }
 
     // The resource's definition in the model, as the JSON of its manifest as declared for this

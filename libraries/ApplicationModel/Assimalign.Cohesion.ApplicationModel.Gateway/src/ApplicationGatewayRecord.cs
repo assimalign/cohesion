@@ -14,4 +14,17 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// <param name="Resources">The resources the gateway deployed, in deployment order.</param>
 public sealed record ApplicationGatewayRecord(
     GatewayName Gateway,
-    IReadOnlyList<ApplicationResourceRecord> Resources);
+    IReadOnlyList<ApplicationResourceRecord> Resources)
+{
+    /// <summary>
+    /// Gets the epoch of the run that holds the record.
+    /// </summary>
+    /// <remarks>
+    /// Each run of a gateway takes its record over with an epoch higher than any run before it took
+    /// (<see cref="IApplicationGatewayStore.AcquireAsync"/>), and a store refuses a save whose epoch
+    /// is lower than the one it holds. So when two runs of one gateway overlap, such as the old and
+    /// the new gateway of a rolling update, the newer run's record wins and the older run stops.
+    /// Zero for a record no run has taken over.
+    /// </remarks>
+    public long Epoch { get; init; }
+}

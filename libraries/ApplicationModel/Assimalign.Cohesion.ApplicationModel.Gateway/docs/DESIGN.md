@@ -35,8 +35,9 @@ flowchart LR
 
 ## Startup: reconcile, then run
 
-`RunAsync` orders the gateway's resources (G17), loads its record from its
-`IApplicationGatewayStore`, creates one aggregate per resource as the previous run left it (G23),
+`RunAsync` orders the gateway's resources (G17), takes its record over from its
+`IApplicationGatewayStore` with a new epoch, which fences off any earlier run still going (G35),
+creates one aggregate per resource as the previous run left it (G23),
 and opens publications and joins, starting the transports its instances publish through (G33). A
 gateway whose model names a parent then joins it, and waits
 within the startup window until the parent reports every output of its resources that the
@@ -60,7 +61,7 @@ sequenceDiagram
     participant Inst as Resource instance
     Caller->>GW: RunAsync()
     GW->>GW: order the resources
-    GW->>Store: LoadAsync(gateway)
+    GW->>Store: AcquireAsync(gateway), a new epoch
     GW->>GW: seed aggregates from the record, open publications and joins, start the transports
     opt the model names a parent
         GW->>Parent: JoinAsync(manifest), again until every output it uses is reported
@@ -118,9 +119,9 @@ are ready.
 | `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IApplicationResourceDeployment`, `ApplicationResourceDeployment`, `IApplicationResourceAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
-| `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read. Children are not recorded. |
-| `JsonFileApplicationGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. The placeholder for a store over the Database area. |
-| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`) and a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `OutputMissing` for a setting whose output the provider or the parent did not report). |
+| `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read, plus the epoch of the run that holds it. `AcquireAsync` takes the record over with a higher epoch, `SaveAsync` refuses a save from an earlier one, and `LoadAsync` reads without taking anything over (G35). Children are not recorded. |
+| `JsonFileApplicationGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. Every read and write holds an exclusive lock on the gateway's lock file, so taking over and saving are atomic across processes. The local default; a platform package backs the store with durable storage of its own. |
+| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`), a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `OutputMissing` for a setting whose output the provider or the parent did not report), and a run a later one superseded (`RecordSuperseded`). |
 
 In ApplicationModel.Definition: `IApplicationModel.Role` and `ApplicationGatewayRole` say whether a
 gateway joins a parent, and `IApplicationParent` names the parent's outputs a model's settings use.
@@ -185,10 +186,11 @@ keeps the decision out of the publication path: in-process providers start insta
 deploy call that reports what it changed. The gateway would learn of an update only after the new
 instances had published with the old state.
 
-**G11 — The record lives behind a store (owner request, 2026-10-28).** `IApplicationGatewayStore` loads the
-record once and saves the whole record after every change: deployment, registration, recorded
-write, teardown. Saves never overlap. `JsonFileApplicationGatewayStore` is the placeholder. A store over the
-Database area replaces it in each gateway once that area is ready, and the gateway does not change.
+**G11 — The record lives behind a store (owner request, 2026-10-28).** `IApplicationGatewayStore` takes the
+record over once per run (G35) and saves the whole record after every change: deployment,
+registration, recorded write, teardown. Saves never overlap. `JsonFileApplicationGatewayStore` is the
+local default. A platform package backs the store with the Database resource, and no gateway uses
+the Database resource directly (owner, 2026-10-29): the gateway sees only this contract.
 Snapshot values are stored as base64, because the platform's content serializer may not be JSON.
 
 **G12 — State follows the definition.** A resource's revision is a fingerprint of its manifest
@@ -446,6 +448,30 @@ the old program first (Gateway.InProcess I8).
 - A random id per deployment. The gate would work the same, but the same inputs would no longer
   give the same id, which a later check of adopted instances against the plan needs.
 
+**G35 — Each run takes its record over, and the newest run wins (2026-10-29).** Any platform
+eventually runs two gateways of one name at once: the old and the new gateway of a rolling update,
+or a pipeline run again while the previous one still runs. The store loaded and saved whole records
+with nothing to tell the runs apart, so every save overwrote the other run's. If the older run saved
+last, the next run read its revisions as a new definition and dropped the operator's state.
+- **Take over.** `RunAsync` starts with `AcquireAsync`, which stores and returns the record with an
+  epoch higher than any run took before (`ApplicationGatewayRecord.Epoch`), in one atomic step.
+- **Fence.** Every save carries the run's epoch, and `SaveAsync` refuses one lower than the stored
+  epoch, again in one atomic step, answering `false` instead of writing.
+- **Stop.** A gateway whose save is refused closes publications and joins, and its run fails with
+  `RecordSuperseded`, whatever the save was for: a registration, a recorded write, an expiry, or a
+  step of its own startup. Instances then publish to the run that holds the record.
+
+The JSON file store holds an exclusive lock on the gateway's lock file for every read and write,
+which the operating system releases when a process ends, so a crashed gateway never leaves it held.
+That also settles the old Windows failure (former open question 14): a read through the store never
+meets the file being replaced. A store over a database uses the database's compare-and-swap.
+*Rejected:*
+- A lock the running gateway holds for its whole run. A rolling update starts the new gateway before
+  it stops the old one, so the new one would wait for a lock the old one gives up only once the new
+  one is ready; a crashed holder would need a lease to expire first.
+- Optimistic concurrency on the record's version. It lets the first writer win, so the old gateway's
+  next save would stop the new one, the wrong run.
+
 **G9 — No HTTP here, yet; it will be a transport over Web (owner direction, 2026-10-29).** COHLIB001
 bars a library from referencing Web, and COHRES003 bars Web (any resource package) from referencing
 a `Gateway*` assembly, so neither side can bind the other today. The options were: serve HTTP from
@@ -508,7 +534,7 @@ candidates for an event source.
 13. **A parent's changed value while the child runs.** It applies on the child's next run (G26). The
     renewals already carry the current values, so a child could replan the resources whose values
     changed without waiting for its pipeline.
-14. **The record file on Windows.** A save replaces the file with `File.Move`, which Windows refuses
-    while another handle has the file open, so a reader polling the record during a save fails that
-    save, and the expiry loop's failure ends the run. The lease test that polls the record shows it
-    locally; the suite runs on Linux in CI.
+14. **The record file on Windows — settled by G35.** A save replaces the file with `File.Move`,
+    which Windows refuses while another handle has the file open. Reads and writes through the store
+    now hold the gateway's lock, so they never overlap; a reader outside the store can still block a
+    save.

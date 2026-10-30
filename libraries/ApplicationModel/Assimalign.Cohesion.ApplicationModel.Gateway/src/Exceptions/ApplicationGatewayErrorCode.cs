@@ -19,4 +19,9 @@ public enum ApplicationGatewayErrorCode
 
     /// <summary>A setting uses an output that its resource's infrastructure provider did not report.</summary>
     OutputMissing,
+
+    /// <summary>
+    /// A later run of the gateway took its record over, so this run can no longer save it and stops.
+    /// </summary>
+    RecordSuperseded,
 }
