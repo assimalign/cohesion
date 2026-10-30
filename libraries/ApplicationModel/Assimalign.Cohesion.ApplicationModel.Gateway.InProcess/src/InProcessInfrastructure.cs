@@ -208,6 +208,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
+        DeploymentId deployment,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
@@ -223,7 +224,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         }
 
         (int endpoint, int controlPlane) = _ports.GetOrAdd(key, static _ => (GetFreePort(), GetFreePort()));
-        InProcessWorkload workload = InProcessWorkload.Start(program, CreateVariables(model, resource, settings, endpoint, controlPlane), settings, endpoint);
+        InProcessWorkload workload = InProcessWorkload.Start(program, CreateVariables(model, resource, settings, deployment, endpoint, controlPlane), settings, endpoint);
         _workloads[key] = workload;
         lock (_started)
         {
@@ -265,12 +266,13 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         await _channel.StopAsync().ConfigureAwait(false);
     }
 
-    // What a platform hands a workload, as its environment: who it is, where its gateway is, where
-    // it listens, and its settings.
+    // What a platform hands a workload, as its environment: who it is, the deployment that started
+    // it, where its gateway is, where it listens, and its settings.
     private Dictionary<string, string> CreateVariables(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
+        DeploymentId deployment,
         int endpoint,
         int controlPlane)
     {
@@ -283,6 +285,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
             [AppEnvironment.Variables.Resource] = resource.Name.Value,
             [AppEnvironment.Variables.ManifestEndpoint] = Endpoint.AbsoluteUri,
             [AppEnvironment.Variables.ControlPlaneEndpoint] = CreateLoopbackUrl(controlPlane, trailingSlash: true),
+            [AppEnvironment.Variables.Deployment] = deployment.ToString(),
             [AppEnvironment.Variables.Endpoint(endpointName, "HOST")] = IPAddress.Loopback.ToString(),
             [AppEnvironment.Variables.Endpoint(endpointName, "PORT")] = endpoint.ToString(CultureInfo.InvariantCulture),
             [AppEnvironment.Variables.Endpoint(endpointName, "SCHEME")] = Uri.UriSchemeHttp,

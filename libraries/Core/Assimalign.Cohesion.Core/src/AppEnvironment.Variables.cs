@@ -98,6 +98,12 @@ public static partial class AppEnvironment
         /// <summary>Gets the variable naming the URL a resource instance serves its control plane on.</summary>
         public const string ControlPlaneEndpoint = "COHESION_CONTROL_PLANE_ENDPOINT";
 
+        /// <summary>
+        /// Gets the variable naming the deployment that started a resource instance, which the instance
+        /// repeats in the manifest it publishes.
+        /// </summary>
+        public const string Deployment = "COHESION_DEPLOYMENT";
+
         // The prefix every variable of the contract starts with. Internal: it names no variable.
         internal const string Prefix = "COHESION_";
 

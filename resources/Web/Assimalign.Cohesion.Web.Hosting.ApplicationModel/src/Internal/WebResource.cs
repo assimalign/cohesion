@@ -14,9 +14,10 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 /// </summary>
 internal sealed class WebResource : IApplicationResourceInstance
 {
-    public WebResource(ResourceName name, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IApplicationInstanceAction> addedActions)
+    public WebResource(ResourceName name, DeploymentId? deployment, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IApplicationInstanceAction> addedActions)
     {
         Name = name;
+        Deployment = deployment;
         Actions = [.. CreateActions(settings), .. addedActions];
     }
 
@@ -25,6 +26,8 @@ internal sealed class WebResource : IApplicationResourceInstance
     public ResourceName Name { get; }
 
     public InstanceKey Key { get; } = InstanceKey.New();
+
+    public DeploymentId? Deployment { get; }
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; }
 

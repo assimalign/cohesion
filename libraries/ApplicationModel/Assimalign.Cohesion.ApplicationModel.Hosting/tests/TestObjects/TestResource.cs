@@ -18,6 +18,8 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public InstanceKey Key { get; init; } = InstanceKey.New();
 
+    public DeploymentId? Deployment { get; init; }
+
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; init; }
 
     public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors { get; init; } = [];

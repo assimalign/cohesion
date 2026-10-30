@@ -49,6 +49,9 @@ public sealed class WebResourceInProcessTests
             // Assert
             answer.ShouldBe("storefront -> orders");
             gateway.Resources.ShouldAllBe(resource => resource.Instances.Count == 1);
+
+            // Each Web application repeats the deployment that started it, which is what made it ready.
+            gateway.Resources.ShouldAllBe(resource => resource.Instances.Single().Deployment != null);
         }
         finally
         {

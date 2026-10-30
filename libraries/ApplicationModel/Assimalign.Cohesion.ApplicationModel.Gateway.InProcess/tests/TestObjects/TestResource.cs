@@ -9,10 +9,11 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests;
 /// </summary>
 internal sealed class TestResource : IApplicationResourceInstance
 {
-    public TestResource(ProviderName provider, ResourceName name)
+    public TestResource(ProviderName provider, ResourceName name, DeploymentId? deployment)
     {
         Provider = provider;
         Name = name;
+        Deployment = deployment;
     }
 
     public ProviderName Provider { get; }
@@ -20,6 +21,8 @@ internal sealed class TestResource : IApplicationResourceInstance
     public ResourceName Name { get; }
 
     public InstanceKey Key { get; } = InstanceKey.New();
+
+    public DeploymentId? Deployment { get; }
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions => [];
 

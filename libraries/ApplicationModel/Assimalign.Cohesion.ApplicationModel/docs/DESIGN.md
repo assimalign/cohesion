@@ -30,8 +30,8 @@ flowchart LR
 | Type | Role |
 | --- | --- |
 | `IApplicationResource` | The base of the three forms: `Provider`, `Name`, and the `Id` derived from them. |
-| `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`, `InstanceKey`, `ActionName` | Identity value objects. Ids are version 5 UUIDs of the names; an instance key is a ULID per process start. |
-| `ApplicationInstanceManifest`, `ApplicationActionDescriptor`, `ApplicationActionKind` | What an instance publishes about itself: its identity, key, and actions. |
+| `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`, `InstanceKey`, `ActionName`, `DeploymentId` | Identity value objects. Ids are version 5 UUIDs of the names; an instance key is a ULID per process start; a deployment id is a version 5 UUID of what a gateway deployed (ApplicationModel.Gateway G34). |
+| `ApplicationInstanceManifest`, `ApplicationActionDescriptor`, `ApplicationActionKind` | What an instance publishes about itself: its identity, key, the deployment that started it, and its actions. |
 | `ApplicationActionContext`, `ApplicationActionResult`, `ApplicationActionStatus` | One invocation of an action, on an instance or a gateway's infrastructure action, and its outcome. |
 | `ApplicationActionSnapshot` | One action's state after a write, as a gateway records and replays it. |
 | `IApplicationContentSerializer`, `ApplicationContentException` | The format of action content, and the refusal of content that does not bind. |

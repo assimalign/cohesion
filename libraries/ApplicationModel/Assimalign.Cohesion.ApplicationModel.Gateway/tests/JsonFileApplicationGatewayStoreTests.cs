@@ -39,7 +39,7 @@ public sealed class JsonFileApplicationGatewayStoreTests : IDisposable
     {
         // Arrange
         JsonFileApplicationGatewayStore store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
-        var instance = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), [new ApplicationActionDescriptor("cors", ApplicationActionKind.ReadWrite, IsStateful: true)]);
+        var instance = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), DeploymentId.New(), [new ApplicationActionDescriptor("cors", ApplicationActionKind.ReadWrite, IsStateful: true)]);
         byte[] binary = [0xFF, 0x00, 0x7B];
         var outputs = new Dictionary<OutputName, string> { [OutputName.Endpoint] = "http://orders-api.root.svc" };
         var saved = new ApplicationGatewayRecord(

@@ -33,7 +33,7 @@ public class ApplicationResourceDeploymentTests
     {
         // Arrange
         ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(TestManifests.OrdersApi);
-        var instance = new ApplicationInstanceManifest("Web", "customers-api", InstanceKey.New(), []);
+        var instance = new ApplicationInstanceManifest("Web", "customers-api", InstanceKey.New(), null, []);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => resource.Register(instance));

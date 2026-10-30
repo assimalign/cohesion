@@ -14,11 +14,12 @@ internal sealed class TestInstance : IApplicationResourceInstance, IApplicationI
     private readonly ApplicationActionState<LogLevelSetting> _state =
         ApplicationActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
 
-    public TestInstance(ProviderName provider, ResourceName name, IReadOnlyDictionary<SettingName, string> settings)
+    public TestInstance(ProviderName provider, ResourceName name, IReadOnlyDictionary<SettingName, string> settings, DeploymentId? deployment)
     {
         Provider = provider;
         Name = name;
         Settings = settings;
+        Deployment = deployment;
     }
 
     public LogLevelSetting Level => _state.Value;
@@ -31,6 +32,9 @@ internal sealed class TestInstance : IApplicationResourceInstance, IApplicationI
     public ResourceName Name { get; }
 
     public InstanceKey Key { get; } = InstanceKey.New();
+
+    /// <summary>The deployment that started the instance, which its workload ran with.</summary>
+    public DeploymentId? Deployment { get; }
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions => [this];
 

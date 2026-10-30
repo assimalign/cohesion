@@ -18,12 +18,13 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 // current: the platform runs, or may already run, the definition of this run.
 //
 // A plan of None opens the gate at once, because the platform already runs the resource. Otherwise
-// the resource is pending until an instance registers after the plan, or closed when its window
-// closes first. An instance that registers before the plan runs the previous definition, so it is
-// registered without opening the gate. Both transitions leave pending atomically, so a registration
-// that races the deadline either wins or is refused. Planning, registration, renewal, and expiry
-// share one lock, so an instance that renews or publishes again while its lease expires is either
-// kept or dropped whole, never half.
+// the resource is pending until an instance of the plan's deployment registers, or closed when its
+// window closes first. An instance that registers before the plan runs the previous definition, and
+// one that repeats another deployment's id was started by an earlier deployment, such as a pod of
+// the previous rollout that restarted: both are registered without opening the gate. Both
+// transitions leave pending atomically, so a registration that races the deadline either wins or is
+// refused. Planning, registration, renewal, and expiry share one lock, so an instance that renews or
+// publishes again while its lease expires is either kept or dropped whole, never half.
 [DebuggerDisplay("{Aggregate.Manifest.Provider}/{Aggregate.Manifest.Name} {Change}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class GatewayResource
@@ -38,6 +39,7 @@ internal sealed class GatewayResource
     private readonly HashSet<InstanceKey> _carried = [];
     private InfrastructureChange _change;
     private string? _revision;
+    private DeploymentId? _deployment;
     private int _state;
     private int _current;
     private int _tornDown;
@@ -71,6 +73,10 @@ internal sealed class GatewayResource
     // The revision the plan runs, or null until the resource is planned.
     public string? Revision => Volatile.Read(ref _revision);
 
+    // The deployment the plan makes, or null until the resource is planned and for a plan of None,
+    // which deploys nothing. Written before the resource becomes current, and read only after.
+    public DeploymentId? Deployment => _deployment;
+
     public Task Registered => _registered.Task;
 
     public bool IsClosed => Volatile.Read(ref _state) == closed;
@@ -81,9 +87,10 @@ internal sealed class GatewayResource
 
     public bool IsTornDown => Volatile.Read(ref _tornDown) != 0;
 
-    // Applies the plan the resource's step made. Call it before the provider deploys the resource,
-    // because an in-process provider's instances publish before the call returns.
-    public void Plan(InfrastructureChange change, string revision)
+    // Applies the plan the resource's step made, with the deployment it makes unless the plan is None.
+    // Call it before the provider deploys the resource, because an in-process provider's instances
+    // publish before the call returns.
+    public void Plan(InfrastructureChange change, string revision, DeploymentId? deployment)
     {
         bool sameDefinition = Previous is not null && Previous.Revision == revision;
         lock (_leases)
@@ -107,6 +114,7 @@ internal sealed class GatewayResource
 
             _carried.Clear();
             _change = change;
+            _deployment = deployment;
             Volatile.Write(ref _revision, revision);
             Volatile.Write(ref _current, 1);
         }
@@ -118,10 +126,13 @@ internal sealed class GatewayResource
         }
     }
 
-    public bool TryMarkRegistered()
+    // Opens the gate when the instance repeats the plan's deployment. Returns false only when the
+    // window closed, so the registration is undone and refused.
+    public bool TryMarkRegistered(ApplicationInstanceManifest instance)
     {
-        if (!IsCurrent)
+        if (!IsCurrent || _deployment is { } deployment && instance.Deployment != deployment)
         {
+            // An instance of the previous definition, or of an earlier deployment of this one.
             return !IsClosed;
         }
 
@@ -239,6 +250,8 @@ internal sealed class GatewayResource
         public InfrastructureChange Change => _resource.Change;
 
         public string? Revision => _resource.Revision;
+
+        public DeploymentId? Deployment => _resource.Deployment;
 
         public bool IsCurrent => _resource.IsCurrent;
 

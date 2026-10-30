@@ -89,6 +89,21 @@ public class ApplicationInstanceControlPlaneTests
         manifest.Actions.Count.ShouldBe(2);
         manifest.Actions[0].ShouldBe(new ApplicationActionDescriptor(_flushCache, ApplicationActionKind.Write, false));
         manifest.Actions[1].ShouldBe(new ApplicationActionDescriptor(_logLevel, ApplicationActionKind.ReadWrite, true));
+        manifest.Deployment.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "The manifest repeats the deployment that started the instance")]
+    public void Manifest_WithDeployment_ShouldRepeatIt()
+    {
+        // Arrange
+        DeploymentId deployment = DeploymentId.New();
+        var resource = new TestResource(new LogLevelAction()) { Deployment = deployment };
+
+        // Act
+        ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(resource, TestSerializer.Json).Manifest;
+
+        // Assert
+        manifest.Deployment.ShouldBe(deployment);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A control plane accepts invocations and restores as soon as it is created")]

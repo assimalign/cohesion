@@ -23,7 +23,7 @@ internal static class TestManifests
 
     public static ApplicationInstanceManifest Instance(params ApplicationActionDescriptor[] actions)
     {
-        return new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), actions);
+        return new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), null, actions);
     }
 
     public static ApplicationActionSnapshot LogLevelSnapshot(string level)

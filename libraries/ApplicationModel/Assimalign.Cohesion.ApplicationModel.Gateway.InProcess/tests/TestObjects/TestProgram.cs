@@ -52,6 +52,7 @@ internal sealed class TestProgram
             AppEnvironment.Variables.Resource,
             AppEnvironment.Variables.ManifestEndpoint,
             AppEnvironment.Variables.ControlPlaneEndpoint,
+            AppEnvironment.Variables.Deployment,
             AppEnvironment.Variables.Endpoint("http", "PORT")])
         {
             environment[variable] = AppEnvironment.GetValue(variable);
@@ -62,7 +63,8 @@ internal sealed class TestProgram
             environment[key] = AppEnvironment.GetValue(AppEnvironment.Variables.Configuration(key));
         }
 
-        var resource = new TestResource(_provider, _name);
+        // The program repeats the deployment that started it, as every managed instance does.
+        var resource = new TestResource(_provider, _name, DeploymentId.TryParse(environment[AppEnvironment.Variables.Deployment], out DeploymentId deployment) ? deployment : null);
         ApplicationInstancePublisher publisher = ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions
         {
             Endpoint = new Uri(environment[AppEnvironment.Variables.ManifestEndpoint]!),

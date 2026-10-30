@@ -39,7 +39,7 @@ managed instance, `AddResource` builds these pieces and registers the last two a
 
 | Piece | Role |
 | --- | --- |
-| `WebResource` (internal) | The `IApplicationResourceInstance`: provider `Web`, the resource's name, a new instance key, one action for each registered setting the resource knows, then the actions the application added, built when the application is built. |
+| `WebResource` (internal) | The `IApplicationResourceInstance`: provider `Web`, the resource's name, a new instance key, the deployment its environment names, one action for each registered setting the resource knows, then the actions the application added, built when the application is built. |
 | `ApplicationInstanceControlPlane` | ApplicationModel.Hosting' control plane over the resource, writing JSON through the resource's own context and the contexts the added actions came with. |
 | `ApplicationInstancePublisher` | The HTTP publisher for `COHESION_MANIFEST_ENDPOINT`, with the builder's optional HTTP client callback. |
 | `ApplicationInstanceService` | Publishes and restores in `StartingAsync`, then renews the lease until `StopAsync`. |
@@ -133,9 +133,11 @@ builder taking a platform's serializer, the previous version; it made every acti
 public API, and a platform had to track every area's types.
 
 **W7 — The resource reads its endpoints from its environment, so it runs in process unchanged
-(2026-10-29).** `WebResourceOptions` reads `ManifestEndpoint` and `ControlPlaneEndpoint` through
-Core's `AppEnvironment`, which reads the program's `AppEnvironmentScope` when a gateway runs the
-application in its own process (Gateway.InProcess). That gateway names an `inprocess://` manifest
+(2026-10-29).** `WebResourceOptions` reads `ManifestEndpoint`, `ControlPlaneEndpoint`, and
+`Deployment` through Core's `AppEnvironment`, which reads the program's `AppEnvironmentScope` when a
+gateway runs the application in its own process (Gateway.InProcess). The resource repeats the
+deployment in its manifest, which is what makes its gateway count the deployment ready
+(ApplicationModel.Gateway G34). That gateway names an `inprocess://` manifest
 endpoint, which `ApplicationInstancePublisher.Create` resolves to its channel, and a loopback
 control-plane port of the program's own. With Web.Hosting binding the platform's `http` endpoint,
 the same `Program.cs` (`CreateBuilder(args)`, `AddResource(name)`) runs on any platform and in

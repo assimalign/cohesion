@@ -149,7 +149,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
 
         descriptors.Sort(static (left, right) => left.Name.CompareTo(right.Name));
 
-        var manifest = new ApplicationInstanceManifest(resource.Provider, resource.Name, resource.Key, descriptors.AsReadOnly());
+        var manifest = new ApplicationInstanceManifest(resource.Provider, resource.Name, resource.Key, resource.Deployment, descriptors.AsReadOnly());
         return new ApplicationInstanceControlPlane(resource, serializer, actions.ToFrozenDictionary(), manifest);
     }
 

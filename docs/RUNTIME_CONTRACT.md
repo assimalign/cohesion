@@ -49,6 +49,7 @@ with no gateway has `COHESION_GATEWAY` unset and resolves its environment name a
 | `COHESION_LOG_FORMAT` | `json`; unset means ordinary stdout/stderr text | Optional and reserved in v1 | Local/Docker: environment; In-process: ambient context; Kubernetes: ConfigMap |
 | `COHESION_MANIFEST_ENDPOINT` | Absolute `http` or `https` URL the instance POSTs its resource manifest to, or an `inprocess` URL of a gateway in the instance's own process | Set by the gateway that provisions the instance; unset means the instance is not managed | Local/Docker: environment; In-process: ambient context, an `inprocess://` endpoint; Kubernetes: ConfigMap |
 | `COHESION_CONTROL_PLANE_ENDPOINT` | Absolute `http` URL the instance serves its control plane on | Set with `COHESION_MANIFEST_ENDPOINT` | Local/Docker: environment; In-process: ambient context, a loopback port; Kubernetes: ConfigMap |
+| `COHESION_DEPLOYMENT` | UUID of the deployment that started the instance; the instance repeats it in every manifest it publishes, and its gateway counts a deployment ready only once an instance that repeats its id publishes | Set with `COHESION_MANIFEST_ENDPOINT` on every instance a gateway's deployment starts | Local/Docker: environment; In-process: ambient context; Kubernetes: a literal value in the pod template, never a ConfigMap reference, so a restarted pod of an earlier rollout keeps reporting its own deployment |
 
 ## Name construction
 

@@ -31,6 +31,18 @@ public interface IApplicationResourceInstance : IApplicationResource
     InstanceKey Key { get; }
 
     /// <summary>
+    /// Gets the deployment that started this instance, as its environment named it, or
+    /// <see langword="null"/> when no gateway deployed it.
+    /// </summary>
+    /// <remarks>
+    /// A platform hands every instance a deployment starts the deployment's id
+    /// (<see cref="AppEnvironment.Variables.Deployment"/>), and the instance repeats it in its
+    /// manifest. The gateway counts a deployment ready only once an instance that repeats its id
+    /// publishes, so an instance an earlier deployment left running cannot stand in for it.
+    /// </remarks>
+    DeploymentId? Deployment { get; }
+
+    /// <summary>
     /// Gets the actions this instance's control plane executes.
     /// </summary>
     IReadOnlyCollection<IApplicationInstanceAction> Actions { get; }

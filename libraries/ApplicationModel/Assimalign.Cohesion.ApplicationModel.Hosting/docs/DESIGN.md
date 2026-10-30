@@ -57,7 +57,7 @@ lists both, because an area builds against both.
 
 | Type | Role |
 | --- | --- |
-| `IApplicationResourceInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), its actions and health contributors. `Id` derives from provider and name. |
+| `IApplicationResourceInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), `Deployment` (the deployment that started it, which its environment names and its manifest repeats; ApplicationModel.Gateway G34), its actions and health contributors. `Id` derives from provider and name. |
 | `IApplicationInstanceAction` | A named operation. `Kind` says which operations it accepts (`Read`, `Write`, or both); `State`, when present, is what its writes change. |
 | `IApplicationActionState`, `ApplicationActionState<TState>` | The state a stateful action's writes change. A snapshot is the whole value, written by the content serializer; restoring one applies it. |
 | `ApplicationActionContext`, `ApplicationActionResult` | One invocation and its outcome. The context carries the control plane's content serializer, which reads the input and writes the output. |
@@ -70,7 +70,7 @@ lists both, because an area builds against both.
 | `IApplicationHealthContributor`, `HealthContribution` | Health, contributed per component. A default contribution is `Unhealthy`, so unset health fails closed. |
 
 Value objects carry the identity: `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
-`InstanceKey`, `ActionName`.
+`InstanceKey`, `ActionName`, `DeploymentId`.
 
 ## Lifecycle
 

@@ -84,6 +84,7 @@ This is the "In-process: ambient context" delivery the runtime contract
 | `Gateway` | `inprocess`, the kind of platform, as the contract defines it |
 | `ManifestEndpoint` | The infrastructure's in-process endpoint, `inprocess://<id>/` |
 | `ControlPlaneEndpoint` | `http://127.0.0.1:<port>/`, the instance's private control-plane listener |
+| `Deployment` | The id of the deployment that started the program, which its manifest repeats (Gateway G34); an update starts the replacement with the new deployment's id |
 | `Endpoint("http", HOST/PORT/SCHEME)` | `127.0.0.1`, a free port, `http`: where the program serves |
 | `Environment` | The gateway program's own environment name, when it has one |
 | `Configuration(key)` | Each setting, under its configuration key (`Orders:Url` → `…CONFIG__Orders__Url`) |

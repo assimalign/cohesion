@@ -36,6 +36,7 @@ public sealed class WebResourceOptions
         Name = name;
         ManifestEndpoint = ReadEndpoint(AppEnvironment.Variables.ManifestEndpoint);
         ControlPlaneEndpoint = ReadEndpoint(AppEnvironment.Variables.ControlPlaneEndpoint);
+        Deployment = ReadDeployment();
     }
 
     /// <summary>
@@ -62,6 +63,17 @@ public sealed class WebResourceOptions
     /// provisioning gateway sets.
     /// </remarks>
     public Uri? ControlPlaneEndpoint { get; set; }
+
+    /// <summary>
+    /// Gets or sets the deployment that started the instance, which it repeats in its manifest;
+    /// <see langword="null"/> for an instance no gateway deployed.
+    /// </summary>
+    /// <remarks>
+    /// Defaults to the <see cref="AppEnvironment.Variables.Deployment"/> variable the provisioning
+    /// gateway's platform sets. The gateway counts its deployment ready only once an instance that
+    /// repeats the deployment's id publishes.
+    /// </remarks>
+    public DeploymentId? Deployment { get; set; }
 
     /// <summary>
     /// Gets or sets the callback that creates the HTTP client the instance publishes its manifest
@@ -138,5 +150,12 @@ public sealed class WebResourceOptions
         string? value = AppEnvironment.GetValue(variable);
 
         return string.IsNullOrWhiteSpace(value) ? null : new Uri(value, UriKind.Absolute);
+    }
+
+    private static DeploymentId? ReadDeployment()
+    {
+        string? value = AppEnvironment.GetValue(AppEnvironment.Variables.Deployment);
+
+        return string.IsNullOrWhiteSpace(value) ? null : DeploymentId.Parse(value);
     }
 }

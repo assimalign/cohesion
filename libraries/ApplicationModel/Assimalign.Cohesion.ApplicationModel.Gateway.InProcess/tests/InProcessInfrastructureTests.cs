@@ -32,7 +32,9 @@ public class InProcessInfrastructureTests
         // Assert
         TestProgramRun program = orders.Runs.ShouldHaveSingleItem();
         IApplicationResourceDeployment deployment = run.Gateway.Resources.ShouldHaveSingleItem();
-        deployment.Instances.ShouldHaveSingleItem().Key.ShouldBe(program.Key);
+        ApplicationInstanceManifest instance = deployment.Instances.ShouldHaveSingleItem();
+        instance.Key.ShouldBe(program.Key);
+        instance.Deployment.ShouldBe(DeploymentId.Parse(program.Environment[AppEnvironment.Variables.Deployment]!));
         program.Environment[AppEnvironment.Variables.Application].ShouldBe("local");
         program.Environment[AppEnvironment.Variables.Gateway].ShouldBe("inprocess");
         program.Environment[AppEnvironment.Variables.Resource].ShouldBe("orders-api");
@@ -147,6 +149,7 @@ public class InProcessInfrastructureTests
         orders.Runs[0].Stopped.IsCompleted.ShouldBeTrue();
         orders.Runs[1].Environment["Greeting"].ShouldBe("welcome");
         orders.Runs[1].Environment[_portVariable].ShouldBe(orders.Runs[0].Environment[_portVariable]);
+        orders.Runs[1].Environment[AppEnvironment.Variables.Deployment].ShouldNotBe(orders.Runs[0].Environment[AppEnvironment.Variables.Deployment]);
         second.Gateway.Resources.ShouldHaveSingleItem().Instances.ShouldHaveSingleItem().Key.ShouldBe(orders.Runs[1].Key);
 
         static ApplicationGateway CreateGateway(InProcessInfrastructure infrastructure, TestStore store, string greeting)
@@ -205,7 +208,7 @@ public class InProcessInfrastructureTests
         // Arrange
         await using var infrastructure = new InProcessInfrastructure();
         ApplicationInstancePublisher publisher = ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions { Endpoint = infrastructure.Endpoint });
-        ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(new TestResource("Web", "orders-api"), JsonApplicationContentSerializer.Create()).Manifest;
+        ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(new TestResource("Web", "orders-api", null), JsonApplicationContentSerializer.Create()).Manifest;
 
         // Act & Assert
         await Should.ThrowAsync<InvalidOperationException>(() => publisher.PublishAsync(manifest).AsTask());

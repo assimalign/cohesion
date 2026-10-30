@@ -31,7 +31,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     public ScaleAction Scale { get; } = new();
 
     public List<string> Deployed { get; } = [];
-
+
     public List<ResourceName> TornDown { get; } = [];
 
     public Func<ApplicationResourceManifest, Task>? OnTeardown { get; set; }
@@ -44,6 +44,12 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
     /// <summary>The settings each workload runs with, which its instances receive when they start.</summary>
     public ConcurrentDictionary<ResourceName, IReadOnlyDictionary<SettingName, string>> RunningSettings { get; } = new();
+
+    /// <summary>The deployment each workload runs, which its instances receive when they start.</summary>
+    public ConcurrentDictionary<ResourceName, DeploymentId> RunningDeployments { get; } = new();
+
+    /// <summary>Every deployment the gateway made, in order, with the resource it deployed.</summary>
+    public ConcurrentQueue<(ResourceName Resource, DeploymentId Deployment)> Deployments { get; } = new();
 
     /// <summary>The settings each resource was last planned with.</summary>
     public ConcurrentDictionary<ResourceName, IReadOnlyDictionary<SettingName, string>> Planned { get; } = new();
@@ -107,10 +113,13 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
+        DeploymentId deployment,
         CancellationToken cancellationToken = default)
     {
         Record(Deployed, $"{model.Name}:{resource.Provider}/{resource.Name}");
         Record($"deploy:{resource.Name}");
+        Deployments.Enqueue((resource.Name, deployment));
+        RunningDeployments[resource.Name] = deployment;
         RunningSettings[resource.Name] = settings;
         RunningExtensions[resource.Name] = Describe(resource.Extensions);
         Seen[resource.Name] = resource;
@@ -128,7 +137,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
 
         await StartInstanceAsync(resource.Provider, resource.Name, cancellationToken);
     }
-
+
     public async ValueTask TeardownResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)
     {
         Record(TornDown, resource.Name);
@@ -139,7 +148,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
             await OnTeardown.Invoke(resource);
         }
     }
-
+
     /// <summary>
     /// The calls in the order they were made: <c>plan:</c>, <c>deploy:</c>, <c>outputs:</c> and
     /// <c>teardown:</c> with a resource name.
@@ -159,12 +168,21 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     }
 
     /// <summary>
-    /// Starts one instance with the settings its workload runs with, as a platform does on deployment
-    /// or scale-out.
+    /// Starts one instance with the settings and the deployment its workload runs with, as a platform
+    /// does on deployment or scale-out.
     /// </summary>
-    public async Task<TestInstance> StartInstanceAsync(ProviderName provider, ResourceName name, CancellationToken cancellationToken = default)
+    public Task<TestInstance> StartInstanceAsync(ProviderName provider, ResourceName name, CancellationToken cancellationToken = default)
     {
-        var instance = new TestInstance(provider, name, RunningSettings.GetValueOrDefault(name) ?? new Dictionary<SettingName, string>());
+        return StartInstanceAsync(provider, name, RunningDeployments.TryGetValue(name, out DeploymentId deployment) ? deployment : null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Starts one instance that repeats the given deployment, such as an instance an earlier rollout
+    /// left running that restarts while a newer deployment rolls out.
+    /// </summary>
+    public async Task<TestInstance> StartInstanceAsync(ProviderName provider, ResourceName name, DeploymentId? deployment, CancellationToken cancellationToken = default)
+    {
+        var instance = new TestInstance(provider, name, RunningSettings.GetValueOrDefault(name) ?? new Dictionary<SettingName, string>(), deployment);
         ApplicationInstanceService service = ApplicationInstanceService.Create(ApplicationInstanceControlPlane.Create(instance, TestSerializer.Json), new GatewayForwarder(this));
         await service.StartingAsync(cancellationToken);
         Instances[instance.Key] = (instance, service);

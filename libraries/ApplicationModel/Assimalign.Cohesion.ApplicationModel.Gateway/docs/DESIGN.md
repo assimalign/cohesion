@@ -115,7 +115,7 @@ are ready.
 | `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`Model`, `RunAsync`), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationParentGateway` (`JoinAsync`, a child's join). `RecordAsync` records a write's snapshot and saves the record. Exposes `Name`, `Resources` (the aggregates), `Children`, `StartupTimeout`, `LeaseDuration`, and `Started`. `CreateBuilder(name)` creates its builder. |
 | `ApplicationBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure (`UseInfrastructure`), the record store (`UseStore`), the parent (`UseParent`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
 | `IApplicationParentGateway`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
-| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values, reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
+| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IApplicationResourceDeployment`, `ApplicationResourceDeployment`, `IApplicationResourceAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
 | `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read. Children are not recorded. |
@@ -252,8 +252,9 @@ publication is the whole gate for now:
 health checks and "every instance" readiness need the gateway-to-instance channel. The plan marks
 the resource current before the gateway calls the provider to deploy it, because an in-process
 provider's instances publish before the call returns; an instance that published earlier runs the
-previous definition and is registered without opening the gate. An instance manifest does not say
-which revision it runs, so an old instance that publishes during the rollout still opens it.
+previous definition and is registered without opening the gate. Since G34 the instance must also
+repeat the deployment's id: one an earlier deployment started, such as a pod of the previous
+rollout that restarts, is registered without opening the gate.
 
 **G19 — A child gateway is one step — superseded by G26.** A parent no longer deploys its
 children, so they are not steps of its deployment. A child waits for its parent's resources itself,
@@ -421,6 +422,29 @@ programs publish through. An HTTP manifest endpoint will be another (G9). *Rejec
 gateway to the provider on each call (`DeployResourceAsync(gateway, …)`). It would tie how
 instances reach the gateway to the platform that starts them, which differs on every platform but
 in-process.
+
+**G34 — A deployment has an id its instances repeat (2026-10-29).** Readiness counted any
+publication after the plan (G18), and an instance manifest did not say which deployment started it.
+On a platform that rolls updates out, a pod of the previous rollout that restarted, or whose lease
+lapsed, published again and opened the gate: dependents deployed against a resource that had not
+updated, and the run reported success. In process it could not happen, because an update stops
+the old program first (Gateway.InProcess I8).
+- **Derived.** For each `Create` or `Update` the gateway derives a `DeploymentId`: a version 5 UUID,
+  in a namespace of its own, of the resource's revision and its settings' values in the manifest's
+  order, each value prefixed with its length. The same inputs give the same id. A plan of `None`
+  makes no deployment.
+- **Delivered.** `DeployResourceAsync` takes the id, and the provider hands it to every instance the
+  deployment starts as the runtime contract's deployment variable, kept with the instance for its
+  life: on Kubernetes a literal value in the pod template, never a ConfigMap reference.
+- **Repeated.** The instance repeats it in its manifest (`ApplicationInstanceManifest.Deployment`).
+  A publication opens the gate only when it repeats the plan's id; any other is registered without
+  opening it, like an early one (G23).
+
+*Rejected:*
+- The revision alone as the id. It leaves the settings' values out (G22), so after an update that a
+  moved dependency caused, old and new instances would report the same id.
+- A random id per deployment. The gate would work the same, but the same inputs would no longer
+  give the same id, which a later check of adopted instances against the plan needs.
 
 **G9 — No HTTP here, yet; it will be a transport over Web (owner direction, 2026-10-29).** COHLIB001
 bars a library from referencing Web, and COHRES003 bars Web (any resource package) from referencing

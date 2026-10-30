@@ -87,11 +87,12 @@ public static class WebResourceExtensions
             // the application's container exists: the first of the two services the build resolves
             // creates it, and the other shares it.
             Func<WebApplicationContext, IApplicationInstanceAction>[] addedActions = [.. options.Actions];
+            DeploymentId? deployment = options.Deployment;
             ApplicationInstanceControlPlane? controlPlane = null;
             ApplicationInstanceControlPlane GetControlPlane(WebApplicationContext context)
             {
                 return controlPlane ??= ApplicationInstanceControlPlane.Create(
-                    new WebResource(name, context.Settings, CreateAddedActions(addedActions, context)),
+                    new WebResource(name, deployment, context.Settings, CreateAddedActions(addedActions, context)),
                     serializer);
             }
 

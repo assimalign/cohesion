@@ -94,7 +94,7 @@ public class ApplicationGatewayTests
         IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
         builder.AddResource("Web", "orders-api");
         (ApplicationGateway gateway, _) = CreateGateway(builder.Build());
-        var manifest = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), []);
+        var manifest = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), null, []);
         ApplicationGatewayException before = Should.Throw<ApplicationGatewayException>(() => gateway.PublishAsync(manifest));
         using var stop = new CancellationTokenSource();
         Task run = gateway.RunAsync(stop.Token);

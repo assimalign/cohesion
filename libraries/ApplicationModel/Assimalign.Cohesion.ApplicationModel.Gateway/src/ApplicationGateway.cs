@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -68,6 +69,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     private static readonly TimeSpan _minimumExpiryInterval = TimeSpan.FromMilliseconds(10);
     private static readonly TimeSpan _maximumJoinRetryInterval = TimeSpan.FromMilliseconds(250);
+
+    // The UUIDv5 namespace of deployment ids. Only the gateway that derives an id compares it, so it
+    // is not wire contract, but its own namespace keeps a deployment id apart from every other id.
+    private static readonly Guid _deploymentNamespace = new("c7e50fe9-ea03-4156-a9fe-9748a45e60ca");
 
     private readonly IApplicationModel _model;
     private readonly IInfrastructureProvider _infrastructure;
@@ -307,7 +312,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
 
         IReadOnlyList<ApplicationActionSnapshot> restore = resource.Register(manifest);
-        if (!resource.TryMarkRegistered())
+        if (!resource.TryMarkRegistered(manifest))
         {
             // The startup window closed between the check above and the registration.
             resource.Unregister(manifest.Key);
@@ -830,12 +835,15 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         // The definition is the manifest as declared for this platform (settings as declared, and
         // only this platform's extensions) and the provider's revision. A value filled in from a
         // dependency or the parent is not part of it, so a dependency that moved does not cost this
-        // resource its recorded state, and neither does an extension for another platform. Planned
-        // before the call: an in-process provider's instances publish before it returns.
-        resource.Plan(plan.Change, string.Concat(Fingerprint(manifest), ":", plan.Revision));
-        if (plan.Change != InfrastructureChange.None)
+        // resource its recorded state, and neither does an extension for another platform. The
+        // deployment adds the values: only an instance that repeats its id makes the resource ready.
+        // Planned before the call: an in-process provider's instances publish before it returns.
+        string revision = string.Concat(Fingerprint(manifest), ":", plan.Revision);
+        DeploymentId? deployment = plan.Change == InfrastructureChange.None ? null : DeploymentOf(revision, manifest, settings);
+        resource.Plan(plan.Change, revision, deployment);
+        if (deployment is { } id)
         {
-            await _infrastructure.DeployResourceAsync(model, manifest, settings, cancellationToken).ConfigureAwait(false);
+            await _infrastructure.DeployResourceAsync(model, manifest, settings, id, cancellationToken).ConfigureAwait(false);
             await SaveAsync(cancellationToken).ConfigureAwait(false);
 
             bool started;
@@ -981,6 +989,27 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     {
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, GatewayJsonContext.Default.ApplicationResourceManifest);
         return Convert.ToHexStringLower(SHA256.HashData(json));
+    }
+
+    // A deployment is what the gateway deploys a resource with: its revision (its definition and the
+    // provider's revision) and its settings' values, in the manifest's order. Each value is prefixed
+    // with its length, so no two sets of values read alike. The same inputs give the same id, so a
+    // resource deployed again with them starts instances that repeat the id running ones report.
+    private static DeploymentId DeploymentOf(string revision, ApplicationResourceManifest manifest, IReadOnlyDictionary<SettingName, string> settings)
+    {
+        var content = new StringBuilder(revision);
+        foreach (ApplicationResourceSetting setting in manifest.Settings)
+        {
+            string value = settings[setting.Name];
+            content.Append('\n')
+                .Append(setting.Name.Value)
+                .Append('=')
+                .Append(value.Length.ToString(CultureInfo.InvariantCulture))
+                .Append(':')
+                .Append(value);
+        }
+
+        return Guid.AsDeterministicGuid(content.ToString(), _deploymentNamespace);
     }
 
     // The resource as declared for the provider's platform: the model's manifest without the

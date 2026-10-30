@@ -99,14 +99,24 @@ public interface IInfrastructureProvider
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Creates or updates a resource's workload, as its plan said, and delivers its settings to the
-    /// instances it starts.
+    /// Creates or updates a resource's workload, as its plan said, and delivers its settings and the
+    /// deployment's id to the instances it starts.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The gateway calls it only when the plan's change is <see cref="InfrastructureChange.Create"/>
     /// or <see cref="InfrastructureChange.Update"/>, right after the plan, once every resource the
     /// resource depends on is ready: an instance of it has published and its outputs are read. How an
     /// update replaces running instances, all at once or a few at a time, is the platform's rollout.
+    /// </para>
+    /// <para>
+    /// Every instance the deployment starts must receive <paramref name="deployment"/> as its
+    /// <see cref="AppEnvironment.Variables.Deployment"/> variable, and keep it for its lifetime: the
+    /// gateway counts the deployment ready only once an instance that repeats the id publishes. A
+    /// platform that rolls an update out keeps each rollout's id with its own instances, such as a
+    /// literal value in a Kubernetes pod template, so an instance of an earlier rollout that restarts
+    /// still reports its own deployment and never stands in for this one.
+    /// </para>
     /// </remarks>
     /// <param name="model">The model the gateway runs.</param>
     /// <param name="resource">
@@ -114,12 +124,17 @@ public interface IInfrastructureProvider
     /// platform's extensions.
     /// </param>
     /// <param name="settings">The values the plan was made with.</param>
+    /// <param name="deployment">
+    /// The deployment's id, derived from the resource's definition, the plan's revision, and the
+    /// settings' values: the same inputs give the same id.
+    /// </param>
     /// <param name="cancellationToken">Cancels the deployment.</param>
     /// <returns>A task that completes when the workload has been started, not when it is ready.</returns>
     ValueTask DeployResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
+        DeploymentId deployment,
         CancellationToken cancellationToken = default);
 
     /// <summary>
