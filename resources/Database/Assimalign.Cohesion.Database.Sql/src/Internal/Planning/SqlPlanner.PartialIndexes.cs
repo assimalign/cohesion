@@ -101,18 +101,19 @@ internal sealed partial class SqlPlanner
                 if (metadata.Type.Type is DatabaseType.String or DatabaseType.Character or DatabaseType.Json &&
                     (!collation.Resolve(null).IsIndexBacked || collation.Resolve(null) != (metadata.Collation ?? _catalog.DefaultCollation))) { continue; }
                 if (op != SqlBinaryOperator.Equal && !IsRangeSargable(metadata.Type.Type)) { continue; }
-                if (value is double number && number == 0d || value is float single && single == 0f) { continue; }
                 try
                 {
                     var stored = SqlPlanExecutor.CoerceForColumn(value, metadata);
                     if (stored is null || SqlExpressionEvaluator.Compare(value, stored) != 0) { continue; }
+                    // Integer/decimal zero can become floating zero during conversion too.
+                    if (stored is double number && number == 0d || stored is float single && single == 0f) { continue; }
                     if (!bounds.TryGetValue(local, out var values)) { bounds.Add(local, values = []); }
                     values.Add((op, stored));
                 }
                 catch (DatabaseException) { /* Retain failures in the original residual. */ }
             }
             var access = SelectAccessPath(table, bounds, restrictions: restrictions[i], offset: binding.Offset);
-            if (access is SqlIndexSeekPath) { inputs[i] = inputs[i] with { Access = access }; }
+            if (access is SqlPartialIndexSeekPath) { inputs[i] = inputs[i] with { Access = access }; }
         }
         var steps = plan.Steps.ToArray();
         var replacements = new Dictionary<SqlJoinStep, SqlJoinStep>(ReferenceEqualityComparer.Instance);
@@ -127,7 +128,7 @@ internal sealed partial class SqlPlanner
                     .Select(term => (((SqlBoundColumn)term.Left).Ordinal, ((SqlBoundColumn)term.Right).Ordinal, term.Collation.Resolve(null))).ToList();
                 int? driver = plan.Tree is null && i == 0 ? plan.FirstBinding : null;
                 var access = SelectJoinAccessPath(plan.Bindings, plan.Columns, equalities, step.Binding, false, driver, restrictions);
-                if (access is not null) { replacement = step with { Access = access }; }
+                if (access is SqlPartialJoinIndexPath) { replacement = step with { Access = access }; }
             }
             replacements.Add(step, replacement);
             steps[i] = replacement;

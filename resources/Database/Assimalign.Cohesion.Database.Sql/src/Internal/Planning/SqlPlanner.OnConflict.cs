@@ -33,6 +33,7 @@ internal sealed partial class SqlPlanner
                 [new(new SqlRelationSource(table), insert.Table, 0)], defaultCollation: _catalog.DefaultCollation,
                 functions: _functions, cancellationToken: _cancellationToken, foldConstants: false);
             ValidateInference(targetWhere, scope);
+            ValidateFunctionCalls(targetWhere, allowNextValue: false);
             ValidatePredicate(targetWhere, scope, "ON CONFLICT target WHERE");
             inference = scope.BindPredicate(targetWhere);
         }

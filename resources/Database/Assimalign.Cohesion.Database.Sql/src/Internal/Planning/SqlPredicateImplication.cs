@@ -115,21 +115,18 @@ internal static class SqlPredicateImplication
         => left.IsFixed && right.IsFixed && left.Resolve(null) == right.Resolve(null);
 
     // Bound column ordinals canonicalize aliases, qualification and parentheses. Constants
-    // retain runtime type and exact value; calls retain overload identity and conversions.
+    // retain runtime type and representation; calls retain overload identity and conversions.
     private static bool Same(SqlBoundExpression query, SqlBoundExpression predicate, int offset)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (query is SqlBoundParameterConstant || predicate is SqlBoundParameterConstant) { return false; }
         if (Constant(query, out var qvalue) && Constant(predicate, out var pvalue))
-        { return qvalue is null ? pvalue is null : pvalue is not null && qvalue.GetType() == pvalue.GetType() &&
-            (qvalue is byte[] qb && pvalue is byte[] pb ? qb.AsSpan().SequenceEqual(pb) : qvalue.Equals(pvalue)); }
+        { return SameConstant(qvalue, pvalue); }
         return (query, predicate) switch
         {
             (SqlBoundColumn q, SqlBoundColumn p) => q.Ordinal == p.Ordinal + offset,
             (SqlBoundDomainArgument q, SqlBoundDomainArgument p) => q.HasSameCoercion(p) && Same(q.Operand, p.Operand, offset),
             (SqlBoundLogical q, SqlBoundLogical p) => !q.IsOr && !p.IsOr && SameList(q.Operands, p.Operands, offset),
-            (SqlBoundConstant q, SqlBoundConstant p) => q.Value is null ? p.Value is null :
-                p.Value is not null && q.Value.GetType() == p.Value.GetType() &&
-                (q.Value is byte[] qb && p.Value is byte[] pb ? qb.AsSpan().SequenceEqual(pb) : q.Value.Equals(p.Value)),
             (SqlBoundBinary q, SqlBoundBinary p) => q.Operator == p.Operator && SameCollation(q.Collation, p.Collation) &&
                 Same(q.Left, p.Left, offset) && Same(q.Right, p.Right, offset),
             (SqlBoundIsNull q, SqlBoundIsNull p) => q.IsNegated == p.IsNegated && Same(q.Operand, p.Operand, offset),
@@ -160,6 +157,34 @@ internal static class SqlPredicateImplication
         };
     }
 
+    // PostgreSQL nodes/equalfuncs.c:95-113 delegates Const identity to datumIsEqual;
+    // utils/adt/datum.c:205-264 compares representations, not SQL value equality.
+    private static bool SameConstant(object? query, object? predicate)
+    {
+        if (query is null) { return predicate is null; }
+        if (predicate is null || query.GetType() != predicate.GetType()) { return false; }
+        switch (query)
+        {
+            case decimal number:
+                Span<int> left = stackalloc int[4];
+                Span<int> right = stackalloc int[4];
+                decimal.GetBits(number, left);
+                decimal.GetBits((decimal)predicate, right);
+                return left.SequenceEqual(right);
+            case double number:
+                return BitConverter.DoubleToInt64Bits(number) == BitConverter.DoubleToInt64Bits((double)predicate);
+            case float number:
+                return BitConverter.SingleToInt32Bits(number) == BitConverter.SingleToInt32Bits((float)predicate);
+            case DateTimeOffset timestamp:
+                var other = (DateTimeOffset)predicate;
+                return timestamp.Ticks == other.Ticks && timestamp.Offset == other.Offset;
+            case byte[] bytes:
+                return bytes.AsSpan().SequenceEqual((byte[])predicate);
+            default:
+                return query.Equals(predicate);
+        }
+    }
+
     private static bool SameOptional(SqlBoundExpression? query, SqlBoundExpression? predicate, int offset)
         => query is null ? predicate is null : predicate is not null && Same(query, predicate, offset);
 
@@ -169,6 +194,7 @@ internal static class SqlPredicateImplication
     private static bool Constant(SqlBoundExpression expression, out object? value)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlBoundParameterConstant) { value = null; return false; }
         if (expression is SqlBoundConstant constant) { value = constant.Value; return true; }
         value = null;
         bool literal = expression switch
@@ -206,7 +232,7 @@ internal static class SqlPredicateImplication
         {
             SqlBoundColumn column => column.Ordinal >= start && column.Ordinal < start + count,
             SqlBoundDomainArgument domain => Local(domain.Operand),
-            SqlBoundConstant => true,
+            SqlBoundConstant => expression is not SqlBoundParameterConstant,
             SqlBoundLogical { IsOr: false } logical => logical.Operands.All(Local),
             SqlBoundBinary binary => Local(binary.Left) && Local(binary.Right),
             SqlBoundIsNull test => Local(test.Operand),

@@ -16,6 +16,9 @@ The execution conformance corpus covers bounded runtime cast slots, registration
 reopen, and constraint/creation-order arbitration with deferred partial-predicate failures.
 It also covers JSON/JSONB runtime representations and domains, complete creation diagnostics,
 function-environment refresh, and bulk failure markers that retain no predicate exceptions.
+The execution conformance corpus also covers converted signed-zero join/DML bounds, unchanged
+ordinary plans around unused partial indexes, target-WHERE call validation, folded parameter
+provenance and representation-sensitive expression matching. Grammar and formats are unchanged.
 
 
 ON CONFLICT column targets retain TargetWhere independently of the action's Where. An optional

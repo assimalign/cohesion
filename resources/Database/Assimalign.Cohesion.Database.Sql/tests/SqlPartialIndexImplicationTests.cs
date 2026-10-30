@@ -225,7 +225,7 @@ public sealed class SqlPartialIndexImplicationTests
         (await session.ExecuteAsync("INSERT INTO t VALUES(3,7,FALSE,1) ON CONFLICT(k) WHERE n>=1 AND b DO NOTHING", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
         (await session.ExecuteAsync("INSERT INTO t VALUES(4,7,TRUE,2) ON CONFLICT(k) WHERE n>1 AND b DO UPDATE SET n=excluded.n WHERE t.n<excluded.n", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(1);
         (await SqlPartialIndexTests.Rows(session, "SELECT n FROM t WHERE b")).Single().Single().ShouldBe(2);
-        await SqlPartialIndexTests.Refuses(session, "INSERT INTO t VALUES(3,8,TRUE,1) ON CONFLICT(k) WHERE random()>0 DO NOTHING", "CS03035");
+        await SqlPartialIndexTests.Refuses(session, "INSERT INTO t VALUES(3,8,TRUE,1) ON CONFLICT(k) WHERE random()>0 DO NOTHING", "CS01016");
         await SqlPartialIndexTests.Refuses(session, "INSERT INTO t VALUES(3,8,TRUE,1) ON CONFLICT(k) WHERE EXISTS(SELECT 1) DO NOTHING", "CS05092");
         (await session.ExecuteAsync("INSERT INTO t VALUES(8,7,TRUE,3),(9,7,TRUE,4) ON CONFLICT(k) WHERE n>0 AND b DO UPDATE SET b=FALSE", cancellationToken: CancellationToken.None)).AffectedCount.ShouldBe(2);
         (await SqlPartialIndexTests.Rows(session, "SELECT id FROM t WHERE b ORDER BY id")).Single().Single().ShouldBe(9);

@@ -39,6 +39,9 @@ comparison with a non-NULL constant implies that column IS NOT NULL. A Boolean c
 = TRUE form are interchangeable. Floating-point bound deductions, parameter-dependent proofs,
 contradiction reasoning, cross-column/transitive facts, OR and NOT reasoning decline optimization.
 No unproven implication is used. The complete query predicate remains a residual filter.
+Identical-expression matching preserves constant representations, including decimal scale, floating
+sign bits and timestamp offsets; comparison bounds still compare values. Parameter-derived values
+cannot supply proofs even after immutable function folding, nested calls, casts or literal signs.
 
 Proofs use only the indexed input's own WHERE conjuncts and INNER JOIN ON conjuncts referencing
 that input alone. ON terms must reference at least one of its columns; constant-only ON terms
@@ -51,12 +54,16 @@ comparisons prove the predicate; the current reusable lookup proof recognizes IS
 compared key columns. Partial uniqueness never proves unconditional DISTINCT or join uniqueness.
 EXPLAIN names the selected partial index and reports partial_predicate and implied_by conjuncts;
 ConflictArbiter children describe inferred partial unique arbiters.
+Unused partial indexes preserve ordinary join access paths. Floating zero comparisons retain both
+signed zeros after conversion from integer or decimal comparands.
 
 ON CONFLICT (columns) WHERE predicate infers matching unique column-set indexes whose predicates
 that target WHERE proves. Unconditional unique indexes can also be inferred with a target WHERE.
 Without a target WHERE, partial unique indexes are not inferred; ON CONSTRAINT never names one
 (CS03035). The inference WHERE is distinct from DO UPDATE WHERE and does not filter proposed rows:
 each arbiter uses the proposal's actual predicate membership. Non-row-local target predicates (subqueries, aggregates, windows and sequences) refuse CS05092.
+After that locality check, target WHERE uses ordinary function validation: unknown functions fail
+CS01016 and scalar aggregate modifiers fail CS05032 before any row is written.
 Parameters and non-immutable calls are accepted but supply no proof of a partial predicate. Other valid
 forms with unproven implication fail partial inference with CS03035. Untargeted
 DO NOTHING checks every unique index, including applicable partial indexes, and skips conflicting

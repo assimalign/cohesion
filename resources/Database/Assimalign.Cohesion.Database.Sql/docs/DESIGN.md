@@ -49,6 +49,11 @@ and correlated join probes. It matches immutable conjuncts after ordinal/literal
 compares same-column/same-constant-type bounds under identical resolved collations, recognizes
 strict comparison to IS NOT NULL and Boolean column/=TRUE equivalence, and recurses over AND.
 Unsupported, parameter-dependent, floating-bound, OR/NOT and cross-scope deductions decline.
+Folded parameter calls retain provenance in a constant subtype, including nested calls, signs and
+CHAR comparands; all implication callers reject them without changing evaluation or ordinary node sizes.
+Structural constant identity compares decimal bits (including scale), floating bits and timestamp
+offset/ticks, following PostgreSQL nodes/equalfuncs.c:95-113 and utils/adt/datum.c:205-264.
+Ordered comparison implication retains value semantics.
 Only local WHERE and INNER ON terms prove membership; nullable outer inputs never supply proof.
 ON terms must reference the indexed input explicitly. Constant-only ON terms can belong to an
 unrelated subtree whose empty result does not restrict a separately preserved outer input.
@@ -59,6 +64,9 @@ unconditional uniqueness evidence. A derived internal seek record carries proof 
 ordinary path objects and planner instances retain their prior field layout and allocation costs.
 An internal catalog presence query avoids allocating an index-description list just to discover
 that an ordinary join has no partial index; retained snapshots inspect their own index directory.
+The partial-join pass replaces input and probe paths only when the selected index carries a proof;
+unused partial indexes preserve the ordinary plan. Floating-zero bound guards run after column
+conversion, so integer/decimal zero cannot omit stored negative zero rows.
 EXPLAIN adds ConflictArbiter children for inferred partial arbiters, each with its proof.
 PostgreSQL optimizer/util/predtest.c:118-181 supplies strong implication semantics;
 optimizer/util/plancat.c:1124-1144 supplies partial-arbiter predicate implication.
@@ -70,7 +78,10 @@ optimizer/util/plancat.c:1124-1144 supplies partial-arbiter predicate implicatio
 ON CONFLICT column targets may carry a separate inference WHERE. Matching unconditional indexes
 remain eligible; partial unique indexes require a proof from that WHERE. Missing WHERE and named
 constraint targets cannot infer partial indexes. CS05092 rejects non-row-local target
-predicates. Actual proposal membership still controls arbitration. DO UPDATE removes pending keys
+predicates before ordinary target-WHERE function/name/modifier validation, preserving CS05092
+precedence. Invalid calls refuse before proposal writes (CS01016/CS05032), as ordinary WHERE does;
+PostgreSQL parser/parse_clause.c:3351-3357 transforms inference expressions before arbitration.
+Actual proposal membership still controls arbitration. DO UPDATE removes pending keys
 when replacement rows leave the predicate or acquire NULL keys. Untargeted DO NOTHING checks every unique index using each proposed
 row's own membership; FALSE/UNKNOWN and NULL-containing partial keys do not arbitrate or take key
 locks. Proposed CHECKs precede arbitration. Sorted batch locking prepares each predicate result

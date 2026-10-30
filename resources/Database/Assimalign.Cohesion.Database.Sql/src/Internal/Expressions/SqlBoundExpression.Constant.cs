@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlBoundConstant")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlBoundConstant.DebugView))]
-internal sealed class SqlBoundConstant : SqlBoundExpression
+internal class SqlBoundConstant : SqlBoundExpression
 {
     /// <summary>The bound SQL <c>NULL</c>.</summary>
     internal static SqlBoundConstant Null { get; } = new(null);
