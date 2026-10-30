@@ -6,4 +6,5 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="TokenResolverUnknownLabelDiagnostic" xml:space="preserve"><value>Label '{0}' is not in the database, so no node carries it. Check its spelling, or that the label exists when the statement runs.</value></data>
   <data name="UnknownRelationshipTypeDiagnostic" xml:space="preserve"><value>Relationship type '{0}' is not in the database, so no relationship has it. Check its spelling, or that the type exists when the statement runs.</value></data>
+  <data name="UnknownPropertyDiagnostic" xml:space="preserve"><value>Entity property '{0}' is not known in the database. Check its spelling, or that the property exists when the statement runs.</value></data>
 </root>

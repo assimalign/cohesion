@@ -11,6 +11,12 @@ carry structured CG03003. No client production source, capability or wire versio
 
 ## Schema text DDL (#1738, GQ-D2)
 
+Read-only unknown entity properties (#1249, GQ-D3) arrive as CG01023 Warning entries in the
+existing negotiated Diagnostics channel before scalar/path completion. InMemory and TCP tests
+pin names, spans, statement-wide de-duplication, normal NULL/empty results, known-anywhere and
+map/write exclusions, and authenticated-session reuse. No production client or protocol change
+is required; the typed API already preserves the structured carrier established in GQ-D2.
+
 CREATE/DROP indexes, constraints and definitions execute over existing InMemory/TCP exchanges.
 Wire tests pin token discovery, conditional no-ops, generated names, SHOW CONSTRAINTS, enforcement,
 structured CG04025 for explicit-transaction DDL, rollback and authenticated-session reuse.

@@ -1,5 +1,42 @@
 # Graph engine design
 
+## Unknown entity properties (#1249, #1738, GQ-D3)
+
+Read-only planning reports structured warning CG01023 for a statically named property unknown
+across stored entity discoveries and label and relationship-type metadata. MATCH property-map keys and entity field accesses
+in predicates, projections, ordering, lexical collections and correlated subplans share the
+statement's token resolver. Composite operands and NEXT segments share it too: one warning per
+ordinal property name, using the first validated occurrence's expression span when present. Pattern keys have no AST span.
+Known names on another owner, map fields and dynamic subscripts do not warn. Every property-access
+AST form resolves ORDER BY aliases before classifying its receiver. Writing statements skip property
+analysis, including correlated EXISTS and pattern comprehensions. Results, explicit transactions and ordinary execution are preserved;
+EXPLAIN performs the same admission and reports the same warnings without execution.
+
+The catalog maintains a property-name directory alongside its existing version directory, loaded
+from existing v2 records and updated on publication and undo. Resolution checks snapshot-visible
+writer stamps in memory, without decoding catalog records or scanning labels, types or entities.
+Entity records currently embed string keys; there is no separate property-token identity to consult.
+Unlabeled writes and undeclared keys on schema-owned definitions therefore save untyped kind-3
+discovery records with private identities, using the same publication, visibility and undo path.
+They do not attach metadata to a definition or change its declared rules. Removal of a value retains
+its discovery across reopen. The existing record codec and format fence remain unchanged.
+Resolution and warning admission share one cached result per ordinal name across the statement.
+Known-only caches are borrowed during planning and returned on success or failure; diagnostic lists
+remain owned by their results. Only misses allocate diagnostic state and formatted messages.
+Resolver and ordinary planner object sizes stay fixed. Isolated Release scalar/aggregate dispatch remains
+17,130.368 / 58,094.944 B/query, matching the base; read-path allocation guards remain in force.
+The typed DatabaseResult.Diagnostics carrier and negotiated wire Diagnostics messages already
+carry warnings; no public API, assembly reference, disk format or wire change is required.
+
+This follows the readOnly and entity-kind checks in the local Neo4j reference
+`C:/Source/repos/neo4j/neo4j/community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/CheckForUnresolvedTokens.scala:53-59,78-85`.
+GqlUnknownPropertyWarningTests, the profile execution corpus and GraphWireDiagnosticTests cover
+in-process, typed AST, InMemory and TCP behavior, including continued authenticated-session use.
+
+| Code | Severity | Condition |
+| --- | --- | --- |
+| CG01023 | Warning | Statically named entity property is unknown database-wide in a read-only statement |
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog undo removes the exact undone metadata reference, including definition,

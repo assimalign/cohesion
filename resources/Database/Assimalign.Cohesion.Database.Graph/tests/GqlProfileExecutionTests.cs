@@ -77,6 +77,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person {never_seen:1}) RETURN a.name", []),
+                new("MATCH (a:Person {name:'Alice'}) WHERE a.never_seen IS NULL RETURN a.never_seen ORDER BY a.never_seen", [[null]]),
                 new("MATCH (a:Person|Robot) RETURN a.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
                 new("MATCH (a:Person&Robot) RETURN a.name", []),
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
@@ -257,6 +259,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.OrderBy] =
             [
+                new("MATCH (a:Person {name:'Alice'}) WITH {a:1} AS a ORDER BY (a).never_seen RETURN a.a ORDER BY a.a", [[1L]]),
+                new("LET a={a:1} MATCH (m:Person {name:'Alice'}) WITH m AS a ORDER BY (a).never_seen RETURN a.name ORDER BY a.name", [["Alice"]]),
                 new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[true]]),
                 new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE all(y IN old WHERE y) | 1][0]", [[new object?[] { true }]]),
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.age", [["Bob"], ["Isolated"], ["Alice"]]),
