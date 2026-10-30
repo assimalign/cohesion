@@ -105,11 +105,12 @@ public sealed partial class GqlQueryParser : QueryParser
 
         // SHOW has a deliberately separate grammar: catalog definitions are not graph elements.
         // Check attempted composition before generic capability errors (SET, DROP, etc.).
+        bool schemaStatement = IsSchemaStart();
         bool catalogStatement = Is("SHOW");
         bool transactionStatement = Is(GqlTransactionVocabulary.Start) || Is(GqlTransactionVocabulary.Begin) ||
             Is(GqlTransactionVocabulary.Commit) || Is(GqlTransactionVocabulary.Rollback);
         if (catalogStatement) { FindCatalogMutation(); }
-        else if (!transactionStatement) { FindUnsupported(); }
+        else if (!transactionStatement && !schemaStatement) { FindUnsupported(); }
         GqlQueryExpression expression;
         if (Failed) { expression = EmptyExpression(); }
         else if (Current.Type == TokenType.Eof)
@@ -150,6 +151,7 @@ public sealed partial class GqlQueryParser : QueryParser
             }
         }
         else if (catalogStatement) { expression = ParseCatalog(); }
+        else if (schemaStatement) { expression = ParseSchema(); }
         else if (IsQueryStart() || Is("NEXT") || Current.Type == TokenType.LeftParen) { expression = ParseNextQuery(); }
         else
         {

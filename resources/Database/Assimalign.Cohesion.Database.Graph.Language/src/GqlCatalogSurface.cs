@@ -11,6 +11,8 @@ public enum GqlCatalogSurface
     PropertyKeys,
     /// <summary>Named node-property index definitions.</summary>
     Indexes,
+    /// <summary>Named type and existence constraints.</summary>
+    Constraints,
     /// <summary>The authority governing each definition and its child metadata.</summary>
     ObjectOwnership,
 }

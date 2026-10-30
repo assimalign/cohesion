@@ -68,7 +68,7 @@ public sealed partial class GraphStore
         ulong id = (ulong)_storage.ReserveTransactionSequence();
         var record = new GraphRecord(3, id, Label: label, PropertyKey: propertyKey);
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
-        var entries = GetNodes(label, latest).Where(node => node.Properties.ContainsKey(propertyKey))
+        var entries = StreamLabels([label], latest, cancellationToken).Where(node => node.Properties.ContainsKey(propertyKey))
             .Select(node => (Found: Find(1, node.Id, latest)!.Value, Key: Composite(GraphRecordCodec.Key(node.Properties[propertyKey]), node.Id))).ToArray();
         var inserted = await ApplyAsync(context, async bracket =>
         {

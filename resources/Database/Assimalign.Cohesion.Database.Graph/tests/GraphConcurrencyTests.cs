@@ -172,10 +172,16 @@ public sealed class GraphConcurrencyTests
             if (relationship) { await schema.DropRelationshipTypeAsync("FRIEND"); }
             else { await schema.DropLabelAsync("Person"); }
         });
-        error.Message.ShouldContain("in use");
+        error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG04025");
         transaction.State.ShouldBe(TransactionState.Faulted);
         await transaction.RollbackAsync();
         transaction.State.ShouldBe(TransactionState.RolledBack);
+        var inUse = await Should.ThrowAsync<DatabaseException>(async () =>
+        {
+            if (relationship) { await schema.DropRelationshipTypeAsync("FRIEND"); }
+            else { await schema.DropLabelAsync("Person"); }
+        });
+        inUse.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG03003");
         (await writerSchema.GetLabelsAsync()).ShouldHaveSingleItem().Name.ShouldBe("Person");
         (await writerSchema.GetRelationshipTypesAsync()).ShouldHaveSingleItem().Name.ShouldBe("FRIEND");
     }

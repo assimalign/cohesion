@@ -80,6 +80,17 @@ colons with label-expression operators or a wildcard (`:A:B|C`, `:A|B:C`, `:%:A`
 `<>`. Database, graph, schema, and session selection statements are outside the profile: all
 evaluation stays inside the already-bound logical database.
 
+## Schema DDL (#1738, GQ-D2)
+
+Standalone CREATE/DROP INDEX and CONSTRAINT plus Cohesion LABEL/RELATIONSHIP TYPE definition
+commands use GqlSchemaCommand, GqlSchemaObjectKind and GqlSchemaPropertyType. The FOR variable
+must match its property reference (CG01022). The dedicated parser branch skips ordinary-query
+unsupported-function discovery, preserving one CK00001 for T3 forms and removing ON noise.
+SchemaCommand.ToString renders semantic fields with escaped double-quoted identifiers and
+canonical scalar names; it never depends on retained source text. The command is an optional
+query-expression property; the existing pipeline remains unchanged. DIALECT specifies syntax,
+conditionals, naming, transaction policy and token lifetime; Graph DESIGN owns coordination.
+
 ## Parser and expression tree
 
 `GqlQueryParser` derives from the shared `QueryParser`, and its `Profile` is
@@ -223,7 +234,11 @@ The function table advertises the aggregates and core scalar functions listed be
 | `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
-| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, `CONSTRAINTS`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `CREATE/DROP INDEX` | Standalone Neo4j-style single node-property index commands, optional names and conditionals | Transactional discovery and physical/catalog coordination |
+| `CREATE/DROP CONSTRAINT` | Named type/existence rules for one node or relationship property | Independent rules; validates existing owner data |
+| `CREATE/DROP LABEL` | Cohesion definition commands with optional conditionals | Creates an empty definition or drops an unused one |
+| `CREATE/DROP RELATIONSHIP TYPE` | Cohesion definition commands with optional conditionals | Creates an empty definition or drops an unused one |
 | `LABEL EXPRESSION` | ISO/IEC 39075 16.8 `\|`, `&`, `!`, `%` and parentheses after `:` or `IS` in a node or edge pattern; the labeled predicate in `WHERE` (#1139); chains of any length and nesting the stack allows | A node is tested against its label set, a relationship against its one type; pattern and positive conjunctive WHERE labels can anchor scans or property seeks (#1245) |
 
 Match patterns accept `(a)`, `(a:Label {key: value})`, `(a IS A|B)`, `(a:(A|B)&!C)`, `(a:%)`, and
