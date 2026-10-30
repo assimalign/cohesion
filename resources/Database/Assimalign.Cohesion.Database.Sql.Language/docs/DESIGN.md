@@ -1215,16 +1215,23 @@ collation semantics are specified in DIALECT.md and the SQL engine DESIGN.
 The postfix :: loop sits between ParsePrimary and unary signs; each left-associated cast
 uses Nest and the same target parser as CAST, including modifiers, aliases and quoted domains.
 It renders only as CAST, preserving every existing renderer precedence and canonical form.
-Direct +numeric remains a literal alias, so +1::TEXT casts the literal 1 while
-+(1::TEXT) retains a unary-plus node; existing +1::REGCLASS canonicalization is unchanged.
-PostgreSQL src/backend/parser/gram.y:904-914 supplies precedence; like.c:165-244 supplies
-collation-selected case handling. The shared lexer is unchanged. All three language profiles
+Direct +numeric remains a literal alias only when no postfix cast follows, preserving +1
+and ORDER BY +1 trees. Cast lookahead keeps +1::TEXT and + 1::TEXT at the sign rung,
+so both fail with CS02003 after casting, as unary minus does; +1::INT remains 1.
+Binary ILIKE follows LOWER(x) LIKE LOWER(p) with the engine's runtime ToLowerInvariant
+mapping: Σ differs from ς, ſ differs from s, É matches é and ΟΣ matches οσ.
+The other three collations extend PostgreSQL's nondeterministic-collation refusal with
+case-insensitive matching under their own equality. Invariant uses CompareOptions.IgnoreCase:
+ΟΣ matches ος, canonical é/é equivalence follows invariant equality, and İ differs from i
+while still matching _. The two index-backed insensitive transforms remain unchanged.
+PostgreSQL src/backend/parser/gram.y:904-914 supplies precedence; like.c:186-221 supplies
+determinism admission and lowercasing. The shared lexer is unchanged. All three language profiles
 pin ::, adjacent colons and ~~* token sequences; GQL labels retain their colon grammar.
 Deferred # and ^ receive named CK00001 refusals in SQL lexical preflight, with ^ described as
 exponentiation (PostgreSQL src/include/catalog/pg_operator.dat:2119,2300). No public interface,
 diagnostic identity, format or wire layout is added.
 Persisted-expression equality and grouping identity distinguish LIKE from ILIKE. Existing
-text, including contextual ilike identifiers and REGCLASS casts, keeps its canonical form.
+persisted canonical text, including contextual ilike identifiers and REGCLASS casts, keeps its form.
 
 ## Distinct predicates, truth tests and LIKE ESCAPE (#1111)
 

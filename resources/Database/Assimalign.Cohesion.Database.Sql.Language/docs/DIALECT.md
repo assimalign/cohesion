@@ -3481,11 +3481,21 @@ CS00003 at the offending or missing token. Adjacent `<-` is less-than followed b
 ## ILIKE and postfix casts (#1721, SQ-O1)
 
 ILIKE and NOT ILIKE use LIKE's precedence, ESCAPE rules, NULL behavior and
-bounded cancellable matcher. Escape recognition happens before case folding. Binary
-ILIKE uses pinned Unicode 17.0 simple case folding; case_insensitive retains that rule,
-and case_accent_insensitive additionally removes accents through its existing transform.
-Legacy invariant ILIKE uses invariant TextInfo lowercasing and linguistic comparison;
-it retains the invariant-globalization refusal. The database default, column and explicit
+bounded cancellable matcher. Escape recognition happens before case mapping. Binary is
+deterministic: ILIKE lowercases both operands with SQL LOWER's own ToLowerInvariant()
+mapping, then matches ordinally, following PostgreSQL's builtin C.UTF-8 rule. That mapping
+comes from the .NET globalization implementation and is not pinned to Unicode 17.0.
+Thus sigma Σ and final sigma ς remain distinct, as do long s ſ and s; É matches é,
+ΟΣ matches οσ, and the Kelvin sign K matches k as LOWER does.
+case_insensitive, case_accent_insensitive and invariant are nondeterministic. PostgreSQL
+refuses ILIKE under nondeterministic collations; Cohesion extends it to match
+case-insensitively under each collation's own equality. The two index-backed insensitive
+collations retain their pinned transforms, including accent removal for the latter.
+Invariant uses its existing linguistic comparer with CompareOptions.IgnoreCase,
+preserving canonical equivalence: é matches decomposed é, as invariant equality does.
+ΟΣ matches ος and σ matches ς. The comparer distinguishes İ from i, while İ matches
+the single-scalar wildcard _. Invariant retains its globalization refusal.
+The database default, column and explicit
 COLLATE candidates resolve exactly as for LIKE, including ESCAPE and subquery collations.
 For example 'É' COLLATE binary ILIKE 'e' is FALSE, while the same expression under
 case_accent_insensitive is TRUE. No invariant uppercasing overrides these choices.
@@ -3493,17 +3503,18 @@ The existing CS02034 escape failure and CS05040 linguistic work budget apply to 
 forms. Fixed patterns compile once; dynamic patterns compile when evaluated.
 
 expr::type accepts every CAST target, including modifiers, multiword names and quoted
-domains. It binds tighter than unary minus and all binary operators and chains left to
+domains. It binds tighter than unary signs and all binary operators and chains left to
 right: -x::TEXT::INT means -CAST(CAST(x AS TEXT) AS INT). Canonical rendering always
 uses CAST. The existing CAST admission and CS02 failures also apply, including the existing
-CHECK restriction on casts. Direct +numeric remains the existing literal alias:
-+1::TEXT is CAST(1 AS TEXT), while +(1::TEXT) applies unary plus to TEXT and fails
-with CS02003, just as +CAST(1 AS TEXT) does. Other types require contiguous ::; the previously accepted
-REGCLASS separated-colon spelling remains available. ILIKE remains contextual; identifiers,
-old expressions and existing canonical text are unchanged, so this run changes no SQL or
+CHECK restriction on casts. Direct +numeric remains the existing literal alias when no
+postfix cast follows, keeping +1 and ORDER BY +1 unchanged. Both `+1::TEXT` and
+`+ 1::TEXT` apply unary plus to CAST(1 AS TEXT) and fail with CS02003, just like the
+minus forms; +1::INT is 1. Other types require contiguous ::; the previously accepted
+REGCLASS separated-colon spelling remains available. ILIKE remains contextual; ordinary
+identifiers and stored canonical text are unchanged, so this run changes no SQL or
 compiled-schema format. Regex, SIMILAR TO and bitwise execution remain deferred.
 PostgreSQL references: src/backend/parser/gram.y:904-914 and
-src/backend/utils/adt/like.c:165-244 (collation-selected casing before matching).
+src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
 
 ## Literals
 

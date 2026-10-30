@@ -35,6 +35,8 @@ public class SqlConformanceTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Conformance: supported statements parse without errors")]
+    [InlineData("SELECT +1::TEXT, + 1::INT, +x::INT FROM t ORDER BY +1;", SqlQueryCommandType.Select)]
+    [InlineData("SELECT 'Σ' COLLATE binary ILIKE 'ς', 'ΟΣ' COLLATE invariant ILIKE 'ος';", SqlQueryCommandType.Select)]
     [InlineData("CREATE TABLE t(id SERIAL2);", SqlQueryCommandType.Create)]
     [InlineData("CREATE TABLE t(id SERIAL4);", SqlQueryCommandType.Create)]
     [InlineData("CREATE TABLE t(id SERIAL8);", SqlQueryCommandType.Create)]

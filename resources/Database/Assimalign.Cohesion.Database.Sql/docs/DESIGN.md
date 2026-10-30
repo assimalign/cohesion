@@ -7556,20 +7556,28 @@ ILIKE and NOT ILIKE reuse SqlLikeExpression, its bound node and the bounded,
 iterative LIKE matcher. IsCaseInsensitive participates in grouping and persisted-tree
 identity; child walkers, collation resolution, NULLs, ESCAPE, eager constant validation,
 CS02034, CS05040 and statement cancellation use the existing paths. Tokenization precedes
-casing. Binary ILIKE uses the pinned Unicode 17.0 simple-fold collation; the two
-insensitive collations retain their own pinned transforms, including accent removal.
-Legacy invariant ILIKE lowercases literal runs and input through invariant TextInfo and
-then uses the existing linguistic matcher, preserving its globalization refusal and work
-budget. Folded fixed patterns are cached; dynamic patterns compile per evaluation.
-PostgreSQL src/backend/utils/adt/like.c:165-244 supplies collation-selected casing before
-matching; Cohesion uses its four declared collations rather than PostgreSQL locale names.
+casing. Binary is deterministic and follows LOWER(x) LIKE LOWER(p), using exactly SQL
+LOWER's ToLowerInvariant() mapping before ordinal matching. LOWER uses the .NET
+globalization implementation rather than a pinned Unicode version; ILIKE stays consistent
+with it. Σ differs from final sigma ς, long s ſ differs from s, É matches é, ΟΣ matches οσ,
+and Kelvin sign K matches k as LOWER does. The other three collations are nondeterministic:
+PostgreSQL refuses ILIKE for them, while Cohesion extends it to case-insensitive matching
+under each collation's own equality. The two insensitive index-backed collations retain
+their pinned transforms, including accent removal. Invariant passes CompareOptions.IgnoreCase
+through every existing linguistic comparison and search, retaining its work budget,
+cancellation and globalization refusal. ΟΣ matches ος and σ matches ς; canonical é/é
+equivalence follows invariant equality. İ differs from i under the comparer but matches _.
+Normalized fixed patterns are cached; dynamic patterns compile per evaluation.
+PostgreSQL src/backend/utils/adt/like.c:186-221 supplies nondeterministic refusal and LOWER
+before deterministic matching; DIALECT records Cohesion's nondeterministic extension.
 
 Postfix :: targets share CAST's type-name/modifier/domain parser and existing cast binder.
-They bind above unary minus and every binary operator, associate left to right, and render as
+They bind above unary signs and every binary operator, associate left to right, and render as
 CAST. PostgreSQL src/backend/parser/gram.y:904-914 supplies that precedence. The earlier
 REGCLASS suffix's separated-colon spelling remains accepted; other types require the
-existing contiguous :: token. Direct numeric plus retains its documented literal alias
-(including +1::REGCLASS); other unary plus operands use the ordinary sign rung.
+existing contiguous :: token. Direct numeric plus retains its documented literal alias only
+without a following cast, preserving +1 and ORDER BY +1. A postfix cast keeps the sign
+outside the cast: +1::TEXT and + 1::TEXT fail with CS02003, while +1::INT is 1.
 ILIKE remains contextual, preserving identifier quoting.
 Regex and SIMILAR TO remain CK00001. Bitwise operators remain deferred to SQ-O2; ^ is
 recognized as deferred exponentiation, never XOR, and # as deferred bitwise XOR.

@@ -87,14 +87,14 @@ internal sealed class SqlLikePattern
 
     internal SqlLikePattern Normalize(Collation collation, bool ignoreCase = false)
     {
-        if (ignoreCase && ReferenceEquals(collation, Collation.Binary)) { collation = Collation.CaseInsensitive; }
-        if (ignoreCase && ReferenceEquals(collation, Collation.Invariant))
+        if (ignoreCase && ReferenceEquals(collation, Collation.Binary))
         {
-            if (ReferenceEquals(_normalizedFor, collation)) { return this; }
+            if (ReferenceEquals(_normalizedFor, collation) && _normalizedTokens is null) { return this; }
             var folded = new string?[_tokens.Length];
             for (int index = 0; index < folded.Length; index++)
             {
-                folded[index] = _tokens[index] is { } literal ? CultureInfo.InvariantCulture.TextInfo.ToLower(literal) : null;
+                // Keep exactly the mapping SQL LOWER uses, including scalar validation.
+                folded[index] = _tokens[index] is { } literal ? collation.Normalize(literal).ToLowerInvariant() : null;
             }
             return new SqlLikePattern(folded, _sourceLength, collation);
         }
@@ -118,23 +118,18 @@ internal sealed class SqlLikePattern
         work = 0;
         beforeMatch?.Invoke();
         cancellationToken.ThrowIfCancellationRequested();
-        // PostgreSQL like.c:165-244 chooses casing from the effective collation.
-        // Tokenize first so folding an alphabetic ESCAPE never creates a wildcard.
-        if (ignoreCase && ReferenceEquals(collation, Collation.Binary)) { collation = Collation.CaseInsensitive; }
-        if (ignoreCase && ReferenceEquals(collation, Collation.Invariant))
-        {
-            collation.Compare(string.Empty, string.Empty); // Keep invariant-globalization refusal.
-            var folded = Normalize(collation, ignoreCase: true);
-            string text = CultureInfo.InvariantCulture.TextInfo.ToLower(input);
-            cancellationToken.ThrowIfCancellationRequested();
-            return folded.Match(text, collation, cancellationToken, out work);
-        }
+        // PostgreSQL like.c:186-221 lowercases deterministic operands before matching.
+        // Tokenize first so casing an alphabetic ESCAPE never creates a wildcard.
+        // Nondeterministic collations extend that rule with their own insensitive equality.
+        var options = ignoreCase ? CompareOptions.IgnoreCase : CompareOptions.None;
         long limit = WorkLimit(input.Length);
-        var pattern = Normalize(collation);
+        var pattern = Normalize(collation, ignoreCase);
         if (ReferenceEquals(collation, Collation.Binary))
         {
             collation.Normalize(input); // Retain validation of Unicode scalars on the binary fast path.
-            return MatchOrdinal(input, _tokens, cancellationToken, ref work);
+            string text = ignoreCase ? input.ToLowerInvariant() : input;
+            cancellationToken.ThrowIfCancellationRequested();
+            return MatchOrdinal(text, pattern._tokens, cancellationToken, ref work);
         }
         if (ReferenceEquals(collation, Collation.CaseInsensitive))
         {
@@ -190,7 +185,7 @@ internal sealed class SqlLikePattern
                     _tokens[1] is { Length: > 0 } terminal && !_requiresBoundaryProbing)
                 {
                     Charge(ref work, Math.Max(1L, (long)input.Length + terminal.Length) + 1, limit, collation, cancellationToken);
-                    bool suffix = CultureInfo.InvariantCulture.CompareInfo.IsSuffix(input.AsSpan(), terminal, CompareOptions.None);
+                    bool suffix = CultureInfo.InvariantCulture.CompareInfo.IsSuffix(input.AsSpan(), terminal, options);
                     cancellationToken.ThrowIfCancellationRequested();
                     return suffix;
                 }
@@ -199,7 +194,7 @@ internal sealed class SqlLikePattern
                 if (_tokens.Length > 1 && !_requiresBoundaryProbing && _tokens[^1] is { Length: > 0 } tail)
                 {
                     Charge(ref work, Math.Max(1L, (long)input.Length + tail.Length) + 1, limit, collation, cancellationToken);
-                    bool suffix = CultureInfo.InvariantCulture.CompareInfo.IsSuffix(input.AsSpan(), tail, CompareOptions.None);
+                    bool suffix = CultureInfo.InvariantCulture.CompareInfo.IsSuffix(input.AsSpan(), tail, options);
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!suffix) { return false; }
                 }
@@ -210,7 +205,7 @@ internal sealed class SqlLikePattern
                     var compare = CultureInfo.InvariantCulture.CompareInfo;
                     if (_tokens.Length == 2 && _tokens[0] is { Length: > 0 } prefix && _tokens[1] is null)
                     {
-                        bool found = compare.IsPrefix(input.AsSpan(), prefix, CompareOptions.None, out int matchLength);
+                        bool found = compare.IsPrefix(input.AsSpan(), prefix, options, out int matchLength);
                         Charge(ref work, Math.Max(1L, (long)(found ? matchLength : input.Length) + prefix.Length) + 1, limit, collation, cancellationToken);
                         cancellationToken.ThrowIfCancellationRequested();
                         if (found) { return true; }
@@ -219,7 +214,7 @@ internal sealed class SqlLikePattern
                     else if (_tokens.Length == 3 && _tokens[0] is null &&
                         _tokens[1] is { Length: > 0 } middle && _tokens[2] is null)
                     {
-                        int found = compare.IndexOf(input.AsSpan(), middle, CompareOptions.None, out int matchLength);
+                        int found = compare.IndexOf(input.AsSpan(), middle, options, out int matchLength);
                         Charge(ref work, Math.Max(1L, (long)(found < 0 ? input.Length : found + matchLength) + middle.Length) + 1, limit, collation, cancellationToken);
                         cancellationToken.ThrowIfCancellationRequested();
                         if (found >= 0) { return true; }
@@ -241,12 +236,12 @@ internal sealed class SqlLikePattern
 
             if (simpleLiteral is not null)
             {
-                return probeBoundaries && MatchAsciiLiteral(input, simpleLiteral, contains, cancellationToken, limit, ref work);
+                return probeBoundaries && MatchAsciiLiteral(input, simpleLiteral, contains, cancellationToken, limit, ref work, options);
             }
 
             if (!collation.IsIndexBacked && !probeBoundaries && !hasIgnorables && _tokens.Length > 1)
             {
-                return MatchAnchored(input, cancellationToken, limit, ref work);
+                return MatchAnchored(input, cancellationToken, limit, ref work, options);
             }
 
             // PostgreSQL like_match.c:193-221 advances wildcards over original characters,
@@ -306,12 +301,12 @@ internal sealed class SqlLikePattern
                             // The terminal literal must cover the remaining suffix, as in
                             // PostgreSQL like_match.c:272-286; % supplies its starting boundary.
                             Charge(ref work, Math.Max(1L, (long)remaining.Length + anchor.Length), limit, collation, cancellationToken);
-                            bool suffix = compare.IsSuffix(remaining, anchor, CompareOptions.None);
+                            bool suffix = compare.IsSuffix(remaining, anchor, options);
                             cancellationToken.ThrowIfCancellationRequested();
                             if (suffix) { return true; }
                             continue;
                         }
-                        int found = compare.IndexOf(remaining, anchor, CompareOptions.None, out int matchLength);
+                        int found = compare.IndexOf(remaining, anchor, options, out int matchLength);
                         Charge(ref work, Math.Max(1L, (long)(found < 0 ? remaining.Length : found + matchLength) + anchor.Length), limit, collation, cancellationToken);
                         cancellationToken.ThrowIfCancellationRequested();
                         if (found < 0) { continue; }
@@ -344,7 +339,7 @@ internal sealed class SqlLikePattern
                         else
                         {
                             Charge(ref work, Math.Max(1L, (long)input.Length - start + token.Length), limit, collation, cancellationToken);
-                            if (CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(start), token.AsSpan(), CompareOptions.None) == 0) { return true; }
+                            if (CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(start), token.AsSpan(), options) == 0) { return true; }
                         }
                         continue;
                     }
@@ -354,13 +349,13 @@ internal sealed class SqlLikePattern
                     bool wordLiteral = !collation.IsIndexBacked && (_asciiLetterOrDigitLiterals || IsAsciiWord(token));
                     if (wordLiteral && probeBoundaries && state.End < 0)
                     {
-                        if (!TryMatchAsciiPrefix(input, start, token, cancellationToken, limit, ref work, out firstEnd)) { continue; }
+                        if (!TryMatchAsciiPrefix(input, start, token, cancellationToken, limit, ref work, out firstEnd, options)) { continue; }
                     }
                     if (!collation.IsIndexBacked && !probeBoundaries)
                     {
                         var compare = CultureInfo.InvariantCulture.CompareInfo;
                         cancellationToken.ThrowIfCancellationRequested();
-                        bool prefix = compare.IsPrefix(input.AsSpan(start), token, CompareOptions.None, out int matchLength);
+                        bool prefix = compare.IsPrefix(input.AsSpan(start), token, options, out int matchLength);
                         Charge(ref work, Math.Max(1L, (long)(prefix ? matchLength : input.Length - start) + token.Length), limit, collation, cancellationToken);
                         cancellationToken.ThrowIfCancellationRequested();
                         if (!prefix) { continue; }
@@ -397,7 +392,7 @@ internal sealed class SqlLikePattern
                             if (!equal)
                             {
                                 Charge(ref work, end - previous, limit, collation, cancellationToken);
-                                equal = CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(previous, end - previous), ReadOnlySpan<char>.Empty, CompareOptions.None) == 0;
+                                equal = CultureInfo.InvariantCulture.CompareInfo.Compare(input.AsSpan(previous, end - previous), ReadOnlySpan<char>.Empty, options) == 0;
                             }
                             if (!equal) { break; }
                         }
@@ -410,7 +405,7 @@ internal sealed class SqlLikePattern
                             var compare = CultureInfo.InvariantCulture.CompareInfo;
                             // Linguistic prefixes can reorder (for example Thai/Lao).
                             // Probe every scalar boundary, as like_match.c:289-311 does.
-                            equal = compare.Compare(prefix, token.AsSpan(), CompareOptions.None) == 0;
+                            equal = compare.Compare(prefix, token.AsSpan(), options) == 0;
                         }
                         if (equal)
                         {
@@ -500,14 +495,14 @@ internal sealed class SqlLikePattern
 
     // Independent scalar ends without ignorables give each literal one candidate
     // end. Last-% backtracking then needs no visited matrix or pending frames.
-    private bool MatchAnchored(string input, CancellationToken cancellationToken, long limit, ref long work)
+    private bool MatchAnchored(string input, CancellationToken cancellationToken, long limit, ref long work, CompareOptions options)
     {
         var compare = CultureInfo.InvariantCulture.CompareInfo;
         int position = 0, index = 0, star = -1, retry = 0;
         if (_tokens[^1] is { Length: > 0 } terminal)
         {
             Charge(ref work, Math.Max(1L, (long)input.Length + terminal.Length), limit, Collation.Invariant, cancellationToken);
-            bool suffix = compare.IsSuffix(input, terminal, CompareOptions.None);
+            bool suffix = compare.IsSuffix(input, terminal, options);
             cancellationToken.ThrowIfCancellationRequested();
             if (!suffix) { return false; }
             if (_tokens.Length == 2 && _tokens[0] is null) { return true; }
@@ -539,7 +534,7 @@ internal sealed class SqlLikePattern
                     int matchLength;
                     if (star >= 0 && index == star + 1)
                     {
-                        int found = compare.IndexOf(input.AsSpan(position), literal, CompareOptions.None, out matchLength);
+                        int found = compare.IndexOf(input.AsSpan(position), literal, options, out matchLength);
                         Charge(ref work, Math.Max(1L, (long)(found < 0 ? input.Length - position : found + matchLength) + literal.Length), limit, Collation.Invariant, cancellationToken);
                         cancellationToken.ThrowIfCancellationRequested();
                         if (found < 0) { return false; }
@@ -549,7 +544,7 @@ internal sealed class SqlLikePattern
                     }
                     else
                     {
-                        prefix = compare.IsPrefix(input.AsSpan(position), literal, CompareOptions.None, out matchLength);
+                        prefix = compare.IsPrefix(input.AsSpan(position), literal, options, out matchLength);
                         // Independent ends without ignored scalars let a failed prefix
                         // stop within the literal's extent, unlike a substring search.
                         Charge(ref work, Math.Max(1L, (long)(prefix ? matchLength : Math.Min(input.Length - position, literal.Length)) + literal.Length), limit, Collation.Invariant, cancellationToken);
@@ -575,24 +570,24 @@ internal sealed class SqlLikePattern
     // scalars cannot repair it. Ignored runs do not change a failed comparison,
     // so skip them rather than comparing the complete run at every boundary.
     private static bool MatchAsciiLiteral(string input, string literal, bool contains,
-        CancellationToken cancellationToken, long limit, ref long work)
+        CancellationToken cancellationToken, long limit, ref long work, CompareOptions options)
     {
-        if (!contains) { return TryMatchAsciiPrefix(input, 0, literal, cancellationToken, limit, ref work, out _); }
+        if (!contains) { return TryMatchAsciiPrefix(input, 0, literal, cancellationToken, limit, ref work, out _, options); }
         int start = 0;
         while (true)
         {
-            start = SkipIgnored(input, start, cancellationToken, limit, ref work);
+            start = SkipIgnored(input, start, cancellationToken, limit, ref work, options);
             if (start == input.Length) { return false; }
-            if (TryMatchAsciiPrefix(input, start, literal, cancellationToken, limit, ref work, out _)) { return true; }
+            if (TryMatchAsciiPrefix(input, start, literal, cancellationToken, limit, ref work, out _, options)) { return true; }
             start += ScalarLength(input, start);
         }
     }
 
     private static bool TryMatchAsciiPrefix(string input, int start, string literal,
-        CancellationToken cancellationToken, long limit, ref long work, out int end)
+        CancellationToken cancellationToken, long limit, ref long work, out int end, CompareOptions options)
     {
         var compare = CultureInfo.InvariantCulture.CompareInfo;
-        end = SkipIgnored(input, start, cancellationToken, limit, ref work);
+        end = SkipIgnored(input, start, cancellationToken, limit, ref work, options);
         if (end == input.Length) { return false; }
         end += ScalarLength(input, end);
         while (true)
@@ -600,10 +595,10 @@ internal sealed class SqlLikePattern
             cancellationToken.ThrowIfCancellationRequested();
             var prefix = input.AsSpan(start, end - start);
             Charge(ref work, (long)prefix.Length + literal.Length + 1, limit, Collation.Invariant, cancellationToken);
-            if (compare.Compare(prefix, literal, CompareOptions.None) == 0) { return true; }
+            if (compare.Compare(prefix, literal, options) == 0) { return true; }
             Charge(ref work, (long)prefix.Length + literal.Length, limit, Collation.Invariant, cancellationToken);
-            if (!compare.IsPrefix(literal, prefix, CompareOptions.None, out _)) { return false; }
-            int next = SkipIgnored(input, end, cancellationToken, limit, ref work);
+            if (!compare.IsPrefix(literal, prefix, options, out _)) { return false; }
+            int next = SkipIgnored(input, end, cancellationToken, limit, ref work, options);
             if (next == input.Length) { return false; }
             end = next + ScalarLength(input, next);
         }
@@ -618,7 +613,7 @@ internal sealed class SqlLikePattern
         return true;
     }
 
-    private static int SkipIgnored(string input, int start, CancellationToken cancellationToken, long limit, ref long work)
+    private static int SkipIgnored(string input, int start, CancellationToken cancellationToken, long limit, ref long work, CompareOptions options)
     {
         var compare = CultureInfo.InvariantCulture.CompareInfo;
         int steps = 0;
@@ -627,7 +622,7 @@ internal sealed class SqlLikePattern
             if ((steps++ & 1023) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
             int length = ScalarLength(input, start);
             Charge(ref work, length + 1, limit, Collation.Invariant, cancellationToken);
-            if (compare.Compare(input.AsSpan(start, length), ReadOnlySpan<char>.Empty, CompareOptions.None) != 0) { break; }
+            if (compare.Compare(input.AsSpan(start, length), ReadOnlySpan<char>.Empty, options) != 0) { break; }
             start += length;
         }
         return start;

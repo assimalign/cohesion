@@ -21,7 +21,7 @@ public sealed class SqlIlikeCastTests
 
     public SqlIlikeCastTests(ITestOutputHelper output) { _output = output; }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - ILIKE: every collation agrees with exhaustive case-folded scalar partitions (#1721)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - ILIKE: every collation agrees with exhaustive per-collation scalar partitions (#1721)")]
     [InlineData("binary")]
     [InlineData("case_insensitive")]
     [InlineData("case_accent_insensitive")]
@@ -67,9 +67,12 @@ public sealed class SqlIlikeCastTests
         }
         comparisons.ShouldBe(9840);
 
-        bool Equal(string left, string right) => name == "invariant"
-            ? collation.Compare(CultureInfo.InvariantCulture.TextInfo.ToLower(left), CultureInfo.InvariantCulture.TextInfo.ToLower(right)) == 0
-            : (name == "binary" ? Collation.CaseInsensitive : collation).Compare(left, right) == 0;
+        bool Equal(string left, string right) => name switch
+        {
+            "binary" => collation.Compare(left.ToLowerInvariant(), right.ToLowerInvariant()) == 0,
+            "invariant" => CultureInfo.InvariantCulture.CompareInfo.Compare(left, right, CompareOptions.IgnoreCase) == 0,
+            _ => collation.Compare(left, right) == 0,
+        };
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: ILIKE and postfix CAST execute with inherited NULL, ESCAPE and type rules (#1721)")]

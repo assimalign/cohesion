@@ -565,13 +565,21 @@ public sealed partial class SqlQueryParser
     }
 
     /// <summary>
-    /// Whether the current <c>+</c> directly precedes a numeric literal, comments aside. Such a
+    /// Whether the current <c>+</c> precedes a numeric literal without a postfix cast, comments aside. Such a
     /// sign is part of the literal rather than a unary plus, which keeps <c>ORDER BY +1</c> an
     /// ordinal and gives <c>+1</c> the same tree as <c>1</c>.
     /// </summary>
     private static bool IsSignedNumericLiteral(TokenLexer lexer)
-        => lexer.Current.Type == TokenType.Plus && AdvancePastComments(ref lexer) &&
-           lexer.Current.Type is TokenType.Integer or TokenType.Float;
+    {
+        if (lexer.Current.Type != TokenType.Plus || !AdvancePastComments(ref lexer) ||
+            lexer.Current.Type is not (TokenType.Integer or TokenType.Float)) { return false; }
+        if (!AdvancePastComments(ref lexer)) { return true; }
+        // TYPECAST binds above either sign (PostgreSQL gram.y:904-914). Preserve
+        // the old literal alias everywhere else, particularly ORDER BY +1.
+        if (lexer.Current.Type == TokenType.ColonColon) { return false; }
+        return lexer.Current.Type != TokenType.Colon || !AdvancePastComments(ref lexer) ||
+            lexer.Current.Type != TokenType.Colon || !AdvancePastComments(ref lexer) || !IsWord(ref lexer, "REGCLASS");
+    }
 
     /// <summary>
     /// Whether an infix <c>~</c> operator starts at the current token: <c>~</c> itself, or
