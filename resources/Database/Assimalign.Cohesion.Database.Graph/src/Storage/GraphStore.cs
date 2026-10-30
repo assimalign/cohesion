@@ -63,6 +63,74 @@ public sealed partial class GraphStore
             _records[key] = versions;
         }
         OpenIndexes();
+        storage.UndoScopesChanged = UndoScopesChanged;
+        storage.UndoTransactionEnded = context => UndoScopesChanged(context.Sequence, false, _coordinator.VersionStore);
+    }
+
+    private Dictionary<ulong, RecordSpaceVersionStore>? _scopeWriters;
+    // Test-only seam in the window after apply admission ends, before the caller resumes.
+    internal Action? AfterApply { get; set; }
+
+    private void UndoScopesChanged(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger)
+    {
+        lock (_sync)
+        {
+            if (!active && (_scopeWriters is null || !_scopeWriters.ContainsKey(writer.Value))) { return; }
+            // Published snapshots are immutable so statement publication needs no extra lock.
+            var writers = _scopeWriters is null ? new Dictionary<ulong, RecordSpaceVersionStore>() : new(_scopeWriters);
+            if (active) { writers[writer.Value] = ledger; }
+            else { writers.Remove(writer.Value); }
+            Volatile.Write(ref _scopeWriters, writers.Count == 0 ? null : writers);
+        }
+    }
+
+    private RecordVersionIndex CaptureDirectoryUndo(GraphRecord record)
+    {
+        byte kind = record.Kind;
+        ulong id = record.Id;
+        var key = (kind, id);
+        bool existed = _records.TryGetValue(key, out var before);
+        bool definition = _definitionIds.Contains(id);
+        var labels = record.Node?.Labels.Select(label => (Name: label,
+            Tokens: _labelTokens.TryGetValue(label, out var tokens) ? new HashSet<Guid>(tokens) : null,
+            Count: _labelCardinalities.GetValueOrDefault(label))).ToArray();
+        string? type = record.Relationship?.Type;
+        var typeTokens = type is not null && _relationshipTypeTokens.TryGetValue(type, out var known) ? new HashSet<Guid>(known) : null;
+        long typeCount = type is not null ? _relationshipTypeCardinalities.GetValueOrDefault(type) : 0;
+        return new DirectoryUndo(() =>
+        {
+            lock (_sync)
+            {
+                if (existed) { _records[key] = before; } else { _records.Remove(key); }
+                if (kind == 3 && !definition) { _definitionIds.Remove(id); }
+                if (labels is not null)
+                {
+                    foreach (var label in labels)
+                    {
+                        if (label.Tokens is null) { _labelTokens.Remove(label.Name); _labelCardinalities.Remove(label.Name); }
+                        else { _labelTokens[label.Name] = new HashSet<Guid>(label.Tokens); _labelCardinalities[label.Name] = label.Count; }
+                    }
+                }
+                if (type is not null)
+                {
+                    if (typeTokens is null) { _relationshipTypeTokens.Remove(type); _relationshipTypeCardinalities.Remove(type); }
+                    else { _relationshipTypeTokens[type] = new HashSet<Guid>(typeTokens); _relationshipTypeCardinalities[type] = typeCount; }
+                }
+            }
+        });
+    }
+
+    [System.Diagnostics.DebuggerDisplay("DirectoryUndo")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(DirectoryUndo.DebugView))]
+    private sealed class DirectoryUndo : RecordVersionIndex
+    {
+        private readonly Action _restore;
+        internal DirectoryUndo(Action restore) { _restore = restore; }
+        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken)
+        { _restore(); return default; }
+        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference, TransactionSequence writer, CancellationToken cancellationToken) => default;
+        protected override void OnStatementRolledBackCore() => _restore();
+        private sealed class DebugView { public DebugView(DirectoryUndo value) { _ = value; } }
     }
 
     /// <summary>Loads graph directories and physical B+Tree registrations.</summary>
@@ -134,7 +202,8 @@ public sealed partial class GraphStore
         var changes = indexes.Where(index => node.Labels.Contains(index.Label!, StringComparer.Ordinal)
             && node.Properties.ContainsKey(index.PropertyKey!))
             .Select(index => (index.Id, Key: Composite(GraphRecordCodec.Key(node.Properties[index.PropertyKey!]), node.Id))).ToArray();
-        var inserted = await ApplyAsync(context, async bracket =>
+        bool published = false;
+        ulong inserted = await ApplyAsync(context, async bracket =>
         {
             if (record.LabelIds!.Length != 0) { await EnsureLabelsAsync(context, cancellationToken).ConfigureAwait(false); }
             var location = Insert(bracket, bytes, context);
@@ -144,9 +213,10 @@ public sealed partial class GraphStore
                 await InsertIndexAsync(change.Id, change.Key, location, context, cancellationToken).ConfigureAwait(false);
             }
             SaveRegistrations(bracket);
+            published = PublishMarked(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
+        if (!published) { Add(record, inserted, context.Sequence); }
         return node;
     }
 
@@ -226,7 +296,8 @@ public sealed partial class GraphStore
         EnsureNew(2, id);
         byte[] bytes = await EncodeAsync(new GraphRecord(2, id, Relationship: relationship, TypeId: typeId), context.Sequence).ConfigureAwait(false);
         var record = GraphRecordCodec.Decode(bytes);
-        var inserted = await ApplyAsync(context, async bracket =>
+        bool published = false;
+        ulong inserted = await ApplyAsync(context, async bracket =>
         {
             await EnsureAdjacencyAsync(context, cancellationToken).ConfigureAwait(false);
             await EnsureRelationshipTypesAsync(context, cancellationToken).ConfigureAwait(false);
@@ -234,9 +305,10 @@ public sealed partial class GraphStore
             await InsertAdjacencyAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             await InsertRelationshipTypeAsync(record, location, context, cancellationToken).ConfigureAwait(false);
             SaveRegistrations(bracket);
+            published = PublishMarked(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
+        if (!published) { Add(record, inserted, context.Sequence); }
         return record.Relationship!.Value;
     }
 
@@ -434,11 +506,21 @@ public sealed partial class GraphStore
         _coordinator.VersionStore.RecordTombstoned(context.Sequence, reference.PageId, reference.SlotIndex);
     }
 
-    private void Add(GraphRecord record, ulong location, TransactionSequence writer, bool prune = true)
+    private bool PublishMarked(GraphRecord record, ulong location, TransactionSequence writer)
+    {
+        var writers = Volatile.Read(ref _scopeWriters);
+        if (writers is null || !writers.TryGetValue(writer.Value, out var ledger)) { return false; }
+        Add(record, location, writer, ledger: ledger);
+        return true;
+    }
+
+    private void Add(GraphRecord record, ulong location, TransactionSequence writer, bool prune = true, RecordSpaceVersionStore? ledger = null)
     {
         var (page, slot) = GraphStorage.UnpackLocation(location);
         lock (_sync)
         {
+            bool marked = ledger is not null;
+            var undo = marked ? CaptureDirectoryUndo(record) : null;
             RememberLabels(record);
             RememberRelationshipType(record);
             var next = new Reference(page, slot, writer, record.Revision);
@@ -446,13 +528,14 @@ public sealed partial class GraphStore
             { versions = new VersionChain { Head = next }; }
             else
             {
-                if (prune) { Sweep(ref versions, record.Kind, record.Id); }
+                if (prune && !marked) { Sweep(ref versions, record.Kind, record.Id); }
                 versions.Older = new History(versions.Head, versions.Older);
                 versions.Head = next;
             }
             versions.RelationshipType = record.Relationship?.Type;
             _records[(record.Kind, record.Id)] = versions;
             if (record.Kind == 3) { _definitionIds.Add(record.Id); }
+            if (undo is not null) { ledger!.RecordIndexEntryCreated(writer, undo, ReadOnlyMemory<byte>.Empty, 0); }
         }
     }
 
@@ -625,7 +708,12 @@ public sealed partial class GraphStore
 
     private async ValueTask<T> ApplyAsync<T>(TransactionContext context, Func<StorageTransaction, ValueTask<T>> apply, CancellationToken cancellationToken)
     {
-        try { return await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            var result = await _coordinator.ApplyStatementAsync(context, apply, durable: false, cancellationToken: cancellationToken).ConfigureAwait(false);
+            AfterApply?.Invoke();
+            return result;
+        }
         catch { OpenIndexes(); throw; }
     }
 

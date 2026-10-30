@@ -45,6 +45,24 @@ comparison and runtime/SDK renderers preserve key order through replacement and 
 Malformed persisted order vectors retain CS06059; unsupported index extensions retain CS06060;
 earlier SQL data-storage formats retain CS06041. Constraint key options retain CS00003.
 
+## Anonymous savepoint adapters (#1726, XT-3)
+
+SQL row-lineage before-images join the shared ordered ledger only while a marker is live.
+A failed physical statement restores them before its suffix is discarded. Undone lineage
+retirement entries leave a marker-only list immediately, so repeated update/undo cannot grow
+behind a retained snapshot; root commit transfers surviving entries to ordinary pruning.
+The record-space adapter removes outgoing lineage when undo deletes a created predecessor or
+clears its replacement tombstone. Row/index/key-lock undo shares the kernel's reverse order.
+An exact concurrent presence directory contains only live lineage touched by marked writers.
+Undo and prune skip both stamp decoding and the links monitor when that directory has no entry;
+never-marked writers populate no directory. Restore and retirement update it under the existing
+links monitor, and root end removes that writer's entries. Repeated undo retains only live links.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission belong to XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit. Reader progress is required inside physical undo for pinned Snapshot
+and fresh READ COMMITTED transactions, with deterministic monitor-entry counters for undo/prune.
 
 ## Partial indexes (#1630, SQ-P1)
 

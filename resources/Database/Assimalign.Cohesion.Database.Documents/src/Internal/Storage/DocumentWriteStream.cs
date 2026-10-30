@@ -52,6 +52,7 @@ internal sealed class DocumentWriteStream : Stream
         _complete = complete;
         _abort = abort;
         _lifetimeCancellation = lifetimeCancellation;
+        _storage.RegisterWriteStream(context);
     }
 
     public override bool CanRead => false;
@@ -202,6 +203,7 @@ internal sealed class DocumentWriteStream : Stream
         }
 
         _failed = true;
+        _storage.UnregisterWriteStream(_context);
         await _abort().ConfigureAwait(false);
     }
 
@@ -228,6 +230,10 @@ internal sealed class DocumentWriteStream : Stream
         {
             await FailAsync().ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            if (!_failed) { _storage.UnregisterWriteStream(_context); }
         }
     }
 

@@ -1370,7 +1370,7 @@ internal sealed partial class SqlPlanExecutor
         _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);
         // A failed UPDATE followed by DELETE in the same transaction must not reuse
         // the failed replacement link (the transaction stamp alone cannot distinguish it).
-        _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex));
+        _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex), statement.Transaction.Sequence);
         statement.Coordinator.VersionStore.RecordTombstoned(statement.Transaction.Sequence, pageId, slotIndex);
     }
 

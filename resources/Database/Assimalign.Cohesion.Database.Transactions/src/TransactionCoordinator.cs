@@ -59,6 +59,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 {
     private readonly Storage _storage;
     private readonly StorageJournal _journal;
+    private readonly TransactionRecordSpace _records;
     private readonly TransactionManager _manager;
     private readonly LockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
@@ -125,6 +126,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(records);
         _storage = storage;
         _journal = journal;
+        _records = records;
         _indexPruner = indexPruner;
 
         // Fully qualified: the coordinator's LockManager property shadows the
@@ -548,8 +550,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
     }
 
-    // XT-2 substrate only. These controls are deliberately internal until named/session
-    // scopes are integrated. Lock ownership is unchanged: all grants live until root end.
+    // These anonymous controls remain internal until named/session scopes are integrated.
     internal ValueTask<TransactionUndoMarker> CreateUndoMarkerAsync(TransactionContext context, CancellationToken cancellationToken = default)
         => RunUndoControlAsync(context, null, rollback: false, release: false, cancellationToken);
 
@@ -576,8 +577,29 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             try
             {
                 UndoControlAdmitted?.Invoke();
-                if (release) { _versionStore.ReleaseMarker(context.Sequence, marker!); }
-                else { marker = _versionStore.CreateMarker(context.Sequence); }
+                if (release)
+                {
+                    bool anyMarkers = _versionStore.ReleaseMarker(context.Sequence, marker!);
+                    _lockManager.ReleaseUndoMarkers(context.Sequence, anyMarkers);
+                    _records.UndoScopesChanged(context.Sequence, anyMarkers, _versionStore);
+                }
+                else
+                {
+                    marker = _versionStore.CreateMarker(context.Sequence);
+                    _lockManager.CreateUndoMarker(context.Sequence, marker);
+                    context.MarkUndoScopes();
+                    try { _records.UndoScopesChanged(context.Sequence, true, _versionStore); }
+                    catch
+                    {
+                        // A failed registration must not strand a marker whose token was
+                        // never returned. Model hooks are exception-atomic on creation;
+                        // release/end notifications are nonthrowing lifecycle cleanup.
+                        bool anyMarkers = _versionStore.ReleaseMarker(context.Sequence, marker);
+                        _lockManager.ReleaseUndoMarkers(context.Sequence, anyMarkers);
+                        _records.UndoScopesChanged(context.Sequence, anyMarkers, _versionStore);
+                        throw;
+                    }
+                }
                 return marker!;
             }
             finally { owner.ExitApply(undoControl: true); }
@@ -604,7 +626,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 throw;
             }
 
-            _versionStore.BuildRollbackLookup(context.Sequence, marker!);
+            if (!_versionStore.BuildRollbackLookup(context.Sequence, marker!))
+            {
+                // Exclusive writer admission makes an empty suffix independent of the gate.
+                await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                _lockManager.RollbackToUndoMarker(context.Sequence, marker!);
+                undoOwner.CompletePartialUndo();
+                return marker!;
+            }
             // Admission freezes this writer's ledger and end before prefix work. Other
             // writers retain the apply gate until physical undo actually needs it.
             await _applyGate.WaitAsync().ConfigureAwait(false);
@@ -612,6 +641,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             try
             {
                 await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                _lockManager.RollbackToUndoMarker(context.Sequence, marker!);
                 undoOwner.CompletePartialUndo();
                 return marker!;
             }
@@ -685,6 +715,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// applied after the rollback's undo would carry a sequence every snapshot then
     /// reads as committed, and nothing would ever undo it.
     /// </exception>
+    /// <exception cref="TransactionUndoException">
+    /// CK04009: partial undo is running or incomplete. Failed statement compensation retains
+    /// the statement and repair failures in an inner <see cref="AggregateException"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Gate acquisition or a wait for a memory-only undo control was canceled.</exception>
+    /// <remarks>Waits for the database apply gate and any admitted marker create or release.</remarks>
     public async ValueTask<T> ApplyStatementAsync<T>(
         TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply,
@@ -720,7 +756,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     bracket.Commit(awaitDurability: durable);
                     return result;
                 }
-                catch
+                catch (Exception statementFailure)
                 {
                     bool restoring = bracket.IsActive;
                     if (bracket.IsActive)
@@ -745,7 +781,16 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                         }
                     }
 
-                    if (restoring) { _versionStore.DiscardStatementSuffix(context.Sequence); }
+                    if (restoring)
+                    {
+                        try { _versionStore.DiscardStatementSuffix(context.Sequence); }
+                        catch (Exception repairFailure)
+                        {
+                            owner.MarkPartialUndoPending();
+                            throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending,
+                                new AggregateException(statementFailure, repairFailure));
+                        }
+                    }
                     throw;
                 }
                 finally
@@ -1206,6 +1251,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
+            List<TransactionContext>? markedEnds = null;
             lock (_sync)
             {
                 _statementBrackets.Clear();
@@ -1215,10 +1261,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 foreach (var context in _openContexts.Values)
                 {
                     TransactionEventSource.Log.TransactionUntracked(context);
+                    if (context.HadUndoMarkers) { (markedEnds ??= new()).Add(context); }
                 }
 
                 _openContexts.Clear();
             }
+            if (markedEnds is not null)
+            { foreach (var context in markedEnds) { _records.TransactionEnded(context); } }
         }
     }
 
@@ -1237,6 +1286,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // keeps bounding the prune and its statement bracket stays resolvable.
     private void UntrackEnded(TransactionContext context)
     {
+        // A rejected foreign end may have the same sequence as a local writer. Only
+        // this manager's contexts can drive tracking or model-ledger cleanup. Preserve
+        // the manager's argument failure too when a public end receives null.
+        if (context is null || !ReferenceEquals(context.Manager, _manager)) { return; }
+        if (context.State != TransactionState.Active && context.HadUndoMarkers) { _records.TransactionEnded(context); }
         if (context.State == TransactionState.Active)
         {
             return;

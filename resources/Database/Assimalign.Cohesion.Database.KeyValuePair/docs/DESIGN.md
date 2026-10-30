@@ -1,5 +1,19 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Anonymous savepoint adapters (#1726, XT-3)
+
+The existing record-space and BTreeRecordVersionIndex adapters already cover every
+transactional key/value effect. Their stable latch equality composes with marker lookup.
+Replacement tombstones, newly created primary postings and uniqueness key locks undo through
+the same shared reverse ledger, leaving pre-marker mappings and CAS stamps intact. Key-space
+catalog DDL retains its existing independent transaction posture; no syntax is added here.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission belong to XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit. The reader probe requires both pinned Snapshot and fresh READ COMMITTED
+reads to start and finish inside physical undo after page latches are released.
+
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a

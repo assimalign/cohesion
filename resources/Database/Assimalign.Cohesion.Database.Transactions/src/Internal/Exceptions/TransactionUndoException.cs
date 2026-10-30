@@ -4,7 +4,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Internal;
 
 internal sealed class TransactionUndoException : Exception
 {
-    internal TransactionUndoException(string code, string message) : base(message)
+    internal TransactionUndoException(string code, string message, Exception? innerException = null) : base(message, innerException)
     {
         Code = code;
     }

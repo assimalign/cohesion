@@ -70,7 +70,8 @@ public sealed partial class GraphStore
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
         var entries = GetNodes(label, latest).Where(node => node.Properties.ContainsKey(propertyKey))
             .Select(node => (Found: Find(1, node.Id, latest)!.Value, Key: Composite(GraphRecordCodec.Key(node.Properties[propertyKey]), node.Id))).ToArray();
-        var inserted = await ApplyAsync(context, async bracket =>
+        bool published = false;
+        ulong inserted = await ApplyAsync(context, async bracket =>
         {
             var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
             foreach (var entry in entries)
@@ -80,9 +81,10 @@ public sealed partial class GraphStore
             }
             var location = Insert(bracket, bytes, context);
             SaveRegistrations(bracket);
+            published = PublishMarked(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
+        if (!published) { Add(record, inserted, context.Sequence); }
     }
 
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
@@ -323,6 +325,9 @@ public sealed partial class GraphStore
             _store = store;
             _id = id;
         }
+
+        public override bool Equals(object? obj) => obj is IndexUndo other && ReferenceEquals(_store, other._store) && _id == other._id;
+        public override int GetHashCode() => HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_store), _id);
 
         protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)
