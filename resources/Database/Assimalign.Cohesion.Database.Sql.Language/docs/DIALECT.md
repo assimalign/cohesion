@@ -206,6 +206,7 @@ no live PostgreSQL comparison is claimed.
 | CS01064 | Duplicate WINDOW name |
 | CS01065 | Unknown or forward window reference |
 | CS01066 | Invalid copied PARTITION BY or ORDER BY |
+| CS01067 | Invalid JSON access or IS JSON operand signature (42883) |
 | CS02068 | Non-integer offset or bucket argument |
 | CS02069 | Incompatible navigation value/default types |
 | CS05076 | Invalid window placement or missing OVER |
@@ -391,6 +392,9 @@ executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL compari
 | CS02075 | Incompatible RANGE offset domain (0A000) |
 | CS02076 | Negative or NaN RANGE offset (22013) |
 | CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
+| CS02078 | Invalid JSON access/assignment input, encoding, Unicode conversion or depth (22032) |
+| CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 | CS05086 | Offset RANGE requires exactly one ordering key (42P20) |
 | CS05087 | GROUPS requires ORDER BY (42P20) |
 | CS05088 | NULL treatment on an incompatible function (42601) |
@@ -3581,7 +3585,7 @@ ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
 identifier positions keep their meaning. SIMILAR TO and NOT SIMILAR TO report one
 CK00001; ordinary identifiers `ilike` and `similar` retain their canonical spelling.
-`^` (exponentiation, never XOR), IS JSON, IS OF and IS NORMALIZED report
+`^` (exponentiation, never XOR), IS OF and IS NORMALIZED report
 one CK00001 at the operator. Missing FROM/comparands or ESCAPE operands remain
 CS00003 at the offending or missing token. Adjacent `<-` is less-than followed by a unary minus operand (#1647).
 
@@ -3622,6 +3626,88 @@ identifiers and stored canonical text are unchanged, so this run changes no SQL 
 compiled-schema format. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bitwise execution below.
 PostgreSQL references: src/backend/parser/gram.y:904-914 and
 src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
+
+## JSON access (#1722, SQ-N1)
+
+JSON and JSONB support left-associative member/element extraction at PostgreSQL's
+ordinary operator precedence, shared with concatenation and bitwise operators:
+
+| Form | Result |
+| --- | --- |
+| `doc -> text` | Last matching object member, retaining the input JSON/JSONB type |
+| `doc -> integer` | Array element, zero-based; negative indexes count from the end |
+| `doc ->> text` / `doc ->> integer` | Extracted text; JSON strings are unquoted and unescaped |
+
+Missing members, out-of-range indexes and wrong container kinds return SQL NULL.
+The owner's wrong-container rule includes every scalar JSONB root. The local PostgreSQL
+implementation indexes its internal scalar wrapper at 0/-1 (jsonb.h:94-102,
+jsonfuncs.c:939-1005, jsonb_util.c:472-492); this deliberate exception follows the
+owner's explicit non-array NULL rule instead of that storage-wrapper behavior.
+JSON null remains JSON `null` under `->` and becomes SQL NULL under `->>`.
+A SQL NULL input or selector yields SQL NULL. Chaining works, for example
+`doc -> 'a' ->> 'b'`. SMALLINT selectors widen to INTEGER; BIGINT selectors
+are refused, including typed NULLs. Signed integer literals fitting INTEGER retain
+that selector signature; computed BIGINT expressions require an explicit INTEGER cast.
+TINYINT selectors also require an explicit INTEGER cast in this surface.
+The left operand must be declared JSON/JSONB (use CAST for character or polymorphic input).
+An unresolved NULL left operand cannot choose between those signatures and is CS01067;
+CAST(NULL AS JSON/JSONB) propagates SQL NULL. Untyped NULL result alternatives adopt
+a surrounding CASE/COALESCE JSON result type.
+In JSON operands and selectors (including IS JSON), CASE/COALESCE resolve one common SQL
+type before selecting an arrow overload. Untyped string and NULL literals adopt declared
+alternatives; all-unknown sets resolve to TEXT. Declared INTEGER and TEXT alternatives, or
+JSON and JSONB alternatives, refuse with CS02080 (42804) before reading input rows.
+Unknown literals undergo input conversion during binding, including skipped alternatives;
+invalid text retains CS02022. The resolved type, rather than the selected runtime value,
+chooses member lookup or indexing. PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+parse_coerce.c:1357-1456 define these rules. Consecutive arrows validate one document and
+serialize only the final value; CAST or another intervening expression ends that chain.
+Duplicate keys select the last occurrence, including escaped-equivalent names.
+Member lookup is ordinal. Text extraction inherits a text selector's collation;
+without one its output uses the database default (parse_collate.c:577-750).
+JSON/JSONB extraction preserves raw selected JSON spelling, member order and duplicate
+keys; JSONB normalization remains outside T2, including its text serialization.
+Malformed stored/access input fails with CS02078, independently of a missing result.
+An invalid Unicode member selector also fails with CS02078 when looking up an object member.
+Extraction decodes Unicode escapes throughout the document and refuses unmatched
+surrogates and \u0000, as PostgreSQL's get_worker does.
+
+`expression IS [NOT] JSON [VALUE | ARRAY | OBJECT | SCALAR]` accepts character,
+JSON and JSONB input. VALUE is the default and includes JSON null. SCALAR includes
+strings, numbers, Booleans and JSON null, excluding arrays/objects. Malformed text
+returns FALSE (TRUE under NOT); SQL NULL stays SQL NULL under both forms.
+The predicate checks JSON syntax rather than Unicode escape conversion, matching
+PostgreSQL's text predicate. WITH/WITHOUT UNIQUE KEYS remains CK00001.
+Kind words stay contextual; canonical rendering always writes the kind, including VALUE.
+
+Explicit casts from JSON/JSONB to BOOLEAN require a JSON Boolean. Numeric targets
+(TINYINT, SMALLINT, INTEGER, BIGINT, REAL, DOUBLE PRECISION, NUMERIC) require a JSON
+number, accept exponent notation and use the destination's range/precision rules.
+Integer casts round midpoint ties away from zero, following PostgreSQL numeric_int*.
+Floating casts normalize numeric zero to positive zero, including JSON -0.0
+(numeric.c:4576-4611,4675-4715,11871-11875).
+JSON null converts to SQL NULL for these scalar casts. Other kinds, including arrays,
+objects and numeric-looking JSON strings, fail with CS02079. Range failures retain
+CS02002; cast-input syntax failures retain CS02022. TEXT/CHAR casts continue to serialize
+JSON (a string retains its JSON quotes, and arrays/objects serialize as JSON).
+
+Every JSON/JSONB column assignment now validates one complete JSON value, including
+DEFAULT, UPDATE and INSERT SELECT; malformed assignment input fails with CS02078
+and rolls back the statement. The existing strict UTF-8/depth-128 policy is shared by
+access and assignment; IS JSON returns FALSE when that limit or encoding is invalid.
+JSON text and JSONB UTF-8 storage remain unchanged. Existing text/bytes/scalar wire cells
+carry results over InMemory and TCP. Invalid operand signatures are CS01067 (42883),
+checked before rows, including all CASE/COALESCE result alternatives.
+Identical JSON conjuncts can prove partial-index eligibility, including IS JSON kind and
+negation. Different source/selector types, keys and arrow forms do not provide that proof.
+
+PostgreSQL references (local clone): src/backend/utils/adt/jsonfuncs.c:886-1005,
+1105-1116,1160-1296; src/backend/utils/adt/jsonb.c:1819-2006;
+src/backend/executor/execExprInterp.c:4811-4892; src/backend/parser/gram.y:904,
+15368-15371,15753-15787. The [PostgreSQL JSON operator documentation](https://www.postgresql.org/docs/18/functions-json.html)
+also records extraction NULL and negative-index behavior.
+JSON_VALUE, JSON_QUERY, JSON_EXISTS and their lax path subset remain SQ-N2.
+JSON_TABLE, question-mark operators and JSONB normalization remain T3.
 
 ## Integer bitwise operators (#1721, SQ-O2)
 
@@ -4083,8 +4169,8 @@ BINARY/VARBINARY. The shared type-name grammar owns all aliases and modifiers.
 | TIMESTAMPTZ | – | – | – | – | – | – | – | – | Y | – | Y | Y | Y | Y | – | – | – | – | Y |
 | INTERVAL | – | – | – | – | – | – | – | – | Y | – | – | Y | – | – | Y | – | – | – | Y |
 | UUID | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | Y | – | – | Y |
-| JSON | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
-| JSONB | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| JSON | Y | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| JSONB | Y | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | Y | Y | Y |
 | CHAR | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 Identity conversions still apply target bounds. A pair without a conversion fails
@@ -4171,15 +4257,15 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   and preserves the original spelling, property order, duplicates and whitespace.
   JSONB equality is byte equality, unlike PostgreSQL's normalized JSONB equality;
   another binary encoding would require a data migration. JSONB-to-text validates
-  the stored UTF-8 JSON before decoding. JSON columns may still accept unvalidated
-  text on INSERT; that assignment behavior is outside CAST. JSON-to-scalar casts
-  remain outside Tier 1.
+  the stored UTF-8 JSON before decoding. Assignments now validate JSON/JSONB too;
+  scalar JSON casts are specified in the JSON access section (#1722).
 - **NULL:** returns NULL for every supported target, with the target's result
   type metadata even when every row is null or the result has no rows. Invalid
   target names/modifiers are still errors with a NULL operand.
 - **Integers:** signed ranges are -128..127, -32768..32767, -2147483648..2147483647,
   and -9223372036854775808..9223372036854775807. Overflow and nonzero fractional
-  parts are errors; there is no rounding, truncation, wrapping, or zero fallback.
+  parts are errors for ordinary numeric/text conversions; JSON numeric casts use the
+  rounding rule above. Ordinary casts never truncate, wrap or substitute zero.
 - **Decimal:** the implementation uses `System.Decimal` (96-bit coefficient,
   scale 0..28), not arbitrary precision. Bare DECIMAL/NUMERIC has no additional
   bound. `DECIMAL(p)` means scale 0; `DECIMAL(p,s)` requires `1 <= p <= 28` and

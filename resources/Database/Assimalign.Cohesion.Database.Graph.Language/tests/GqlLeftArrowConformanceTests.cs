@@ -21,4 +21,16 @@ public sealed class GqlLeftArrowConformanceTests
         statement.Diagnostics.ShouldBeEmpty();
         statement.GqlExpression.Matches.ShouldHaveSingleItem().Relationships.ShouldHaveSingleItem().Direction.ShouldBe(expected);
     }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Language] - JSON isolation: excluded Cypher arrows retain their existing diagnostics (#1722)")]
+    [InlineData("-->", "CG00008")]
+    [InlineData("<--", "CG00002")]
+    [InlineData("<-->", "CG00002")]
+    public void Parse_CypherArrows_ShouldRetainRefusal(string arrow, string code)
+    {
+        // Arrange / Act
+        var statement = new GqlQueryParser().Parse($"MATCH (a){arrow}(b) RETURN a, b");
+        // Assert
+        statement.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+    }
 }

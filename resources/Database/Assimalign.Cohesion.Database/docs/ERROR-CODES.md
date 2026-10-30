@@ -159,6 +159,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42P20) |
 | New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
 | New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY/ORDER BY or copies an explicit frame (42P20) |
+| New (#1722, SQ-N1) | CS01067 | Invalid JSON access or IS JSON operand signature (42883) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -188,6 +189,9 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS02075 | Incompatible RANGE offset domain (0A000) |
 | New (#1526, SQ-W3) | CS02076 | Negative or NaN RANGE offset (22013) |
 | New (#1721, SQ-O2) | CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
+| New (#1722, SQ-N1) | CS02078 | Malformed JSON access or assignment input, invalid Unicode/UTF-8 or depth over 128 (22032) |
+| New (#1722, SQ-N1) | CS02079 | JSON kind cannot convert to the requested numeric or Boolean scalar (22023) |
+| New (#1722, SQ-N1) | CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |

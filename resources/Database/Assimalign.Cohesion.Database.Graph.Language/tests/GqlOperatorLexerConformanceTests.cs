@@ -15,6 +15,7 @@ public sealed class GqlOperatorLexerConformanceTests
     [InlineData("!", new[] { TokenType.Bang })]
     [InlineData("<-", new[] { TokenType.LeftArrow })]
     [InlineData("->", new[] { TokenType.RightArrow })]
+    [InlineData("->>", new[] { TokenType.RightArrow, TokenType.GreaterThan })]
     [InlineData("<--", new[] { TokenType.LeftArrow, TokenType.Minus })]
     [InlineData("-->", new[] { TokenType.Comment })]
     [InlineData("<-[", new[] { TokenType.LeftArrow, TokenType.LeftBracket })]
@@ -50,6 +51,8 @@ public sealed class GqlOperatorLexerConformanceTests
     [InlineData("RETURN 1 | 2") ]
     [InlineData("RETURN 1 << 2") ]
     [InlineData("RETURN 1 >> 2") ]
+    [InlineData("RETURN '{}' -> 'a'")]
+    [InlineData("RETURN '{}' ->> 'a'")]
     [InlineData("RETURN 'a' ~~* 'A'")]
     public void Parse_SqlOperators_ShouldRemainRefused(string text)
     {

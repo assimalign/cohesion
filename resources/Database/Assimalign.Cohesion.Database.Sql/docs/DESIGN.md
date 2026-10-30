@@ -2880,8 +2880,8 @@ flowchart LR
   Typed shorthands create ordinary storage pairs. JSON and JSONB share CLR string/byte[]
   representations with TEXT/BYTEA, so their built-in entries use the assembly-local constructor;
   no public API, visibility grant or new storage wrapper is needed. The bound CAST retains
-  the source SQL identity so JSON-to-scalar pairs are refused during planning, rather than
-  being accidentally treated as text casts. All 19 shared SQL types are covered by the
+  the source SQL identity so explicit JSON-to-scalar pairs apply JSON kind conversion,
+  rather than accidentally treating them as text casts (#1722). All 19 shared SQL types are covered by the
   [dialect matrix](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#explicit-conversion-cast-1022-e3).
   CAST text reads temporal and interval input through public SqlLiteralText. TIME and INTERVAL
   plain-string assignment use those same readers (#1422), including trimmed input, day-time
@@ -2895,7 +2895,8 @@ flowchart LR
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
   round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
   to Single, avoiding a DOUBLE midpoint and second rounding (PostgreSQL numeric.c:4691-4696).
-  Integer targets refuse fractions; non-finite floats are range failures, CS02002/22003
+  Integer targets refuse fractions except JSON numbers, which round ties away from zero
+  (#1722); non-finite floats are range failures, CS02002/22003
   (float.c:1267-1270). Backslash-free BYTEA input encodes the original text, including surrounding
   whitespace (bytea.c:230-231); the hex form retains its separate trimmed-input grammar.
   INTERVAL output uses PostgreSQL's postgres-style day units and omits a zero clock after days
@@ -2903,8 +2904,8 @@ flowchart LR
   formatting, and every emitted form still passes through SqlLiteralText on input.
   JSON input uses JsonDocument at depth 128 and strict UTF-8, with no reflection or JsonSerializer.
   JSON text is preserved; JSONB is the same validated UTF-8 without normalization, so equality
-  stays byte equality. A future binary format needs a migration. INSERT's existing unvalidated
-  JSON-text acceptance is unchanged. Binary-producing casts detach delivery through the same
+  stays byte equality. A future binary format needs a migration. JSON/JSONB assignments
+  now validate input through SqlJsonAccess before storage (#1722). Binary-producing casts detach delivery through the same
   ownership path as application casts, including folded/shared constants and empty arrays.
 - **Allocation-free cast lookup (#1422).** The frozen cast index uses a value key holding storage
   ordinals and case-insensitive domain names. Lookup preserves domain-to-domain, domain-to-base,
@@ -2974,7 +2975,7 @@ parameter: PostgreSQL types it `unknown` and resolves it to the parameter, `pars
 `func_select_candidate`, which the design's narrow lattice does not, and which is an owner
 question); a volatility on `SqlCast`, which a phase that runs casts
 in a CHECK, an index or a generated expression, or applies `Implicit` contexts, needs first;
-a `COHESION_SCHEMA` view of casts; and JSON-to-scalar casts.
+a `COHESION_SCHEMA` view of casts. JSON scalar conversions are specified below (#1722).
 
 ## Modifier admission (#1438)
 
@@ -7747,6 +7748,57 @@ CK07001 with exact retained/omitted counts; the original Error category/message 
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
+
+## JSON access (#1722, SQ-N1)
+
+The existing SqlBinaryExpression gains JsonAccess and JsonTextAccess operators at the
+left-associative generic-operator rung. SQL combines the existing RightArrow token
+with an immediately adjacent GreaterThan token for ->>; shared lexer/token/profile
+values and keyword reservations do not change. SqlIsJsonExpression carries one operand,
+negation and SqlJsonKind (default VALUE); its IS precedence and nesting use the existing
+predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refusal.
+
+The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
+ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
+including grouping, windows, correlation, persisted equivalence and definition checks.
+JSON positions share a scoped CASE/COALESCE common-type resolver: unknown literals adopt
+declared alternatives, all-unknown sets become TEXT, and incompatible declared alternatives
+refuse before rows. The ordinary binder has no equivalent resolver; its rules outside these
+positions remain unchanged. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+parse_coerce.c:1357-1456. Bound selectors retain their SQL type and member/index overload;
+evaluation converts alternatives to that type before access.
+Adjacent arrows fold only in the bound tree into ordered selectors over one owned, validated
+document. Intermediate missing values still evaluate later selectors; casts and other
+expressions end a chain. Only the final value is serialized. Structural partial-index proofs
+compare source/selector types, overloads, ordered selectors, text mode and IS JSON kind/negation,
+map column offsets and render their witnesses. JSON restrictions remain outside error-free
+join pushdown because extraction may raise CS02078 on valid stored Unicode escapes.
+The shared reader validates complete input with strict UTF-8 and maximum depth 128;
+missing/wrong-container results, JSON null and SQL NULL remain distinct. The dialect
+specifies extraction, Unicode conversion and numeric/Boolean cast rules and PostgreSQL
+source anchors. JSONB storage, comparison and raw serialization remain unnormalized.
+Scalar JSONB roots follow the owner's non-array NULL rule at indexes 0/-1; the local
+PostgreSQL implementation instead indexes its internal raw-scalar wrapper there.
+
+Canonical rendering writes arrows and an explicit predicate kind. The persisted-format
+audit compared 12,951 accepted baseline statements at 311cdf224 with zero canonical
+changes and fixed points in both assemblies. Existing interpretation and stored syntax
+are unchanged; no format bump or compatibility reader is needed. Views, defaults and
+CHECK constraints containing the new forms round-trip across restart. JSON assignment
+admission now refuses malformed input; it does not rewrite existing row bytes.
+
+| Code | Condition |
+| --- | --- |
+| CS01067 | Invalid JSON access or IS JSON signature (42883) |
+| CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
+| CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+
+The extraction oracle performs 10,240 comparisons over generated nested values,
+negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.
+Deterministic three-round allocation minima prove linear input-size allocation; existing
+Release query/DML guards protect non-JSON paths. No reflection, JsonSerializer, public
+interface, cross-assembly visibility grant or wire value type is introduced.
 
 ## Integer bitwise operators (#1721, SQ-O2)
 

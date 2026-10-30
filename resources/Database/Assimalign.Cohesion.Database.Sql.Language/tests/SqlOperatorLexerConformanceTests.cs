@@ -20,6 +20,9 @@ public sealed class SqlOperatorLexerConformanceTests
     [InlineData("|", new[] { TokenType.Pipe })]
     [InlineData("<<", new[] { TokenType.LessThan, TokenType.LessThan })]
     [InlineData(">>", new[] { TokenType.GreaterThan, TokenType.GreaterThan })]
+    [InlineData("->", new[] { TokenType.RightArrow })]
+    [InlineData("->>", new[] { TokenType.RightArrow, TokenType.GreaterThan })]
+    [InlineData("-> >", new[] { TokenType.RightArrow, TokenType.GreaterThan })]
     [InlineData("~~*", new[] { TokenType.Tilde, TokenType.Tilde, TokenType.Asterisk })]
     [InlineData("!~~*", new[] { TokenType.Bang, TokenType.Tilde, TokenType.Tilde, TokenType.Asterisk })]
     public void Tokenize_OperatorSequences_ShouldRetainTokenTypes(string text, TokenType[] expected)

@@ -1246,6 +1246,50 @@ flow through scalar alternatives and set operands, every catalog view column is 
 catalog refusals retain structured diagnostics over the wire.
 
 
+## JSON access (#1722, SQ-N1)
+
+The existing SqlBinaryExpression gains JsonAccess and JsonTextAccess operators at the
+left-associative generic-operator rung. SQL combines the existing RightArrow token
+with an immediately adjacent GreaterThan token for ->>; shared lexer/token/profile
+values and keyword reservations do not change. SqlIsJsonExpression carries one operand,
+negation and SqlJsonKind (default VALUE); its IS precedence and nesting use the existing
+predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refusal.
+
+The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
+ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
+including grouping, windows, correlation, persisted equivalence and definition checks.
+The engine resolves CASE/COALESCE alternatives through one scoped common-type path in JSON
+positions, records the selector overload, and folds adjacent bound arrows over one validated
+document. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
+literal coercion and the CS02080 declared-type mismatch refusal; the conformance corpus covers
+common selectors and JSON partial predicates.
+The shared reader validates complete input with strict UTF-8 and maximum depth 128;
+missing/wrong-container results, JSON null and SQL NULL remain distinct. The dialect
+specifies extraction, Unicode conversion and numeric/Boolean cast rules and PostgreSQL
+source anchors. JSONB storage, comparison and raw serialization remain unnormalized.
+Scalar JSONB roots follow the owner's non-array NULL rule at indexes 0/-1; the local
+PostgreSQL implementation instead indexes its internal raw-scalar wrapper there.
+
+Canonical rendering writes arrows and an explicit predicate kind. The persisted-format
+audit compared 12,951 accepted baseline statements at 311cdf224 with zero canonical
+changes and fixed points in both assemblies. Existing interpretation and stored syntax
+are unchanged; no format bump or compatibility reader is needed. Views, defaults and
+CHECK constraints containing the new forms round-trip across restart. JSON assignment
+admission now refuses malformed input; it does not rewrite existing row bytes.
+
+| Code | Condition |
+| --- | --- |
+| CS01067 | Invalid JSON access or IS JSON signature (42883) |
+| CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
+| CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+
+The extraction oracle performs 10,240 comparisons over generated nested values,
+negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.
+Deterministic three-round allocation minima prove linear input-size allocation; existing
+Release query/DML guards protect non-JSON paths. No reflection, JsonSerializer, public
+interface, cross-assembly visibility grant or wire value type is introduced.
+
 ## Integer bitwise operators (#1721, SQ-O2)
 
 The existing binary/unary nodes carry integer bitwise operations. All binary operators
