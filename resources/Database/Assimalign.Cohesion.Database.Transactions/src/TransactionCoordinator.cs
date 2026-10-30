@@ -66,7 +66,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private readonly Func<TransactionSequence, CancellationToken, ValueTask<long>>? _indexPruner;
 
-    // True in the async flow of a statement apply that holds the apply gate, which is not
+    // True in the async flow of a statement apply or undo control holding the apply gate, which is not
     // reentrant: a checkpoint asked for from inside the apply is refused instead of waiting for
     // the gate its own caller holds.
     private readonly AsyncLocal<bool> _insideApply = new();
@@ -548,6 +548,89 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
     }
 
+    // XT-2 substrate only. These controls are deliberately internal until named/session
+    // scopes are integrated. Lock ownership is unchanged: all grants live until root end.
+    internal ValueTask<TransactionUndoMarker> CreateUndoMarkerAsync(TransactionContext context, CancellationToken cancellationToken = default)
+        => RunUndoControlAsync(context, null, rollback: false, release: false, cancellationToken);
+
+    internal async ValueTask ReleaseUndoMarkerAsync(TransactionContext context, TransactionUndoMarker marker, CancellationToken cancellationToken = default)
+        => _ = await RunUndoControlAsync(context, marker, rollback: false, release: true, cancellationToken).ConfigureAwait(false);
+
+    internal async ValueTask RollbackToUndoMarkerAsync(TransactionContext context, TransactionUndoMarker marker, CancellationToken cancellationToken = default)
+        => _ = await RunUndoControlAsync(context, marker, rollback: true, release: false, cancellationToken).ConfigureAwait(false);
+
+    // Deterministic admission seams for the owning test assembly.
+    internal Action? UndoMarkerValidated { get; set; }
+    internal Action? UndoControlAdmitted { get; set; }
+
+    private async ValueTask<TransactionUndoMarker> RunUndoControlAsync(TransactionContext context, TransactionUndoMarker? marker,
+        bool rollback, bool release, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (rollback || release) { ArgumentNullException.ThrowIfNull(marker); }
+        ThrowIfInsideApply();
+        if (!rollback)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var owner = _manager.EnterUndoControl(context, out _);
+            try
+            {
+                UndoControlAdmitted?.Invoke();
+                if (release) { _versionStore.ReleaseMarker(context.Sequence, marker!); }
+                else { marker = _versionStore.CreateMarker(context.Sequence); }
+                return marker!;
+            }
+            finally { owner.ExitApply(undoControl: true); }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        // Release does not take the apply gate. Validate optimistically, then revalidate
+        // under admitted control before starting undo; a release can win between them.
+        _versionStore.ValidateMarker(context.Sequence, marker!);
+        UndoMarkerValidated?.Invoke();
+        cancellationToken.ThrowIfCancellationRequested();
+        var undoOwner = _manager.EnterUndoControl(context, out bool undoWasPending, rollback: true);
+        try
+        {
+            try
+            {
+                _versionStore.BeginRollbackToMarker(context.Sequence, marker!);
+            }
+            catch
+            {
+                // Validation failed before the store installed Pending or did any undo.
+                // Only this attempt's newly installed retry fence may be removed.
+                if (!undoWasPending) { undoOwner.CompletePartialUndo(); }
+                throw;
+            }
+
+            _versionStore.BuildRollbackLookup(context.Sequence, marker!);
+            // Admission freezes this writer's ledger and end before prefix work. Other
+            // writers retain the apply gate until physical undo actually needs it.
+            await _applyGate.WaitAsync().ConfigureAwait(false);
+            _insideApply.Value = true;
+            try
+            {
+                await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                undoOwner.CompletePartialUndo();
+                return marker!;
+            }
+            finally
+            {
+                try
+                {
+                    if (Volatile.Read(ref _checkpointDeferred) != 0) { RunDeferredCheckpoint(); }
+                }
+                finally
+                {
+                    _insideApply.Value = false;
+                    _applyGate.Release();
+                }
+            }
+        }
+        finally { undoOwner.ExitApply(undoControl: true); }
+    }
+
     /// <summary>
     /// Applies a statement's physical mutations: acquires the apply gate (one
     /// writer statement applies at a time — page conflicts cannot exist), opens
@@ -619,11 +702,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             // Admission under the gate: a statement queued on the gate when its
             // transaction's end began is refused, and an end waits for the one
             // admitted apply of its context to exit before it undoes or commits.
-            var owner = _manager.EnterApply(context);
+            var owner = _manager.EnterApply(context, cancellationToken);
 
             try
             {
                 var bracket = _storage.BeginTransaction();
+                _versionStore.BeginStatement(context.Sequence);
 
                 lock (_sync)
                 {
@@ -638,6 +722,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 }
                 catch
                 {
+                    bool restoring = bracket.IsActive;
                     if (bracket.IsActive)
                     {
                         try
@@ -660,10 +745,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                         }
                     }
 
+                    if (restoring) { _versionStore.DiscardStatementSuffix(context.Sequence); }
                     throw;
                 }
                 finally
                 {
+                    _versionStore.EndStatement();
                     lock (_sync)
                     {
                         _statementBrackets.Remove(context.Sequence.Value);
@@ -677,13 +764,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
-            if (Volatile.Read(ref _checkpointDeferred) != 0)
+            try
             {
-                RunDeferredCheckpoint();
+                if (Volatile.Read(ref _checkpointDeferred) != 0) { RunDeferredCheckpoint(); }
             }
-
-            _insideApply.Value = false;
-            _applyGate.Release();
+            finally
+            {
+                _insideApply.Value = false;
+                _applyGate.Release();
+            }
         }
     }
 

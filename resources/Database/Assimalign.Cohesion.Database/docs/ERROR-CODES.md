@@ -534,6 +534,8 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK04005 | Transaction has already ended | — |
 | CK04006 | Transaction commit or rollback is in progress | — |
 | CK04007 | Running operation prevents transaction commit | — |
+| CK04008 | Undo marker is foreign, released, discarded or ended; undo control context is foreign, stale, a statement view or a snapshot pin (#1726) | — |
+| CK04009 | Partial undo is running or incomplete, or a statement/control/end prevents control admission; retry its target or an earlier marker, or roll back the transaction (#1726) | — |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
 | CK07003 | Session operations overlap | — |
