@@ -34,6 +34,10 @@ existing tokens and introduce no keyword reservations.
 
 ## SQL operator isolation (#1721)
 
+JSON access isolation (#1722) pins -> and ->> as the existing RightArrow and
+GreaterThan tokens. SQL alone joins them; GQL relationship arrows and OQL comparisons
+retain their grammar, and both languages still refuse SQL JSON access expressions.
+
 The shared lexer is unchanged. The operator corpus pins # as Unrecognized, ~, &, |
 and paired angle brackets as their existing tokens, with SQL bitwise syntax still refused.
 GQL additionally pins :A|B, :A&B, ! and <-, ->, <--, -->, <-[ boundaries.
