@@ -152,6 +152,7 @@ internal static class GraphCatalogCodec
         }
         if (record.Constraint is { } constraint)
         {
+            ArgumentException.ThrowIfNullOrWhiteSpace(constraint.Name);
             ArgumentException.ThrowIfNullOrWhiteSpace(constraint.PropertyKey);
             if (constraint.Type is { } constraintType && (byte)constraintType > (byte)DatabaseType.JsonBinary)
             {

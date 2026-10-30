@@ -176,7 +176,7 @@ public sealed class GraphCatalog
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public IReadOnlyList<GraphPropertyKeyMetadata> GetPropertyKeys(Guid definitionId, TransactionSnapshot snapshot)
     {
-        var declared = List(3, definitionId, snapshot).Select(item => item.Record.Property!.Value).ToArray();
+        var declared = GetDeclaredPropertyKeys(definitionId, snapshot);
         lock (_sync)
         {
             if (!_children.ContainsKey((5, definitionId))) { return declared; }
@@ -197,13 +197,25 @@ public sealed class GraphCatalog
         return properties.Values.OrderBy(item => item.Name, StringComparer.Ordinal).ToArray();
     }
 
+    internal IReadOnlyList<GraphPropertyKeyMetadata> GetDeclaredPropertyKeys(Guid definitionId, TransactionSnapshot snapshot)
+        => List(3, definitionId, snapshot).Select(item => item.Record.Property!.Value).ToArray();
+
+    internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
+    {
+        if (property.Type is { } type && GetConstraints(property.DefinitionId, snapshot)
+            .Any(item => item.PropertyKey == property.Name && item.Type is { } expected && expected != type))
+        {
+            throw ConstraintConflict(property.Name);
+        }
+    }
+
     /// <summary>Creates or alters property metadata on an existing mutable definition.</summary>
     /// <param name="property">The complete property definition.</param>
     /// <param name="context">The active logical transaction.</param>
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The property metadata is invalid.</exception>
-    /// <exception cref="GraphCatalogException">The owning definition is absent.</exception>
+    /// <exception cref="GraphCatalogException">The owning definition is absent, or a named type rule conflicts (CG03009).</exception>
     /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default)
@@ -213,11 +225,7 @@ public sealed class GraphCatalog
         GraphCatalogCodec.Validate(record);
         RequireMutableDefinition(property.DefinitionId, context.Snapshot, "ALTER");
         EnsureParentUnchanged(property.DefinitionId, context);
-        if (property.Type is { } type && GetConstraints(property.DefinitionId, Latest(context))
-            .Any(item => item.PropertyKey == property.Name && item.Type is { } expected && expected != type))
-        {
-            throw ConstraintConflict(property.Name);
-        }
+        EnsurePropertyKeyCompatible(property, Latest(context));
         return SaveAsync(record, EnsureUnchanged(3, property.DefinitionId, property.Name, context), context, cancellationToken);
     }
 

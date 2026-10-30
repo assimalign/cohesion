@@ -10,6 +10,10 @@ CONSTRAINTS is not added here. Duplicate names use CG03008, conflicting rules CG
 invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v1 refuses with
 CG06019; only v2 is read.
 
+A named constraint may repeat an identical unnamed property rule. The declarations are
+independent: dropping that constraint preserves the unnamed rule. Typed GetPropertyKeysAsync
+returns declared metadata only; SHOW PROPERTY KEYS continues to report effective rules.
+
 The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DESIGN.md](DESIGN.md).
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.

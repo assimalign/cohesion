@@ -11,11 +11,17 @@ CG03009, as do incompatible named and unnamed type rules. This follows Neo4j's g
 checks and equivalent-rule refusal in
 `C:/Source/repos/neo4j/neo4j/community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/Operations.java:2318-2349`.
 
+A named rule over an identical unnamed property declaration is accepted: the declarations are
+independent, and dropping the named constraint leaves the unnamed rule in force. Property-metadata
+saves check compatibility with named rules before scanning existing data, so an incompatible type
+reports structured CG03009 whether the owner is empty or populated.
+
 GraphConstraintMetadata persists the owner GUID, name, property key and optional type. A null
 type denotes existence (a non-null property is required); a type rule permits absent/null values.
-CreateConstraintAsync validates existing nodes or outgoing relationships, including self-loops,
-under the writer lock and latest visibility, refusing violations with CG03010. Validation on
-CREATE/INSERT, SET, REMOVE and MERGE uses the same effective property metadata as unnamed rules.
+CreateConstraintAsync streams the owner's label or relationship-type postings, including self-loops,
+under the writer lock and latest visibility, refusing violations with CG03010. It never materializes
+the graph or the owner's entities and stops at the first violation; an empty type visits no nodes.
+Validation on CREATE/INSERT, SET, REMOVE and MERGE uses the same effective property metadata as unnamed rules.
 DELETE can remove constrained entities. Property validation now carries CG03003 in structured
 diagnostics with unprefixed message text; catalog caller-error translation preserves its actual
 code. The wire continues composing codes at its existing boundary. Dropping one named constraint preserves other constraints
@@ -33,11 +39,22 @@ The typed API still joins the session operation, including explicit transactions
 the owner-approved explicit-transaction DDL refusal and text grammar/dispatch, and new-label
 index token creation. D3 supplies property warnings.
 
+GetPropertyKeysAsync returns declared metadata only; effective rules remain visible through SHOW
+PROPERTY KEYS and the constraint APIs. Reading and saving property metadata therefore cannot copy
+a named rule into an unnamed declaration. CreateConstraintAsync validates names, property keys,
+owner identities and supported types before statement admission, leaving an explicit transaction
+usable after a bad argument. SaveLabelAsync retains its older validation-inside-statement pattern
+as a follow-up. Oversized encoded constraint metadata reports DatabaseException with CG02009.
+
 The catalog record codec is v2 for every kind (1 label, 2 relationship type, 3 property, 4 index,
 5 constraint). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
 length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
 by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
 versions refuse with CG06019 before logical recovery scrub; no legacy reader or upgrade exists.
+The refusal happens before any logical write; physical redo of the journal runs first until
+[Storage #1744](https://github.com/assimalign/cohesion/issues/1744) is fixed. CG06019 names the database,
+including for uncheckpointed v1 images.
+
 The graph entity/tree format remains 5. Internal record variants reuse the existing payload
 slots, and constraint-free property reads skip constraint-list allocation. This keeps ordinary
 CREATE/SET/DELETE within the unchanged allocation guards. The NativeAOT guard checks named creation, discovery,

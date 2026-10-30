@@ -71,16 +71,16 @@ public sealed class GraphSchema
     public ValueTask<IReadOnlyList<GraphRelationshipTypeMetadata>> GetRelationshipTypesAsync(CancellationToken cancellationToken = default)
         => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphRelationshipTypeMetadata>>(_database.Catalog.GetRelationshipTypes(op.Context.Snapshot)), cancellationToken);
 
-    /// <summary>Lists property metadata for a label or relationship type.</summary>
+    /// <summary>Lists declared property metadata for a label or relationship type, excluding named constraint effects.</summary>
     /// <param name="definitionId">The label or relationship type identity.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The visible property definitions.</returns>
+    /// <returns>The visible declared property definitions, suitable for saving without copying named constraint effects.</returns>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">The session is closed, another statement holds it, or its transaction refuses statements (<c>CG04007</c>).</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CG06012</c>, #1243).</exception>
     public ValueTask<IReadOnlyList<GraphPropertyKeyMetadata>> GetPropertyKeysAsync(Guid definitionId, CancellationToken cancellationToken = default)
-        => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphPropertyKeyMetadata>>(_database.Catalog.GetPropertyKeys(definitionId, op.Context.Snapshot)), cancellationToken);
+        => _database.RunAsync(_session, op => new ValueTask<IReadOnlyList<GraphPropertyKeyMetadata>>(_database.Catalog.GetDeclaredPropertyKeys(definitionId, op.Context.Snapshot)), cancellationToken);
 
     /// <summary>Lists a label's property indexes.</summary>
     /// <param name="label">The label name.</param>
@@ -159,7 +159,7 @@ public sealed class GraphSchema
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="DatabaseException">
     /// The owning definition does not exist (<c>CG03003</c>, a caller error that a retry repeats); the property type is not supported by graph storage, or existing graph data violates the
-    /// property (both <c>CG03003</c>); the session is closed, another statement holds it, or its
+    /// property (both <c>CG03003</c>); a named type rule conflicts (<c>CG03009</c>); the session is closed, another statement holds it, or its
     /// transaction refuses statements (<c>CG04007</c>); or the transaction ended while the
     /// statement waited for the writer lock.
     /// </exception>
@@ -175,6 +175,7 @@ public sealed class GraphSchema
             if (type.Id != Guid.Empty) { EnsureMutable(type.Name, type.Owner, type.OwningSchema, "ALTER RELATIONSHIP TYPE"); }
             if (definition.Type is { } scalarType && !GraphDatabase.SupportsPropertyType(scalarType))
             { throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SchemaSavePropertyKeyAsyncDatabase, scalarType)); }
+            _database.Catalog.EnsurePropertyKeyCompatible(definition, latest);
             foreach (var node in _database.Store.GetNodes(label.Id == Guid.Empty ? null : label.Name, latest))
             {
                 if (label.Id != Guid.Empty) { Validate(node.Properties); }
@@ -347,9 +348,8 @@ public sealed class GraphSchema
     /// <param name="constraint">The owning definition, database-wide name, property and optional scalar type.</param>
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>Completion of constraint creation.</returns>
-    /// <exception cref="ArgumentException">The metadata is invalid.</exception>
-    /// <exception cref="DatabaseException">The name is taken (CG03008), a rule conflicts (CG03009), the owner is missing or the type unsupported (CG03003), or existing data violates the constraint (CG03010).</exception>
-    /// <exception cref="GraphElementTooLargeException">The encoded metadata exceeds one record.</exception>
+    /// <exception cref="ArgumentException">The metadata has a blank name or property key, or an empty owner identity; checked before the statement starts.</exception>
+    /// <exception cref="DatabaseException">The name is taken (CG03008), a rule conflicts (CG03009), the owner is missing or the type unsupported (CG03003), existing data violates the constraint (CG03010), or encoded metadata exceeds one record (CG02009). Unsupported types are checked before the statement starts.</exception>
     /// <exception cref="ObjectDisposedException">The database has been disposed.</exception>
     /// <exception cref="OperationCanceledException">The cancellation token was canceled.</exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (CG06012).</exception>
@@ -358,19 +358,22 @@ public sealed class GraphSchema
     /// <exception cref="DatabaseTransactionAbortedException">The schema changed after the transaction snapshot (CG04007).</exception>
     /// <exception cref="DatabaseTransactionCommitUnconfirmedException">The autocommit commit could not be confirmed durable.</exception>
     public ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, CancellationToken cancellationToken = default)
-        => WriteAsync(async op =>
+    {
+        // Caller-contract failures precede statement admission and leave explicit transactions usable.
+        if (constraint.Type is { } scalarType && !GraphDatabase.SupportsPropertyType(scalarType))
         {
-            if (constraint.Type is { } scalarType && !GraphDatabase.SupportsPropertyType(scalarType))
-            {
-                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintTypeUnsupported, scalarType);
-                throw new DatabaseException(message, [new Types.Diagnostic
-                { Code = "CG03003", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
-            }
+            string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintTypeUnsupported, scalarType);
+            throw new DatabaseException(message, [new Types.Diagnostic
+            { Code = "CG03003", Message = message, Severity = Types.DiagnosticSeverity.Error }]);
+        }
+        GraphCatalogCodec.Validate(new CatalogRecord(constraint: constraint));
+        return WriteAsync(async op =>
+        {
             await _database.Catalog.CreateConstraintAsync(constraint, op.Context, cancellationToken).ConfigureAwait(false);
             var latest = _database.LatestSnapshot(op.Context);
             if (_database.Catalog.FindLabel(constraint.DefinitionId, latest) is { } label)
             {
-                foreach (var node in _database.Store.GetNodes(label.Name, latest))
+                foreach (var node in _database.Store.StreamLabels([label.Name], latest, cancellationToken))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     Validate(node.Properties);
@@ -378,11 +381,10 @@ public sealed class GraphSchema
             }
             else
             {
-                foreach (var node in _database.Store.GetNodes(null, latest))
+                var type = _database.Catalog.FindRelationshipType(constraint.DefinitionId, latest)!.Value;
+                foreach (var edge in _database.Store.StreamRelationshipTypes([type.Name], latest, cancellationToken))
                 {
-                    await foreach (var edge in _database.Store.GetIncidentAsync(node.Id, GraphIncidentDirection.Outgoing,
-                        [constraint.DefinitionId], latest, cancellationToken).ConfigureAwait(false))
-                    { Validate(edge.Properties); }
+                    Validate(edge.Properties);
                 }
             }
             void Validate(IReadOnlyDictionary<string, object?> properties)
@@ -397,6 +399,7 @@ public sealed class GraphSchema
                 }
             }
         }, cancellationToken);
+    }
 
     /// <summary>Drops a constraint by name, preserving every other constraint and property definition.</summary>
     /// <param name="name">The database-wide constraint name.</param>
