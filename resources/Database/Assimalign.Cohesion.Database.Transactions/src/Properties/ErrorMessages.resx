@@ -28,6 +28,7 @@
   <data name="WriteStreamLimitExceeded" xml:space="preserve">
     <value>A transaction cannot have more than 65,535 open write streams.</value>
   </data>
+  <data name="WriteStreamNotRegistered" xml:space="preserve"><value>No open write stream is registered for this transaction.</value></data>
   <data name="UndoOpenWriteStream" xml:space="preserve">
     <value>An open write stream prevents undo marker control.</value>
   </data>

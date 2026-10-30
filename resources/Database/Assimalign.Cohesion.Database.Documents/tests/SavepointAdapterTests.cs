@@ -10,7 +10,9 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Documents.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Transactions.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Documents.Tests;
@@ -18,6 +20,59 @@ namespace Assimalign.Cohesion.Database.Documents.Tests;
 [Collection("Savepoint engine races")]
 public sealed class SavepointAdapterTests
 {
+    [Theory(DisplayName = "Cohesion Test [Documents] - Full rollback: retained own versions preserve the live committed catalog and index predecessor")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rollback_MarkedRepeatedSave_ShouldPreserveLivePredecessor(bool rollbackToFirst)
+    {
+        // Arrange
+        await using var engine = DocumentDatabaseEngine.Create("rollback-live", new());
+        var database = await engine.CreateDatabaseAsync("source");
+        await using var session = await database.CreateSessionAsync();
+        var collection = await session.CreateCollectionAsync("items");
+        await session.ExecuteAsync("CREATE UNIQUE INDEX by_n ON items (n)");
+        await collection.PutAsync(session, "one", """{"n":0}"""u8.ToArray());
+        await using var observer = await database.CreateSessionAsync();
+        await using var observation = await observer.BeginTransactionAsync();
+        await using (var transaction = await session.BeginTransactionAsync())
+        {
+            var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
+            await collection.PutAsync(session, "one", """{"n":1}"""u8.ToArray());
+            await collection.PutAsync(session, "one", """{"n":2}"""u8.ToArray());
+            if (rollbackToFirst)
+            {
+                await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);
+                await collection.PutAsync(session, "one", """{"n":3}"""u8.ToArray());
+                await collection.PutAsync(session, "one", """{"n":4}"""u8.ToArray());
+            }
+            // Act
+            await transaction.RollbackAsync();
+        }
+
+        // Assert against the live catalog, including a snapshot pinned before the writer.
+        Encoding.UTF8.GetString((await collection.GetAsync(session, "one"))!.Value.Content.Span).ShouldBe("""{"n":0}""");
+        var observing = await observer.GetCollectionAsync("items");
+        Encoding.UTF8.GetString((await observing.GetAsync(observer, "one"))!.Value.Content.Span).ShouldBe("""{"n":0}""");
+        await using var replacement = await session.BeginTransactionAsync();
+        await collection.PutAsync(session, "one", """{"n":5}"""u8.ToArray());
+        using (var records = database.DataStorage.GetUnitIterator(0))
+        {
+            int predecessors = 0;
+            while (records.MoveNext())
+            {
+                var unit = records.Current;
+                if (DocumentCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex).Document is not { } document || document.Name != "one") { continue; }
+                var stamps = RecordVersionStamp.ReadStamps(unit.Data.Span);
+                if (stamps.Writer != replacement.Context.Sequence)
+                { stamps.Deleter.ShouldBe(replacement.Context.Sequence); predecessors++; }
+            }
+            predecessors.ShouldBe(1);
+        }
+        // The predecessor's unique posting must have been tombstoned along with its metadata.
+        await collection.PutAsync(session, "two", """{"n":0}"""u8.ToArray());
+        await replacement.CommitAsync();
+    }
+
     [Theory(DisplayName = "Cohesion Test [Documents] - Savepoint adapters: open streams refuse controls and release registration on every completion path")]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -72,13 +127,21 @@ public sealed class SavepointAdapterTests
         await using var observation = await observer.BeginTransactionAsync();
         var observing = await observer.GetCollectionAsync("items");
         await using var transaction = await session.BeginTransactionAsync();
+        await using var committedObserver = await database.CreateSessionAsync();
+        var committedCollection = await committedObserver.GetCollectionAsync("items");
         await collection.PutAsync(session, "one", """{"n":1}"""u8.ToArray());
         var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
         await collection.PutAsync(session, "one", """{"n":2}"""u8.ToArray());
         await collection.PutAsync(session, "two", """{"n":9}"""u8.ToArray());
         await session.CreateCollectionAsync("transient");
         // Act
-        await UndoReaderProbe.RunAsync(async () => { Encoding.UTF8.GetString((await observing.GetAsync(observer, "one"))!.Value.Content.Span).ShouldBe("""{"n":0}"""); }, async () =>
+        await UndoReaderProbe.RunAsync(async () =>
+        {
+            Encoding.UTF8.GetString((await observing.GetAsync(observer, "one"))!.Value.Content.Span).ShouldBe("""{"n":0}""");
+            await using var fresh = await committedObserver.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+            Encoding.UTF8.GetString((await committedCollection.GetAsync(committedObserver, "one"))!.Value.Content.Span).ShouldBe("""{"n":0}""");
+            await fresh.CommitAsync();
+        }, async () =>
         {
             await collection.PutAsync(session, "one", """{"n":2}"""u8.ToArray());
             await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);

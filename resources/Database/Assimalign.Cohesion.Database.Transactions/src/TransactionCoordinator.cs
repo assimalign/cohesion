@@ -778,7 +778,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                         }
                     }
 
-                    if (restoring) { _versionStore.DiscardStatementSuffix(context.Sequence); }
+                    if (restoring)
+                    {
+                        try { _versionStore.DiscardStatementSuffix(context.Sequence); }
+                        catch
+                        {
+                            owner.MarkPartialUndoPending();
+                            throw;
+                        }
+                    }
                     throw;
                 }
                 finally

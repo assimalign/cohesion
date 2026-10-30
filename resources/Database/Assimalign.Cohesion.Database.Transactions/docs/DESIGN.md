@@ -102,6 +102,15 @@ aligned size. A separate pending boolean added eight bytes per statement pin and
 SQL Release allocation guards; packing the flags keeps the existing budgets. No per-context
 object, delegate or collection is added to transactions that never set a marker.
 
+If a statement's memory compensation fails after bracket rollback, the complete suffix stays
+in the ledger and CK04009 fences writes and commit until rollback-to or whole rollback repairs
+it. A commit already draining that statement rechecks the fence without another ordinary-path
+latch acquisition and returns its end claim to the still-active writer. Created-version undo
+reuses the confirmed stamp-read bytes for catalog unlink on partial and full rollback; it never
+copies a second SQL row or document/blob chunk just to invoke an unused observer.
+Returning the claim is serialized with manager disposal; if disposal has already begun, the
+draining commit owns whole rollback instead, so disposal cannot lose an active writer.
+
 Markers have no durable identities. Partial undo uses the existing physical WAL operations and
 root-writer stamps. A later root commit makes the remaining prefix and preceding undo durable
 in journal order; without a root commit, recovery scrubs every remaining effect of that writer,
@@ -128,12 +137,14 @@ write-after-undo reuse and copied live crash images.
 
 ### Lock scopes and model maintenance (#1726, XT-3)
 
-Lock markers use a lazy per-writer grant journal under the lock-table monitor. Each grant,
-including an unchanged re-acquisition, remembers its preceding mode mask and first-grant stamp.
+Lock markers use a lazy per-writer grant journal under the lock-table monitor. Each changed
+mode mask remembers its preceding mask and first-grant stamp. Same-mode regrants do no journal
+lookup or append, so journal size follows distinct resources and mode changes.
 Reverse undo restores the exact pre-marker mask, releasing newly acquired resources and key
 locks and reverting upgrades while preserving earlier holdings. Release retains the journal
 when an enclosing marker remains, transferring the child grants to that scope; last release
-transfers all grants to the root. End drops the journal. The waits-for graph continues to be
+transfers all grants to the root. End drops the journal; the last marked owner's release or end
+resets the journal directory to null and restores the lookup-free grant path. The waits-for graph continues to be
 read from the current table and queue; undo schedules every affected queue before notifying
 waiters outside the monitor. Unused owner-directory entries are removed during suffix undo.
 This follows PostgreSQL resource-owner count removal and reassignment in
@@ -152,9 +163,10 @@ maintenance seam and restore idempotently; failed physical statements compensate
 reverse before discarding their ledger suffix. Whole-writer undo now uses the same reverse
 order so these adapters also compose with root abort and retry.
 
-TransactionRecordSpace supplies protected opaque-marker controls, structured failure
-classification and lifecycle hooks. These are the inverted model composition seam, with no
-public token promotion, new public interface, reflection or shipped friend assembly. Models
+Anonymous controls and failure classification on TransactionRecordSpace are internal.
+The model seam retains only protected instance stream registration and protected internal
+observer hooks. Test-only cached reflection delegates reach anonymous controls from the linked
+model probes; shipped code adds no reflection, public token or friend assembly. Models
 retain their before-images only for marked writers and repair only affected identities. This
 keeps a small undo independent of the database's full catalog or graph population.
 
@@ -165,12 +177,20 @@ statement/control admission. Atomic counter updates and a full control-side stor
 make stream registration and marker admission mutually exclusive without a new context field,
 allocation or monitor acquisition on ordinary stream registration. Completion, cancellation and
 failure release the registration exactly once. Ending/ended contexts report aborted even when
-the stream count is saturated. Same-owner stream/control operations remain
+the stream count is saturated. Stream end validates its owner and uses a checked CAS decrement:
+an unpaired end throws InvalidOperationException without underflowing the packed count.
+Same-owner stream/control operations remain
 session-serialized. The existing lifecycle callback restores no stream state.
 
 XT-4 still owns named scopes, language/session integration and the aborted-block read fence.
+It must define the owned marker/token and structured failure surface needed by those sessions;
+protected statics on an arbitrary record-space subclass are not that admission contract.
 The substrate refuses writes and commit after incomplete undo; the session must also refuse
 reads until successful retry or root rollback. XT-5 supplies cross-model wire/reset conformance.
+
+Reader probes pause after a physical undo batch releases its page latches and require a read
+to start and finish within that same interval. Every model completes both pinned Snapshot and
+fresh READ COMMITTED reads there; a mutex serializing readers against undo fails the probe.
 
 ## Why MVCC (and not lock-based isolation)
 

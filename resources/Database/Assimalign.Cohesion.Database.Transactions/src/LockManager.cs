@@ -614,7 +614,11 @@ public sealed class LockManager
         // Child effects already share the parent's journal. Dropping its last marker
         // transfers every grant to the root without inspecting or changing the table.
         if (anyMarkers) { return; }
-        lock (_sync) { _scopeGrants?.Remove(owner.Value); }
+        lock (_sync)
+        {
+            _scopeGrants?.Remove(owner.Value);
+            if (_scopeGrants?.Count == 0) { _scopeGrants = null; }
+        }
     }
 
     internal void RollbackToUndoMarker(TransactionSequence owner, TransactionUndoMarker marker)
@@ -713,6 +717,7 @@ public sealed class LockManager
         {
             _abandoned.Remove(owner.Value);
             _scopeGrants?.Remove(owner.Value);
+            if (_scopeGrants?.Count == 0) { _scopeGrants = null; }
             DequeueOwnerLocked(owner.Value, ref ended);
 
             // Only the owner's entries can change: a request waits only for the grants and the
@@ -1052,12 +1057,12 @@ public sealed class LockManager
     private void GrantLocked(LockEntry entry, ulong owner, LockMode mode, Waiter? queued, ref List<Waiter>? victims)
     {
         bool holder = entry.Granted.TryGetValue(owner, out var grant);
-        if (_scopeGrants is not null && _scopeGrants.TryGetValue(owner, out var changes))
-        { changes.Add(new ScopeGrant(entry.Resource, grant)); }
         byte held = grant.Modes;
         byte holds = (byte)(held | Bit(mode));
         if (holds != held)
         {
+            if (_scopeGrants is not null && _scopeGrants.TryGetValue(owner, out var changes))
+            { changes.Add(new ScopeGrant(entry.Resource, grant)); }
             entry.Granted[owner] = new LockGrant(holds, holder ? grant.Sequence : Interlocked.Increment(ref _grantSequence));
         }
 

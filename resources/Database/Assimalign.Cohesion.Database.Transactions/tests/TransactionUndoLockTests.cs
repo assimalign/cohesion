@@ -1,5 +1,7 @@
 using System;
 using System.Diagnostics;
+using System.Collections;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -16,6 +18,91 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 public sealed class TransactionUndoLockTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Lock journal: releasing or ending the final marked owner restores the null fast path")]
+    public async Task ReleaseMarker_LastOwner_ShouldDisableJournalLookup()
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var first = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var second = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var firstMarker = await coordinator.CreateUndoMarkerAsync(first);
+        var secondMarker = await coordinator.CreateUndoMarkerAsync(second);
+        var field = typeof(LockManager).GetField("_scopeGrants", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        // Act / Assert
+        await coordinator.ReleaseUndoMarkerAsync(first, firstMarker);
+        ((IDictionary)field.GetValue(coordinator.LockManager)!).Count.ShouldBe(1);
+        await coordinator.ReleaseUndoMarkerAsync(second, secondMarker);
+        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        await coordinator.CreateUndoMarkerAsync(first);
+        await coordinator.CommitAsync(first);
+        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        await coordinator.CommitAsync(second);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Transactions] - Marker boundary: anonymous controls are internal")]
+    [InlineData("CreateUndoMarkerAsync")]
+    [InlineData("ReleaseUndoMarkerAsync")]
+    [InlineData("RollbackToUndoMarkerAsync")]
+    [InlineData("GetUndoFailureCode")]
+    public void MarkerControl_AnonymousSeam_ShouldRemainInternal(string name)
+    {
+        // Arrange / Act
+        var method = typeof(TransactionRecordSpace).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!;
+        // Assert
+        method.IsAssembly.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Stream boundary: end validates a null owner")]
+    public void EndWriteStream_NullContext_ShouldRefuseArgument()
+    {
+        // Arrange
+        var driver = new UndoMarkerDriver();
+        // Act / Assert
+        Should.Throw<ArgumentNullException>(() => driver.FinishStream(null!));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Undo streams: an unpaired end cannot underflow or poison later controls")]
+    public async Task EndWriteStream_UnpairedEnd_ShouldRefuseWithoutChangingCount()
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        // Act / Assert
+        Should.Throw<InvalidOperationException>(writer.EndWriteStream);
+        writer.HasOpenWriteStreams.ShouldBeFalse();
+        writer.BeginWriteStream();
+        writer.EndWriteStream();
+        Should.Throw<InvalidOperationException>(writer.EndWriteStream);
+        writer.HasOpenWriteStreams.ShouldBeFalse();
+        var marker = await coordinator.CreateUndoMarkerAsync(writer);
+        await coordinator.ReleaseUndoMarkerAsync(writer, marker);
+        await coordinator.CommitAsync(writer);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Lock journal: same-mode regrants scale with resources and last release disables lookup")]
+    public async Task Acquire_SameModeRegrants_ShouldBoundJournalAndResetLastScope()
+    {
+        // Arrange
+        using var storage = new UndoTestStorage();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
+        var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        var marker = await coordinator.CreateUndoMarkerAsync(writer);
+        var field = typeof(LockManager).GetField("_scopeGrants", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        // Act
+        for (int i = 0; i < 1_000; i++)
+        { await coordinator.LockManager.AcquireAsync(writer.Sequence, LockResource.Entry(1, (ulong)(i % 3)), LockMode.Exclusive); }
+        // Assert
+        var journals = (IDictionary)field.GetValue(coordinator.LockManager)!;
+        ((ICollection)journals[writer.Sequence.Value]!).Count.ShouldBe(3);
+        await coordinator.ReleaseUndoMarkerAsync(writer, marker);
+        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        await coordinator.LockManager.AcquireAsync(writer.Sequence, LockResource.Entry(1, 10), LockMode.Exclusive);
+        field.GetValue(coordinator.LockManager).ShouldBeNull();
+        await coordinator.RollbackAsync(writer);
+    }
 
     [Theory(DisplayName = "Cohesion Test [Transactions] - Undo lifecycle: rejected foreign ended contexts cannot clean a colliding local scope")]
     [InlineData(false)]

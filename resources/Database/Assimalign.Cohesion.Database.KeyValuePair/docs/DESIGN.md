@@ -11,7 +11,8 @@ catalog DDL retains its existing independent transaction posture; no syntax is a
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
 format changes. Named controls and language/session admission belong to XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
-and without the root commit.
+and without the root commit. The reader probe requires both pinned Snapshot and fresh READ COMMITTED
+reads to start and finish inside physical undo after page latches are released.
 
 ## Worker lane isolation (#1279)
 

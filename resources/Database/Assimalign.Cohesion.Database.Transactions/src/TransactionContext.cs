@@ -196,14 +196,41 @@ public sealed class TransactionContext
         // or this registration sees its flag. Model sessions serialize stream/control work.
         if ((Volatile.Read(ref owner._admission) & (endingFlag | partialUndoFlag | undoControlFlag)) != 0 || owner.State != TransactionState.Active)
         {
-            Interlocked.Add(ref owner._applying, -streamUnit);
+            owner.EndWriteStream();
             if ((Volatile.Read(ref owner._admission) & endingFlag) != 0 || owner.State != TransactionState.Active)
             { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
             throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
         }
     }
 
-    internal void EndWriteStream() => Interlocked.Add(ref (_transaction ?? this)._applying, -streamUnit);
+    internal void EndWriteStream()
+    {
+        var owner = _transaction ?? this;
+        while (true)
+        {
+            int before = Volatile.Read(ref owner._applying);
+            if ((before & ~applyMask) == 0)
+            { throw new InvalidOperationException(ErrorMessages.WriteStreamNotRegistered); }
+            if (Interlocked.CompareExchange(ref owner._applying, unchecked(before - streamUnit), before) == before) { return; }
+        }
+    }
+
+    internal void MarkPartialUndoPending()
+    {
+        var owner = _transaction ?? this;
+        lock (_endSync) { owner._admission |= partialUndoFlag; }
+    }
+
+    // A commit may have claimed the end while its admitted statement was still running.
+    // Compensation can fail during that drain. Return the claim to the active writer so
+    // it can retry undo; ordinary commits add no latch acquisition.
+    internal bool HasFailedCompensation => (Volatile.Read(ref (_transaction ?? this)._admission) & partialUndoFlag) != 0;
+
+    internal void ReopenAfterFailedCompensation()
+    {
+        var owner = _transaction ?? this;
+        lock (_endSync) { owner._admission = (byte)(owner._admission & ~endingFlag); }
+    }
 
     internal void CompletePartialUndo()
     {

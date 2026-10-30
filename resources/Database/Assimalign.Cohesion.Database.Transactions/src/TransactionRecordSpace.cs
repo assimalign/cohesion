@@ -34,8 +34,7 @@ public abstract class TransactionRecordSpace
     {
     }
 
-    // Protected controls keep opaque marker identities inside the kernel while model
-    // adapters can compose them without reflection, public token types or friend assemblies.
+    // Anonymous marker controls stay internal until XT-4 owns named/session admission.
     /// <summary>Creates an anonymous undo scope for the supplied coordinator and transaction.</summary>
     /// <param name="coordinator">The owning coordinator.</param>
     /// <param name="context">The transaction's lifecycle context.</param>
@@ -44,7 +43,7 @@ public abstract class TransactionRecordSpace
     /// <exception cref="ArgumentNullException">A dependency is null.</exception>
     /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
     /// <exception cref="Exception">A structured CK04008, CK04009 or CK04010 undo refusal; classify with GetUndoFailureCode.</exception>
-    protected static async ValueTask<object> CreateUndoMarkerAsync(TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken = default)
+    internal static async ValueTask<object> CreateUndoMarkerAsync(TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         return await coordinator.CreateUndoMarkerAsync(context, cancellationToken).ConfigureAwait(false);
@@ -59,7 +58,7 @@ public abstract class TransactionRecordSpace
     /// <exception cref="ArgumentNullException">A dependency is null.</exception>
     /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
     /// <exception cref="Exception">A structured CK04008, CK04009 or CK04010 undo refusal; classify with GetUndoFailureCode.</exception>
-    protected static ValueTask ReleaseUndoMarkerAsync(TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken = default)
+    internal static ValueTask ReleaseUndoMarkerAsync(TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         return coordinator.ReleaseUndoMarkerAsync(context, RequireMarker(marker), cancellationToken);
@@ -74,7 +73,7 @@ public abstract class TransactionRecordSpace
     /// <exception cref="ArgumentNullException">A dependency is null.</exception>
     /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
     /// <exception cref="Exception">A structured CK04008, CK04009 or CK04010 undo refusal; classify with GetUndoFailureCode.</exception>
-    protected static ValueTask RollbackToUndoMarkerAsync(TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken = default)
+    internal static ValueTask RollbackToUndoMarkerAsync(TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         return coordinator.RollbackToUndoMarkerAsync(context, RequireMarker(marker), cancellationToken);
@@ -83,7 +82,7 @@ public abstract class TransactionRecordSpace
     /// <summary>Classifies a shared undo failure without exposing the kernel's internal exception type.</summary>
     /// <param name="exception">The failure raised by an undo control.</param>
     /// <returns>The structured CK04 identity, or null for another failure.</returns>
-    protected static string? GetUndoFailureCode(Exception exception) => (exception as Internal.TransactionUndoException)?.Code;
+    internal static string? GetUndoFailureCode(Exception exception) => (exception as Internal.TransactionUndoException)?.Code;
 
     private static Internal.TransactionUndoMarker RequireMarker(object marker)
         => marker as Internal.TransactionUndoMarker ?? throw new Internal.TransactionUndoException("CK04008", ErrorMessages.UndoMarkerInvalid);
@@ -91,7 +90,7 @@ public abstract class TransactionRecordSpace
     /// <summary>Registers an incomplete streamed write that excludes marker controls.</summary>
     /// <param name="context">The stream's owning transaction.</param>
     /// <exception cref="ArgumentNullException">The context is null.</exception>
-    protected static void BeginWriteStream(TransactionContext context)
+    protected void BeginWriteStream(TransactionContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         context.BeginWriteStream();
@@ -99,7 +98,13 @@ public abstract class TransactionRecordSpace
 
     /// <summary>Releases a previously registered streamed write exactly once.</summary>
     /// <param name="context">The stream's owning transaction.</param>
-    protected static void EndWriteStream(TransactionContext context) => context.EndWriteStream();
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    /// <exception cref="InvalidOperationException">No write stream is registered.</exception>
+    protected void EndWriteStream(TransactionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        context.EndWriteStream();
+    }
 
     internal void UndoScopesChanged(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger) => OnUndoScopesChangedCore(writer, active, ledger);
     internal void TransactionEnded(TransactionContext context) => OnTransactionEndedCore(context);
@@ -108,14 +113,14 @@ public abstract class TransactionRecordSpace
     /// <summary>Observes marker creation/release for marker-only model ledgers.</summary>
     /// <param name="writer">The scope's root writer.</param><param name="active">Whether a marker remains.</param><param name="ledger">The shared ordered ledger.</param>
     /// <remarks>Creation must be exception-atomic; release and root-end cleanup must not throw. The kernel unwinds an unpublished marker after a creation failure.</remarks>
-    protected virtual void OnUndoScopesChangedCore(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger) { }
+    protected internal virtual void OnUndoScopesChangedCore(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger) { }
     /// <summary>Ends marker-only model state after the root transaction ends.</summary>
     /// <param name="context">The ended transaction.</param>
     /// <remarks>Cleanup is idempotent and must not throw; disposal can repeat an earlier end notification.</remarks>
-    protected virtual void OnTransactionEndedCore(TransactionContext context) { }
-    /// <summary>Removes a created version's model directory reference during partial undo.</summary>
+    protected internal virtual void OnTransactionEndedCore(TransactionContext context) { }
+    /// <summary>Removes a created version's model directory reference during partial or full undo.</summary>
     /// <param name="page">The version's page.</param><param name="slot">The version's slot.</param><param name="record">The version before deletion.</param>
-    protected virtual void OnCreatedVersionUndoneCore(PageId page, int slot, ReadOnlyMemory<byte> record) { }
+    protected internal virtual void OnCreatedVersionUndoneCore(PageId page, int slot, ReadOnlyMemory<byte> record) { }
 
     /// <summary>
     /// Reads a complete stamped record at the given physical location.

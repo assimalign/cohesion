@@ -35,6 +35,9 @@ public sealed class RecordSpaceVersionStore : VersionStore
     // existing lock, so even never-marked transactions pay no additional lock or allocation.
     private TransactionSequence _statementWriter;
     private int _statementPosition = -1;
+    // Test-only progress seam after an undo batch mutates records and releases page
+    // latches, before its physical commit. No store/model monitor is held here.
+    internal Action? UndoBatchApplied { get; set; }
 
     // These seams require exclusive admission for this writer; physical undo also holds the
     // apply gate. When both are needed, the gate precedes _sync, and _sync
@@ -101,7 +104,19 @@ public sealed class RecordSpaceVersionStore : VersionStore
         if (entries is null) { return; }
         // The apply gate freezes the writer's list. No store monitor spans a model
         // callback; models can take their own cache monitor while restoring memory.
-        for (int i = entries.Count - 1; i >= _statementPosition; i--) { entries[i].Index?.StatementRolledBack(); }
+        try
+        {
+            for (int i = entries.Count - 1; i >= _statementPosition; i--) { entries[i].Index?.StatementRolledBack(); }
+        }
+        catch
+        {
+            lock (_sync)
+            {
+                if (_undoScopes?.TryGetValue(writer.Value, out var scopes) == true)
+                { scopes.Pending = scopes.Markers[^1]; }
+            }
+            throw;
+        }
         lock (_sync) { entries.RemoveRange(_statementPosition, entries.Count - _statementPosition); }
     }
 
@@ -184,8 +199,9 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 var entry = entries[index];
                 if ((entry.Kind is LedgerEntryKind.Tombstoned or LedgerEntryKind.IndexEntryTombstoned) &&
                     tombstonesToUndo?.Contains(entry) == false) { continue; }
-                await UndoEntryAsync(writer, entries[index], bracket, CancellationToken.None, partial: true).ConfigureAwait(false);
+                await UndoEntryAsync(writer, entries[index], bracket, CancellationToken.None).ConfigureAwait(false);
             }
+            UndoBatchApplied?.Invoke();
             bracket.Commit(awaitDurability: false);
             lock (_sync) { entries.RemoveRange(start, end - start); }
         }
@@ -637,7 +653,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     }
 
     private async ValueTask<long> UndoEntryAsync(TransactionSequence writer, LedgerEntry entry,
-        StorageTransaction bracket, CancellationToken cancellationToken, bool partial = false)
+        StorageTransaction bracket, CancellationToken cancellationToken)
     {
         long removed = 0;
         // Index references belong to the index adapter and need not be row locations.
@@ -647,11 +663,12 @@ public sealed class RecordSpaceVersionStore : VersionStore
         switch (entry.Kind)
         {
             case LedgerEntryKind.Created:
-                if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _) && createdWriter == writer)
+                if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _, out var before) && createdWriter == writer)
                 {
-                    var before = partial ? _records.Read(pageId, slotIndex) : default;
                     _records.Delete(bracket, pageId, slotIndex);
-                    if (partial) { _records.CreatedVersionUndone(pageId, slotIndex, before); }
+                    // The confirmed stamp read already owns these bytes. Reuse them for
+                    // catalog unlink on partial AND full undo, without a second record copy.
+                    _records.CreatedVersionUndone(pageId, slotIndex, before);
                     removed++;
                 }
 
@@ -715,11 +732,15 @@ public sealed class RecordSpaceVersionStore : VersionStore
     /// </exception>
     /// <exception cref="StorageIOException">The version's page could not be read; handled as a failed checksum is.</exception>
     private bool TryReadStamps(PageId pageId, int slotIndex, out TransactionSequence writer, out TransactionSequence deleter)
+        => TryReadStamps(pageId, slotIndex, out writer, out deleter, out _);
+
+    private bool TryReadStamps(PageId pageId, int slotIndex, out TransactionSequence writer, out TransactionSequence deleter,
+        out ReadOnlyMemory<byte> record)
     {
         writer = default;
         deleter = default;
 
-        if (!_storage.TryReadRecord(pageId, slotIndex, out var record))
+        if (!_storage.TryReadRecord(pageId, slotIndex, out record))
         {
             return false;
         }

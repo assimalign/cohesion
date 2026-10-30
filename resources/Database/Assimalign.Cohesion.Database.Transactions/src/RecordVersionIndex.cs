@@ -77,7 +77,7 @@ public abstract class RecordVersionIndex
 
     /// <summary>Compensates model-owned memory after the containing physical statement rolls back.</summary>
     /// <remarks>Index adapters need no action; reversible maintenance adapters restore their before-image idempotently.</remarks>
-    protected virtual void OnStatementRolledBackCore() { }
+    protected internal virtual void OnStatementRolledBackCore() { }
 
     /// <summary>
     /// Erases the entry when its writer stamp is <paramref name="writer"/> (see <see cref="EraseAsync"/>).

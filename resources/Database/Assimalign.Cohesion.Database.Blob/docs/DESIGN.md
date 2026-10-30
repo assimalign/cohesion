@@ -8,11 +8,15 @@ container/blob version without reading content or scanning the catalog. An open 
 marker controls with CK04010 because buffered data and in-place chunk links cannot be bisected.
 Completion, failure, cancellation and repeated disposal settle registration exactly once.
 Completed multi-chunk uploads and old-chain tombstones use the shared reverse ledger.
+Full rollback unlinks the same exact catalog references before writer untracking, preserving
+the committed predecessor for live reads and the next save's tombstone. The undo observer reuses
+the confirmed stamp-read bytes; chunks receive no second copy for that observer.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
 format changes. Named controls and language/session admission belong to XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
-and without the root commit.
+and without the root commit. Live-catalog tests cover full rollback and rollback-to followed by
+full rollback. Pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
 
 | Code | Condition |
 |---|---|

@@ -10,7 +10,9 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Blob.Internal;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Transactions.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Blob.Tests;
@@ -18,6 +20,57 @@ namespace Assimalign.Cohesion.Database.Blob.Tests;
 [Collection("Savepoint engine races")]
 public sealed class SavepointAdapterTests
 {
+    [Theory(DisplayName = "Cohesion Test [Blob] - Full rollback: retained own versions preserve the live committed catalog and predecessor")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Rollback_MarkedRepeatedSave_ShouldPreserveLivePredecessor(bool rollbackToFirst)
+    {
+        // Arrange
+        await using var engine = BlobDatabaseEngine.Create("rollback-live", new());
+        var database = await engine.CreateDatabaseAsync("source");
+        await using var session = await database.CreateSessionAsync();
+        var container = await session.CreateContainerAsync("items");
+        await Write(container, "one", 0);
+        await using var observer = await database.CreateSessionAsync();
+        await using var observation = await observer.BeginTransactionAsync();
+        var observing = await observer.GetContainerAsync("items");
+        await using (var transaction = await session.BeginTransactionAsync())
+        {
+            var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
+            await Write(container, "one", 1);
+            await Write(container, "one", 2);
+            if (rollbackToFirst)
+            {
+                await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);
+                await Write(container, "one", 3);
+                await Write(container, "one", 4);
+            }
+            // Act
+            await transaction.RollbackAsync();
+        }
+
+        // Assert against the live catalog and a snapshot pinned before the writer.
+        (await Read(container, "one")).ShouldBe(new byte[20_000]);
+        (await Read(observing, "one")).ShouldBe(new byte[20_000]);
+        await using var replacement = await session.BeginTransactionAsync();
+        await Write(container, "one", 5);
+        using (var records = database.DataStorage.GetUnitIterator(0))
+        {
+            int predecessors = 0;
+            while (records.MoveNext())
+            {
+                var unit = records.Current;
+                if (BlobCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex).Blob is not { } blob || blob.Name != "one") { continue; }
+                var stamps = RecordVersionStamp.ReadStamps(unit.Data.Span);
+                if (stamps.Writer != replacement.Context.Sequence)
+                { stamps.Deleter.ShouldBe(replacement.Context.Sequence); predecessors++; }
+            }
+            predecessors.ShouldBe(1);
+        }
+        await replacement.CommitAsync();
+        (await Read(container, "one")).ShouldBe(Enumerable.Repeat((byte)5, 20_000).ToArray());
+    }
+
     [Theory(DisplayName = "Cohesion Test [Blob] - Savepoint adapters: open streams refuse controls and release registration on every completion path")]
     [InlineData(false, false)]
     [InlineData(true, false)]
@@ -71,13 +124,21 @@ public sealed class SavepointAdapterTests
         await using var observation = await observer.BeginTransactionAsync();
         var observing = await observer.GetContainerAsync("items");
         await using var transaction = await session.BeginTransactionAsync();
+        await using var committedObserver = await database.CreateSessionAsync();
+        var committedContainer = await committedObserver.GetContainerAsync("items");
         await Write(container, "one", 1);
         var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
         await Write(container, "one", 2);
         await Write(container, "two", 9);
         await session.CreateContainerAsync("transient");
         // Act
-        await UndoReaderProbe.RunAsync(async () => { (await Read(observing, "one")).ShouldBe(Enumerable.Repeat((byte)0, 20_000).ToArray()); }, async () =>
+        await UndoReaderProbe.RunAsync(async () =>
+        {
+            (await Read(observing, "one")).ShouldBe(new byte[20_000]);
+            await using var fresh = await committedObserver.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+            (await Read(committedContainer, "one")).ShouldBe(new byte[20_000]);
+            await fresh.CommitAsync();
+        }, async () =>
         {
             await Write(container, "one", 2);
             await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);

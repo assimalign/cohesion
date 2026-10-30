@@ -514,6 +514,19 @@ public sealed class TransactionManager : IAsyncDisposable
             // No statement applies once the end is claimed; one already applying finishes
             // first, so the commit record follows every bracket stamped with the sequence.
             await owned.WaitForAppliesAsync().ConfigureAwait(false);
+            if (owned.HasFailedCompensation)
+            {
+                bool closing;
+                lock (_sync)
+                {
+                    // Disposal either sees the returned end claim or this commit
+                    // remains responsible for aborting the writer it is draining.
+                    closing = _disposed;
+                    if (!closing) { owned.ReopenAfterFailedCompensation(); }
+                }
+                if (closing) { await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false); }
+                throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
+            }
 
             try
             {

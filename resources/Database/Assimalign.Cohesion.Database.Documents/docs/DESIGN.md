@@ -9,11 +9,16 @@ IndexUndo equality/hash use the immutable catalog identity and physical index ge
 independent of the apply gate. Open chunk streams refuse marker controls with CK04010 and
 refuse a 65,536th registration with CK04011 and release registration once on completion, failure or cancellation. Completed chains undo with
 metadata and postings through ordinary physical operations; no whole-catalog reload occurs.
+Full rollback invokes the same exact-reference unlink as partial undo before writer untracking,
+so retained own versions cannot hide a committed predecessor in the live catalog. A later save
+tombstones that predecessor and its unique postings normally. Undo observers reuse the confirmed
+stamp-read buffer, including for chunks, rather than making another copy.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
 format changes. Named controls and language/session admission belong to XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
-and without the root commit.
+and without the root commit. Live-catalog tests cover full rollback and rollback-to followed by
+full rollback. Pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
 
 | Code | Condition |
 |---|---|
