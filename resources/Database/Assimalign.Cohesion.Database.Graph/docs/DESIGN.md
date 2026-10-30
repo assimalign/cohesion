@@ -1,5 +1,59 @@
 # Graph engine design
 
+## Database-wide schema names and named constraints (#1738, GQ-D1)
+
+Index and constraint names share one database-wide, ordinal case-sensitive namespace. A name
+lookup uses a version-aware name directory; it never scans every label. The database writer
+lock serializes reservations through commit or rollback. A stale Snapshot writer reports the
+existing CG04007 conflict; a current duplicate reports CG03008. Label/type names retain their
+separate namespaces. Equivalent type or existence constraints on one property refuse with
+CG03009, as do incompatible named and unnamed type rules. This follows Neo4j's global name
+checks and equivalent-rule refusal in
+`C:/Source/repos/neo4j/neo4j/community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/Operations.java:2318-2349`.
+
+GraphConstraintMetadata persists the owner GUID, name, property key and optional type. A null
+type denotes existence (a non-null property is required); a type rule permits absent/null values.
+CreateConstraintAsync validates existing nodes or outgoing relationships, including self-loops,
+under the writer lock and latest visibility, refusing violations with CG03010. Validation on
+CREATE/INSERT, SET, REMOVE and MERGE uses the same effective property metadata as unnamed rules.
+DELETE can remove constrained entities. Property validation now carries CG03003 in structured
+diagnostics with unprefixed message text; catalog caller-error translation preserves its actual
+code. The wire continues composing codes at its existing boundary. Dropping one named constraint preserves other constraints
+and persisted property metadata. Creating a constraint also discovers an untyped property key
+when none was declared, so dropping the last constraint retains the known key without its rule.
+A failed creation rolls back both the new key and constraint. Ownership always follows the parent and prevents child mutation on schema-owned
+definitions. Typed GetConstraintsAsync/FindConstraintAsync expose names; GetIndexesAsync and
+FindIndexAsync offer database-wide lookup. DropIndexAsync coordinates the physical and catalog
+tombstones. Dropping an absent named object reports CG01021.
+
+SHOW PROPERTY KEYS reports effective type/required rules. SHOW OBJECT OWNERSHIP includes each
+named CONSTRAINT with its owning definition and inherited authority; existing columns stay fixed.
+SHOW INDEXES retains its label-then-name ordering. No SHOW CONSTRAINTS grammar is added in D1.
+The typed API still joins the session operation, including explicit transactions; D2 must add
+the owner-approved explicit-transaction DDL refusal and text grammar/dispatch, and new-label
+index token creation. D3 supplies property warnings.
+
+The catalog record codec is v2 for every kind (1 label, 2 relationship type, 3 property, 4 index,
+5 constraint). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
+length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
+by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
+versions refuse with CG06019 before logical recovery scrub; no legacy reader or upgrade exists.
+The graph entity/tree format remains 5. Internal record variants reuse the existing payload
+slots, and constraint-free property reads skip constraint-list allocation. This keeps ordinary
+CREATE/SET/DELETE within the unchanged allocation guards. The NativeAOT guard checks named creation, discovery,
+enforcement and independent drops. Catalog SaveIndexAsync retains same-record upsert semantics;
+typed CreateIndexAsync refuses every existing schema name. Crash images cover committed and abandoned constraint
+creation/drop, independent identities and named-index drop. An empty catalog has no versioned
+records to refuse. No wire bytes, public interface or assembly boundary changes are needed.
+
+| Code | Condition |
+| --- | --- |
+| CG01021 | Named index or constraint to drop is absent |
+| CG03008 | Shared database-wide schema name is taken |
+| CG03009 | Duplicate constraint kind or incompatible property type rules |
+| CG03010 | Existing data violates a new named constraint |
+| CG06019 | Unsupported catalog record format; only v2 is admitted |
+
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
@@ -1937,7 +1991,7 @@ Ownership follows SQL's `COHESION_SCHEMA.OBJECT_OWNERSHIP` vocabulary: `OBJECT_T
 authority, never a graph namespace. Label and relationship-type rows report their persisted owner.
 Property and index metadata has no independent ownership field: its rows report the parent
 definition's authority because catalog mutation enforcement checks that parent. `OBJECT_TYPE` is
-`LABEL`, `RELATIONSHIP TYPE`, `PROPERTY KEY` or `INDEX`; the definition identity disambiguates children.
+`LABEL`, `RELATIONSHIP TYPE`, `PROPERTY KEY`, `INDEX` or `CONSTRAINT`; the definition identity disambiguates children.
 
 The executor reads all definitions and children using the operation's existing pinned MVCC snapshot.
 Snapshot transactions retain their original visibility; ReadCommitted and auto-commit statements
@@ -2952,7 +3006,7 @@ The Catalog component is part of `Assimalign.Cohesion.Database.Graph`, with publ
 #### Catalog: Intent and dependencies
 
 The catalog gives each logical graph database a durable vocabulary. A label or relationship
-type has a stable GUID identity and an ordinal, case-sensitive name. Property and index
+type has a stable GUID identity and an ordinal, case-sensitive name. Property, index and named constraint
 metadata references the stable identity, so dropping and recreating the same name does not
 reuse old child metadata. Identities cannot be reused across definitions or renamed.
 Label names and relationship-type names occupy separate namespaces.
@@ -3017,13 +3071,14 @@ The payload begins at byte 16:
 
 | Offset / order | Encoding | Meaning |
 | --- | --- | --- |
-| 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index |
-| 17 | byte | Format version, currently 1 |
-| 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4 |
+| 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index, 5 named constraint |
+| 17 | byte | Format version, currently 2; earlier versions refuse with CG06019 before logical scrub |
+| 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4/5 |
 | 34 | string | Definition name, property key, or index name |
 | Following name, kinds 1/2 | byte, string | `DatabaseObjectOwner` value and owning schema |
 | Following name, kind 3 | byte, byte | Shared `DatabaseType` value (255 means unconstrained), required flag (0 or 1) |
 | Following name, kind 4 | string | Indexed scalar property key |
+| Following name, kind 5 | string, byte | Constrained property key and type (255 means existence) |
 
 All fixed-width numeric values are little-endian. Strings use a signed 32-bit little-endian
 UTF-8 byte length followed by exactly that many strict UTF-8 bytes. Length -1 represents
@@ -3048,17 +3103,18 @@ now make them through the same member.
 
 Saving a version tombstones the old version and inserts the new one inside one shared physical
 statement bracket. Both changes register with the coordinator's version store. Deleting a
-definition tombstones its property and index records in that same bracket. A failed bracket
+definition tombstones its property, index and constraint records in that same bracket. A failed bracket
 publishes no directory references; logical rollback removes created versions and restores
 deleters. Snapshot readers continue to see their original definitions until they leave.
 
-Recovery order is storage open, coordinator analyze-and-scrub, catalog open, then coordinator
+Recovery order is storage open, graph/index and catalog format fences, coordinator analyze-and-scrub, catalog open, then coordinator
 complete-recovery. The graph store separately scrubs physical index entries before the recovery
 checkpoint. Catalog crash tests copy live data and WAL before disposal, proving that committed
 definitions survive and partial definition/child changes disappear.
 
 Identity discovery uses an in-memory id → set of (kind, name) keys for labels/types. Child
-discovery uses (kind, parent id) → ordinal sorted names for properties/indexes. Both are built
+discovery uses (kind, parent id) → ordinal sorted names for properties/indexes/constraints.
+A shared ordinal schema-name directory locates indexes and constraints across every parent. Both are built
 on open and maintained under the same catalog lock as the version directory; stale-reference
 removal prunes their entries. They select candidates only: every result still reloads and decodes
 the record and applies the original per-version MVCC checks. Recreating a dropped name with

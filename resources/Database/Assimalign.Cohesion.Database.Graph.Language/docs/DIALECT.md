@@ -1,5 +1,15 @@
 # Cohesion GQL dialect
 
+Typed GraphSchema manages database-wide index/constraint names (#1738, GQ-D1). Named type
+and existence constraints are independently droppable; creation checks existing data and all
+entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their combined type and
+required state; SHOW OBJECT OWNERSHIP includes named CONSTRAINT rows with parent ownership.
+The existing column contracts remain fixed. Typed schema writes still join explicit transactions
+in D1; text DDL, transaction-policy refusal and new-label index tokens belong to D2. SHOW
+CONSTRAINTS is not added here. Duplicate names use CG03008, conflicting rules CG03009,
+invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v1 refuses with
+CG06019; only v2 is read.
+
 The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DESIGN.md](DESIGN.md).
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.

@@ -427,6 +427,33 @@ public sealed class GqlProfileExecutionTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Graph] - SHOW corpus: named constraints project effective property rules and independent identities")]
+    public async Task Profile_NamedConstraintShowCorpus_ShouldExposeEffectiveMetadataAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("schema-corpus", new());
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync();
+        var schema = GraphSchema.Open(database, session);
+        await schema.SaveLabelAsync(new(_personLabelId, "Person"));
+        await schema.CreateConstraintAsync(new(_personLabelId, "age_type", "age", Types.DatabaseType.Int64));
+        await schema.CreateConstraintAsync(new(_personLabelId, "age_exists", "age"));
+        var corpus = new ExecutionCase[]
+        {
+            new("SHOW PROPERTY KEYS", [["audit", "LABEL", _personLabelId, "Person", "age", "Int64", true]]),
+            new("SHOW OBJECT OWNERSHIP", [
+                ["audit", "LABEL", _personLabelId, "Person", "LABEL", "Person", "Adhoc", null],
+                ["audit", "LABEL", _personLabelId, "Person", "PROPERTY KEY", "age", "Adhoc", null],
+                ["audit", "LABEL", _personLabelId, "Person", "CONSTRAINT", "age_exists", "Adhoc", null],
+                ["audit", "LABEL", _personLabelId, "Person", "CONSTRAINT", "age_type", "Adhoc", null]]),
+        };
+        // Act / Assert
+        foreach (var item in corpus) { await ExecuteAndVerifyAsync(session, item, GqlClauses.Show, CancellationToken.None); }
+        await schema.DropConstraintAsync("age_exists");
+        await ExecuteAndVerifyAsync(session, new("SHOW PROPERTY KEYS",
+            [["audit", "LABEL", _personLabelId, "Person", "age", "Int64", false]]), GqlClauses.Show, CancellationToken.None);
+    }
+
     /// <summary>Demonstrates that a newly advertised clause cannot silently escape the execution matrix.</summary>
     [Fact(DisplayName = "Cohesion Test [Graph] - A profile addition without execution data fails conformance")]
     public void Profile_AdditionalUnmappedClause_FailsCoverage()

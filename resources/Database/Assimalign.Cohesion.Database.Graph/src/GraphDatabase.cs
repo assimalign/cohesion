@@ -87,6 +87,12 @@ public sealed partial class GraphDatabase : DatabaseInstance
         try
         {
             GraphStore.EnsureIndexFormat(storage);
+            GraphCatalog.EnsureFormat(storage);
+        }
+        catch (GraphCatalogException exception)
+        {
+            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            throw new DatabaseException(exception.Message, exception.Diagnostics, exception);
         }
         catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
@@ -556,7 +562,9 @@ public sealed partial class GraphDatabase : DatabaseInstance
             bool present = properties?.TryGetValue(key.Name, out value) == true && value is not null;
             if (!deferRequired && key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name));
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = "CG03003", Message = message, Severity = DiagnosticSeverity.Error }]);
             }
         }
         // Discovery records untyped keys; explicitly supplied metadata can constrain them.

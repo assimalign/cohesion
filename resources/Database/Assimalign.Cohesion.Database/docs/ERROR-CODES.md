@@ -420,6 +420,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1736, GQ-C2) | CG01018 | Binding/names — missing reduce/list-predicate declaration or identical accumulator and iterator names |
 | New (#1537, GQ-E1) | CG01019 | Binding/names — outer binding has a proven incompatible correlated pattern kind |
 | New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
+| New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
@@ -431,6 +432,9 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
 | New (#1735, GQ-M2 fixes) | CG03006 | Constraints — repeated or already-bound MERGE node has labels or properties |
 | New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
+| New (#1738, GQ-D1) | CG03008 | Schema — database-wide index/constraint name is already used |
+| New (#1738, GQ-D1) | CG03009 | Constraints — duplicate constraint kind or incompatible property type rule |
+| New (#1738, GQ-D1) | CG03010 | Constraints — existing data violates a newly created named constraint |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
@@ -454,6 +458,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
+| New (#1738, GQ-D1) | CG06019 | Format — graph catalog record version differs from v2; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |
