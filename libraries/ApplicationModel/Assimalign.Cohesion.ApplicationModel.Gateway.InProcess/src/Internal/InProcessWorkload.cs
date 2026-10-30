@@ -19,6 +19,7 @@ internal sealed class InProcessWorkload
 
     private InProcessWorkload(
         InProcessProgram program,
+        DeploymentId deployment,
         IReadOnlyDictionary<SettingName, string> settings,
         int endpointPort,
         AppEnvironmentScope scope,
@@ -27,9 +28,13 @@ internal sealed class InProcessWorkload
         _program = program;
         _scope = scope;
         _shutdown = shutdown;
+        Deployment = deployment;
         Settings = settings;
         EndpointPort = endpointPort;
     }
+
+    /// <summary>Gets the deployment that started the program.</summary>
+    public DeploymentId Deployment { get; }
 
     /// <summary>Gets the settings the program runs with.</summary>
     public IReadOnlyDictionary<SettingName, string> Settings { get; }
@@ -39,6 +44,12 @@ internal sealed class InProcessWorkload
 
     /// <summary>Gets whether the program's entry point has returned or thrown.</summary>
     public bool HasExited => _exited.Task.IsCompleted;
+
+    /// <summary>
+    /// Gets a task that completes when the program's entry point returns, and faults with the
+    /// program's exception when it throws.
+    /// </summary>
+    public Task Exited => _exited.Task;
 
     /// <summary>
     /// Starts the program's entry point on a new background thread that enters the program's
@@ -51,12 +62,13 @@ internal sealed class InProcessWorkload
     /// </remarks>
     public static InProcessWorkload Start(
         InProcessProgram program,
+        DeploymentId deployment,
         IReadOnlyDictionary<string, string> variables,
         IReadOnlyDictionary<SettingName, string> settings,
         int endpointPort)
     {
         var shutdown = new CancellationTokenSource();
-        var workload = new InProcessWorkload(program, settings, endpointPort, AppEnvironmentScope.Create(variables, shutdown.Token), shutdown);
+        var workload = new InProcessWorkload(program, deployment, settings, endpointPort, AppEnvironmentScope.Create(variables, shutdown.Token), shutdown);
         var thread = new Thread(workload.Run)
         {
             IsBackground = true,

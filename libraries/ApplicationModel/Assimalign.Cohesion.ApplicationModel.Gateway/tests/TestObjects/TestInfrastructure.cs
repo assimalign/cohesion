@@ -23,6 +23,12 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
     public HashSet<ResourceName> Silent { get; } = [];
 
     /// <summary>
+    /// Resources whose workload stops right after its deployment starts, before any instance
+    /// publishes: failing with the exception, or ending without one when the value is null.
+    /// </summary>
+    public ConcurrentDictionary<ResourceName, Exception?> Crashing { get; } = new();
+
+    /// <summary>
     /// Resources whose instance starts only once the task the function returns completes; their
     /// deployment returns at once, as a platform's does before the workload is ready.
     /// </summary>
@@ -124,7 +130,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         RunningExtensions[resource.Name] = Describe(resource.Extensions);
         Seen[resource.Name] = resource;
         Running[resource.Name] = Revisions.GetValueOrDefault(resource.Name, "1");
-        if (Silent.Contains(resource.Name))
+        if (Silent.Contains(resource.Name) || Crashing.ContainsKey(resource.Name))
         {
             return;
         }
@@ -136,6 +142,23 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         }
 
         await StartInstanceAsync(resource.Provider, resource.Name, cancellationToken);
+    }
+
+    public async ValueTask WatchResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, DeploymentId deployment, CancellationToken cancellationToken = default)
+    {
+        Record($"watch:{resource.Name}");
+        if (Crashing.TryGetValue(resource.Name, out Exception? failure))
+        {
+            if (failure is not null)
+            {
+                throw failure;
+            }
+
+            return;
+        }
+
+        // A workload that keeps running is watched until the gateway stops waiting.
+        await Task.Delay(Timeout.Infinite, cancellationToken);
     }
 
     public async ValueTask TeardownResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default)

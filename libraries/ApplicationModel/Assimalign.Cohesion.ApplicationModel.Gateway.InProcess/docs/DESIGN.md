@@ -132,6 +132,13 @@ infrastructure cancels the program's shutdown token; its host drains and its ent
 `StopTimeout` (thirty seconds) bounds the wait. A program that does not stop in time is left on its
 background thread, which ends with the process, because a thread cannot be ended from outside.
 
+**I11 — A program that stops before it publishes is reported at once (2026-10-29).** The gateway
+watches each deployment while it waits for its first instance (Gateway G36). The infrastructure's
+watch waits for the deployment's program: it returns when the entry point returns, and throws the
+exception the entry point threw. So a program that fails its composition fails the gateway's run
+within moments, with its own exception as the run's inner exception, instead of a timeout after
+the whole window. A deployment whose program no longer runs has ended.
+
 **I10 — The endpoint output is the loopback address.** `GetResourceOutputsAsync` reports
 `endpoint` = `http://127.0.0.1:<port>` for a running program, so a dependent's setting that uses
 `orders.Endpoint` receives the address the program serves.
@@ -154,8 +161,8 @@ None. The package raises no events and has no event source.
 
 ## Open questions
 
-1. **A program that ends before it publishes** is noticed only when its startup window closes. The
-   provider knows at once, but the gateway has no way to hear it.
+1. **A program that ends before it publishes — settled by I11.** The gateway hears it at once, with
+   the program's exception.
 2. **Generated bindings.** The SDK should emit the `AddProgram` calls for a gateway's referenced
    programs. A top-level-statements program has no entry point a delegate can name, so the binding
    needs either a generated wrapper or `Assembly.EntryPoint` with trimming roots.

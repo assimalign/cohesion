@@ -40,6 +40,8 @@ internal sealed class GatewayResource
     private InfrastructureChange _change;
     private string? _revision;
     private DeploymentId? _deployment;
+    private Exception? _stopCause;
+    private int _stopped;
     private int _state;
     private int _current;
     private int _tornDown;
@@ -86,6 +88,19 @@ internal sealed class GatewayResource
     public bool IsCurrent => Volatile.Read(ref _current) != 0;
 
     public bool IsTornDown => Volatile.Read(ref _tornDown) != 0;
+
+    // Whether the deployment's workload stopped before an instance published, which closed the
+    // window early; StopCause is the failure the provider reported, or null for a workload that ended.
+    public bool IsStopped => Volatile.Read(ref _stopped) != 0;
+
+    public Exception? StopCause => Volatile.Read(ref _stopCause);
+
+    // Records why a workload stopped. Call it only once the window is closed.
+    public void MarkStopped(Exception? cause)
+    {
+        Volatile.Write(ref _stopCause, cause);
+        Volatile.Write(ref _stopped, 1);
+    }
 
     // Applies the plan the resource's step made, with the deployment it makes unless the plan is None.
     // Call it before the provider deploys the resource, because an in-process provider's instances

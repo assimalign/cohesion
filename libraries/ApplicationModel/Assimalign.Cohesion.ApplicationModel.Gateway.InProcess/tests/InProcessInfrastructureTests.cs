@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
@@ -187,6 +188,28 @@ public class InProcessInfrastructureTests
         // Assert
         storefront.Runs.ShouldHaveSingleItem().Stopped.IsCompleted.ShouldBeTrue();
         orders.Runs.ShouldHaveSingleItem().Stopped.IsCompleted.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A program that throws before it publishes fails the run at once, with its exception")]
+    public async Task RunAsync_WhenAProgramThrowsBeforeItPublishes_ShouldFailAtOnceWithItsException()
+    {
+        // Arrange: the startup window is ten seconds; the program fails its composition at once.
+        await using var infrastructure = new InProcessInfrastructure();
+        var failure = new InvalidOperationException("The orders database is not configured.");
+        var orders = new TestProgram("Web", "orders-api") { Failure = failure };
+        infrastructure.AddProgram("Web", "orders-api", orders.MainAsync);
+        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        builder.AddResource("Web", "orders-api");
+        long started = Stopwatch.GetTimestamp();
+
+        // Act
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => builder.Build().RunAsync());
+
+        // Assert
+        Stopwatch.GetElapsedTime(started).ShouldBeLessThan(TimeSpan.FromSeconds(5));
+        exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.ResourceFailed);
+        exception.Message.ShouldContain("Web/orders-api (InvalidOperationException: The orders database is not configured.)", Case.Sensitive);
+        exception.InnerException.ShouldBeSameAs(failure);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A resource without a program fails the run before anything deploys")]

@@ -73,6 +73,7 @@ sequenceDiagram
         GW->>Infra: DeployResourceAsync if created or updated
         GW->>Store: SaveAsync(record)
         Infra->>Inst: start or replace the workload
+        GW->>Infra: WatchResourceAsync, until an instance publishes
         Inst->>GW: PublishAsync(manifest)
         GW->>Store: SaveAsync(record)
         GW-->>Inst: snapshots to restore, and a lease
@@ -116,12 +117,12 @@ are ready.
 | `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`Model`, `RunAsync`), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationParentGateway` (`JoinAsync`, a child's join). `RecordAsync` records a write's snapshot and saves the record. Exposes `Name`, `Resources` (the aggregates), `Children`, `StartupTimeout`, `LeaseDuration`, and `Started`. `CreateBuilder(name)` creates its builder. |
 | `ApplicationBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure (`UseInfrastructure`), the record store (`UseStore`), the parent (`UseParent`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
 | `IApplicationParentGateway`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
-| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
+| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), watches the deployment's workload until an instance publishes and reports one that stops first (`WatchResourceAsync`, G36), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IApplicationResourceDeployment`, `ApplicationResourceDeployment`, `IApplicationResourceAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
 | `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read, plus the epoch of the run that holds it. `AcquireAsync` takes the record over with a higher epoch, `SaveAsync` refuses a save from an earlier one, and `LoadAsync` reads without taking anything over (G35). Children are not recorded. |
 | `JsonFileApplicationGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. Every read and write holds an exclusive lock on the gateway's lock file, so taking over and saving are atomic across processes. The local default; a platform package backs the store with durable storage of its own. |
-| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`), a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `OutputMissing` for a setting whose output the provider or the parent did not report), and a run a later one superseded (`RecordSuperseded`). |
+| `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`), a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `ResourceFailed` for a workload that stopped before an instance published, with its failure as the inner exception; `OutputMissing` for a setting whose output the provider or the parent did not report), and a run a later one superseded (`RecordSuperseded`). |
 
 In ApplicationModel.Definition: `IApplicationModel.Role` and `ApplicationGatewayRole` say whether a
 gateway joins a parent, and `IApplicationParent` names the parent's outputs a model's settings use.
@@ -471,6 +472,30 @@ meets the file being replaced. A store over a database uses the database's compa
   one is ready; a crashed holder would need a lease to expire first.
 - Optimistic concurrency on the record's version. It lets the first writer win, so the old gateway's
   next save would stop the new one, the wrong run.
+
+**G36 — A workload that stops before it publishes fails its step at once (2026-10-29).** The gateway
+learned only from publications that a deployment had started, so a workload that crashed on start
+(a port in use, a missing setting) cost the whole startup window. The run then failed with
+`StartupTimedOut`, naming the resource but never the cause. In process, the program's exception
+was swallowed when the program stopped.
+- **Watch.** Right after `DeployResourceAsync`, the gateway calls `WatchResourceAsync` and waits for
+  whichever comes first: an instance of the deployment publishing, the watch ending, or the window
+  closing. The watch returns when the workload ended, throws the platform's failure when it failed,
+  and is cancelled once the gateway stops waiting. A provider that cannot observe its workloads waits
+  for the cancellation, and the window decides, as before.
+- **Fail at once.** A watch that ends first closes the window at once. An instance that registered
+  meanwhile still counts, because closing the window and registering race on the same atomic
+  transition (G4). The resource is then treated as one that missed its window: a new one is torn
+  down, an update keeps whatever the platform runs, and what depends on it is skipped (G20).
+- **Report the cause.** When workloads stopped, the run fails with `ResourceFailed`. The message
+  names each one with its failure's type and message, or "ended", then anything that missed its
+  window and what did not deploy. The failure itself is the inner exception, an
+  `AggregateException` when there are several.
+
+Only stopping before the first publication counts: an instance that fails after it published is
+supervision's, which waits for health and liveness. *Rejected:* `DeployResourceAsync` returning a
+handle with a failure task. The gateway would have to dispose each handle, and the provider would
+keep watching a workload nobody waits for; a cancelled watch ends with the wait.
 
 **G9 — No HTTP here, yet; it will be a transport over Web (owner direction, 2026-10-29).** COHLIB001
 bars a library from referencing Web, and COHRES003 bars Web (any resource package) from referencing

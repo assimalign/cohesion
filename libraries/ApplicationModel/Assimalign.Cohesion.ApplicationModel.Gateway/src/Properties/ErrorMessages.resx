@@ -45,6 +45,11 @@
   <data name="GatewayInfrastructureMissing" xml:space="preserve"><value>Gateway '{0}' has no infrastructure provider; call UseInfrastructure before Build.</value></data>
   <data name="GatewayParentMissing" xml:space="preserve"><value>The model of gateway '{0}' joins parent '{1}', but the gateway has no connection to it; call UseParent with the parent gateway.</value></data>
   <data name="ApplicationGatewayAlreadyBuilt" xml:space="preserve"><value>The gateway is already built; its builder accepts no changes.</value></data>
+  <data name="GatewayResourcesStopped" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) stopped before an instance published: {2}. New resources were torn down; updated resources keep whatever instances the platform still runs.</value></data>
+  <data name="GatewayResourcesStoppedAlsoMissed" xml:space="preserve"><value>{0} more published no manifest within {1}: {2}.</value></data>
+  <data name="GatewayResourcesStoppedSkipped" xml:space="preserve"><value>Not deployed, because something they depend on did not start: {0}.</value></data>
+  <data name="GatewayResourceFailedWith" xml:space="preserve"><value>{0} ({1}: {2})</value></data>
+  <data name="GatewayResourceEnded" xml:space="preserve"><value>{0} (ended)</value></data>
   <data name="GatewayRecordNull" xml:space="preserve"><value>The record store returned no record when gateway '{0}' took its record over.</value></data>
   <data name="GatewayRecordSuperseded" xml:space="preserve"><value>Gateway '{0}' stopped: a later run of it took its record over, so this run, epoch {1}, can no longer save it.</value></data>
 </root>

@@ -192,9 +192,11 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// <see cref="StartupTimeout"/> (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/> or
     /// <see cref="ApplicationGatewayErrorCode.OutputMissing"/>); a created or updated resource
     /// published no manifest within <see cref="StartupTimeout"/> of its deployment
-    /// (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>); a setting uses an output its
-    /// resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>); or
-    /// a later run of this gateway took its record over, so this run stopped
+    /// (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>); a created or updated resource's
+    /// workload stopped before an instance published, with the workload's failure as the inner
+    /// exception (<see cref="ApplicationGatewayErrorCode.ResourceFailed"/>); a setting uses an output
+    /// its resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>);
+    /// or a later run of this gateway took its record over, so this run stopped
     /// (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>).
     /// </exception>
     public async Task RunAsync(CancellationToken cancellationToken = default)
@@ -811,17 +813,37 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         await SaveAsync(cancellationToken).ConfigureAwait(false);
 
         var missed = new List<string>();
+        var stopped = new List<string>();
+        var causes = new List<Exception>();
         var skipped = new List<string>();
         foreach (GatewayStep step in steps)
         {
+            GatewayResource resource = Find(step.Resource);
             if (step.IsSkipped)
             {
                 skipped.Add(step.Name);
             }
-            else if (Find(step.Resource).IsClosed)
+            else if (resource.IsStopped)
+            {
+                // The provider reported the workload stopping before an instance published.
+                Exception? cause = resource.StopCause;
+                stopped.Add(cause is null
+                    ? Format(ErrorMessages.GatewayResourceEnded, step.Name)
+                    : Format(ErrorMessages.GatewayResourceFailedWith, step.Name, cause.GetType().Name, cause.Message));
+                if (cause is not null)
+                {
+                    causes.Add(cause);
+                }
+            }
+            else if (resource.IsClosed)
             {
                 missed.Add(step.Name);
             }
+        }
+
+        if (stopped.Count > 0)
+        {
+            throw Stopped(model, stopped, causes, missed, skipped);
         }
 
         if (missed.Count == 0)
@@ -834,6 +856,32 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             : Format(ErrorMessages.GatewayStartupTimedOutWithSkipped, model.Name, missed.Count, StartupTimeout, string.Join(", ", missed), string.Join(", ", skipped));
 
         throw new ApplicationGatewayException(ApplicationGatewayErrorCode.StartupTimedOut, message);
+    }
+
+    // The run's failure when workloads stopped before an instance published: those first, each with
+    // its reason, then what else missed its window and what did not deploy. The workloads' own
+    // failures are the inner exception, so a caller sees a program's exception as it was thrown.
+    private ApplicationGatewayException Stopped(IApplicationModel model, List<string> stopped, List<Exception> causes, List<string> missed, List<string> skipped)
+    {
+        var message = new StringBuilder(Format(ErrorMessages.GatewayResourcesStopped, model.Name, stopped.Count, string.Join("; ", stopped)));
+        if (missed.Count > 0)
+        {
+            message.Append(' ').Append(Format(ErrorMessages.GatewayResourcesStoppedAlsoMissed, missed.Count, StartupTimeout, string.Join(", ", missed)));
+        }
+
+        if (skipped.Count > 0)
+        {
+            message.Append(' ').Append(Format(ErrorMessages.GatewayResourcesStoppedSkipped, string.Join(", ", skipped)));
+        }
+
+        Exception? inner = causes.Count switch
+        {
+            0 => null,
+            1 => causes[0],
+            _ => new AggregateException(causes),
+        };
+
+        return new ApplicationGatewayException(ApplicationGatewayErrorCode.ResourceFailed, message.ToString(), inner);
     }
 
     private async Task RunStepAsync(IApplicationModel model, GatewayStep step, CancellationTokenSource walk)
@@ -893,19 +941,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             await _infrastructure.DeployResourceAsync(model, manifest, settings, id, cancellationToken).ConfigureAwait(false);
             await SaveAsync(cancellationToken).ConfigureAwait(false);
 
-            bool started;
-            try
-            {
-                await resource.Registered.WaitAsync(StartupTimeout, cancellationToken).ConfigureAwait(false);
-                started = true;
-            }
-            catch (TimeoutException)
-            {
-                // The window closed. A resource that registered in the meantime is not missed.
-                started = !resource.TryClose();
-            }
-
-            if (!started)
+            if (!await WaitForStartAsync(model, resource, id, cancellationToken).ConfigureAwait(false))
             {
                 // A new resource that never started is removed; an update's previous instances are
                 // the platform's to keep or replace.
@@ -929,6 +965,47 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
 
         return true;
+    }
+
+    // Waits, within the startup window, for an instance of the deployment to publish, while the
+    // provider watches the deployment's workload. A workload that stops first closes the window at
+    // once and is recorded on the resource with the provider's reason. Returns whether it started.
+    private async Task<bool> WaitForStartAsync(IApplicationModel model, GatewayResource resource, DeploymentId deployment, CancellationToken cancellationToken)
+    {
+        using var watching = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task watch = _infrastructure.WatchResourceAsync(model, resource.Declared, deployment, watching.Token).AsTask();
+        try
+        {
+            Task first = await Task.WhenAny(resource.Registered, watch).WaitAsync(StartupTimeout, cancellationToken).ConfigureAwait(false);
+            if (first == resource.Registered)
+            {
+                return true;
+            }
+
+            // The watch ended first: the run was cancelled, or the workload stopped. An instance that
+            // registered in the meantime still counts.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!resource.TryClose())
+            {
+                return true;
+            }
+
+            resource.MarkStopped(watch.IsFaulted ? watch.Exception!.InnerException : watch.IsCanceled ? new TaskCanceledException(watch) : null);
+            return false;
+        }
+        catch (TimeoutException)
+        {
+            // The window closed. A resource that registered in the meantime is not missed.
+            return !resource.TryClose();
+        }
+        finally
+        {
+            await watching.CancelAsync().ConfigureAwait(false);
+
+            // The watch may end later, or fail after the step stopped caring; observe it without
+            // waiting, so a provider slow to honor cancellation never holds the step.
+            _ = watch.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
     }
 
     // The values of one of this gateway's resources' settings, by name.

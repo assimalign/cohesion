@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -134,6 +135,40 @@ public interface IInfrastructureProvider
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
+        DeploymentId deployment,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Watches a deployment's workload while the gateway waits for its first instance, and reports a
+    /// workload that stops first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The gateway calls it right after <see cref="DeployResourceAsync"/> and cancels it once an
+    /// instance of the deployment publishes or the startup window closes. Return when the workload has
+    /// ended, and throw the failure when the platform reports one, such as a program's exception or a
+    /// container that keeps crashing. The gateway then fails the resource's step at once with that
+    /// failure, instead of waiting out the window, and treats the resource as one that missed it: a
+    /// new one is torn down, and nothing that depends on it deploys.
+    /// </para>
+    /// <para>
+    /// Until then, and on a platform that cannot tell, wait for the cancellation and throw
+    /// <see cref="OperationCanceledException"/>. Only stopping before the first instance publishes
+    /// counts: what happens to a resource's instances after that is not this method's to report.
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Manifest"/>, with only this
+    /// platform's extensions.
+    /// </param>
+    /// <param name="deployment">The deployment whose workload to watch, as <see cref="DeployResourceAsync"/> received it.</param>
+    /// <param name="cancellationToken">Cancelled when the gateway stops waiting.</param>
+    /// <returns>A task that completes when the workload has ended.</returns>
+    /// <exception cref="OperationCanceledException">The gateway stopped waiting while the workload still ran.</exception>
+    ValueTask WatchResourceAsync(
+        IApplicationModel model,
+        ApplicationResourceManifest resource,
         DeploymentId deployment,
         CancellationToken cancellationToken = default);
 

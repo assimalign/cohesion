@@ -224,11 +224,22 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         }
 
         (int endpoint, int controlPlane) = _ports.GetOrAdd(key, static _ => (GetFreePort(), GetFreePort()));
-        InProcessWorkload workload = InProcessWorkload.Start(program, CreateVariables(model, resource, settings, deployment, endpoint, controlPlane), settings, endpoint);
+        InProcessWorkload workload = InProcessWorkload.Start(program, deployment, CreateVariables(model, resource, settings, deployment, endpoint, controlPlane), settings, endpoint);
         _workloads[key] = workload;
         lock (_started)
         {
             _started.Add(workload);
+        }
+    }
+
+    async ValueTask IInfrastructureProvider.WatchResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, DeploymentId deployment, CancellationToken cancellationToken)
+    {
+        // The program's entry point returning or throwing is its whole run, so the gateway hears of
+        // it at once: an exception arrives as the program threw it. A deployment whose program no
+        // longer runs, because another replaced or a teardown removed it, has ended.
+        if (_workloads.TryGetValue((resource.Provider, resource.Name), out InProcessWorkload? workload) && workload.Deployment == deployment)
+        {
+            await workload.Exited.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -21,6 +21,13 @@ public enum ApplicationGatewayErrorCode
     OutputMissing,
 
     /// <summary>
+    /// A created or updated resource's workload stopped before any instance published, as its
+    /// infrastructure provider reported. The inner exception is the workload's failure, when the
+    /// platform reported one.
+    /// </summary>
+    ResourceFailed,
+
+    /// <summary>
     /// A later run of the gateway took its record over, so this run can no longer save it and stops.
     /// </summary>
     RecordSuperseded,
