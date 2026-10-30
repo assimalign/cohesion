@@ -111,16 +111,18 @@ public sealed class SqlPredicateWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: linguistic work refusal keeps both transports usable")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task QueryAsync_LikeWorkLimit_ShouldReturnLocatedReusableFailureAsync(bool tcp)
+    [InlineData(false, "LIKE")]
+    [InlineData(true, "LIKE")]
+    [InlineData(false, "ILIKE")]
+    [InlineData(true, "ILIKE")]
+    public async Task QueryAsync_LikeWorkLimit_ShouldReturnLocatedReusableFailureAsync(bool tcp, string op)
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
         await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
         // Act
         var error = await Should.ThrowAsync<SqlClientException>(async () => await connection.QueryAsync(
-            "SELECT RPAD('เก', 1024, 'เก') COLLATE invariant LIKE RPAD('%เก', 96, '%เก') || 'ข' FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
+            $"SELECT RPAD('เก', 1024, 'เก') COLLATE invariant {op} RPAD('%เก', 96, '%เก') || 'ข' FROM users WHERE id = 1", cancellationToken: SqlClientTestHarness.Timeout()));
         // Assert
         error.Kind.ShouldBe(SqlClientErrorKind.ExecutionFailure);
         error.ConnectionUsable.ShouldBeTrue();
@@ -130,9 +132,11 @@ public sealed class SqlPredicateWireTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - LIKE: disconnect cancels an entered row-time invariant matcher")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task QueryAsync_DisconnectedLike_ShouldCancelServerSessionAsync(bool tcp)
+    [InlineData(false, "LIKE")]
+    [InlineData(true, "LIKE")]
+    [InlineData(false, "ILIKE")]
+    [InlineData(true, "ILIKE")]
+    public async Task QueryAsync_DisconnectedLike_ShouldCancelServerSessionAsync(bool tcp, string op)
     {
         // Arrange: no application functions; observe the real server session lifetime.
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
@@ -141,10 +145,10 @@ public sealed class SqlPredicateWireTests
         using var rootEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database"), EventLevel.Verbose);
         using var admission = new SqlLikeAdmissionGate(serverSession);
         using var sqlEvents = new EventSourceRecorder(EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Sql"), EventLevel.Verbose);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         // Act: disconnect only after the row-time matcher entered. Keep it held until
         // the server lifetime token is canceled, so transport notification cannot race refusal.
-        var command = new SqlCommand("SELECT @input COLLATE invariant LIKE @pattern FROM users WHERE id = 1");
+        var command = new SqlCommand($"SELECT @input COLLATE invariant {op} @pattern FROM users WHERE id = 1");
         command.Parameters.Add("input", string.Concat(Enumerable.Repeat("เก", 512)));
         command.Parameters.Add("pattern", string.Concat(Enumerable.Repeat("%เก", 32)) + "ข");
         var query = DedicatedTestTask.Run(async () => await connection.QueryAsync(command, timeout.Token), timeout.Token);

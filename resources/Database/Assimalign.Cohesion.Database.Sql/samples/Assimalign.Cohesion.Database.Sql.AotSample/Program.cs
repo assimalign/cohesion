@@ -93,8 +93,10 @@ internal static class Program
         "1 NOT IN (SELECT 2 FROM customers WHERE Id = 1) BETWEEN FALSE AND TRUE, " +
         "'เก' COLLATE invariant LIKE 'เก', 'ເກ' COLLATE invariant LIKE 'ເກ', " +
         "CAST('a' AS CHAR(3)) IS NOT DISTINCT FROM 'a', " +
-        "NOT EXISTS (SELECT Id FROM customers WHERE Id < 0) IS TRUE FROM customers WHERE Id = 1";
-    private static readonly object?[][] _predicates = [[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]];
+        "NOT EXISTS (SELECT Id FROM customers WHERE Id < 0) IS TRUE, " +
+        "'A%' ILIKE 'aX%' ESCAPE 'X', 'É' COLLATE case_accent_insensitive ILIKE 'e', " +
+        "'A' COLLATE invariant NOT ILIKE 'b', NULL ILIKE '%', -'7'::INT, '7'::TEXT::INT FROM customers WHERE Id = 1";
+    private static readonly object?[][] _predicates = [[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, null, -7L, 7]];
 
     private const string characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];

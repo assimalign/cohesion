@@ -45,6 +45,13 @@ An in-memory regression returns an authenticated rental to its pool and leaves t
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
 
+## ILIKE and postfix CAST wire conformance (#1721)
+
+The existing exchange carries collation-aware ILIKE/NOT ILIKE, NULL Boolean cells,
+parameter ESCAPE and chained casts over InMemory and TCP. CS02022 and CS05040 retain
+located execution diagnostics and usable connections. Recorded matcher admission drives
+disconnect cancellation for LIKE and ILIKE. No public client API or wire layout changes.
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.

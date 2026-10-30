@@ -1,5 +1,9 @@
 # Cohesion GQL dialect
 
+SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
+`~~*` and `!~~*` is unchanged. SQL postfix casts remain outside this language's scalar grammar;
+Label colons retain their existing meaning.
+
 The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DESIGN.md](DESIGN.md).
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
