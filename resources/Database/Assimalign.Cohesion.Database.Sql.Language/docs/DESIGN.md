@@ -7,6 +7,7 @@ accept standalone SAVEPOINT, RELEASE and ROLLBACK TO; the three adjacent profile
 complete-statement/execution corpora advance together. Core spelling follows ISO, optional
 SAVEPOINT follows PostgreSQL. Unquoted names fold to lowercase; quoted names preserve case.
 See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+The parser and renderer corpus covers both TO forms with no modifier or WORK and TRANSACTION (PostgreSQL src/backend/parser/gram.y:11414-11431,11483-11486).
 
 ## Index key order grammar (#1631, SQ-K1)
 

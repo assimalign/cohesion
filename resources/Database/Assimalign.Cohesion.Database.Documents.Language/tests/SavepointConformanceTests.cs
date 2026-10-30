@@ -20,6 +20,9 @@ public sealed class SavepointConformanceTests
     [InlineData("ROLLBACK WORK TO SAVEPOINT scope")]
     [InlineData("ROLLBACK TRAN TO SAVEPOINT scope")]
     [InlineData("ROLLBACK TRANSACTION TO SAVEPOINT scope")]
+    [InlineData("ROLLBACK WORK TO scope")]
+    [InlineData("ROLLBACK TRAN TO scope")]
+    [InlineData("ROLLBACK TRANSACTION TO scope")]
     public void Parse_NamedControl_ShouldRoundTrip(string source)
     {
         // Arrange / Act

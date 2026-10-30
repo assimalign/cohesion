@@ -10,6 +10,7 @@ remain accepted before TO. The words stay contextual. Three profile clauses adva
 with positive/malformed and keyword-disposition corpora. Names are ordinal; duplicate stacking
 and RELEASE follow the PostgreSQL owner decision rather than Couchbase duplicate replacement.
 See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+The parser and renderer corpus covers both TO forms with no modifier or WORK, TRAN and TRANSACTION (Couchbase ROLLBACK TRANSACTION syntax).
 
 The package owns the document model's OQL grammar, statement and expression trees, diagnostics,
 and conformance corpus. `OqlQueryParser` derives from the shared `QueryParser` and declares

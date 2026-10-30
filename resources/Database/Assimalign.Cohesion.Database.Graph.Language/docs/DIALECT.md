@@ -2,7 +2,7 @@
 
 ## Named savepoints (#1726, XT-4)
 
-GQL accepts the SQL spellings SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+GQL accepts the SQL spellings SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK [WORK | TRANSACTION] TO
 [SAVEPOINT] name as Cohesion extensions to its ISO profile. Names preserve decoded identifier
 spelling and compare ordinally; quoted identifiers decode doubled quotes. Canonical rendering
 quotes the decoded name. The contextual grammar adds three profile clauses without adding lexer
@@ -877,7 +877,7 @@ the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid
 Both use Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
 A failed explicit transaction refuses work until rollback. Named savepoints follow the contract above; transaction options,
 EXPLAIN controls and multi-statement text are unsupported. ExecutePaths cannot control transactions.
-WORK, TRAN, READ ONLY/READ WRITE, isolation levels and deferrability retain CG00002;
+WORK outside ROLLBACK TO, TRAN, READ ONLY/READ WRITE, isolation levels and deferrability retain CG00002;
 the optional TRANSACTION word adds no transaction options. Keywords are case-insensitive,
 comments may separate words, and one terminal semicolon is optional.
 

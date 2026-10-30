@@ -130,7 +130,13 @@ public sealed partial class GqlQueryParser : QueryParser
             else if (first.Text.Equals(GqlTransactionVocabulary.Begin, StringComparison.OrdinalIgnoreCase))
             { Take(GqlTransactionVocabulary.Transaction); }
             string? name = null;
-            if (command == GqlTransactionCommand.Rollback && Take("TO")) { command = GqlTransactionCommand.RollbackToSavepoint; }
+            if (command == GqlTransactionCommand.Rollback)
+            {
+                // PostgreSQL gram.y:11414-11431,11483-11486: optional WORK/TRANSACTION
+                // precedes TO. These remain contextual, including in savepoint names.
+                if ((Is("WORK") || Is("TRANSACTION")) && IsWordAt(_position + 1, "TO")) { _position++; }
+                if (Take("TO")) { command = GqlTransactionCommand.RollbackToSavepoint; }
+            }
             if (command is GqlTransactionCommand.Savepoint or GqlTransactionCommand.ReleaseSavepoint or GqlTransactionCommand.RollbackToSavepoint)
             {
                 if (command != GqlTransactionCommand.Savepoint) { Take("SAVEPOINT"); }
