@@ -159,7 +159,9 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
     }
 
     /// <summary>
-    /// Sets how the gateway calls its instances' control planes; over HTTP unless set.
+    /// Sets how the gateway calls its instances' control planes: the instance client of the
+    /// platform its instances run on. A gateway without one deploys and receives publications but
+    /// cannot run an operator's action.
     /// </summary>
     /// <param name="client">The client.</param>
     /// <returns>This builder.</returns>
@@ -225,7 +227,7 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
             _store ?? new InMemoryApplicationGatewayStore(),
             _parent,
             [.. _transports],
-            _client ?? HttpApplicationInstanceClient.Shared,
+            _client,
             _startupTimeout,
             _leaseDuration);
     }

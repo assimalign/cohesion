@@ -106,28 +106,14 @@ public class ApplicationInstanceControlPlaneTests
         manifest.Deployment.ShouldBe(deployment);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "The manifest names where the instance's control plane serves")]
-    public void Manifest_WithControlPlaneEndpoint_ShouldNameIt()
+    [Fact(DisplayName = DisplayPrefix + "The manifest leaves where the gateway reaches the control plane to the platform's client")]
+    public void Manifest_Always_ShouldNameNoControlPlaneEndpoint()
     {
-        // Arrange
-        var endpoint = new Uri("http://10.0.0.5:9090/");
-        var resource = new TestResource(new LogLevelAction()) { ControlPlaneEndpoint = endpoint };
-
         // Act
-        ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(resource, TestSerializer.Json).Manifest;
+        ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(new TestResource(new LogLevelAction()), TestSerializer.Json).Manifest;
 
         // Assert
-        manifest.ControlPlaneEndpoint.ShouldBe(endpoint);
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "A relative control-plane endpoint is refused, since the gateway calls it from wherever it runs")]
-    public void Create_WithRelativeControlPlaneEndpoint_ShouldThrow()
-    {
-        // Arrange
-        var resource = new TestResource(new LogLevelAction()) { ControlPlaneEndpoint = new Uri("/control", UriKind.Relative) };
-
-        // Act & Assert
-        Should.Throw<ArgumentException>(() => ApplicationInstanceControlPlane.Create(resource, TestSerializer.Json));
+        manifest.ControlPlaneEndpoint.ShouldBeNull();
     }
 
     [Fact(DisplayName = DisplayPrefix + "A control plane accepts invocations and restores as soon as it is created")]

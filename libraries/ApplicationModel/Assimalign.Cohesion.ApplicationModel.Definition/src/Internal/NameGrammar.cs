@@ -1,7 +1,7 @@
 namespace Assimalign.Cohesion.ApplicationModel.Internal;
 
-// The grammar output, platform, and extension names share: lowercase ASCII letters and digits in
-// hyphen-separated words.
+// The grammar output and extension names share with the contracts' platform names: lowercase ASCII
+// letters and digits in hyphen-separated words.
 internal static class NameGrammar
 {
     public static bool IsHyphenatedWords(string value, int maximumLength)

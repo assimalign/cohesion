@@ -4,7 +4,6 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ApplicationResourceManifest))]
-[JsonSerializable(typeof(ApplicationActionResult))]
 internal sealed partial class GatewayJsonContext : JsonSerializerContext
 {
 }

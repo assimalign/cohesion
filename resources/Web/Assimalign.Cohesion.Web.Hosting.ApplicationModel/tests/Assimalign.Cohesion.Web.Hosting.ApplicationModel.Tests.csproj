@@ -10,6 +10,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting.InProcess" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 	</ItemGroup>
 	<ItemGroup>

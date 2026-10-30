@@ -1,6 +1,4 @@
 using System;
-using System.Globalization;
-using System.Net;
 
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Hosting;
@@ -28,29 +26,28 @@ public static class WebResourceExtensions
         /// application defines are added with <see cref="WebResourceOptions.AddAction(IApplicationInstanceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
         /// </para>
         /// <para>
-        /// When the resource has a manifest endpoint (by default the
-        /// <see cref="AppEnvironment.Variables.ManifestEndpoint"/> variable its gateway sets, read
-        /// through <see cref="AppEnvironment"/> so a gateway that runs the application in its own
-        /// process can set it for this application alone), the instance is managed. Before any of the application's services or servers start, it
-        /// publishes its manifest and restores the state the gateway answers with; it then serves its
-        /// control plane on <see cref="WebResourceOptions.ControlPlaneEndpoint"/>, ahead of the
-        /// application's servers and until they have drained. A publication the gateway refuses or
-        /// cannot receive fails the application's start.
+        /// The resource opts into each platform it runs on through that platform's hosting package,
+        /// such as <c>resource =&gt; resource.UseInProcess()</c>. When the instance's environment names
+        /// a platform (<see cref="ApplicationInstanceOptions.Platform"/>), the instance is managed
+        /// through that platform's client: before any of the application's services or servers start,
+        /// it publishes its manifest and restores the state the gateway answers with, and from then
+        /// until the application's servers have drained the gateway can call its control plane. A
+        /// publication the gateway refuses or cannot receive fails the application's start. The
+        /// resource does no transport of its own: how the manifest travels and how the gateway's calls
+        /// arrive is the platform's.
         /// </para>
         /// <para>
-        /// Without a manifest endpoint the application runs unmanaged, with the settings its code defines.
+        /// Without a named platform the application runs unmanaged, with the settings its code defines.
         /// </para>
         /// </remarks>
         /// <param name="name">The resource's name, such as <c>orders-api</c>.</param>
-        /// <param name="configure">Configures the resource's endpoints and adds the application's own actions.</param>
+        /// <param name="configure">Opts the resource into its platforms and adds the application's own actions.</param>
         /// <returns>The same builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// <paramref name="name"/> is <see langword="default"/>; the manifest endpoint is not an
-        /// absolute http, https, or inprocess URL; or the control-plane endpoint is not an absolute
-        /// http URL whose host is an IP address or localhost.
+        /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
+        /// <exception cref="InvalidOperationException">
+        /// The instance's environment names a platform the resource uses no client for.
         /// </exception>
-        /// <exception cref="InvalidOperationException">The resource has a manifest endpoint but no control-plane endpoint.</exception>
         public WebApplicationBuilder AddResource(ResourceName name, Action<WebResourceOptions>? configure = null)
         {
             ArgumentNullException.ThrowIfNull(builder);
@@ -63,45 +60,25 @@ public static class WebResourceExtensions
             var options = new WebResourceOptions(name);
             configure?.Invoke(options);
 
-            if (options.ManifestEndpoint is not { } manifestEndpoint)
+            if (options.GetGatewayClient() is not { } client)
             {
                 return builder;
             }
 
-            Uri controlPlaneEndpoint = options.ControlPlaneEndpoint
-                ?? throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture,
-                    ErrorMessages.ControlPlaneEndpointRequired, AppEnvironment.Variables.ControlPlaneEndpoint));
-            IPEndPoint listener = WebResourceControlPlaneServer.ParseEndpoint(controlPlaneEndpoint);
-
             // Control-plane content is JSON. The resource's own actions write their types through its
             // internal context, and each action the application added through the context it came with.
             IApplicationContentSerializer serializer = JsonApplicationContentSerializer.Create([WebResourceJsonContext.Default, .. options.JsonContexts]);
-            ApplicationInstancePublisher publisher = ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions
-            {
-                Endpoint = manifestEndpoint,
-                HttpClientFactory = options.HttpClientFactory,
-                Serializer = serializer,
-            });
 
             // The control plane exposes the settings the application registered, so it is created once
-            // the application's container exists: the first of the two services the build resolves
-            // creates it, and the other shares it.
+            // the application's container exists. The resource service publishes and restores in
+            // StartingAsync, which the host completes for every lifecycle service before it starts any
+            // service or server, and opens the control plane to the gateway's calls in StartAsync; the
+            // Web host stops it only after the application's servers have drained.
             Func<WebApplicationContext, IApplicationInstanceAction>[] addedActions = [.. options.Actions];
             DeploymentId? deployment = options.Deployment;
-            ApplicationInstanceControlPlane? controlPlane = null;
-            ApplicationInstanceControlPlane GetControlPlane(WebApplicationContext context)
-            {
-                return controlPlane ??= ApplicationInstanceControlPlane.Create(
-                    new WebResource(name, deployment, controlPlaneEndpoint, context.Settings, CreateAddedActions(addedActions, context)),
-                    serializer);
-            }
-
-            // The resource service publishes and restores in StartingAsync, which the host completes
-            // for every lifecycle service before it starts any service or server. The control-plane
-            // server is a host service of its own, so it listens only once the gateway's state is in
-            // effect, and the Web host stops it only after the application's servers have drained.
-            builder.AddService(context => ApplicationInstanceService.Create(GetControlPlane(context), publisher));
-            builder.AddService(context => new WebResourceControlPlaneServer(listener, GetControlPlane(context)));
+            builder.AddService(context => ApplicationInstanceService.Create(
+                ApplicationInstanceControlPlane.Create(new WebResource(name, deployment, context.Settings, CreateAddedActions(addedActions, context)), serializer),
+                client));
 
             return builder;
         }

@@ -6,15 +6,20 @@
 > [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md), and `IResource`
 > became `IApplicationResourceInstance`. The library was restarted from scratch on 2026-10-27; the
 > previous implementation (deployment records, the ambient `ResourceRuntime`, commands, mounts,
-> credentials) is retired, and its source is at commit `6576e7c64`.
+> credentials) is retired, and its source is at commit `6576e7c64`. On 2026-10-30 its transports left
+> for the platform packages (D19): it holds only the abstractions for hosting an instance, and the
+> options through which a resource takes each platform's client.
 
 ## Purpose
 
 This library defines what a **resource instance** is: the identity it starts with, the actions its
 control plane exposes and the state those actions leave, its health contributors, the manifest it
-publishes, and the generic control plane that runs all of it. It knows no transport and no gateway.
-It references Core, Hosting, and the shared contracts in ApplicationModel only, because it sits in
-the closure of every resource. A gateway references the contracts but not this library.
+publishes, the generic control plane that runs all of it, and the host service that joins it to its
+gateway through a platform's client. It knows no transport and no gateway: a platform's instance half
+supplies the client (`IApplicationGatewayClient`), and a resource opts into it through
+`ApplicationInstanceOptions`. It references Core, Hosting, and the shared contracts in
+ApplicationModel only, because it sits in the closure of every resource. A gateway references the
+contracts but not this library.
 
 ## Where it sits
 
@@ -49,24 +54,26 @@ flowchart TB
 ## The model
 
 The instance's own types live here. The types it exchanges with its gateway live in the shared
-contracts, ApplicationModel (D16): `IApplicationResource`, the identity value objects,
-`ApplicationActionContext` and `ApplicationActionResult`, `IApplicationContentSerializer` and
-`ApplicationContentException`, `ApplicationActionSnapshot`, `ApplicationInstanceManifest` and
-`ApplicationActionDescriptor`, and `IApplicationInstancePublisher` with `ApplicationInstancePublication`. The table
-lists both, because an area builds against both.
+contracts, ApplicationModel (D16): `IApplicationResource`, the identity value objects and
+`PlatformName`, `ApplicationActionContext` and `ApplicationActionResult`,
+`IApplicationContentSerializer`, `JsonApplicationContentSerializer` and `ApplicationContentException`,
+`ApplicationActionSnapshot`, `ApplicationInstanceManifest` and `ApplicationActionDescriptor`, and
+`IApplicationInstancePublisher` with `ApplicationInstancePublication`. The table lists both, because
+an area builds against both.
 
 | Type | Role |
 | --- | --- |
-| `IApplicationResourceInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), `Deployment` (the deployment that started it, which its environment names and its manifest repeats; ApplicationModel.Gateway G34), `ControlPlaneEndpoint` (where its control plane serves, which its manifest names so its gateway can call it; D18), its actions and health contributors. `Id` derives from provider and name. |
+| `IApplicationResourceInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), `Deployment` (the deployment that started it, which its environment names and its manifest repeats; ApplicationModel.Gateway G34), its actions and health contributors. `Id` derives from provider and name. It names no address (D19). |
 | `IApplicationInstanceAction` | A named operation. `Kind` says which operations it accepts (`Read`, `Write`, or both); `State`, when present, is what its writes change. |
 | `IApplicationActionState`, `ApplicationActionState<TState>` | The state a stateful action's writes change. A snapshot is the whole value, written by the content serializer; restoring one applies it. |
 | `ApplicationActionContext`, `ApplicationActionResult` | One invocation and its outcome. The context carries the control plane's content serializer, which reads the input and writes the output. |
-| `IApplicationContentSerializer`, `JsonApplicationContentSerializer`, `ApplicationContentException` | The format of everything an instance exchanges (D12). JSON over source-generated contexts is the default; content the instance refuses is an `ApplicationContentException`. |
+| `IApplicationContentSerializer`, `JsonApplicationContentSerializer`, `ApplicationContentException` | The format of everything an instance exchanges (D12), from the contracts. JSON over source-generated contexts is the default; content the instance refuses is an `ApplicationContentException`. |
 | `ApplicationActionSnapshot` | One action's state, as a gateway keeps it until the next deployment. |
-| `ApplicationInstanceManifest`, `ApplicationActionDescriptor` | What an instance publishes about itself when its host starts, its control plane's endpoint included. |
+| `ApplicationInstanceManifest`, `ApplicationActionDescriptor` | What an instance publishes about itself when its host starts. The control plane's manifest names no control-plane address; the client that publishes it does (D19). |
 | `IApplicationInstanceControlPlane`, `ApplicationInstanceControlPlane` | The instance's actions and state: a plain object with no lifecycle that executes actions and restores snapshots from the moment it is created (D15). |
-| `IApplicationInstanceService`, `ApplicationInstanceService` | The `IHostLifecycleService` an area registers: it publishes the manifest and restores the answer in `StartingAsync`, renews the lease, and stops renewing in `StopAsync` (D15). In-process code finds the control plane among the host's services through it. |
-| `IApplicationInstancePublisher`, `ApplicationInstancePublisher`, `ApplicationInstancePublisherOptions` | The seam to the gateway, its abstract base, and the options of the HTTP publisher `ApplicationInstancePublisher.Create` returns (D13). Publication answers with an `ApplicationInstancePublication` (snapshots and a lease); `RenewAsync` renews the lease (D14). A local gateway accepts anonymous publication. |
+| `IApplicationInstanceService`, `ApplicationInstanceService` | The `IHostLifecycleService` an area registers with the platform's client: it publishes the manifest and restores the answer in `StartingAsync`, renews the lease, opens the control plane to the gateway's calls in `StartAsync`, and closes it and stops renewing in `StopAsync` (D15, D19). |
+| `IApplicationGatewayClient` | The instance half of a platform: publishes and renews (`IApplicationInstancePublisher`), names where the gateway reaches the control plane, and carries the gateway's calls in between `StartAsync` and `StopAsync` (D19). |
+| `ApplicationInstanceOptions` | The base of every area's resource options: the clients a resource opts into, one per platform; the platform its environment names, which selects one; and the deployment that started it (D19). |
 | `IApplicationHealthContributor`, `HealthContribution` | Health, contributed per component. A default contribution is `Unhealthy`, so unset health fails closed. |
 
 Value objects carry the identity: `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
@@ -81,37 +88,39 @@ sequenceDiagram
     participant Host as Area host
     participant RS as ApplicationInstanceService
     participant CP as Control plane
+    participant Client as Platform's gateway client
     participant GW as Gateway
-    participant Srv as Control-plane server
     Host->>RS: StartingAsync, before any service or server starts
-    RS->>GW: publish the manifest
+    RS->>Client: publish the manifest
+    Client->>GW: the manifest, with where the gateway reaches the control plane
     GW-->>RS: snapshots written since the last deployment, and a lease
     RS->>CP: RestoreAsync, each snapshot
     RS-->>Host: the gateway's state is in effect
-    Host->>Srv: StartAsync, open the private listener
+    Host->>RS: StartAsync
+    RS->>Client: StartAsync, carry the gateway's calls to the control plane
     Host->>Host: start the application's servers
     loop three times per lease
-        RS->>GW: renew
+        RS->>Client: renew
     end
     Note over GW: An operator writes log-level
-    GW->>Srv: POST /actions/log-level
-    Srv->>CP: ExecuteAsync(log-level, Write)
+    GW->>Client: run log-level, through the platform's instance client
+    Client->>CP: ExecuteAsync(log-level, Write)
     CP-->>GW: the result, with the state's snapshot
-    Host->>Srv: StopAsync, after the application's servers drained
-    Host->>RS: StopAsync, stop renewing
+    Host->>RS: StopAsync, after the application's servers drained
+    RS->>Client: StopAsync, then stop renewing
 ```
 
-1. The area registers an `ApplicationInstanceService` and, when it serves the control plane over a network, a
-   server as a host service of its own. Where they sit among the host's registrations does not
-   matter.
-2. `StartingAsync` publishes the manifest and restores every snapshot the publisher returns. A host
-   completes `StartingAsync` for every lifecycle service before it starts any service or server, so
-   the application serves only after the returned state is in effect. A failed publication or
-   restore fails the host's start. When the answer carries a lease, the service renews it until
-   `StopAsync` (D14).
-3. The server starts with the other services, after every `StartingAsync`, so the control plane
-   listens only once the gateway's state is in effect. The Web host stops its servers before its
-   other services, so the control plane stays reachable while the application drains.
+1. The area registers an `ApplicationInstanceService` with the client its options select. Where it
+   sits among the host's registrations does not matter.
+2. `StartingAsync` publishes the manifest through the client and restores every snapshot the gateway
+   answers with. A host completes `StartingAsync` for every lifecycle service before it starts any
+   service or server, so the application serves only after the returned state is in effect. A failed
+   publication or restore fails the host's start. When the answer carries a lease, the service
+   renews it until `StopAsync` (D14).
+3. `StartAsync`, after every `StartingAsync`, starts the client carrying the gateway's calls, so they
+   reach the control plane only once the gateway's state is in effect. The Web host stops its
+   servers before its other services, so the control plane stays reachable while the application
+   drains.
 4. `ExecuteAsync` runs actions and `RestoreAsync` applies snapshots whenever they are called: the
    control plane has no lifecycle.
 
@@ -203,14 +212,10 @@ control plane's error model no longer names a format. `ApplicationInstanceContro
 every state once, so a serializer that does not know a state's type fails at composition. Otherwise
 it would fail the first write, after the write had already changed the instance.
 
-**D13 — The HTTP publisher is internal behind an abstract base and options (owner request,
-2026-10-28).** `ApplicationInstancePublisher.Create(ApplicationInstancePublisherOptions)` returns the
-HTTP implementation. The options' `HttpClientFactory` callback is called once per publication,
-and the client it returns is disposed afterward, the way an HTTP client factory's clients are
-used. A factory such as `Assimalign.Cohesion.Http.ClientFactory` pools and rotates the handlers, so
-publications do not exhaust sockets. Without a callback, every publisher in the process shares one
-`SocketsHttpHandler`, whose connections are recycled every two minutes. Another transport derives
-from `ApplicationInstancePublisher`; `Create` picks the in-process one by its scheme (D17).
+**D13 — Superseded by D19 (2026-10-30).** The HTTP publisher behind
+`ApplicationInstancePublisher.Create(ApplicationInstancePublisherOptions)`, with its
+`HttpClientFactory` callback and shared `SocketsHttpHandler`, was removed with every other transport
+in this library. Its source is in this branch's history before D19.
 
 **D14 — Registrations are leases (owner decision, 2026-10-28).** Instances published once and sent
 nothing after, so a gateway could not tell a dead instance from a live one, least of all after its
@@ -218,14 +223,14 @@ own restart. The publication answer, an `ApplicationInstancePublication`, now ca
 service renews it three times per lease through `IApplicationInstancePublisher.RenewAsync`, which
 carries no snapshots, so renewals cost no restores. A gateway that answers `false` does not know the
 instance: the service publishes again and restores the answer, which is idempotent (D3). A failed
-renewal is retried on the next one, so an unreachable gateway never stops the instance. Over HTTP a
-renewal is a `PUT` of the manifest to the publication endpoint; `404` means unknown. *Rejected:*
+renewal is retried on the next one, so an unreachable gateway never stops the instance. How a
+renewal travels is the platform's (D19). *Rejected:*
 renewing by publishing again, which would restore every snapshot, and rebuild what each one
 applies, on every renewal. *Rejected for now:* asking the platform which instances run, which
 detects a death faster but needs each provider to map its instances to instance keys.
 
-**D15 — The control plane has no lifecycle; a resource service joins the host, and the server is
-the area's own host service (owner decision, 2026-10-28).** `IApplicationInstanceControlPlane` was an
+**D15 — The control plane has no lifecycle; a resource service joins the host (owner decision,
+2026-10-28; its server half superseded by D19).** `IApplicationInstanceControlPlane` was an
 `IHostService` whose start published and renewed, so one object held two lifetimes: its actions and
 state, which last as long as the application, and its gateway registration, which lasts one host
 run. The control plane is now a plain object that accepts invocations from the moment it is
@@ -237,15 +242,14 @@ serves only once the gateway's state is in effect, wherever the area registered 
 the service started in registration order, and a service registered ahead of it started before the
 restore.
 
-The service knows no server. An area that serves the control plane over a network registers its
-server as a plain host service of its own; the host starts it after every `StartingAsync`, so it
-listens only once the state is in effect. In process, no server is registered, and a gateway calls
-`IApplicationInstanceService.ControlPlane` directly. *Rejected:* a host runner around `RunAsync`, which never
-runs for a host started with `StartAsync`, as a nested host (`AsService`), a test host, and an
-in-process gateway's instances are; and a server seam in this library, which the area's own host
-service makes unnecessary. *Consequence:* a gateway push that reaches an instance before its
-listener opens fails at once, and the gateway-to-instance channel retries it with the current state
-(open question 6).
+The service knows no server. Until D19 an area that served the control plane over a network
+registered its server as a host service of its own; since D19 the platform's client carries the
+gateway's calls, and the service starts it in `StartAsync`, after every `StartingAsync`, so it opens
+only once the state is in effect. *Rejected:* a host runner around `RunAsync`, which never runs for
+a host started with `StartAsync`, as a nested host (`AsService`), a test host, and an in-process
+gateway's instances are. *Consequence:* a gateway call that reaches an instance before its client
+opens gets no answer, and the gateway drops the instance until it publishes again (open questions 6
+and 7).
 
 **D16 — This is the physical side of the application model (owner decision, 2026-10-29).** The
 library was `Assimalign.Cohesion.Hosting.Resources`, and ApplicationModel referenced it for the
@@ -258,30 +262,51 @@ therefore loads neither the builder nor the validated model, and the gateway loa
 library. `ApplicationActionResult.WithState` became public on the way, because the control plane that
 attaches a write's snapshot now lives in a different assembly from the result.
 
-**D17 — The endpoint's scheme picks the transport; one is inside the process (2026-10-29).** The
-owner kept `IApplicationInstancePublisher` as one seam so a platform can bring its own transport.
-`ApplicationInstancePublisher.Create` now chooses by the endpoint's scheme: `http` and `https` get the
-HTTP publisher, and `inprocess` gets one that publishes to whatever is registered for the endpoint
-(`ApplicationInstancePublisher.Register`) when each call is made. A gateway that runs its resources in
-its own process registers its transport there and names the endpoint in each program's
-`ManifestEndpoint`, so a program's code is the same on every platform: it publishes to the endpoint its
-environment names. The registry is process-wide, as the names of named pipes are machine-wide; a
-registration is removed only by its own handle. A call made while nothing is registered fails, as one
-to an HTTP endpoint that nothing listens on does. *Rejected:* an ambient publisher the program would
-pick up (D1 forbids it here), and handing the program the gateway object (Gateway.InProcess I5).
+**D17 — Superseded by D19 (2026-10-30).** `ApplicationInstancePublisher.Create` chose a transport by
+the endpoint's scheme, `http`/`https` or `inprocess`, and `ApplicationInstancePublisher.Register` held
+the process's in-process endpoints. The endpoint registry survives, moved to the in-process
+platform's instance half (`InProcessPlatform.RegisterGateway` in ApplicationModel.Hosting.InProcess);
+the scheme switch does not, because a resource now names its platforms rather than this library
+guessing one from a URL.
 
-**D18 — The manifest names the control plane, so the gateway can call it (2026-10-30).** The
-gateway ran no action on an instance and restored no write itself: it knew an instance's address only
-when it had assigned it. `IApplicationResourceInstance.ControlPlaneEndpoint` is the absolute URL the
-instance's control plane serves at, as its environment named it, and `ApplicationInstanceControlPlane`
-repeats it in the manifest (`ApplicationInstanceManifest.ControlPlaneEndpoint`) and refuses a relative
-one. The platform hands each instance an address its gateway reaches, and the area's server listens
-there, so the gateway calls the instance where it published from: an operator's action, and a restore
-of a write made on another instance (ApplicationModel.Gateway G38), over the binding every area's
-server serves (ApplicationModel C5). An instance with no control-plane server names none; its gateway
-unregisters it after a write, and it restores the write when it publishes again. *Rejected:* the
+**D18 — The manifest names where the gateway reaches the control plane (2026-10-30; amended by
+D19).** The gateway ran no action on an instance and restored no write itself: it knew an instance's
+address only when it had assigned it. The manifest now names where the gateway reaches the instance's
+control plane (`ApplicationInstanceManifest.ControlPlaneEndpoint`), so the gateway calls the instance
+it registered: an operator's action, and a restore of a write made on another instance
+(ApplicationModel.Gateway G38). An instance whose manifest names none cannot be called; its gateway
+unregisters it after a write, and it restores the write when it publishes again. Since D19 the
+platform's client names the address, in its own terms, as it publishes; the resource and the control
+plane name none, and `IApplicationResourceInstance.ControlPlaneEndpoint` is gone. *Rejected:* the
 platform reporting each instance's address to the gateway. A provider does not know instance keys, and
 an in-process provider would report what it had just assigned.
+
+**D19 — The platform owns the transport; the host takes its client through options (owner,
+2026-10-30).** The publishers here and the area's control-plane server made Hosting and every area
+carry transports, and the gateway's HTTP client needed a Web reference no library may take
+(COHLIB001). The owner moved all of it to the platforms. This library keeps only what hosting an
+instance needs:
+- **`IApplicationGatewayClient`** is a platform's instance half. It publishes and renews
+  (`IApplicationInstancePublisher`), names where the gateway reaches the control plane in the
+  manifest it publishes, and between `StartAsync` and `StopAsync` carries the gateway's calls to the
+  control plane. `ApplicationInstanceService.Create(controlPlane, client)` drives it: publish and
+  restore in `StartingAsync`, open in `StartAsync`, close then stop renewing in `StopAsync`.
+- **`ApplicationInstanceOptions`** is the base of every area's resource options. A platform's
+  hosting package adds its opt-in verb to it with a generic receiver
+  (`extension<TOptions>(TOptions options) where TOptions : ApplicationInstanceOptions`), so
+  `resource => resource.UseInProcess()` works on every area's options and returns them for chaining.
+  `UseGatewayClient` adds a client, at most one per platform.
+- **Selection.** `Platform` defaults to the gateway variable a gateway sets for every instance it
+  starts (`AppEnvironment.Variables.Gateway`), read through `AppEnvironment` when the options are
+  created. `GetGatewayClient()` returns `null` when no platform is named, so the instance runs
+  unmanaged; the named platform's client; or throws when the resource opted into none for it, so an
+  instance never runs unmanaged where a gateway waits for it to publish. A malformed variable throws
+  at once. `Deployment` moved here from Web's options, since every area repeats it.
+
+*Rejected:* one package per platform for both halves, which would put the gateway and the logical
+model into every resource's closure; selecting the transport by the endpoint's scheme (D17), which
+cannot tell two platforms with the same scheme apart and keeps transports here; and an HTTP binding
+every area serves (ApplicationModel C5, superseded), which made each area a transport.
 
 ## Concurrency
 
@@ -292,16 +317,17 @@ its own: change it only from an action. Use an immutable `TState` so a concurren
 ## Tiers and area implementations
 
 This library is under `libraries/`, so it cannot reference a resource area (COHLIB001) and knows
-nothing of Web. The Web area (Tier 1) supplies the HTTP server that maps requests onto
-`ExecuteAsync` and `RestoreAsync`: Web.Server's engine on a private listener, registered as a host
-service of its own (D15). A Tier 2 or Tier 3 area reuses that server and exposes only the actions its
-own resource lists. An action is a standalone object, so such an area can list
-selected Web actions explicitly; nothing is exposed by nesting, and enabling the Application Model on
-it creates its control plane only.
+nothing of Web. No area serves the control plane: the platform's client carries the gateway's calls
+(D19). An area exposes only the actions its own resource lists. An action is a standalone object, so
+an area can list selected Web actions explicitly; nothing is exposed by nesting, and enabling the
+Application Model on it creates its control plane only.
 
-An area's implementation of this library (its actions and its control-plane wiring) ships as
-`<Area>.Hosting.ApplicationModel`; Web's is the first. The area `<Area>.ApplicationModel` packages of
-the retired design were deleted on 2026-10-30 (owner): a gateway declares any resource generically.
+An area's implementation of this library (its actions, its options deriving from
+`ApplicationInstanceOptions`, and its registration of the instance service) ships as
+`<Area>.Hosting.ApplicationModel`; Web's is the first. A platform's instance half ships as
+`ApplicationModel.Hosting.<Platform>`; the in-process one is the first. The area
+`<Area>.ApplicationModel` packages of the retired design were deleted on 2026-10-30 (owner): a
+gateway declares any resource generically.
 
 ## AOT
 
@@ -326,9 +352,15 @@ None. The library raises no events and has no event source.
    create and register its control plane without an ambient registry (D1)?
 5. **Management routes.** `/resources/providers/{provider}/controls` has no segment for the
    application resource or the instance an action addresses. The gateway's `ExecuteAsync` addresses
-   the resource and picks the instance (ApplicationModel.Gateway G38); its HTTP routes come with the
-   gateway's transport.
+   the resource and picks the instance (ApplicationModel.Gateway G38); a platform's routes, if it
+   has any, come with its transport (D19).
 6. **Restore order.** Since ApplicationModel.Gateway G38 the gateway restores writes on running
    instances. When a gateway that forgot an instance answers its new publication, a restore it sends
    afterward can reach the instance first, and the late answer then overwrites the newer state until
    the next write. Snapshots need a version the instance checks before it applies one.
+7. **A call between publication and opening.** An instance is registered when it publishes, but
+   its client opens only once the publication's state is restored (D19). An operator's action in
+   that window gets no answer, and the gateway drops the instance until its next renewal, a third of
+   a lease away. Options: the instance reports that it serves in a renewal, and the gateway calls
+   only instances that do; or a platform's instance client waits briefly for an instance that is
+   still starting. For the owner.

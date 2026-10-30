@@ -11,7 +11,9 @@ host starts, the control plane publishes the instance's manifest to the gateway 
 restores the state the gateway returns: every stateful write made since the resource was last
 deployed. Afterwards it executes actions and restores state on request.
 
-The library is transport-neutral and gateway-neutral. The Web area binds the control plane to HTTP;
+The library is transport-neutral and gateway-neutral. A platform's instance half supplies the client
+that carries the manifest out and the gateway's calls in (`IApplicationGatewayClient`), and a resource
+opts into each platform through its area's options (`ApplicationInstanceOptions`);
 `Assimalign.Cohesion.ApplicationModel.Definition` and `Assimalign.Cohesion.ApplicationModel.Gateway`
 manage instances without referencing this library.
 

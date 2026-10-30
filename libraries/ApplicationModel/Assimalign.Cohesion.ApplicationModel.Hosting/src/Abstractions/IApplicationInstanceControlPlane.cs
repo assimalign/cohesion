@@ -14,9 +14,9 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// <see cref="IApplicationInstanceService"/> that runs it.
 /// </para>
 /// <para>
-/// The control plane is transport-neutral. A server, such as the HTTP listener an area registers as
-/// a host service of its own, maps its requests onto <see cref="ExecuteAsync"/> and
-/// <see cref="RestoreAsync"/>, and reads and writes their content with <see cref="Serializer"/>.
+/// The control plane is transport-neutral. The platform's <see cref="IApplicationGatewayClient"/>
+/// carries the gateway's calls to <see cref="ExecuteAsync"/> and <see cref="RestoreAsync"/>, and
+/// reads their content with <see cref="Serializer"/>.
 /// </para>
 /// </remarks>
 public interface IApplicationInstanceControlPlane
@@ -27,13 +27,16 @@ public interface IApplicationInstanceControlPlane
     IApplicationResourceInstance Resource { get; }
 
     /// <summary>
-    /// Gets the manifest the instance publishes to its gateway.
+    /// Gets the instance's manifest: its identity and its actions. The gateway client that publishes
+    /// it adds where the gateway reaches this control plane
+    /// (<see cref="ApplicationInstanceManifest.ControlPlaneEndpoint"/>), which this manifest leaves
+    /// unset.
     /// </summary>
     ApplicationInstanceManifest Manifest { get; }
 
     /// <summary>
-    /// Gets the content serializer the control plane writes its states' snapshots with. A server
-    /// creates invocation contexts with it and writes the manifest and results with it.
+    /// Gets the content serializer the control plane writes its states' snapshots with. A gateway
+    /// client creates invocation contexts with it for the content it carries in.
     /// </summary>
     IApplicationContentSerializer Serializer { get; }
 

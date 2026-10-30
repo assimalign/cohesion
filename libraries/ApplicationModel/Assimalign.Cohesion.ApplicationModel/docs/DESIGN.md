@@ -15,7 +15,9 @@ three share and what a gateway and an instance exchange, and nothing either side
 It references Core only.
 
 The arrow below means "references". The logical side and the physical side both reference the
-contracts, and neither references the other.
+contracts, and neither references the other. A platform is a pair of packages, one on each side:
+the in-process platform's instance half references Hosting, and its gateway half references both
+the Gateway and that instance half (C5).
 
 ```mermaid
 flowchart LR
@@ -23,6 +25,9 @@ flowchart LR
     Definition --> Contracts["Assimalign.Cohesion.ApplicationModel<br/>contracts"]
     Hosting["ApplicationModel.Hosting<br/>physical: instances, control plane"] --> Contracts
     Contracts --> Core["Assimalign.Cohesion.Core"]
+    HostingInProcess["ApplicationModel.Hosting.InProcess<br/>instance half"] --> Hosting
+    GatewayInProcess["ApplicationModel.Gateway.InProcess<br/>gateway half"] --> Gateway
+    GatewayInProcess --> HostingInProcess
 ```
 
 ## The types
@@ -31,11 +36,14 @@ flowchart LR
 | --- | --- |
 | `IApplicationResource` | The base of the three forms: `Provider`, `Name`, and the `Id` derived from them. |
 | `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`, `InstanceKey`, `ActionName`, `DeploymentId` | Identity value objects. Ids are version 5 UUIDs of the names; an instance key is a ULID per process start; a deployment id is a version 5 UUID of what a gateway deployed (ApplicationModel.Gateway G34). |
-| `ApplicationInstanceManifest`, `ApplicationActionDescriptor`, `ApplicationActionKind` | What an instance publishes about itself: its identity, key, the deployment that started it, where its control plane serves (C5), and its actions. |
+| `PlatformName` | Names a platform, such as `inprocess` or `kubernetes`: what a gateway deploys onto, when an extension applies, and which client an instance reaches its gateway through (C5). It moved here from Definition so both halves of a platform share it. |
+| `ApplicationInstanceManifest`, `ApplicationActionDescriptor`, `ApplicationActionKind` | What an instance publishes about itself: its identity, key, the deployment that started it, where its gateway reaches its control plane (C5), and its actions. |
 | `ApplicationActionContext`, `ApplicationActionResult`, `ApplicationActionStatus` | One invocation of an action, on an instance or a gateway's infrastructure action, and its outcome. |
 | `ApplicationActionSnapshot` | One action's state after a write, as a gateway records and replays it. |
 | `IApplicationContentSerializer`, `ApplicationContentException` | The format of action content, and the refusal of content that does not bind. |
-| `IApplicationInstancePublisher`, `ApplicationInstancePublication` | The seam an instance publishes through, which a gateway implements, and its answer: the snapshots to restore and a lease. |
+| `JsonApplicationContentSerializer` | The default serializer: UTF-8 JSON through source-generated contexts, this library's own first. An instance's control plane writes with it, and a platform that carries content between processes can too. |
+| `IApplicationInstancePublisher`, `ApplicationInstancePublication` | Instance to gateway: the seam an instance publishes through, which a gateway implements, and its answer: the snapshots to restore and a lease. |
+| `IApplicationInstanceClient` | Gateway to instance: how a gateway runs an action on an instance and restores a write there. A platform's gateway half implements it. |
 
 ## Decisions
 
@@ -73,30 +81,36 @@ this decision the contracts and the instance side were `Resource`-prefixed (`Res
   and `IApplicationResourceAction`, and adds eleven characters to each name.
 - `Resource` as the only prefix: it would undo the `IApplicationResource` family.
 
-**C5 — An instance's control plane has one HTTP binding, which its gateway calls (2026-10-30).** A
-gateway runs an operator's action on an instance and restores a write on the others through the
-instance's control plane (ApplicationModel.Gateway G38). The binding is therefore a contract between
-the gateway and every area, not one area's choice:
-- **Address.** The manifest names the absolute URL the control plane serves at
-  (`ApplicationInstanceManifest.ControlPlaneEndpoint`), as the instance's environment named it
-  (`COHESION_CONTROL_PLANE_ENDPOINT`). The platform hands each instance an address the gateway
-  reaches, and the area's server listens there: on Kubernetes the pod's own address, never a value
-  its pods share. The routes resolve against it, and a server serves them at its root. An instance
-  with no control plane names none; the gateway cannot call it, and it receives a write when it
-  next publishes.
-- **Routes.** `GET /manifest`; `GET /actions/{name}` reads an action and `POST /actions/{name}`
-  writes it, with the body as its input; `PUT /state/{name}` restores its state, with the body as
-  the snapshot's value.
-- **Bodies.** JSON both ways. An action or a restore answers with its `ApplicationActionResult`:
-  `{status, output?, reason?, state?}`.
-- **Statuses.** `200` succeeded, `400` rejected, `404` no such action, `405` operation not accepted,
-  each with a result. Any other status, or one without a result, such as the bare `404` of a server
-  that serves no control plane at the address, is no answer.
+**C5 — A platform owns the transport between an instance and its gateway, both ways (2026-10-30,
+owner).** The core packages carry no transport. This library holds the two client seams a platform
+implements, one per direction: `IApplicationInstancePublisher` (an instance publishes and renews) and
+`IApplicationInstanceClient` (a gateway runs an action and restores a write, ApplicationModel.Gateway
+G38). Each platform is a pair of packages, because one package cannot serve both sides without a
+resource carrying the gateway:
+- **The instance half**, which a resource opts into in its area builder (`resource =>
+  resource.UseInProcess()`), is a gateway client (`IApplicationGatewayClient`, ApplicationModel.Hosting
+  D19). It publishes the instance's manifest and carries the gateway's calls in.
+- **The gateway half**, which the gateway opts into in its builder, is the gateway's infrastructure,
+  its transport, and its instance client.
+- **Selection.** A resource that runs on several platforms opts into each; an instance uses the
+  client of the platform its gateway names (`AppEnvironment.Variables.Gateway`, a `PlatformName`).
+  None named runs it unmanaged; a name it has no client for fails its build.
+- **Address.** The manifest's `ControlPlaneEndpoint` is where the gateway reaches the control plane
+  in the platform's own terms; the instance's client names it, and only the platform's instance
+  client reads it. In process it is the gateway's in-process endpoint. An instance whose manifest
+  names none cannot be called; it receives a write when it next publishes.
+- **Content.** An invocation's content crosses as bytes, which the instance's control plane reads
+  with its own serializer, whether or not a process boundary lies between them.
 
-The gateway's default instance client calls it, and Web.Hosting.ApplicationModel serves it (W1);
-every area's server serves the same binding. It is anonymous until authentication ships with the
-gateway's HTTP transport. *Rejected:* each area naming its own routes in its manifest. The gateway,
-and every operator tool after it, would carry a route table per area for the same two operations.
+So an area does no transport: Web exposes its settings as actions and nothing else. The in-process
+platform runs on direct calls in both directions (ApplicationModel.Hosting.InProcess,
+ApplicationModel.Gateway.InProcess). No platform runs a resource out of process yet, so no HTTP
+binding exists; the first one defines its transport, push or pull, and its authentication.
+*Superseded:* the earlier C5 of the same day, an HTTP control-plane binding (`GET /manifest`,
+`GET|POST /actions/{name}`, `PUT /state/{name}`) that every area served on its own listener and the
+gateway's default client called, and the plan to give that client a private Web reference (owner,
+2026-10-30). *Rejected:* one package per platform for both halves; a resource that references it
+carries the gateway and the logical model.
 
 ## AOT
 

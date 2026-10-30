@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Hosting</RootNamespace>
-		<Description>Cohesion application model hosting: a running resource instance, its health contributions, the in-process control plane over its actions, the host service that publishes its manifest and restores its state, and the HTTP manifest publisher.</Description>
+		<Description>Cohesion application model hosting: the abstractions for hosting a resource instance — its actions and health contributions, the control plane over its actions, the host service that publishes its manifest and restores its state, and the options through which a resource opts into the gateway client of each platform it runs on.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />

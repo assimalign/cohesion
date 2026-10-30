@@ -19,10 +19,10 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// gateway is down, leaves the gateway's registrations within one lease.
 /// </para>
 /// <para>
-/// The transport and its authentication belong to the implementation; a local gateway accepts an
-/// anonymous publication. <see cref="ApplicationInstancePublisher.Create"/> creates the HTTP
-/// implementation. A snapshot's value must be written by the content serializer of the control
-/// plane that restores it.
+/// The gateway implements it, as its transports hand it what instances publish, and the instance half
+/// of a platform implements it as the client an instance publishes through. The transport between
+/// them and its authentication belong to the platform. A snapshot's value must be written by the
+/// content serializer of the control plane that restores it.
 /// </para>
 /// </remarks>
 public interface IApplicationInstancePublisher

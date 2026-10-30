@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Tests;
 
 /// <summary>
 /// The manage loop on Web: an operator's write through the gateway runs on one instance's control
-/// plane over HTTP, is recorded, and reaches every other instance, now or when it next publishes.
+/// plane directly, is recorded, and reaches every other instance, now or when it next publishes.
 /// </summary>
 public sealed class WebResourceManagementTests
 {
@@ -50,7 +50,7 @@ public sealed class WebResourceManagementTests
             var program = new Uri(resource.Outputs[OutputName.Endpoint]);
             (await GetAllowedOriginAsync(program, CorsProgram.Shop)).ShouldBe(CorsProgram.Shop);
 
-            second = await RunningResource.StartAsync(infrastructure.Endpoint, new WebCorsPolicy { Origins = [CorsProgram.Shop] });
+            second = await RunningResource.StartInProcessAsync(infrastructure.Endpoint, new WebCorsPolicy { Origins = [CorsProgram.Shop] });
             resource.Instances.Count.ShouldBe(2);
 
             // Act
@@ -65,13 +65,13 @@ public sealed class WebResourceManagementTests
             resource.State.ShouldHaveSingleItem().Action.ShouldBe(new ActionName("cors"));
             (await GetAllowedOriginAsync(program, Partner)).ShouldBe(Partner);
             (await second.GetAllowedOriginAsync(Partner)).ShouldBe(Partner);
-            resource.Instances.ShouldAllBe(instance => instance.ControlPlaneEndpoint != null);
+            resource.Instances.ShouldAllBe(instance => instance.ControlPlaneEndpoint == infrastructure.Endpoint);
 
             // A restarted instance is a new one: it restores the write from its publication's answer
             // before it serves.
             await second.DisposeAsync();
             second = null;
-            await using RunningResource restarted = await RunningResource.StartAsync(infrastructure.Endpoint, new WebCorsPolicy { Origins = [CorsProgram.Shop] });
+            await using RunningResource restarted = await RunningResource.StartInProcessAsync(infrastructure.Endpoint, new WebCorsPolicy { Origins = [CorsProgram.Shop] });
             (await restarted.GetAllowedOriginAsync(Partner)).ShouldBe(Partner);
             (await restarted.GetAllowedOriginAsync(CorsProgram.Shop)).ShouldBeNull();
         }

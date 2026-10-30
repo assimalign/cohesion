@@ -3,12 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Hosting;
+using Assimalign.Cohesion.ApplicationModel.Hosting.InProcess;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Cors;
 using Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
@@ -20,19 +21,18 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Tests;
 
 /// <summary>
 /// A Web application started as the <c>orders-api</c> resource instance, the way a provisioned
-/// resource's <c>Program.cs</c> composes it, on its own port and with a private control-plane port.
-/// Its CORS policy is registered with <c>AddCors</c> and placed with <c>UseCors()</c>, as any Web
-/// application's is; <c>AddResource</c> adds nothing to that composition.
+/// resource's <c>Program.cs</c> composes it, on its own port. Its CORS policy is registered with
+/// <c>AddCors</c> and placed with <c>UseCors()</c>, as any Web application's is; <c>AddResource</c>
+/// adds nothing to that composition and no listener of its own.
 /// </summary>
 internal sealed class RunningResource : IAsyncDisposable
 {
     private readonly WebApplication _application;
 
-    private RunningResource(WebApplication application, int applicationPort, int controlPlanePort)
+    private RunningResource(WebApplication application, int applicationPort)
     {
         _application = application;
         Application = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{applicationPort}/") };
-        ControlPlane = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{controlPlanePort}/") };
     }
 
     /// <summary>
@@ -52,30 +52,60 @@ internal sealed class RunningResource : IAsyncDisposable
     public HttpClient Application { get; }
 
     /// <summary>
-    /// Gets a client for the instance's control plane, as the gateway calls it.
-    /// </summary>
-    public HttpClient ControlPlane { get; }
-
-    /// <summary>
-    /// Gets the resource services among the host's services, as an in-process gateway finds them.
+    /// Gets the resource services among the host's services.
     /// </summary>
     public IReadOnlyList<IApplicationInstanceService> InstanceServices => _application.Context.ServiceProvider
         .GetRequiredService<IEnumerable<IHostService>>()
         .OfType<IApplicationInstanceService>()
         .ToArray();
 
-    /// <param name="manifestEndpoint">Where the instance publishes; <see langword="null"/> runs it unmanaged.</param>
+    /// <param name="gateway">The test platform the instance runs on; <see langword="null"/> runs it unmanaged.</param>
     /// <param name="cors">The CORS policy the application's code defines; <see langword="null"/> registers no CORS at all.</param>
     /// <param name="configure">Configures the resource further.</param>
     /// <param name="beforeResource">Composes the application ahead of <c>AddResource</c>.</param>
-    public static async Task<RunningResource> StartAsync(
-        Uri? manifestEndpoint,
+    public static Task<RunningResource> StartAsync(
+        TestGatewayClient? gateway,
         WebCorsPolicy? cors,
         Action<WebResourceOptions>? configure = null,
         Action<WebApplicationBuilder>? beforeResource = null)
     {
+        return StartCoreAsync(cors, resource =>
+        {
+            // The test names the platform itself, whatever the process's environment holds.
+            resource.Platform = gateway?.Platform;
+            if (gateway is not null)
+            {
+                resource.UseGatewayClient(gateway);
+            }
+
+            configure?.Invoke(resource);
+        }, beforeResource);
+    }
+
+    /// <summary>
+    /// Starts an instance that joins an in-process gateway at its endpoint, as one a platform scales
+    /// out does: in the environment the gateway gives its programs, opted into the platform.
+    /// </summary>
+    public static async Task<RunningResource> StartInProcessAsync(Uri endpoint, WebCorsPolicy? cors)
+    {
+        var variables = new Dictionary<string, string>
+        {
+            [AppEnvironment.Variables.Gateway] = "inprocess",
+            [AppEnvironment.Variables.ManifestEndpoint] = endpoint.AbsoluteUri,
+        };
+
+        using (AppEnvironment.Enter(AppEnvironmentScope.Create(variables, CancellationToken.None)))
+        {
+            return await StartCoreAsync(cors, resource => resource.UseInProcess(), beforeResource: null);
+        }
+    }
+
+    private static async Task<RunningResource> StartCoreAsync(
+        WebCorsPolicy? cors,
+        Action<WebResourceOptions> configure,
+        Action<WebApplicationBuilder>? beforeResource)
+    {
         int applicationPort = TestPorts.GetFree();
-        int controlPlanePort = TestPorts.GetFree();
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions());
         builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(IPAddress.Loopback, applicationPort)));
@@ -90,12 +120,7 @@ internal sealed class RunningResource : IAsyncDisposable
             });
         }
         beforeResource?.Invoke(builder);
-        builder.AddResource("orders-api", resource =>
-        {
-            resource.ManifestEndpoint = manifestEndpoint;
-            resource.ControlPlaneEndpoint = new Uri($"http://127.0.0.1:{controlPlanePort}/");
-            configure?.Invoke(resource);
-        });
+        builder.AddResource("orders-api", configure);
 
         WebApplication application = builder.Build();
         application.UseCors();
@@ -115,7 +140,7 @@ internal sealed class RunningResource : IAsyncDisposable
             throw;
         }
 
-        return new RunningResource(application, applicationPort, controlPlanePort);
+        return new RunningResource(application, applicationPort);
     }
 
     /// <summary>
@@ -137,7 +162,6 @@ internal sealed class RunningResource : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Application.Dispose();
-        ControlPlane.Dispose();
         await ((IWebApplication)_application).StopAsync();
         await ((IAsyncDisposable)_application).DisposeAsync();
     }

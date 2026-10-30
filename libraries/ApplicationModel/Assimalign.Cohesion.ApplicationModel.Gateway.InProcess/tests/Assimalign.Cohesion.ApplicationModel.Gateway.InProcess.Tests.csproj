@@ -15,5 +15,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting.InProcess" />
 	</ItemGroup>
 </Project>

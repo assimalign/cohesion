@@ -1,9 +1,12 @@
 # Assimalign.Cohesion.ApplicationModel.Gateway.InProcess — Design
 
-> **Status (2026-10-29):** rebuilt on the restarted application model. The plan-driven
+> **Status (2026-10-30):** rebuilt on the restarted application model. The plan-driven
 > in-process gateway (`InProcessGateway`, `ProcessHost`, member supervision, plan compilation) is
 > gone; this package is now an infrastructure provider of the gateway in
 > [ApplicationModel.Gateway](../../Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md).
+> Since 2026-10-30 it is the gateway half of the in-process platform, whose instance half is
+> [ApplicationModel.Hosting.InProcess](../../Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/DESIGN.md)
+> (I12).
 
 ## Purpose
 
@@ -15,9 +18,11 @@ listens, and its settings. Every program then publishes to its gateway like any 
 `dotnet run` of the gateway program runs the whole application, with each resource's code exactly
 as it runs on any other platform.
 
-The package references ApplicationModel.Gateway, for the provider and transport seams, and
-ApplicationModel.Hosting, for the in-process endpoint its programs publish to. It references no
-resource area: the gateway program references the programs.
+The package references ApplicationModel.Gateway, for the provider and transport seams;
+ApplicationModel.Hosting, for the instance's control plane it calls; and the platform's instance
+half, ApplicationModel.Hosting.InProcess, for the endpoints both halves meet at. It references no
+resource area: the gateway program references the programs, and each program opts into the platform
+with the instance half's `UseInProcess()`.
 
 ## How a deployment runs
 
@@ -36,18 +41,22 @@ sequenceDiagram
     Program->>Channel: publish manifest (inprocess:// endpoint)
     Channel->>Gateway: PublishAsync, on the gateway's flow
     Gateway-->>Program: snapshots and lease
+    Program->>Channel: attach its control plane, once the snapshots are restored
     Gateway->>Infra: GetResourceOutputsAsync
     Infra-->>Gateway: endpoint = http://127.0.0.1:port
+    Gateway->>Infra: ExecuteAsync (as instance client), an operator's action
+    Infra->>Program: the attached control plane, in the program's environment
     Gateway->>Infra: DisposeAsync, after the run (gateway program)
     Infra->>Program: scope shutdown, the last deployed first
 ```
 
 The gateway starts the channel as one of its transports before it deploys anything. It plans and
-deploys the resource. The infrastructure starts the program, whose host publishes its manifest to
-the in-process endpoint its environment names. The channel hands the publication to the gateway,
+deploys the resource. The infrastructure starts the program, whose in-process client publishes its
+manifest to the endpoint its environment names. The channel hands the publication to the gateway,
 and the gateway reads the resource's outputs, so what depends on it can be planned with its
-address. Once the gateway has stopped, the gateway program disposes the infrastructure, which stops
-the programs.
+address. Once its restored state is in effect the program attaches its control plane at the same
+endpoint, and the gateway's operator actions and restores reach it there directly (I12). Once the
+gateway has stopped, the gateway program disposes the infrastructure, which stops the programs.
 
 ## Decisions
 
@@ -81,27 +90,26 @@ This is the "In-process: ambient context" delivery the runtime contract
 | Variable | Value |
 | --- | --- |
 | `Application`, `Resource` | The name of the model the gateway runs, and the resource's name |
-| `Gateway` | `inprocess`, the kind of platform, as the contract defines it |
-| `ManifestEndpoint` | The infrastructure's in-process endpoint, `inprocess://<id>/` |
-| `ControlPlaneEndpoint` | `http://127.0.0.1:<port>/`, the instance's private control-plane listener |
+| `Gateway` | `inprocess`, the platform's name, which selects the program's in-process client (ApplicationModel.Hosting D19) |
+| `ManifestEndpoint` | The infrastructure's in-process endpoint, `inprocess://<id>/`, where the program publishes and attaches its control plane |
 | `Deployment` | The id of the deployment that started the program, which its manifest repeats (Gateway G34); an update starts the replacement with the new deployment's id |
 | `Endpoint("http", HOST/PORT/SCHEME)` | `127.0.0.1`, a free port, `http`: where the program serves |
 | `Environment` | The gateway program's own environment name, when it has one |
 | `Configuration(key)` | Each setting, under its configuration key (`Orders:Url` → `…CONFIG__Orders__Url`) |
 
-The ports are chosen when a resource first deploys and kept for its lifetime in the
-infrastructure, so an update listens where its predecessor did and its dependents' values do not
-move. A Web application binds the `http` endpoint when it configures no listener of its own
+No control-plane address is given: the gateway calls the program directly (I12). The port is
+chosen when a resource first deploys and kept for its lifetime in the infrastructure, so an update
+listens where its predecessor did and its dependents' values do not move. A Web application binds the `http` endpoint when it configures no listener of its own
 (Web.Hosting), and its configuration reads the settings through its environment-variable source.
 
 **I5 — The transport is a channel (owner suggestion, 2026-10-29).** The owner kept one publisher
 seam so each platform can bring its own transport, and suggested named pipes or channels for this
-one. A program publishes through its ordinary publisher to the in-process endpoint
-(`ApplicationInstancePublisher.Register`, ApplicationModel.Hosting). The infrastructure registers a
-channel there and drains it on the flow the gateway started it on: the infrastructure is also an
-`IApplicationGatewayTransport` (Gateway G33). Each request carries its own completion, so the program
-waits with its own cancellation, and the gateway handles the request outside the program's
-environment. *Rejected:*
+one. A program publishes through its in-process client to the in-process endpoint, which the
+infrastructure registers its channel at (`InProcessPlatform.RegisterGateway`,
+ApplicationModel.Hosting.InProcess). It drains the channel on the flow the gateway started it on:
+the infrastructure is also an `IApplicationGatewayTransport` (Gateway G33). Each request carries its
+own completion, so the program waits with its own cancellation, and the gateway handles the request
+outside the program's environment. *Rejected:*
 - A direct call, the program publishing to the gateway object itself. The gateway's code would run
   inside the program's scope, and the program's cancellation would reach the gateway's record save.
 - Named pipes. They would serialize every publication and hold operating-system handles, for no
@@ -143,13 +151,26 @@ the whole window. A deployment whose program no longer runs has ended.
 `endpoint` = `http://127.0.0.1:<port>` for a running program, so a dependent's setting that uses
 `orders.Endpoint` receives the address the program serves.
 
-**I12 — The gateway reaches a program's control plane over loopback HTTP (2026-10-30).** A program's
-control plane listens on the loopback port its scope names (I4), and its manifest names that address
-(ApplicationModel.Hosting D18). The gateway runs an operator's action and restores a write there with
-its own HTTP client (Gateway G38), as it would on any platform, so in process needs no client of its
-own. *Rejected:* calling the program's control plane object through the channel. The channel carries
-publications from programs to the gateway; calls in the other direction would need a registry of
-control planes by instance, and would skip the binding every other platform uses.
+**I12 — The gateway calls a program's control plane directly (owner, 2026-10-30).** The platform
+owns the transport in both directions (ApplicationModel C5), so this package is the gateway half of
+a pair, and ApplicationModel.Hosting.InProcess is the instance half a program opts into. In the
+other direction, from the gateway to the programs:
+- **Attach.** A program's in-process client attaches its control plane to the channel once the
+  state its publication answered with is restored, and detaches it when the program stops. Its
+  manifest names the in-process endpoint as its control plane's address.
+- **Call.** The infrastructure is the gateway's `IApplicationInstanceClient` (`UseInProcess` sets it
+  with the infrastructure and the transport). It finds the attached control plane by the manifest's
+  instance key and calls it. The content crosses as bytes, rewrapped with the control plane's own
+  serializer, as between processes.
+- **Environment.** The program's client runs each call in the execution context it attached from, so
+  an action runs in the program's environment, not the gateway's.
+- **No answer.** A call for an instance that is not attached, because it has not finished starting or
+  has stopped, throws, and the gateway drops the instance until it publishes again (Gateway G38).
+
+*Superseded:* the same-day decision that the gateway reached each program's control plane over
+loopback HTTP, with a control-plane port per program and the gateway's own HTTP client.
+*Rejected:* the program's control plane found among its host's services, which the gateway cannot
+reach without the program's host.
 
 ## Non-goals
 

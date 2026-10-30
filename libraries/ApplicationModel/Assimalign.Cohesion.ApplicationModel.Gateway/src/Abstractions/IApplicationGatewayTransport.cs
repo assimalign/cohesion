@@ -5,15 +5,16 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 
 /// <summary>
 /// A way a gateway's instances reach it: it receives the manifests they publish and their renewals,
-/// and hands each to the gateway. An HTTP endpoint is one; a channel inside the gateway's process,
-/// for resources the gateway runs there, is another.
+/// and hands each to the gateway. The gateway half of a platform supplies it, such as the channel
+/// inside the gateway's process for the resources it runs there.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The gateway itself is transport-neutral: it takes each publication and renewal through
 /// <see cref="IApplicationInstancePublisher"/>. A transport carries them to it from wherever its
-/// instances run, and an instance's own publisher (the one its
-/// <see cref="AppEnvironment.Variables.ManifestEndpoint"/> variable names) carries them to the transport.
+/// instances run, and the instance half of the same platform, the client each instance publishes
+/// through, carries them to the transport. The gateway calls back through the platform's
+/// <see cref="IApplicationInstanceClient"/>.
 /// </para>
 /// <para>
 /// A gateway starts each of its transports when its run has loaded its record, before it joins its

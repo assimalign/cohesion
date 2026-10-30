@@ -11,16 +11,16 @@ record is [DESIGN.md](DESIGN.md).
 ## Scope
 
 - In scope: `ApplicationGateway` and its `ApplicationBuilder`; the `IApplicationGateway`,
-  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, `IApplicationGatewayTransport`,
-  `IApplicationInstanceClient` (with its default HTTP client for the control-plane binding), and
-  `IInfrastructureProvider` seams; an operator's actions on a resource's instances
-  (`ApplicationGateway.ExecuteAsync`); the
-  deployment of a resource (`IApplicationResourceDeployment`, `ApplicationResourceDeployment`,
+  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, `IApplicationGatewayTransport`, and
+  `IInfrastructureProvider` seams, and the use of the contracts' `IApplicationInstanceClient`; an
+  operator's actions on a resource's instances (`ApplicationGateway.ExecuteAsync`); the deployment
+  of a resource (`IApplicationResourceDeployment`, `ApplicationResourceDeployment`,
   `IApplicationResourceAction`); the `IApplicationGatewayStore` record with its JSON file store; and
   `ApplicationGatewayException`.
-- Out of scope: serving HTTP (the publication endpoint, joins, and management routes are
-  transport-neutral here; the gateway only calls its instances' control planes over HTTP), platform
-  providers, and identity and authentication.
+- Out of scope: every transport. A platform's gateway half supplies the infrastructure, the transport
+  instances publish through, and the instance client the gateway calls them with, such as
+  `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`. Also out of scope: identity and
+  authentication.
 
 ## Dependencies
 

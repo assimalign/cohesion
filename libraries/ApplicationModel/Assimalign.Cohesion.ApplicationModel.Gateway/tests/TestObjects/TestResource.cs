@@ -20,8 +20,6 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public DeploymentId? Deployment { get; init; }
 
-    public Uri? ControlPlaneEndpoint { get; init; }
-
     public IReadOnlyCollection<IApplicationInstanceAction> Actions => [LogLevel];
 
     public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors => [];

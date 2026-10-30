@@ -54,7 +54,8 @@ jobs:
             'Assimalign.Cohesion.ApplicationModel.Definition',
             'Assimalign.Cohesion.ApplicationModel.Gateway',
             'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess',
-            'Assimalign.Cohesion.ApplicationModel.Hosting'
+            'Assimalign.Cohesion.ApplicationModel.Hosting',
+            'Assimalign.Cohesion.ApplicationModel.Hosting.InProcess'
         ]]
     steps:
       - uses: actions/checkout@v7

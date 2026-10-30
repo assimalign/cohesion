@@ -1,13 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Hosting;
+using Assimalign.Cohesion.ApplicationModel.Hosting.InProcess;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests;
 
@@ -40,7 +43,46 @@ public class InProcessInfrastructureTests
         program.Environment[AppEnvironment.Variables.Gateway].ShouldBe("inprocess");
         program.Environment[AppEnvironment.Variables.Resource].ShouldBe("orders-api");
         program.Environment[AppEnvironment.Variables.ManifestEndpoint].ShouldBe(infrastructure.Endpoint.AbsoluteUri);
-        program.Environment[AppEnvironment.Variables.ControlPlaneEndpoint].ShouldStartWith("http://127.0.0.1:");
+
+        // The gateway calls the program directly, through the endpoint it publishes to: no listener,
+        // so no control-plane address of its own.
+        program.Environment[AppEnvironment.Variables.ControlPlaneEndpoint].ShouldBeNull();
+        instance.ControlPlaneEndpoint.ShouldBe(infrastructure.Endpoint);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An operator's action reaches the program's control plane directly and runs in the program's environment")]
+    public async Task ExecuteAsync_OnProgram_ShouldRunInTheProgramsEnvironment()
+    {
+        // Arrange
+        await using var infrastructure = new InProcessInfrastructure();
+        var orders = new TestProgram("Web", "orders-api");
+        infrastructure.AddProgram("Web", "orders-api", orders.MainAsync);
+        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        builder.AddResource("Web", "orders-api");
+        await using GatewayRun run = await GatewayRun.StartAsync(builder.Build());
+        await orders.Runs.ShouldHaveSingleItem().Serving.WaitAsync(TimeSpan.FromSeconds(10));
+        JsonApplicationContentSerializer json = JsonApplicationContentSerializer.Create(TestJsonContext.Default);
+
+        // Act
+        ApplicationActionResult result = await run.Gateway.ExecuteAsync("Web", "orders-api", "environment", ApplicationActionContext.Create(ApplicationActionKind.Read, json));
+
+        // Assert: the action read the program's own variables, not the test's.
+        result.Status.ShouldBe(ApplicationActionStatus.Succeeded);
+        json.Deserialize<ProgramEnvironment>(result.Output).ShouldNotBeNull().Resource.ShouldBe("orders-api");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A call to an instance whose control plane is not attached gets no answer")]
+    public async Task ExecuteAsync_WithUnattachedInstance_ShouldThrow()
+    {
+        // Arrange
+        await using var infrastructure = new InProcessInfrastructure();
+        IApplicationInstanceClient client = infrastructure;
+        ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(new TestResource("Web", "orders-api", null), JsonApplicationContentSerializer.Create()).Manifest
+            with { ControlPlaneEndpoint = infrastructure.Endpoint };
+
+        // Act & Assert
+        await Should.ThrowAsync<InvalidOperationException>(() => client.ExecuteAsync(manifest, "environment", ApplicationActionContext.Create(ApplicationActionKind.Read, JsonApplicationContentSerializer.Create())).AsTask());
+        await Should.ThrowAsync<InvalidOperationException>(() => client.RestoreAsync(manifest, ApplicationActionSnapshot.Create("environment", "{}"u8.ToArray())).AsTask());
     }
 
     [Fact(DisplayName = DisplayPrefix + "Each program reads its own environment, and a setting arrives as configuration")]
@@ -228,13 +270,24 @@ public class InProcessInfrastructureTests
     [Fact(DisplayName = DisplayPrefix + "A publication while no gateway runs is refused")]
     public async Task PublishAsync_WithoutRunningGateway_ShouldThrow()
     {
-        // Arrange
+        // Arrange: an instance opted into the platform, in an environment that names the endpoint.
         await using var infrastructure = new InProcessInfrastructure();
-        ApplicationInstancePublisher publisher = ApplicationInstancePublisher.Create(new ApplicationInstancePublisherOptions { Endpoint = infrastructure.Endpoint });
+        IApplicationGatewayClient client;
+        using (AppEnvironment.Enter(AppEnvironmentScope.Create(
+            new Dictionary<string, string>
+            {
+                [AppEnvironment.Variables.Gateway] = "inprocess",
+                [AppEnvironment.Variables.ManifestEndpoint] = infrastructure.Endpoint.AbsoluteUri,
+            },
+            CancellationToken.None)))
+        {
+            client = new TestOptions().UseInProcess().GetGatewayClient().ShouldNotBeNull();
+        }
+
         ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(new TestResource("Web", "orders-api", null), JsonApplicationContentSerializer.Create()).Manifest;
 
         // Act & Assert
-        await Should.ThrowAsync<InvalidOperationException>(() => publisher.PublishAsync(manifest).AsTask());
+        await Should.ThrowAsync<InvalidOperationException>(() => client.PublishAsync(manifest).AsTask());
     }
 
     [Fact(DisplayName = DisplayPrefix + "A resource is bound to one program")]

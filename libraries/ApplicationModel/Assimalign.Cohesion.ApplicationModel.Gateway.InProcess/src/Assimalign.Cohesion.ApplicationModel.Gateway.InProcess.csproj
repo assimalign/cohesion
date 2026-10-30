@@ -5,5 +5,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+		<!-- The instance half of the in-process platform: the endpoints both halves meet at. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting.InProcess" />
 	</ItemGroup>
 </Project>

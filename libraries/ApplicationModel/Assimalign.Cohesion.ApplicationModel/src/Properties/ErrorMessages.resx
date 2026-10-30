@@ -14,4 +14,7 @@
   <data name="ApplicationActionSnapshotEmpty" xml:space="preserve"><value>A state snapshot is a UTF-8 JSON value and cannot be empty.</value></data>
   <data name="ApplicationActionSnapshotInvalid" xml:space="preserve"><value>A state snapshot is a JSON object with a string 'action' and a 'value'.</value></data>
   <data name="ApplicationActionResultInvalid" xml:space="preserve"><value>An action result is a JSON object whose 'status' is Succeeded, Rejected, NotFound, or NotSupported; a rejection carries a 'reason'.</value></data>
+  <data name="PlatformNameInvalid" xml:space="preserve"><value>A platform name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ResourceContentTypeUnsupported" xml:space="preserve"><value>The content serializer does not know type '{0}'. Create it with the source-generated context that declares the type.</value></data>
+  <data name="JsonContextNull" xml:space="preserve"><value>The JSON contexts cannot contain null.</value></data>
 </root>

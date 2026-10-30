@@ -19,8 +19,8 @@ and exposes each resource's infrastructure actions. An operator manages a resour
 gateway runs the action on one instance's control plane and keeps a write on every instance. A child
 gateway joins its parent and fills its settings in from the parent's outputs; the parent knows
 nothing of a child before it joins. The library is transport-neutral and platform-neutral: a
-transport binds its endpoints, and an infrastructure provider supplies the platform. It calls its
-instances' control planes over HTTP itself, with the BCL's client, and serves no HTTP.
+platform's gateway half supplies the infrastructure provider, the transport its instances publish
+through, and the instance client the gateway calls them with (G9). It carries no transport of its own.
 
 The arrow below means "references". A platform package, such as a Kubernetes provider, references
 the gateway; the gateway references the definitions, which reference the shared contracts. The
@@ -156,7 +156,7 @@ sequenceDiagram
 | `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`Model`, `RunAsync`), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationParentGateway` (`JoinAsync`, a child's join). `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Resources` (the aggregates), `Children`, `StartupTimeout`, `LeaseDuration`, and `Started`. `CreateBuilder(name)` creates its builder. |
 | `ApplicationBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure (`UseInfrastructure`), the record store (`UseStore`), the parent (`UseParent`), the transports (`UseTransport`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
 | `IApplicationParentGateway`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
-| `IApplicationInstanceClient` | How the gateway calls its instances' control planes, at the endpoint each manifest names: an action, and a restore (G38). The default is an internal HTTP client of the control-plane binding (ApplicationModel C5); `UseInstanceClient` sets another. |
+| `IApplicationInstanceClient` | From the shared contracts: how the gateway calls its instances' control planes, where each manifest says, for an action and a restore (G38). The platform's gateway half supplies it through `UseInstanceClient`; a gateway without one runs no operator action (G9). |
 | `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), watches the deployment's workload until an instance publishes and reports one that stops first (`WatchResourceAsync`, G36), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
 | `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
 | `IApplicationResourceDeployment`, `ApplicationResourceDeployment`, `IApplicationResourceAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
@@ -461,7 +461,7 @@ instance the previous run left can publish again. It stops them, last first, whe
 transport that cannot start fails the run before anything is joined or deployed. A transport that
 fails to stop fails the run, unless the run failed already: its own failure is the one reported.
 The first transport is in process: Gateway.InProcess's infrastructure is also the channel its
-programs publish through. An HTTP manifest endpoint will be another (G9). *Rejected:* passing the
+programs publish through. Every other platform brings its own (G9). *Rejected:* passing the
 gateway to the provider on each call (`DeployResourceAsync(gateway, …)`). It would tie how
 instances reach the gateway to the platform that starts them, which differs on every platform but
 in-process.
@@ -560,11 +560,11 @@ directly.
 (2026-10-30).** The gateway recorded a write's snapshot (`RecordAsync`) and named the instances that
 had to restore it, but nothing called an instance: an operator wrote to one instance's control plane
 directly, and the restores were the caller's. `ExecuteAsync` closes the loop.
-- **Reach.** Each manifest names the instance's control plane (ApplicationModel C5), and the gateway
-  calls it through an `IApplicationInstanceClient`: over HTTP unless the builder sets another
-  (`UseInstanceClient`). The HTTP client is here, on the BCL's `HttpClient`, so a gateway that runs
-  only in process still reaches its programs' loopback control planes. Serving HTTP stays a
-  transport's (G9).
+- **Reach.** Each manifest names where the gateway reaches the instance's control plane, in its
+  platform's terms (ApplicationModel C5), and the gateway calls it through the platform's
+  `IApplicationInstanceClient` (`UseInstanceClient`). In process that is a direct call. A gateway
+  built without a client fails the call with `InstanceUnavailable` before it reaches any instance
+  (G9).
 - **Run.** The action runs on one registered instance that declares it and names a control plane,
   the earliest started first, because one that registered a moment ago may not serve its control
   plane yet. An action no registered instance declares answers `NotFound` without a call. A write
@@ -582,10 +582,12 @@ directly, and the restores were the caller's. `ExecuteAsync` closes the loop.
   restore the operator's cancellation interrupts unregisters its instance too, so no instance stays
   registered without the write.
 
-The same path covers a restore that reaches an instance before its control plane listens: the
-instance registers when it publishes, before its control-plane server starts
-(Web.Hosting.ApplicationModel W2), so the restore fails and the instance takes the state from its
-next publication. Still open: rolling a live change out in batches with a health check after each
+The same path covers a restore that reaches an instance before its control plane opens: the
+instance registers when it publishes, before its client carries the gateway's calls
+(ApplicationModel.Hosting D19), so the restore fails and the instance takes the state from its
+next publication. An operator's action in that window drops the instance the same way
+(ApplicationModel.Hosting open question 7). Still open: rolling a live change out in batches with a
+health check after each
 (open question 4); snapshot versions, so a late publication answer cannot overwrite a newer restore
 (ApplicationModel.Hosting open question 6); and authenticating the calls (open question 6).
 
@@ -595,15 +597,19 @@ next publication. Still open: rolling a live change out in batches with a health
 - Keeping an instance whose restore failed registered and retrying it. That needs a retry queue per
   instance; unregistering reuses publication, the path every new instance already takes.
 
-**G9 — No HTTP here, yet; it will be a transport over Web (owner direction, 2026-10-29).** COHLIB001
-bars a library from referencing Web, and COHRES003 bars Web (any resource package) from referencing
-a `Gateway*` assembly, so neither side can bind the other today. The options were: serve HTTP from
-this library tier with `Http.Connections`, as the retired gateway did; move the endpoint contracts
-into ApplicationModel and bind them in `Web.ApplicationModel`; or relax one of the guards. The owner
-chose the third: the HTTP transport reuses the Web area as a private reference, so its endpoints run
-on Web.Server's engine, as an instance's control plane already does (Web.Hosting.ApplicationModel
-W1), and no Web type reaches the gateway's public API. It ships as a transport (G33) in a package of
-its own, so a gateway that runs only in process does not carry Web. The retired
+**G9 — No transport here; a platform's gateway half brings it (owner, 2026-10-30).** A platform is a
+pair of packages (ApplicationModel C5). Its gateway half gives the builder three things:
+- the infrastructure provider (`UseInfrastructure`);
+- the transport its instances publish through (`UseTransport`, G33);
+- the instance client the gateway calls them with (`UseInstanceClient`, G38).
+
+Gateway.InProcess's `UseInProcess(infrastructure)` sets all three from one object. The gateway
+therefore has no default client: one built without a client deploys and receives publications, but
+an operator's action fails with `InstanceUnavailable` and names the missing client.
+*Superseded:* the HTTP instance client this library carried on the BCL's `HttpClient` (the 2026-10-30
+form of G38), and the owner's 2026-10-29 plan for an HTTP transport over a private Web reference,
+which COHLIB001 and COHRES003 blocked and the owner scratched on 2026-10-30. The first out-of-process
+platform defines its transport, push or pull, and its authentication. The retired
 `Gateway.ControlPlane`, which served HTTP on `Http.Connections` with its own router, was removed on
 2026-10-29: everything it served (the export document, application sets, declarative commands,
 trusted-issuer grants) was retired with the old model. Joins have no transport either: a child joins
@@ -647,10 +653,10 @@ event carries an action's input, output, or state.
 
 ## Open questions
 
-1. **HTTP binding** (G9): settled as a transport over a private Web reference. Still open: the
-   package's name and where it lives, its routes for publications, renewals, joins, and an operator's
-   actions (`ExecuteAsync`, G38), and authentication. Calling instances needs no transport: the
-   gateway's HTTP client covers it (G38).
+1. **The first out-of-process platform** (G9): which comes first, its package pair's names, whether
+   its instances push to the gateway or hold a connection the gateway's calls come back over, how
+   joins and an operator's actions (`ExecuteAsync`, G38) reach the gateway from outside its process,
+   and authentication.
 2. **Instance liveness.** Resolved by leases (G15). A lease only bounds how long a dead instance stays
    registered; asking the platform which instances run would detect a death sooner.
 3. **Startup failure scope.** Only missed new resources are torn down (G13). Should a failed startup

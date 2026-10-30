@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.ApplicationModel.Hosting.InProcess;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Cors;
 using Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
@@ -21,7 +22,7 @@ internal static class OrdersProgram
     public static async Task MainAsync(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-        builder.AddResource("orders-api");
+        builder.AddResource("orders-api", resource => resource.UseInProcess());
 
         WebApplication application = builder.Build();
         application.Use(async (context, _) =>
@@ -44,7 +45,7 @@ internal static class StorefrontProgram
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         string orders = builder.Configuration["Orders:Url"] ?? throw new InvalidOperationException("The Orders:Url setting did not arrive.");
-        builder.AddResource("storefront");
+        builder.AddResource("storefront", resource => resource.UseInProcess());
 
         WebApplication application = builder.Build();
         using var client = new HttpClient { BaseAddress = new Uri(orders) };
@@ -78,7 +79,7 @@ internal static class CorsProgram
                 cors.Options.AddDefaultPolicy(policy);
             }
         });
-        builder.AddResource("orders-api");
+        builder.AddResource("orders-api", resource => resource.UseInProcess());
 
         WebApplication application = builder.Build();
         application.UseCors();

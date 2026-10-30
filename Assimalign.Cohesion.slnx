@@ -229,6 +229,19 @@
 	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/tests/">
 		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/tests/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests.csproj" />
 	</Folder>
+	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/">
+		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/README.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/">
+		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/DESIGN.md" />
+		<File Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/">
+		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
+	</Folder>
+	<Folder Name="/cohesion/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/tests/">
+		<Project Path="libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/tests/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.Tests.csproj" />
+	</Folder>
 	<Folder Name="/cohesion/libraries/Cache/">
 		<File Path="libraries/Cache/Directory.Build.props" />
 		<File Path="libraries/Cache/Directory.Build.targets" />

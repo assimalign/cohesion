@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
-		<Description>Cohesion application model contracts: what a resource's definition and its running instances share, from resource identity to the manifest an instance publishes, its actions and their replayable state, and the publication seam between an instance and its gateway.</Description>
+		<Description>Cohesion application model contracts: what a resource's definition and its running instances share, from resource and platform identity to the manifest an instance publishes, its actions and their replayable state, the two client seams a platform implements between an instance and its gateway, and the JSON content serializer both halves can write with.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
@@ -14,5 +14,6 @@
 		<CohesionValueType Include="ValueObjects\ProviderId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
 		<CohesionValueType Include="ValueObjects\ProviderName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
 		<CohesionValueType Include="ValueObjects\ActionName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\PlatformName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
 	</ItemGroup>
 </Project>

@@ -86,7 +86,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private readonly IApplicationGatewayStore _store;
     private readonly IApplicationParentGateway? _parent;
     private readonly IApplicationGatewayTransport[] _transports;
-    private readonly IApplicationInstanceClient _client;
+    private readonly IApplicationInstanceClient? _client;
     private readonly SemaphoreSlim _saves = new(1, 1);
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Dictionary<GatewayName, (ApplicationManifest Manifest, long Renewed)> _children = [];
@@ -107,7 +107,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         IApplicationGatewayStore store,
         IApplicationParentGateway? parent,
         IApplicationGatewayTransport[] transports,
-        IApplicationInstanceClient client,
+        IApplicationInstanceClient? client,
         TimeSpan startupTimeout,
         TimeSpan leaseDuration)
     {
@@ -568,7 +568,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>), does
     /// not run the resource (<see cref="ApplicationGatewayErrorCode.ResourceUnknown"/>), stopped
     /// accepting it after it missed its startup window (<see cref="ApplicationGatewayErrorCode.ResourceTornDown"/>),
-    /// reached no registered instance that declares the action
+    /// has no instance client or reached no registered instance that declares the action
     /// (<see cref="ApplicationGatewayErrorCode.InstanceUnavailable"/>), or found while saving the
     /// write that a later run took its record over (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>).
     /// </exception>
@@ -587,17 +587,23 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             throw Closed(resource);
         }
 
+        // The platform owns the call to an instance; a gateway built without its client has none.
+        IApplicationInstanceClient client = _client ?? throw new ApplicationGatewayException(
+            ApplicationGatewayErrorCode.InstanceUnavailable,
+            Format(ErrorMessages.GatewayInstanceClientMissing, Name, provider, name, action),
+            null);
+
         // Writes run one at a time, from the call to the instance to the last restore, so a restore of
         // an earlier write never lands on an instance after a later write's.
         if (context.Operation != ApplicationActionKind.Write)
         {
-            return await RunActionAsync(resource, provider, name, action, context, cancellationToken).ConfigureAwait(false);
+            return await RunActionAsync(resource, client, provider, name, action, context, cancellationToken).ConfigureAwait(false);
         }
 
         await resource.Writes.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            return await RunActionAsync(resource, provider, name, action, context, cancellationToken).ConfigureAwait(false);
+            return await RunActionAsync(resource, client, provider, name, action, context, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -607,6 +613,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     private async Task<ApplicationActionResult> RunActionAsync(
         GatewayResource resource,
+        IApplicationInstanceClient client,
         ProviderName provider,
         ResourceName name,
         ActionName action,
@@ -642,7 +649,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             ApplicationActionResult? result;
             try
             {
-                result = await _client.ExecuteAsync(instance, action, context, cancellationToken).ConfigureAwait(false);
+                result = await client.ExecuteAsync(instance, action, context, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
             {
@@ -664,7 +671,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
                 IReadOnlyList<InstanceKey> targets = resource.Aggregate.Record(instance.Key, snapshot);
                 ApplicationGatewayEventSource.Log.StateRecorded(Name, provider, name, snapshot.Action, instance.Key, targets.Count);
                 await SaveAsync(cancellationToken).ConfigureAwait(false);
-                if (await RestoreAsync(resource, targets, snapshot, cancellationToken).ConfigureAwait(false))
+                if (await RestoreAsync(resource, client, targets, snapshot, cancellationToken).ConfigureAwait(false))
                 {
                     await SaveAsync(cancellationToken).ConfigureAwait(false);
                 }
@@ -747,7 +754,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     // Restores a write's snapshot on the instances the aggregate named, all at once, and returns
     // whether any was unregistered because the restore did not reach it.
-    private async Task<bool> RestoreAsync(GatewayResource resource, IReadOnlyList<InstanceKey> targets, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
+    private async Task<bool> RestoreAsync(GatewayResource resource, IApplicationInstanceClient client, IReadOnlyList<InstanceKey> targets, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
     {
         if (targets.Count == 0)
         {
@@ -766,7 +773,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             // One that left since the write was recorded restores it when it publishes again.
             if (registered.TryGetValue(target, out ApplicationInstanceManifest? instance))
             {
-                restores.Add(RestoreAsync(resource, instance, snapshot, cancellationToken));
+                restores.Add(RestoreAsync(resource, client, instance, snapshot, cancellationToken));
             }
         }
 
@@ -778,7 +785,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     // no control plane is unregistered: when it next renews it publishes again, and the answer carries
     // the recorded state. That includes a restore the caller cancelled, so no instance stays
     // registered without the write.
-    private async Task<bool> RestoreAsync(GatewayResource resource, ApplicationInstanceManifest instance, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
+    private async Task<bool> RestoreAsync(GatewayResource resource, IApplicationInstanceClient client, ApplicationInstanceManifest instance, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
     {
         Exception? failure = null;
         ApplicationActionStatus? refusal = null;
@@ -786,7 +793,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         {
             try
             {
-                ApplicationActionResult? result = await _client.RestoreAsync(instance, snapshot, cancellationToken).ConfigureAwait(false);
+                ApplicationActionResult? result = await client.RestoreAsync(instance, snapshot, cancellationToken).ConfigureAwait(false);
                 if (result?.Status == ApplicationActionStatus.Succeeded)
                 {
                     return true;

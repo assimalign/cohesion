@@ -10,30 +10,34 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 using Assimalign.Cohesion.ApplicationModel.Hosting;
+using Assimalign.Cohesion.ApplicationModel.Hosting.InProcess;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 
 /// <summary>
 /// Runs a gateway's resources inside the gateway's own process: each resource is a program the
-/// gateway program references, run on a thread of its own in an environment of its own.
+/// gateway program references, run on a thread of its own in an environment of its own. It is the
+/// gateway half of the in-process platform.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <see cref="AddProgram"/> binds a resource to its program's entry point. Deploying the resource
 /// calls the entry point on a new background thread, in an <see cref="AppEnvironmentScope"/> that
 /// holds what a platform hands a workload: the application's and the resource's names, the
-/// <c>inprocess</c> gateway, the endpoint the instance publishes its manifest to, the loopback
-/// addresses of its <c>http</c> endpoint and its control plane, and every setting as a configuration
-/// variable. The program reads them as it
-/// would read its environment, and its host stops when the scope's shutdown is signaled, not on the
-/// process's signals, which stay with the gateway program.
+/// <c>inprocess</c> platform, the endpoint the instance reaches its gateway at, the loopback address
+/// of its <c>http</c> endpoint, and every setting as a configuration variable. The program reads them
+/// as it would read its environment, and its host stops when the scope's shutdown is signaled, not on
+/// the process's signals, which stay with the gateway program.
 /// </para>
 /// <para>
-/// The infrastructure is also the transport its programs reach the gateway through:
-/// <see cref="InProcessApplicationBuilderExtensions.UseInProcess"/> adds it as both. A program
+/// The infrastructure is also the gateway's transport and its instance client:
+/// <see cref="InProcessApplicationBuilderExtensions.UseInProcess"/> sets it as all three. A program
+/// opts into the platform with the instance half's <c>UseInProcess()</c> on its resource, so it
 /// publishes to <see cref="Endpoint"/>, a channel inside the process that the gateway drains on its
-/// own flow while it runs, so the gateway handles each publication outside the program's
-/// environment, and the program waits for its answer with its own cancellation.
+/// own flow while it runs: the gateway handles each publication outside the program's environment,
+/// and the program waits for its answer with its own cancellation. Once its restored state is in
+/// effect, the program attaches its control plane to the same endpoint, and the gateway calls it
+/// there directly, with no listener; the program runs each call in its own environment.
 /// </para>
 /// <para>
 /// A program runs as long as the infrastructure, not the gateway: a gateway that stops leaves its
@@ -45,7 +49,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// </remarks>
 [DebuggerDisplay("{Endpoint}")]
 [DebuggerTypeProxy(typeof(DebugView))]
-public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicationGatewayTransport, IAsyncDisposable
+public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicationGatewayTransport, IApplicationInstanceClient, IAsyncDisposable
 {
     // The program's code is part of the gateway program's own build, so the infrastructure tells no
     // versions apart: a resource is a new definition only when its model changes.
@@ -58,7 +62,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
 
     private readonly ConcurrentDictionary<(ProviderName Provider, ResourceName Name), InProcessProgram> _programs = new();
     private readonly ConcurrentDictionary<(ProviderName Provider, ResourceName Name), InProcessWorkload> _workloads = new();
-    private readonly ConcurrentDictionary<(ProviderName Provider, ResourceName Name), (int Endpoint, int ControlPlane)> _ports = new();
+    private readonly ConcurrentDictionary<(ProviderName Provider, ResourceName Name), int> _ports = new();
     private readonly List<InProcessWorkload> _started = [];
     private readonly InProcessChannel _channel;
     private readonly IDisposable _registration;
@@ -70,19 +74,20 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
     /// </summary>
     public InProcessInfrastructure()
     {
-        Endpoint = new Uri(string.Concat(ApplicationInstancePublisher.InProcessScheme, "://", Guid.NewGuid().ToString("N"), "/"));
+        Endpoint = new Uri(string.Concat(InProcessPlatform.Name.Value, "://", Guid.NewGuid().ToString("N"), "/"));
         _channel = new InProcessChannel(Endpoint);
-        _registration = ApplicationInstancePublisher.Register(Endpoint, _channel);
+        _registration = InProcessPlatform.RegisterGateway(Endpoint, _channel);
     }
 
     /// <summary>
     /// Gets the platform the infrastructure deploys onto: <c>inprocess</c>. A resource's extensions
-    /// for it apply here.
+    /// for it apply here, and its programs select their in-process client by it.
     /// </summary>
-    public PlatformName Platform => "inprocess";
+    public PlatformName Platform => InProcessPlatform.Name;
 
     /// <summary>
-    /// Gets the in-process endpoint the programs publish their manifests to.
+    /// Gets the in-process endpoint the programs reach their gateway at: they publish their manifests
+    /// to it and attach their control planes to it.
     /// </summary>
     public Uri Endpoint { get; }
 
@@ -223,8 +228,8 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
             await StopAsync(running).ConfigureAwait(false);
         }
 
-        (int endpoint, int controlPlane) = _ports.GetOrAdd(key, static _ => (GetFreePort(), GetFreePort()));
-        InProcessWorkload workload = InProcessWorkload.Start(program, deployment, CreateVariables(model, resource, settings, deployment, endpoint, controlPlane), settings, endpoint);
+        int endpoint = _ports.GetOrAdd(key, static _ => GetFreePort());
+        InProcessWorkload workload = InProcessWorkload.Start(program, deployment, CreateVariables(model, resource, settings, deployment, endpoint), settings, endpoint);
         _workloads[key] = workload;
         lock (_started)
         {
@@ -246,7 +251,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
     ValueTask<IReadOnlyDictionary<OutputName, string>> IInfrastructureProvider.GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken)
     {
         IReadOnlyDictionary<OutputName, string> outputs = _workloads.TryGetValue((resource.Provider, resource.Name), out InProcessWorkload? workload)
-            ? new Dictionary<OutputName, string> { [OutputName.Endpoint] = CreateLoopbackUrl(workload.EndpointPort, trailingSlash: false) }
+            ? new Dictionary<OutputName, string> { [OutputName.Endpoint] = CreateLoopbackUrl(workload.EndpointPort) }
             : _noOutputs;
 
         return ValueTask.FromResult(outputs);
@@ -277,25 +282,51 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         await _channel.StopAsync().ConfigureAwait(false);
     }
 
+    // The gateway calls a program's control plane where the program attached it. The content crosses
+    // as bytes, as it would between processes, and the control plane reads it with its own serializer.
+    ValueTask<ApplicationActionResult> IApplicationInstanceClient.ExecuteAsync(ApplicationInstanceManifest instance, ActionName action, ApplicationActionContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentNullException.ThrowIfNull(context);
+
+        IApplicationInstanceControlPlane controlPlane = FindControlPlane(instance);
+        return controlPlane.ExecuteAsync(action, ApplicationActionContext.Create(context.Operation, controlPlane.Serializer, context.Input), cancellationToken);
+    }
+
+    ValueTask<ApplicationActionResult> IApplicationInstanceClient.RestoreAsync(ApplicationInstanceManifest instance, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        return FindControlPlane(instance).RestoreAsync(snapshot, cancellationToken);
+    }
+
+    // A program attaches its control plane once its restored state is in effect and detaches it when
+    // it stops; one that is not attached gives no answer, so the gateway drops it until it publishes
+    // again.
+    private IApplicationInstanceControlPlane FindControlPlane(ApplicationInstanceManifest instance)
+    {
+        return _channel.Find(instance.Key)
+            ?? throw new InvalidOperationException(Format(ErrorMessages.InstanceNotAttached, instance.Key, instance.Provider, instance.Name, Endpoint.AbsoluteUri));
+    }
+
     // What a platform hands a workload, as its environment: who it is, the deployment that started
-    // it, where its gateway is, where it listens, and its settings.
+    // it, its platform and where its gateway is, where it listens, and its settings.
     private Dictionary<string, string> CreateVariables(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
         DeploymentId deployment,
-        int endpoint,
-        int controlPlane)
+        int endpoint)
     {
-        // The contract's application is the model the gateway runs, and its gateway is the kind of
-        // platform: this one.
+        // The contract's application is the model the gateway runs, and its gateway variable names
+        // the platform, so the program selects its in-process client.
         var variables = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [AppEnvironment.Variables.Application] = model.Name.Value,
             [AppEnvironment.Variables.Gateway] = Platform.Value,
             [AppEnvironment.Variables.Resource] = resource.Name.Value,
             [AppEnvironment.Variables.ManifestEndpoint] = Endpoint.AbsoluteUri,
-            [AppEnvironment.Variables.ControlPlaneEndpoint] = CreateLoopbackUrl(controlPlane, trailingSlash: true),
             [AppEnvironment.Variables.Deployment] = deployment.ToString(),
             [AppEnvironment.Variables.Endpoint(endpointName, "HOST")] = IPAddress.Loopback.ToString(),
             [AppEnvironment.Variables.Endpoint(endpointName, "PORT")] = endpoint.ToString(CultureInfo.InvariantCulture),
@@ -333,9 +364,9 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         await workload.StopAsync(_stopTimeout).ConfigureAwait(false);
     }
 
-    private static string CreateLoopbackUrl(int port, bool trailingSlash)
+    private static string CreateLoopbackUrl(int port)
     {
-        return string.Concat("http://", IPAddress.Loopback.ToString(), ":", port.ToString(CultureInfo.InvariantCulture), trailingSlash ? "/" : string.Empty);
+        return string.Concat("http://", IPAddress.Loopback.ToString(), ":", port.ToString(CultureInfo.InvariantCulture));
     }
 
     // The port is free when it is read; the program binds it a moment later, as a platform's

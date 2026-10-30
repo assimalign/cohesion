@@ -3,9 +3,9 @@ using Assimalign.Cohesion.Hosting;
 namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 
 /// <summary>
-/// The host service that joins a resource instance to its gateway: it publishes the instance's
-/// manifest, restores the state the gateway answers with, and keeps the registration alive while the
-/// host runs.
+/// The host service that joins a resource instance to its gateway, through the platform's gateway
+/// client: it publishes the instance's manifest, restores the state the gateway answers with, keeps
+/// the registration alive while the host runs, and opens the control plane to the gateway's calls.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,11 +15,10 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// gateway's state is in effect, wherever the service sits among the host's registrations.
 /// </para>
 /// <para>
-/// The service does not serve the control plane. An area that exposes it over a network registers
-/// its server as a host service of its own, which a host starts after every
-/// <see cref="IHostLifecycleService.StartingAsync"/>. Code in the same process, such as an
-/// in-process gateway, finds the instance's control plane among the host's services through this
-/// interface.
+/// It starts the client in <see cref="IHostService.StartAsync"/>, after every
+/// <see cref="IHostLifecycleService.StartingAsync"/>, so the gateway's calls reach the control plane
+/// only once the restored state is in effect, and stops it in <see cref="IHostService.StopAsync"/>,
+/// which a host calls after the servers registered after the service have drained.
 /// </para>
 /// </remarks>
 public interface IApplicationInstanceService : IHostLifecycleService

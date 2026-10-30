@@ -14,7 +14,6 @@
   <data name="OutputNameMissing" xml:space="preserve"><value>An output name is required; a default output name is not one.</value></data>
   <data name="SettingNameInvalid" xml:space="preserve"><value>A setting name is colon-separated segments of ASCII letters, digits, underscores, hyphens, and periods, at most 256 characters.</value></data>
   <data name="SettingNameMissing" xml:space="preserve"><value>A setting name is required; a default setting name is not one.</value></data>
-  <data name="PlatformNameInvalid" xml:space="preserve"><value>A platform name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
   <data name="PlatformNameMissing" xml:space="preserve"><value>A platform name is required; a default platform name is not one.</value></data>
   <data name="ExtensionNameInvalid" xml:space="preserve"><value>An extension name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
   <data name="ExtensionNameMissing" xml:space="preserve"><value>An extension name is required; a default extension name is not one.</value></data>

@@ -5,7 +5,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
 /// What a resource instance publishes about itself when its host starts: its identity, the
-/// deployment that started it, where its control plane serves, and the actions it exposes there.
+/// deployment that started it, where its gateway reaches its control plane, and the actions it
+/// exposes there.
 /// </summary>
 /// <param name="Provider">The resource's provider.</param>
 /// <param name="Name">The resource's name.</param>
@@ -16,11 +17,11 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// repeats its id publishes.
 /// </param>
 /// <param name="ControlPlaneEndpoint">
-/// The absolute URL the instance's control plane serves at, as its environment named it
-/// (<see cref="AppEnvironment.Variables.ControlPlaneEndpoint"/>); <see langword="null"/> for an
-/// instance that serves no control plane. A gateway calls it to run an operator's action on the
-/// instance and to restore a write made on another instance. An instance it cannot reach this way
-/// receives the state when it next publishes.
+/// Where the gateway reaches the instance's control plane, as the platform's client that published
+/// the manifest names it; <see langword="null"/> for an instance the gateway cannot call. Its form is
+/// the platform's: the gateway hands it to the platform's instance client to run an operator's action
+/// on the instance and to restore a write made on another instance. An instance it cannot reach this
+/// way receives the state when it next publishes.
 /// </param>
 /// <param name="Actions">The instance's actions, ordered by name.</param>
 public sealed record ApplicationInstanceManifest(

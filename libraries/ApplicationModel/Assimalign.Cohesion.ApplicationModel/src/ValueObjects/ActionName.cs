@@ -1,3 +1,5 @@
+using Assimalign.Cohesion.ApplicationModel.Internal;
+
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
@@ -15,42 +17,7 @@ public readonly partial struct ActionName
     /// <returns>Whether the candidate is valid.</returns>
     public static partial bool IsValid(string value, out string? message)
     {
-        message = ErrorMessages.ActionNameInvalid;
-        if (value is null || value.Length is 0 or > 64)
-        {
-            return false;
-        }
-
-        bool wordStart = true;
-        foreach (char character in value)
-        {
-            if (character == '-')
-            {
-                if (wordStart)
-                {
-                    // A leading or doubled hyphen leaves an empty word.
-                    return false;
-                }
-
-                wordStart = true;
-            }
-            else if (char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character))
-            {
-                wordStart = false;
-            }
-            else
-            {
-                return false;
-            }
-        }
-
-        if (wordStart)
-        {
-            // A trailing hyphen leaves an empty last word.
-            return false;
-        }
-
-        message = null;
-        return true;
+        message = NameGrammar.IsHyphenatedWords(value, 64) ? null : ErrorMessages.ActionNameInvalid;
+        return message is null;
     }
 }
