@@ -291,29 +291,6 @@ never misread.
   such a file set before its journal is read, which makes the page-0 fence the one that
   covers the polynomial change, and the frame version the one for later bumps that keep it.
 
-### Storage format 5 (#1726, XT-2)
-
-The owner-required savepoint substrate fence bumps `StorageFileHeader.CurrentFormatVersion`
-from 4 to 5. Earlier files are refused by the existing CK06001 gate before recovery or writes;
-there is no upgrade path or legacy reader (#1152). No record, page, header-slot or journal frame
-layout changes: journal frames remain version 4. The bump fences the new partial-undo contract,
-even though markers themselves remain memory-only.
-
-Transactions undo a marker's combined row/index suffix in reverse order through ordinary
-bounded storage brackets. Each bracket journals its physical delete/deleter restoration and
-commits without a durability wait. The enclosing root writer remains active, stamped and
-checkpoint-anchored throughout; its eventual durable commit orders every completed undo ahead
-of that commit record. A crash before root commit causes open-time writer scrub to remove the
-remaining prefix and suffix; a crash after root commit retains only the prefix. A crash in a
-physical undo bracket uses the existing ordered redo and bracket recovery before root scrub.
-No persisted subtransaction identity or new recovery record is needed.
-
-The coordinator apply gate precedes manager/context admission, version-ledger monitors and
-storage transaction/page/index latches. No ledger monitor spans page or index work. Index
-readers retain their existing tree latch discipline while a failed bracket restores pages.
-Locks remain transaction-duration in XT-2. Transactions' crash tests exercise whole and torn
-writes throughout multi-batch partial undo; the storage format tests additionally refuse 4.
-
 ### Storage format 4 (#1160)
 
 Format 4 separates checksummed reclaimed pages from zero-only uninitialized pages and

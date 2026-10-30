@@ -71,9 +71,9 @@ object, delegate or collection is added to transactions that never set a marker.
 Markers have no durable identities. Partial undo uses the existing physical WAL operations and
 root-writer stamps. A later root commit makes the remaining prefix and preceding undo durable
 in journal order; without a root commit, recovery scrubs every remaining effect of that writer,
-including after a crash mid-undo or checkpoint truncation. The owner-required storage-format
-fence moves from 4 to 5; record layout and journal frame format 4 do not change. Earlier storage
-files are refused through CK06001 without an upgrade path.
+including after a crash mid-undo or checkpoint truncation. The substrate needs no format
+change: storage stays at format 4. Record, page, WAL, journal-frame and recovery layouts are
+unchanged; markers and ledger positions exist only in memory.
 
 The internal structured `TransactionUndoException.Code` carries these substrate conditions
 separately from its resource-backed message:

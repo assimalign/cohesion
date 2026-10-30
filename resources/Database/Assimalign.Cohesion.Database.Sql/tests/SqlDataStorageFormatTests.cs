@@ -448,7 +448,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         refusal.Message.ShouldStartWith(
             $"Database '{testDatabase}' cannot be opened: its {role} file set '{storageName}' was refused. {StorageFormatException.ErrorCode}: ",
             Case.Sensitive);
-        refusal.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 5", Case.Sensitive);
+        refusal.Message.ShouldContain("uses storage format 2, but this engine supports only storage format 4", Case.Sensitive);
         refusal.InnerException.ShouldBeOfType<StorageFormatException>().FoundVersion.ShouldBe(2);
         engine.TryGetDatabase(testDatabase, out _).ShouldBeFalse();
         AssertUnchanged(before);

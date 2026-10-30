@@ -31,7 +31,6 @@ public sealed class StorageFormatTests
     [InlineData(1)]
     [InlineData(2)]
     [InlineData(3)]
-    [InlineData(4)]
     [InlineData(0)]
     [InlineData(int.MaxValue)]
     public void Open_OtherFormatVersion_ShouldBeRefusedBeforeAnyChecksum(int version)
@@ -55,19 +54,19 @@ public sealed class StorageFormatTests
         refusal.Message.ShouldContain(version < StorageFileHeader.CurrentFormatVersion ? "does not upgrade" : "newer engine");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: the current format is 5, and a header names it exactly")]
-    public void FileHeader_CurrentFormat_ShouldBeFiveAndExact()
+    [Fact(DisplayName = "Cohesion Test [Storage] - Format fence: the current format is 4, and a header names it exactly")]
+    public void FileHeader_CurrentFormat_ShouldBeFourAndExact()
     {
         // Arrange
-        var current = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 5 };
+        var current = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 4 };
         var older = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 2 };
-        var newer = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 6 };
+        var newer = new StorageFileHeader { Magic = StorageFileHeader.ExpectedMagic, FormatVersion = 5 };
 
         // Act
         bool[] valid = [current.IsValid(), older.IsValid(), newer.IsValid()];
 
         // Assert
-        StorageFileHeader.CurrentFormatVersion.ShouldBe(5);
+        StorageFileHeader.CurrentFormatVersion.ShouldBe(4);
         valid.ShouldBe([true, false, false]);
     }
 
@@ -99,7 +98,7 @@ public sealed class StorageFormatTests
         // Assert
         refusal.Message.ShouldStartWith(StorageFormatException.ErrorCode + ":");
         refusal.FoundVersion.ShouldBe(2);
-        refusal.SupportedVersion.ShouldBe(5);
+        refusal.SupportedVersion.ShouldBe(4);
         data.CaptureLive().ShouldBe(images.Data);
         data.CaptureDurable().ShouldBe(images.Data);
         journal.CaptureLive().ShouldBe(journalBytes);

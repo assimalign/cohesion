@@ -62,7 +62,7 @@ representation — model-specific layouts live in the Storage components of each
   copy of the identity block), so a torn header write cannot make a file set unopenable.
   A half-page read error permits fallback only with verified journal coverage and emits a
   Warning; an unreadable half plus a damaged surviving slot is page-0 corruption (`CK06003`).
-  Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 5;
+  Page 0 is never a data page: the page manager refuses to pin or free it. Storage format 4;
   any other format is refused with `StorageFormatException` (`CK06001`), with no upgrade
   path (#1152).
 - **File set** — each storage instance owns three streams: data (`.dat`), journal
