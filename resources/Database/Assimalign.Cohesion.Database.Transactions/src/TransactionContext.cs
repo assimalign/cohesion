@@ -73,6 +73,9 @@ public sealed class TransactionContext
     private readonly object _endSync;
     private TransactionState _state;
     private int _applying;
+    private const int streamUnit = 1 << 16;
+    private const int applyMask = streamUnit - 1;
+    private const byte markedFlag = 8;
     // Reuse the former end boolean's byte. A second boolean grows every statement pin
     // by eight aligned bytes; lifecycle and pending-undo bits share this existing storage.
     private byte _admission;
@@ -145,14 +148,58 @@ public sealed class TransactionContext
         lock (_endSync)
         {
             undoWasPending = (_admission & partialUndoFlag) != 0;
-            if ((_admission & (endingFlag | undoControlFlag)) != 0 || _applying != 0 || State != TransactionState.Active ||
+            if ((_admission & (endingFlag | undoControlFlag)) != 0 || (_applying & applyMask) != 0 || State != TransactionState.Active ||
                 (!rollback && undoWasPending)) { return false; }
             _admission |= undoControlFlag;
+            // Pair the control's store/load with the stream's interlocked registration.
+            // Volatile reads alone do not forbid store buffering, including on ARM64.
+            Thread.MemoryBarrier();
+            if (HasOpenWriteStreams)
+            {
+                _admission = (byte)(_admission & ~undoControlFlag);
+                throw new TransactionUndoException("CK04010", ErrorMessages.UndoOpenWriteStream);
+            }
             if (rollback) { _admission |= partialUndoFlag; }
-            _applying++;
+            IncrementApplyCount();
             return true;
         }
     }
+
+    private void IncrementApplyCount()
+    {
+        // Called under _endSync. The database gate normally bounds low-word use to
+        // one apply plus its control waiter; enforce the packed limit at this seam too.
+        if ((Volatile.Read(ref _applying) & applyMask) == applyMask)
+        { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
+        Interlocked.Increment(ref _applying);
+    }
+
+    internal bool HasOpenWriteStreams => (Volatile.Read(ref (_transaction ?? this)._applying) & ~applyMask) != 0;
+    internal bool HadUndoMarkers => (Volatile.Read(ref (_transaction ?? this)._admission) & markedFlag) != 0;
+    internal void MarkUndoScopes() { lock (_endSync) { (_transaction ?? this)._admission |= markedFlag; } }
+
+    internal void BeginWriteStream()
+    {
+        var owner = _transaction ?? this;
+        while (true)
+        {
+            int before = Volatile.Read(ref owner._applying);
+            if ((before & ~applyMask) == unchecked((int)0xffff0000))
+            { throw new TransactionUndoException("CK04011", ErrorMessages.WriteStreamLimitExceeded); }
+            if (Interlocked.CompareExchange(ref owner._applying, unchecked(before + streamUnit), before) == before) { break; }
+        }
+        // Lock-free handshake with control admission: either control sees this count,
+        // or this registration sees its flag. Model sessions serialize stream/control work.
+        if ((Volatile.Read(ref owner._admission) & (endingFlag | partialUndoFlag | undoControlFlag)) != 0 || owner.State != TransactionState.Active)
+        {
+            Interlocked.Add(ref owner._applying, -streamUnit);
+            if ((Volatile.Read(ref owner._admission) & endingFlag) != 0 || owner.State != TransactionState.Active)
+            { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
+            throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
+        }
+    }
+
+    internal void EndWriteStream() => Interlocked.Add(ref (_transaction ?? this)._applying, -streamUnit);
 
     internal void CompletePartialUndo()
     {
@@ -234,7 +281,7 @@ public sealed class TransactionContext
             var owner = _transaction ?? this;
             if ((owner._admission & endingFlag) != 0 || State != TransactionState.Active)
             { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
-            if (owner._applying != 0)
+            if ((owner._applying & applyMask) != 0)
             { throw new TransactionAbortedException(ErrorMessages.IsolationStatementRunning); }
             if ((owner._admission & partialUndoFlag) != 0)
             { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
@@ -305,7 +352,7 @@ public sealed class TransactionContext
                 // gate held by this waiter. Recheck end/pending after every wake-up.
                 // Count the waiter before releasing the latch: back-to-back controls
                 // must yield to a statement that already waited for one.
-                _applying++;
+                IncrementApplyCount();
                 try
                 {
                     waitingForUndoControl?.Invoke();
@@ -328,7 +375,7 @@ public sealed class TransactionContext
                 ExitApply();
             }
 
-            _applying++;
+            IncrementApplyCount();
             return true;
         }
     }
@@ -353,7 +400,7 @@ public sealed class TransactionContext
                 _admission = (byte)(_admission & ~undoControlFlag);
                 Monitor.PulseAll(_endSync);
             }
-            if (--_applying == 0 && _drained is not null)
+            if ((Interlocked.Decrement(ref _applying) & applyMask) == 0 && _drained is not null)
             {
                 drained = _drained;
                 _drained = null;
@@ -383,7 +430,7 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
-            if (_applying == 0)
+            if ((_applying & applyMask) == 0)
             {
                 return Task.CompletedTask;
             }

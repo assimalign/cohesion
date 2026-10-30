@@ -25,6 +25,12 @@
   <data name="TransactionSnapshotArgument" xml:space="preserve"><value>Snapshot minimum cannot exceed its maximum.</value></data>
   <data name="LogUnconfirmedMessageFailure" xml:space="preserve"><value>Transaction {0} committed in this process, but its commit record could not be made durable, so its outcome is unknown: the failed flush took the storage offline, and nothing more is written to it. Reopen the database; its recovery keeps the commit if the record reached stable storage and discards it if not.</value></data>
   <data name="IsolationStatementView" xml:space="preserve"><value>A statement view cannot configure transaction isolation; pass the current transaction context.</value></data>
+  <data name="WriteStreamLimitExceeded" xml:space="preserve">
+    <value>A transaction cannot have more than 65,535 open write streams.</value>
+  </data>
+  <data name="UndoOpenWriteStream" xml:space="preserve">
+    <value>An open write stream prevents undo marker control.</value>
+  </data>
   <data name="UndoMarkerInvalid" xml:space="preserve"><value>The undo marker is foreign, released, discarded or no longer active.</value></data>
   <data name="UndoContextInvalid" xml:space="preserve"><value>Undo controls require this coordinator's current transaction context, not a statement view or snapshot pin.</value></data>
   <data name="PartialUndoPending" xml:space="preserve"><value>A partial undo is running or incomplete, a statement or control is running, or the transaction is ending. Retry rollback to its target or an earlier marker, or roll back the whole transaction before further work.</value></data>

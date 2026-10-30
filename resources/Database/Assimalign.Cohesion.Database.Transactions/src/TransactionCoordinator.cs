@@ -59,6 +59,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 {
     private readonly Storage _storage;
     private readonly StorageJournal _journal;
+    private readonly TransactionRecordSpace _records;
     private readonly TransactionManager _manager;
     private readonly LockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
@@ -125,6 +126,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(records);
         _storage = storage;
         _journal = journal;
+        _records = records;
         _indexPruner = indexPruner;
 
         // Fully qualified: the coordinator's LockManager property shadows the
@@ -548,8 +550,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
     }
 
-    // XT-2 substrate only. These controls are deliberately internal until named/session
-    // scopes are integrated. Lock ownership is unchanged: all grants live until root end.
+    // These anonymous controls remain internal until named/session scopes are integrated.
     internal ValueTask<TransactionUndoMarker> CreateUndoMarkerAsync(TransactionContext context, CancellationToken cancellationToken = default)
         => RunUndoControlAsync(context, null, rollback: false, release: false, cancellationToken);
 
@@ -576,8 +577,29 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             try
             {
                 UndoControlAdmitted?.Invoke();
-                if (release) { _versionStore.ReleaseMarker(context.Sequence, marker!); }
-                else { marker = _versionStore.CreateMarker(context.Sequence); }
+                if (release)
+                {
+                    bool anyMarkers = _versionStore.ReleaseMarker(context.Sequence, marker!);
+                    _lockManager.ReleaseUndoMarkers(context.Sequence, anyMarkers);
+                    _records.UndoScopesChanged(context.Sequence, anyMarkers, _versionStore);
+                }
+                else
+                {
+                    marker = _versionStore.CreateMarker(context.Sequence);
+                    _lockManager.CreateUndoMarker(context.Sequence, marker);
+                    context.MarkUndoScopes();
+                    try { _records.UndoScopesChanged(context.Sequence, true, _versionStore); }
+                    catch
+                    {
+                        // A failed registration must not strand a marker whose token was
+                        // never returned. Model hooks are exception-atomic on creation;
+                        // release/end notifications are nonthrowing lifecycle cleanup.
+                        bool anyMarkers = _versionStore.ReleaseMarker(context.Sequence, marker);
+                        _lockManager.ReleaseUndoMarkers(context.Sequence, anyMarkers);
+                        _records.UndoScopesChanged(context.Sequence, anyMarkers, _versionStore);
+                        throw;
+                    }
+                }
                 return marker!;
             }
             finally { owner.ExitApply(undoControl: true); }
@@ -608,6 +630,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             {
                 // Exclusive writer admission makes an empty suffix independent of the gate.
                 await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                _lockManager.RollbackToUndoMarker(context.Sequence, marker!);
                 undoOwner.CompletePartialUndo();
                 return marker!;
             }
@@ -618,6 +641,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             try
             {
                 await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                _lockManager.RollbackToUndoMarker(context.Sequence, marker!);
                 undoOwner.CompletePartialUndo();
                 return marker!;
             }
@@ -1215,6 +1239,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
+            List<TransactionContext>? markedEnds = null;
             lock (_sync)
             {
                 _statementBrackets.Clear();
@@ -1224,10 +1249,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 foreach (var context in _openContexts.Values)
                 {
                     TransactionEventSource.Log.TransactionUntracked(context);
+                    if (context.HadUndoMarkers) { (markedEnds ??= new()).Add(context); }
                 }
 
                 _openContexts.Clear();
             }
+            if (markedEnds is not null)
+            { foreach (var context in markedEnds) { _records.TransactionEnded(context); } }
         }
     }
 
@@ -1246,6 +1274,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // keeps bounding the prune and its statement bracket stays resolvable.
     private void UntrackEnded(TransactionContext context)
     {
+        if (context.State != TransactionState.Active && context.HadUndoMarkers) { _records.TransactionEnded(context); }
         if (context.State == TransactionState.Active)
         {
             return;

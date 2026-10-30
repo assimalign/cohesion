@@ -69,7 +69,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
         }
     }
 
-    internal void ReleaseMarker(TransactionSequence writer, TransactionUndoMarker marker)
+    internal bool ReleaseMarker(TransactionSequence writer, TransactionUndoMarker marker)
     {
         lock (_sync)
         {
@@ -78,6 +78,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
             int index = scopes.Markers.IndexOf(marker);
             scopes.Markers.RemoveRange(index, scopes.Markers.Count - index);
             if (scopes.Markers.Count == 0) { _undoScopes.Remove(writer.Value); }
+            return scopes.Markers.Count != 0;
         }
     }
 
@@ -95,11 +96,13 @@ public sealed class RecordSpaceVersionStore : VersionStore
     internal void DiscardStatementSuffix(TransactionSequence writer)
     {
         if (_statementPosition < 0) { return; }
-        lock (_sync)
-        {
-            if (_ledger.TryGetValue(writer.Value, out var entries))
-            { entries.RemoveRange(_statementPosition, entries.Count - _statementPosition); }
-        }
+        List<LedgerEntry>? entries;
+        lock (_sync) { _ledger.TryGetValue(writer.Value, out entries); }
+        if (entries is null) { return; }
+        // The apply gate freezes the writer's list. No store monitor spans a model
+        // callback; models can take their own cache monitor while restoring memory.
+        for (int i = entries.Count - 1; i >= _statementPosition; i--) { entries[i].Index?.StatementRolledBack(); }
+        lock (_sync) { entries.RemoveRange(_statementPosition, entries.Count - _statementPosition); }
     }
 
     private int LedgerPosition(TransactionSequence writer)
@@ -181,7 +184,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 var entry = entries[index];
                 if ((entry.Kind is LedgerEntryKind.Tombstoned or LedgerEntryKind.IndexEntryTombstoned) &&
                     tombstonesToUndo?.Contains(entry) == false) { continue; }
-                await UndoEntryAsync(writer, entries[index], bracket, CancellationToken.None).ConfigureAwait(false);
+                await UndoEntryAsync(writer, entries[index], bracket, CancellationToken.None, partial: true).ConfigureAwait(false);
             }
             bracket.Commit(awaitDurability: false);
             lock (_sync) { entries.RemoveRange(start, end - start); }
@@ -610,12 +613,12 @@ public sealed class RecordSpaceVersionStore : VersionStore
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            for (int offset = 0; offset < entries.Count; offset += mutationBatchSize)
+            for (int end = entries.Count; end > 0; end -= mutationBatchSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 using var bracket = _storage.BeginTransaction();
-                int end = Math.Min(offset + mutationBatchSize, entries.Count);
-                for (int index = offset; index < end; index++)
+                int start = Math.Max(0, end - mutationBatchSize);
+                for (int index = end - 1; index >= start; index--)
                 {
                     removed += await UndoEntryAsync(writer, entries[index], bracket, cancellationToken).ConfigureAwait(false);
                 }
@@ -634,7 +637,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     }
 
     private async ValueTask<long> UndoEntryAsync(TransactionSequence writer, LedgerEntry entry,
-        StorageTransaction bracket, CancellationToken cancellationToken)
+        StorageTransaction bracket, CancellationToken cancellationToken, bool partial = false)
     {
         long removed = 0;
         // Index references belong to the index adapter and need not be row locations.
@@ -646,7 +649,9 @@ public sealed class RecordSpaceVersionStore : VersionStore
             case LedgerEntryKind.Created:
                 if (TryReadStamps(pageId, slotIndex, out var createdWriter, out _) && createdWriter == writer)
                 {
+                    var before = partial ? _records.Read(pageId, slotIndex) : default;
                     _records.Delete(bracket, pageId, slotIndex);
+                    if (partial) { _records.CreatedVersionUndone(pageId, slotIndex, before); }
                     removed++;
                 }
 

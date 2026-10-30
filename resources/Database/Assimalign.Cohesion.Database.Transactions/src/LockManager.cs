@@ -101,6 +101,10 @@ public sealed class LockManager
     // mark records the existing holdings without copying them or allocating on the fast path.
     private ulong _grantSequence;
 
+    // Allocated only by marker creation. Under _sync, each grant remembers the holding
+    // it replaced, including re-acquisitions whose mode mask does not change.
+    private Dictionary<ulong, List<ScopeGrant>>? _scopeGrants;
+
     // Every resource an owner was granted or queued for, so its release and AbandonPending visit
     // only the owner's entries instead of enumerating the whole table, which cost every transaction
     // end time in proportion to every other transaction's locks and to the table's high-water mark
@@ -573,6 +577,88 @@ public sealed class LockManager
         FailDeadlocked(victims);
     }
 
+    // Control order: manager registration -> context admission, both released before
+    // version-store or lock-table _sync. Physical undo takes apply gate -> store monitor
+    // (released before index/page latches), then lock-table _sync only after every undo
+    // bracket commits. No lock-table monitor spans storage, an await, manager admission,
+    // or a grant notification. This covers create/release versus grants, rollback-to versus
+    // release (context admission excludes a second control), failed undo (all locks stay),
+    // and root end/disposal (the apply count drains undo before ReleaseAllUnfiltered).
+    // Owner statements/lock requests are serialized with controls by their model session;
+    // other owners may queue/cancel/end at any point. _sync linearizes their graph changes.
+    internal byte HeldModes(TransactionSequence owner, LockResource resource)
+    {
+        lock (_sync) { return _table.TryGetValue(resource, out var entry) && entry.Granted.TryGetValue(owner.Value, out var grant) ? grant.Modes : (byte)0; }
+    }
+
+    internal void CreateUndoMarker(TransactionSequence owner, TransactionUndoMarker marker)
+    {
+        lock (_sync)
+        {
+            _scopeGrants ??= new();
+            if (!_scopeGrants.TryGetValue(owner.Value, out var changes))
+            {
+                changes = new List<ScopeGrant>();
+                _scopeGrants.Add(owner.Value, changes);
+            }
+            marker.LockPosition = changes.Count;
+        }
+    }
+
+    internal void ReleaseUndoMarkers(TransactionSequence owner, bool anyMarkers)
+    {
+        // Child effects already share the parent's journal. Dropping its last marker
+        // transfers every grant to the root without inspecting or changing the table.
+        if (anyMarkers) { return; }
+        lock (_sync) { _scopeGrants?.Remove(owner.Value); }
+    }
+
+    internal void RollbackToUndoMarker(TransactionSequence owner, TransactionUndoMarker marker)
+    {
+        List<Waiter>? granted = null;
+        List<Waiter>? victims = null;
+        lock (_sync)
+        {
+            if (_scopeGrants is not null && _scopeGrants.TryGetValue(owner.Value, out var changes))
+            {
+                for (int i = changes.Count - 1; i >= marker.LockPosition; i--)
+                {
+                    var change = changes[i];
+                    if (!_table.TryGetValue(change.Resource, out var entry)) { continue; }
+                    if (change.Before.Modes == 0) { entry.Granted.Remove(owner.Value); }
+                    else { entry.Granted[owner.Value] = change.Before; }
+                    LeftLocked(entry);
+                }
+                if (_owned.TryGetValue(owner.Value, out var owned))
+                {
+                    for (int i = marker.LockPosition; i < changes.Count; i++)
+                    {
+                        var resource = changes[i].Resource;
+                        bool used = false;
+                        if (_table.TryGetValue(resource, out var entry))
+                        {
+                            used = entry.Granted.ContainsKey(owner.Value);
+                            if (!used)
+                            {
+                                foreach (var waiter in entry.Waiters)
+                                { if (waiter.Owner == owner.Value) { used = true; break; } }
+                            }
+                        }
+                        if (!used) { owned.Remove(resource); }
+                    }
+                    if (owned.Count == 0) { _owned.Remove(owner.Value); }
+                }
+                changes.RemoveRange(marker.LockPosition, changes.Count - marker.LockPosition);
+            }
+            // The graph is derived from current holdings and queue order. Schedule all
+            // affected queues before notification; downgrades remove edges and may grant
+            // waiters just as a full release does, including uniqueness key locks.
+            WakeScheduledLocked(ref granted, ref victims);
+        }
+        CompleteGranted(granted);
+        FailDeadlocked(victims);
+    }
+
     /// <summary>
     /// Releases every lock held by the specified transaction, and fails its pending
     /// requests with <see cref="TransactionAbortedException"/>: the call ends the
@@ -622,6 +708,7 @@ public sealed class LockManager
         lock (_sync)
         {
             _abandoned.Remove(owner.Value);
+            _scopeGrants?.Remove(owner.Value);
             DequeueOwnerLocked(owner.Value, ref ended);
 
             // Only the owner's entries can change: a request waits only for the grants and the
@@ -961,6 +1048,8 @@ public sealed class LockManager
     private void GrantLocked(LockEntry entry, ulong owner, LockMode mode, Waiter? queued, ref List<Waiter>? victims)
     {
         bool holder = entry.Granted.TryGetValue(owner, out var grant);
+        if (_scopeGrants is not null && _scopeGrants.TryGetValue(owner, out var changes))
+        { changes.Add(new ScopeGrant(entry.Resource, grant)); }
         byte held = grant.Modes;
         byte holds = (byte)(held | Bit(mode));
         if (holds != held)
@@ -1585,6 +1674,7 @@ public sealed class LockManager
     }
 
     private readonly record struct LockGrant(byte Modes, ulong Sequence);
+    private readonly record struct ScopeGrant(LockResource Resource, LockGrant Before);
 
     private sealed class LockEntry
     {

@@ -241,7 +241,7 @@ public sealed class TransactionUndoMarkerTests
         Values(storage).ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Transactions] - Undo markers: cancellation before start leaves state, cancellation after start completes undo and retains locks")]
+    [Fact(DisplayName = "Cohesion Test [Transactions] - Undo markers: cancellation before start leaves state, cancellation after start completes undo and releases suffix locks")]
     public async Task RollbackToMarker_Cancellation_ShouldOnlyCancelBeforeUndoStarts()
     {
         // Arrange
@@ -264,7 +264,7 @@ public sealed class TransactionUndoMarkerTests
         // Assert
         canceled.IsCancellationRequested.ShouldBeTrue();
         Values(storage).ShouldBeEmpty();
-        wait.IsCompleted.ShouldBeFalse();
+        await wait.WaitAsync(_timeout);
         writer.State.ShouldBe(TransactionState.Active);
         await coordinator.CommitAsync(writer);
         await wait.WaitAsync(_timeout);
