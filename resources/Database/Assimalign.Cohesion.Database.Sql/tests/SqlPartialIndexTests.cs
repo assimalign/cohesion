@@ -131,7 +131,7 @@ public sealed class SqlPartialIndexTests
         await Execute(session, "INSERT INTO t VALUES(1)");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Partial indexes: metadata, views, dependencies and query scans remain truthful (#1630)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Partial indexes: metadata, views, dependencies and query paths remain truthful (#1630)")]
     public async Task ExecuteAsync_MetadataAndDependencies_ShouldPreservePredicateAndAvoidAccess()
     {
         // Arrange
@@ -151,7 +151,7 @@ public sealed class SqlPartialIndexTests
         session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
         (await Rows(session, "EXPLAIN SELECT a.k FROM t a JOIN t b ON a.k=b.k WHERE a.k=1")).ShouldNotContain(row => Equals(row[4], "ix"));
         await Rows(session, "SELECT k FROM t WHERE k=1 AND active");
-        session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
+        session.LastStatementMetrics!.AccessPath.ShouldBe("seek:ix");
         await Execute(session, "ALTER TABLE t RENAME COLUMN active TO enabled");
         await Execute(session, "ALTER TABLE t RENAME TO renamed");
         await Execute(session, "UPDATE renamed SET enabled=TRUE");
@@ -252,7 +252,7 @@ public sealed class SqlPartialIndexTests
     internal static async Task Oracle(SqlDatabase database, SqlDatabaseSession session, string tableName = "t",
         string keyColumn = "k", string predicate = "active AND k IS NOT NULL")
     {
-        var expected = (await Rows(session, $"SELECT id,{keyColumn} FROM {tableName} WHERE {predicate} ORDER BY id"))
+        var expected = (await Rows(session, $"SELECT id,{keyColumn} FROM {tableName} WHERE ({predicate}) OR FALSE ORDER BY id"))
             .Select(row => (Convert.ToInt64(row[0]), Convert.ToInt32(row[1]))).ToArray();
         database.Catalog.TryGetTable("dbo", tableName, out var table).ShouldBeTrue();
         var metadata = database.Catalog.GetIndexes(table.ObjectId).Single(index => index.Name == "ix");

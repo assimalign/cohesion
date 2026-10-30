@@ -37,6 +37,10 @@ internal sealed class SqlBoundDomainArgument : SqlBoundExpression
 
     internal SqlBoundExpression Operand { get; }
 
+    internal bool HasSameCoercion(SqlBoundDomainArgument other)
+        => ReferenceEquals(_domain, other._domain) && _checkTarget == other._checkTarget &&
+            _collation.IsFixed && other._collation.IsFixed && _collation.Resolve(null) == other._collation.Resolve(null);
+
     internal object? Coerce(object? value, SqlSubqueryValues? subqueries, CancellationToken cancellationToken)
     {
         // PostgreSQL builds CoerceToDomain into the argument before strict dispatch:

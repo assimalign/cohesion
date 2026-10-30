@@ -466,7 +466,11 @@ internal sealed partial class SqlPlanExecutor
         var bound = _definitions.Get(key.Table);
         foreach (var metadata in preparedIndexes ?? _catalog.GetIndexes(key.Table.ObjectId))
         {
-            if (metadata.Predicate is not null) { continue; }
+            if (metadata.Predicate is not null)
+            {
+                var restrictions = key.Ordinals.Select(ordinal => (SqlBoundExpression)new SqlBoundIsNull(new SqlBoundColumn(ordinal), true)).ToArray();
+                if (SqlPredicateImplication.Prove(_definitions.GetIndexPredicate(key.Table, metadata), restrictions) is null) { continue; }
+            }
             int[] ordinals = bound.GetKey(metadata.ColumnNames).Ordinals;
             var mapping = new List<int>();
             foreach (int ordinal in ordinals)
@@ -501,7 +505,7 @@ internal sealed partial class SqlPlanExecutor
         var lookup = ConstraintLookup(key, statement);
         statement.Metrics.AccessPath = lookup.AccessPath;
         IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> candidates;
-        if (lookup.Metadata is { } metadata)
+        if (lookup.Metadata is { } metadata && (metadata.Predicate is null || !keys.Contains(null)))
         {
             var equalityValues = new object?[lookup.PrefixKeyOrdinals.Length];
             for (int ordinal = 0; ordinal < equalityValues.Length; ordinal++) { equalityValues[ordinal] = keys[lookup.PrefixKeyOrdinals[ordinal]]; }

@@ -86,6 +86,7 @@ public class SqlConformanceTests
     [InlineData("INSERT INTO users (id, name) VALUES (1, DEFAULT), (DEFAULT, 'Grace');", SqlQueryCommandType.Insert)]
     [InlineData("INSERT INTO users DEFAULT VALUES;", SqlQueryCommandType.Insert)]
     [InlineData("INSERT INTO users (name) DEFAULT VALUES;", SqlQueryCommandType.Insert)]
+    [InlineData("INSERT INTO t VALUES(1) ON CONFLICT(id) WHERE id>0 DO NOTHING;", SqlQueryCommandType.Insert)]
     [InlineData("UPDATE dbo.users SET name = 'Ada', age = age + 1 WHERE id = @id;", SqlQueryCommandType.Update)]
     [InlineData("UPDATE dbo.users AS u SET age = age + 1 WHERE u.id BETWEEN 1 AND 10 RETURNING id, age;", SqlQueryCommandType.Update)]
     [InlineData("MERGE INTO t USING s ON t.id=s.id WHEN MATCHED AND s.v>0 THEN UPDATE SET v=s.v WHEN MATCHED THEN DELETE WHEN NOT MATCHED THEN INSERT(id,v) VALUES(s.id,s.v) WHEN NOT MATCHED BY SOURCE THEN DO NOTHING RETURNING merge_action();", SqlQueryCommandType.Merge)]

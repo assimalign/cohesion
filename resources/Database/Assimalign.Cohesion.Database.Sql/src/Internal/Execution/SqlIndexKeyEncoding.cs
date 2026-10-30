@@ -47,6 +47,9 @@ internal static class SqlIndexKeyEncoding
     // order only after encoding every equality-prefix component.
     internal static IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek, int[] indexOrdinals, Collation defaultCollation)
     {
+        // A proven partial-index subset scan (#1630, SQ-P2) has no prefix and no bounds:
+        // it reads the whole tree, NULL keys included.
+        if (seek.EqualityValues.Count == 0 && seek.Lower is null && seek.Upper is null) { return IndexKeyRange.All; }
         var prefixWriter = new DatabaseKeyWriter();
         int[]? rented = null;
         Span<int> ends = seek.EqualityValues.Count <= 64 ? stackalloc int[seek.EqualityValues.Count]

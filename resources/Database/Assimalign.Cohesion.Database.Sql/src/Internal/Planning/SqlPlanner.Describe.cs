@@ -169,6 +169,12 @@ internal sealed partial class SqlPlanner
             };
             Add(recursiveDemand && current is SqlJoinPlan { Steps.Count: > 0 } ? "NestedLoopJoin" : DescribeOperator(current),
                 parent, target, indexName, detail, actual: metrics?.ActualCandidates(current));
+            var conflict = current switch { SqlInsertPlan p => p.OnConflict, SqlInsertSelectPlan p => p.OnConflict, _ => null };
+            if (conflict is SqlPartialOnConflictPlan partialConflict)
+            {
+                foreach (var proof in partialConflict.Proofs)
+                { Add("ConflictArbiter", id, target, proof.Index.Name, "partial_predicate=" + proof.Index.Predicate + "; implied_by=" + proof.Proof); }
+            }
             switch (current)
             {
                 case SqlWindowAggregatePlan window:
@@ -224,7 +230,7 @@ internal sealed partial class SqlPlanner
                                 var treeSeek = treeStep.Access!;
                                 string bounds = string.Join(" AND ", treeSeek.InnerColumns.Select((column, i) =>
                                     $"{column.Name} = {JoinProbeReference(join.Bindings, treeSeek.OuterOrdinals[i])}"));
-                                Add("IndexSeek", next.Parent, Target(join.Bindings[treeSeek.InnerBinding].Source), treeSeek.Index.Name, bounds);
+                                Add("IndexSeek", next.Parent, Target(join.Bindings[treeSeek.InnerBinding].Source), treeSeek.Index.Name, bounds + PartialProof(treeSeek));
                                 continue;
                             }
                             int treeId = nodes.Count;
@@ -267,7 +273,7 @@ internal sealed partial class SqlPlanner
                         {
                             string bounds = string.Join(" AND ", seek.InnerColumns.Select((column, i) =>
                                 $"{column.Name} = {JoinProbeReference(join.Bindings, seek.OuterOrdinals[i])}"));
-                            Add("IndexSeek", stepId, Target(binding.Source), seek.Index.Name, bounds);
+                            Add("IndexSeek", stepId, Target(binding.Source), seek.Index.Name, bounds + PartialProof(seek));
                         }
                         else { JoinInput(inner, stepId); }
                     }
@@ -360,13 +366,16 @@ internal sealed partial class SqlPlanner
             if (seek.Lower is { } lower) { bounds.Add($"{seek.Index.ColumnNames[next]} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
             if (seek.Upper is { } upper) { bounds.Add($"{seek.Index.ColumnNames[next]} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
             Add("IndexSeek", parent, Target(table), seek.Index.Name,
-                string.Join(" AND ", bounds) + (probe is null ? string.Empty : "; " + probe),
+                string.Join(" AND ", bounds) + (seek is SqlPartialIndexSeekPath partial ? "; partial_predicate=" + seek.Index.Predicate + "; implied_by=" + partial.Proof : "") + (probe is null ? string.Empty : "; " + probe),
                 estimated: estimate?.Count ?? (seek.Index.IsUnique && seek.EqualityValues.Count == seek.Index.ColumnNames.Count ? 1 : null), actual: actual);
         }
 
         void Add(string name, int? parent, string? target = null, string? index = null, string? detail = null, long? estimated = null, long? actual = null)
             => nodes.Add(new DatabasePlanNode { NodeId = nodes.Count, ParentId = parent, Operator = name, Target = target, Index = index, Detail = detail, EstimatedRows = estimated, ActualRows = actual });
     }
+
+    private static string PartialProof(SqlJoinIndexPath path)
+        => path is SqlPartialJoinIndexPath partial ? "; partial_predicate=" + path.Index.Predicate + "; implied_by=" + partial.Proof : "";
 
     private static string JoinProbeReference(IReadOnlyList<SqlRelationBinding> bindings, int ordinal)
     {

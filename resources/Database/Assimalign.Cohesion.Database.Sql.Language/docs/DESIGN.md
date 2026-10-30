@@ -16,19 +16,29 @@ The current record-space format is 32; index predicates are persisted by Sql, in
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
-## Partial index grammar (#1630, SQ-P1)
+## Partial index grammar (#1630, SQ-P1/SQ-P2)
 
 SqlCreateIndexExpression.Predicate retains the optional WHERE tree. The canonical statement
 renderer emits it after the ordered column list; scalar predicate rendering is unchanged.
 The profile adds CREATE INDEX WHERE beside CREATE INDEX (+1 clause). Parser completeness,
 positive/negative conformance and rendering cases advance together. CREATE INDEX subqueries
 reach engine predicate validation and fail with CS05091. They are never executable predicates.
-SQ-P1 deliberately advertises no implication/access optimization; see DIALECT.
+SQ-P2 adds conservative implication and proven access selection; see DIALECT.
 The execution conformance corpus covers bounded runtime cast slots, registration changes on
 reopen, and constraint/creation-order arbitration with deferred partial-predicate failures.
 It also covers JSON/JSONB runtime representations and domains, complete creation diagnostics,
 function-environment refresh, and bulk failure markers that retain no predicate exceptions.
+The execution conformance corpus also covers converted signed-zero join/DML bounds, unchanged
+ordinary plans around unused partial indexes, target-WHERE call validation, folded parameter
+provenance and representation-sensitive expression matching. Grammar and formats are unchanged.
 
+
+ON CONFLICT column targets retain TargetWhere independently of the action's Where. An optional
+predicate-pair payload reuses the existing action-WHERE reference slot, preserving old syntax
+object sizes and allocations. Parsing and
+canonical rendering round trip both predicates; expression/key-direction inference remains outside
+the declared grammar. SQL binding implements strong conservative implication, access selection and
+arbiter membership, described in DIALECT and Sql DESIGN. No profile clause or format bump is needed.
 
 ## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
 

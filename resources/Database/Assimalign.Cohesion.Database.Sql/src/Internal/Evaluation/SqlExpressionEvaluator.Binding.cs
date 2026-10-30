@@ -412,8 +412,12 @@ internal sealed partial class SqlExpressionEvaluator
         // PostgreSQL parse_coerce.c:233-249 converts an unknown string constant while
         // analyzing the CAST. Include text the engine already folded to a constant;
         // typed numeric casts remain deferred and can be discarded.
-        return _validatingIgnoredIdentityInput && operand is SqlBoundConstant { Value: string or SqlCharacter }
-            ? new SqlBoundConstant(Evaluate(bound, [])) : bound;
+        if (_validatingIgnoredIdentityInput && operand is SqlBoundConstant { Value: string or SqlCharacter })
+        {
+            object? value = Evaluate(bound, []);
+            return operand is SqlBoundParameterConstant ? new SqlBoundParameterConstant(value) : new SqlBoundConstant(value);
+        }
+        return bound;
     }
 
     private SqlCast?[] ResolveExpressionCasts(SqlExpression operand, SqlType? source, SqlType target, Location? location = null)
@@ -580,7 +584,8 @@ internal sealed partial class SqlExpressionEvaluator
     {
         try
         {
-            return new SqlBoundConstant(Evaluate(sign, []));
+            object? value = Evaluate(sign, []);
+            return sign.Operand is SqlBoundParameterConstant ? new SqlBoundParameterConstant(value) : new SqlBoundConstant(value);
         }
         catch (Exception exception) when (!_validatingIgnoredIdentityInput && IsDeferrable(exception))
         {
@@ -831,12 +836,13 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         var scalar = (SqlScalarFunction)function!;
-        bool fixedArguments = AreFixed(arguments);
+        bool fixedArguments = AreFixed(arguments, out bool parameterDependent);
         var callCollation = SqlBoundCollation.Of(collation, default, _defaultCollation);
         BindParameterCoercions(scalar, arguments, callCollation);
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
             callCollation, _functions.Database, _cancellationToken, _functions.TransactionStart);
-        return (_foldConstants || _validatingIgnoredIdentityInput) && scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
+        return (_foldConstants || _validatingIgnoredIdentityInput) && scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments
+            ? Fold(bound, parameterDependent) : bound;
     }
 
     /// <summary>Applies declared CHAR bounds and domain checks before scalar or aggregate STRICT dispatch.</summary>
@@ -856,14 +862,16 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>Whether every argument has a value fixed when the statement was bound: a constant or a parameter.</summary>
-    private static bool AreFixed(SqlBoundExpression[] arguments)
+    private static bool AreFixed(SqlBoundExpression[] arguments, out bool parameterDependent)
     {
+        parameterDependent = false;
         foreach (var argument in arguments)
         {
             if (argument.Kind is not (SqlBoundExpressionKind.Constant or SqlBoundExpressionKind.Parameter))
             {
                 return false;
             }
+            parameterDependent |= argument is SqlBoundParameter or SqlBoundParameterConstant;
         }
 
         return true;
@@ -874,11 +882,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// fails is kept, and fails, as before folding existed, only when a row reaches it.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression Fold(SqlBoundCall call)
+    private SqlBoundExpression Fold(SqlBoundCall call, bool parameterDependent)
     {
         try
         {
-            return new SqlBoundConstant(EvaluateCall(call, []));
+            object? value = EvaluateCall(call, []);
+            return parameterDependent ? new SqlBoundParameterConstant(value) : new SqlBoundConstant(value);
         }
         catch (Exception exception) when (!_validatingIgnoredIdentityInput && IsDeferrable(exception))
         {

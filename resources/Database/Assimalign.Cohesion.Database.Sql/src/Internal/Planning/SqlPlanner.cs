@@ -412,19 +412,27 @@ internal sealed partial class SqlPlanner
         var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
         foreach (var conjunct in conjuncts) { CollectSargablePredicates(table, conjunct, predicates, scope); }
 
-        if (predicates.Count == 0)
+        if (predicates.Count == 0 && !HasPartialIndexes(indexes))
         {
             return SqlScanPath.Instance;
         }
 
-        return SelectAccessPath(table, predicates, indexes);
+        IReadOnlyList<SqlBoundExpression>? restrictions = null;
+        if (HasPartialIndexes(indexes))
+        {
+            scope ??= new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation,
+                functions: _functions, cancellationToken: _cancellationToken, foldConstants: false);
+            restrictions = conjuncts.Select(scope.BindPredicate).ToArray();
+        }
+        return SelectAccessPath(table, predicates, indexes, restrictions);
     }
 
     /// <summary>Shares seek ranking with join inputs whose restrictions are already bound.</summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
-        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null,
+        IReadOnlyList<SqlBoundExpression>? restrictions = null, int offset = 0)
     {
-        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 && restrictions is null || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -437,14 +445,21 @@ internal sealed partial class SqlPlanner
 
         foreach (var index in indexes.OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
         {
-            if (index.Predicate is not null) { continue; }
+            string? proof = null;
+            if (index.Predicate is not null)
+            {
+                if (restrictions is null || ProvePartialIndex(table, index, restrictions, offset) is not { } proven) { continue; }
+                proof = proven;
+            }
             var seek = TryBuildSeek(table, index, predicates, out int prefixLength, out bool hasRange);
 
             if (seek is null)
             {
-                continue;
+                if (proof is null) { continue; }
+                seek = new SqlIndexSeekPath(index, [], null, null);
             }
 
+            if (proof is not null) { seek = new SqlPartialIndexSeekPath(index, seek.EqualityValues, seek.Lower, seek.Upper, proof); }
             if (firstCandidate is null) { firstCandidate = seek; }
             else
             {
