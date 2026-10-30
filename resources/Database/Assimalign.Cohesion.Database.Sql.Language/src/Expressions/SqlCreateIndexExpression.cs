@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Language;
 
 /// <summary>
 /// Represents a parsed CREATE INDEX statement:
-/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [, ...])</c>.
+/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [, ...]) [WHERE predicate]</c>.
 /// </summary>
 public sealed class SqlCreateIndexExpression : SqlQueryExpression
 {
@@ -18,6 +18,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
     /// <param name="columns">The ordered key column names.</param>
     /// <param name="isUnique">Whether UNIQUE was specified.</param>
     /// <param name="ifNotExists">Whether IF NOT EXISTS was specified.</param>
+    /// <param name="predicate">The optional row-local index predicate.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     internal SqlCreateIndexExpression(
@@ -26,6 +27,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
         IReadOnlyList<string> columns,
         bool isUnique,
         bool ifNotExists,
+        SqlExpression? predicate,
         string? text,
         Location? location)
         : base(SqlQueryCommandType.Create, text, location)
@@ -35,6 +37,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
         Columns = columns;
         IsUnique = isUnique;
         IfNotExists = ifNotExists;
+        Predicate = predicate;
     }
 
     /// <summary>
@@ -61,4 +64,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
     /// Gets whether IF NOT EXISTS was specified.
     /// </summary>
     public bool IfNotExists { get; }
+
+    /// <summary>Gets the optional predicate; only rows for which it is TRUE are indexed.</summary>
+    public SqlExpression? Predicate { get; }
 }

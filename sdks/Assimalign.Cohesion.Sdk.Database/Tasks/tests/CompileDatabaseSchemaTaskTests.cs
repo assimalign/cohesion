@@ -57,7 +57,7 @@ public partial class CompileDatabaseSchemaTaskTests
 
         string schemaPath = SchemaPath(task, "orders");
         SqlCompiledSchema schema = SqlCompiledSchemaSerializer.Read(schemaPath);
-        schema.Format.ShouldBe("cohesion/database-schema/v9");
+        schema.Format.ShouldBe("cohesion/database-schema/v10");
         schema.Name.ShouldBe("orders");
         schema.Tables.Select(static table => table.Name).ShouldBe(["OrderLines", "Orders"]);
         schema.Tables.SelectMany(static table => table.Constraints)

@@ -11,7 +11,8 @@ internal sealed record SqlCreateIndexPlan(
     string IndexName,
     IReadOnlyList<string> ColumnNames,
     bool IsUnique,
-    bool IfNotExists) : SqlPlan{
+    bool IfNotExists,
+    SqlCatalogIndex? PartialIndex = null) : SqlPlan{
     private sealed class DebugView
     {
         private readonly global::Assimalign.Cohesion.Database.Sql.Internal.SqlCreateIndexPlan _target;

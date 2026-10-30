@@ -68,6 +68,21 @@ public static partial class SqlExpressionRenderer
             (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
     }
 
+    /// <summary>Renders CREATE INDEX, including its optional predicate, as canonical SQL.</summary>
+    /// <param name="query">The parsed index declaration.</param>
+    /// <returns>The canonical statement without a terminator.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The predicate exceeds the available stack.</exception>
+    /// <exception cref="NotSupportedException">The predicate contains an unsupported expression.</exception>
+    public static string Render(SqlCreateIndexExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return "CREATE " + (query.IsUnique ? "UNIQUE " : "") + "INDEX " +
+            (query.IfNotExists ? "IF NOT EXISTS " : "") + Identifier(query.IndexName) +
+            " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select(Identifier)) + ")" +
+            (query.Predicate is null ? "" : " WHERE " + Render(query.Predicate));
+    }
+
     private static void AppendOverride(StringBuilder builder, SqlIdentityOverride value)
     { if (value != SqlIdentityOverride.None) { builder.Append(value == SqlIdentityOverride.User ? " OVERRIDING USER VALUE" : " OVERRIDING SYSTEM VALUE"); } }
 

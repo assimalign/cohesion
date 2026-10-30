@@ -253,7 +253,8 @@ public sealed class SqlLanguageConformanceTests
         // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
         // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
         // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(82);
+        // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(83);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -1104,6 +1105,15 @@ public sealed class SqlLanguageConformanceTests
                 session.Database.Catalog.Namespaces.ShouldNotContain(schema => schema.Name == "sales");
                 session.Database.Catalog.TryGetTable("sales", "orders", out var droppedTable).ShouldBeFalse();
                 await ExecuteAsync(session, "DROP SCHEMA IF EXISTS sales;");
+            }),
+        [SqlClauses.PartialIndex] = new("CREATE UNIQUE INDEX ix_positive ON t(name) WHERE age > 0;", _seed,
+            expression => expression is SqlCreateIndexExpression { Predicate: not null },
+            async (session, _) =>
+            {
+                await ExecuteAsync(session, "INSERT INTO t VALUES(4,'Ada',-1);");
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE name='Ada' ORDER BY id;", [[1],[4]]);
+                session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
+                await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET age=1 WHERE id=4;"));
             }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },

@@ -391,7 +391,7 @@ internal sealed partial class SqlPlanExecutor
             { _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(row.Location.PageId, row.Location.SlotIndex), SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence); }
             statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
             try
-            { await InsertIndexEntriesAsync(statement, GetLiveIndexes(row.Table, statement), row.Table, row.NewValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false); }
+            { await InsertIndexEntriesAsync(statement, bracket, GetLiveIndexes(row.Table, statement), row.Table, row.NewValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false); }
             catch (IndexUniqueViolationException failure) { throw TranslateUniqueViolation(row.Table, failure); }
         }
     }

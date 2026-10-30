@@ -412,7 +412,7 @@ internal sealed partial class SqlPlanExecutor
 
     private void EnsureCanDropIndex(SqlCatalogTable table, SqlCatalogIndex index)
     {
-        if (index.IsUnique && (index.IsPrimaryKey ||
+        if (index.Predicate is null && index.IsUnique && (index.IsPrimaryKey ||
             IncomingReferences(table).Any(reference => SameConstraintColumns(reference.Constraint.ReferencedColumns!, index.ColumnNames))))
         {
             throw new SqlExecutionException(SqlExecutionException.DependentObjectsCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintIndexDependent, index.Name));

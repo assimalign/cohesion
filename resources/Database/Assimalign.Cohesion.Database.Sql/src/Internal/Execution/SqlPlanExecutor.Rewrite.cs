@@ -61,9 +61,9 @@ internal sealed partial class SqlPlanExecutor
         var mapping = previous.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
             .ToDictionary(pair => pair.ObjectId, pair => pair.Replacement);
         var indexes = oldIndexes.Select(index => new SqlCatalogIndex(mapping[index.TableObjectId].ObjectId,
-            index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey)).ToArray();
+            index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls)).ToArray();
         if (additionalIndexes is { Count: > 0 })
-        { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey))).ToArray(); }
+        { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls))).ToArray(); }
         var created = new List<SqlCatalogIndex>();
         bool published = false;
         Exception? operationFailure = null;
@@ -168,7 +168,8 @@ internal sealed partial class SqlPlanExecutor
         var indexes = descriptions.Select(description =>
         {
             _indexManager.TryGetIndex(description.TableObjectId, description.Name, out var index);
-            return (Index: index, Ordinals: description.ColumnNames.Select(name => FindColumnOrdinal(replacement, name)).ToArray());
+            if (description.Predicate is not null) { _definitions.GetIndexPredicate(replacement, description, cancellationToken); }
+            return (Metadata: description, Index: index, Ordinals: description.ColumnNames.Select(name => FindColumnOrdinal(replacement, name)).ToArray());
         }).ToArray();
         var snapshot = ConstraintCurrentSnapshot(statement);
         long processed = 0;
@@ -203,6 +204,7 @@ internal sealed partial class SqlPlanExecutor
                 cancellationToken.ThrowIfCancellationRequested();
                 converted[i] = transform is null ? batch[i].Values : transform(batch[i].Values);
                 memory.Retain(converted[i]);
+                foreach (var index in indexes) { MatchesIndex(replacement, index.Metadata, converted[i], cancellationToken: cancellationToken); }
             }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
@@ -219,6 +221,7 @@ internal sealed partial class SqlPlanExecutor
                         var location = _storage.InsertRow(bracket, replacement.ObjectId, record);
                         foreach (var index in indexes)
                         {
+                            if (!MatchesIndex(replacement, index.Metadata, values, prepared: true)) { continue; }
                             await index.Index.InsertVersionAsync(bracket, BuildIndexKey(replacement, index.Ordinals, values),
                                 SqlRecordLocation.Pack(location.PageId, location.SlotIndex), version.Writer,
                                 TransactionSequence.None, cancellationToken).ConfigureAwait(false);
@@ -228,13 +231,14 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
+            ForgetIndexRows(converted);
             processed += batch.Count;
             statement.ProvisioningProgress?.Invoke(processed, null);
             RewriteStage?.Invoke("Copied", processed);
         }
         foreach (var index in indexes)
         {
-            await ValidateBuiltUniqueIndexAsync(replacement, index.Index, statement, cancellationToken).ConfigureAwait(false);
+            await ValidateBuiltUniqueIndexAsync(replacement, index.Index, statement, cancellationToken, index.Metadata.Predicate is null ? null : index.Ordinals, index.Metadata.Predicate is not null).ConfigureAwait(false);
         }
         statement.ProvisioningProgress?.Invoke(processed, processed);
     }

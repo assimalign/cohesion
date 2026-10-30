@@ -381,6 +381,7 @@ internal sealed partial class SqlPlanner
             if (innerBinding.Source.Table is not { } table) { continue; }
             foreach (var index in ReadIndexes(table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
             {
+                if (index.Predicate is not null) { continue; }
                 var outerOrdinals = new List<int>();
                 var innerColumns = new List<SqlCatalogColumn>();
                 foreach (string key in index.ColumnNames)

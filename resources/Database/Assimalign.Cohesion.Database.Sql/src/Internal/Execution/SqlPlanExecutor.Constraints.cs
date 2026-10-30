@@ -466,6 +466,7 @@ internal sealed partial class SqlPlanExecutor
         var bound = _definitions.Get(key.Table);
         foreach (var metadata in preparedIndexes ?? _catalog.GetIndexes(key.Table.ObjectId))
         {
+            if (metadata.Predicate is not null) { continue; }
             int[] ordinals = bound.GetKey(metadata.ColumnNames).Ordinals;
             var mapping = new List<int>();
             foreach (int ordinal in ordinals)
@@ -1130,7 +1131,7 @@ internal sealed partial class SqlPlanExecutor
             var indexes = GetLiveIndexes(group.First().Table, statement);
             foreach (var row in group)
             {
-                CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes);
+                CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes, cancellationToken);
             }
 
             await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
@@ -1197,6 +1198,9 @@ internal sealed partial class SqlPlanExecutor
         new SqlCheckSyntax(table, scope, declaring: false, retyping: retyping, previousScope: previousScope).Validate(expression, requireBoolean: true);
         return scope.BindPredicate(expression);
     }
+
+    internal static void ValidatePersistedPredicate(SqlExpression expression, SqlCatalogTable table, SqlExpressionEvaluator scope)
+        => new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
         => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
@@ -1289,7 +1293,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             bool unique = (self && SameConstraintColumns(parent.PrimaryKeyColumns, definition.ReferencedColumns)) ||
-                _catalog.GetIndexes(parent.ObjectId).Any(index => index.IsUnique && SameConstraintColumns(index.ColumnNames, definition.ReferencedColumns)) ||
+                _catalog.GetIndexes(parent.ObjectId).Any(index => index.IsUnique && index.Predicate is null && SameConstraintColumns(index.ColumnNames, definition.ReferencedColumns)) ||
                 (self && definitions.Any(d => d.Kind is SqlConstraintKind.Unique or SqlConstraintKind.PrimaryKey && SameConstraintColumns(d.Columns, definition.ReferencedColumns)));
             if (!unique)
             {

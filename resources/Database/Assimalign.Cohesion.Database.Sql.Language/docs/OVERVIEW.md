@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql.Language — Overview
 
+CREATE [UNIQUE] INDEX supports an immutable row-local WHERE predicate. SQ-P1 persists and
+maintains the matching subset; query implication and partial-index access selection follow
+in SQ-P2. See DIALECT for predicate refusals and conditional uniqueness.
+
 Foreign keys retain and render all five ON UPDATE actions beside ON DELETE, in either order.
 Omitted actions default to NO ACTION. All five actions execute on UPDATE, UPDATE FROM,
 ON CONFLICT DO UPDATE and MERGE; RESTRICT checks immediately and NO ACTION checks the final

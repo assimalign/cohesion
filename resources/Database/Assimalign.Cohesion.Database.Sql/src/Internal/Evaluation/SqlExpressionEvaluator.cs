@@ -398,7 +398,7 @@ internal sealed partial class SqlExpressionEvaluator
         RuntimeHelpers.EnsureSufficientExecutionStack();
         // PostgreSQL functions.c:491 and typecmds.c:3609 use Param and CoerceToDomainValue,
         // neither of which is a Var for parse_expr.c:1163. The binding site supplies that distinction.
-        if (_bindingContext != SqlBindingContext.Table) { return false; }
+        if (_bindingContext is not (SqlBindingContext.Table or SqlBindingContext.IndexPredicate)) { return false; }
         return expression is SqlColumnReferenceExpression || SqlPlanner.Children(expression).Any(ReferencesTableColumn);
     }
 

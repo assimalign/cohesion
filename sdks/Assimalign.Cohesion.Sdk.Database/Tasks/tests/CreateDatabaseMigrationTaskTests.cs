@@ -46,7 +46,7 @@ public class CreateDatabaseMigrationTaskTests
         error.Code.ShouldBe("COHDBSDK206");
         error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
         error.Message.ShouldContain("cohesion/database-schema/v8", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v9", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v10", Case.Sensitive);
         task.MigrationPath.ShouldBeEmpty();
         task.BaselinePath.ShouldBeEmpty();
         File.ReadAllText(artifact).ShouldBe(document);
@@ -87,7 +87,7 @@ public class CreateDatabaseMigrationTaskTests
         error.Code.ShouldBe("COHDBSDK206");
         error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
         error.Message.ShouldContain("cohesion/database-schema/v4", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v9", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v10", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         task.MigrationPath.ShouldBeEmpty();
         task.BaselinePath.ShouldBeEmpty();
@@ -136,7 +136,7 @@ public class CreateDatabaseMigrationTaskTests
         error.Code.ShouldBe("COHDBSDK206");
         error.Message.ShouldNotBeNull().ShouldContain("schema.format", Case.Sensitive);
         error.Message.ShouldContain("cohesion/database-schema/v7", Case.Sensitive);
-        error.Message.ShouldContain("cohesion/database-schema/v9", Case.Sensitive);
+        error.Message.ShouldContain("cohesion/database-schema/v10", Case.Sensitive);
         error.Message.ShouldContain("Rebuild", Case.Sensitive);
         task.MigrationPath.ShouldBeEmpty();
         task.BaselinePath.ShouldBeEmpty();

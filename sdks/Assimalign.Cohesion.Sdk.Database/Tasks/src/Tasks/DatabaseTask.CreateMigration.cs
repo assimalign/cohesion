@@ -409,7 +409,16 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             }
             builder.Append("INDEX IF NOT EXISTS ").Append(Identifier(index.Name))
                 .Append(" ON ").Append(QualifiedTable(table))
-                .Append(" (").Append(ColumnList(index.Columns)).Append(");\n");
+                .Append(" (").Append(ColumnList(index.Columns)).Append(')');
+            if (index.Predicate is { } predicate)
+            {
+                // Parse both the fragment and a parenthesized carrier to reject trailing
+                // statements, clauses and comments. Only the rendered AST reaches SQL.
+                var expression = ParseDefault(predicate, predicate: true);
+                _ = ParseDefault($"({predicate})", predicate: true);
+                builder.Append(" WHERE ").Append(SqlExpressionRenderer.Render(expression));
+            }
+            builder.Append(";\n");
         }
 
         private static void WriteColumn(StringBuilder builder, CompiledSchemaColumn column, bool isPrimaryKey)
@@ -441,19 +450,20 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             return literal is SqlLiteralExpression { LiteralType: SqlLiteralType.Null } ? null : SqlExpressionRenderer.Render(literal);
         }
 
-        private static SqlExpression ParseDefault(string text)
+        private static SqlExpression ParseDefault(string text, bool predicate = false)
         {
             const string carrierTable = "__migration_default";
             var statement = new SqlQueryParser().Parse($"SELECT * FROM {carrierTable} WHERE {text}");
             if (statement.Diagnostics.Any(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error) ||
                 statement is not SqlQueryStatement { SqlExpression: SqlSelectExpression select } ||
-                select.Where is not { } literal || !IsDefaultLiteral(literal) || select.IsDistinct || select.Columns.Count != 1 ||
+                select.Where is not { } literal || !predicate && !IsDefaultLiteral(literal) || select.IsDistinct || select.Columns.Count != 1 ||
                 select.Columns[0] is not { Expression: SqlStarExpression, Alias: null } ||
                 select.From is not [{ Table: SqlTableReference { TableName: carrierTable, SchemaName: null, Alias: null }, Joins.Count: 0 }] ||
                 select.GroupBy.Count > 0 || select.Having is not null ||
                 select.OrderBy.Count > 0 || select.Limit is not null || select.Offset is not null)
             {
-                throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DefaultLiteralInvalid, text));
+                throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    predicate ? ErrorMessages.MigrationPredicateInvalid : ErrorMessages.DefaultLiteralInvalid, text));
             }
 
             return literal;

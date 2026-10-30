@@ -75,6 +75,9 @@ public static class SqlClauses
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
 
+    /// <summary>A partial index with an immutable row predicate.</summary>
+    public const string PartialIndex = "CREATE INDEX WHERE";
+
     /// <summary>An <c>ALTER TABLE</c> statement.</summary>
     public const string AlterTable = "ALTER TABLE";
 

@@ -36,8 +36,10 @@ internal static class SqlSystemViews
             Text("UNIQUE_CONSTRAINT_CATALOG", true), Text("UNIQUE_CONSTRAINT_SCHEMA", true), Text("UNIQUE_CONSTRAINT_NAME", true),
             Text("MATCH_OPTION"), Text("UPDATE_RULE"), Text("DELETE_RULE")),
         Iso("CHECK_CONSTRAINTS", Text("CONSTRAINT_CATALOG"), Text("CONSTRAINT_SCHEMA"), Text("CONSTRAINT_NAME"), Text("CHECK_CLAUSE")),
+        Iso("INDEXES", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("INDEX_NAME"),
+            Text("COLUMN_NAME"), Number("ORDINAL_POSITION"), Text("IS_UNIQUE"), Text("IS_PRIMARY_KEY"), Text("PREDICATE", true)),
         Cohesion("INDEXES", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"), Text("INDEX_NAME"),
-            Text("COLUMN_NAME"), Number("ORDINAL_POSITION"), Text("IS_UNIQUE"), Text("IS_PRIMARY_KEY")),
+            Text("COLUMN_NAME"), Number("ORDINAL_POSITION"), Text("IS_UNIQUE"), Text("IS_PRIMARY_KEY"), Text("PREDICATE", true)),
         Cohesion("OBJECT_OWNERSHIP", Text("TABLE_CATALOG"), Text("TABLE_SCHEMA"), Text("TABLE_NAME"),
             Text("OBJECT_TYPE"), Text("OBJECT_NAME"), Text("OWNER"), Text("OWNING_SCHEMA", true)),
         // The engine's function catalog, one row per overload, then the special forms (owner
