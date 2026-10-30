@@ -296,6 +296,44 @@ public sealed class NamedSavepointTests
         await ExecuteAsync(session, "COMMIT");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql] - Named savepoints: a memory compensation I/O cause retains CK04009 recovery (#1726)")]
+    public async Task ExecuteAsync_FailedMemoryCompensationWithIoCause_ShouldKeepRecoverableFence()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("savepoint-compensation", new());
+        var database = await engine.CreateDatabaseAsync("db");
+        await using var session = await database.CreateSessionAsync();
+        await ExecuteAsync(session, "CREATE TABLE items (id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "BEGIN");
+        await ExecuteAsync(session, "SAVEPOINT scope");
+        var transaction = session.CurrentTransaction.ShouldNotBeNull();
+        var memory = new TestObjects.FailingSavepointMemoryUndo();
+        var original = new InvalidOperationException("Injected statement failure");
+
+        // Act: a real failed bracket retains its suffix after the adapter's memory repair fails.
+        var failure = await Record.ExceptionAsync(() => database.Coordinator.ApplyStatementAsync<int>(transaction.Context, _ =>
+        {
+            database.Coordinator.VersionStore.RecordIndexEntryCreated(transaction.Context.Sequence, memory, ReadOnlyMemory<byte>.Empty, 1);
+            throw original;
+        }, CancellationToken.None).AsTask());
+
+        // Assert: the I/O-typed memory failure must not turn recoverable undo into a storage abort.
+        TransactionCoordinator.GetUndoFailureCode(failure!).ShouldBe("CK04009");
+        SqlDatabase.IsStorageFailure(failure!).ShouldBeFalse();
+        var translated = database.TranslateFailure(failure!).ShouldBeAssignableTo<DatabaseException>();
+        translated.Diagnostics.ShouldContain(item => item.Code == "CK04009");
+        SqlDatabase.IsStorageFailure(translated).ShouldBeFalse();
+        database.TranslateFailure(translated).ShouldBeSameAs(translated);
+        var refused = await Should.ThrowAsync<DatabaseException>(async () => await CountAsync(session));
+        refused.Diagnostics.ShouldContain(item => item.Code == "CK04009");
+        memory.Fail = false;
+        await ExecuteAsync(session, "ROLLBACK TO scope");
+        memory.Restored.ShouldBeTrue();
+        await ExecuteAsync(session, "INSERT INTO items VALUES (2)");
+        await ExecuteAsync(session, "COMMIT");
+        (await CountAsync(session)).ShouldBe(1);
+    }
+
     private static async Task ExecuteAsync(SqlDatabaseSession session, string source)
         => (await session.ExecuteAsync(source)).Status.ShouldBe(DatabaseResultStatus.Success);
 

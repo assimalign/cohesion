@@ -19,7 +19,8 @@ root monitor is released before kernel manager admission/context end latch and l
 work; no root monitor spans storage/page/index latches or awaits. A negative existing operation
 count excludes typed statement admission during the control. The finally path restores admission
 and releases the end gate after success, failure or cancellation. Root rollback, disposal and
-session teardown drain an admitted control through that gate. The source states this lock order.
+session teardown drain an admitted control through that gate. End cleanup discards names
+without calling leaf code from the gate-release finally, while preserving an abort cause. The source states this lock order.
 
 Incomplete undo leaves the kernel Active and exposes Faulted session status, with CK04009 for
 reads, writes, BEGIN, RELEASE, SAVEPOINT and COMMIT. Commit refuses before claiming the end.

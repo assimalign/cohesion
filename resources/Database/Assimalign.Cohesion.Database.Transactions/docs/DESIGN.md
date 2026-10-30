@@ -4,8 +4,9 @@
 
 TransactionCoordinator exposes non-virtual controls over a new sealed TransactionSavepoint token.
 The token owns its coordinator, exact current context and internal marker; foreign, stale,
-released or ended tokens retain CK04008. This is the common kernel consumer surface for all
-models. Existing internal marker identities remain internal. GetUndoFailureCode supplies their
+released or ended tokens retain CK04008. The wrapper is allocated before kernel admission, so
+an allocation failure cannot orphan a marker. Kernel creation also unwinds its marker if lock
+or model registration fails. This is the common kernel consumer surface for all models. Existing internal marker identities remain internal. GetUndoFailureCode supplies their
 structured CK04 identity without message parsing, and IsPartialUndoPending reads the shared
 lifecycle's existing flag without taking another monitor. The root transaction supplies names
 and the session read fence. Markers remain in memory; storage stays at format 4.

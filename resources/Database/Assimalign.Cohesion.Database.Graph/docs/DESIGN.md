@@ -22,6 +22,9 @@ format changes are needed (storage 4); rollback-on-pool-return discards every na
 | CK04012 | A savepoint command requires an explicit bound transaction |
 | CK04013 | The named savepoint does not exist |
 
+The central advertised-clause execution matrix also proves each savepoint AST command and
+its row visibility/effects through a live session; the unmapped-clause guard remains intact.
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog undo removes the exact undone metadata reference, including definition,
@@ -864,8 +867,13 @@ continues to follow the existing Neo4j-style failure contract:
 
 The session's explicit-transaction lifecycle, where Faulted is the new state:
 
+UndoPending is a recovery path also reported as TransactionState.Faulted; it does not
+represent an ordinary statement-aborted transaction. Only its named rollback retry or whole
+rollback recovers it, as described in the savepoint contract above.
+
 ```mermaid
 stateDiagram-v2
+    state "Faulted: incomplete undo" as UndoPending
     [*] --> Idle
     Idle --> Idle: autocommit statement succeeds or fails
     Idle --> Active: BeginTransactionAsync
@@ -874,6 +882,10 @@ stateDiagram-v2
     Faulted --> Faulted: statement or BEGIN refused with CG04007
     Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
     Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with CG04007
+    Active --> UndoPending: partial undo fails
+    UndoPending --> Active: ROLLBACK TO retained or outer scope
+    UndoPending --> UndoPending: other work refused with CK04009
+    UndoPending --> Idle: ROLLBACK or DisposeAsync
 ```
 
 The reference engines agree on the failure and the refusal; they differ only on COMMIT. Citations

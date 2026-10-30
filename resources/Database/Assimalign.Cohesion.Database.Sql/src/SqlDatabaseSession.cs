@@ -554,7 +554,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         { ThrowIfPartialUndoPending(); }
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
-        // must not become a full ROLLBACK while savepoints remain unsupported).
+        // must not become a full ROLLBACK when its name or suffix is malformed).
         foreach (var diagnostic in request.Statement.Diagnostics)
         {
             if (diagnostic.Severity == DiagnosticSeverity.Error)

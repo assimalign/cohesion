@@ -501,10 +501,10 @@ removed yet (#1226, `Database.Transactions` DESIGN.md, "Ending a transaction").
 
 ### Failed operations in explicit transactions (#1225)
 
-An operation that fails inside an explicit transaction aborts the whole transaction. Blob
-storage cannot undo one operation: an upload writes a physical bracket per chunk, and a delete
-tombstones the chain chunk by chunk and its metadata separately, while `Database.Transactions`
-undoes a writer only as a whole transaction, with no savepoints. Until #1225 the session then
+An operation that fails inside an explicit transaction still aborts the whole transaction
+(owner, 2026-10-25, #1726). An upload writes a physical bracket per chunk, and a delete
+tombstones the chain chunk by chunk and its metadata separately. The partial-undo substrate
+preserves this failure rule; marker controls also refuse while a write stream is open (CK04010). Until #1225 the session then
 dropped the rolled-back transaction from view, so the next operation silently ran in autocommit
 and the caller's `RollbackAsync` threw. The session now follows the contract the Graph engine set
 in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),

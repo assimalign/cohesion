@@ -11,16 +11,16 @@ namespace Assimalign.Cohesion.Database.Transactions;
 [DebuggerTypeProxy(typeof(TransactionSavepoint.DebugView))]
 public sealed class TransactionSavepoint
 {
-    internal TransactionSavepoint(TransactionCoordinator coordinator, TransactionContext context, TransactionUndoMarker marker)
+    internal TransactionSavepoint(TransactionCoordinator coordinator, TransactionContext context)
     {
         Coordinator = coordinator;
         Context = context;
-        Marker = marker;
     }
 
     internal TransactionCoordinator Coordinator { get; }
     internal TransactionContext Context { get; }
-    internal TransactionUndoMarker Marker { get; }
+    // Initialized before publication; allocation precedes kernel marker admission.
+    internal TransactionUndoMarker Marker { get; set; } = null!;
 
     private sealed class DebugView
     {

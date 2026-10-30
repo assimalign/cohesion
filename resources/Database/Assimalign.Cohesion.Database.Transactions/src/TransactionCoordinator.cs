@@ -558,7 +558,14 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
     /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
     public async ValueTask<TransactionSavepoint> CreateSavepointAsync(TransactionContext context, CancellationToken cancellationToken = default)
-        => new(this, context, await CreateUndoMarkerAsync(context, cancellationToken).ConfigureAwait(false));
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        // Allocate the wrapper before admitting its kernel marker: an allocation failure must
+        // never leave an anonymous scope that its caller cannot release.
+        var savepoint = new TransactionSavepoint(this, context);
+        savepoint.Marker = await CreateUndoMarkerAsync(context, cancellationToken).ConfigureAwait(false);
+        return savepoint;
+    }
 
     /// <summary>Releases an undo scope and every newer scope, retaining their effects.</summary>
     /// <param name="context">The current lifecycle context.</param>
@@ -607,7 +614,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         return savepoint.Marker;
     }
 
-    // These anonymous controls remain internal until named/session scopes are integrated.
+    // Anonymous backend controls remain internal behind the owned coordinator surface.
     internal ValueTask<TransactionUndoMarker> CreateUndoMarkerAsync(TransactionContext context, CancellationToken cancellationToken = default)
         => RunUndoControlAsync(context, null, rollback: false, release: false, cancellationToken);
 
@@ -643,9 +650,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 else
                 {
                     marker = _versionStore.CreateMarker(context.Sequence);
-                    _lockManager.CreateUndoMarker(context.Sequence, marker);
-                    context.MarkUndoScopes();
-                    try { _records.UndoScopesChanged(context.Sequence, true, _versionStore); }
+                    try
+                    {
+                        _lockManager.CreateUndoMarker(context.Sequence, marker);
+                        context.MarkUndoScopes();
+                        _records.UndoScopesChanged(context.Sequence, true, _versionStore);
+                    }
                     catch
                     {
                         // A failed registration must not strand a marker whose token was

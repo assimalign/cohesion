@@ -7,9 +7,16 @@ The SQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK
 duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
 the existing model adapters. The enclosing transaction stays open and can commit after undo.
 SQL statement failures remain statement-atomic. SET TRANSACTION inside an active savepoint
-is CS04074; releasing the last scope permits otherwise-early configuration again. A retained
+is CS04074; releasing the last scope permits otherwise-early configuration again.
+The owner's unconditional refusal includes idempotent SET. The local PostgreSQL reference
+allows that no-op (src/backend/commands/variable.c:580-603); the 2026-10-25 owner decision wins. A retained
 ROLLBACK TO target still refuses SET. Existing CS04072 late-data and CS04073 unsupported-level
 conditions keep their meanings.
+
+A coded CK04009 memory-compensation failure retains that recovery path even when its aggregate
+cause contains IOException; it is not reclassified as an ordinary SQL storage abort. Genuine
+offline/corruption translation still takes precedence. The regression uses a real failed bracket
+and retry through the named session scope.
 
 Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
 outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
@@ -6043,8 +6050,13 @@ rejected by the existing C# seam until the coordinator supports serialization de
 
 The session lifecycle below applies equally to SQL requests and C# transactions.
 
+UndoPending is a recovery path also reported as TransactionState.Faulted; it does not
+represent an ordinary statement-aborted transaction. Only its named rollback retry or whole
+rollback recovers it, as described in the savepoint contract above.
+
 ```mermaid
 stateDiagram-v2
+    state "Faulted: incomplete undo" as UndoPending
     [*] --> Idle
     Idle --> Open: BEGIN
     Open --> Open: query or DML
@@ -6053,6 +6065,11 @@ stateDiagram-v2
     Open --> Faulted: the kernel ends it under the caller
     Faulted --> Idle: ROLLBACK, or COMMIT failing with CS04005
     Idle --> Closed: disconnect
+    Open --> UndoPending: partial undo fails
+    UndoPending --> Open: ROLLBACK TO retained or outer scope
+    UndoPending --> UndoPending: other work refused with CK04009
+    UndoPending --> Idle: ROLLBACK or DisposeAsync
+    UndoPending --> Closed: disconnect rolls back
 ```
 
 State misuse returns `DatabaseResultStatus.Error` with an error diagnostic, without

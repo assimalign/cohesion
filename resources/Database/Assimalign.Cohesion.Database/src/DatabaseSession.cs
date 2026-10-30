@@ -360,6 +360,8 @@ public abstract class DatabaseSession : IAsyncDisposable
     /// <summary>Creates a named savepoint in the explicit transaction.</summary>
     /// <param name="name">The language-normalized savepoint identifier.</param>
     /// <param name="cancellationToken">Observed before control admission.</param>
+    /// <exception cref="ArgumentException">The name is null or empty.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before control admission.</exception>
     /// <returns>A task representing completion.</returns>
     /// <exception cref="DatabaseException">There is no explicit transaction or it refuses the control.</exception>
     protected ValueTask CreateSavepointAsync(string name, CancellationToken cancellationToken = default)
@@ -368,6 +370,8 @@ public abstract class DatabaseSession : IAsyncDisposable
     /// <summary>Releases the newest named savepoint and its descendants.</summary>
     /// <param name="name">The language-normalized identifier.</param>
     /// <param name="cancellationToken">Observed before control admission.</param>
+    /// <exception cref="ArgumentException">The name is null or empty.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before control admission.</exception>
     /// <returns>A task representing completion.</returns>
     /// <exception cref="DatabaseException">The transaction or savepoint is absent, or control is refused.</exception>
     protected ValueTask ReleaseSavepointAsync(string name, CancellationToken cancellationToken = default)
@@ -376,6 +380,8 @@ public abstract class DatabaseSession : IAsyncDisposable
     /// <summary>Undoes to the newest named savepoint, retaining it and discarding descendants.</summary>
     /// <param name="name">The language-normalized identifier.</param>
     /// <param name="cancellationToken">Observed before admission; admitted undo completes.</param>
+    /// <exception cref="ArgumentException">The name is null or empty.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before control admission.</exception>
     /// <returns>A task representing completion.</returns>
     /// <exception cref="DatabaseException">The transaction or savepoint is absent, or control is refused.</exception>
     protected ValueTask RollbackToSavepointAsync(string name, CancellationToken cancellationToken = default)

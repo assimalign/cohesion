@@ -34,13 +34,16 @@ internal static class DatabaseFailure
     }
 
     internal static DatabaseException? TranslateUndoFailure(Exception error)
-        => Transactions.TransactionCoordinator.GetUndoFailureCode(error) is { } code
+        => error is DatabaseException { Diagnostics: [{ Code: "CK04009" }, ..] } pending ? pending
+            : Transactions.TransactionCoordinator.GetUndoFailureCode(error) is { } code
             ? new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = code, Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error)
             : null;
 
     internal static bool IsStorageFailure(Exception error)
-        => Find<StorageOfflineException>(error) is null
+        => error is not DatabaseException { Diagnostics: [{ Code: "CK04009" }, ..] }
+            && Transactions.TransactionCoordinator.GetUndoFailureCode(error) != "CK04009"
+            && Find<StorageOfflineException>(error) is null
             && (Find<StorageException>(error) is not null || Find<IOException>(error) is not null
                 || error is DatabaseCorruptionException
                 || (Find<IndexException>(error) is not null

@@ -7,6 +7,7 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 - `TransactionManager` — begin/commit/rollback lifecycle, sequence assignment, snapshot capture (a sealed type; the coordinator composes the durable one, `TransactionManager.Create` a standalone one over an in-memory log)
 - `TransactionContext` — the engine-internal state of one in-flight transaction (sealed;
   `PinStatementSnapshot` fixes a read-committed statement's snapshot)
+- `TransactionSavepoint` — the sealed, opaque token for the coordinator's non-virtual undo controls
 - `TransactionId` / `TransactionState` — the transaction vocabulary the area root's `DatabaseTransaction` base consumes
 - `TransactionSnapshot` / `TransactionSequence` — MVCC visibility (implemented, tested)
 - `LockManager` / `LockMode` / `LockResource` — hierarchical write locking with deadlock resolution
@@ -21,8 +22,11 @@ The shared ACID substrate for every Cohesion database engine: MVCC visibility sn
 
 The coordinator's internal anonymous markers capture positions in the ordered row/index
 ledger. Partial undo reverses a marker's suffix through bounded physical brackets while the
-root transaction stays open; locks remain held until root end in XT-2 (#1726). Named scopes
-and language controls follow in later runs. See DESIGN for failure recovery and cancellation.
+root transaction stays open. Marker-scoped grants are released and upgrades revert with undo
+(#1726, XT-3). Owned tokens expose these controls to model adapters; root sessions supply names,
+duplicate lookup, RELEASE scope and repeatable ROLLBACK TO in SQL/OQL/GQL (XT-4). Incomplete
+undo fences work until retry to the same or an outer scope, or whole rollback. Markers stay in
+memory and storage stays at format 4. See DESIGN for failure recovery and cancellation.
 
 The coordinator's record ledger supports streamed model records: logical rollback,
 pruning, and recovery scrub use bounded physical mutation batches, while lifecycle

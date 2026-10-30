@@ -4,11 +4,6 @@
 <resheader name="version"><value>2.0</value></resheader>
 <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="SavepointControlBusy" xml:space="preserve"><value>A statement or another control is already running on this session or transaction.</value></data>
-  <data name="SavepointBindingMissing" xml:space="preserve"><value>This transaction has no savepoint binding.</value></data>
-  <data name="SavepointOutsideTransaction" xml:space="preserve"><value>Savepoint commands require an explicit transaction.</value></data>
-  <data name="SavepointUnknown" xml:space="preserve"><value>The named savepoint does not exist.</value></data>
-  <data name="SavepointUndoPending" xml:space="preserve"><value>Partial undo requires retry of the same or an outer savepoint, or ROLLBACK.</value></data>
   <data name="StorageCorrupt" xml:space="preserve"><value>Database '{0}' is corrupt. {2} Restore the database from a verified backup.</value></data>
   <data name="StoragePageCorrupt" xml:space="preserve"><value>Database '{0}' is corrupt on page {1}. {2} Restore the database from a verified backup.</value></data>
   <data name="ObjectOwnedBySchema" xml:space="preserve"><value>Object '{0}' is owned by schema '{1}' and cannot be changed by {2}. Alter the schema and redeploy it.</value></data>
@@ -39,6 +34,11 @@
   <data name="DatabaseSessionDisposeAsyncDatabase" xml:space="preserve"><value>The session closed before the transaction ended.</value></data>
   <data name="DatabaseSessionDisposeAsyncAggregate" xml:space="preserve"><value>The session failed to close.</value></data>
   <data name="SessionCreateClosedExceptionDatabase" xml:space="preserve"><value>The session is closed.</value></data>
+  <data name="SavepointControlBusy" xml:space="preserve"><value>A statement or another control is already running on this session or transaction.</value></data>
+  <data name="SavepointBindingMissing" xml:space="preserve"><value>This transaction has no savepoint binding.</value></data>
+  <data name="SavepointOutsideTransaction" xml:space="preserve"><value>Savepoint commands require an explicit transaction.</value></data>
+  <data name="SavepointUnknown" xml:space="preserve"><value>The named savepoint does not exist.</value></data>
+  <data name="SavepointUndoPending" xml:space="preserve"><value>Partial undo requires retry of the same or an outer savepoint, or ROLLBACK.</value></data>
   <data name="TransactionCommitAsyncDatabase" xml:space="preserve"><value>The transaction is {0}.</value></data>
   <data name="TransactionCommitAsyncDatabase2" xml:space="preserve"><value>An operation of the transaction is still running; commit after it completes.</value></data>
   <data name="TransactionRollbackAsyncDatabase" xml:space="preserve"><value>The transaction is Committed; a committed transaction cannot roll back.</value></data>

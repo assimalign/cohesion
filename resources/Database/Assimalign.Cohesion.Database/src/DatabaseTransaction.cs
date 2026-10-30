@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Database;
 /// <para>
 /// <b>A transaction that did not commit accepts any number of rollbacks</b>, because its work is
 /// already undone once one completed or the kernel aborted it; a committed transaction refuses one.
-/// A commit ends the transaction whatever its outcome, as a failed transaction block's
+/// A commit that starts ends the transaction whatever its outcome, as a failed transaction block's
 /// <c>COMMIT</c> does in PostgreSQL (<c>EndTransactionBlock</c>, <c>xact.c:4133-4139</c>): one
 /// after an operation aborted the transaction completes the rollback and fails with the model's
 /// coded error (<see cref="CreateAbortedException"/>), and commits nothing.
@@ -44,6 +44,12 @@ namespace Assimalign.Cohesion.Database;
 /// caller. The transaction stays the session's transaction meanwhile
 /// (<see cref="IsOpen"/>), and the session refuses work with <see cref="CreateRefusal"/> until the
 /// caller rolls it back.
+/// </para>
+/// <para>
+/// <b>Incomplete partial undo.</b> The kernel stays active while <see cref="State"/> reports
+/// <see cref="TransactionState.Faulted"/> and statements and commit refuse with CK04009.
+/// Only the owning session's rollback to the same or an outer savepoint, or whole rollback,
+/// recovers it. This differs from a model statement failure that aborted the whole transaction.
 /// </para>
 /// <para>
 /// <b>An offline database (#1243)</b> refuses a commit and a rollback before they start
@@ -206,7 +212,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         finally
         {
             if (admitted) { lock (_sync) { _operations = 0; } }
-            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
+            if (_ended) { Savepoints = null; }
             _endGate.Release();
         }
     }
@@ -261,7 +267,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <summary>
     /// Gets the state of the transaction: the kernel transaction's state once the caller ended it,
     /// <see cref="TransactionState.Faulted"/> while an operation's failure aborted it or the kernel
-    /// ended it under the caller, and <see cref="TransactionState.Active"/> otherwise, including
+    /// ended it under the caller or partial undo needs recovery, and <see cref="TransactionState.Active"/> otherwise, including
     /// while the caller's commit or rollback runs.
     /// </summary>
     public TransactionState State
@@ -301,7 +307,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
 
     /// <summary>
     /// Gets whether operations may run in the transaction: it is open, not aborted, and its kernel
-    /// transaction is active.
+    /// transaction is active and no control or incomplete undo fences it.
     /// </summary>
     protected internal bool IsUsable
     {
@@ -333,14 +339,14 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <summary>
     /// Commits the transaction, or, when an operation aborted it or the kernel ended it under its
     /// caller, completes its rollback and fails with the model's coded error. A commit ends the
-    /// transaction whatever its outcome.
+    /// transaction once the commit starts, whatever its outcome.
     /// </summary>
     /// <param name="cancellationToken">Observed only until the commit starts.</param>
     /// <returns>A task that completes once the commit ended.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled before the commit started.</exception>
     /// <exception cref="DatabaseException">
     /// The transaction was aborted or already ended (nothing was committed), or an operation of the
-    /// transaction is still running (the transaction stays active); the model's own errors besides.
+    /// transaction is still running or partial undo needs recovery (the transaction stays open); the model's own errors besides.
     /// </exception>
     public async ValueTask CommitAsync(CancellationToken cancellationToken = default)
     {
@@ -403,8 +409,8 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             }
             finally
             {
-                if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
-            _endGate.Release();
+                if (_ended) { Savepoints = null; }
+                _endGate.Release();
             }
         }
         catch (Exception exception) when (DatabaseEventSource.CaptureFailure(exception, out thrown))
@@ -461,7 +467,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
         finally
         {
-            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
+            if (_ended) { Savepoints = null; }
             _endGate.Release();
         }
     }
@@ -497,8 +503,8 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             }
             finally
             {
-                if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
-            _endGate.Release();
+                if (_ended) { Savepoints = null; }
+                _endGate.Release();
             }
         }
         finally
@@ -546,7 +552,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
         finally
         {
-            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
+            if (_ended) { Savepoints = null; }
             _endGate.Release();
         }
     }
@@ -585,7 +591,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         }
         finally
         {
-            if (_ended && GetKernelState() != TransactionState.Active) { Savepoints = null; }
+            if (_ended) { Savepoints = null; }
             _endGate.Release();
         }
     }
