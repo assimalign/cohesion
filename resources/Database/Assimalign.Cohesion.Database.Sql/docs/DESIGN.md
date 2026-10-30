@@ -5259,8 +5259,8 @@ description + exported registrations), the engine binds them.
   Violations surface as the area root's `DatabaseException` at the model
   boundary (`IndexUniqueViolationException` translated — the child-root error
   policy); the statement's bracket has rolled back, the session stays usable.
-  Unconditional unique keys treat NULL as a value (stricter than ANSI); partial unique keys retain NULL-distinct semantics. Every ORDER BY sorts in
-  memory after its access path; matching directed indexes can supply result order (SQ-K3). Physical SQL index order matches SqlValueComparer, including NaN and signed zero; NULL placement must agree only for keys that can contain NULL.
+  Unconditional unique keys treat NULL as a value (stricter than ANSI); partial unique keys retain NULL-distinct semantics. An ORDER BY sorts in
+  memory after its access path unless a matching directed index supplies the order through an ordered scan (SQ-K3, #1631). Physical SQL index order matches SqlValueComparer, including NaN and signed zero; NULL placement must agree only for keys that can contain NULL.
 - **A failed statement's pages are restored where no seek sees them half done** (#1371).
   A multi-row `INSERT` (or `INSERT ... SELECT`, `ExecuteInsertRowsAsync` in
   `src/Internal/Execution/SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row and its entries, splitting
