@@ -185,7 +185,7 @@ public sealed partial class SqlCatalog
                     var index = slot.Index;
                     var replacement = new SqlCatalogIndex(index.TableObjectId, index.Name, index.ColumnNames.Select(RenameColumn).ToArray(),
                         index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey,
-                        index.Predicate is null ? null : checkExpressions[index.Name], index.PredicateColumns.Select(RenameColumn).ToArray(), index.PredicateFunctionCalls);
+                        index.Predicate is null ? null : checkExpressions[index.Name], index.PredicateColumns.Select(RenameColumn).ToArray(), index.PredicateFunctionCalls, index.KeyOrders);
                     indexes.Add((slot, replacement, EncodeIndex(replacement)));
                 }
             }

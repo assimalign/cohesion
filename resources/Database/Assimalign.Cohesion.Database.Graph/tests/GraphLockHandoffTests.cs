@@ -99,8 +99,9 @@ public sealed class GraphLockHandoffTests
             await using var first = await database.CreateSessionAsync(token);
             await using var second = await database.CreateSessionAsync(token);
             await using var writer = await first.BeginTransactionAsync(IsolationLevel.Snapshot, token);
-            await using var stale = await second.BeginTransactionAsync(IsolationLevel.Snapshot, token);
-            var firstSchema = GraphSchema.Open(database, first);
+            await using var stale = conflict ? await second.BeginTransactionAsync(IsolationLevel.Snapshot, token) : null;
+            // Public DDL requires autocommit; stage catalog substrate mutations under the held lock.
+            await database.LockWriterAsync(writer.Context, token);
             var secondSchema = GraphSchema.Open(database, second);
             switch (path)
             {
@@ -108,11 +109,11 @@ public sealed class GraphLockHandoffTests
                 case "ValidateNodeData": await database.CreateNodeAsync(first, ["Thing"], cancellationToken: token); break;
                 case "DropRelationshipType":
                 case "ValidateRelationshipData": await database.CreateRelationshipAsync(first, from.Id, to.Id, "LINK", cancellationToken: token); break;
-                case "NodeLabel": await firstSchema.DropLabelAsync("Thing", token); break;
-                case "RelationshipType": await firstSchema.DropRelationshipTypeAsync("LINK", token); break;
+                case "NodeLabel": await database.Catalog.DeleteLabelAsync(label.Id, writer.Context, token); break;
+                case "RelationshipType": await database.Catalog.DeleteRelationshipTypeAsync(type.Id, writer.Context, token); break;
                 default:
-                    await firstSchema.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(
-                        path == "NodeProperties" ? label.Id : type.Id, "required", DatabaseType.String, true), token);
+                    await database.Catalog.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(
+                        path == "NodeProperties" ? label.Id : type.Id, "required", DatabaseType.String, true), writer.Context, token);
                     break;
             }
             var pending = MutateAsync();
@@ -141,8 +142,11 @@ public sealed class GraphLockHandoffTests
             // Assert: the hook and the refusal happened on every iteration.
             gate.Calls.ShouldBe(1);
             gate.TimedOut.ShouldBeFalse();
-            stale.State.ShouldBe(TransactionState.Faulted);
-            await stale.RollbackAsync(token);
+            if (stale is not null)
+            {
+                stale.State.ShouldBe(TransactionState.Faulted);
+                await stale.RollbackAsync(token);
+            }
             if (!conflict)
             {
                 (await schema.GetLabelsAsync(token)).ShouldContain(label);

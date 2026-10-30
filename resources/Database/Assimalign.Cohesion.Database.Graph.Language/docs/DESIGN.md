@@ -2,7 +2,10 @@
 
 ## SQL operator isolation (#1721)
 
-The shared lexer is unchanged. Profile conformance pins :: as ColonColon, separated
+The shared lexer is unchanged. The operator corpus pins # as Unrecognized, ~, &, |
+and paired angle brackets as their existing tokens, with SQL bitwise syntax still refused.
+GQL additionally pins :A|B, :A&B, ! and <-, ->, <--, -->, <-[ boundaries.
+Profile conformance also pins :: as ColonColon, separated
 colons as individual Colon tokens, and `~~*` and `!~~*` as individual tilde/bang/asterisk tokens.
 SQL casts do not become expression syntax here; adjacent colons preserve the existing
 parser refusal and GQL label grammar. No language vocabulary or persisted text changes.
@@ -79,6 +82,25 @@ colons with label-expression operators or a wildcard (`:A:B|C`, `:A|B:C`, `:%:A`
 `CG00002`. Applications seeking portable syntax should write `:A&B` and
 `<>`. Database, graph, schema, and session selection statements are outside the profile: all
 evaluation stays inside the already-bound logical database.
+
+## Schema DDL (#1738, GQ-D2)
+
+Standalone CREATE/DROP INDEX and CONSTRAINT plus Cohesion LABEL/RELATIONSHIP TYPE definition
+commands use GqlSchemaCommand, GqlSchemaObjectKind and GqlSchemaPropertyType. The FOR variable
+must match its property reference (CG01022). The dedicated parser branch skips ordinary-query
+unsupported-function discovery, preserving one CK00001 for T3 forms and removing ON noise.
+SchemaCommand.ToString renders semantic fields with escaped double-quoted identifiers and
+canonical scalar names; it never depends on retained source text. The command is an optional
+query-expression property stored in the existing body slot alongside the mutually exclusive
+pipeline and composite forms, preserving ordinary query-expression allocation size. Malformed
+hand-built combinations retain both operands only for the existing execution refusal. DIALECT specifies syntax,
+conditionals, naming, transaction policy and token lifetime; Graph DESIGN owns coordination.
+
+Relationship schema patterns accept optional incoming and outgoing arrows, including both,
+and render as undirected patterns because constraints apply to a relationship type regardless
+of direction. Relationship indexes retain one named CK00001 without syntax diagnostics. This
+follows the local Neo4j grammar at
+`C:/Source/repos/neo4j/neo4j/community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:1202`.
 
 ## Parser and expression tree
 
@@ -223,7 +245,11 @@ The function table advertises the aggregates and core scalar functions listed be
 | `REMOVE` | Property keys or node labels with IS or colon | Removes keys/labels, ignoring OPTIONAL NULL targets |
 | `DELETE` | Bound node/relationship variables following a match | Refuses deleting a node that still has incident relationships |
 | `DETACH DELETE` | Bound node/relationship variables following a match | Deletes incident relationships with the node in one transaction |
-| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `SHOW` | `LABELS`, `RELATIONSHIP TYPES`, `PROPERTY KEYS`, `INDEXES`, `CONSTRAINTS`, or `OBJECT OWNERSHIP`; Cohesion extension | Returns typed, read-only metadata from the session database's catalog snapshot |
+| `CREATE/DROP INDEX` | Standalone Neo4j-style single node-property index commands, optional names and conditionals | Transactional discovery and physical/catalog coordination |
+| `CREATE/DROP CONSTRAINT` | Named type/existence rules for one node or relationship property | Independent rules; validates existing owner data |
+| `CREATE/DROP LABEL` | Cohesion definition commands with optional conditionals | Creates an empty definition or drops an unused one |
+| `CREATE/DROP RELATIONSHIP TYPE` | Cohesion definition commands with optional conditionals | Creates an empty definition or drops an unused one |
 | `LABEL EXPRESSION` | ISO/IEC 39075 16.8 `\|`, `&`, `!`, `%` and parentheses after `:` or `IS` in a node or edge pattern; the labeled predicate in `WHERE` (#1139); chains of any length and nesting the stack allows | A node is tested against its label set, a relationship against its one type; pattern and positive conjunctive WHERE labels can anchor scans or property seeks (#1245) |
 
 Match patterns accept `(a)`, `(a:Label {key: value})`, `(a IS A|B)`, `(a:(A|B)&!C)`, `(a:%)`, and

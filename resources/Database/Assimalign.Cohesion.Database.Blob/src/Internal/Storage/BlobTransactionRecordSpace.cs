@@ -22,6 +22,12 @@ internal sealed class BlobTransactionRecordSpace : TransactionRecordSpace
         _storage = storage;
     }
 
+    internal void RegisterWriteStream(TransactionContext context) => BeginWriteStream(context);
+    internal void UnregisterWriteStream(TransactionContext context) => EndWriteStream(context);
+    protected override void OnUndoScopesChangedCore(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger) => _storage.UndoScopesChanged?.Invoke(writer, active);
+    protected override void OnTransactionEndedCore(TransactionContext context) => _storage.UndoScopesChanged?.Invoke(context.Sequence, false);
+    protected override void OnCreatedVersionUndoneCore(PageId page, int slot, ReadOnlyMemory<byte> record) => _storage.CreatedVersionUndone?.Invoke(page, slot, record);
+
     protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.ReadEntry(pageId, slotIndex);
     protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
         => _storage.UpdateEntry(transaction, pageId, slotIndex, record);

@@ -1,22 +1,44 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
-The current record-space format is 31; index predicates are persisted by Sql, independently
+## Index key order grammar (#1631, SQ-K1)
+
+SqlCreateIndexExpression.KeyOrders retains effective per-column direction and NULL placement.
+The parser accepts ASC/DESC before NULLS FIRST/LAST, once each. Defaults follow PostgreSQL
+src/backend/commands/indexcmds.c:2255-2270: ASC NULLS LAST and DESC NULLS FIRST. Rendering
+omits default options. Constraint column lists retain their column-only grammar and coded
+syntax refusal (PostgreSQL src/backend/parser/gram.y:4321,8422-8495). The profile gains one
+clause; parser completeness and positive/negative and live execution corpora cover it. SQ-K1
+changes no ORDER BY planning or result wire types. Catalog 32 and compiled v11 fence the
+persisted contract; earlier artifacts are refused, with no upgrade reader.
+
+
+The current record-space format is 32; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
-## Partial index grammar (#1630, SQ-P1)
+## Partial index grammar (#1630, SQ-P1/SQ-P2)
 
 SqlCreateIndexExpression.Predicate retains the optional WHERE tree. The canonical statement
 renderer emits it after the ordered column list; scalar predicate rendering is unchanged.
 The profile adds CREATE INDEX WHERE beside CREATE INDEX (+1 clause). Parser completeness,
 positive/negative conformance and rendering cases advance together. CREATE INDEX subqueries
 reach engine predicate validation and fail with CS05091. They are never executable predicates.
-SQ-P1 deliberately advertises no implication/access optimization; see DIALECT.
+SQ-P2 adds conservative implication and proven access selection; see DIALECT.
 The execution conformance corpus covers bounded runtime cast slots, registration changes on
 reopen, and constraint/creation-order arbitration with deferred partial-predicate failures.
 It also covers JSON/JSONB runtime representations and domains, complete creation diagnostics,
 function-environment refresh, and bulk failure markers that retain no predicate exceptions.
+The execution conformance corpus also covers converted signed-zero join/DML bounds, unchanged
+ordinary plans around unused partial indexes, target-WHERE call validation, folded parameter
+provenance and representation-sensitive expression matching. Grammar and formats are unchanged.
 
+
+ON CONFLICT column targets retain TargetWhere independently of the action's Where. An optional
+predicate-pair payload reuses the existing action-WHERE reference slot, preserving old syntax
+object sizes and allocations. Parsing and
+canonical rendering round trip both predicates; expression/key-direction inference remains outside
+the declared grammar. SQL binding implements strong conservative implication, access selection and
+arbiter membership, described in DIALECT and Sql DESIGN. No profile clause or format bump is needed.
 
 ## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
 
@@ -118,7 +140,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 31's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 32's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -1223,6 +1245,42 @@ The engine's view metadata contract is documented in DIALECT: complete common ty
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
 
+
+## Integer bitwise operators (#1721, SQ-O2)
+
+The existing binary/unary nodes carry integer bitwise operations. All binary operators
+share the generic precedence level with concatenation; prefix ~ binds at that level
+below addition. Canonical rendering preserves these trees, with no changed old branch
+or identifier rule. SQL consumes # and adjacent shift-token pairs locally; the shared
+lexer, token values and other language profiles remain unchanged. PostgreSQL anchors:
+parser/gram.y:904-914,15368-15371 and include/catalog/pg_operator.dat:2274-2328.
+
+Binding accepts SMALLINT/INTEGER/BIGINT storage types and untyped NULL. AND, OR and
+XOR promote to the wider operand. Shifts take an INTEGER count (SMALLINT widens;
+BIGINT is refused) and return the left operand's type, matching PostgreSQL's catalog
+(include/catalog/pg_operator.dat:2286-2328; pg_cast.dat:23-24,33-36). CS02077 (42804)
+refuses invalid operands and count types before rows execute. Validation walks every
+CASE/COALESCE result alternative and supplied parameter, including nested wrappers.
+Explicit CAST inputs and selection conditions retain their ordinary conversion rules.
+
+An engine-owned SqlBoundBitwise leaf carries the resolved integer width through evaluation,
+including domain base types. Runtime CASE/COALESCE values convert to that width before
+all six operations; ordinary unary/binary nodes retain their allocation sizes. SMALLINT
+shifts compute in INTEGER and truncate, so SMALLINT and INTEGER counts wrap modulo 32;
+BIGINT operands use modulo 64. Right shifts are arithmetic and left-shift results wrap
+without overflow diagnostics (utils/adt/int.c:1449,1511,1520; int8.c:1255). Untyped NULL
+propagates NULL; two untyped NULLs default to INTEGER metadata.
+
+Views, defaults and CHECKs round-trip through reopen. No format or wire change is
+needed; 21,008 baseline canonical comparisons against 8ac5744fa are identical and
+reload with identical trees. Existing canonical expressions retain their interpretation. The engine oracle
+checks signed integer boundaries and every shift-count residue against independent .NET operators; all three
+profile corpora pin token isolation, including GQL labels and arrows.
+
+| Code | Condition |
+| --- | --- |
+| CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
+
 ## ILIKE and postfix CAST (#1721, SQ-O1)
 
 ILIKE is contextual and adds IsCaseInsensitive to the existing LIKE AST, preserving the
@@ -1245,7 +1303,7 @@ while still matching _. The two index-backed insensitive transforms remain uncha
 PostgreSQL src/backend/parser/gram.y:904-914 supplies precedence; like.c:186-221 supplies
 determinism admission and lowercasing. The shared lexer is unchanged. All three language profiles
 pin ::, adjacent colons and ~~* token sequences; GQL labels retain their colon grammar.
-Deferred # and ^ receive named CK00001 refusals in SQL lexical preflight, with ^ described as
+SQ-O2 consumes # in SQL syntax; ^ retains its named CK00001 lexical refusal as
 exponentiation (PostgreSQL src/include/catalog/pg_operator.dat:2119,2300). No public interface,
 diagnostic identity, format or wire layout is added.
 Persisted-expression equality and grouping identity distinguish LIKE from ILIKE. Existing

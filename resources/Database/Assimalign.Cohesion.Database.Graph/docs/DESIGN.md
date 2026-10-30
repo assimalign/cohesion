@@ -1,5 +1,29 @@
 # Graph engine design
 
+## Anonymous savepoint adapters (#1726, XT-3)
+
+Catalog undo removes the exact undone metadata reference, including definition,
+child-name and schema-name directory routes. GraphStore journals before-images of the affected
+entity chain, definition membership, label/type tokens and advisory counts only for marked
+writers. Restore is idempotent across failed undo brackets and whole-transaction abort, and
+never materializes the full graph. IndexUndo equality/hash use the immutable store identity and
+physical index generation. Shared record/index undo restores postings and constraints with
+these directories before marker-scoped locks are released.
+Marked entity/definition publication and its directory before-image are recorded inside the
+admitted apply, before the physical bracket commits. A host rollback claiming the end after apply
+therefore sees the complete ordered ledger; no late marked directory entry can outlive or reorder
+that undo. Unmarked writers publish only after successful bracket commit, so a refused commit
+cannot leave label/type tokens, counts or entity references for rolled-back pages. Scope registration
+publishes immutable dictionary snapshots under the existing catalog monitor; the existing writer
+lookup moves to the publication decision without adding a lock or lookup to unmarked writes.
+Only marker registration/release copies these snapshots; the last release restores null.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission belong to XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit. A deterministic after-apply hook races a claimed host rollback;
+pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
+
 ## Database-wide schema names and named constraints (#1738, GQ-D1)
 
 Index and constraint names share one database-wide, ordinal case-sensitive namespace. A name
@@ -34,17 +58,14 @@ tombstones. Dropping an absent named object reports CG01021.
 
 SHOW PROPERTY KEYS reports effective type/required rules. SHOW OBJECT OWNERSHIP includes each
 named CONSTRAINT with its owning definition and inherited authority; existing columns stay fixed.
-SHOW INDEXES retains its label-then-name ordering. No SHOW CONSTRAINTS grammar is added in D1.
-The typed API still joins the session operation, including explicit transactions; D2 must add
-the owner-approved explicit-transaction DDL refusal and text grammar/dispatch, and new-label
-index token creation. D3 supplies property warnings.
+SHOW INDEXES retains its label-then-name ordering. D2 adds SHOW CONSTRAINTS, text DDL and
+the explicit-transaction policy described below. D3 supplies property warnings.
 
 GetPropertyKeysAsync returns declared metadata only; effective rules remain visible through SHOW
 PROPERTY KEYS and the constraint APIs. Reading and saving property metadata therefore cannot copy
 a named rule into an unnamed declaration. CreateConstraintAsync validates names, property keys,
 owner identities and supported types before statement admission, leaving an explicit transaction
-usable after a bad argument. SaveLabelAsync retains its older validation-inside-statement pattern
-as a follow-up. Oversized encoded constraint metadata reports DatabaseException with CG02009.
+usable after a bad argument. D2 applies this order to the remaining schema mutations. Oversized encoded constraint metadata reports DatabaseException with CG02009.
 
 The catalog record codec is v2 for every kind (1 label, 2 relationship type, 3 property, 4 index,
 5 constraint). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
@@ -66,10 +87,66 @@ records to refuse. No wire bytes, public interface or assembly boundary changes 
 | Code | Condition |
 | --- | --- |
 | CG01021 | Named index or constraint to drop is absent |
+| CG01022 | Schema property references another FOR variable |
 | CG03008 | Shared database-wide schema name is taken |
 | CG03009 | Duplicate constraint kind or incompatible property type rules |
 | CG03010 | Existing data violates a new named constraint |
+| CG04025 | Schema DDL inside an explicit transaction (Cohesion policy) |
 | CG06019 | Unsupported catalog record format; only v2 is admitted |
+
+## Schema text coordination (#1738, GQ-D2; #1249)
+
+GqlSchemaCommand is a standalone semantic AST. The parser bypasses the graph-query capability
+scan for recognized DDL, so ON never becomes an unknown function. GraphDatabaseSession routes
+valid row requests to GraphSchema; invalid hand-built combinations and path requests use the
+existing CG05001 admission refusal. Schema commands normalize parameter-map keys through the
+same contract as SHOW, although the grammar takes no parameter operands. Ordinary queries
+retain the existing planner/executor path and operation layout.
+
+GraphSchema shares private index/constraint cores between typed and text callers. WriteAsync
+admits one statement, refuses an explicit transaction with CG04025 before taking the writer
+lock, then serializes the complete auto-commit schema transaction. This is a behavior change:
+typed schema writes previously joined explicit transactions. The normal failed-statement path
+aborts such a transaction and preserves CG04025 in Diagnostics. SaveLabelAsync, relationship-type
+saves, property saves, index creates and named drops validate arguments before admission.
+Property saves and definition drops stream owner postings; empty owners decode no unrelated
+nodes, and validation/drop refusals stop at their first violating entity. Index backfill also
+uses the owning label's postings. Deterministic storage visit counters pin these bounds.
+
+Index creation saves a missing label and untyped property metadata in the operation that owns
+the logical and physical index. Text constraint creation similarly saves its missing owner
+before calling the shared independently named constraint core. A catalog conflict, oversized
+record/key, cancellation or failed validation rolls all discovery back. Successful rule drops
+retain discovered tokens. Conditional name/equivalence checks run after writer-snapshot refresh,
+before discovery, including requests queued behind committing or rolling-back reservations.
+Catalog-level staging tests preserve the lower layer's stale-snapshot and lock-handoff coverage;
+public-schema tests now assert the explicit-transaction refusal.
+
+Every admitted schema write starts and validates its statement budget inside the operation,
+after the explicit-transaction refusal and before writer-lock acquisition. Text requests use
+their lower GraphQueryLimits; typed writes use engine ceilings. Validation and definition-drop
+scans charge the same owner-posting work and cursor-memory callbacks as ordinary statements.
+Index backfill reserves growing entry-buffer capacity and owned keys before retaining them,
+stores only source references and keys, and charges both scans and tree insertions. An internal
+callback overload preserves the public storage boundary. All memory grants unwind with the
+schema operation; CG05004/CG05020 exhaustion rolls back rules, name reservations, physical
+index writes and discovered tokens through the normal failed-statement path. Invalid limits
+retain CG08021. No diagnostic identity or persisted format changes.
+
+Defaults (including generated-name hashing, scalar aliases, conditional matching, affected counts,
+definition syntax and SHOW CONSTRAINTS ordering) are specified in Graph.Language DIALECT.
+Generated identifiers depend only on semantic names/types and have no runtime hash randomization.
+No persisted format, wire capability, EventSource or public interface changes are required.
+
+Local Neo4j references, consulted without copying code:
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:1205-1232`
+defines optional names, conditionals and single-owner schema patterns;
+`community/kernel/src/main/java/org/neo4j/kernel/impl/coreapi/schema/SchemaImpl.java:610-630,907-925`
+creates label/type/property tokens through the same transaction as the rule;
+`community/kernel/src/main/java/org/neo4j/kernel/impl/api/KernelTransactionImplementation.java:2093-2123`
+forbids data/schema write-state mixing, a narrower policy than Cohesion's explicit-transaction refusal.
+The deterministic naming algorithm is Cohesion's own; it follows the reference's optional-name
+behavior without claiming byte-identical Neo4j names.
 
 ## Worker lane isolation (#1279)
 
@@ -737,8 +814,8 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    type, on the typed `GraphDatabase` writes; an invalid traversal specification, reported as
    `CG05001` before the traversal starts), a session of another database (`CG07005`), a token
    canceled before the statement starts, a non-GQL request, and the refusal of a second
-   concurrent operation on the session. A definition `GraphSchema` saves is validated by the
-   catalog inside its statement, so a rejected definition is a failed statement.
+   concurrent operation on the session. GraphSchema validates caller arguments before admission; a valid schema write inside an explicit
+   transaction is an admitted CG04025 refusal and aborts it.
 6. Autocommit statements are unaffected: a failure ends only its own statement transaction.
 7. A rollback or commit observes its cancellation token only before it starts: a token canceled
    by then throws `OperationCanceledException` and leaves the transaction as it was. One that has

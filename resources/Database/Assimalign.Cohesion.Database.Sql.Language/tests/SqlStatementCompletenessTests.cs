@@ -111,6 +111,7 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.DropSequence] = ["DROP SEQUENCE IF EXISTS ids, dbo.ids2 CASCADE"],
         [SqlClauses.NextValue] = ["SELECT NEXT VALUE FOR dbo.ids"],
         [SqlClauses.Identity] = ["CREATE TABLE t (id BIGINT GENERATED ALWAYS AS IDENTITY)", "ALTER TABLE t ADD id INT IDENTITY(100, 5)"],
+        [SqlClauses.IndexKeyOrder] = ["CREATE INDEX ix ON t(a ASC NULLS FIRST,b DESC NULLS LAST)", "CREATE UNIQUE INDEX ix ON t(a DESC,b) WHERE b IS NOT NULL"],
         [SqlClauses.PartialIndex] = ["CREATE INDEX ix ON t (a) WHERE b > 0", "CREATE UNIQUE INDEX ix ON t (a) WHERE b IS NOT NULL"],
         [SqlClauses.CreateIndex] = ["CREATE INDEX ix ON t (a)", "CREATE UNIQUE INDEX IF NOT EXISTS ix ON dbo.t (a, b)"],
         [SqlClauses.AlterTable] =
@@ -169,7 +170,7 @@ public sealed class SqlStatementCompletenessTests
     /// </summary>
     private static readonly string[] _leftovers =
     [
-        " x y", " 1", " )", " WHRE id = 1", "; x", "; DELETE FROM t", ";;", " 'x", " /* x", " # x",
+        " x y", " 1", " )", " WHRE id = 1", "; x", "; DELETE FROM t", ";;", " 'x", " /* x", " ^ x",
         " -- c\n x y", " -- c\r x y", " -- c\r\n x y", " -- c" + (char)0x0085 + " x y",
         " -- c" + (char)0x2028 + " x y", " -- c" + (char)0x2029 + " x y",
     ];
@@ -268,7 +269,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("DELETE FROM t ^/* WHERE id = 1;", "/*")]
     [InlineData("DELETE FROM t ^/* /* nested */ WHERE id = 1;", "/*")]
     [InlineData("SELECT ^\"id FROM t;", "\"")]
-    [InlineData("DELETE FROM t ^# WHERE id = 1;", "#", "CK00001")]
+    [InlineData("DELETE FROM t ^# WHERE id = 1;", "#")]
     [InlineData("DELETE FROM t WHERE a NOT ^NULL;", "NULL")]
     [InlineData("UPDATE t SET age = 0 WHERE flag NOT ^FALSE;", "FALSE")]
     [InlineData("DELETE FROM t WHERE NOT (flag NOT ^NULL);", "NULL")]
@@ -417,8 +418,8 @@ public sealed class SqlStatementCompletenessTests
         columns[1].Expression.ShouldBeOfType<SqlUnaryExpression>().Operand.ShouldBeOfType<SqlUnaryExpression>()
             .Operator.ShouldBe(SqlUnaryOperator.Negate);
 
-        // ~ is outside the dialect since #1101; its signed operand still leaves no text behind.
-        Errors(Parse("SELECT ~ -a FROM t;")).ShouldHaveSingleItem().Code.ShouldBe("CK00001");
+        // Prefix ~ now executes; its signed operand leaves no text behind (#1721).
+        Errors(Parse("SELECT ~ -a FROM t;")).ShouldBeEmpty();
     }
 
     /// <summary>

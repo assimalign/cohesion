@@ -98,6 +98,14 @@ public static class GqlLanguageProfile
         GqlClauses.For,
         GqlClauses.Unwind,
         GqlClauses.Show,
+        GqlClauses.CreateIndex,
+        GqlClauses.DropIndex,
+        GqlClauses.CreateConstraint,
+        GqlClauses.DropConstraint,
+        GqlClauses.CreateLabel,
+        GqlClauses.DropLabel,
+        GqlClauses.CreateRelationshipType,
+        GqlClauses.DropRelationshipType,
         GqlClauses.LabelExpression,
     ];
     /// <summary>Gets the ISO GQL language profile used by graph-model query consumers.</summary>

@@ -44,7 +44,7 @@ public sealed partial class BlobCatalog
         public Func<CatalogRecord, bool> Matches { get; set; } = null!;
         public Action Retire { get; set; } = null!;
 
-        public void Add(Reference reference, TransactionSequence? recoveredDeleter)
+        public void Add(Reference reference, TransactionSequence? recoveredDeleter, bool retainOwnVersions = false)
         {
             if (_locations.TryGetValue((reference.PageId, reference.SlotIndex), out var reused))
             {
@@ -52,7 +52,7 @@ public sealed partial class BlobCatalog
             }
             // Earlier own saves have writer == deleter and cannot be visible to any
             // snapshot. Keep one publication per writer, including its committed predecessor.
-            if (recoveredDeleter is null && Current is { } own && own.Writer == reference.Writer)
+            if (!retainOwnVersions && recoveredDeleter is null && Current is { } own && own.Writer == reference.Writer)
             {
                 Remove(own);
             }
@@ -64,6 +64,11 @@ public sealed partial class BlobCatalog
             Current = reference;
             TerminalKnown = true;
             _locations.Add((reference.PageId, reference.SlotIndex), reference);
+        }
+
+        public void RemoveLocation(PageId page, int slot, TransactionSequence writer)
+        {
+            if (_locations.TryGetValue((page, slot), out var reference) && reference.Writer == writer) { Remove(reference); }
         }
 
         public void RebuildPublicationOrder()

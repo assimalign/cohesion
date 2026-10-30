@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 /// <summary>
 /// Parse strictness (#1101): a character outside the dialect is a syntax error at its own
-/// span that binds nothing, and <c>~</c> is a recognized operator the surface rejects.
+/// span that binds nothing, and infix <c>~</c> is a recognized regex operator the surface rejects.
 /// </summary>
 public sealed class SqlParseStrictnessTests
 {
@@ -23,9 +23,7 @@ public sealed class SqlParseStrictnessTests
     /// <param name="expectedCode">Syntax or recognized unsupported operator identity.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: stray characters and deferred symbols have one located diagnostic and bind nothing")]
     [InlineData("SELECT * FROM t «?»")]
-    [InlineData("SELECT * FROM t «#»", false, "CK00001")]
     [InlineData("SELECT * FROM t «^»", false, "CK00001")]
-    [InlineData("SELECT a «#» b FROM t", false, "CK00001")]
     [InlineData("SELECT * FROM t «§»;")]
     [InlineData("SELECT a FROM t WHERE b = «?»", true)]
     [InlineData("SELECT «?» FROM t;", true)]
@@ -140,26 +138,18 @@ public sealed class SqlParseStrictnessTests
     }
 
     /// <summary>
-    /// <c>~</c> is recognized but outside the executable subset. Prefix (bitwise NOT) and infix
-    /// (PostgreSQL regular-expression match) each report one CK00001 at the operator.
+    /// Infix <c>~</c> (PostgreSQL regular-expression match) reports one CK00001 at the operator.
+    /// Prefix bitwise NOT executes (#1721).
     /// </summary>
     /// <param name="marked">The statement; the operator sits between '«' and '»'.</param>
     /// <param name="form">The operator form the message names.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Strictness: ~ reports one CK00001 naming the operator")]
-    [InlineData("SELECT «~»a FROM t;", "prefix")]
-    [InlineData("SELECT «~»NULL;", "prefix")]
-    [InlineData("SELECT «~» -a FROM t;", "prefix")]
-    [InlineData("SELECT a FROM t WHERE «~»a = 1;", "prefix")]
-    [InlineData("UPDATE t SET a = «~»b WHERE id = 1;", "prefix")]
     [InlineData("SELECT a FROM t WHERE a «~» 'x';", "infix")]
     [InlineData("SELECT a «~» 'x' FROM t;", "infix")]
     [InlineData("SELECT a FROM t WHERE a = b «~» 'x';", "infix")]
     [InlineData("DELETE FROM t WHERE a «~» 'x' || 'y';", "infix")]
     [InlineData("SELECT a FROM t WHERE a «~»;", "infix")]
     // Rules that take a primary directly, and a run of prefix operators
-    [InlineData("SELECT a FROM t WHERE s LIKE «~»'x';", "prefix")]
-    [InlineData("CREATE TABLE u (a INT DEFAULT «~»1);", "prefix")]
-    [InlineData("SELECT a FROM t WHERE «~ ~»a = 1;", "prefix")]
     // After a predicate that completes without returning to the additive loop
     [InlineData("SELECT a FROM t WHERE s LIKE 'x' «~» 'y';", "infix")]
     [InlineData("SELECT a FROM t WHERE a IS NULL «~» 'y';", "infix")]
@@ -178,9 +168,8 @@ public sealed class SqlParseStrictnessTests
         error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(start);
         error.End.ShouldBe(end);
-        error.Message.ShouldBe(form == "prefix"
-            ? "The prefix ~ operator (bitwise NOT) is not supported by the SQL surface."
-            : "The infix ~ operator (regular-expression match) is not supported by the SQL surface.");
+        form.ShouldBe("infix");
+        error.Message.ShouldBe("The infix ~ operator (regular-expression match) is not supported by the SQL surface.");
     }
 
     /// <summary>

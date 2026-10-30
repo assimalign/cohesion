@@ -187,6 +187,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS02074 | Unsupported RANGE offset ordering-key domain (0A000) |
 | New (#1526, SQ-W3) | CS02075 | Incompatible RANGE offset domain (0A000) |
 | New (#1526, SQ-W3) | CS02076 | Negative or NaN RANGE offset (22013) |
+| New (#1721, SQ-O2) | CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -225,6 +226,7 @@ structured-carrier messages remain unprefixed.
 | New (#1630, SQ-P1) | CS03082 | Partial predicate on a primary key (42P16) |
 | New (#1630, SQ-P1) | CS03083 | Type change of a column read by a partial-index predicate (0A000) |
 | New (#1630, SQ-P1) | CS03084 | Inconsistent index predicate text/dependency metadata (42P17) |
+| New (#1631, SQ-K1) | CS03085 | Invalid per-column index key orders or directed primary-key metadata (42P17) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -293,6 +295,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
 | New (#1719, SQ-R2 reader fix) | CS05090 | Execution/internal invariant — a CTE opens more readers than its plan counted (XX000) |
 | New (#1630, SQ-P1) | CS05091 | Prohibited expression or non-immutable function in a partial-index predicate (42P17) |
+| New (#1630, SQ-P2) | CS05092 | Non-row-local ON CONFLICT inference predicate |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -430,6 +433,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1537, GQ-E1) | CG01019 | Binding/names — outer binding has a proven incompatible correlated pattern kind |
 | New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
 | New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
+| New (#1738, GQ-D2) | CG01022 | Binding/names — schema property references a variable other than its FOR declaration |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
@@ -448,6 +452,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
 | New (#1735, GQ-M1) | CG04024 | Transactions/locking — retryable stale Snapshot MERGE pattern decision |
+| New (#1738, GQ-D2) | CG04025 | Transactions — schema DDL inside an explicit transaction (Cohesion policy) |
 | COHDBG001 | CG05001 | Execution/budgets |
 | COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
 | COHDBG008 | CG05008 | Execution/budgets |
@@ -535,7 +540,9 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK04006 | Transaction commit or rollback is in progress | — |
 | CK04007 | Running operation prevents transaction commit | — |
 | CK04008 | Undo marker is foreign, released, discarded or ended; undo control context is foreign, stale, a statement view or a snapshot pin (#1726) | — |
-| CK04009 | Partial undo is running or incomplete, or a statement/control/end prevents control admission; retry its target or an earlier marker, or roll back the transaction (#1726) | — |
+| CK04009 | Partial undo or failed statement memory compensation is running or incomplete, or a statement/control/end prevents control admission; retry its target or an earlier marker, or roll back the transaction (#1726) | — |
+| CK04010 | An open write stream prevents undo marker creation, release or rollback-to (#1726) | — |
+| CK04011 | A transaction has reached the supported limit of 65,535 open write streams (#1726) | — |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
 | CK07003 | Session operations overlap | — |

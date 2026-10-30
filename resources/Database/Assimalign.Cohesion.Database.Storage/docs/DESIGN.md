@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Storage — Design
 
+## Bracket commit failure injection (#1726)
+
+The internal TransactionCommitting observer runs before commit journals a page or ends the bracket.
+Graph's foreign tests bind its setter with UnsafeAccessor and require an active bracket and exact
+callback counts. A thrown callback therefore exercises the normal physical rollback and model
+compensation path without taking storage offline or introducing a public test surface.
+
 ## Maintenance due hints (#1279)
 
 Storage.HasPendingCommits reads the grouped durability gate's requested/durable LSNs under its

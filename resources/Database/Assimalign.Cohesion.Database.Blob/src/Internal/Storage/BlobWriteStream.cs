@@ -48,6 +48,7 @@ internal sealed class BlobWriteStream : Stream
         _complete = complete;
         _abort = abort;
         _lifetimeCancellation = lifetimeCancellation;
+        _storage.RegisterWriteStream(context);
     }
 
     public override bool CanRead => false;
@@ -197,6 +198,7 @@ internal sealed class BlobWriteStream : Stream
         }
 
         _failed = true;
+        _storage.UnregisterWriteStream(_context);
         await _abort(error).ConfigureAwait(false);
     }
 
@@ -223,6 +225,10 @@ internal sealed class BlobWriteStream : Stream
         {
             await FailAsync(error).ConfigureAwait(false);
             throw;
+        }
+        finally
+        {
+            if (!_failed) { _storage.UnregisterWriteStream(_context); }
         }
     }
 

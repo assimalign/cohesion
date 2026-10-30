@@ -102,6 +102,7 @@ public static class SqlLanguageProfile
         SqlClauses.DiscardAll,
         SqlClauses.CreateIndex,
         SqlClauses.PartialIndex,
+        SqlClauses.IndexKeyOrder,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
         SqlClauses.Truncate,

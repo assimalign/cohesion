@@ -32,6 +32,9 @@ internal sealed class UndoTestStorage : Storage.Storage
         else { InitializeNew((Name)"undo-substrate"); }
     }
 
+    internal Action<bool>? ScopeChanged { get; set; }
+    internal Action<TransactionContext>? ScopeEnded { get; set; }
+    internal int AdapterReads { get; set; }
     internal StorageJournal Log => WriteAheadLog;
     internal TransactionRecordSpace Records { get; }
     internal (byte[] Data, byte[] Journal) Capture() => (_data.CaptureDurable(), _journal.CaptureDurable());
@@ -59,7 +62,10 @@ internal sealed class UndoTestStorage : Storage.Storage
     {
         private readonly UndoTestStorage _storage;
         internal RecordSpace(UndoTestStorage storage) { _storage = storage; }
-        protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => _storage.Read(Pack(pageId, slotIndex));
+        protected internal override void OnUndoScopesChangedCore(TransactionSequence writer, bool active, RecordSpaceVersionStore ledger) => _storage.ScopeChanged?.Invoke(active);
+        protected internal override void OnTransactionEndedCore(TransactionContext context) => _storage.ScopeEnded?.Invoke(context);
+        protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex)
+        { _storage.AdapterReads++; return _storage.Read(Pack(pageId, slotIndex)); }
         protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record)
             => _storage.Update(transaction, Pack(pageId, slotIndex), record);
         protected override void DeleteCore(StorageTransaction transaction, PageId pageId, int slotIndex)

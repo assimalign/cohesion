@@ -12,6 +12,7 @@ internal sealed record SqlCreateIndexPlan(
     IReadOnlyList<string> ColumnNames,
     bool IsUnique,
     bool IfNotExists,
+    IReadOnlyList<SqlCatalogIndexKeyOrder> KeyOrders,
     SqlCatalogIndex? PartialIndex = null) : SqlPlan{
     private sealed class DebugView
     {

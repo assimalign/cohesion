@@ -127,6 +127,10 @@ internal sealed partial class SqlPlanExecutor
         {
             case SqlBoundBinary binary: yield return binary.Left; yield return binary.Right; break;
             case SqlBoundUnary unary: yield return unary.Operand; break;
+            case SqlBoundBitwise bitwise:
+                yield return bitwise.Left;
+                if (bitwise.Right is not null) { yield return bitwise.Right; }
+                break;
             case SqlBoundDistinct distinct: yield return distinct.Left; yield return distinct.Right; break;
             case SqlBoundBooleanTest test: yield return test.Operand; break;
             case SqlBoundIsNull isNull: yield return isNull.Operand; break;

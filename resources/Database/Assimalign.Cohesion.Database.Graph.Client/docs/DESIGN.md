@@ -9,6 +9,13 @@ create type/existence rules locally, verify metadata, exercise rejected CREATE/I
 drop independent rules and indexes, and retain one authenticated session. Enforcement failures
 carry structured CG03003. No client production source, capability or wire version changes.
 
+## Schema text DDL (#1738, GQ-D2)
+
+CREATE/DROP indexes, constraints and definitions execute over existing InMemory/TCP exchanges.
+Wire tests pin token discovery, conditional no-ops, generated names, SHOW CONSTRAINTS, enforcement,
+structured CG04025 for explicit-transaction DDL, rollback and authenticated-session reuse.
+No client production API, capability, protocol version or byte layout changes are required.
+
 ## Terminal TCP conformance (#1087)
 
 The real GraphClient and model server run missing-database handshakes on InMemory and

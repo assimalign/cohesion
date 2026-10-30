@@ -88,6 +88,32 @@ public class SqlCatalogIndexTests
         reopened.GetIndexRegistrations().ShouldBe(new[] { registration });
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Directed indexes: orders snapshot and round trip with predicates (#1631)")]
+    public async Task CreateIndex_KeyOrders_ShouldCopyAndPersist()
+    {
+        // Arrange
+        var (catalog, harness, table) = await OpenWithTableAsync();
+        SqlCatalogIndexKeyOrder[] orders = [SqlCatalogIndexKeyOrder.DescendingNullsLast, SqlCatalogIndexKeyOrder.AscendingNullsFirst];
+        var metadata = new SqlCatalogIndex(table.ObjectId, "ix", ["age", "email"], false,
+            predicate: "age > 0", predicateColumns: ["age"], keyOrders: orders);
+        orders[0] = SqlCatalogIndexKeyOrder.AscendingNullsLast;
+
+        // Act
+        await catalog.CreateIndexAsync(metadata, [Registration(table.ObjectId, "ix", false, 42)], CancellationToken.None);
+        var recovered = harness.Reopen();
+
+        // Assert
+        recovered.TryGetIndex(table.ObjectId, "ix", out var index).ShouldBeTrue();
+        index.KeyOrders.ShouldBe([SqlCatalogIndexKeyOrder.DescendingNullsLast, SqlCatalogIndexKeyOrder.AscendingNullsFirst]);
+        index.Predicate.ShouldBe("age > 0");
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "bad", ["a"], false,
+            keyOrders: [])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03085");
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "bad", ["a"], false,
+            keyOrders: [(SqlCatalogIndexKeyOrder)4])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03085");
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "bad", ["a"], true, isPrimaryKey: true,
+            keyOrders: [SqlCatalogIndexKeyOrder.DescendingNullsFirst])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03085");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Partial indexes: predicate and immutable dependencies persist symmetrically (#1630)")]
     public async Task CreateIndex_PartialMetadata_ShouldRoundTripAndCopyDependencies()
     {

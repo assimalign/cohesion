@@ -210,6 +210,9 @@ internal sealed partial class SqlPlanExecutor
                             [
                                 database, table.Schema, table.Name, index.Name, index.ColumnNames[ordinal], (long)ordinal + 1,
                                 index.IsUnique ? "YES" : "NO", index.IsPrimaryKey ? "YES" : "NO", index.Predicate,
+                                ((int)index.KeyOrders[ordinal] & 2) != 0 ? "DESC" : null,
+                                index.KeyOrders[ordinal] == SqlCatalogIndexKeyOrder.AscendingNullsFirst ? "FIRST" :
+                                    index.KeyOrders[ordinal] == SqlCatalogIndexKeyOrder.DescendingNullsLast ? "LAST" : null,
                             ];
                         }
                     }

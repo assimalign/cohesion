@@ -40,6 +40,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
     [InlineData(SqlClauses.CreateTable, "CREATE TABLE t (id INT);")]
     [InlineData(SqlClauses.CreateTableAs, "CREATE TABLE t (id) AS SELECT 1 WITH NO DATA;")]
+    [InlineData(SqlClauses.IndexKeyOrder, "CREATE INDEX ix ON t(id DESC NULLS LAST);")]
     [InlineData(SqlClauses.PartialIndex, "CREATE INDEX ix ON t (id) WHERE id > 0;")]
     [InlineData(SqlClauses.CreateIndex, "CREATE INDEX ix_t_id ON t (id);")]
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]

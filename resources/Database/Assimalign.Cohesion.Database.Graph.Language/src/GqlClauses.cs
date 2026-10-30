@@ -8,6 +8,30 @@ public static class GqlClauses
 {
     /// <summary>The Cohesion database-scoped catalog introspection extension.</summary>
     public const string Show = "SHOW";
+    /// <summary>Standalone create index schema DDL.</summary>
+    public const string CreateIndex = "CREATE INDEX";
+
+    /// <summary>Standalone drop index schema DDL.</summary>
+    public const string DropIndex = "DROP INDEX";
+
+    /// <summary>Standalone create constraint schema DDL.</summary>
+    public const string CreateConstraint = "CREATE CONSTRAINT";
+
+    /// <summary>Standalone drop constraint schema DDL.</summary>
+    public const string DropConstraint = "DROP CONSTRAINT";
+
+    /// <summary>Standalone create label schema DDL.</summary>
+    public const string CreateLabel = "CREATE LABEL";
+
+    /// <summary>Standalone drop label schema DDL.</summary>
+    public const string DropLabel = "DROP LABEL";
+
+    /// <summary>Standalone create relationship type schema DDL.</summary>
+    public const string CreateRelationshipType = "CREATE RELATIONSHIP TYPE";
+
+    /// <summary>Standalone drop relationship type schema DDL.</summary>
+    public const string DropRelationshipType = "DROP RELATIONSHIP TYPE";
+
     /// <summary>Matches a graph pattern.</summary>
     public const string Match = "MATCH";
 

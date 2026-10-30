@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <param name="Upper">The optional upper bound on the key column after the prefix.</param>
 [global::System.Diagnostics.DebuggerDisplay("SqlIndexSeekPath")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlIndexSeekPath.DebugView))]
-internal sealed record SqlIndexSeekPath(
+internal record SqlIndexSeekPath(
     SqlCatalogIndex Index,
     IReadOnlyList<object?> EqualityValues,
     SqlSeekBound? Lower,

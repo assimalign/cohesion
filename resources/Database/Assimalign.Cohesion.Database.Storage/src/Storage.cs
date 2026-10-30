@@ -2481,6 +2481,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </remarks>
     internal unsafe void CommitTransaction(StorageTransaction transaction, bool awaitDurability = true)
     {
+        TransactionCommitting?.Invoke(transaction);
         // Read once: the setting in effect when the commit starts decides both the check below and
         // the wait after the commit record, so a concurrent change cannot pass the check under one
         // mode and wait under another (owner decision 26 of 2026-10-06; PostgreSQL reads
@@ -3163,6 +3164,9 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
         return handle;
     }
+
+    // Called before commit journals any page or ends the physical bracket.
+    internal Action<StorageTransaction>? TransactionCommitting { get; set; }
 
     // Test rendezvous after an owner-directory read, with _ownerLock released.
     internal Action? OwnerPageIdsReadForWrite;

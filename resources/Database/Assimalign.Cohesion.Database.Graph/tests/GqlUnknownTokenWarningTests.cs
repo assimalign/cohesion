@@ -253,7 +253,7 @@ public sealed class GqlUnknownTokenWarningTests
 
     /// <summary>
     /// A schema read of an unknown label is empty with the same warning and keeps the transaction;
-    /// schema writes still require an existing label (CG01002) and, like any failed statement,
+    /// schema writes refuse explicit transactions (CG04025) and, like any failed statement,
     /// abort the transaction.
     /// </summary>
     [Fact(DisplayName = "Cohesion Test [Graph] - Unknown tokens: a schema read of an unknown label is empty and warns")]
@@ -286,7 +286,7 @@ public sealed class GqlUnknownTokenWarningTests
         known.Select(index => index.Name).ShouldBe(["by_name"]);
         known.Diagnostics.ShouldBeEmpty();
         activeAfterReads.ShouldBe(TransactionState.Active);
-        drop.Message.ShouldStartWith("CG01002", Case.Sensitive);
+        drop.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG04025");
         afterWrite.ShouldBe(TransactionState.Faulted);
     }
 

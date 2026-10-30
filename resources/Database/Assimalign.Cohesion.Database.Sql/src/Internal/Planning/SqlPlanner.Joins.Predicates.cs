@@ -17,7 +17,7 @@ internal sealed partial class SqlPlanner
         if (plan.Tree is not null || _queryScopes?.DeferQueryEvaluation == true)
         {
             // Restrictions retain their written level across grouped and swapped boundaries.
-            return plan with { Inputs = plan.Bindings.Select(_ => new SqlJoinInput(SqlScanPath.Instance, null)).ToArray() };
+            return PlanPartialJoinAccess(plan with { Inputs = plan.Bindings.Select(_ => new SqlJoinInput(SqlScanPath.Instance, null)).ToArray() });
         }
         var filters = plan.Bindings.Select(_ => new List<SqlBoundExpression>()).ToArray();
         var predicates = plan.Bindings.Select(_ => new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>()).ToArray();
@@ -94,7 +94,7 @@ internal sealed partial class SqlPlanner
                 steps[0] = steps[0] with { Access = SelectJoinAccessPath(plan.Bindings, plan.Columns, equalities, 1, false, driver) };
             }
         }
-        return plan with { Inputs = inputs, Steps = steps, FirstBinding = first };
+        return PlanPartialJoinAccess(plan with { Inputs = inputs, Steps = steps, FirstBinding = first });
 
         int BindingOf(int ordinal)
         {

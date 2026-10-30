@@ -57,7 +57,11 @@ public sealed partial class GraphStore
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     /// <exception cref="TransactionAbortedException">The transaction ended while waiting for its writer lock.</exception>
     /// <exception cref="GraphElementTooLargeException">The names exceed one graph record, or an existing node's value exceeds the index key.</exception>
-    public async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
+    public ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context, CancellationToken cancellationToken = default)
+        => CreateIndexAsync(label, propertyKey, context, null, null, cancellationToken);
+
+    internal async ValueTask CreateIndexAsync(string label, string propertyKey, TransactionContext context,
+        Action? visit, Action<long>? reserve, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrWhiteSpace(propertyKey);
@@ -68,21 +72,38 @@ public sealed partial class GraphStore
         ulong id = (ulong)_storage.ReserveTransactionSequence();
         var record = new GraphRecord(3, id, Label: label, PropertyKey: propertyKey);
         byte[] bytes = await EncodeAsync(record, context.Sequence).ConfigureAwait(false);
-        var entries = GetNodes(label, latest).Where(node => node.Properties.ContainsKey(propertyKey))
-            .Select(node => (Found: Find(1, node.Id, latest)!.Value, Key: Composite(GraphRecordCodec.Key(node.Properties[propertyKey]), node.Id))).ToArray();
-        var inserted = await ApplyAsync(context, async bracket =>
+        reserve?.Invoke(32);
+        var entries = new List<(Reference Reference, IndexKey Key)>();
+        foreach (var node in StreamLabels([label], latest, cancellationToken, visit, reserve))
+        {
+            if (!node.Properties.TryGetValue(propertyKey, out var value)) { continue; }
+            var key = GraphRecordCodec.Key(value);
+            if (entries.Count == entries.Capacity)
+            {
+                int capacity = entries.Capacity == 0 ? 4 : checked(entries.Capacity * 2);
+                // Include owned entry slots and array headers before growing the backfill buffer.
+                reserve?.Invoke(24 + 48L * (capacity - entries.Capacity));
+                entries.Capacity = capacity;
+            }
+            reserve?.Invoke(32L + key.Length + 8);
+            entries.Add((Find(1, node.Id, latest)!.Value.Reference, Composite(key, node.Id)));
+        }
+        bool published = false;
+        ulong inserted = await ApplyAsync(context, async bracket =>
         {
             var index = await _indexes.CreateIndexAsync(context, id, new IndexDefinition(treeName), cancellationToken).ConfigureAwait(false);
             foreach (var entry in entries)
             {
-                await index.InsertVersionAsync(bracket, entry.Key, entry.Found.Reference.Location,
-                    entry.Found.Reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                visit?.Invoke();
+                await index.InsertVersionAsync(bracket, entry.Key, entry.Reference.Location,
+                    entry.Reference.Writer, TransactionSequence.None, cancellationToken).ConfigureAwait(false);
             }
             var location = Insert(bracket, bytes, context);
             SaveRegistrations(bracket);
+            published = PublishMarked(record, location, context.Sequence);
             return location;
         }, cancellationToken).ConfigureAwait(false);
-        Add(record, inserted, context.Sequence);
+        if (!published) { Add(record, inserted, context.Sequence); }
     }
 
     /// <summary>Drops a node-property index definition; older snapshots retain its tree.</summary>
@@ -323,6 +344,9 @@ public sealed partial class GraphStore
             _store = store;
             _id = id;
         }
+
+        public override bool Equals(object? obj) => obj is IndexUndo other && ReferenceEquals(_store, other._store) && _id == other._id;
+        public override int GetHashCode() => HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_store), _id);
 
         protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)

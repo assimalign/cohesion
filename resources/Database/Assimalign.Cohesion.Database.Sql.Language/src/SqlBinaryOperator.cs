@@ -52,4 +52,19 @@ public enum SqlBinaryOperator
 
     /// <summary>String concatenation (<c>||</c>).</summary>
     Concat,
+
+    /// <summary>Integer bitwise AND (<c>&amp;</c>).</summary>
+    BitwiseAnd,
+
+    /// <summary>Integer bitwise OR (<c>|</c>).</summary>
+    BitwiseOr,
+
+    /// <summary>Integer bitwise XOR (<c>#</c>).</summary>
+    BitwiseXor,
+
+    /// <summary>Integer left shift (<c>&lt;&lt;</c>).</summary>
+    ShiftLeft,
+
+    /// <summary>Integer arithmetic right shift (<c>&gt;&gt;</c>).</summary>
+    ShiftRight,
 }

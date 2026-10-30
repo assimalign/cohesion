@@ -63,7 +63,7 @@ public sealed class SqlPartialIndexDurabilityTests
             recovered.IndexManager.TryGetIndex(table.ObjectId, "ix", out _).ShouldBeFalse();
             await writer.ExecuteAsync("UPDATE t SET active=TRUE WHERE id=2", cancellationToken: timeout.Token);
         }
-        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(31);
+        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(32);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Partial indexes: cancellation and predicate failures remove unpublished trees and release locks (#1630)")]
@@ -167,7 +167,7 @@ public sealed class SqlPartialIndexDurabilityTests
 
         // Assert
         failure.Diagnostics.ShouldContain(d => d.Code == "CS06041");
-        failure.Message.ShouldContain("supports only format 31", Case.Sensitive);
+        failure.Message.ShouldContain("supports only format 32", Case.Sensitive);
     }
 
     private static SqlDatabaseEngineBuilder Builder(CrashCaptureSqlStorageStrategy storage)

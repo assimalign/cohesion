@@ -131,7 +131,7 @@ public sealed class SqlPartialIndexTests
         await Execute(session, "INSERT INTO t VALUES(1)");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Partial indexes: metadata, views, dependencies and query scans remain truthful (#1630)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Partial indexes: metadata, views, dependencies and query paths remain truthful (#1630)")]
     public async Task ExecuteAsync_MetadataAndDependencies_ShouldPreservePredicateAndAvoidAccess()
     {
         // Arrange
@@ -151,7 +151,7 @@ public sealed class SqlPartialIndexTests
         session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
         (await Rows(session, "EXPLAIN SELECT a.k FROM t a JOIN t b ON a.k=b.k WHERE a.k=1")).ShouldNotContain(row => Equals(row[4], "ix"));
         await Rows(session, "SELECT k FROM t WHERE k=1 AND active");
-        session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
+        session.LastStatementMetrics!.AccessPath.ShouldBe("seek:ix");
         await Execute(session, "ALTER TABLE t RENAME COLUMN active TO enabled");
         await Execute(session, "ALTER TABLE t RENAME TO renamed");
         await Execute(session, "UPDATE renamed SET enabled=TRUE");
@@ -252,7 +252,7 @@ public sealed class SqlPartialIndexTests
     internal static async Task Oracle(SqlDatabase database, SqlDatabaseSession session, string tableName = "t",
         string keyColumn = "k", string predicate = "active AND k IS NOT NULL")
     {
-        var expected = (await Rows(session, $"SELECT id,{keyColumn} FROM {tableName} WHERE {predicate} ORDER BY id"))
+        var expected = (await Rows(session, $"SELECT id,{keyColumn} FROM {tableName} WHERE ({predicate}) OR FALSE ORDER BY id"))
             .Select(row => (Convert.ToInt64(row[0]), Convert.ToInt32(row[1]))).ToArray();
         database.Catalog.TryGetTable("dbo", tableName, out var table).ShouldBeTrue();
         var metadata = database.Catalog.GetIndexes(table.ObjectId).Single(index => index.Name == "ix");
@@ -268,13 +268,21 @@ public sealed class SqlPartialIndexTests
                 database.DataStorage.TryReadRecord(page, slot, table.ObjectId, out var record).ShouldBeTrue();
                 var values = SqlRowCodec.Decode(record.Span, table, out _, out _, out _);
                 var key = new DatabaseKeyWriter();
-                foreach (string name in metadata.ColumnNames)
+                var ends = new int[metadata.ColumnNames.Count];
+                for (int i = 0; i < metadata.ColumnNames.Count; i++)
                 {
+                    string name = metadata.ColumnNames[i];
                     int ordinal = Enumerable.Range(0, table.Columns.Count).Single(i => table.Columns[i].Name == name);
                     SqlRowCodec.AppendKeyValue(key, table.Columns[ordinal].Type.Type, values[ordinal],
                         table.Columns[ordinal].Collation ?? database.Catalog.DefaultCollation);
+                    ends[i] = key.Length;
                 }
-                cursor.CurrentKey.Encoded.ToArray().ShouldBe(key.ToArray());
+                // Row-component bytes become SQL key bytes only after the declared
+                // order is applied, including ASC's NULLS LAST default (#1631).
+                byte[] expectedKey = key.ToArray();
+                for (int i = 0, start = 0; i < ends.Length; start = ends[i++])
+                { SqlIndexKeyEncoding.Transform(expectedKey.AsSpan(start, ends[i] - start), metadata.KeyOrders[i]); }
+                cursor.CurrentKey.Encoded.ToArray().ShouldBe(expectedKey);
                 actual.Add((Convert.ToInt64(values[0]), Convert.ToInt32(values[1])));
             }
         }

@@ -22,6 +22,11 @@ public sealed class BlobStorage : Assimalign.Cohesion.Database.Storage.Storage
     /// <summary>Gets the shared version store's record adapter.</summary>
     public TransactionRecordSpace Records { get; }
 
+    internal Action<TransactionSequence, bool>? UndoScopesChanged { get; set; }
+    internal Action<PageId, int, ReadOnlyMemory<byte>>? CreatedVersionUndone { get; set; }
+    internal void RegisterWriteStream(TransactionContext context) => ((BlobTransactionRecordSpace)Records).RegisterWriteStream(context);
+    internal void UnregisterWriteStream(TransactionContext context) => ((BlobTransactionRecordSpace)Records).UnregisterWriteStream(context);
+
     /// <summary>Creates an empty blob file set.</summary>
     /// <param name="data">The data stream.</param>
     /// <param name="journal">The journal stream.</param>

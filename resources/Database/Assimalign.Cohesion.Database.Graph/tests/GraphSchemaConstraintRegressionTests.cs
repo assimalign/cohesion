@@ -123,9 +123,9 @@ public sealed class GraphSchemaConstraintRegressionTests
         }
 
         // Assert: a successful write and commit also retain the work preceding the bad argument.
-        await schema.CreateConstraintAsync(new(id, "valid", "p"), CancellationToken.None);
         await session.ExecuteAsync("INSERT (:N {p:2})", cancellationToken: CancellationToken.None);
         await transaction.CommitAsync(CancellationToken.None);
+        await schema.CreateConstraintAsync(new(id, "valid", "p"), CancellationToken.None);
         (await GraphCatalogIntrospectionTests.Rows(session, "MATCH (n:N) RETURN n.p ORDER BY n.p")).Select(row => row[0]).ShouldBe([1L, 2L]);
         (await schema.GetConstraintsAsync(CancellationToken.None)).ShouldHaveSingleItem().Name.ShouldBe("valid");
     }

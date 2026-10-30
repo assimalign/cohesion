@@ -12,6 +12,7 @@ internal sealed class TransactionUndoMarker
     }
 
     internal int Position { get; }
+    internal int LockPosition { get; set; }
 
     private sealed class DebugView
     {

@@ -9,7 +9,9 @@ Every model needs ordered lookups: SQL secondary indexes, document indexes, grap
 `BTreeRecordVersionIndex` compares and hashes by logical tree: the shared latch identifies its
 storage and fixed root page, including handles reattached through another manager. Adapters
 created by different statements therefore preserve an earlier same-writer tombstone across a
-marker. No persisted layout or public member beyond the equality/hash overrides is added.
+marker. The regression reaches anonymous marker controls through test-only UnsafeAccessor bindings
+until XT-4 supplies the language surface, without reflection or a foreign assembly grant.
+No persisted layout or public member beyond the equality/hash overrides is added.
 
 ## Latest live-entry lookup (#1118)
 
@@ -560,7 +562,7 @@ upgrades are #1152). How each model surfaces the refusal:
 
 | Model | Where its open checks | Error |
 |---|---|---|
-| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 31, #1630), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 31"; a marker that does not describe its trees, the attach check's `CK06101` |
+| SQL | Its catalog's data-storage format marker, bumped from 4 to 5 by #1194 (current format 32, #1631), before the data file set opens; then the attach check, before recovery | `SqlDataStorageFormatException` "uses data-storage format 4, but this engine supports only format 32"; a marker that does not describe its trees, the attach check's `CK06101` |
 | Key-value | Its catalog's entry-space format marker, bumped from 1 to 2, before the attach; then the attach check, before recovery | `DatabaseException` "uses entry-space format 1, but this engine supports only format 2"; a marker that does not describe its tree, "Database 'x' cannot be opened. CK06101: …" |
 | Document | `DocumentCatalog.EnsureIndexFormat`, before the recovery scrub; the attach check again in the catalog's open | "Database 'x' cannot be opened. CK06101: …" |
 | Graph | `GraphStore.EnsureIndexFormat`, before the recovery scrub; the attach check again in the store's open | the same |

@@ -75,6 +75,9 @@ public static class SqlClauses
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
 
+    /// <summary>Per-column index directions and NULL placement.</summary>
+    public const string IndexKeyOrder = "CREATE INDEX KEY ORDER";
+
     /// <summary>A partial index with an immutable row predicate.</summary>
     public const string PartialIndex = "CREATE INDEX WHERE";
 
