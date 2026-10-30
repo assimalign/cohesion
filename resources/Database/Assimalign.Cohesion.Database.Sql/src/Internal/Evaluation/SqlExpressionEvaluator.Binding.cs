@@ -206,14 +206,48 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (SqlBitwise.IsBinary(binary.Operator))
         {
-            SqlBitwise.Validate(StaticTypeOf(binary.Left), SqlBitwise.Text(binary.Operator), binary.Left.Location);
-            SqlBitwise.Validate(StaticTypeOf(binary.Right), SqlBitwise.Text(binary.Operator), binary.Right.Location);
-            if (left is SqlBoundParameter { Value: { } a }) { SqlBitwise.ValueType(a, SqlBitwise.Text(binary.Operator), binary.Left.Location); }
-            if (right is SqlBoundParameter { Value: { } b }) { SqlBitwise.ValueType(b, SqlBitwise.Text(binary.Operator), binary.Right.Location); }
+            var leftType = ValidateBitwiseOperand(binary.Left, SqlBitwise.Text(binary.Operator));
+            var rightType = ValidateBitwiseOperand(binary.Right, SqlBitwise.Text(binary.Operator), SqlBitwise.IsShift(binary.Operator));
+            collation = default;
+            return new SqlBoundBitwise(binary.Operator, left, right, SqlBitwise.ResultType(binary.Operator, leftType, rightType), binary.Location);
         }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
             SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), binary.Location);
+    }
+
+    // Validate result alternatives, not their selection conditions or explicitly cast inputs.
+    // StaticTypeOf alone reports a single CASE/COALESCE alternative and maps unknown CLR
+    // parameter types to Null; neither can authorize every value a wrapper might return.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private DatabaseType ValidateBitwiseOperand(SqlExpression expression, string op, bool shiftCount = false)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        var type = StaticTypeOf(expression);
+        SqlBitwise.Validate(type, op, expression.Location, shiftCount);
+        switch (expression)
+        {
+            case SqlParameterExpression parameter when TryGetParameterValue(parameter, out var value) && value is not null:
+                SqlBitwise.Validate(SqlBitwise.ValueType(value, op, expression.Location), op, expression.Location, shiftCount);
+                break;
+            case SqlCollateExpression collate:
+                ValidateBitwiseOperand(collate.Operand, op, shiftCount);
+                break;
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus:
+                ValidateBitwiseOperand(plus.Operand, op, shiftCount);
+                break;
+            case SqlCaseExpression conditional:
+                foreach (var clause in conditional.WhenClauses) { ValidateBitwiseOperand(clause.Result, op, shiftCount); }
+                if (conditional.ElseResult is not null) { ValidateBitwiseOperand(conditional.ElseResult, op, shiftCount); }
+                break;
+            case SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                foreach (var argument in call.Arguments) { ValidateBitwiseOperand(argument, op, shiftCount); }
+                break;
+            case SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase) && call.Arguments.Count > 0:
+                ValidateBitwiseOperand(call.Arguments[0], op, shiftCount);
+                break;
+        }
+        return type;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -528,8 +562,8 @@ internal sealed partial class SqlExpressionEvaluator
         collation = CollationOf(unary, [operandCollation]);
         if (unary.Operator == SqlUnaryOperator.BitwiseNot)
         {
-            SqlBitwise.Validate(StaticTypeOf(unary.Operand), "~", unary.Operand.Location);
-            if (operand is SqlBoundParameter { Value: { } value }) { SqlBitwise.ValueType(value, "~", unary.Operand.Location); }
+            var type = ValidateBitwiseOperand(unary.Operand, "~");
+            return new SqlBoundBitwise(default, operand, null, type == DatabaseType.Null ? DatabaseType.Int32 : type, unary.Location);
         }
         var bound = new SqlBoundUnary(unary.Operator, operand, unary.Location);
 

@@ -3566,14 +3566,17 @@ src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before mat
 ## Integer bitwise operators (#1721, SQ-O2)
 
 `&` is AND, `|` is OR, `#` is XOR, prefix `~` is NOT, and `<<` / `>>`
-are left and arithmetic right shifts. SMALLINT, INTEGER and BIGINT operands retain their
-16-, 32- and 64-bit widths. Mixed widths promote to the wider operand, including shift
-counts, following the owner-approved T2 rule; PostgreSQL's catalog instead declares
-INTEGER counts with the left operand's result type. Every noninteger operand (including
-TINYINT, NUMERIC, floating, text, Boolean, binary and temporal values) fails during binding
-with CS02077 (42804), including typed NULLs, empty inputs and unselected CASE branches.
-An untyped NULL operand propagates NULL; two untyped NULLs use INTEGER result metadata.
-Domains over the three accepted storage types use their underlying integer width.
+are left and arithmetic right shifts. AND, OR and XOR promote SMALLINT, INTEGER and
+BIGINT operands to the wider width. Shifts take an INTEGER count (a SMALLINT count
+widens) and return the left operand's type. A BIGINT count has no matching operator
+and fails during binding with CS02077 (42804), including a typed NULL count.
+Every noninteger operand (including TINYINT, NUMERIC, floating, text, Boolean, binary
+and temporal values) fails with the same code. Validation includes every possible
+CASE/COALESCE result and nested parameter value before rows execute, including empty
+inputs and unselected alternatives. An untyped NULL operand propagates NULL; two
+untyped NULLs use INTEGER result metadata. Domains use their base integer widths.
+Bound SQL types determine evaluation widths even when a selected CASE/COALESCE value
+has a different CLR integer width.
 
 All five binary operators share PostgreSQL's generic-operator precedence with concatenation:
 above predicates/comparisons and below addition/subtraction, associating left.
@@ -3582,12 +3585,13 @@ same precedence: `~1 + 2` means `~(1 + 2)`. Unary signs and `::` still bind
 more tightly. Parentheses preserve a right-nested generic expression. Adjacent angle
 brackets form shifts; spaces/comments between the brackets are syntax errors.
 
-Counts are reduced modulo the promoted operand width, including negative counts and
-counts at or above the width. Right shifts extend the sign bit; left-shift overflow wraps
-in two's complement. Thus `1::SMALLINT << 16::SMALLINT` is SMALLINT 1,
-`1 << 32` is INTEGER 1, and `(-8)::INT >> 2` is INTEGER -2. The explicit
-16-bit modulo rule and all-width count promotion are Cohesion's owner-approved choices;
-they avoid depending on a C compiler's undefined out-of-range shift behavior.
+SMALLINT shifts compute in 32 bits and then truncate to 16 bits. Their counts and
+INTEGER operand counts are effectively modulo 32; BIGINT operand counts are modulo
+64, including negative counts. Right shifts extend the sign bit and left-shift overflow
+wraps in two's complement. Thus `32767::SMALLINT << 1` is SMALLINT -2,
+`1::SMALLINT << 16::SMALLINT` is SMALLINT 0,
+`(-32768)::SMALLINT >> 16::SMALLINT` is SMALLINT -1, and `1 << 32` is INTEGER 1.
+These follow PostgreSQL's INTEGER-count signatures and native integer shifts.
 
 Canonical text preserves these operators in views, column defaults and CHECK constraints
 across reopen. The old renderer branches and all existing identifier rules retain their
@@ -3597,7 +3601,7 @@ profile corpora pin `#`, `~`, `&`, `|`, `<<`, `>>`; GQL additionally
 pins label operators and graph arrows. InMemory and TCP preserve typed values and CS02077.
 
 PostgreSQL references (local clone): `src/backend/parser/gram.y:904-914,15368-15371`;
-`src/include/catalog/pg_operator.dat:2274-2328`;
+`src/include/catalog/pg_operator.dat:2274-2328`, `pg_cast.dat:23-24,33-36`;
 `src/backend/utils/adt/int.c:1401-1527`, `int8.c:1215-1271`.
 
 ## Literals

@@ -315,6 +315,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return Deliver(((SqlBoundConstant)expression).Value, copySharedBinary);
             case SqlBoundExpressionKind.Binary:
                 return EvaluateBinary((SqlBoundBinary)expression, row);
+            case SqlBoundExpressionKind.Bitwise:
+                return EvaluateBitwise((SqlBoundBitwise)expression, row);
             case SqlBoundExpressionKind.Logical:
                 return EvaluateLogical((SqlBoundLogical)expression, row);
             case SqlBoundExpressionKind.Call:
@@ -895,7 +897,6 @@ internal sealed partial class SqlExpressionEvaluator
                 SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                     or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo => Arithmetic(binary.Operator, leftValue, rightValue),
                 SqlBinaryOperator.Concat => SqlCastText.Format(leftValue) + SqlCastText.Format(rightValue),
-                var op when SqlBitwise.IsBinary(op) => SqlBitwise.Binary(op, leftValue, rightValue, binary.Location),
                 _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateBinarySqlPlanning, binary.Operator), binary.Location),
             };
         }
@@ -910,6 +911,22 @@ internal sealed partial class SqlExpressionEvaluator
         catch (ArithmeticException exception)
         {
             throw SqlEvaluationException.FromArithmetic(exception).At(binary.Location);
+        }
+    }
+
+    private object? EvaluateBitwise(SqlBoundBitwise expression, object?[] row)
+    {
+        var left = EvaluateCore(expression.Left, row);
+        var right = expression.Right is null ? null : EvaluateCore(expression.Right, row);
+        if (left is null || expression.Right is not null && right is null) { return null; }
+        try
+        {
+            return expression.Right is null ? SqlBitwise.Not(left, expression.Type, expression.Location)
+                : SqlBitwise.Binary(expression.Operator, left, right!, expression.Type, expression.Location);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception).At(expression.Location);
         }
     }
 
@@ -946,7 +963,6 @@ internal sealed partial class SqlExpressionEvaluator
                     ? operand
                     : throw SqlEvaluationException.InvalidOperandType("+", OperandTypeName(operand)),
                 SqlUnaryOperator.Not => Box(!BooleanValue(operand, "NOT", unary.Location)!.Value),
-                SqlUnaryOperator.BitwiseNot => SqlBitwise.Not(operand, unary.Location),
                 _ => throw new SqlPlanningException("CS05013", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.EvaluatorEvaluateUnarySqlPlanning, unary.Operator), unary.Location),
             };
         }

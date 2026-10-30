@@ -669,6 +669,9 @@
   <data name="BitwiseOperandType" xml:space="preserve">
     <value>Operator {0} requires SMALLINT, INTEGER or BIGINT operands; received {1}.</value>
   </data>
+  <data name="BitwiseShiftCountType" xml:space="preserve">
+    <value>Operator {0} requires an INTEGER shift count (SMALLINT widens); received {1}.</value>
+  </data>
   <data name="InvalidOperandTypeSqlEvaluation" xml:space="preserve"><value>Invalid operand type: unary '{0}' requires a numeric operand, but the operand is {1}.</value></data>
   <data name="ReferenceNotAllowedSqlEvaluation" xml:space="preserve"><value>Column reference '{0}' is not allowed in {1}, which has no columns in scope. Use literals, parameters and expressions over them{2}.</value></data>
   <data name="SignatureMismatchSqlEvaluation" xml:space="preserve"><value>Function '{0}' takes {1} but was called with {2}. Accepted: {3}.</value></data>

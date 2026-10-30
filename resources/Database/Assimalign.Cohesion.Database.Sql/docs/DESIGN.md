@@ -7660,23 +7660,31 @@ or identifier rule. SQL consumes # and adjacent shift-token pairs locally; the s
 lexer, token values and other language profiles remain unchanged. PostgreSQL anchors:
 parser/gram.y:904-914,15368-15371 and include/catalog/pg_operator.dat:2274-2328.
 
-Binding accepts SMALLINT/INTEGER/BIGINT storage types and untyped NULL only. CS02077
-(42804) names an invalid bitwise operand before empty inputs or unselected CASE arms.
-Results retain the wider operand width, including shift counts under the explicit T2
-owner rule. Untyped NULL propagates NULL; two untyped NULLs default to INTEGER metadata.
-Right shifts are arithmetic, counts wrap modulo the promoted width (including 16-bit
-operands and negative counts), and left shifts wrap without overflow diagnostics.
-The dialect records these choices against PostgreSQL's INTEGER-count shift signatures.
+Binding accepts SMALLINT/INTEGER/BIGINT storage types and untyped NULL. AND, OR and
+XOR promote to the wider operand. Shifts take an INTEGER count (SMALLINT widens;
+BIGINT is refused) and return the left operand's type, matching PostgreSQL's catalog
+(include/catalog/pg_operator.dat:2286-2328; pg_cast.dat:23-24,33-36). CS02077 (42804)
+refuses invalid operands and count types before rows execute. Validation walks every
+CASE/COALESCE result alternative and supplied parameter, including nested wrappers.
+Explicit CAST inputs and selection conditions retain their ordinary conversion rules.
+
+An engine-owned SqlBoundBitwise leaf carries the resolved integer width through evaluation,
+including domain base types. Runtime CASE/COALESCE values convert to that width before
+all six operations; ordinary unary/binary nodes retain their allocation sizes. SMALLINT
+shifts compute in INTEGER and truncate, so SMALLINT and INTEGER counts wrap modulo 32;
+BIGINT operands use modulo 64. Right shifts are arithmetic and left-shift results wrap
+without overflow diagnostics (utils/adt/int.c:1449,1511,1520; int8.c:1255). Untyped NULL
+propagates NULL; two untyped NULLs default to INTEGER metadata.
 
 Views, defaults and CHECKs round-trip through reopen. No format or wire change is
 needed; 21,008 baseline canonical comparisons against 8ac5744fa are identical and
 reload with identical trees. Existing canonical expressions retain their interpretation. The engine oracle
-checks 3,537 typed boundaries/counts against independent .NET operators; all three
+checks signed integer boundaries and every shift-count residue against independent .NET operators; all three
 profile corpora pin token isolation, including GQL labels and arrows.
 
 | Code | Condition |
 | --- | --- |
-| CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
+| CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
 
 ## ILIKE and postfix casts (#1721, SQ-O1)
 
