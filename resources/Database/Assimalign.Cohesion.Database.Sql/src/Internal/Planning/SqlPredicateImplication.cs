@@ -53,7 +53,7 @@ internal static class SqlPredicateImplication
     {
         if (Same(query, predicate, offset)) { return true; }
         if (predicate is SqlBoundIsNull { IsNegated: true, Operand: SqlBoundColumn notNull } &&
-            Comparison(query, out var key, out _, out _, out _) && key.Ordinal == notNull.Ordinal + offset) { return true; }
+            Comparison(query, out _, out _, out _, out _) && RejectsNull(query, notNull.Ordinal + offset)) { return true; }
         if (BooleanColumn(query) is int flag && BooleanColumn(predicate) is int required && flag == required + offset) { return true; }
         if (!Comparison(query, out var q, out var qop, out var qvalue, out var qc) ||
             !Comparison(predicate, out var p, out var pop, out var pvalue, out var pc) ||
@@ -82,6 +82,34 @@ internal static class SqlPredicateImplication
         };
     }
 
+    // Shared by partial-index implication and ordering: a mandatory strict comparison
+    // rejects a NULL key regardless of its other operand (including parameters).
+    // Descend only through AND; neither OR nor NOT supplies a mandatory witness.
+    internal static bool RejectsNull(SqlBoundExpression? expression, int ordinal)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlBoundLogical { IsOr: false } logical)
+        {
+            foreach (var term in logical.Operands) { if (RejectsNull(term, ordinal)) { return true; } }
+            return false;
+        }
+        return expression switch
+        {
+            SqlBoundBinary binary when IsStrictComparison(binary.Operator) => IsColumn(binary.Left) || IsColumn(binary.Right),
+            SqlBoundIsNull { IsNegated: true } test => IsColumn(test.Operand),
+            SqlBoundIn { IsNegated: false } member => IsColumn(member.Operand),
+            SqlBoundBetween { IsNegated: false } range => IsColumn(range.LowOperand) && IsColumn(range.HighOperand),
+            SqlBoundLike { IsNegated: false } like => IsColumn(like.Operand),
+            SqlBoundColumn column => column.Ordinal == ordinal,
+            _ => false,
+        };
+
+        bool IsColumn(SqlBoundExpression operand) => operand is SqlBoundColumn column && column.Ordinal == ordinal;
+    }
+
+    private static bool IsStrictComparison(SqlBinaryOperator op) => op is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or
+        SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.LessOrEqual;
+
     private static int? BooleanColumn(SqlBoundExpression expression)
         => expression is SqlBoundColumn column ? column.Ordinal :
             Comparison(expression, out var key, out var op, out var value, out _) && op == SqlBinaryOperator.Equal && value is true ? key.Ordinal : null;
@@ -90,8 +118,7 @@ internal static class SqlPredicateImplication
         out SqlBinaryOperator op, out object value, out SqlBoundCollation collation)
     {
         column = null!; value = null!; op = default; collation = default;
-        if (expression is not SqlBoundBinary binary || binary.Operator is not (SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or
-            SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.LessOrEqual) ||
+        if (expression is not SqlBoundBinary binary || !IsStrictComparison(binary.Operator) ||
             !binary.Collation.IsFixed) { return false; }
         if (binary.Left is SqlBoundColumn left && Constant(binary.Right, out var rightValue) && rightValue is not null)
         { column = left; value = rightValue; op = binary.Operator; }

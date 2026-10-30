@@ -10,7 +10,11 @@ syntax refusal (PostgreSQL src/backend/parser/gram.y:4321,8422-8495). The profil
 clause; parser completeness and positive/negative and live execution corpora cover it. SQ-K1
 changes no ORDER BY grammar or result wire types. SQ-K3 adds engine order matching, forward/
 backward sort avoidance and order costing; the live index-order corpus now asserts both scan
-directions and zero retained sort rows (see DIALECT). Catalog 32 and compiled v11 fence the
+directions and zero retained sort rows (see DIALECT). NULL placement is ignored only for
+keys proven non-NULL by declarations, equality prefixes, mandatory local NULL rejection or a
+proven partial predicate. Strict comparison NULL rejection shares SQ-P2's rule, including
+parameter operands; OR/NOT and outer NULL extension provide no proof. The live corpus also
+covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 32 and compiled v11 fence the
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 

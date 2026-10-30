@@ -148,8 +148,9 @@ public sealed class SqlOrderedIndexTests
         session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
         session.LastStatementMetrics.PeakOrderedRows.ShouldBe(1024);
 
-        expected = await Rows(session, "SELECT id FROM t WHERE id%3=0 ORDER BY k+0 DESC NULLS FIRST LIMIT 7 OFFSET 3");
-        actual = await Rows(session, "SELECT id FROM t WHERE id%3=0 ORDER BY k DESC NULLS FIRST LIMIT 7 OFFSET 3");
+        // A mostly qualifying inequality keeps the ordered walk profitable after selectivity costing.
+        expected = await Rows(session, "SELECT id FROM t WHERE id>=18 ORDER BY k+0 DESC NULLS FIRST LIMIT 7 OFFSET 3");
+        actual = await Rows(session, "SELECT id FROM t WHERE id>=18 ORDER BY k DESC NULLS FIRST LIMIT 7 OFFSET 3");
         actual.ShouldBe(expected);
         session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix:backward");
         session.LastStatementMetrics.RecordsExamined.ShouldBe(28);

@@ -28,7 +28,11 @@ resolved collations, directions and NULL placement. Reversing every direction an
 placement together permits a backward scan; partial reversal, computed keys, missing equality
 prefixes and incompatible collations retain sorting. Pass-through aliases/ordinals can match.
 A partial index also needs the query's proven predicate implication. ORDER BY's existing defaults
-remain ASC NULLS FIRST and DESC NULLS LAST, so explicitly align NULL placement with index DDL.
+remain ASC NULLS FIRST and DESC NULLS LAST. NULL placement need not match for keys proven
+non-NULL by NOT NULL (including primary keys), equality prefixes, mandatory local NULL-rejecting
+conjuncts, or a proven partial-index predicate. Strict comparisons (parameters included), IN,
+BETWEEN, LIKE and IS NOT NULL can supply that proof; OR/NOT branches and outer-join NULL
+extension cannot. Directions still must all match or all reverse.
 Equal ordering keys have unspecified tie order; use a unique final key to pin paginated row identity.
 
 Costing credits the avoided sort and top-N work against random base-row fetches; a large full

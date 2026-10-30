@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -11,11 +10,18 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
+    // Optional test observations; ordinary planning retains no counter state.
+    internal static Action<SqlCatalogIndex>? OrderedIndexInspected { get; set; }
+    internal static Action<bool>? OrderedPrecheck { get; set; }
+    internal static Action? OrderedCandidatesStarted { get; set; }
+
     private SqlAccessPath SelectOrderedAccessPath(SqlCatalogTable table, SqlSelectExpression select,
         IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> ordering,
         SqlBoundExpression? where, SqlExpressionEvaluator evaluator)
     {
-        var original = SelectAccessPath(table, select.Where, OuterScope is null ? null : evaluator);
+        var original = SelectAccessPath(table, select.Where, OuterScope is null ? null : evaluator, out var predicates);
+        if (original is SqlIndexSeekPath { Index.IsUnique: true } unique && unique.EqualityValues.Count == unique.Index.ColumnNames.Count)
+        { return original; }
         if (ordering.Count == 0 || _subquerySlots.Count != 0 || OuterScope is not null || _queryScopes?.DeferQueryEvaluation == true ||
             ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || _commonTableState?.BindingUnused == true)
         { return original; }
@@ -39,61 +45,31 @@ internal sealed partial class SqlPlanner
             { return original; }
         }
 
-        int[]? rented = null;
-        int width = ordering.Count * 2 + table.Columns.Count;
-        Span<int> components = ordering.Count <= 64 && table.Columns.Count <= 64 ? stackalloc int[width]
-            : (rented = ArrayPool<int>.Shared.Rent(width));
-        try
+        var indexes = ViewImageState is { } image ? image.Snapshot.GetIndexes(table.ObjectId) : _catalog.GetPlanningIndexes(table.ObjectId);
+        if (indexes.Count == 0) { return original; }
+        bool hasNullEquality = CollectOrderedNullEqualities(where, null);
+        OrderedPrecheck?.Invoke(false);
+        bool possible = false;
+        for (int indexOrdinal = 0; indexOrdinal < indexes.Count; indexOrdinal++)
         {
-            for (int i = 0; i < ordering.Count; i++)
-            {
-                components[i] = OrderingOrdinal(ordering[i], table, projections);
-                components[ordering.Count + i] = (ordering[i].IsDescending ? 2 : 0) | (ordering[i].NullsFirst ? 1 : 0);
-            }
-            var ordinals = components[..ordering.Count];
-            var orders = components.Slice(ordering.Count, ordering.Count);
-            var fixedColumns = components.Slice(ordering.Count * 2, table.Columns.Count);
-            fixedColumns.Clear();
-            MarkOrderedEqualityColumns(where, fixedColumns);
-            bool possible = false;
-            if (ViewImageState is { } image)
-            {
-                foreach (var index in image.Snapshot.GetIndexes(table.ObjectId))
-                { if (SqlCatalog.HasKeyOrder(index, table, ordinals, orders, fixedColumns)) { possible = true; break; } }
-            }
-            else { possible = _catalog.ContainsKeyOrder(table, ordinals, orders, fixedColumns); }
-            if (!possible) { return original; }
+            var index = indexes[indexOrdinal];
+            OrderedIndexInspected?.Invoke(index);
+            if (MatchOrderedIndex(table, index, original, projections, ordering, where, predicates, hasNullEquality, out _, out _, out _)) { possible = true; break; }
         }
-        finally { if (rented is not null) { ArrayPool<int>.Shared.Return(rented); } }
+        OrderedPrecheck?.Invoke(true);
+        if (!possible) { return original; }
         foreach (var projection in select.Columns)
         { if (ContainsVolatileCall(projection.Expression)) { return original; } }
 
+        if (hasNullEquality) { CollectOrderedNullEqualities(where, predicates!); }
+        OrderedCandidatesStarted?.Invoke();
         List<SqlIndexSeekPath>? candidates = null;
-        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates = null;
-        bool hasNullEquality = CollectOrderedNullEqualities(where, null);
-        foreach (var index in ReadIndexes(table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
+        for (int indexOrdinal = 0; indexOrdinal < indexes.Count; indexOrdinal++)
         {
-            string? proof = null;
-            if (index.Predicate is not null)
-            {
-                if (where is null || ProvePartialIndex(table, index, [where], 0) is not { } proven) { continue; }
-                proof = proven;
-            }
-            // Reuse bound predicate values when ordinary access already considered this index.
-            var seek = original is SqlIndexSeekPath chosen
-                ? chosen.Cost?.Alternatives.FirstOrDefault(path => ReferenceEquals(path.Index, index)) ??
-                    (ReferenceEquals(chosen.Index, index) ? chosen : null) : null;
-            if (seek is null || hasNullEquality)
-            {
-                if (predicates is null)
-                {
-                    predicates = new();
-                    if (select.Where is not null) { CollectSargablePredicates(table, select.Where, predicates, evaluator); }
-                    if (hasNullEquality) { CollectOrderedNullEqualities(where, predicates); }
-                }
-                seek = TryBuildSeek(table, index, predicates, out _, out _) ?? new SqlIndexSeekPath(index, [], null, null);
-            }
-            if (!MatchesIndexOrder(index, seek.EqualityValues.Count, out bool reverse)) { continue; }
+            var index = indexes[indexOrdinal];
+            if (!MatchOrderedIndex(table, index, original, projections, ordering, where, predicates, hasNullEquality, out var seek, out var proof, out bool reverse)) { continue; }
+            seek = hasNullEquality ? TryBuildSeek(table, index, predicates!, out _, out _) : seek;
+            seek ??= new SqlIndexSeekPath(index, [], null, null);
             if (candidates is null)
             {
                 candidates = original is SqlIndexSeekPath existing ? new(existing.Cost?.Alternatives ?? [existing]) : [];
@@ -105,51 +81,83 @@ internal sealed partial class SqlPlanner
         var ordered = candidates.First(path => path is SqlOrderedIndexPath);
         ordered.Cost = new(candidates);
         return ordered;
+    }
 
-        bool MatchesIndexOrder(SqlCatalogIndex index, int equalityPrefix, out bool reverse)
+    private bool MatchOrderedIndex(SqlCatalogTable table, SqlCatalogIndex index, SqlAccessPath original,
+        IReadOnlyList<SqlProjection> projections, IReadOnlyList<SqlBoundOrdering> ordering, SqlBoundExpression? where,
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates, bool hasNullEquality,
+        out SqlIndexSeekPath? seek, out string? proof, out bool reverse)
+    {
+        seek = null; proof = null; reverse = false;
+        if (original is SqlIndexSeekPath chosen)
         {
-            // An equality-bound leading component may be omitted from ORDER BY. The
-            // remaining requested keys must be a contiguous prefix of the suffix.
-            // PostgreSQL pathkeys.c:720-814 flips direction AND NULL placement together.
-            for (int start = 0; start <= equalityPrefix && start + ordering.Count <= index.ColumnNames.Count; start++)
+            if (ReferenceEquals(chosen.Index, index)) { seek = chosen; }
+            else if (chosen.Cost is { } cost)
             {
-                bool forward = true, backward = true;
-                for (int i = 0; i < ordering.Count; i++)
-                {
-                    var order = ordering[i];
-                    int ordinal = OrderingOrdinal(order, table, projections);
-                    if (!string.Equals(table.Columns[ordinal].Name, index.ColumnNames[start + i], StringComparison.OrdinalIgnoreCase))
-                    { forward = backward = false; break; }
-                    var keyOrder = index.KeyOrders[start + i];
-                    bool descending = ((int)keyOrder & 2) != 0, nullsFirst = ((int)keyOrder & 1) != 0;
-                    forward &= order.IsDescending == descending && order.NullsFirst == nullsFirst;
-                    backward &= order.IsDescending != descending && order.NullsFirst != nullsFirst;
-                }
-                if (forward || backward) { reverse = backward; return true; }
+                for (int i = 0; i < cost.Alternatives.Count; i++)
+                { if (ReferenceEquals(cost.Alternatives[i].Index, index)) { seek = cost.Alternatives[i]; break; } }
             }
-            reverse = false;
-            return false;
         }
+        // Ordinary access has already performed the same strong implication proof,
+        // including for an unbounded partial path. Reuse that membership proof.
+        if (index.Predicate is not null)
+        {
+            if (seek is not SqlPartialIndexSeekPath partial) { return false; }
+            proof = partial.Proof;
+        }
+        int equalityPrefix = seek?.EqualityValues.Count ?? 0;
+        if (hasNullEquality)
+        {
+            equalityPrefix = 0;
+            foreach (string name in index.ColumnNames)
+            {
+                int ordinal = FindColumnOrdinal(table, name);
+                bool fixedKey = OrderedNullEquality(where, ordinal);
+                if (predicates is not null && predicates.TryGetValue(ordinal, out var values))
+                { for (int i = 0; i < values.Count; i++) { fixedKey |= values[i].Op == SqlBinaryOperator.Equal; } }
+                if (!fixedKey) { break; }
+                equalityPrefix++;
+            }
+        }
+        // An equality-bound leading component may be omitted from ORDER BY. The
+        // remaining requested keys must be a contiguous prefix of the suffix.
+        // PostgreSQL pathkeys.c:720-814 flips direction AND NULL placement together.
+        for (int start = 0; start <= equalityPrefix && start + ordering.Count <= index.ColumnNames.Count; start++)
+        {
+            bool forward = true, backward = true;
+            for (int i = 0; i < ordering.Count; i++)
+            {
+                var order = ordering[i];
+                int ordinal = OrderingOrdinal(order, table, projections);
+                if (!string.Equals(table.Columns[ordinal].Name, index.ColumnNames[start + i], StringComparison.OrdinalIgnoreCase))
+                { forward = backward = false; break; }
+                var keyOrder = index.KeyOrders[start + i];
+                bool descending = ((int)keyOrder & 2) != 0, nullsFirst = ((int)keyOrder & 1) != 0;
+                bool noNulls = start + i < equalityPrefix || !table.Columns[ordinal].IsNullable || SqlPredicateImplication.RejectsNull(where, ordinal) ||
+                    index.Predicate is not null && SqlPredicateImplication.RejectsNull(
+                        SqlPartialIndexPredicate.Bind(table, index, _catalog.DefaultCollation, _functions, _cancellationToken), ordinal);
+                forward &= order.IsDescending == descending && (noNulls || order.NullsFirst == nullsFirst);
+                backward &= order.IsDescending != descending && (noNulls || order.NullsFirst != nullsFirst);
+            }
+            if (forward || backward) { reverse = backward; return true; }
+        }
+        reverse = false;
+        return false;
     }
 
     private static int OrderingOrdinal(SqlBoundOrdering order, SqlCatalogTable table, IReadOnlyList<SqlProjection> projections)
         => order.Key is SqlBoundColumn column ? column.Ordinal
             : projections[((SqlBoundSlot)order.Key).Ordinal - table.Columns.Count].ColumnOrdinal!.Value;
 
-    private static void MarkOrderedEqualityColumns(SqlBoundExpression? expression, Span<int> columns)
+    private static bool OrderedNullEquality(SqlBoundExpression? expression, int ordinal)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is SqlBoundLogical { IsOr: false } logical)
         {
-            foreach (var term in logical.Operands) { MarkOrderedEqualityColumns(term, columns); }
+            foreach (var term in logical.Operands) { if (OrderedNullEquality(term, ordinal)) { return true; } }
+            return false;
         }
-        else if (expression is SqlBoundIsNull { IsNegated: false, Operand: SqlBoundColumn nullable })
-        { columns[nullable.Ordinal] = 1; }
-        else if (expression is SqlBoundBinary { Operator: SqlBinaryOperator.Equal } binary)
-        {
-            if (binary.Left is SqlBoundColumn left && binary.Right is not SqlBoundColumn) { columns[left.Ordinal] = 1; }
-            if (binary.Right is SqlBoundColumn right && binary.Left is not SqlBoundColumn) { columns[right.Ordinal] = 1; }
-        }
+        return expression is SqlBoundIsNull { IsNegated: false, Operand: SqlBoundColumn column } && column.Ordinal == ordinal;
     }
 
     // IS NULL fixes a key just as equality does. Keep this admission local to the
