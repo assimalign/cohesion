@@ -1,5 +1,13 @@
 # Database.Sql.Client — Design
 
+## Directed index keys over the existing exchange (#1631, SQ-K1)
+
+InMemory and TCP carry per-column directions and NULL placement, composite seeks/ranges,
+canonical INDEXES metadata and CS00003 constraint-list refusals. Tests retain usable connections
+and verify that matching ORDER BY retains its ordering keys. No client API or wire format change
+is needed; order-based sort avoidance remains SQ-K3.
+
+
 ## Partial indexes over the existing exchange (#1630, SQ-P1)
 
 InMemory and TCP execute CREATE INDEX WHERE, predicate transitions, NULL-distinct partial

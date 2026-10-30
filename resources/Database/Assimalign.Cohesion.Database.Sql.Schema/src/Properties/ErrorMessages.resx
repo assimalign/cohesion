@@ -52,6 +52,9 @@
   <data name="SchemaValidatorValidateIndexesVoid" xml:space="preserve"><value>The index entry cannot be null.</value></data>
   <data name="SchemaValidatorValidateIndexesVoid2" xml:space="preserve"><value>The index name is declared more than once.</value></data>
   <data name="SchemaValidatorValidateIndexesVoid3" xml:space="preserve"><value>An index must declare at least one column or field.</value></data>
+  <data name="IndexKeyOrderInvalid" xml:space="preserve">
+    <value>Index key orders must match the key columns and contain only supported directions and NULL placements; primary keys require the default order.</value>
+  </data>
   <data name="ValidatorValidateMemberNamesVoid" xml:space="preserve"><value>The same column or field is named more than once.</value></data>
   <data name="ValidatorValidateMemberNamesVoid2" xml:space="preserve"><value>The column or field is not declared.</value></data>
   <data name="ValidatorValidateTypeReferenceVoid" xml:space="preserve"><value>Database type '{0}' is not a supported stored value type.</value></data>

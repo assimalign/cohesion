@@ -79,7 +79,13 @@ public static partial class SqlExpressionRenderer
         ArgumentNullException.ThrowIfNull(query);
         return "CREATE " + (query.IsUnique ? "UNIQUE " : "") + "INDEX " +
             (query.IfNotExists ? "IF NOT EXISTS " : "") + Identifier(query.IndexName) +
-            " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select(Identifier)) + ")" +
+            " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select((column, i) => Identifier(column) + (query.KeyOrders[i] switch
+            {
+                SqlIndexKeyOrder.AscendingNullsFirst => " NULLS FIRST",
+                SqlIndexKeyOrder.DescendingNullsFirst => " DESC",
+                SqlIndexKeyOrder.DescendingNullsLast => " DESC NULLS LAST",
+                _ => "",
+            }))) + ")" +
             (query.Predicate is null ? "" : " WHERE " + Render(query.Predicate));
     }
 

@@ -13,9 +13,8 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
-/// Verifies that join index probes preserve evaluator equality: floating keys,
-/// whose physical identity is finer than SQL comparison, scan; temporal keys,
-/// whose identity matches it, seek.
+/// Verifies the conservative join admission matrix: floating keys still scan;
+/// temporal keys whose identity matches evaluator equality seek.
 /// </summary>
 public sealed class SqlJoinIndexSemanticsTests
 {
@@ -25,7 +24,7 @@ public sealed class SqlJoinIndexSemanticsTests
     public async Task Join_CloseDoubleKeys_ShouldScanWithoutCollapsingDistinctRows()
     {
         // Arrange: both comparison and keys preserve adjacent IEEE values;
-        // joins still scan because signed-zero equality spans distinct keys.
+        // floating joins retain their existing scan admission after #1631.
         double left = 1d;
         double right = Math.BitIncrement(left);
         BitConverter.DoubleToInt64Bits(left).ShouldNotBe(BitConverter.DoubleToInt64Bits(right));

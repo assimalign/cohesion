@@ -78,7 +78,7 @@ internal sealed partial class SqlPlanExecutor
                 prepared = proposals.Select(values =>
                     (values, unique.Select(index => index.Metadata.Predicate is not null &&
                         (!MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false) || PartialNullKey(index.Metadata, index.KeyOrdinals, values))
-                        ? default : BuildIndexKeyUnchecked(table, index.KeyOrdinals, values)).ToArray()));
+                        ? default : BuildIndexKeyUnchecked(table, index.KeyOrdinals, values, index.Metadata.KeyOrders)).ToArray()));
             }
             if (!orderedDefaults)
             {
@@ -177,7 +177,7 @@ internal sealed partial class SqlPlanExecutor
                         var arbiter = arbiters[arbiterIndex];
                         if (arbiter.Metadata.Predicate is null ||
                             MatchesIndex(table, arbiter.Metadata, oldValues, cancellationToken: cancellationToken) && !PartialNullKey(arbiter.Metadata, arbiter.KeyOrdinals, oldValues))
-                        { pending[(arbiter.Metadata.Name, BuildIndexKeyUnchecked(table, arbiter.KeyOrdinals, oldValues))] = null; }
+                        { pending[(arbiter.Metadata.Name, BuildIndexKeyUnchecked(table, arbiter.KeyOrdinals, oldValues, arbiter.Metadata.KeyOrders))] = null; }
                     }
                 }
                 // PostgreSQL nodeModifyTable.c:1121-1232 arbitrates before heap/index insertion.
@@ -187,7 +187,7 @@ internal sealed partial class SqlPlanExecutor
                 for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                 {
                     var arbiter = arbiters[arbiterIndex];
-                    var key = write.OldLocation.HasValue ? BuildIndexKey(table, arbiter.KeyOrdinals, write.Values)
+                    var key = write.OldLocation.HasValue ? BuildIndexKey(table, arbiter.KeyOrdinals, write.Values, arbiter.Metadata.KeyOrders)
                         : proposal.Keys[arbiterOrdinals[arbiterIndex]];
                     if (key.Length == 0) { continue; }
                     pending[(arbiter.Metadata.Name, key)] = write;
@@ -350,7 +350,7 @@ internal sealed partial class SqlPlanExecutor
                     }
                     if (!matches || PartialNullKey(index.Metadata, index.KeyOrdinals, values)) { continue; }
                 }
-                keys[ordinal] = BuildIndexKeyUnchecked(table, index.KeyOrdinals, values);
+                keys[ordinal] = BuildIndexKeyUnchecked(table, index.KeyOrdinals, values, index.Metadata.KeyOrders);
             }
             return (values, keys);
         }

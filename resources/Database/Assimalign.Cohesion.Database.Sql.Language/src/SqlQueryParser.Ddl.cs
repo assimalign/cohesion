@@ -96,6 +96,7 @@ public sealed partial class SqlQueryParser
 
         // Key column list: ( col [, col]* ). Every element must name a column.
         var columns = new List<string>();
+        var keyOrders = new List<SqlIndexKeyOrder>();
         if (Expect(ref lexer, TokenType.LeftParen, "'(' and the index columns"))
         {
             while (true)
@@ -108,6 +109,19 @@ public sealed partial class SqlQueryParser
 
                 columns.Add(CurrentIdentifierText(ref lexer));
                 Advance(ref lexer);
+                if (IsKeyword(ref lexer, "DESC") || IsKeyword(ref lexer, "ASC") || IsWord(ref lexer, "NULLS"))
+                { RequireSchemaClause(ref lexer, SqlClauses.IndexKeyOrder); }
+                bool descending = IsKeyword(ref lexer, "DESC");
+                if (descending || IsKeyword(ref lexer, "ASC")) { Advance(ref lexer); }
+                bool nullsFirst = descending;
+                if (IsWord(ref lexer, "NULLS"))
+                {
+                    Advance(ref lexer);
+                    if (IsWord(ref lexer, "FIRST")) { nullsFirst = true; Advance(ref lexer); }
+                    else if (IsWord(ref lexer, "LAST")) { nullsFirst = false; Advance(ref lexer); }
+                    else { AddExpectedDiagnostic(ref lexer, "FIRST or LAST"); }
+                }
+                keyOrders.Add((SqlIndexKeyOrder)((descending ? 2 : 0) | (nullsFirst ? 1 : 0)));
                 if (lexer.Current.Type != TokenType.Comma)
                 {
                     break;
@@ -126,7 +140,7 @@ public sealed partial class SqlQueryParser
             predicate = ParseExpression(ref lexer);
         }
 
-        return new SqlCreateIndexExpression(indexName, table, columns, isUnique, ifNotExists, predicate, null,
+        return new SqlCreateIndexExpression(indexName, table, columns, keyOrders, isUnique, ifNotExists, predicate, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 

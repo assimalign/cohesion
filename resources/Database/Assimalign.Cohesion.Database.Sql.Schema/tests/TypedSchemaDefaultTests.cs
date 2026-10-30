@@ -252,7 +252,7 @@ public sealed class TypedSchemaDefaultTests
             table.DefaultSql(row => row.Value, "'it''s ready'")));
 
         // Act / Assert
-        typed.Format.ShouldBe("cohesion/database-schema/v10");
+        typed.Format.ShouldBe("cohesion/database-schema/v11");
         typed.CanonicalDocument.ShouldBe(raw.CanonicalDocument);
         typed.Hash.ShouldBe(raw.Hash);
     }

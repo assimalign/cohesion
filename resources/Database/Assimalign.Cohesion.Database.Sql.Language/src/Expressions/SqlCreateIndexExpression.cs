@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Language;
 
 /// <summary>
 /// Represents a parsed CREATE INDEX statement:
-/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [, ...]) [WHERE predicate]</c>.
+/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [ASC | DESC] [NULLS FIRST | LAST] [, ...]) [WHERE predicate]</c>.
 /// </summary>
 public sealed class SqlCreateIndexExpression : SqlQueryExpression
 {
@@ -15,6 +15,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
     /// </summary>
     /// <param name="indexName">The name of the index being created.</param>
     /// <param name="table">The table the index is created on.</param>
+    /// <param name="keyOrders">Effective per-column directions and NULL placement.</param>
     /// <param name="columns">The ordered key column names.</param>
     /// <param name="isUnique">Whether UNIQUE was specified.</param>
     /// <param name="ifNotExists">Whether IF NOT EXISTS was specified.</param>
@@ -25,6 +26,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
         string indexName,
         SqlTableReference table,
         IReadOnlyList<string> columns,
+        IReadOnlyList<SqlIndexKeyOrder> keyOrders,
         bool isUnique,
         bool ifNotExists,
         SqlExpression? predicate,
@@ -35,6 +37,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
         IndexName = indexName;
         Table = table;
         Columns = columns;
+        KeyOrders = keyOrders;
         IsUnique = isUnique;
         IfNotExists = ifNotExists;
         Predicate = predicate;
@@ -54,6 +57,9 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
     /// Gets the ordered key column names.
     /// </summary>
     public IReadOnlyList<string> Columns { get; }
+
+    /// <summary>Gets the effective order of each key column.</summary>
+    public IReadOnlyList<SqlIndexKeyOrder> KeyOrders { get; }
 
     /// <summary>
     /// Gets whether the index enforces key uniqueness.

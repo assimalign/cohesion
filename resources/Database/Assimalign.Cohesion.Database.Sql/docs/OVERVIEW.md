@@ -144,11 +144,11 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   strings, and ignores trailing spaces for comparison, grouping and index keys. CHAR-to-text
   casts and concatenation strip padding; LENGTH ignores it, while LIKE sees padded input.
   Domains and function parameters/results preserve their CHAR lengths. Compiled schemas use
-  format v10; result-header format 2 carries Character identity and the declared length.
+  format v11; result-header format 2 carries Character identity and the declared length.
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 31). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 32). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -284,7 +284,7 @@ physical index registrations exported by `Database.Indexing`.
 
 - **Fixed-length characters** — columns retain Character identity and length; domains and
   function signatures retain CHAR(n). The [current record-space format](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#execution-model)
-  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v10.
+  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v11.
 
 - **Metadata model** — table descriptions with stable `ObjectId`s, ordered columns
   typed by the shared type system (`DatabaseTypeInfo`), nullability, default
@@ -463,7 +463,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v10`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v11`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated

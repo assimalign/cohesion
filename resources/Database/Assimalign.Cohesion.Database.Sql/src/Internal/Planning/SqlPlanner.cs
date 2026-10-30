@@ -729,8 +729,8 @@ internal sealed partial class SqlPlanner
             return;
         }
 
-        // Physical IEEE keys distinguish signed zero; SQL equality combines them.
-        // A single encoded equality probe would omit the other zero representation.
+        // Retain the existing conservative signed-zero probe admission. SQL keys
+        // now canonicalize zero signs (#1631); widening the predicate matrix is separate work.
         if (value is double doubleValue && doubleValue == 0d || value is float floatValue && floatValue == 0f)
         {
             return;
@@ -748,8 +748,8 @@ internal sealed partial class SqlPlanner
     /// <summary>
     /// Range seeks require evaluator order to match encoded byte order. String
     /// predicates also pass the effective-collation compatibility check above.
-    /// Guid, binary and JSON remain equality-only. Floating keys place NaN last,
-    /// unlike SQL comparison, so even finite range bounds require a scan.
+    /// Guid, binary and JSON remain equality-only. Floating range admission stays
+    /// conservative in this run, although SQL key order now matches the comparer (#1631).
     /// </summary>
     private static bool IsRangeSargable(DatabaseType type) => type switch
     {
@@ -1262,7 +1262,7 @@ internal sealed partial class SqlPlanner
         }
 
         var partial = create.Predicate is null ? null : SqlPartialIndexPredicate.Declare(table, create, _catalog.DefaultCollation, _functions);
-        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists, partial);
+        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists, create.KeyOrders.Select(order => (SqlCatalogIndexKeyOrder)order).ToArray(), partial);
     }
 
     private SqlDropIndexPlan PlanDropIndex(SqlDropIndexExpression drop)
