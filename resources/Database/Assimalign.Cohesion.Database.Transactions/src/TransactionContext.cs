@@ -1,3 +1,5 @@
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Transactions.Internal;
@@ -134,16 +136,17 @@ public sealed class TransactionContext
         }
     }
 
-    // Called under the manager lock; physical undo also holds the coordinator apply gate.
+    // Called under the manager lock, before physical undo takes the coordinator apply gate.
     // The control bit excludes later statements while memory-only controls run without that
     // gate. The apply count makes every end drain an admitted control.
-    internal bool TryEnterUndoControl(bool rollback)
+    internal bool TryEnterUndoControl(bool rollback, out bool undoWasPending)
     {
-        if (_transaction is not null) { return _transaction.TryEnterUndoControl(rollback); }
+        if (_transaction is not null) { return _transaction.TryEnterUndoControl(rollback, out undoWasPending); }
         lock (_endSync)
         {
+            undoWasPending = (_admission & partialUndoFlag) != 0;
             if ((_admission & (endingFlag | undoControlFlag)) != 0 || _applying != 0 || State != TransactionState.Active ||
-                (!rollback && (_admission & partialUndoFlag) != 0)) { return false; }
+                (!rollback && undoWasPending)) { return false; }
             _admission |= undoControlFlag;
             if (rollback) { _admission |= partialUndoFlag; }
             _applying++;
@@ -263,6 +266,10 @@ public sealed class TransactionContext
             }
 
             _admission |= endingFlag;
+            // Ending supersedes the retry fence. Clear it under this existing latch, even
+            // when whole undo will be deferred; no new lock is added to ordinary ends.
+            _admission = (byte)(_admission & ~partialUndoFlag);
+            if ((_admission & undoControlFlag) != 0) { Monitor.PulseAll(_endSync); }
             return true;
         }
     }
@@ -272,18 +279,33 @@ public sealed class TransactionContext
     /// Every admitted apply is paired with <see cref="ExitApply"/>.
     /// </summary>
     /// <returns>True when the apply may run.</returns>
-    internal bool TryEnterApply()
+    internal bool TryEnterApply() => TryEnterApply(out _);
+
+    internal bool TryEnterApply(out bool pendingUndo, Action? waitingForUndoControl = null,
+        CancellationToken cancellationToken = default)
     {
         if (_transaction is not null)
         {
-            return _transaction.TryEnterApply();
+            return _transaction.TryEnterApply(out pendingUndo, waitingForUndoControl, cancellationToken);
         }
 
         lock (_endSync)
         {
-            if (_admission != 0 || State != TransactionState.Active)
+            while (true)
             {
-                return false;
+                // Decide the refusal under the same latch as admission. An end always
+                // wins over a pending retry, including a deferred writer still in _active.
+                pendingUndo = false;
+                if ((_admission & endingFlag) != 0 || State != TransactionState.Active) { return false; }
+                pendingUndo = (_admission & partialUndoFlag) != 0;
+                if (pendingUndo) { return false; }
+                if ((_admission & undoControlFlag) == 0) { break; }
+
+                // Create/release are short, memory-only controls and never need the apply
+                // gate held by this waiter. Recheck end/pending after every wake-up.
+                waitingForUndoControl?.Invoke();
+                Monitor.Wait(_endSync);
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
             _applying++;
@@ -306,7 +328,11 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
-            if (undoControl) { _admission = (byte)(_admission & ~undoControlFlag); }
+            if (undoControl)
+            {
+                _admission = (byte)(_admission & ~undoControlFlag);
+                Monitor.PulseAll(_endSync);
+            }
             if (--_applying == 0 && _drained is not null)
             {
                 drained = _drained;

@@ -36,8 +36,8 @@ public sealed class RecordSpaceVersionStore : VersionStore
     private TransactionSequence _statementWriter;
     private int _statementPosition = -1;
 
-    // These seams require exclusive admission for this writer; undo also holds the apply gate.
-    // The gate precedes _sync, and _sync
+    // These seams require exclusive admission for this writer; physical undo also holds the
+    // apply gate. When both are needed, the gate precedes _sync, and _sync
     // is released before storage/page/index latches or callbacks. No model lock is acquired
     // here. Other transactions ignore this active writer's creates and tombstones throughout
     // every batch; its manager registration keeps their horizons and pruning fences intact.
@@ -105,9 +105,8 @@ public sealed class RecordSpaceVersionStore : VersionStore
     private int LedgerPosition(TransactionSequence writer)
         => _ledger.TryGetValue(writer.Value, out var entries) ? entries.Count : 0;
 
-    internal async ValueTask RollbackToMarkerUnderGateAsync(TransactionSequence writer, TransactionUndoMarker marker)
+    internal void BeginRollbackToMarker(TransactionSequence writer, TransactionUndoMarker marker)
     {
-        List<LedgerEntry>? entries;
         lock (_sync)
         {
             ValidateMarker(writer, marker);
@@ -115,11 +114,18 @@ public sealed class RecordSpaceVersionStore : VersionStore
             scopes.Pending = marker;
             int index = scopes.Markers.IndexOf(marker) + 1;
             scopes.Markers.RemoveRange(index, scopes.Markers.Count - index);
-            _ledger.TryGetValue(writer.Value, out entries);
+            scopes.TombstonesToUndo = null;
         }
+    }
 
-        // The gate and pending admission freeze this writer's ledger. Other transactions'
-        // commits take _sync, so all prefix-proportional work runs outside that monitor.
+    internal void BuildRollbackLookup(TransactionSequence writer, TransactionUndoMarker marker)
+    {
+        List<LedgerEntry>? entries;
+        lock (_sync) { _ledger.TryGetValue(writer.Value, out entries); }
+
+        // Admitted control alone freezes this writer's ledger, excluding its statements
+        // and end. Prefix work needs neither the database apply gate nor _sync, so other
+        // writers can apply and commit while the duplicate lookup is built.
         // Retain only suffix tombstones, removing those already present before the marker:
         // memory is O(suffix), and an empty/create-only suffix never visits the prefix.
         HashSet<LedgerEntry>? tombstonesToUndo = null;
@@ -145,6 +151,19 @@ public sealed class RecordSpaceVersionStore : VersionStore
             }
         }
 
+        lock (_sync) { _undoScopes![writer.Value].TombstonesToUndo = tombstonesToUndo; }
+    }
+
+    internal async ValueTask RollbackToMarkerUnderGateAsync(TransactionSequence writer, TransactionUndoMarker marker)
+    {
+        List<LedgerEntry>? entries;
+        HashSet<LedgerEntry>? tombstonesToUndo;
+        lock (_sync)
+        {
+            _ledger.TryGetValue(writer.Value, out entries);
+            tombstonesToUndo = _undoScopes![writer.Value].TombstonesToUndo;
+        }
+
         // Reverse the combined row/index/maintenance order. Only remove a batch from the
         // ledger after its physical commit; an exception rolls its bracket back and retains
         // exactly the outstanding suffix for retry or whole-transaction abort. Bounded
@@ -167,7 +186,12 @@ public sealed class RecordSpaceVersionStore : VersionStore
             lock (_sync) { entries.RemoveRange(start, end - start); }
         }
 
-        lock (_sync) { _undoScopes![writer.Value].Pending = null; }
+        lock (_sync)
+        {
+            var scopes = _undoScopes![writer.Value];
+            scopes.Pending = null;
+            scopes.TombstonesToUndo = null;
+        }
     }
 
     internal RecordSpaceVersionStore(Storage storage, TransactionRecordSpace records, SemaphoreSlim applyGate)
@@ -732,6 +756,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
     {
         internal List<TransactionUndoMarker> Markers { get; } = new();
         internal TransactionUndoMarker? Pending { get; set; }
+        internal HashSet<LedgerEntry>? TombstonesToUndo { get; set; }
 
         private sealed class DebugView
         {
