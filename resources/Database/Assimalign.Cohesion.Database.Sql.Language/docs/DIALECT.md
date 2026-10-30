@@ -5,13 +5,18 @@
 CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [, ...]) WHERE predicate
 indexes exactly rows where the predicate is TRUE. FALSE and UNKNOWN are excluded. Predicates
 must be immutable Boolean row expressions: columns, literals, built-in casts and immutable scalar
-functions are supported. Application casts have no volatility declaration and are refused; domain checks must be immutable. Parameters, subqueries, aggregates, windows, sequences and stable or
+functions are supported. Reachable application casts have no volatility declaration and are refused;
+unrelated registered casts do not prevent creation. Domain checks must be immutable. Parameters,
+subqueries, aggregates, windows, sequences and stable or
 volatile calls fail CS05091. Unknown columns retain CS01015; non-Boolean results retain
 CS02003. Function overloads and column dependencies are persisted with canonical text.
-Every runtime conversion must be provably immutable, including conversions in untaken CASE and
-COALESCE alternatives. After reopening without a predicate function, or with its registration
-weakened from IMMUTABLE, reads still work and every write to the table refuses CS01009, regardless
-of short-circuit evaluation.
+Every reachable runtime conversion must be provably immutable. Columns, literals and declared
+function results bound the possible types; CASE, COALESCE and NULLIF include every alternative,
+even untaken ones. Unknown type sets check every conversion slot. After reopening without a
+predicate function, with its registration weakened from IMMUTABLE, with an incompatible result,
+or with a reachable cast/domain check that lost its immutable contract, SELECT, catalog reads and
+DROP INDEX work. Every write to the table refuses CS01009 naming the cause, regardless of short
+circuits or empty inputs. Malformed stored expressions and dependency vectors still fail the open.
 
 A partial UNIQUE index enforces only matching non-NULL keys; any NULL key component permits
 duplicates. It cannot enforce a primary key or serve as a foreign-key target. Ordinary unique
@@ -28,6 +33,10 @@ selection. Targeted ON CONFLICT inference uses unconditional indexes only; expli
 column/name targets refuse CS03035 and partial-WHERE inference retains CK00001. Untargeted
 DO NOTHING checks every unique index, including applicable partial indexes, and skips conflicting
 proposals. Applicability uses the proposed row's predicate result, without query implication.
+Each proposed row's CHECKs run first. Arbiters are visited in index creation order (a table-declared
+primary key first), stopping at the first conflict. A later partial predicate's evaluation error
+is raised only when arbitration reaches it. Up-front sorted key locking retains this error order;
+an errored predicate contributes no key lock.
 NULL-containing partial keys neither conflict nor take uniqueness locks, including on deletion.
 
 COHESION_SCHEMA.INDEXES and its nonstandard INFORMATION_SCHEMA.INDEXES alias expose nullable

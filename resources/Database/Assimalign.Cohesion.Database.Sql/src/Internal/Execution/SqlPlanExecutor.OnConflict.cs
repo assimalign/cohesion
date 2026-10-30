@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,6 +20,8 @@ internal sealed partial class SqlPlanExecutor
     private static readonly string _upsertSnapshotConflict = ErrorMessages.UpsertSnapshotConflict;
     private static readonly string _upsertIndexesChanged = ErrorMessages.UpsertIndexesChanged;
     private sealed record SqlUpsertWrite(ulong? OldLocation, object?[]? OldValues, object?[] Values, byte[] Record);
+    private sealed record SqlPartialUpsertPreparation(IEnumerable<(object?[] Values, IndexKey[] Keys)> Rows,
+        Dictionary<(object?[] Values, SqlCatalogIndex Index), DatabaseException> Failures);
 
     private static void EnsureUpsertIndexes(SqlCatalogTable table, List<SqlLiveIndex> indexes, SqlOnConflictPlan? plan)
     {
@@ -45,21 +48,39 @@ internal sealed partial class SqlPlanExecutor
         int cascadeRefusals = 0;
         try
         {
+            // PostgreSQL RelationGetIndexList (relcache.c:4934) walks creation/OID order.
+            // GetLiveIndexes retains the catalog's persisted registration order, including
+            // a table-declared PK before subsequently created partial arbiters.
             var arbiters = indexes.Where(index => plan.Arbiters.Any(arbiter => arbiter.Name == index.Metadata.Name)).ToList();
             var unique = indexes.Where(index => index.Metadata.IsUnique && index.Metadata.Predicate is null).ToList();
+            bool partialArbiters = false;
             for (int index = 0; index < arbiters.Count; index++)
             {
-                if (arbiters[index].Metadata.Predicate is not null) { unique.Add(arbiters[index]); }
+                if (arbiters[index].Metadata.Predicate is not null) { unique.Add(arbiters[index]); partialArbiters = true; }
             }
         RetryArbitration:
             cancellationToken.ThrowIfCancellationRequested();
             var hashes = new List<ulong>();
             // Build each proposal's keys once, sharing them between locking, arbitration and
             // pending inserts. Without side-effecting defaults the full batch precedes lookup.
-            IEnumerable<(object?[] Values, IndexKey[] Keys)> prepared = proposals.Select(values =>
-                (values, unique.Select(index => index.Metadata.Predicate is not null &&
-                    (!MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false) || PartialNullKey(index.Metadata, index.KeyOrdinals, values))
-                    ? default : BuildIndexKeyUnchecked(table, index.KeyOrdinals, values)).ToArray()));
+            // Prelocking must not change error order: save predicate failures beside their
+            // row/index, with no key to lock. Raise only when arbitration reaches that index,
+            // after this row's CHECKs and any earlier conflicting arbiter (execIndexing.c:615-653).
+            SqlPartialUpsertPreparation? partialPreparation = null;
+            IEnumerable<(object?[] Values, IndexKey[] Keys)> prepared;
+            if (partialArbiters)
+            {
+                partialPreparation = PreparePartialUpsert(table, unique, proposals, cancellationToken);
+                prepared = partialPreparation.Rows;
+            }
+            else
+            {
+                // Preserve ordinary upserts' established preparation and allocation shape.
+                prepared = proposals.Select(values =>
+                    (values, unique.Select(index => index.Metadata.Predicate is not null &&
+                        (!MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false) || PartialNullKey(index.Metadata, index.KeyOrdinals, values))
+                        ? default : BuildIndexKeyUnchecked(table, index.KeyOrdinals, values)).ToArray()));
+            }
             if (!orderedDefaults)
             {
                 prepared = prepared.ToList();
@@ -93,7 +114,10 @@ internal sealed partial class SqlPlanExecutor
                 for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                 {
                     var arbiter = arbiters[arbiterIndex];
-                    var key = proposal.Keys[arbiterOrdinals[arbiterIndex]];
+                    int ordinal = arbiterOrdinals[arbiterIndex];
+                    if (partialPreparation is not null && partialPreparation.Failures.TryGetValue((proposal.Values, arbiter.Metadata), out var failure))
+                    { ExceptionDispatchInfo.Throw(failure); }
+                    var key = proposal.Keys[ordinal];
                     if (key.Length == 0) { continue; } // This partial arbiter does not cover this proposed key.
                     if (pending.TryGetValue((arbiter.Metadata.Name, key), out var prior))
                     {
@@ -286,6 +310,7 @@ internal sealed partial class SqlPlanExecutor
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, writes.Count)
                     : MaterializeProjected(returning!, returned, writes.Count), cancellationToken).ConfigureAwait(false);
             }, durable: false, cancellationToken).ConfigureAwait(false);
+
         }
         catch when (!applyStarted)
         {
@@ -297,6 +322,35 @@ internal sealed partial class SqlPlanExecutor
 
         TransactionAbortedException SnapshotConflict() => new(string.Format(CultureInfo.CurrentCulture,
             _upsertSnapshotConflict, table.Schema, table.Name));
+    }
+
+    private SqlPartialUpsertPreparation PreparePartialUpsert(SqlCatalogTable table, List<SqlLiveIndex> indexes,
+        IEnumerable<object?[]> proposals, CancellationToken cancellationToken)
+    {
+        var failures = new Dictionary<(object?[], SqlCatalogIndex), DatabaseException>();
+        return new(proposals.Select(Prepare), failures);
+
+        (object?[] Values, IndexKey[] Keys) Prepare(object?[] values)
+        {
+            var keys = new IndexKey[indexes.Count];
+            for (int ordinal = 0; ordinal < indexes.Count; ordinal++)
+            {
+                var index = indexes[ordinal];
+                if (index.Metadata.Predicate is not null)
+                {
+                    bool matches;
+                    try { matches = MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false); }
+                    catch (DatabaseException failure)
+                    {
+                        failures[(values, index.Metadata)] = failure;
+                        continue;
+                    }
+                    if (!matches || PartialNullKey(index.Metadata, index.KeyOrdinals, values)) { continue; }
+                }
+                keys[ordinal] = BuildIndexKeyUnchecked(table, index.KeyOrdinals, values);
+            }
+            return (values, keys);
+        }
     }
 
     // No heap/index mutation or RETURNING projection precedes the apply below arbitration.

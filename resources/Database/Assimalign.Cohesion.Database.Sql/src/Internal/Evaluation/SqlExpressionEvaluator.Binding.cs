@@ -232,13 +232,13 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlBoundExpression JsonBinaryToText(SqlExpression syntax, SqlBoundExpression value)
         => StaticTypeOf(syntax) == DatabaseType.JsonBinary
-            ? new SqlBoundCast(value, "TEXT", SqlType.Text, ResolveExpressionCasts(null, SqlType.Text, syntax.Location),
+            ? new SqlBoundCast(value, "TEXT", SqlType.Text, ResolveExpressionCasts(syntax, null, SqlType.Text, syntax.Location),
                 _functions.Database, _defaultCollation, sourceType: DatabaseType.JsonBinary)
             : value;
 
     private SqlBoundExpression CharacterToText(SqlExpression syntax, SqlBoundExpression value)
         => StaticTypeOf(syntax) == DatabaseType.Character
-            ? new SqlBoundCast(value, "TEXT", SqlType.Text, ResolveExpressionCasts(null, SqlType.Text, syntax.Location), _functions.Database, _defaultCollation)
+            ? new SqlBoundCast(value, "TEXT", SqlType.Text, ResolveExpressionCasts(syntax, null, SqlType.Text, syntax.Location), _functions.Database, _defaultCollation)
             : value;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -366,7 +366,7 @@ internal sealed partial class SqlExpressionEvaluator
             return CastTargetFailure(cast, _functions.Types);
         }
 
-        var bound = new SqlBoundCast(operand, cast.TargetType, target, ResolveExpressionCasts(SourceDomain(cast.Operand), target, cast.Location),
+        var bound = new SqlBoundCast(operand, cast.TargetType, target, ResolveExpressionCasts(cast.Operand, SourceDomain(cast.Operand), target, cast.Location),
             _functions.Database, _defaultCollation, cast.Location, StaticTypeOf(cast.Operand));
         // PostgreSQL parse_coerce.c:233-249 converts an unknown string constant while
         // analyzing the CAST. Include text the engine already folded to a constant;
@@ -375,11 +375,11 @@ internal sealed partial class SqlExpressionEvaluator
             ? new SqlBoundConstant(Evaluate(bound, [])) : bound;
     }
 
-    private SqlCast?[] ResolveExpressionCasts(SqlType? source, SqlType target, Location? location = null)
+    private SqlCast?[] ResolveExpressionCasts(SqlExpression operand, SqlType? source, SqlType target, Location? location = null)
     {
         var conversions = _functions.Types.ResolveCasts(source, target);
         if (_bindingContext == SqlBindingContext.IndexPredicate)
-        { SqlPartialIndexPredicate.ValidateConversions(conversions, target, location); }
+        { SqlPartialIndexPredicate.ValidateConversions(conversions, target, operand, this, location); }
         return conversions;
     }
 

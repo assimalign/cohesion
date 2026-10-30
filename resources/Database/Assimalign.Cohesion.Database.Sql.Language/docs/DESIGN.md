@@ -12,6 +12,8 @@ The profile adds CREATE INDEX WHERE beside CREATE INDEX (+1 clause). Parser comp
 positive/negative conformance and rendering cases advance together. CREATE INDEX subqueries
 reach engine predicate validation and fail with CS05091. They are never executable predicates.
 SQ-P1 deliberately advertises no implication/access optimization; see DIALECT.
+The execution conformance corpus covers bounded runtime cast slots, registration changes on
+reopen, and constraint/creation-order arbitration with deferred partial-predicate failures.
 
 
 ## Foreign-key ON UPDATE metadata (#1723, SQ-F1)

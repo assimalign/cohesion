@@ -1199,6 +1199,9 @@ internal sealed partial class SqlPlanExecutor
         return scope.BindPredicate(expression);
     }
 
+    internal static void ValidatePersistedPredicate(SqlExpression expression, SqlCatalogTable table, SqlExpressionEvaluator scope)
+        => new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
+
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
         => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
 

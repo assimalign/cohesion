@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -47,23 +48,42 @@ internal static class SqlPartialIndexPredicate
     {
         var expression = SqlPersistedExpression.Load(index.Predicate!, index.Name);
         var scope = Scope(table, collation, functions, cancellationToken);
-        SqlDefinitionBinder.PinCalls(expression, scope, index.PredicateFunctionCalls);
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Collect(expression);
+        try
+        {
+            SqlDefinitionBinder.PinCalls(expression, scope, index.PredicateFunctionCalls);
+            Collect(expression);
+        }
+        catch (DatabaseException failure)
+        { throw new SqlCatalogException("CS06059", ErrorMessages.PartialPredicateDependencies, failure); }
         if (!columns.SetEquals(index.PredicateColumns))
         { throw new SqlCatalogException("CS06059", ErrorMessages.PartialPredicateDependencies); }
-        // Resolve the entire stored contract before binding its executable tree. A
-        // short-circuit must never hide a missing or weakened application registration.
-        if (SqlDefinitionBinder.HasUnavailableCall(expression, scope, SqlFunctionVolatility.Immutable))
+        try
         {
-            var unresolved = new SqlUnresolvedDefinition(index.Name, index.Predicate!, ErrorMessages.PartialPredicateUnavailable);
-            return new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(unresolved));
+            // Resolve every alternative before compiling: short circuits cannot hide a
+            // missing or weakened registration, even for a write with no input rows.
+            if (UnavailableRegistration(expression, scope) is { } unavailable)
+            { return Unresolved(index, unavailable.Signature, unavailable.Reason); }
+            Validate(expression, table, scope);
+            SqlPersistedExpression.Bind(expression, scope);
+            SqlPlanExecutor.ValidatePersistedPredicate(expression, table, scope);
+            SqlPlanner.ValidateExpression(expression, scope);
+            RequireBoolean(expression, scope);
+            return scope.BindPredicate(expression);
         }
-        Validate(expression, table, scope);
-        SqlPersistedExpression.Bind(expression, scope);
-        SqlPlanner.ValidateExpression(expression, scope);
-        RequireBoolean(expression, scope);
-        return scope.BindPredicate(expression);
+        catch (SqlPartialIndexRegistrationException failure)
+        { return Unresolved(index, failure.Signature, failure.Message); }
+        catch (SqlFunctionResultMismatchException mismatch)
+        { return Unresolved(index, mismatch.Call.FunctionName, mismatch.Message); }
+        catch (DatabaseException failure)
+        {
+            // As for CHECK, only a changed application contract explains an unresolved
+            // definition. Invalid stored syntax, columns and dependency vectors are damage.
+            throw new DatabaseException(string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.PartialPredicateBindingFailed, index.Name, index.Predicate, failure.Message,
+                SqlPersistedExpression.DamagedCatalogHint),
+                SqlExecutionException.DiagnosticsOf(failure, SqlExecutionException.DamagedDefinitionCode, discardLocations: true), failure);
+        }
 
         void Collect(SqlExpression node)
         {
@@ -73,19 +93,82 @@ internal static class SqlPartialIndexPredicate
         }
     }
 
+    private static SqlBoundExpression Unresolved(SqlCatalogIndex index, string signature, string reason)
+    {
+        var unresolved = new SqlUnresolvedDefinition(index.Name, signature, reason);
+        return new SqlBoundFailure(() => throw SqlEvaluationException.UnregisteredFunction(unresolved));
+    }
+
+    private static (string Signature, string Reason)? UnavailableRegistration(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        foreach (var child in SqlPlanner.Children(expression))
+        { if (UnavailableRegistration(child, scope) is { } unavailable) { return unavailable; } }
+        if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
+        {
+            try
+            {
+                var function = scope.ResolveFunction(call);
+                if (function is null) { return (call.FunctionName, ErrorMessages.RegistrationMissingReason); }
+                if (function is SqlExpressionFunction { Unresolved: { } reason }) { return (call.FunctionName, reason); }
+                if (function.Kind != SqlFunctionKind.Scalar || function.Volatility != SqlFunctionVolatility.Immutable)
+                { return (call.FunctionName, ErrorMessages.ImmutableRegistrationMissing); }
+            }
+            catch (DatabaseException failure) { return (call.FunctionName, failure.Message); }
+        }
+        if (expression is SqlCastExpression cast && scope.TryResolveCastTarget(cast) is { Check: SqlExpressionFunction { Unresolved: { } domainReason } } target)
+        { return (target.Name, domainReason); }
+        return null;
+    }
+
     private static SqlExpressionEvaluator Scope(SqlCatalogTable table, Collation collation,
         SqlFunctionEnvironment functions, CancellationToken cancellationToken)
         => new(table.Columns, null, defaultCollation: collation, functions: functions,
             cancellationToken: cancellationToken, foldConstants: false, bindingContext: SqlBindingContext.IndexPredicate);
 
-    internal static void ValidateConversions(SqlCast?[] conversions, SqlType target, Assimalign.Cohesion.Database.Language.Location? location)
+    internal static void ValidateConversions(SqlCast?[] conversions, SqlType target, SqlExpression operand,
+        SqlExpressionEvaluator scope, Assimalign.Cohesion.Database.Language.Location? location)
     {
-        // The evaluator dispatches by the runtime value's type, which CASE/COALESCE
-        // can change independently of the inferred source. Every dispatch slot must
-        // be safe, including alternatives the current rows will never select.
-        if (conversions.Any(conversion => conversion is not null && !SqlStandardCasts.Contains(conversion)) ||
-            target.Check is { Volatility: not SqlFunctionVolatility.Immutable })
-        { throw new SqlPlanningException("CS05091", ErrorMessages.PartialPredicateInvalid, location); }
+        // Dispatch uses the value's runtime type, not CASE's inferred type. Check the
+        // union of all alternatives (including unreachable ones), or every slot if unknown.
+        uint types = RuntimeTypes(operand, scope);
+        for (int slot = 0; slot < conversions.Length; slot++)
+        {
+            if ((types & (1u << slot)) != 0 && conversions[slot] is { } conversion && !SqlStandardCasts.Contains(conversion))
+            { throw new SqlPartialIndexRegistrationException(conversion.Source.Name + " -> " + conversion.Target.Name,
+                string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateCastUnavailable, conversion.Source.Name, conversion.Target.Name), location); }
+        }
+        if (target.Check is { Volatility: not SqlFunctionVolatility.Immutable })
+        { throw new SqlPartialIndexRegistrationException(target.Name,
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.PartialPredicateDomainUnavailable, target.Name), location); }
+    }
+
+    private static uint RuntimeTypes(SqlExpression expression, SqlExpressionEvaluator scope)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        switch (expression)
+        {
+            case SqlColumnReferenceExpression:
+            case SqlLiteralExpression:
+                return 1u | (1u << (int)scope.StaticTypeOf(expression));
+            case SqlCastExpression cast when scope.TryResolveCastTarget(cast) is { } target:
+                return 1u | (1u << (int)target.Storage.Type);
+            case SqlCollateExpression collate:
+                return RuntimeTypes(collate.Operand, scope);
+            case SqlCaseExpression conditional:
+                uint alternatives = conditional.ElseResult is null ? 1u : RuntimeTypes(conditional.ElseResult, scope);
+                foreach (var clause in conditional.WhenClauses) { alternatives |= RuntimeTypes(clause.Result, scope); }
+                return alternatives;
+            case SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName) ||
+                call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase):
+                uint arguments = 1u;
+                foreach (var argument in call.Arguments) { arguments |= RuntimeTypes(argument, scope); }
+                return arguments;
+            case SqlFunctionCallExpression call when scope.ResolveFunction(call) is { ReturnType.IsPseudo: false } function:
+                return 1u | (1u << (int)function.ReturnType.Storage.Type);
+            default:
+                return uint.MaxValue;
+        }
     }
 
     private static void RequireBoolean(SqlExpression expression, SqlExpressionEvaluator scope)
@@ -114,7 +197,7 @@ internal static class SqlPartialIndexPredicate
             var conversions = scope.Functions.Types.ResolveCasts(scope.SourceDomain(cast.Operand), target);
             // Application casts have no volatility contract. Only standard conversions
             // and immutable domain checks can prove a persisted predicate immutable.
-            ValidateConversions(conversions, target, cast.Location);
+            ValidateConversions(conversions, target, cast.Operand, scope, cast.Location);
         }
         if (expression is SqlColumnReferenceExpression column)
         {

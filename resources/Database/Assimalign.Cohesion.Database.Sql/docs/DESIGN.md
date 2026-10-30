@@ -13,7 +13,12 @@ indexes retain their existing NULL identity and DML allocation shape.
 
 Predicate admission allows immutable scalar functions, built-in casts, comparisons and Boolean row
 expressions, while CS05091 rejects parameters, sequence calls, subqueries, aggregates,
-windows and stable/volatile functions. Application casts have no volatility metadata and are conservatively refused, as are non-immutable domain checks. Admission checks every runtime conversion slot, including implicit conversions and every CASE/COALESCE alternative, even unreachable branches.
+windows and stable/volatile functions. Application casts have no volatility metadata and are
+refused when reachable, as are non-immutable domain checks. Admission bounds runtime conversion
+slots by a column's storage type, a literal's type or a function's declared result. CASE, COALESCE
+and NULLIF contribute every alternative, including unreachable branches. Unknown result sets
+retain the conservative all-slot check. Explicit and implicit conversions share this admission;
+an unrelated registered cast does not refuse an INT-to-INT or NUMERIC-to-INT predicate.
 Binding errors retain CS01 identities; Boolean
 requirements retain CS02003. CS03082 rejects a partial primary key. CS03083 refuses TYPE
 on a predicate column, including widening without conversion: drop and recreate the index around the type change. CS03084
@@ -39,24 +44,38 @@ Until SQ-P2 proves implication, every partial index is excluded from query seeks
 cardinality probes, constraint lookups and foreign-key targets. Targeted ON CONFLICT inference
 still refuses partial indexes. Untargeted DO NOTHING checks every unique index using each proposed
 row's own membership; FALSE/UNKNOWN and NULL-containing partial keys do not arbitrate or take key
-locks. PostgreSQL executor/execIndexing.c:601-632 filters arbiters by row membership and
+locks. Proposed CHECKs precede arbitration. Sorted batch locking prepares each predicate result
+or saves its failure per row/index; an errored predicate contributes no lock. Arbitration visits
+creation order and stops at the first conflict, raising a saved failure only when it reaches that
+index. Catalog index lists follow the already persisted registration vector, preserving this
+order across dropped dictionary slots, reopen and storage rewrites; table-declared primary keys
+precede later indexes. PostgreSQL executor/nodeModifyTable.c:1108 checks constraints first,
+utils/cache/relcache.c:4934 sorts index OIDs, and executor/execIndexing.c:615-653 stops at the first
+conflict. PostgreSQL executor/execIndexing.c:601-632 filters arbiters by row membership and
 access/nbtree/nbtinsert.c:128-140 bypasses unique checking for NULL keys. Partial NULL tombstones
 use a borrowed tree handle attached to the same fixed root and shared latch through the existing
 manager composition API, with no key-lock manager. Its ordinary DeleteAsync performs one atomic
 stamp mutation and keeps the same undo ledger and recovery stamps. The handle is weakly cached
 by the canonical tree identity, never published, and used only for NULL-containing partial keys.
+Deferred-error preparation is allocated only for statements with partial arbiters; ordinary
+upserts retain their established proposal buffers and exact allocation shape.
 INFORMATION_SCHEMA.INDEXES is an explicitly nonstandard alias of
 COHESION_SCHEMA.INDEXES; both expose nullable canonical PREDICATE text, including through
 user views. Partial unique indexes are absent from TABLE_CONSTRAINTS. The conformance oracle
 compares live cursor entries with full predicate scans after generated writes, rewrites and
 TRUNCATE; crash images and counter-driven nonparallel races cover publication and key waits.
 
-At reopen, missing or weakened predicate function registrations bind as one unresolved predicate.
+At reopen, missing or weakened predicate function registrations, incompatible registered results,
+reachable application casts and domain checks that lost immutability bind as an unresolved predicate,
+naming the registration and cause. Binding reuses CHECK's application-result validation.
 The database opens and reads work; every DML write to that table refuses CS01009 before row
 evaluation, even when an OR/CASE branch or an empty input could avoid the call. Malformed persisted
 syntax and dependency vectors remain catalog failures. This follows persisted CHECK handling.
 Predicate bindings belong to the function-environment generation, so restoring a missing immutable
 SQL definition rebinds them; dropping the affected index also restores write availability.
+Unresolved state belongs to that function-environment generation and is cleared when catalog
+validation finds no unresolved predicate. Writes to tables without partial indexes return before
+catalog validation, even when another table remains unresolved and unrelated DDL invalidates it.
 
 
 ### Partial-index diagnostics

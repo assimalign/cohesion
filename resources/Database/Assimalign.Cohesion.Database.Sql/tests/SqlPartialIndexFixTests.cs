@@ -21,6 +21,7 @@ public sealed class SqlPartialIndexFixTests
     [InlineData("CASE WHEN active THEN 1 ELSE TRUE END")]
     [InlineData("CASE WHEN TRUE THEN 1 ELSE TRUE END")]
     [InlineData("COALESCE(k, TRUE)")]
+    [InlineData("NULLIF(k, TRUE)")]
     public async Task ExecuteAsync_MutableAlternativeCast_ShouldRefuseBeforeCallback(string operand)
     {
         // Arrange

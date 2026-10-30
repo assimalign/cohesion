@@ -45,6 +45,9 @@
   <data name="PartialPredicateInvalid" xml:space="preserve"><value>An index predicate must be immutable and row-local; parameters, sequences, subqueries, aggregates and windows are prohibited.</value></data>
   <data name="PartialPredicateUnprepared" xml:space="preserve"><value>Index predicate membership was not prepared before applying the write.</value></data>
   <data name="PartialPredicateUnavailable" xml:space="preserve"><value>whose persisted immutable function contract this engine cannot resolve</value></data>
+  <data name="PartialPredicateCastUnavailable" xml:space="preserve"><value>whose reachable cast from {0} to {1} is application-registered and has no immutable contract</value></data>
+  <data name="PartialPredicateDomainUnavailable" xml:space="preserve"><value>whose domain {0} no longer has an immutable check</value></data>
+  <data name="PartialPredicateBindingFailed" xml:space="preserve"><value>Index predicate '{0}' ({1}) does not bind: {2} {3}</value></data>
   <data name="PartialPredicateTypeChange" xml:space="preserve"><value>Column '{0}' is read by partial index '{1}'; drop the index before changing the column type.</value></data>
   <data name="IndexKeyTooLarge" xml:space="preserve"><value>Index key for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
   <data name="ColumnDefaultMissing" xml:space="preserve">

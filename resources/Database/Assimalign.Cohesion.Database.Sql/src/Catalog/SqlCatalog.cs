@@ -880,9 +880,20 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             var result = new List<SqlCatalogIndex>();
 
+            // The persisted registration vector appends creations and retains survivors'
+            // order, unlike dictionary slots reused after DROP. Keep this order through
+            // reopen and storage rewrites, with a table-declared primary key first.
+            for (int ordinal = 0; ordinal < _registrations.Count; ordinal++)
+            {
+                var registration = _registrations[ordinal];
+                if (registration.ObjectId == tableObjectId &&
+                    _indexes.TryGetValue((tableObjectId, registration.Definition.Name), out var registered))
+                { result.Add(registered.Index); }
+            }
             foreach (var slot in _indexes.Values)
             {
-                if (slot.Index.TableObjectId == tableObjectId)
+                // Metadata-only catalog callers can publish descriptions before trees.
+                if (slot.Index.TableObjectId == tableObjectId && !result.Contains(slot.Index))
                 {
                     result.Add(slot.Index);
                 }

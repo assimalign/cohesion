@@ -43,7 +43,6 @@ internal sealed class SqlBoundTableCache
     private SqlBindingEntry<CacheState>? _pending;
     private long _bindCount;
     private int _validationWalkCount;
-    private bool _hasUnresolvedIndexPredicates;
 
     // The required open-time binding pass is separate from repeat Build validation.
     internal int ValidationWalkCount => Volatile.Read(ref _validationWalkCount);
@@ -144,16 +143,17 @@ internal sealed class SqlBoundTableCache
         var state = GetState(cancellationToken);
         var bound = state.IndexPredicates.GetValue(table, static _ => new()).GetValue(index, _ =>
             new(token => SqlPartialIndexPredicate.Bind(table, index, _catalog.DefaultCollation, state.Functions, token))).Get(cancellationToken);
-        if (bound is SqlBoundFailure) { Volatile.Write(ref _hasUnresolvedIndexPredicates, true); }
+        if (bound is SqlBoundFailure) { Volatile.Write(ref state.HasUnresolvedIndexPredicates, true); }
         return bound;
     }
 
     internal void EnsureIndexPredicatesResolved(SqlCatalogTable table, CancellationToken cancellationToken)
     {
-        // Normally a single flag read. Even in an unresolved database, the generation's
-        // cached map adds no allocation to writes of other tables. Catalog/function DDL
-        // invalidates validation, so restoring a function or dropping an index is a remedy.
-        if (!Volatile.Read(ref _hasUnresolvedIndexPredicates)) { return; }
+        // The normal path stays a flag read. An unresolved generation must still leave
+        // tables without partial indexes out of validation, including after unrelated DDL.
+        var state = Volatile.Read(ref _state);
+        if (!Volatile.Read(ref state.HasUnresolvedIndexPredicates)) { return; }
+        if (!_catalog.GetIndexes(table.ObjectId).Any(static index => index.Predicate is not null)) { return; }
         if (GetValidation(cancellationToken).IndexPredicates is { } predicates && predicates.TryGetValue(table, out var unresolved))
         { unresolved.Raise(); }
     }
@@ -307,6 +307,7 @@ internal sealed class SqlBoundTableCache
             }
         }
 
+        Volatile.Write(ref state.HasUnresolvedIndexPredicates, unresolvedIndexes is not null);
         return new Validation(definition, unresolvedDomain, unresolvedIndexes);
     }
 
@@ -645,6 +646,7 @@ internal sealed class SqlBoundTableCache
         internal readonly SqlFunctionEnvironment Functions;
         internal ulong ValidatedGeneration;
         internal SqlBindingEntry<Validation>? Validation;
+        internal bool HasUnresolvedIndexPredicates;
 
         internal CacheState(SqlBoundTableCache owner, SqlFunctionEnvironment functions)
         {
