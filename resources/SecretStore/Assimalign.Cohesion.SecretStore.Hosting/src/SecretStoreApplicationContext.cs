@@ -26,8 +26,7 @@ public sealed class SecretStoreApplicationContext : HostContext, ISecretStoreApp
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
 
-        // The opt-in resource runner asserts that the host content root equals the ambient resource content root,
-        // so an enabled resource seeds it from the ambient context; a plain application keeps it unset.
+        // The builder roots a plain application's content at the application base directory.
         _environment = new HostEnvironment(environmentName) { ContentRootPath = contentRootPath };
     }
 

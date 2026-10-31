@@ -26,8 +26,7 @@ public sealed class ConfigurationStoreApplicationContext : HostContext, IConfigu
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
 
-        // The opt-in resource runner asserts that the host content root equals the ambient resource content root,
-        // so an enabled resource seeds it from the ambient context; a plain application keeps it unset.
+        // A plain application keeps the content root unset.
         _environment = new HostEnvironment(environmentName) { ContentRootPath = contentRootPath };
     }
 

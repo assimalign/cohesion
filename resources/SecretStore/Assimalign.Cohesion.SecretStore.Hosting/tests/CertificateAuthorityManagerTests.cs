@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore.Hosting.Internal;
 using Assimalign.Cohesion.Security.DataProtection;
 using Assimalign.Cohesion.SecretStore;
@@ -25,12 +24,6 @@ public sealed class CertificateAuthorityManagerTests
         string dataPath = SecretStoreTestHost.CreateTemporaryDirectory();
         try
         {
-            using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-                applicationName: "appa",
-                resourceName: "secrets",
-                environmentName: "Development",
-                gatewayName: null,
-                contentRootPath: dataPath));
             IDataProtectionProvider firstProvider = CreateProtectionProvider(dataPath);
             string firstRoot;
             string firstLeaf;
@@ -94,12 +87,6 @@ public sealed class CertificateAuthorityManagerTests
         string childPath = SecretStoreTestHost.CreateTemporaryDirectory();
         try
         {
-            using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-                applicationName: "appa",
-                resourceName: "secrets",
-                environmentName: "Development",
-                gatewayName: "local",
-                contentRootPath: childPath));
             using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             using var platform = new CertificateAuthorityManager(
                 rootPath,

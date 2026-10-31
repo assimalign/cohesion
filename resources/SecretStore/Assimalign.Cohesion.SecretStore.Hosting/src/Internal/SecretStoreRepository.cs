@@ -10,8 +10,6 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Security.DataProtection;
-using Assimalign.Cohesion.ApplicationModel.Internal;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
 
@@ -140,120 +138,6 @@ internal sealed class SecretStoreRepository
         {
             CryptographicOperations.ZeroMemory(encodedPath);
             CryptographicOperations.ZeroMemory(hash);
-        }
-    }
-
-    internal async Task StoreCommandSecretAsync(ResourceCommand command, string source, ReadOnlyMemory<byte> value,
-        CancellationToken cancellationToken = default)
-    {
-        if (!SecretStoreCommandGrammar.IsValidPath(command.Key))
-        {
-            throw new ResourceCommandRejectedException(ErrorMessages.CommandPathInvalid);
-        }
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureInitialized();
-            string path = GetPath(command.Key);
-            byte[]? durable = await ProtectedFileStore.ReadAsync(path, _protector, cancellationToken).ConfigureAwait(false);
-            try
-            {
-                if (durable is not null)
-                {
-                    SecretCommandDocument? previous = ReadCommandDocument(command.Key, durable);
-                    try
-                    {
-                        if (previous is null || previous.Owner != command.Owner)
-                        {
-                            throw new ResourceCommandRejectedException($"secretstore.add-secret path '{command.Key}' belongs to '{previous?.Owner ?? "the resource"}'; owner '{command.Owner}' cannot overwrite it.");
-                        }
-                        if (previous.Source != source || !previous.Value.AsSpan().SequenceEqual(value.Span))
-                        {
-                            throw new ResourceCommandRejectedException($"secretstore.add-secret path '{command.Key}' conflicts with its stored declaration; delete it before changing its source or value.");
-                        }
-                    }
-                    finally
-                    {
-                        if (previous is not null) { CryptographicOperations.ZeroMemory(previous.Value); }
-                    }
-                }
-                byte[] valueCopy = value.ToArray();
-                byte[] metadata;
-                try
-                {
-                    metadata = JsonSerializer.SerializeToUtf8Bytes(
-                        new SecretCommandDocument(command.Id, command.Owner, command.Key, source, valueCopy),
-                        SecretRepositoryJsonContext.Default.SecretCommandDocument);
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(valueCopy);
-                }
-                byte[] encoded = Encode(command.Key, metadata);
-                encoded[0] = 2;
-                try
-                {
-                    await ProtectedFileStore.WriteAsync(path, _protector, encoded, cancellationToken).ConfigureAwait(false);
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(metadata);
-                    CryptographicOperations.ZeroMemory(encoded);
-                }
-            }
-            finally
-            {
-                if (durable is not null) { CryptographicOperations.ZeroMemory(durable); }
-            }
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    internal async Task DeleteCommandSecretAsync(ResourceCommand command, CancellationToken cancellationToken = default)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureInitialized();
-            string path = GetPath(command.Key);
-            byte[]? durable = await ProtectedFileStore.ReadAsync(path, _protector, cancellationToken).ConfigureAwait(false);
-            if (durable is null) { return; }
-            try
-            {
-                SecretCommandDocument? previous = ReadCommandDocument(command.Key, durable);
-                if (previous is null || previous.Owner != command.Owner)
-                {
-                    throw new ResourceCommandRejectedException($"secretstore.add-secret owner '{command.Owner}' cannot delete path '{command.Key}' owned by '{previous?.Owner ?? "the resource"}'.");
-                }
-                CryptographicOperations.ZeroMemory(previous.Value);
-                File.Delete(path);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(durable);
-            }
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    private static SecretCommandDocument? ReadCommandDocument(string path, byte[] payload)
-    {
-        if (payload[0] != 2) { return null; }
-        byte[] metadata = DecodeFrame(path, payload);
-        try
-        {
-            return JsonSerializer.Deserialize(metadata, SecretRepositoryJsonContext.Default.SecretCommandDocument)
-                ?? throw new InvalidDataException("A declared secret document cannot be null.");
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(metadata);
         }
     }
 

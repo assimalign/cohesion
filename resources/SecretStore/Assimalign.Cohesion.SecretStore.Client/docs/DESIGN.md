@@ -54,11 +54,11 @@ Every request carries `Authorization: Bearer <opaque-token>`. Redirects and cook
 a credential is never forwarded to a different authority or mixed with ambient cookie state. Non-success status codes surface as
 `HttpRequestException`; cancellation propagates unchanged.
 
-`Assimalign.Cohesion.SecretStore.Hosting` serves this protocol. A gateway-managed store validates
-the ES256 bearer token against its persistent trusted-issuer set and distinguishes an invalid or
-unknown credential (`401`) from a valid credential with the wrong resource audience (`403`). Secret
-and certificate responses are marked `no-store`. Item 31c adds observed secret and certificate
-mutations alongside the existing `cohesion.trust.add` bootstrap command.
+`Assimalign.Cohesion.SecretStore.Hosting` serves the secret and certificate routes. The retired
+resource integration (bearer-token validation and the command route) was removed on 2026-10-31
+with the application-model restart (assimalign/cohesion#1759), and the area's resource integration
+returns as `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`. Secret and certificate
+responses are marked `no-store`.
 
 ## Credential and command contracts
 

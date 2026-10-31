@@ -9,8 +9,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("ConfigurationStoreRepository")]
@@ -185,69 +183,6 @@ internal sealed class ConfigurationStoreRepository
             }
 
             return true;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    internal async Task CreateNamespaceAsync(string name, string owner, IReadOnlyDictionary<string, string?> seed,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
-        ArgumentNullException.ThrowIfNull(seed);
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureInitialized();
-            if (_values.ContainsKey(name))
-            {
-                if (!_declarations.TryGetValue(name, out NamespaceDeclaration? existing))
-                {
-                    throw new ResourceCommandRejectedException($"configurationstore.add-namespace cannot claim existing namespace '{name}'; it was declared by the resource.");
-                }
-                if (existing.Owner != owner)
-                {
-                    throw new ResourceCommandRejectedException($"configurationstore.add-namespace key '{name}' belongs to owner '{existing.Owner}'; owner '{owner}' cannot overwrite it.");
-                }
-                if (existing.Seed.Count != seed.Count || existing.Seed.Any(pair =>
-                    !seed.TryGetValue(pair.Key, out string? value) || value != pair.Value))
-                {
-                    throw new ResourceCommandRejectedException($"configurationstore.add-namespace namespace '{name}' has a conflicting seed; delete the declaration before changing its seed.");
-                }
-                return;
-            }
-            var values = new Dictionary<string, string?>(seed, StringComparer.Ordinal);
-            var declaration = new NamespaceDeclaration(owner, new Dictionary<string, string?>(values, StringComparer.Ordinal));
-            await WriteFileAsync(name, values, cancellationToken, declaration).ConfigureAwait(false);
-            _values.Add(name, values);
-            _declarations.Add(name, declaration);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    internal async Task DeleteNamespaceAsync(string name, string owner, CancellationToken cancellationToken = default)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureInitialized();
-            if (!_values.ContainsKey(name))
-            {
-                return;
-            }
-            if (!_declarations.TryGetValue(name, out NamespaceDeclaration? declaration) || declaration.Owner != owner)
-            {
-                throw new ResourceCommandRejectedException($"configurationstore.add-namespace owner '{owner}' cannot delete namespace '{name}' owned by '{declaration?.Owner ?? "the resource"}'.");
-            }
-            File.Delete(Path.Combine(_namespaceDirectory, GetFileName(name)));
-            _values.Remove(name);
-            _declarations.Remove(name);
         }
         finally
         {
