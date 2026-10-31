@@ -748,7 +748,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <returns>The change result.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="TransactionAbortedException">The transaction is ending or ended.</exception>
-    /// <exception cref="TransactionUndoException">Incomplete undo fences the transaction.</exception>
+    /// <exception cref="TransactionUndoException"><paramref name="context"/> belongs to another transaction manager (CK04008),
+    /// or incomplete undo fences the transaction.</exception>
     /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
     /// <remarks>The before-image is recorded before mutation and retained until scope or whole undo.
     /// No storage bracket, journal record or durability wait is created.</remarks>
