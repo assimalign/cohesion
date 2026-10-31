@@ -92,6 +92,7 @@ internal enum SqlBoundExpressionKind : byte
 
     /// <summary>A validated JSON member or array element extraction.</summary>
     JsonAccess,
+    JsonFunction,
 
     /// <summary>A JSON validity and kind predicate.</summary>
     IsJson,

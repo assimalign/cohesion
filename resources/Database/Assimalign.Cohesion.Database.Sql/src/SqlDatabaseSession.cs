@@ -39,8 +39,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// Wire result encoding is part of statement execution (#1651). A statement is admitted
 /// into the transaction through the base's operation admission, so a commit cannot start while it
 /// runs, and a transaction that refuses work (its commit or rollback is running, or the kernel
-/// ended it under its caller) refuses the statement. Statements do not hold the session (the
-/// base's operation hold): sessions are single-threaded by contract, as before the bases.
+/// ended it under its caller) refuses the statement. Statements and COPY share the base's
+/// operation hold; BEGIN and SAVEPOINT controls take that hold internally.
 /// </para>
 /// <para>
 /// <b>Transaction control through statement text.</b> <c>BEGIN</c> on a session with a usable
@@ -66,7 +66,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("SqlDatabaseSession")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession.DebugView))]
-public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
+public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
     private SqlSequenceSessionState? _sequenceState;
     internal SqlSequenceSessionState SequenceState => _sequenceState ??= new SqlSequenceSessionState();
@@ -304,6 +304,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
         if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
+        // Refuse before a competing request can replace the active export's timer state.
+        // The export's own internal request still uses the ordinary execution pipeline.
+        if (Volatile.Read(ref _copyOperation) is { } copy && !ReferenceEquals(copy.Request, request))
+        { throw new InvalidOperationException(ErrorMessages.CopyAlreadyActive); }
         if (!_resetValuesCaptured)
         {
             _initialStatementTimeout = _statementTimeout;
@@ -357,7 +361,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // The statement's own metrics are the ones set after this point; a statement that fails
         // before it runs leaves the previous statement's, which never classify this one.
         var previousMetrics = _lastStatementMetrics;
-        long readerEpoch = _database.TableReclamation.EnterStatement();
+        long readerEpoch = EnterStatementExecution(request);
         try
         {
             if (_provisioningSchema is null && _database.SchemaProvisioner.Deferred is not null)
@@ -419,7 +423,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 // The session retains metrics after execution, but wire buffers belong to delivery.
                 if (_lastStatementMetrics is not null) { _lastStatementMetrics.ResultPreparation = null; }
-                _database.TableReclamation.ExitStatement(readerEpoch);
+                try { _database.TableReclamation.ExitStatement(readerEpoch); }
+                finally { ExitExecution(request); }
             }
         }
     }
@@ -623,6 +628,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // never runs in a half-rolled-back transaction or silently autocommits (#1225).
         if (CurrentTransaction is { } transaction)
         {
+            if (request.Statement.SqlExpression is SqlCopyToExpression)
+            { throw new SqlExecutionException("CS04075", ErrorMessages.CopyExplicitTransaction); }
             // The admission also keeps a commit from starting while the statement runs. A rollback
             // may still end the transaction underneath it (a host's rollback of a wire session's
             // transaction): the statement then fails, and the kernel applies nothing for it.
@@ -789,6 +796,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken, scope);
         try
         {
+            using var jsonPlanning = SqlJsonPathExecution.BeginPlanning(scope.Metrics, _database.Definitions.StatementMemoryBudget, cancellationToken);
             var plan = planner.Plan(explain.Statement, scope.Snapshot);
             var sequenceUsage = plan.SequenceUsage;
             if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }

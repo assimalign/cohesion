@@ -1,5 +1,64 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Bounded COPY TO (#1724, SQ-C1)
+
+SqlDatabaseSession.CopyToAsync owns a caller-supplied Stream through ordinary session admission,
+timeout, reclamation and auto-commit snapshot lifetime. Inside BEGIN it refuses with CS04075.
+The dedicated executor binds a physical table and actual CAST(column AS TEXT) projections,
+then encodes one visible row at a time. It never invokes SELECT result materialization. Lock
+order is session admission, snapshot, binding's short catalog monitor, then page read pins;
+no writer/row/object lock or page latch spans destination backpressure. The root snapshot and
+reclamation epoch retain historical rows/tables until success, exception, cancellation or teardown.
+An internal delivery exception stores the original destination failure outside InnerException
+during cleanup, preventing generic IOException storage classification; the public seam rethrows
+that exact failure after releasing the snapshot. The destination always remains open.
+
+COPY uses SELECT's owner-scoped physical iterator: it visits only the table's data pages and
+copies no unrelated rows or index pages. The iterator verifies ownership while copying each row;
+no later page-header lookup can race reclamation of an unrelated retired owner. It retains an
+8-byte entry per table page, one decoded row, row text, one nonlocking iterator pin and 16 KiB
+encoded bytes. The byte buffer fills across rows before delivery; rows wider after a custom cast
+still encode in fixed chunks. No public storage seam or shared streaming change is needed.
+Ordinary query/DML allocations and planning are unchanged.
+
+Deferred migration admission includes the COPY target before snapshot capture and binding, so
+headers and missing values come from the published layout. Embedded ordinary execution and COPY
+share the root session hold; the export's own internal request passes through that admission.
+An overlapping statement, BEGIN or SAVEPOINT control is refused while the export holds it.
+
+The server's separately negotiated sql.outbound-stream exchange uses Sql.Protocol frames 80-84
+and Database.Client's existing framed exchange admission. The client copies bounded frames
+directly to its supplied destination.
+Each data frame has an empty delivery acknowledgment; the one-frame window bounds queued bytes
+even on transports without backpressure. Success certifies row/byte counts; terminal statement
+Errors before CopyStart preserve the connection/transaction. Late Errors retain their diagnostic
+and partial destination bytes, but discard the transfer to avoid racing a pending acknowledgment.
+Incomplete responses, cancellation and destination failures discard the rental. COPY drains the
+existing negotiated Ready postamble; ordinary Execute framing, protocol version and disk formats
+remain unchanged. EOF or peer-close cancellation while awaiting a delivery acknowledgment closes as PeerClosed; malformed
+acknowledgments remain protocol violations. Blank COPY-frame text receives CS00003 ParseFailure
+and retains the session. Session disposal cancels an active embedded COPY and joins snapshot cleanup;
+destinations must honor cancellation and must not reenter the session from a write callback.
+COPY FROM remains gated.
+See Sql.Language DIALECT for defaults, PostgreSQL references and representation differences.
+
+| Code | COPY condition |
+|---|---|
+| CS01070 | Invalid, repeated or incompatible option |
+| CS01071 | Repeated output column or FORCE_QUOTE outside output |
+| CS04075 | COPY inside BEGIN |
+| CS05045 | Malformed Unicode in rendered text (existing result-encoding condition) |
+| CS05095 | Streaming API received another statement kind |
+| CS05096 | Missing export sink or negotiated capability |
+| CK07005 | Invalid export envelope/order/counters |
+
+The conformance corpus covers every storage scalar, independent PostgreSQL field escaping,
+selected/default columns, early failures, bounded byte progress, both wire transports and
+counter-driven non-parallel writer overlap. Frame/acknowledgment counts scale with encoded bytes,
+and visited-page counts and minimum-of-three allocation ceilings exclude unrelated-table growth.
+Existing SQL Release guards continue to cover ordinary requests. Acknowledgment waits have no
+independent deadline, as with ordinary SELECT delivery; a delivery deadline remains a follow-up.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The SQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
@@ -40,6 +99,18 @@ session, including the error/Ready E exchange.
 | CK04012 | A savepoint command requires an explicit bound transaction |
 | CK04013 | The named savepoint does not exist |
 | CS04074 | SET TRANSACTION inside an active savepoint |
+
+The shared eleven-stage schedule includes four late index/memory adapter failures after real
+undo brackets have committed. Each requires a separate physical-progress observation before
+adapter failure, followed by exact target, outer and root recovery. The Transactions design
+records the covered cells and transport-specific exclusions.
+
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real Sql mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
 
 ## Directed index keys (#1631, SQ-K1)
 
@@ -172,7 +243,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Catalog/record-space format 32 refuses all earlier files before data recovery;
+extension 3. Current catalog/record-space format 33 refuses all earlier files before data recovery;
 compiled-schema v11 adds CompiledSchemaIndex.Predicate and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -908,10 +979,11 @@ before evaluating SET or writing. Association plans use SELECT predicate pushdow
 costing with the target pinned as the outer input. Safe target-only WHERE terms select target
 seeks; mandatory target/source equalities drive source index probes or the existing budgeted
 hash build. EXPLAIN exposes those access paths and algorithms. The full WHERE remains a residual.
-Equality-driven hash or seek steps are formed one at a time in written source order. For example,
-`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
-pairs before reaching b's hash. Write `FROM b, a` to make these equality joins linear in the
-input sizes. Both orders return correct results; general join-order search belongs to #1629.
+One source and source graphs with legality barriers retain written step order. Two
+through eight eligible INNER/CROSS source relations use #1629's exact DP search described
+under costing below, without joining the target into the search graph. The target identity
+uses the flat frame's final slot or the normalized frame's penultimate slot; the normalized
+final slot retains MERGE's independent source-presence marker.
 The pushed target filter runs before retaining target identities. Collection keeps the writer
 stamp from the original decode, avoiding a second whole-row read. Internal statement counters
 record association reads separately from total row reads, which also include stamp checks and
@@ -1295,7 +1367,9 @@ Computed merged keys do not acquire physical index probes. Ordinary equality and
 precedence remain unchanged. Grouping compares bound column values so qualified inputs and
 coerced merged names cannot accidentally share a key slot with different types.
 
-Execution is left-deep in written order. Only the first INNER pair may swap for an index;
+The bound fallback executes left-deep in written order; only its first INNER pair may swap
+for an index. #1629's exact DP search may replace eligible three-to-eight relation INNER/CROSS
+graphs with a certified plan after costing left-deep and bushy candidates (see the costing section below). Fallback
 later steps seek into the added input, and LEFT always preserves its left side. Each LEFT
 step tests its own residual before deciding whether to extend an unmatched row with NULL.
 Proven non-throwing single-binding WHERE conjuncts also filter inputs before pair allocation and
@@ -1314,7 +1388,8 @@ CHARACTER_LENGTH and the six captured transaction-clock forms. Volatility metada
 never proves error safety. Arithmetic, other calls, row-dependent LIKE patterns/escapes,
 lazy scalar forms without a safety proof, subqueries, outer references and deferred
 failures stay at their original level, preserving short-circuit errors even for rows
-discarded by another input or join key. Complete ON and WHERE residuals still run. Compatible mandatory
+discarded by another input or join key. Bound fallback retains complete ON and WHERE residuals;
+searched plans place each proven-safe conjunct at its lowest available subtree. Compatible mandatory
 equijoin equalities propagate exact constants transitively across INNER inputs, and only
 from preserved to nullable inputs across LEFT. Floating keys and incompatible text
 collations/types never infer constants. A full unique WHERE seek takes priority when
@@ -4541,7 +4616,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 32 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 33 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -7864,6 +7939,62 @@ successful result is preserved and the session stays reusable. Both the 4,096-en
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
 
+## SQL/JSON path execution (#1722, SQ-N2)
+
+SqlJsonFunctionExpression retains context, path, RETURNING, wrapper, quotes and both
+behavior/default operands. Canonical rendering emits effective wrapper, quotes and
+behavior defaults, while preserving older vocabulary and expression spelling. Three
+contextual profile clauses and parser/live conformance cases cover the functions.
+The closed internal SqlJsonPath parser accepts only the owner's accessor subset and
+parses constants/parameters before rows, including skipped branches. Bound nodes retain
+path and output conversion; context CASE/COALESCE uses the N1 common-type resolver.
+The DIALECT records every effective default and the exact PostgreSQL source anchors.
+An expanded audit of 32,652 accepted statements/scalar wrappers from the batch-base
+Database corpus found zero canonical text changes. Additional quoted ordinary-call probes
+require quoted function names in canonical text; SQL format 33 fences that grammar change. New views,
+DEFAULTs, CHECKs and partial predicates round-trip; format 32 and earlier files are refused.
+
+Context conversion uses the validated N1 reader over pooled input, validating Unicode
+escapes without materializing unselected strings. Accessors walk the admitted DOM,
+apply last-duplicate membership and UTF-8 length/binary wildcard order, and serialize
+only selected results with jsonb numeric spelling. Narrow-path allocation therefore
+stays flat in unselected padding. Stored JSONB,
+its equality and arrows remain unchanged. Input conversion precedes error handling;
+ON ERROR covers path/cardinality and result coercion only. ERROR ON EMPTY, behavior
+failures, cancellation and budget failures escape. Result conversions reuse the local
+cast registry, modifiers and domain checks without a new assembly boundary. Path
+parameters use the ordinary binder's bare names for $name, @name and $1. Boolean
+DEFAULTs execute their bound application cast before considering PostgreSQL's fallback.
+JSON_VALUE distinguishes exact built-in JSON/JSONB targets from every domain, including
+domains without CHECKs (parse_expr.c:4727-4733; execExprInterp.c:4977-4990,5016-5035).
+
+A JSON-only execution scope shares SqlStatementMetrics' existing retained-memory ledger
+and the database StatementMemoryBudget. Path visits and window-frame recomputation share
+the existing 1,000,000-visit statement cap; each inspected member, array item and serialized item is
+charged. Parsed paths are limited to 65,536 UTF-16 units and 256 accessors. Wildcard
+access recursively pushes one match at a time, retaining only final results; strict
+EXISTS completes the walk to detect later errors while retaining one result reference.
+Synchronous planning uses a stack-owned budget scope; JSON-only weak statement state
+keeps one work counter through binding, costing and execution. Direct wildcard proofs show
+n+1 visits and 32n result-reference bytes; lax EXISTS stops at two visits. Cached
+table versions retain separate read/write JSON usage. Execution follows the current
+plan's sources, SQL calls, domain checks, partial predicates and referential write paths;
+unrelated definitions and dropped versions add no scope to ordinary statements.
+Deferred row counts, join-tree conditions and schema admission follow the same usage walk.
+Nested statements retain separate work and memory ledgers.
+
+| Code | Condition |
+| --- | --- |
+| CS01068 | Path must be a string constant or parameter (42804) |
+| CS01069 | Invalid SQL/JSON operand/default/RETURNING signature (42804) |
+| CS02081 | Invalid or unsupported path before rows (42601/0A000) |
+| CS02082 | Strict accessor structural error (2203A) |
+| CS02083 | ERROR ON EMPTY (2203F) |
+| CS02084 | Context jsonb number exceeds exponent, precision or scale bounds (22003) |
+| CS05093 | Result cardinality or scalar-kind error (22034/2203B) |
+| CS05094 | Path size, statement work or memory budget (54000) |
+
+
 ## JSON access (#1722, SQ-N1)
 
 The existing SqlBinaryExpression gains JsonAccess and JsonTextAccess operators at the
@@ -8089,7 +8220,7 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **32** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **33** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v11 is current.
@@ -8416,7 +8547,7 @@ The populated-table worker handoff and expanded crash/wire convergence coverage 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 32); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 33); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8599,7 +8730,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 32 requires the complete table extension 8 record,
+after the existing constraints. Current format 33 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -8677,7 +8808,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 32 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 33 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -9510,6 +9641,94 @@ counts remain unchanged; no scan bound is widened (#1420).
 
 ## Transient probe costing and bounded hash builds (#1522, D3)
 
+### Exact join-order search (#1629, SQ-Z1)
+
+Three through eight eligible stored-table relations use subset dynamic programming over
+all ordered binary partitions, including bushy trees and Cartesian partitions. Each subset
+keeps one minimum-cost tree; its cardinality depends only on the relation set and mandatory
+predicates, so child costs are reusable. The default exact limit is eight relations. One/two
+relations retain the previous costing/allocation path. Larger graphs retain bound order until
+SQ-Z2 supplies its bounded heuristic. Search allocates no persistent statistics or public API,
+changes no format or wire contract, and introduces no diagnostic identity.
+
+The legal graph deliberately implements a conservative subset of PostgreSQL's outer-join
+identities: every outer join is a barrier, including RIGHT's existing physical normalization
+and FULL's preserved sides. An entire SELECT containing such a boundary retains bound order.
+Derived/view/system inputs, LATERAL, semi/anti subquery predicates, correlated slots, application
+calls and expressions lacking the existing non-throwing restriction proof also prevent search.
+Only INNER/CROSS nodes with proven-safe ON/WHERE conjuncts commute/associate. Each conjunct
+is attached at the lowest subtree containing all its references; singleton restrictions use
+input filters. Normalized seeks apply their local filter in the joined ordinal frame when
+the probe bypasses the input reader; scan fallback uses the input reader's filter instead.
+Reference-identity deduplication prevents repeating bound local conjuncts during graph assembly.
+Volatile and set-returning expressions are never moved into a different evaluation level.
+UPDATE FROM, DELETE USING and MERGE search only their source graph (two through eight
+sources); the target remains outside it at the original target/source boundary. MERGE's root
+outer kind, ON predicate and presence tracking remain unchanged.
+Flat UPDATE/DELETE WHERE conjuncts referencing both target and sources are a dependency
+barrier: source probes are parameterized by the target row, and replacing them with an
+independently materialized source can regress constant indexed work to a full source scan.
+Those association plans retain bound order. Independent FROM/USING graphs and MERGE's
+already separate source subtree remain eligible. Source search also retains ordinary access
+costing for the target input without including it in the order search.
+
+Input access-path estimates are reused or probed once per search input with the existing
+32-page/512-entry bounded snapshot probe and definition-invalidation fallback.
+All bound table definitions are rechecked after search so a change during a later input's
+probe also discards earlier memoized choices. Unknown inputs
+retain the 4096 estimate; incomplete counts retain max(1024, 2*observed). Unique complete
+constant seeks need no probe. Output estimates multiply input estimates and apply a heuristic
+1/max(input cardinalities) per column equality or 1/3 per other crossing predicate, capped
+at 1e100 rows per subset; singleton scan filters have no extra selectivity assumption.
+Loop, index lookup and hash work reuse
+the existing product, outer*(1+log2(inner+1)), and 4*(outer+inner) costs. A unique complete
+probe takes preference over an unindexed product estimate; hash work can still win.
+Proven partial indexes remain eligible only with a
+binding proof. No persisted distribution or distinct-count claim is implied.
+
+Equal-work ties compare estimated retained bytes before ascending leaf ordinals and the
+deterministic subset enumeration. The estimate includes row width, padded full ordinal
+frames, bucket-array growth and simultaneously retained builds; it is not a memory proof.
+PostgreSQL costsize.c:4364-4400 and nodeHash.c:683-720 likewise distinguish build work and
+tuple width. A separate conservative certificate permits zero additional retained bytes
+against the pre-search costed plan: streaming hash builds retain the same input, NULL-key
+population, local row width and activation prefix, and every old hash/index path survives.
+Joined DML (including its nested queries) also retains the same streaming buffer order and
+probe row sharing: a new seek cannot replace one shared decoded buffer with fresh retained cells.
+Unproven candidates, including bushy full-width materialization, keep the old costed plan;
+an incomplete cardinality probe or heuristic fanout never proves a byte bound. This can
+decline a cheaper estimated plan deliberately. Exact enumeration and its optimum remain
+available independently of this execution admission check. EXPLAIN
+reports the parenthesized chosen_order, reordered (including association changes), exact_dp
+or bound, collapse_limit, search_scope and memo state/partition counts. Searched plan evidence
+uses an internal derived record; ordinary plan object sizes stay unchanged. Left-deep SELECT
+winners use the flat executor. Independent UPDATE/DELETE sources flatten after their pinned
+target so associations stream into deduplication; multiple UPDATE matches still refuse with
+CS05068 before later products can consume the grant. Expression hash keys use mask-based
+membership, including noncontiguous source sets, and keep full-frame evaluation in the
+normalized executor when selected. Unproven normalized rewrites retain the old normalized
+plan, including its expression hashes. MERGE explicitly asserts both the absence of an
+association WHERE and the absence of target predicates inside its source graph before
+relying on either invariant. The normalized executor copies each right relation's physical
+slots separately for noncontiguous subsets. Index
+seek fallback still applies the residual. Joins keep their sort (SQ-K3 remains single-table).
+
+Deterministic tests assert 3/15/63/255 states and 2/50/602/6050 ordered partitions at
+2/4/6/8 inputs (2 exercises the search kernel; production retains its old two-input path).
+An exhaustive four-input binary-tree oracle verifies the bushy optimum. Generated data
+compares selected plans with forced bound plans for duplicates, NULLs, multi-column and
+non-equi joins, grouped/CROSS joins, outer barriers, EXISTS/NOT EXISTS and DML sources.
+A later selective third input reduces tested pairs from 12,800 to 160, and target-parameterized
+DML retains three examined rows at 16/500/2000-row sources rather than materializing
+33/1001/4001 rows. These are work counters, not duration thresholds. PostgreSQL reference anchors (local clone):
+src/backend/optimizer/README:199-285 (identities, strictness, semi/anti and FULL barriers),
+src/backend/optimizer/path/joinrels.c:355-676 (legality and LATERAL constraints), and
+src/backend/optimizer/plan/initsplan.c:2018-2110 (make_outerjoininfo and FULL's fixed sets).
+src/backend/utils/misc/guc_parameters.dat:1107-1114,1186-1192,1537-1544 keeps the collapse
+defaults of eight and GEQO's distinct threshold of twelve as separate policies.
+
+### Existing costing contract
+
 No catalog statistic, maintenance command, storage format change or legacy reader is introduced.
 Binding still proves sargability and keeps the entire WHERE/ON residual. Competing seek paths
 are ranked by snapshot-visible B+Tree range counts. Each probe visits at most 32 pages and
@@ -9537,7 +9756,7 @@ more than 16 candidates loses to a scan only when an exact base probe costs no m
 random fetch units per seek candidate. Small indexed inner inputs (at most 16 exact candidates)
 and unique complete probes retain their index nested loop.
 
-For a safe mandatory equality, hash build plus probe work is compared with nested work.
+In the bound fallback, a safe mandatory equality compares hash build plus probe work with nested work.
 An unindexed loop costs the input product; an index loop costs outer rows times
 (1 + log2(inner rows + 1)). Loops remain when that work is at most four times the input sum.
 Unknown outer cardinality conservatively retains an available index probe. When both first-pair

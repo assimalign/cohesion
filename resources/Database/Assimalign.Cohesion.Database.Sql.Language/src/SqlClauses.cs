@@ -89,6 +89,8 @@ public static class SqlClauses
 
     /// <summary>Empty one or more tables, with identity and foreign-key policies.</summary>
     public const string Truncate = "TRUNCATE";
+    /// <summary>Table export through a caller-owned stream.</summary>
+    public const string CopyTo = "COPY TO STDOUT";
 
     /// <summary>A <c>DROP SCHEMA</c> SQL namespace removal.</summary>
     public const string DropSchema = "DROP SCHEMA";
@@ -170,6 +172,13 @@ public static class SqlClauses
 
     /// <summary>A <c>CAST</c> expression.</summary>
     public const string Cast = "CAST";
+
+    /// <summary>A scalar SQL/JSON path query.</summary>
+    public const string JsonValue = "JSON_VALUE";
+    /// <summary>A JSON SQL/JSON path query.</summary>
+    public const string JsonQuery = "JSON_QUERY";
+    /// <summary>A SQL/JSON existence test.</summary>
+    public const string JsonExists = "JSON_EXISTS";
 
     /// <summary>A column or expression <c>COLLATE</c> override.</summary>
     public const string Collate = "COLLATE";

@@ -392,6 +392,7 @@ internal static class SqlPersistedExpression
         (SqlStarExpression, SqlStarExpression) => true,
         (SqlDistinctExpression a, SqlDistinctExpression b) => a.IsNegated == b.IsNegated,
         (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
+        (SqlJsonFunctionExpression a, SqlJsonFunctionExpression b) => SqlPersistedExpression.SameJsonFunction(a, b),
         (SqlIsJsonExpression a, SqlIsJsonExpression b) => a.IsNegated == b.IsNegated && a.Kind == b.Kind,
         (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
         (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
@@ -417,6 +418,12 @@ internal static class SqlPersistedExpression
             a.Quantifier == b.Quantifier && SameQuery(a.Subquery, b.Subquery),
         _ => false,
     };
+
+    internal static bool SameJsonFunction(SqlJsonFunctionExpression a, SqlJsonFunctionExpression b)
+        => a.Kind == b.Kind && a.Wrapper == b.Wrapper && a.OmitQuotes == b.OmitQuotes && a.OnEmpty == b.OnEmpty && a.OnError == b.OnError &&
+            (a.ReturningType is { } x && b.ReturningType is { } y
+                ? x.Type == y.Type && x.MaxLength == y.MaxLength && x.Precision == y.Precision && x.Scale == y.Scale
+                : a.ReturningType is null && b.ReturningType is null && (a.Returning is null ? b.Returning is null : b.Returning is not null && SqlTypeRules.SameTypeName(a.Returning, b.Returning)));
 
     internal static bool SameQuery(SqlQueryBodyExpression? left, SqlQueryBodyExpression? right)
     {

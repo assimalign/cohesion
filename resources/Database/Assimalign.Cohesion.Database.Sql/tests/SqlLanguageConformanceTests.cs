@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,6 +23,28 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: exact join search retains written output ordinals and ordering (#1629)")]
+    [InlineData("a JOIN b ON a.id=b.id JOIN c ON b.id=c.id")]
+    [InlineData("a CROSS JOIN b CROSS JOIN c WHERE a.id=b.id AND b.id=c.id")]
+    [InlineData("a JOIN (b JOIN c ON b.id=c.id) ON a.id=b.id")]
+    public async Task ExecuteAsync_JoinSearchCorpus_ShouldPreserveColumns(string from)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-search-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        foreach (string table in new[] { "a", "b", "c" })
+        {
+            await ExecuteAsync(session, $"CREATE TABLE {table}(id INT PRIMARY KEY)");
+            await ExecuteAsync(session, $"INSERT INTO {table} VALUES(2),(1)");
+        }
+
+        // Act / Assert
+        await ExpectRowsAsync(session, "SELECT a.id,b.id,c.id FROM " + from + " ORDER BY a.id", [[1, 1, 1], [2, 2, 2]]);
+        (await RowsAsync(session, "EXPLAIN SELECT a.id,b.id,c.id FROM " + from)).SelectMany(row => row).OfType<string>()
+            .ShouldContain(detail => detail.Contains("join_search=exact_dp", StringComparison.Ordinal));
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: sequence dependencies remain limited to column defaults (#1770)")]
     [InlineData("CREATE TABLE checked(v INT CHECK(nextval('s') > 0))")]
     [InlineData("CREATE VIEW v AS SELECT nextval('s') AS n")]
@@ -278,7 +302,9 @@ public sealed class SqlLanguageConformanceTests
         // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
         // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
         // Named savepoint controls (#1726, XT-4) add exactly three measured clauses.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(87);
+        // SQL/JSON query functions (#1722, SQ-N2) add three measured expression clauses.
+        // Table COPY TO STDOUT (#1724, SQ-C1) adds one measured streaming clause.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(91);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -297,7 +323,9 @@ public sealed class SqlLanguageConformanceTests
                 (await ExecuteAsync(session, setup)).Status.ShouldBe(DatabaseResultStatus.Success, $"{clause}: {setup}");
             }
 
-            var result = await ExecuteAsync(session, executionCase.Statement);
+            var result = executionCase.Execute is { } execute
+                ? await execute(session, executionCase.Statement)
+                : await ExecuteAsync(session, executionCase.Statement);
             result.Status.ShouldBe(DatabaseResultStatus.Success, clause);
             await executionCase.Verify(session, result);
         }
@@ -924,6 +952,17 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Case] = Query("SELECT CASE WHEN age > 40 THEN 'senior' ELSE 'junior' END, CASE id WHEN 1 THEN 'first' ELSE 'later' END FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCaseExpression),
             [["junior", "first"], ["senior", "later"], ["senior", "later"]]),
+        [SqlClauses.JsonValue] = new("SELECT JSON_VALUE('2', '$' RETURNING INT), JSON_VALUE('\"hello\"', '$' RETURNING json_domain);",
+            ["CREATE DOMAIN json_domain AS JSON;"], expression => expression is SqlSelectExpression,
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[2, null]]);
+                var parameterResult = await session.ExecuteAsync(SqlQueryRequest.FromSql(
+                    "SELECT JSON_VALUE('{\"a\":1}', $1)", new Dictionary<string, object?> { ["1"] = "$.a" }), CancellationToken.None);
+                CheckRows(await ReadRowsAsync(parameterResult), [["1"]]);
+            }),
+        [SqlClauses.JsonQuery] = Query("SELECT JSON_QUERY('[1,2]', '$[*]' RETURNING TEXT WITH WRAPPER);", expression => expression is SqlSelectExpression, [["[1, 2]"]]),
+        [SqlClauses.JsonExists] = Query("SELECT JSON_EXISTS('{}', '$.a'),JSON_EXISTS('null', '$');", expression => expression is SqlSelectExpression, [[false, true]]),
         [SqlClauses.Cast] = new("SELECT CAST('42' AS INT), CAST(age AS TEXT) FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCastExpression),
             async (_, result) =>
@@ -1103,6 +1142,16 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT * FROM t;", []);
                 await ExecuteAsync(session, "INSERT INTO t VALUES (9, 'after', 99);");
                 await ExpectRowsAsync(session, "SELECT id FROM t;", [[9]]);
+            }),
+        [SqlClauses.CopyTo] = new("COPY t(name,id) TO STDOUT (FORMAT csv, HEADER);", _seed,
+            expression => expression is SqlCopyToExpression { Columns.Count: 2, Options.IsCsv: true },
+            static (_, result) => { result.AffectedCount.ShouldBe(3); return Task.CompletedTask; },
+            static async (session, statement) =>
+            {
+                using var output = new MemoryStream();
+                long rows = await session.CopyToAsync(statement, output, CancellationToken.None);
+                Encoding.UTF8.GetString(output.ToArray()).ShouldBe("name,id\nAda,1\nGrace,2\nAlan,3\n");
+                return new SqlQueryResult(DatabaseResultStatus.Success, rows);
             }),
         [SqlClauses.CreateView] = new("CREATE VIEW v AS SELECT id FROM t;", _seed,
             expression => expression is SqlCreateViewExpression,
@@ -1470,5 +1519,6 @@ public sealed class SqlLanguageConformanceTests
         string Statement,
         string[] Setup,
         Func<SqlQueryExpression, bool> ContainsClause,
-        Func<SqlDatabaseSession, DatabaseResult, Task> Verify);
+        Func<SqlDatabaseSession, DatabaseResult, Task> Verify,
+        Func<SqlDatabaseSession, string, Task<DatabaseResult>>? Execute = null);
 }

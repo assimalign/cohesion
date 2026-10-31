@@ -18,6 +18,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 	</ItemGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\SavepointUndoFault.cs" Link="TestObjects\SavepointUndoFault.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)build\TestSupport\EventSourceRecorder.cs" Link="Shared\EventSourceRecorder.cs" />
 	</ItemGroup>
 </Project>

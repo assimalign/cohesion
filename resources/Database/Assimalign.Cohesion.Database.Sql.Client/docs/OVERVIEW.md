@@ -1,5 +1,7 @@
 # Assimalign.Cohesion.Database.Sql.Client
 
+SqlConnection.CopyToAsync streams negotiated text/CSV table exports to a caller-owned Stream with bounded buffering and a verified data-row count (#1724).
+
 The typed SQL client: a relational surface — commands, typed result sets, a
 SQL-scoped error taxonomy, and a telemetry hook — layered over the shared
 `Assimalign.Cohesion.Database.Client` core.

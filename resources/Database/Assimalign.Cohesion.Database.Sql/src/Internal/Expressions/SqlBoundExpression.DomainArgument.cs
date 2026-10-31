@@ -36,6 +36,8 @@ internal sealed class SqlBoundDomainArgument : SqlBoundExpression
     }
 
     internal SqlBoundExpression Operand { get; }
+    internal SqlScalarFunction? Check => _domain.Check;
+    internal Collation? FixedCollation => _collation.IsFixed ? _collation.Resolve(null) : null;
 
     internal bool HasSameCoercion(SqlBoundDomainArgument other)
         => ReferenceEquals(_domain, other._domain) && _checkTarget == other._checkTarget &&

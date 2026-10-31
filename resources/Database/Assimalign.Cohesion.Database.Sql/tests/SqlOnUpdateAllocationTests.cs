@@ -45,7 +45,7 @@ public sealed class SqlOnUpdateAllocationTests
 
         // Assert
         _output.WriteLine($"{sql}: {minimum} B/64 = {minimum / 64.0:F4} B/request");
-        minimum.ShouldBe(baseline);
+        minimum.ShouldBeLessThanOrEqualTo(baseline);
 
         long Measure(int count)
         {

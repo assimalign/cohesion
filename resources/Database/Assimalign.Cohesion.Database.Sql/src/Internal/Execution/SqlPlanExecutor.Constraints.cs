@@ -1465,6 +1465,7 @@ internal sealed partial class SqlPlanExecutor
                 // COALESCE over Boolean arguments, or a function declared to return BOOLEAN.
                 SqlFunctionCallExpression => called is null || called.ReturnType.Storage.Type == DatabaseType.Boolean,
                 SqlCaseExpression => true,
+                SqlJsonFunctionExpression json => _scope.JsonReturning(json).Storage.Type == DatabaseType.Boolean,
                 _ => false,
             };
             if (!boolean)

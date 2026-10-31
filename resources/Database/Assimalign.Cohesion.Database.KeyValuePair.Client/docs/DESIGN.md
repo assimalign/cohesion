@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.KeyValuePair.Client — Design
 
+## Savepoint adapter conformance (#1726, XT-5)
+
+SavepointAdapterWireTests runs real KeyValuePair mutations on InMemory and TCP under the server
+session's host-owned transaction and kernel savepoint, following the existing transaction-failure
+corpus. Both protocols keep their existing lack of transaction-control messages. The shared
+failure schedule exercises index erase/clear, memory restoration before/after mutation and
+three physical undo brackets; target retry or whole rollback must permit an exact subsequent
+commit. Test-only accessors reach the existing coordinator/context; shipped boundaries do not change.
+
+Wire adapter recovery covers target, outer and root over InMemory and TCP, including index
+and memory failures reached only after newer real undo brackets have committed.
+
 ## Terminal TCP conformance (#1087)
 
 The real KeyValueClient and model server run missing-database handshakes on InMemory and
