@@ -9545,10 +9545,12 @@ All bound table definitions are rechecked after search so a change during a late
 probe also discards earlier memoized choices. Unknown inputs
 retain the 4096 estimate; incomplete counts retain max(1024, 2*observed). Unique complete
 constant seeks need no probe. Output estimates multiply input estimates and apply a heuristic
-1/max(input cardinalities) per column equality or 1/3 per other crossing predicate; singleton
-scan filters have no extra selectivity assumption. Loop, index lookup and hash work reuse
+1/max(input cardinalities) per column equality or 1/3 per other crossing predicate, capped
+at 1e100 rows per subset; singleton scan filters have no extra selectivity assumption.
+Loop, index lookup and hash work reuse
 the existing product, outer*(1+log2(inner+1)), and 4*(outer+inner) costs. A unique complete
-probe keeps its established preference. Proven partial indexes remain eligible only with a
+probe takes preference over an unindexed product estimate; hash work can still win.
+Proven partial indexes remain eligible only with a
 binding proof. No persisted distribution or distinct-count claim is implied.
 
 Ties retain ascending leaf ordinals, then the deterministic subset enumeration. EXPLAIN
