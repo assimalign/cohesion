@@ -1,5 +1,38 @@
 # Blob client design
 
+## Borrowed wire transaction scopes (#1726, XT-5)
+
+The Blob protocol has no transaction-control messages and its pump serializes exchanges, so
+pipelined frames cannot execute a COMMIT or ROLLBACK during a transfer. The host can nevertheless
+end the server session's transaction between container lookup and stream admission; connection
+lifetime cancellation and session disposal can also end it. Upload admission checks the captured
+transaction identity under the existing operation reservation and refuses a stale host with
+CK04005 instead of starting autocommit. Every failed upload aborts the destination's own operation
+before buffered stream disposal, including protocol validation failures with a live lifetime token.
+Pre-operation protocol failures also abort the host before terminal I/O, retaining their exact cause.
+
+Downloads select metadata and content from one catalog record and pinned operation snapshot,
+including READ COMMITTED during a concurrent replacement. EOF releases the operation before
+TransferComplete is written, so immediate host COMMIT cannot encounter the read hold. Protocol
+acknowledgement failures abort the borrowed read operation before disposal and retain their cause.
+Only an automatically created envelope is committed/disposed by the server. No monitor spans a
+transport await; the XT-4 admission and end ordering, public API and storage format 4 are unchanged.
+Deterministic tests cover both transports, stale host COMMIT/ROLLBACK, wrong-length completion
+while the lifetime is live, pre-operation failure, failed downloads, immediate commit, and replacement
+of a 20,000-byte version by a 30,000-byte version while the original download remains pinned.
+
+Wire adapter recovery covers target, outer and root over InMemory and TCP, including index
+and memory failures reached only after newer real undo brackets have committed.
+
+## Savepoint adapter conformance (#1726, XT-5)
+
+SavepointAdapterWireTests runs real Blob mutations on InMemory and TCP under the server
+session's host-owned transaction and kernel savepoint, following the existing transaction-failure
+corpus. The Blob protocol retains its existing lack of transaction-control messages. The shared
+failure schedule exercises index erase/clear, memory restoration before/after mutation and
+three physical undo brackets; target/outer retry or whole rollback must permit an exact subsequent
+commit. Test-only accessors reach the existing coordinator/context; shipped boundaries do not change.
+
 ## Terminal TCP conformance (#1087)
 
 The real BlobClient and model server run missing-database handshakes on InMemory and
@@ -316,9 +349,9 @@ standard .NET argument guards retain their own contracts.
 
 ## Host transaction refusal evidence
 
-An upload refused because the host already opened a transaction sends `CK04004: message` in
+An upload refused because its container is absent sends `CB01001: message` in
 the existing Error frame. The host transaction retains the original unprefixed, structured
-`CK04004` abort cause; its later commit reports `CB04001`, preserves that cause instance and
+`CB01001` abort cause; its later commit reports `CB04001`, preserves that cause instance and
 commits nothing. Repeated commit after terminal session cleanup retains the same cause.
 `BlobClientException.Diagnostics` remains empty under the existing Blob wire contract.
 

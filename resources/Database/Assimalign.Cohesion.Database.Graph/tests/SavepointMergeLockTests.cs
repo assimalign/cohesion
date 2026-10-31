@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
+using System.Net;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +10,12 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Connections.InMemory;
+using Assimalign.Cohesion.Connections.Tcp;
+using Assimalign.Cohesion.Database.Protocol;
+using Assimalign.Cohesion.Database.Graph.Protocol;
+using Assimalign.Cohesion.Database.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
 using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
@@ -21,11 +29,19 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 public sealed class SavepointMergeLockTests
 {
     [Theory(DisplayName = "Cohesion Test [Graph] - Matched marked MERGE uses no WAL, undo bracket or durability wait even with fsync failure armed (#1726)")]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task ExecuteAsync_ReadOnlyMerge_ShouldRemainMemoryOnly(bool undo, bool failFsync)
+    [InlineData(false, false, 0)]
+    [InlineData(false, false, 1)]
+    [InlineData(false, false, 2)]
+    [InlineData(false, true, 0)]
+    [InlineData(false, true, 1)]
+    [InlineData(false, true, 2)]
+    [InlineData(true, false, 0)]
+    [InlineData(true, false, 1)]
+    [InlineData(true, false, 2)]
+    [InlineData(true, true, 0)]
+    [InlineData(true, true, 1)]
+    [InlineData(true, true, 2)]
+    public async Task ExecuteAsync_ReadOnlyMerge_ShouldRemainMemoryOnly(bool undo, bool failFsync, int transportMode)
     {
         // Arrange
         var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
@@ -34,7 +50,20 @@ public sealed class SavepointMergeLockTests
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("MERGE (:Item {id: 1})");
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using IDuplexConnectionListener? listener = transportMode == 0 ? null : transportMode == 2
+            ? TcpConnectionListener.Create(options => options.EndPoint = new IPEndPoint(IPAddress.Loopback, 0)) : new InMemoryConnectionListener();
+        await using var server = listener is null ? null : GraphDatabaseServer.Create(engine, new() { Listener = listener });
+        if (server is not null) { await server.StartAsync(token); }
+        IDuplexConnectionFactory? factory = listener is null ? null : transportMode == 2 ? new TcpConnectionFactory() : ((InMemoryConnectionListener)listener).CreateFactory();
+        await using var transport = factory is null ? null : await factory.ConnectAsync(listener!.EndPoint, token);
+        await using var channel = transport is null ? null : new ProtocolChannel(transport.AsStream(), GraphProtocol.Family, true);
+        var wire = channel is null ? null : new SavepointWireControl(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute, ProtocolMessageType.Error,
+            text => GraphProtocolExecuteMessage.Create(text).Encode(), frame => ProtocolErrorMessage.Decode(frame.Payload.Span).Message, token);
+        if (wire is not null) { await wire.StartAsync("db"); }
         long journal = database.DataStorage.WriteAheadJournal.Length;
+        int tracked = database.Coordinator.VersionStore.TrackedVersionCount;
         int brackets = 0, flushes = 0;
         SetTransactionCommitting(database.DataStorage, _ => brackets++);
         FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () => flushes++;
@@ -43,11 +72,16 @@ public sealed class SavepointMergeLockTests
         // Act
         try
         {
-            await session.ExecuteAsync("BEGIN");
-            await session.ExecuteAsync("SAVEPOINT scope");
-            await session.ExecuteAsync("MERGE (:Item {id: 1})");
-            if (undo) { await session.ExecuteAsync("ROLLBACK TO scope"); }
-            await session.ExecuteAsync("COMMIT");
+            await Execute("BEGIN", ProtocolTransactionStatus.Active);
+            await Execute("SAVEPOINT scope", ProtocolTransactionStatus.Active);
+            await Execute("MERGE (:Item {id: 1})", ProtocolTransactionStatus.Active);
+            database.Coordinator.VersionStore.TrackedVersionCount.ShouldBeGreaterThan(tracked);
+            if (undo)
+            {
+                await Execute("ROLLBACK TO scope", ProtocolTransactionStatus.Active);
+                database.Coordinator.VersionStore.TrackedVersionCount.ShouldBe(tracked);
+            }
+            await Execute("COMMIT", ProtocolTransactionStatus.Idle);
         }
         finally { SetTransactionCommitting(database.DataStorage, null); FaultInjectingJournalStorageStrategy.BeforeCommitFlush = null; }
 
@@ -58,6 +92,17 @@ public sealed class SavepointMergeLockTests
         if (failure is not null) { failure.Attempts.ShouldBe(0); failure.Remaining.ShouldBe(1); }
         database.IsOffline.ShouldBeFalse();
         session.State.ShouldBe(SessionState.Open);
+        if (server is not null)
+        {
+            var wireSession = (GraphDatabaseSession)server.Sessions.Single().DatabaseSession!;
+            wireSession.State.ShouldBe(SessionState.Open);
+            wireSession.CurrentTransaction.ShouldBeNull();
+        }
+        async Task Execute(string text, ProtocolTransactionStatus status)
+        {
+            if (wire is null) { (await session.ExecuteAsync(text, cancellationToken: token)).Status.ShouldBe(DatabaseResultStatus.Success); }
+            else { (await wire.ExecuteAsync(text, status)).ShouldBeTrue(wire.LastFailure); }
+        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph] - Marked MERGE bookkeeping drains before rollback or disposal removes its ledger (#1726)")]
