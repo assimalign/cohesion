@@ -159,7 +159,7 @@ public sealed class SqlDmlSourceReviewTests
         metrics.JoinCandidatePairs.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joined DML: written source order and workaround are documented (#1714)")]
+    [Fact(DisplayName = "Cohesion Test [Sql] - Joined DML: exact source search and fixed target boundary are documented (#1629)")]
     public void Documentation_SourceOrder_ShouldDescribeCurrentExecution()
     {
         // Arrange
@@ -172,8 +172,9 @@ public sealed class SqlDmlSourceReviewTests
         {
             string text = File.ReadAllText(path);
             text.ShouldContain("#1629", Case.Sensitive);
-            text.ShouldContain("FROM a, b", Case.Sensitive);
-            text.ShouldContain("FROM b, a", Case.Sensitive);
+            text.ShouldContain("eight", Case.Sensitive);
+            text.ShouldContain("target/source boundary", Case.Sensitive);
+            text.ShouldContain("SQ-Z2", Case.Sensitive);
         }
     }
 

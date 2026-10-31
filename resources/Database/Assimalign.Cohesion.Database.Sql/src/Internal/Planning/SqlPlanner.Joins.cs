@@ -457,7 +457,7 @@ internal sealed partial class SqlPlanner
     /// Timestamps qualify: their keys encode only the ticks
     /// (TIMESTAMP) or the instant (TIMESTAMPTZ), the identity the comparer uses.
     /// </summary>
-    private static bool CanSeekJoinEquality(DatabaseType inner, DatabaseType outer)
+    internal static bool CanSeekJoinEquality(DatabaseType inner, DatabaseType outer)
     {
         static bool ExactNumeric(DatabaseType type) => type is DatabaseType.Int8 or DatabaseType.Int16
             or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Decimal;

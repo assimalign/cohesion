@@ -21,6 +21,28 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: exact join search retains written output ordinals and ordering (#1629)")]
+    [InlineData("a JOIN b ON a.id=b.id JOIN c ON b.id=c.id")]
+    [InlineData("a CROSS JOIN b CROSS JOIN c WHERE a.id=b.id AND b.id=c.id")]
+    [InlineData("a JOIN (b JOIN c ON b.id=c.id) ON a.id=b.id")]
+    public async Task ExecuteAsync_JoinSearchCorpus_ShouldPreserveColumns(string from)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-search-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        foreach (string table in new[] { "a", "b", "c" })
+        {
+            await ExecuteAsync(session, $"CREATE TABLE {table}(id INT PRIMARY KEY)");
+            await ExecuteAsync(session, $"INSERT INTO {table} VALUES(2),(1)");
+        }
+
+        // Act / Assert
+        await ExpectRowsAsync(session, "SELECT a.id,b.id,c.id FROM " + from + " ORDER BY a.id", [[1, 1, 1], [2, 2, 2]]);
+        (await RowsAsync(session, "EXPLAIN SELECT a.id,b.id,c.id FROM " + from)).SelectMany(row => row).OfType<string>()
+            .ShouldContain(detail => detail.Contains("join_search=exact_dp", StringComparison.Ordinal));
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: sequence dependencies remain limited to column defaults (#1770)")]
     [InlineData("CREATE TABLE checked(v INT CHECK(nextval('s') > 0))")]
     [InlineData("CREATE VIEW v AS SELECT nextval('s') AS n")]

@@ -802,11 +802,15 @@ INNER, LEFT and CROSS joins. RIGHT, FULL or parenthesized joins directly in thes
 These forms execute and are advertised as UPDATE FROM and DELETE USING in the SQL profile.
 Plain EXPLAIN describes the target/source association plan without applying the mutation.
 
-Equality-driven hash or seek steps follow written source order. For example,
-`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
-pairs before b's hash; write `FROM b, a` to make these equality joins linear in the input sizes.
-Results are correct in either order. General join-order search is deferred to #1629; place a
-source connected by equality to the target before sources that depend on it.
+Two through eight eligible source relations use exact join-order search (#1629).
+UPDATE FROM, DELETE USING and MERGE retain the target/source boundary: only source
+relations participate in search. One source retains existing planning. Outer source joins,
+derived sources and predicates without the non-throwing safety proof retain bound order.
+Target-referencing cross-conjuncts in UPDATE/DELETE WHERE also retain bound order: their
+source index probes depend on the target row. Independent FROM/USING graphs and MERGE's
+existing source subtree can be searched without discarding that parameterization.
+UPDATE/DELETE winners stream associations into target deduplication; an unproven source
+rewrite keeps the old streaming plan and UPDATE's CS05068 multiple-match refusal.
 
 SET values, WHERE and RETURNING resolve against the target plus source namespace. SET destinations
 remain target columns. An alias hides the original relation name; self-joins require distinct
@@ -2043,8 +2047,21 @@ cancellation. Joined DML also charges retained outer/intermediate inputs and ass
 described in the statement-memory contract below. General SELECT result materialization is outside that grant.
 PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c:578-592,634-679,729-756.
 
-Ordinary flat joins execute left-deep in written order. Only the first INNER pair
-may swap sides for an index. Each later step may seek into the input it adds; a LEFT
+Three through eight eligible stored-table inputs use exact subset dynamic programming
+over INNER and CROSS joins, including bushy trees. The default exact relation limit is eight;
+above it this run retains bound order (the bounded heuristic is SQ-Z2). One and two inputs
+keep existing costing. Every outer join is a conservative barrier: its inputs and ON level
+stay fixed. Derived inputs, LATERAL (currently refused with CK00001), subquery predicates,
+application calls and potentially throwing expressions prevent reassociation. Mandatory safe
+ON/WHERE conjunctions move to the lowest subtree containing their referenced inputs; local
+restrictions also remain on scans. Physical columns, USING outputs and ORDER BY semantics
+retain written ordinals. Joins retain their sort; ordered index sort removal is single-table only.
+EXPLAIN shows chosen_order, reordered, exact_dp/bound, and exact search state/partition counts.
+Equal work costs prefer smaller estimated retained builds/frames before deterministic
+binding-ordinal and subset order. Execution admission separately requires zero extra retained
+bytes against the pre-search costed plan and preserves its hash/index paths and build-activation
+prefix; unproven full-width/bushy candidates keep that old plan. Expression hash keys remain
+eligible and use normalized full-frame evaluation. A LEFT
 step always drives from its preserved left input. Mandatory equalities must bind an
 index-key prefix under the existing type and effective-collation rules. The full ON
 remains a residual predicate. Otherwise the added input buffers once. System inputs
