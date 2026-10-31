@@ -3777,6 +3777,10 @@ words add no lexical reservation, preserving older identifiers and canonical exp
   whereas JSON strings retain their spelling (`"1e2"` fails integer input).
   Built-in BOOLEAN input accepts PostgreSQL's unique true/false/yes/no prefixes,
   on/off and 1/0 (bool.c:29-116); application cast overrides still apply.
+  Exact built-in JSON/JSONB RETURNING types serialize the scalar. Domains over them,
+  including domains without CHECKs, use scalar input coercion: the unquoted `hello`
+  from `JSON_VALUE('"hello"', '$' RETURNING json_domain)` is invalid JSON and reaches
+  the default NULL ON ERROR (parse_expr.c:4727-4733; execExprInterp.c:4977-4990,5016-5035).
 - `JSON_QUERY(context, path [RETURNING type] [WITHOUT [ARRAY] WRAPPER |
   WITH [CONDITIONAL | UNCONDITIONAL] [ARRAY] WRAPPER] [{KEEP | OMIT} QUOTES
   [ON SCALAR STRING]] [behavior ON EMPTY] [behavior ON ERROR])` defaults to JSONB,
@@ -3792,8 +3796,10 @@ VALUE and QUERY default to NULL ON EMPTY and NULL ON ERROR. Both accept ERROR, N
 and DEFAULT expression for either clause; QUERY also accepts EMPTY [ARRAY] and EMPTY
 OBJECT. ON EMPTY precedes ON ERROR and each appears at most once. DEFAULT may contain
 parameters, scalar calls and operators, but no columns, subqueries, aggregates or windows.
-Unknown string defaults convert during binding, including unused defaults. Domain
-input conversion checks the base type; its domain CHECK runs only when the
+Unknown string defaults convert during binding, including unused defaults.
+Boolean defaults honor the assignment cast selected during binding, including application
+overrides; PostgreSQL's Boolean fallback applies only without a selected application cast.
+Domain input conversion checks the base type; its domain CHECK runs only when the
 default is selected (parse_coerce.c:232-360, clauses.c:4222-4278). SQL NULL
 contexts and NULL path parameters skip the path and produce SQL NULL; RETURNING domain
 constraints still run, with coercion errors reaching ON ERROR (execExpr.c:4817-4930). Context conversion
@@ -3820,7 +3826,8 @@ serialization retain their existing bytes. Context conversion validates numeric 
 in overwritten duplicate members (jsonb.c:391-401, jsonb_util.c:2070-2125); exponent
 magnitudes are limited to INT32_MAX / 2 before normalization (numeric.c:6889-6945).
 
-Paths must be string constants or parameters, parsed before rows even in a skipped CASE
+Paths must be string constants or ordinary $name, @name or $1 parameters, resolved by
+their bare binding name and parsed before rows even in a skipped CASE
 branch or an empty input. Every other path construct reports CS02081: filters, methods,
 arithmetic/comparison/Boolean expressions, regex/prefix tests, exists/is unknown, @,
 variables, recursive .**, and malformed accessors. PASSING is a coded syntax refusal.
@@ -3829,9 +3836,13 @@ CS02082 reports structural errors; CS02083 reports ERROR ON EMPTY; CS02084 repor
 context numbers outside jsonb input bounds; CS05093 reports
 cardinality/scalar-kind errors. CS05094 bounds paths at 65,536 UTF-16 code units and 256
 accessors, and path execution and window-frame recomputation share a 1,000,000-visit
-statement cap. Transient DOM,
-normalization, wildcard result references and serialization share StatementMemoryBudget;
-all temporary grants unwind after the expression. Wildcard access streams matches rather
+statement cap. Transient DOM, wildcard result references and selected-result
+serialization share StatementMemoryBudget. Complete input admission validates Unicode
+and all numbers once; paths walk the original DOM and normalize only selected results,
+so narrow-path allocation stays flat in unselected padding. Scope activation follows the
+plan and its current definition versions, including indirect views and write definitions;
+unrelated JSON CHECKs and dropped definitions add no ordinary-query scope.
+All temporary grants unwind after the expression. Wildcard access streams matches rather
 than retaining intermediate sequences. Existing wire text, bytes and scalar cells suffice.
 
 Reference rules from the local PostgreSQL clone: parser/parse_expr.c:4444-4452

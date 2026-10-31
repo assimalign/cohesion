@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 
+using Assimalign.Cohesion.Database.Execution.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Types;
 
@@ -21,7 +22,7 @@ internal sealed partial class SqlExpressionEvaluator
         object? path = json.Path switch
         {
             SqlLiteralExpression { LiteralType: SqlLiteralType.String } literal => literal.Value,
-            SqlParameterExpression parameter when parameters?.TryGetValue(parameter.ParameterName.TrimStart('@', ':'), out var value) == true => value,
+            SqlParameterExpression parameter when parameters?.TryGetValue(ParameterBindings.BareName(parameter.ParameterName), out var value) == true => value,
             _ => throw new SqlPlanningException("CS01068", ErrorMessages.JsonPathConstantRequired, json.Path.Location),
         };
         if (path is null) { return null; }
@@ -127,17 +128,16 @@ internal sealed partial class SqlExpressionEvaluator
             if (input is null) { return NullInput(); }
             work.Reserve(input is byte[] bytes ? bytes.LongLength * 6 + 256 : ((string)input).Length * 12L + 256);
             using var source = SqlJsonAccess.ReadExtraction(input);
-            // PostgreSQL transforms the context to transient jsonb before evaluating
-            // the path: collapse duplicates, order keys and validate all numbers.
-            string normalized = SqlJsonSerialization.Render([source.RootElement], false, work);
-            work.Reserve(normalized.Length * 6L + 256);
-            using var document = SqlJsonAccess.ReadExtraction(normalized);
+            // Admission still visits all input, including discarded duplicate values.
+            // Accessors implement jsonb membership/order over the original DOM; only
+            // selected output is rendered (jsonb.c:391-401, jsonb_util.c:2070-2125).
+            SqlJsonSerialization.ValidateInput(input, source.RootElement, work);
             if (bound.Path is null) { return NullInput(); }
             List<JsonElement> items;
             object? result;
             try
             {
-                items = bound.Path.Evaluate(document.RootElement, work, json.Kind == SqlJsonFunctionKind.Exists);
+                items = bound.Path.Evaluate(source.RootElement, work, json.Kind == SqlJsonFunctionKind.Exists);
                 if (json.Kind == SqlJsonFunctionKind.Exists) { return Box(items.Count != 0); }
                 if (items.Count == 0) { result = null; }
                 else
@@ -173,7 +173,7 @@ internal sealed partial class SqlExpressionEvaluator
             string? text;
             if (json.Kind == SqlJsonFunctionKind.Value && items[0].ValueKind == JsonValueKind.Null)
             { return Convert(null); }
-            if (json.Kind == SqlJsonFunctionKind.Value && (!jsonTarget || bound.Conversion.Target.Check is not null))
+            if (json.Kind == SqlJsonFunctionKind.Value && (!jsonTarget || bound.Conversion.Target.IsDomain))
             {
                 var scalar = items[0];
                 text = scalar.ValueKind switch
@@ -205,7 +205,8 @@ internal sealed partial class SqlExpressionEvaluator
             };
         object? Default(SqlBoundExpression expression)
         {
-            if (expression is SqlBoundCast { SourceType: DatabaseType.Boolean } boolean)
+            if (expression is SqlBoundCast { SourceType: DatabaseType.Boolean } boolean &&
+                (boolean.Casts[(int)DatabaseType.Boolean] is not { } selected || SqlStandardCasts.Contains(selected)))
             {
                 var booleanValue = EvaluateCore(boolean.Operand, row);
                 string? booleanText = booleanValue is bool flag ? bound.Conversion.Target.Storage.Type == DatabaseType.Int32

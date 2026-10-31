@@ -10,13 +10,80 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// <summary>Transient jsonb result spelling; never used for JSONB storage.</summary>
 internal static class SqlJsonSerialization
 {
+    internal static void ValidateInput(object input, JsonElement root, SqlJsonPathExecution work)
+    {
+        // The shared reader has admitted syntax and Unicode. Inspect numeric token
+        // spelling in the original input, without copying or expanding unselected
+        // numbers. jsonb admission still validates overwritten duplicate members.
+        ReadOnlySpan<char> text = input is string source ? source : [];
+        ReadOnlySpan<byte> bytes = input is byte[] binary ? binary : [];
+        bool quoted = false;
+        int length = Math.Max(text.Length, bytes.Length);
+        for (int index = 0; index < length; index++)
+        {
+            int character = Unit(text, bytes, index);
+            if (quoted && character == '\\') { index++; continue; }
+            if (character == '"') { quoted = !quoted; continue; }
+            if (quoted || character != '-' && character is not (>= '0' and <= '9')) { continue; }
+            int first = index;
+            while (index < length && Unit(text, bytes, index) is >= '0' and <= '9' or '.' or 'e' or 'E' or '+' or '-') { index++; }
+            CheckNumber(text, bytes, first, index);
+            index--;
+        }
+        Visit(root);
+
+        void Visit(JsonElement item)
+        {
+            work.Visit();
+            if (item.ValueKind == JsonValueKind.Array)
+            { foreach (var child in item.EnumerateArray()) { Visit(child); } }
+            else if (item.ValueKind == JsonValueKind.Object)
+            { foreach (var property in item.EnumerateObject()) { work.Visit(); Visit(property.Value); } }
+        }
+    }
+
+    private static int Unit(ReadOnlySpan<char> text, ReadOnlySpan<byte> bytes, int index)
+        => text.IsEmpty ? bytes[index] : text[index];
+
+    private static void CheckNumber(ReadOnlySpan<char> text, ReadOnlySpan<byte> bytes, int first, int end)
+    {
+        if (Unit(text, bytes, first) == '-') { first++; }
+        int digits = 0, whole = 0, leadingZeros = 0, position = first;
+        bool dot = false, nonzero = false;
+        for (; position < end && Unit(text, bytes, position) is not ('e' or 'E'); position++)
+        {
+            int character = Unit(text, bytes, position);
+            if (character == '.') { dot = true; continue; }
+            digits++; if (!dot) { whole++; }
+            if (!nonzero && character == '0') { leadingZeros++; } else { nonzero = true; }
+        }
+        long exponent = 0;
+        if (position < end)
+        {
+            position++;
+            bool negative = Unit(text, bytes, position) == '-';
+            if (Unit(text, bytes, position) is '+' or '-') { position++; }
+            for (; position < end; position++)
+            {
+                exponent = exponent * 10 + Unit(text, bytes, position) - '0';
+                if (exponent > int.MaxValue / 2) { throw new SqlExecutionException("CS02084", ErrorMessages.JsonNumberOutOfRange); }
+            }
+            if (negative) { exponent = -exponent; }
+        }
+        long integral = whole + exponent;
+        long scale = Math.Max(0, digits - integral);
+        // numeric.c:238,261,6889-6945: exponent, packed scale and weight bounds.
+        if (integral is > int.MaxValue or < int.MinValue || scale > 16383 || nonzero && integral - leadingZeros > 131072)
+        { throw new SqlExecutionException("CS02084", ErrorMessages.JsonNumberOutOfRange); }
+    }
+
     internal static IEnumerable<JsonProperty> Members(JsonElement item, SqlJsonPathExecution work)
     {
         var members = new Dictionary<string, JsonProperty>(StringComparer.Ordinal);
         foreach (var property in item.EnumerateObject())
         {
             work.Visit();
-            if (members.TryGetValue(property.Name, out var previous)) { ValidateDiscarded(previous.Value, work); }
+            if (members.TryGetValue(property.Name, out var previous)) { Validate(previous.Value, work); }
             else { work.Reserve(160L + 2L * property.Name.Length); }
             members[property.Name] = property;
         }
@@ -25,16 +92,16 @@ internal static class SqlJsonSerialization
             .ThenBy(property => property.Name, Utf8Comparer.Instance);
     }
 
-    private static void ValidateDiscarded(JsonElement item, SqlJsonPathExecution work)
+    internal static void Validate(JsonElement item, SqlJsonPathExecution work)
     {
         // jsonb_in converts every value before uniqueifyJsonbObject drops earlier
         // duplicate members (jsonb.c:391-401, jsonb_util.c:2070-2125).
         work.Visit();
         if (item.ValueKind == JsonValueKind.Number) { Number(item.GetRawText(), work); }
         else if (item.ValueKind == JsonValueKind.Array)
-        { foreach (var child in item.EnumerateArray()) { ValidateDiscarded(child, work); } }
+        { foreach (var child in item.EnumerateArray()) { Validate(child, work); } }
         else if (item.ValueKind == JsonValueKind.Object)
-        { foreach (var property in item.EnumerateObject()) { ValidateDiscarded(property.Value, work); } }
+        { foreach (var property in item.EnumerateObject()) { Validate(property.Value, work); } }
     }
 
     internal static string Render(IReadOnlyList<JsonElement> items, bool wrap, SqlJsonPathExecution work)

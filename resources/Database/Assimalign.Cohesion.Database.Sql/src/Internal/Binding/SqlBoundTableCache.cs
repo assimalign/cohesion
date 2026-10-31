@@ -43,10 +43,6 @@ internal sealed class SqlBoundTableCache
     private SqlBindingEntry<CacheState>? _pending;
     private long _bindCount;
     private int _validationWalkCount;
-    private bool _containsJsonPaths;
-    internal bool ContainsJsonPaths => Volatile.Read(ref _containsJsonPaths);
-    // Definitions may bind concurrently. Once observed, JSON usage stays published.
-    private void RecordJsonUsage(bool used) { if (used) { Volatile.Write(ref _containsJsonPaths, true); } }
 
     // The required open-time binding pass is separate from repeat Build validation.
     internal int ValidationWalkCount => Volatile.Read(ref _validationWalkCount);
@@ -63,7 +59,7 @@ internal sealed class SqlBoundTableCache
         _catalog = catalog;
         _native = functions ?? SqlFunctionEnvironment.Standard;
         _state = Load(cancellationToken);
-        PrepareDefinitions(_state.Functions, cancellationToken);
+        PrepareDefinitions(_state, cancellationToken);
     }
 
     /// <summary>
@@ -96,21 +92,23 @@ internal sealed class SqlBoundTableCache
     {
         lock (_sync) { Volatile.Write(ref _pending, new SqlBindingEntry<CacheState>(Load)); }
         EnsureDefinitions(cancellationToken);
-        PrepareDefinitions(Functions, cancellationToken);
+        PrepareDefinitions(Volatile.Read(ref _state), cancellationToken);
     }
 
     private CacheState Load(CancellationToken cancellationToken)
         => new(this, SqlDefinitionBinder.Load(_catalog, _native, cancellationToken));
 
-    private void PrepareDefinitions(SqlFunctionEnvironment functions, CancellationToken cancellationToken)
+    private void PrepareDefinitions(CacheState state, CancellationToken cancellationToken)
     {
+        var functions = state.Functions;
         foreach (var function in functions.Catalog.OfType<SqlExpressionFunction>())
         {
-            RecordJsonUsage(BoundHasJsonPath(function.PrepareBody(_catalog.DefaultCollation, cancellationToken)));
+            function.PrepareBody(_catalog.DefaultCollation, cancellationToken);
         }
         foreach (var type in functions.Types)
         {
-            if (type.Check is SqlExpressionFunction check) { RecordJsonUsage(BoundHasJsonPath(check.PrepareBody(_catalog.DefaultCollation, cancellationToken))); }
+            if (type.Check is SqlExpressionFunction check)
+            { check.PrepareBody(_catalog.DefaultCollation, cancellationToken); }
         }
     }
 
@@ -142,6 +140,32 @@ internal sealed class SqlBoundTableCache
         return GetState(cancellationToken).Get(table, cancellationToken);
     }
 
+    internal SqlBoundTable? PreparedTable(SqlCatalogTable table)
+        => Volatile.Read(ref _state).Bound.TryGetValue(table, out var entry) ? entry.Value : null;
+
+    // Only referential-write closure discovery needs a catalog-wide precheck. Cache
+    // it by both function environment and DDL generation, and never wait for an
+    // unrelated binding. An unknown entry conservatively enables the targeted walk.
+    internal bool MayHaveJsonWrites(CancellationToken cancellationToken)
+    {
+        var state = GetState(cancellationToken);
+        ulong generation = _catalog.DdlGeneration;
+        if (Volatile.Read(ref state.JsonWrites) is { } cached && cached.Generation == generation) { return cached.Used; }
+        bool used = false;
+        foreach (var table in _catalog.Tables)
+        {
+            if (!state.Bound.TryGetValue(table, out var entry) || entry.Value is not { } bound ||
+                bound.WritesJsonPath || bound.DefaultsUseJsonPath)
+            { used = true; break; }
+            var indexes = _catalog.GetPlanningIndexes(table.ObjectId);
+            for (int index = 0; index < indexes.Count; index++)
+            { if (indexes[index].Predicate is not null) { used = true; break; } }
+            if (used) { break; }
+        }
+        Volatile.Write(ref state.JsonWrites, new JsonWriteUsage(generation, used));
+        return used;
+    }
+
     internal SqlBoundExpression GetIndexPredicate(SqlCatalogTable table, SqlCatalogIndex index, CancellationToken cancellationToken = default)
     {
         var state = GetState(cancellationToken);
@@ -149,7 +173,6 @@ internal sealed class SqlBoundTableCache
             new(token =>
             {
                 var predicate = SqlPartialIndexPredicate.Bind(table, index, _catalog.DefaultCollation, state.Functions, token);
-                RecordJsonUsage(BoundHasJsonPath(predicate));
                 return predicate;
             })).Get(cancellationToken);
         if (bound is SqlBoundFailure) { Volatile.Write(ref state.HasUnresolvedIndexPredicates, true); }
@@ -338,7 +361,7 @@ internal sealed class SqlBoundTableCache
                 state.Validation = new SqlBindingEntry<Validation>(token =>
                 {
                     if (countWalk) { Interlocked.Increment(ref _validationWalkCount); }
-                    PrepareDefinitions(state.Functions, token);
+                    PrepareDefinitions(state, token);
                     return ValidateCatalog(state, token);
                 });
             }
@@ -389,7 +412,6 @@ internal sealed class SqlBoundTableCache
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ColumnDefaultSubject, column.Name, tableName), functions, _catalog.DefaultCollation, cancellationToken);
             }
 
-            if (defaults[ordinal] is { } boundDefault) { RecordJsonUsage(BoundHasJsonPath(boundDefault)); }
             if (column.MissingValueLiteral is { } text)
             {
                 var frozen = new SqlCatalogColumn(column.Name, column.Type, true, text, column.Collation);
@@ -466,7 +488,6 @@ internal sealed class SqlBoundTableCache
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the predicate.</exception>
     private SqlBoundCheck BindCheck(SqlCatalogTable table, SqlCatalogConstraint constraint, SqlExpression predicate, string subject, SqlFunctionEnvironment functions, CancellationToken cancellationToken)
     {
-        RecordJsonUsage(HasJsonPath(predicate));
         DatabaseException failure;
         try
         {
@@ -650,6 +671,8 @@ internal sealed class SqlBoundTableCache
     private sealed record Validation(SqlUnresolvedDefinition? Definition, SqlUnresolvedDomain? Domain,
         IReadOnlyDictionary<SqlCatalogTable, SqlBoundFailure>? IndexPredicates);
 
+    private sealed record JsonWriteUsage(ulong Generation, bool Used);
+
     // A refresh replaces the whole state. A slow binding retains its original environment and
     // table map and cannot publish an old result into the replacement generation.
     [global::System.Diagnostics.DebuggerDisplay("CacheState")]
@@ -663,6 +686,7 @@ internal sealed class SqlBoundTableCache
         internal ulong ValidatedGeneration;
         internal SqlBindingEntry<Validation>? Validation;
         internal bool HasUnresolvedIndexPredicates;
+        internal JsonWriteUsage? JsonWrites;
 
         internal CacheState(SqlBoundTableCache owner, SqlFunctionEnvironment functions)
         {
@@ -690,18 +714,6 @@ internal sealed class SqlBoundTableCache
                 _ = value;
             }
         }
-    }
-
-    private static bool BoundHasJsonPath(SqlBoundExpression expression)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        return expression is SqlBoundJsonFunction || SqlPlanExecutor.BoundChildren(expression).Any(BoundHasJsonPath);
-    }
-
-    private static bool HasJsonPath(SqlExpression expression)
-    {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
-        return expression is SqlJsonFunctionExpression || SqlPlanner.Children(expression).Any(HasJsonPath);
     }
 
     private sealed class DebugView

@@ -156,9 +156,9 @@ internal sealed class SqlJsonPath
             {
                 if (step.Wildcard)
                 {
-                    // SQL/JSON operates on jsonb: duplicates have already collapsed and
-                    // object iteration uses jsonb's length/UTF-8 key order.
-                    foreach (var property in item.EnumerateObject())
+                    // Apply transient jsonb duplicate and key-order rules only where
+                    // wildcard traversal needs them; narrow access needs no key map.
+                    foreach (var property in SqlJsonSerialization.Members(item, work))
                     { if (Visit(property.Value, stepIndex + 1, true)) { return true; } }
                 }
                 else

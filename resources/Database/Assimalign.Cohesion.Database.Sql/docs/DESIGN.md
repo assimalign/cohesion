@@ -7879,12 +7879,19 @@ Database corpus found zero canonical text changes. Additional quoted ordinary-ca
 require quoted function names in canonical text; SQL format 33 fences that grammar change. New views,
 DEFAULTs, CHECKs and partial predicates round-trip; format 32 and earlier files are refused.
 
-Context conversion uses the validated N1 reader and a transient jsonb representation:
-last duplicate keys, UTF-8 length/binary key order and numeric spelling. Stored JSONB,
+Context conversion uses the validated N1 reader over pooled input, validating Unicode
+escapes without materializing unselected strings. Accessors walk the admitted DOM,
+apply last-duplicate membership and UTF-8 length/binary wildcard order, and serialize
+only selected results with jsonb numeric spelling. Narrow-path allocation therefore
+stays flat in unselected padding. Stored JSONB,
 its equality and arrows remain unchanged. Input conversion precedes error handling;
 ON ERROR covers path/cardinality and result coercion only. ERROR ON EMPTY, behavior
 failures, cancellation and budget failures escape. Result conversions reuse the local
-cast registry, modifiers and domain checks without a new assembly boundary.
+cast registry, modifiers and domain checks without a new assembly boundary. Path
+parameters use the ordinary binder's bare names for $name, @name and $1. Boolean
+DEFAULTs execute their bound application cast before considering PostgreSQL's fallback.
+JSON_VALUE distinguishes exact built-in JSON/JSONB targets from every domain, including
+domains without CHECKs (parse_expr.c:4727-4733; execExprInterp.c:4977-4990,5016-5035).
 
 A JSON-only execution scope shares SqlStatementMetrics' existing retained-memory ledger
 and the database StatementMemoryBudget. Path visits and window-frame recomputation share
@@ -7895,8 +7902,11 @@ EXISTS completes the walk to detect later errors while retaining one result refe
 Synchronous planning uses a stack-owned budget scope; JSON-only weak statement state
 keeps one work counter through binding, costing and execution. Direct wildcard proofs show
 n+1 visits and 32n result-reference bytes; lax EXISTS stops at two visits. Cached
-definitions publish JSON usage monotonically while binding; databases without such definitions
-leave ordinary statements without a scope. Nested statements retain separate work and memory ledgers.
+table versions retain separate read/write JSON usage. Execution follows the current
+plan's sources, SQL calls, domain checks, partial predicates and referential write paths;
+unrelated definitions and dropped versions add no scope to ordinary statements.
+Deferred row counts, join-tree conditions and schema admission follow the same usage walk.
+Nested statements retain separate work and memory ledgers.
 
 | Code | Condition |
 | --- | --- |

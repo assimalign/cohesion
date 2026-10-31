@@ -92,7 +92,7 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
-        if ((plan.ContainsJsonPath || _definitions.ContainsJsonPaths) && !SqlJsonPathExecution.IsStatement(statement.Metrics))
+        if (!SqlJsonPathExecution.IsStatement(statement.Metrics) && PlanUsesJson(plan, cancellationToken))
         { return ExecuteJsonStatementAsync(plan, statement, cancellationToken); }
         if (plan.ContainsRecursion && RecursiveState is null)
         { return ExecuteRecursiveStatementAsync(plan, statement, cancellationToken); }
