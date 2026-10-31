@@ -200,7 +200,7 @@ public sealed partial class SqlCatalog
             owned();
             _tables.Remove((expected.Schema, expected.Name));
             foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
-            foreach (var slot in indexSlots) { _indexes[(slot.Index.TableObjectId, slot.Index.Name)] = slot; }
+            foreach (var slot in indexSlots) { SetIndexSlot(slot); }
             return new ValueTask<SqlCatalogTable>(tableSlots.Single(slot => slot.Table.ObjectId == expected.ObjectId).Table);
         }
     }

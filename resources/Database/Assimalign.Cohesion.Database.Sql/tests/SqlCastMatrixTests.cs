@@ -32,7 +32,7 @@ public sealed class SqlCastMatrixTests
         [1, 2, 3, 4, 6, 7, 8, 18], [1, 2, 3, 4, 5, 7, 8, 18], [1, 2, 3, 4, 5, 6, 8, 18],
         [0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
         [8, 18], [8, 12, 13, 18], [8, 14, 18], [8, 10, 11, 13, 18], [8, 10, 11, 12, 18],
-        [8, 11, 18], [8, 18], [8, 17, 18], [8, 16, 18],
+        [8, 11, 18], [8, 18], [0, 1, 2, 3, 4, 5, 6, 7, 8, 17, 18], [0, 1, 2, 3, 4, 5, 6, 7, 8, 16, 18],
         [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
     ];
 
@@ -56,7 +56,8 @@ public sealed class SqlCastMatrixTests
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync($"CREATE TABLE t (id INT, v {_names[source]});", cancellationToken: CancellationToken.None);
-        object sourceValue = source is 8 or 18 ? Input(target) : Value(source);
+        object sourceValue = source is 8 or 18 ? Input(target) : source is 16 or 17 && target <= 7
+            ? source == 16 ? target == 0 ? "true" : "1" : Encoding.UTF8.GetBytes(target == 0 ? "true" : "1") : Value(source);
         await session.ExecuteAsync("INSERT INTO t VALUES (1, @v), (2, NULL);",
             new Dictionary<string, object?> { ["v"] = sourceValue }, cancellationToken: CancellationToken.None);
         string expression = $"CAST(v AS {_names[target]})";
@@ -125,6 +126,7 @@ public sealed class SqlCastMatrixTests
         }
         if (source == 18 && target == 16) { return ((string)value).TrimEnd(' '); }
         if (source == 18 && target == 17) { return Encoding.UTF8.GetBytes(((string)value).TrimEnd(' ')); }
+        if (source is 16 or 17 && target <= 7) { return Value(target); }
         if (source is 8 or 18) { return Value(target); }
         if (source >= 1 && source <= 7) { return Value(target); }
         if (source == 10 && target == 12) { return new DateTime(2024, 1, 1); }

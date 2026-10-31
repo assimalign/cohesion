@@ -90,7 +90,7 @@ public sealed class SavepointAdapterTests
         await using var committedObserver = await database.CreateSessionAsync();
         await using var transaction = await session.BeginTransactionAsync();
         await session.ExecuteAsync("MATCH (n:Item) SET n.value = 1");
-        var marker = await UndoMarkerDriver.CreateAsync(database.Coordinator, transaction.Context);
+        (await session.ExecuteAsync("SAVEPOINT marker")).Status.ShouldBe(DatabaseResultStatus.Success);
         await session.ExecuteAsync("MATCH (n:Item) SET n.value = 2");
         await session.ExecuteAsync("INSERT (:Transient {value: 9})");
         await database.Catalog.CreateConstraintAsync(new GraphConstraintMetadata(label.Id, "marker_rule", "value", DatabaseType.Int64), transaction.Context);
@@ -104,7 +104,9 @@ public sealed class SavepointAdapterTests
         }, async () =>
         {
             await session.ExecuteAsync("MATCH (n:Item) SET n.value = 2");
-            await UndoMarkerDriver.UndoAsync(database.Coordinator, transaction.Context, marker);
+            UndoMarkerDriver.SetBatchObserver(database.Coordinator, UndoReaderProbe.BatchObserver);
+            try { (await session.ExecuteAsync("ROLLBACK TO marker")).Status.ShouldBe(DatabaseResultStatus.Success); }
+            finally { UndoMarkerDriver.SetBatchObserver(database.Coordinator, null); }
         });
         (await Values(session, "MATCH (n:Item) RETURN n.value")).ShouldBe([1L]);
         (await Values(session, "MATCH (n:Transient) RETURN n.value")).ShouldBeEmpty();

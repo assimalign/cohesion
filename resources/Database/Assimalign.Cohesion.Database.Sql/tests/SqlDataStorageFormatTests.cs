@@ -70,14 +70,15 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         // Arrange + Act: create, write temporal keys, close.
         await CreateDatabaseAsync(formatVersion: null);
 
-        // Assert: the reopened database is on format 32 and its identity keys seek.
+        // Assert: force sorting to keep this format test on the temporal identity seek.
+        // Default primary-key ordering is independently covered by the ordered-access tests.
         await using var engine = CreateEngine();
         var database = await engine.OpenDatabaseAsync(testDatabase);
         database.Catalog.RecordSpaceFormatVersion.ShouldBe(32);
         SqlRowCodec.RecordSpaceFormatVersion.ShouldBe(32);
 
         await using var session = await database.CreateSessionAsync();
-        (await IdsAsync(session, "SELECT id FROM events WHERE at = @p ORDER BY id", _instant.ToOffset(TimeSpan.FromHours(9)))).ShouldBe([1, 2]);
+        (await IdsAsync(session, "SELECT id FROM events WHERE at = @p ORDER BY id+0", _instant.ToOffset(TimeSpan.FromHours(9)))).ShouldBe([1, 2]);
         session.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_at");
     }
 
@@ -538,7 +539,7 @@ public sealed class SqlDataStorageFormatTests : IDisposable
         {
             var recovered = await recoveringEngine.OpenDatabaseAsync(testDatabase);
             await using var verify = await recovered.CreateSessionAsync();
-            (await IdsAsync(verify, "SELECT id FROM events WHERE at = @p ORDER BY id", _instant)).ShouldBe([1, 2, 4]);
+            (await IdsAsync(verify, "SELECT id FROM events WHERE at = @p ORDER BY id+0", _instant)).ShouldBe([1, 2, 4]);
             verify.LastStatementMetrics.ShouldNotBeNull().AccessPath.ShouldBe("seek:ix_at");
             (await IdsAsync(verify, "SELECT id FROM events WHERE id > @p ORDER BY id", 0)).ShouldBe([1, 2, 4]);
         }

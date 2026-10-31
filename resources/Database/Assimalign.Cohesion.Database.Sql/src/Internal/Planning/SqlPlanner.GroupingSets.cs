@@ -474,6 +474,7 @@ internal sealed partial class SqlPlanner
             case SqlCollateExpression collate: return ContainsGrouping(collate.Operand);
             case SqlCastExpression cast: return ContainsGrouping(cast.Operand);
             case SqlDistinctExpression distinct: return ContainsGrouping(distinct.Left) || ContainsGrouping(distinct.Right);
+            case SqlIsJsonExpression json: return ContainsGrouping(json.Operand);
             case SqlBooleanTestExpression test: return ContainsGrouping(test.Operand);
             case SqlIsNullExpression test: return ContainsGrouping(test.Operand);
             case SqlBetweenExpression between: return ContainsGrouping(between.Operand) || ContainsGrouping(between.Low) || ContainsGrouping(between.High);

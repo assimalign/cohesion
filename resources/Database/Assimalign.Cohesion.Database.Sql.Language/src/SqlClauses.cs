@@ -259,6 +259,13 @@ public static class SqlClauses
     /// <summary>A <c>ROLLBACK</c> transaction-control statement.</summary>
     public const string Rollback = "ROLLBACK";
 
+    /// <summary>Create a named undo scope.</summary>
+    public const string Savepoint = "SAVEPOINT";
+    /// <summary>Release a named undo scope and descendants.</summary>
+    public const string ReleaseSavepoint = "RELEASE SAVEPOINT";
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    public const string RollbackToSavepoint = "ROLLBACK TO SAVEPOINT";
+
     /// <summary>The <c>TRANSACTION</c> keyword, required after <c>START</c> and optional (with <c>WORK</c> as a synonym) after <c>BEGIN</c>, <c>COMMIT</c>, or <c>ROLLBACK</c>.</summary>
     public const string Transaction = "TRANSACTION";
 }

@@ -232,7 +232,8 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     /// <returns>A task that completes once the transaction is aborted, or at once.</returns>
     internal async ValueTask AbortTransactionAsync(Exception cause)
     {
-        if (CurrentTransaction is not { AcceptsStatements: true } transaction)
+        if (CurrentTransaction is not { } transaction ||
+            (!transaction.AcceptsStatements && !Assimalign.Cohesion.Database.Internal.DatabaseFailure.IsCorruption(cause)))
         {
             return;
         }
@@ -303,6 +304,9 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        if (request.Statement.GqlExpression is not GqlQueryExpression { TransactionCommand: GqlTransactionCommand.Rollback or GqlTransactionCommand.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         if (request.Statement.GqlExpression.TransactionCommand != GqlTransactionCommand.None &&
             !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
         {
@@ -367,10 +371,45 @@ public sealed class GraphDatabaseSession : DatabaseLanguageSession<GraphRequest>
 
     internal GraphPlanExecutor.ExpansionBudget? LastStatementMetrics { get; private set; }
 
-    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(GraphRequest request, CancellationToken cancellationToken)
+    // Keep named-control translator locals out of the ordinary control's async frame.
+    private ValueTask<DatabaseResult> ExecuteTransactionControlAsync(GraphRequest request, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
         cancellationToken.ThrowIfCancellationRequested();
+        return request.Statement.GqlExpression.SavepointName is { } name
+            ? ExecuteSavepointControlAsync(request, name, cancellationToken)
+            : ExecuteWholeTransactionControlAsync(request, cancellationToken);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteSavepointControlAsync(GraphRequest request, string name, CancellationToken cancellationToken)
+    {
+        var expression = request.Statement.GqlExpression;
+        if (request.Paths)
+        {
+            var error = new GraphPlanningException("CG05001", ErrorMessages.TransactionPathsInvalid, expression.Location);
+            await AbortTransactionAsync(error).ConfigureAwait(false);
+            throw error;
+        }
+        try
+        {
+            if (expression.TransactionCommand == GqlTransactionCommand.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else if (expression.TransactionCommand == GqlTransactionCommand.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+        }
+        catch (Exception error)
+        {
+            var reported = Assimalign.Cohesion.Database.Internal.DatabaseFailure.TranslateSavepointFailure(
+                _database.TranslateFailure(error), CurrentTransaction?.Context);
+            // The fence is recoverable; corruption still aborts the writer (#1364).
+            await AbortTransactionAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+        return new GraphMutationResult(0, []);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteWholeTransactionControlAsync(GraphRequest request, CancellationToken cancellationToken)
+    {
         var expression = request.Statement.GqlExpression;
         if (request.Paths)
         {

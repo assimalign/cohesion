@@ -34,7 +34,7 @@ public abstract class TransactionRecordSpace
     {
     }
 
-    // Anonymous marker controls stay internal until XT-4 owns named/session admission.
+    // Anonymous backend controls stay internal; the coordinator exposes owned scope tokens.
     /// <summary>Creates an anonymous undo scope for the supplied coordinator and transaction.</summary>
     /// <param name="coordinator">The owning coordinator.</param>
     /// <param name="context">The transaction's lifecycle context.</param>

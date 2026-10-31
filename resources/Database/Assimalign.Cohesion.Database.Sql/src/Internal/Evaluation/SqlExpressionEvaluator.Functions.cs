@@ -124,8 +124,10 @@ internal sealed partial class SqlExpressionEvaluator
     /// <param name="arguments">The call's arguments.</param>
     /// <param name="collation">The collation the arguments' values compare under.</param>
     /// <param name="statisticsInput">Whether to normalize every numeric CASE/COALESCE boundary.</param>
+    /// <param name="jsonTypes">Resolved JSON-position types for NULLIF's first operand, when applicable.</param>
     /// <returns>The bound arguments.</returns>
-    internal SqlBoundExpression[] BindArguments(IReadOnlyList<SqlExpression> arguments, out SqlBoundCollation collation, bool statisticsInput = false)
+    internal SqlBoundExpression[] BindArguments(IReadOnlyList<SqlExpression> arguments, out SqlBoundCollation collation, bool statisticsInput = false,
+        Dictionary<SqlExpression, DatabaseType>? jsonTypes = null)
     {
         if (arguments.Count == 1 && arguments[0] is SqlStarExpression star)
         {
@@ -134,7 +136,8 @@ internal sealed partial class SqlExpressionEvaluator
         }
         if (arguments.Count == 1)
         {
-            var value = Bind(arguments[0], out SqlCollationCandidate candidate, statisticsInput: statisticsInput);
+            var value = jsonTypes is null ? Bind(arguments[0], out SqlCollationCandidate candidate, statisticsInput: statisticsInput)
+                : BindJsonOperand(arguments[0], out candidate, statisticsInput, jsonTypes);
             collation = SqlBoundCollation.Of(candidate, default, _defaultCollation);
             return [value];
         }
@@ -143,7 +146,9 @@ internal sealed partial class SqlExpressionEvaluator
         var candidates = new SqlCollationCandidate[arguments.Count];
         for (int index = 0; index < bound.Length; index++)
         {
-            bound[index] = Bind(arguments[index], out candidates[index], statisticsInput: statisticsInput);
+            // NULLIF returns its first operand; the second remains an ordinary comparand.
+            bound[index] = index == 0 && jsonTypes is not null ? BindJsonOperand(arguments[index], out candidates[index], statisticsInput, jsonTypes)
+                : Bind(arguments[index], out candidates[index], statisticsInput: statisticsInput);
         }
 
         collation = SqlBoundCollation.Of(SqlCollationCandidate.Fold(candidates), default, _defaultCollation);
@@ -259,7 +264,8 @@ internal sealed partial class SqlExpressionEvaluator
     /// calls an overload over INTEGER.
     /// </summary>
     /// <param name="expression">The expression.</param>
-    /// <returns>The static type; never throws for an expression planning would reject.</returns>
+    /// <returns>The static type. JSON alternatives enforce their common-type check during binding.</returns>
+    /// <exception cref="SqlPlanningException">JSON-position alternatives have incompatible declared types.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has too little stack left to walk the expression.</exception>
     internal DatabaseType StaticTypeOf(SqlExpression expression)
     {
@@ -319,9 +325,11 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic:
                 return ArithmeticType(arithmetic.Operator, StaticTypeOf(arithmetic.Left), StaticTypeOf(arithmetic.Right));
+            case SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator):
+                return SqlJsonAccess.ResultType(json.Operator, JsonOperandType(json.Left));
             case SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator):
                 return SqlBitwise.ResultType(bitwise.Operator, StaticTypeOf(bitwise.Left), StaticTypeOf(bitwise.Right));
-            case SqlBinaryExpression or SqlLogicalExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
+            case SqlBinaryExpression or SqlLogicalExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression
                 or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression:
                 return DatabaseType.Boolean;
             case SqlSubqueryExpression:

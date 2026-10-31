@@ -442,6 +442,7 @@ public sealed class DocumentDatabase : DatabaseInstance
 
     internal Exception TranslateKernelFailure(Exception error) => error switch
     {
+        _ when DatabaseFailure.TranslateUndoFailure(error) is { } undo => undo,
         DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
             or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
         DatabaseException { Diagnostics.Count: > 0 } => error,

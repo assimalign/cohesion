@@ -270,7 +270,7 @@ internal sealed partial class SqlPlanner
             BindCount(select.Limit, LimitClause(select)),
             BindCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
+            SelectOrderedAccessPath(table!, select, projections, ordering, where, evaluator), orderByProjections);
     }
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
@@ -390,12 +390,21 @@ internal sealed partial class SqlPlanner
     /// choice can cost performance but never correctness.
     /// </summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope = null)
-        => SelectAccessPath(table, where is null ? [] : [where], scope);
+        => SelectAccessPath(table, where, scope, out _);
+
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope,
+        out Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates)
+        => SelectAccessPath(table, where is null ? [] : [where], scope, out predicates);
 
     // A caller may supply only the conjuncts applicable to its input and that input's scope.
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
+        => SelectAccessPath(table, conjuncts, scope, out _);
+
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope,
+        out Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates)
     {
+        predicates = null;
         if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
@@ -409,7 +418,7 @@ internal sealed partial class SqlPlanner
         }
 
         // Top-level AND conjuncts → per-column sargable predicates.
-        var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
+        predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
         foreach (var conjunct in conjuncts) { CollectSargablePredicates(table, conjunct, predicates, scope); }
 
         if (predicates.Count == 0 && !HasPartialIndexes(indexes))
@@ -1897,12 +1906,13 @@ internal sealed partial class SqlPlanner
             SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? evaluator.TryResolveCastTarget(cast)?.Storage.Type,
             SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
             SqlLogicalExpression => DatabaseType.Boolean,
+            SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator) => evaluator.StaticTypeOf(json),
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
             SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator) => evaluator.StaticTypeOf(bitwise),
             SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } bitwise => evaluator.StaticTypeOf(bitwise),
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
-            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
+            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
             // A scalar call's resolved result type: UPPER and LOWER take their argument's type, so
             // UPPER over text is text. CAST's binder fallback also types aggregate results.
@@ -2051,7 +2061,7 @@ internal sealed partial class SqlPlanner
         SqlFunctionCallExpression { Filter: not null } function => FilterOperands(function),
         SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :
             function.Arguments.Concat(function.OrderBy.Select(key => key.Expression)),
-        SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
+        SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression
             or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],
     };
@@ -2094,6 +2104,9 @@ internal sealed partial class SqlPlanner
                 break;
             case SqlBooleanTestExpression test:
                 yield return test.Operand;
+                break;
+            case SqlIsJsonExpression json:
+                yield return json.Operand;
                 break;
             case SqlIsNullExpression isNull:
                 yield return isNull.Operand;

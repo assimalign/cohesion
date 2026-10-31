@@ -9,8 +9,8 @@ Every model needs ordered lookups: SQL secondary indexes, document indexes, grap
 `BTreeRecordVersionIndex` compares and hashes by logical tree: the shared latch identifies its
 storage and fixed root page, including handles reattached through another manager. Adapters
 created by different statements therefore preserve an earlier same-writer tombstone across a
-marker. The regression reaches anonymous marker controls through test-only UnsafeAccessor bindings
-until XT-4 supplies the language surface, without reflection or a foreign assembly grant.
+marker. The regression now uses the owned coordinator savepoint token (#1726, XT-4), without
+UnsafeAccessor, reflection or a foreign assembly grant.
 No persisted layout or public member beyond the equality/hash overrides is added.
 
 ## Latest live-entry lookup (#1118)

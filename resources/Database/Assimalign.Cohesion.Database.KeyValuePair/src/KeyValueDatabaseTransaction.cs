@@ -46,18 +46,14 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     private static readonly string _operationsAborted = ErrorMessages.TransactionOperationsAborted;
     private static readonly string _failureCause = ErrorMessages.TransactionFailureCause;
 
-    private readonly TransactionCoordinator _coordinator;
-    private readonly TransactionContext _context;
 
     // The database whose offline state (#1243) refuses the transaction's commit and rollback and
     // makes its disposal touch nothing.
     private readonly KeyValueDatabase _database;
 
     internal KeyValueDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, KeyValueDatabase database)
-        : base(context.Id, context.IsolationLevel)
+        : base(coordinator, context)
     {
-        _coordinator = coordinator;
-        _context = context;
         _database = database;
     }
 
@@ -67,7 +63,7 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     /// <see cref="IsolationLevel.ReadCommitted"/>, fixed at begin under
     /// <see cref="IsolationLevel.Snapshot"/>).
     /// </summary>
-    internal TransactionContext Context => _context;
+    internal TransactionContext Context => KernelContext;
 
     /// <summary>Gets the number of admitted commands still running (observability for tests and diagnostics).</summary>
     internal int RunningCommands => RunningOperations;
@@ -95,7 +91,7 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     internal ValueTask AbortForFailedStatementAsync(Exception cause) => AbortAsync(cause);
 
     /// <inheritdoc />
-    protected override TransactionState GetKernelState() => _context.State;
+    protected override TransactionState GetKernelState() => KernelContext.State;
 
     /// <inheritdoc />
     /// <remarks>
@@ -109,7 +105,7 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     {
         try
         {
-            await _coordinator.CommitAsync(_context).ConfigureAwait(false);
+            await KernelCoordinator.CommitAsync(KernelContext).ConfigureAwait(false);
         }
         catch (Exception error)
         {
@@ -135,7 +131,7 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     {
         try
         {
-            await _coordinator.RollbackAsync(_context).ConfigureAwait(false);
+            await KernelCoordinator.RollbackAsync(KernelContext).ConfigureAwait(false);
         }
         catch (Exception error)
         {
@@ -150,7 +146,12 @@ public sealed class KeyValueDatabaseTransaction : DatabaseTransaction
     }
 
     /// <inheritdoc />
-    protected override DatabaseException? GetOfflineRefusal() => _database.GetOfflineRefusal();
+    protected override DatabaseException? GetOfflineRefusal()
+    {
+        if (TransactionCoordinator.IsPartialUndoPending(KernelContext))
+        { ObjectDisposedException.ThrowIf(_database.IsClosed, _database); }
+        return _database.GetOfflineRefusal();
+    }
 
     /// <inheritdoc />
     protected override DatabaseException CreateAbortedException(Exception? cause, bool commit)

@@ -1,5 +1,4 @@
 using System;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,13 +13,6 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 
 public sealed class BTreeUndoMarkerTests
 {
-    // Deviates from the repo foreign-test public-surface rule per owner direction for #1726.
-    // Temporary foreign-test access to the anonymous controls, until XT-4.
-    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "CreateUndoMarkerAsync")]
-    private static extern ValueTask<object> CreateMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken);
-    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "RollbackToUndoMarkerAsync")]
-    private static extern ValueTask UndoMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken);
-
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Undo: a second statement adapter cannot clear a pre-marker row and unique-index tombstone")]
     public async Task RollbackToMarker_DuplicateThroughSecondBinding_ShouldKeepEarlierTombstone()
     {
@@ -62,7 +54,7 @@ public sealed class BTreeUndoMarkerTests
             return 0;
         });
 
-        var marker = await CreateMarker(null, coordinator, writer, CancellationToken.None);
+        var marker = await coordinator.CreateSavepointAsync(writer, CancellationToken.None);
         await coordinator.ApplyStatementAsync<int>(writer, async _ =>
         {
             await index!.DeleteAsync(writer, key, row); // physically a no-op
@@ -71,7 +63,7 @@ public sealed class BTreeUndoMarkerTests
         });
 
         // Act
-        await UndoMarker(null, coordinator, writer, marker, CancellationToken.None);
+        await coordinator.RollbackToSavepointAsync(writer, marker, CancellationToken.None);
         await coordinator.CommitAsync(writer);
 
         // Assert: both the row and its tree entry remain deleted, so the key can be reused.

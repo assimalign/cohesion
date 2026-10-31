@@ -118,7 +118,7 @@ public sealed class SqlPredicateParserTests
     [InlineData("a SIMILAR TO p", "SIMILAR TO")]
     [InlineData("a NOT SIMILAR TO p", "NOT SIMILAR TO")]
     [InlineData("a ^ b", "^")]
-    [InlineData("a IS JSON", "IS JSON")]
+    [InlineData("a IS JSON WITH UNIQUE KEYS", "IS JSON WITH UNIQUE KEYS")]
     [InlineData("a IS OF (INT)", "IS OF")]
     [InlineData("a IS NORMALIZED", "IS NORMALIZED")]
     public void Parse_ExcludedOperator_ShouldReportSingleNamedCapability(string text, string form)

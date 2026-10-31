@@ -379,6 +379,7 @@ public static partial class SqlExpressionRenderer
         SqlDistinctExpression distinct => Operand(distinct.Left, concatLevel) +
             (distinct.IsNegated ? " IS NOT DISTINCT FROM " : " IS DISTINCT FROM ") + Operand(distinct.Right, comparisonLevel),
         SqlBooleanTestExpression test => Operand(test.Operand, concatLevel) + (test.IsNegated ? " IS NOT " : " IS ") + test.TruthValue.ToString().ToUpperInvariant(),
+        SqlIsJsonExpression json => Operand(json.Operand, concatLevel) + (json.IsNegated ? " IS NOT JSON " : " IS JSON ") + json.Kind.ToString().ToUpperInvariant(),
         SqlIsNullExpression isNull => Operand(isNull.Operand, concatLevel) + (isNull.IsNegated ? " IS NOT NULL" : " IS NULL"),
         SqlBetweenExpression between => Operand(between.Operand, concatLevel) + (between.IsNegated ? " NOT BETWEEN " : " BETWEEN ") +
             Operand(between.Low, concatLevel) + " AND " + Operand(between.High, concatLevel),
@@ -472,14 +473,15 @@ public static partial class SqlExpressionRenderer
             Operator: SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or
                 SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
         } => comparisonLevel,
-        SqlIsNullExpression or SqlDistinctExpression or SqlBooleanTestExpression => isLevel,
+        SqlIsNullExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression => isLevel,
         SqlQuantifiedComparisonExpression => comparisonLevel,
         SqlBetweenExpression or SqlInExpression or SqlLikeExpression => predicateLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } => multiplicativeLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.BitwiseAnd or SqlBinaryOperator.BitwiseOr
-            or SqlBinaryOperator.BitwiseXor or SqlBinaryOperator.ShiftLeft or SqlBinaryOperator.ShiftRight } => concatLevel,
+            or SqlBinaryOperator.BitwiseXor or SqlBinaryOperator.ShiftLeft or SqlBinaryOperator.ShiftRight
+            or SqlBinaryOperator.JsonAccess or SqlBinaryOperator.JsonTextAccess } => concatLevel,
         SqlBinaryExpression binary => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, binary.Operator)),
         SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } => concatLevel,
         SqlUnaryExpression => unaryLevel,
@@ -540,6 +542,8 @@ public static partial class SqlExpressionRenderer
         SqlBinaryOperator.BitwiseXor => "#",
         SqlBinaryOperator.ShiftLeft => "<<",
         SqlBinaryOperator.ShiftRight => ">>",
+        SqlBinaryOperator.JsonAccess => "->",
+        SqlBinaryOperator.JsonTextAccess => "->>",
         SqlBinaryOperator.Equal => "=",
         SqlBinaryOperator.NotEqual => "<>",
         SqlBinaryOperator.LessThan => "<",

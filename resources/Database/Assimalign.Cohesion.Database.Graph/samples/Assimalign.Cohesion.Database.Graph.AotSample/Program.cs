@@ -216,6 +216,23 @@ if ((await schema.GetConstraintsAsync(CancellationToken.None)).Count != 0 ||
     await schema.FindIndexAsync("schema_index", CancellationToken.None) is not null)
 { throw new InvalidOperationException("Named schema AOT drop failed."); }
 checks++;
+await using (var warned = (DatabaseResultSet)await session.ExecuteAsync(
+    "MATCH (n:SchemaSmoke) WHERE n.aot_unknown IS NULL RETURN n.aot_unknown ORDER BY n.aot_unknown", cancellationToken: CancellationToken.None))
+{
+    if (warned.Diagnostics.Count != 1 || warned.Diagnostics[0].Code != "CG01023" ||
+        warned.Diagnostics[0].Severity != Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Warning)
+    { throw new InvalidOperationException("Unknown property AOT diagnostics failed."); }
+    checks++;
+}
+await using (var known = (DatabaseResultSet)await session.ExecuteAsync(
+    "MATCH (n:SchemaSmoke) RETURN n.p, {p:1}.aot_unknown", cancellationToken: CancellationToken.None))
+{
+    if (known.Diagnostics.Count != 0) { throw new InvalidOperationException("Known property/map AOT diagnostics failed."); }
+    checks++;
+}
+foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:1})", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:2})", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT (:SavepointNative {n:3})", "RELEASE parent", "COMMIT" })
+{ await session.ExecuteAsync(command, cancellationToken: CancellationToken.None); }
+await Check("MATCH (n:SavepointNative) RETURN n.n", [[3L]]);
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

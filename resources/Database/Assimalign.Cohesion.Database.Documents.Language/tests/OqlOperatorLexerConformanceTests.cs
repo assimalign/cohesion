@@ -20,6 +20,8 @@ public sealed class OqlOperatorLexerConformanceTests
     [InlineData("|", new[] { TokenType.Pipe })]
     [InlineData("<<", new[] { TokenType.LessThan, TokenType.LessThan })]
     [InlineData(">>", new[] { TokenType.GreaterThan, TokenType.GreaterThan })]
+    [InlineData("->", new[] { TokenType.RightArrow })]
+    [InlineData("->>", new[] { TokenType.RightArrow, TokenType.GreaterThan })]
     [InlineData("~~*", new[] { TokenType.Tilde, TokenType.Tilde, TokenType.Asterisk })]
     [InlineData("!~~*", new[] { TokenType.Bang, TokenType.Tilde, TokenType.Tilde, TokenType.Asterisk })]
     public void Tokenize_OperatorSequences_ShouldRetainTokenTypes(string text, TokenType[] expected)
@@ -42,6 +44,8 @@ public sealed class OqlOperatorLexerConformanceTests
     [InlineData("SELECT 1 | 2 FROM t") ]
     [InlineData("SELECT 1 << 2 FROM t") ]
     [InlineData("SELECT 1 >> 2 FROM t") ]
+    [InlineData("SELECT a -> 'x' FROM t")]
+    [InlineData("SELECT a ->> 'x' FROM t")]
     [InlineData("SELECT a ~~* 'x' FROM t")]
     public void Parse_SqlOperators_ShouldRemainRefused(string text)
     {
@@ -56,6 +60,18 @@ public sealed class OqlOperatorLexerConformanceTests
     {
         // Arrange / Act
         var statement = new OqlQueryParser().Parse("SELECT {x:1} AS o FROM t");
+        // Assert
+        statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - JSON isolation: OQL comparisons retain their grammar (#1722)")]
+    [InlineData("SELECT a FROM t WHERE a<-1")]
+    [InlineData("SELECT a FROM t WHERE a> -1")]
+    [InlineData("SELECT a FROM t WHERE a<=-1 AND a>=-2")]
+    public void Parse_Comparisons_ShouldRemainAccepted(string text)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse(text);
         // Assert
         statement.Diagnostics.ShouldNotContain(diagnostic => diagnostic.Severity == Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Error);
     }

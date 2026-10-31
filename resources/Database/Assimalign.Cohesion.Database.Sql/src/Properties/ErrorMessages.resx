@@ -96,6 +96,15 @@
   <data name="CastUtf8Text" xml:space="preserve">
     <value>CAST text must be valid UTF-8.</value>
   </data>
+  <data name="JsonInputInvalid" xml:space="preserve">
+    <value>JSON input is malformed, exceeds depth 128, has an invalid Unicode escape or is not valid UTF-8.</value>
+  </data>
+  <data name="JsonScalarKindInvalid" xml:space="preserve">
+    <value>Cannot cast JSON {0} to {1}.</value>
+  </data>
+  <data name="JsonSignatureInvalid" xml:space="preserve">
+    <value>JSON access requires JSON or JSONB and a TEXT or INTEGER selector; IS JSON requires character or JSON input.</value>
+  </data>
   <data name="CastJsonText" xml:space="preserve">
     <value>Invalid JSON text (maximum depth 128).</value>
   </data>
@@ -995,9 +1004,11 @@
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
   <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
   <data name="TransactionIsolationOutside" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL requires an active transaction block.</value></data>
+  <data name="TransactionIsolationSavepoint" xml:space="preserve"><value>SET TRANSACTION is not allowed inside a savepoint.</value></data>
   <data name="TransactionIsolationLate" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL must precede the first data statement and cannot run in a savepoint or while a statement is running.</value></data>
   <data name="TransactionSerializable" xml:space="preserve"><value>SERIALIZABLE isolation is not supported; use REPEATABLE READ or READ COMMITTED.</value></data>
   <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
   <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
   <data name="RecursiveReaderCountExceeded" xml:space="preserve"><value>The CTE '{0}' opened more readers than its execution plan counted.</value></data>
+  <data name="JsonAlternativesMismatch" xml:space="preserve"><value>CASE/COALESCE alternatives in a JSON operand require compatible types; found {0} and {1}.</value></data>
 </root>

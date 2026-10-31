@@ -8,6 +8,13 @@ public static class GqlClauses
 {
     /// <summary>The Cohesion database-scoped catalog introspection extension.</summary>
     public const string Show = "SHOW";
+
+    /// <summary>Create a named undo scope.</summary>
+    public const string Savepoint = "SAVEPOINT";
+    /// <summary>Release a named undo scope and descendants.</summary>
+    public const string ReleaseSavepoint = "RELEASE SAVEPOINT";
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    public const string RollbackToSavepoint = "ROLLBACK TO SAVEPOINT";
     /// <summary>Standalone create index schema DDL.</summary>
     public const string CreateIndex = "CREATE INDEX";
 

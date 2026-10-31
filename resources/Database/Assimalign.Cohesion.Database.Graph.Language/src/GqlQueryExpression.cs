@@ -44,7 +44,7 @@ public sealed class GqlQueryExpression : GqlExpression
         Projections = projections;
     }
 
-    // Stages, composite queries and standalone DDL share one body reference.
+    // Stages, composite queries, standalone DDL and savepoint names share one body reference.
     private readonly object? _body;
 
     // Only malformed hand-built combinations retain both bodies, so execution can refuse
@@ -92,7 +92,7 @@ public sealed class GqlQueryExpression : GqlExpression
         get
         {
             if (QueryBody is IReadOnlyList<GqlStage> body) { return body; }
-            if (QueryBody is GqlCompositeQuery or GqlSchemaCommand) { return Array.Empty<GqlStage>(); }
+            if (QueryBody is GqlCompositeQuery or GqlSchemaCommand or string) { return Array.Empty<GqlStage>(); }
             var stages = new List<GqlStage>();
             if (MatchClauses is not null)
             { foreach (var clause in MatchClauses) { stages.Add(new GqlMatchStage(clause)); } }
@@ -109,7 +109,12 @@ public sealed class GqlQueryExpression : GqlExpression
 
     /// <summary>Renders the semantic query tree with explicit composite grouping.</summary>
     /// <returns>The normalized GQL query, including NEXT precedence.</returns>
-    public override string ToString() => SchemaCommand is { } schema ? schema.ToString() : CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
+    public override string ToString() => SavepointName is { } name ? (TransactionCommand switch
+    {
+        GqlTransactionCommand.Savepoint => "SAVEPOINT",
+        GqlTransactionCommand.ReleaseSavepoint => "RELEASE SAVEPOINT",
+        _ => "ROLLBACK TO SAVEPOINT",
+    }) + " \"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"" : SchemaCommand is { } schema ? schema.ToString() : CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
         ? Text ?? base.ToString()! : Internal.GqlPathRenderer.RenderExpression(this);
 
     /// <summary>Gets SET items across all stages in source order.</summary>
@@ -182,6 +187,9 @@ public sealed class GqlQueryExpression : GqlExpression
 
     /// <summary>Gets the transaction command, or None for an ordinary statement.</summary>
     public GqlTransactionCommand TransactionCommand { get; internal init; }
+
+    /// <summary>Gets the decoded name for a savepoint control, or null.</summary>
+    public string? SavepointName { get => _body as string; internal init { if (value is not null) { _body = value; } } }
 
     private sealed class DebugView
     {

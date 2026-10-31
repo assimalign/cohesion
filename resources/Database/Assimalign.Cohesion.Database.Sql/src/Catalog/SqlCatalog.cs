@@ -628,7 +628,7 @@ public sealed partial class SqlCatalog
 
             foreach (var indexSlot in droppedIndexes)
             {
-                _indexes.Remove((indexSlot.Index.TableObjectId, indexSlot.Index.Name));
+                RemoveIndexSlot((indexSlot.Index.TableObjectId, indexSlot.Index.Name));
             }
 
             if (droppedIndexes.Count > 0)
@@ -1020,7 +1020,7 @@ public sealed partial class SqlCatalog
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Index(table.Schema, table.Name, index.Name), createsObject: true);
                 _registrationsLocation = registrationsLocation;
-                _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
+                SetIndexSlot(new IndexSlot(index, location));
             }
 
             _registrations = mergedRegistrations;
@@ -1113,7 +1113,7 @@ public sealed partial class SqlCatalog
                 _registrationsLocation = registrationsLocation;
             }
 
-            _indexes.Remove((tableObjectId, name));
+            RemoveIndexSlot((tableObjectId, name));
             _registrations = remainingRegistrations;
             return default;
         }
@@ -1420,7 +1420,7 @@ public sealed partial class SqlCatalog
 
                     case indexRecordKind:
                         var index = DecodeIndex(ref reader);
-                        _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
+                        SetIndexSlot(new IndexSlot(index, (unit.PageId, unit.SlotIndex)));
                         break;
 
                     case schemaStateRecordKind:
@@ -1589,7 +1589,7 @@ public sealed partial class SqlCatalog
             {
                 _registrations = remaining;
                 _registrationsLocation = registrationsLocation;
-                foreach (var index in droppedIndexes!) { _indexes.Remove((index.Index.TableObjectId, index.Index.Name)); }
+                foreach (var index in droppedIndexes!) { RemoveIndexSlot((index.Index.TableObjectId, index.Index.Name)); }
             }
         }
     }
@@ -2491,7 +2491,7 @@ public sealed partial class SqlCatalog
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {
-                _indexes[(table.ObjectId, slot.Index.Name)] = slot;
+                SetIndexSlot(slot);
             }
             _registrationsLocation = registrationsLocation;
             _registrations = mergedRegistrations;

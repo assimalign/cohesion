@@ -1,11 +1,26 @@
 # Database.Sql.Client — Design
 
+## Named savepoint wire conformance (#1726, XT-4)
+
+The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
+control frame, protocol version, client API or result shape is added. InMemory and TCP tests
+exercise duplicate names, nested release/undo, repeated rollback to the retained target, work
+continued after undo and root commit, peer isolation and the model's failure rule. CK04012 and
+CK04013 remain structured diagnostics. An active savepoint transaction returned to the pool
+is rolled back; tests rent the exact authenticated server session again and prove the old name
+and uncommitted rows are absent. Faulted partial undo uses existing Ready E and pool rollback.
+A closed database with a live undo fence returns CS04005 followed by Ready E on both transports;
+repeated requests keep the same session open.
+Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.
+
 ## Directed index keys over the existing exchange (#1631, SQ-K1)
 
 InMemory and TCP carry per-column directions and NULL placement, composite seeks/ranges,
 canonical INDEXES metadata and CS00003 constraint-list refusals. Tests retain usable connections
-and verify that matching ORDER BY retains its ordering keys. No client API or wire format change
-is needed; order-based sort avoidance remains SQ-K3.
+and verify that matching ORDER BY retains its ordering keys. SQ-K3 adds equality-prefix mixed
+orders, fully reversed scans, partial-index implication, LIMIT/OFFSET and OrderedIndexScan EXPLAIN
+with direction and sort_removed=true on both transports. No client API or wire format change is
+needed; existing result and plan columns carry the behavior.
 
 
 ## Partial indexes over the existing exchange (#1630, SQ-P1/SQ-P2)
@@ -61,6 +76,14 @@ and 200 idle and graceful-stop notices surfaced by the next concrete-client oper
 An in-memory regression returns an authenticated rental to its pool and leaves the client open
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
+
+## JSON access wire conformance (#1722, SQ-N1)
+
+InMemory and TCP preserve JSON text, JSONB bytes, unescaped extraction text, Boolean
+predicates and typed scalar conversions. Tests distinguish missing members, JSON null
+and SQL NULL, exercise negative indexes and retain usable connections after CS01067,
+CS02078, CS02079 and existing cast/range errors. Invalid JSON assignments leave rows
+unchanged. The client API, protocol format and value representation remain unchanged.
 
 ## Integer bitwise wire conformance (#1721, SQ-O2)
 

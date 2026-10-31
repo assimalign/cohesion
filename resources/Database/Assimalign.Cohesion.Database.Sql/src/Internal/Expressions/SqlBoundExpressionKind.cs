@@ -89,4 +89,10 @@ internal enum SqlBoundExpressionKind : byte
 
     /// <summary><see cref="SqlBoundBitwise"/>: an integer bitwise operation and its bound width.</summary>
     Bitwise,
+
+    /// <summary>A validated JSON member or array element extraction.</summary>
+    JsonAccess,
+
+    /// <summary>A JSON validity and kind predicate.</summary>
+    IsJson,
 }

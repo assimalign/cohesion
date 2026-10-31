@@ -21,6 +21,30 @@ public class DatabaseTransactionTests
 {
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(30);
 
+    [Fact(DisplayName = "Cohesion Test [Database] - Transaction: end cleanup preserves a core failure and always releases its gate (#1726)")]
+    public async Task CommitAsync_FailedCoreAndUnavailableState_ShouldPreserveCauseAndReleaseGate()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(_timeout);
+        var expected = new InvalidOperationException("Injected commit failure");
+        var transaction = new TestTransaction
+        {
+            CommitFailure = expected,
+            StateFailureAfterCommit = new InvalidOperationException("State must not be read by end cleanup"),
+        };
+
+        // Act
+        var failure = await Should.ThrowAsync<InvalidOperationException>(async () => await transaction.CommitAsync(timeout.Token));
+        transaction.StateFailureAfterCommit = null;
+        await transaction.RollbackAsync(timeout.Token).AsTask().WaitAsync(timeout.Token);
+        await transaction.DisposeAsync();
+
+        // Assert
+        failure.ShouldBeSameAs(expected);
+        transaction.State.ShouldBe(TransactionState.RolledBack);
+        transaction.DisposeCores.ShouldBe(1);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database] - Transaction: the identity and isolation level are the constructor's")]
     public void Constructor_IdentityAndLevel_ShouldBeFixed()
     {

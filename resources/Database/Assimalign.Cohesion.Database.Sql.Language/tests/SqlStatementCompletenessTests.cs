@@ -155,6 +155,9 @@ public sealed class SqlStatementCompletenessTests
         [SqlClauses.IsolationLevel] = ["BEGIN ISOLATION LEVEL READ COMMITTED", "START TRANSACTION ISOLATION LEVEL REPEATABLE READ"],
         [SqlClauses.SetTransaction] = ["SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED"],
         [SqlClauses.Commit] = ["COMMIT", "COMMIT WORK", "COMMIT TRANSACTION", "END"],
+        [SqlClauses.Savepoint] = ["SAVEPOINT a", "SAVEPOINT \"a b\""],
+        [SqlClauses.ReleaseSavepoint] = ["RELEASE a", "RELEASE SAVEPOINT a"],
+        [SqlClauses.RollbackToSavepoint] = ["ROLLBACK TO a", "ROLLBACK WORK TO SAVEPOINT a"],
         [SqlClauses.Rollback] = ["ROLLBACK", "ROLLBACK WORK", "ROLLBACK TRANSACTION"],
         [SqlClauses.Transaction] = ["BEGIN TRANSACTION"],
         [SqlClauses.DiscardAll] = ["DISCARD ALL"],
@@ -494,7 +497,7 @@ public sealed class SqlStatementCompletenessTests
     [InlineData("UPDATE t SET a =", "Expected an expression before the end of the statement.", "")]
     [InlineData("DELETE FROM t WHERE", "Expected an expression before the end of the statement.", "")]
     [InlineData("SELECT +", "Expected an expression before the end of the statement.", "")]
-    [InlineData("SELECT id FROM t WHERE a IS;", "Expected NULL, TRUE, FALSE, UNKNOWN or DISTINCT FROM after IS [NOT] but found ';'.", ";")]
+    [InlineData("SELECT id FROM t WHERE a IS;", "Expected NULL, TRUE, FALSE, UNKNOWN, JSON or DISTINCT FROM after IS [NOT] but found ';'.", ";")]
     public void Parse_MissingExpression_ShouldReportSyntaxError(string sql, string message, string located)
     {
         // Act

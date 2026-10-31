@@ -657,7 +657,7 @@ public sealed class SqlCastWireTests
     [InlineData("CAST('{bad' AS JSONB)")]
     [InlineData("CAST('00112233-4455-6677-8899-aabbccddeefg' AS UUID)")]
     [InlineData("CAST('\\x00ff' AS VARBINARY(1))")]
-    [InlineData("CAST(CAST('1' AS JSON) AS INTEGER)")]
+    [InlineData("CAST(CAST('1' AS JSON) AS DATE)")]
     [InlineData("CAST(X'00' AS JSONB)")]
     [InlineData("CAST('1e300' AS DOUBLE PRECISION) + 1")]
     public async Task QueryAsync_NewConversionFailure_ShouldKeepConnectionUsable(string expression)

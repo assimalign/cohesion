@@ -239,8 +239,8 @@ public sealed partial class SqlCatalog
             else { transaction.Commit(); }
             if (receipt is not null) { _scripts[receipt.Value.Name] = receipt; }
             foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
-            foreach (var slot in oldIndexes) { _indexes.Remove((slot.Index.TableObjectId, slot.Index.Name)); }
-            foreach (var slot in indexSlots) { _indexes[(slot.Index.TableObjectId, slot.Index.Name)] = slot; }
+            foreach (var slot in oldIndexes) { RemoveIndexSlot((slot.Index.TableObjectId, slot.Index.Name)); }
+            foreach (var slot in indexSlots) { SetIndexSlot(slot); }
             foreach (var view in viewSlots) { _views[view.Key] = view.Slot; }
             foreach (var publish in owned) { publish(); }
             foreach (var table in replacements)

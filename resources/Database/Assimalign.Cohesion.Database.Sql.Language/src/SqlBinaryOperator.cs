@@ -67,4 +67,10 @@ public enum SqlBinaryOperator
 
     /// <summary>Integer arithmetic right shift (<c>&gt;&gt;</c>).</summary>
     ShiftRight,
+
+    /// <summary>JSON member or array element extraction (<c>-&gt;</c>).</summary>
+    JsonAccess,
+
+    /// <summary>JSON member or array element extraction as text (<c>-&gt;&gt;</c>).</summary>
+    JsonTextAccess,
 }

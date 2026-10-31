@@ -76,6 +76,9 @@ public sealed class GqlPathSelectorPlanningTests
         var database = await engine.CreateDatabaseAsync("graph", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         var parsed = GraphQueryRequest.FromGql(source).Statement.GqlExpression;
+        // Measure ordinary planning with a known token. Unknown names now intentionally
+        // allocate CG01023 diagnostics; that path has its own warning coverage (#1249).
+        await session.ExecuteAsync("INSERT (:Probe {k:1})", cancellationToken: CancellationToken.None);
         var statement = new GqlQueryExpression(parsed.MatchClauses, [], [], false, parsed.Projections);
         long bytes = await database.RunAsync(session, operation =>
         {

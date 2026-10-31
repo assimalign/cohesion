@@ -91,7 +91,13 @@ internal sealed class TestTransaction : DatabaseTransaction
 
     public DatabaseException Refusal() => CreateRefusal();
 
-    protected override TransactionState GetKernelState() => KernelState;
+    public Exception? StateFailureAfterCommit { get; set; }
+
+    protected override TransactionState GetKernelState()
+    {
+        if (Commits != 0 && StateFailureAfterCommit is { } failure) { throw failure; }
+        return KernelState;
+    }
 
     protected override async ValueTask CommitCoreAsync()
     {

@@ -15,6 +15,13 @@ public static class OqlClauses
     /// <summary>Rolls back the session's explicit transaction.</summary>
     public const string Rollback = "ROLLBACK";
 
+    /// <summary>Create a named undo scope.</summary>
+    public const string Savepoint = "SAVEPOINT";
+    /// <summary>Release a named undo scope and descendants.</summary>
+    public const string ReleaseSavepoint = "RELEASE SAVEPOINT";
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    public const string RollbackToSavepoint = "ROLLBACK TO SAVEPOINT";
+
     /// <summary>A <c>CREATE COLLECTION</c> statement.</summary>
     public const string CreateCollection = "CREATE COLLECTION";
 

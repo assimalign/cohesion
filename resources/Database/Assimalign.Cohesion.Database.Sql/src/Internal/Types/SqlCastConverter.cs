@@ -50,7 +50,12 @@ internal static class SqlCastConverter
                 {
                     // The built-in text conversion needs the destination scale before reducing
                     // its digits to Decimal. Application casts still own their conversions.
-                    converted = (value is string || value is SqlCharacter) && cast.Target.Storage.Type == DatabaseType.Decimal
+                    converted = source is DatabaseType.Json or DatabaseType.JsonBinary
+                        && cast.Target.Storage.Type is DatabaseType.Boolean or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
+                            or DatabaseType.Int64 or DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64
+                        && SqlStandardCasts.Contains(registered)
+                        ? SqlJsonAccess.Scalar(value, cast.Target.Storage)
+                        : (value is string || value is SqlCharacter) && cast.Target.Storage.Type == DatabaseType.Decimal
                         && SqlStandardCasts.Contains(registered)
                         ? ParseNumericText(value is SqlCharacter fixedText ? fixedText.Text : (string)value, cast.Target.Storage)
                         : registered.Apply(value);
@@ -115,6 +120,7 @@ internal static class SqlCastConverter
     /// <exception cref="InvalidCastException">A binary value exceeds its declared length.</exception>
     internal static object ApplyModifiers(object value, DatabaseTypeInfo target, bool isExplicit = false)
     {
+        if (target.Type is DatabaseType.Json or DatabaseType.JsonBinary) { SqlJsonAccess.Validate(value); return value; }
         if (value is SqlCharacter character) { value = character.Value; }
         if (target.Type == DatabaseType.Character)
         {

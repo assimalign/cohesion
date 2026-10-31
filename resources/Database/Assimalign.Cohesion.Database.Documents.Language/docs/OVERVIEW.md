@@ -10,11 +10,11 @@ One immutable standard-function table declares META, eleven aggregates and 34 SQ
 ALL/DISTINCT aggregate metadata, native parse-time arity checks and static result types used by native registrations. The standalone
 parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
 the executing engine's function catalog.
-BEGIN/START, COMMIT and ROLLBACK execute on in-process and wire sessions. Snapshot is the default;
+BEGIN/START, COMMIT, ROLLBACK and named SAVEPOINT/RELEASE/ROLLBACK TO execute on in-process and wire sessions. Snapshot is the default;
 explicit SNAPSHOT and READ COMMITTED are supported. Wire sessions negotiate transaction status;
 pool return rolls back open or failed work and discards peers that cannot certify a clean session.
 OQL collection/index DDL is refused in an explicit transaction (CD04105). See DIALECT.md for
-exact spellings, fault recovery and the deferred savepoint forms.
+exact spellings, fault recovery and named savepoint scope semantics.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.

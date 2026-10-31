@@ -60,8 +60,6 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     private static readonly string _operationsAborted = ErrorMessages.TransactionOperationsAborted;
     private static readonly string _failureCause = ErrorMessages.TransactionFailureCause;
 
-    private readonly TransactionCoordinator _coordinator;
-    private TransactionContext _context;
     private TransactionContext? _configurationPin;
     private bool _dataStatementStarted;
 
@@ -73,11 +71,9 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
 
     internal SqlDatabaseTransaction(TransactionCoordinator coordinator, TransactionContext context, SqlDatabase database, SqlCatalogSnapshot? catalogSnapshot, DateTimeOffset? transactionStart = null,
         TransactionContext? configurationPin = null)
-        : base(context.Id, context.IsolationLevel)
+        : base(coordinator, context)
     {
         TransactionStart = transactionStart ?? DateTimeOffset.UtcNow;
-        _coordinator = coordinator;
-        _context = context;
         _configurationPin = configurationPin;
         _database = database;
         _catalogSnapshot = catalogSnapshot;
@@ -89,7 +85,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// <see cref="IsolationLevel.ReadCommitted"/>, fixed at begin under
     /// <see cref="IsolationLevel.Snapshot"/>).
     /// </summary>
-    internal TransactionContext Context => _context;
+    internal TransactionContext Context => KernelContext;
 
     internal DateTimeOffset TransactionStart { get; }
 
@@ -100,13 +96,15 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// </summary>
     internal SqlCatalogSnapshot? CatalogSnapshot => IsolationLevel == IsolationLevel.Snapshot ? _catalogSnapshot : null;
 
+    internal bool HasSavepointScope => HasSavepoints;
+
     internal bool TrySetIsolationLevel(IsolationLevel isolationLevel)
     {
         if (_dataStatementStarted) { return false; }
         return TryConfigureIsolationLevel(isolationLevel, () =>
         {
             if (_dataStatementStarted) { return false; }
-            _context = _coordinator.ReplaceIsolationLevel(_context, isolationLevel);
+            UpdateSavepointContext(KernelCoordinator.ReplaceIsolationLevel(KernelContext, isolationLevel));
             return true;
         });
     }
@@ -133,7 +131,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
             try
             {
                 if (ConfigurationPinReleasingAsync is { } releasing) { await releasing().ConfigureAwait(false); }
-                await _coordinator.RollbackAsync(pin).ConfigureAwait(false);
+                await KernelCoordinator.RollbackAsync(pin).ConfigureAwait(false);
             }
             // Exchange gives this path sole ownership. A disposed manager, or an end
             // already claimed on this private pin, means kernel disposal owns its abort.
@@ -161,7 +159,8 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// (<see cref="TryBeginStatement"/> returned false): the base's refusal, for the session.
     /// </summary>
     /// <returns>The refusal.</returns>
-    internal DatabaseException CreateStatementRefusal() => CreateRefusal();
+    internal DatabaseException CreateStatementRefusal()
+        => _database.IsClosed ? CreateAbortedException(null, commit: false) : CreateRefusal();
 
     internal bool HasStorageFailure => _storageFailure is not null;
 
@@ -185,7 +184,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     }
 
     /// <inheritdoc />
-    protected override TransactionState GetKernelState() => _context.State;
+    protected override TransactionState GetKernelState() => KernelContext.State;
 
     /// <inheritdoc />
     /// <remarks>
@@ -201,7 +200,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         try
         {
-            try { await _coordinator.CommitAsync(_context).ConfigureAwait(false); }
+            try { await KernelCoordinator.CommitAsync(KernelContext).ConfigureAwait(false); }
             finally { await ReleaseConfigurationPinAsync().ConfigureAwait(false); }
         }
         catch (Exception error)
@@ -228,7 +227,7 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     {
         try
         {
-            try { await _coordinator.RollbackAsync(_context).ConfigureAwait(false); }
+            try { await KernelCoordinator.RollbackAsync(KernelContext).ConfigureAwait(false); }
             finally { await ReleaseConfigurationPinAsync().ConfigureAwait(false); }
         }
         catch (Exception error)
@@ -244,7 +243,12 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     }
 
     /// <inheritdoc />
-    protected override DatabaseException? GetOfflineRefusal() => _database.GetOfflineRefusal();
+    protected override DatabaseException? GetOfflineRefusal()
+    {
+        if (TransactionCoordinator.IsPartialUndoPending(KernelContext))
+        { ObjectDisposedException.ThrowIf(_database.IsClosed, _database); }
+        return _database.GetOfflineRefusal();
+    }
 
     /// <inheritdoc />
     protected override DatabaseException CreateAbortedException(Exception? cause, bool commit)

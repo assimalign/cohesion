@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -285,7 +286,16 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// walk over the statement does.
     /// </remarks>
     protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
-        => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
+    {
+        try { return ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken); }
+        catch (DatabaseException)
+        {
+            if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
+            _database.ThrowIfOffline();
+            ThrowIfPartialUndoPending();
+            throw;
+        }
+    }
 
     /// <summary>Executes one request with a receipt that cannot attach to any later session request.</summary>
     internal ValueTask<DatabaseResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
@@ -293,6 +303,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
+        if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
         if (!_resetValuesCaptured)
         {
             _initialStatementTimeout = _statementTimeout;
@@ -304,6 +315,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         return request.Statement.SqlExpression is SqlTransactionExpression || (statementTimeout == TimeSpan.Zero && lockTimeout == TimeSpan.Zero)
             ? ExecuteUntimedRequestAsync(request, cancellationToken, scriptReceipt)
             : ExecuteTimedRequestAsync(request, statementTimeout, lockTimeout, cancellationToken, scriptReceipt);
+    }
+
+    private void ThrowIfFencedDatabaseDisposed()
+    {
+        // Preserve the existing CS04005 outcome for a transaction the kernel already ended.
+        // During the earlier disposed-admission window, a live retry fence cannot hide disposal.
+        if (CurrentTransaction is { } transaction && TransactionCoordinator.IsPartialUndoPending(transaction.Context))
+        { throw transaction.CreateStatementRefusal(); }
     }
 
     private async ValueTask<DatabaseResult> ExecuteTimedRequestAsync(SqlQueryRequest request, TimeSpan statementTimeout,
@@ -424,11 +443,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 failure = SqlExecutionException.FromPersisted(failure);
             }
         }
-        var located = LocateFailure(failure, location);
+        var located = LocateFailure(failure, location, expression is SqlTransactionExpression { SavepointName: not null });
         if (!ReferenceEquals(located, original)) { throw located; }
     }
 
-    private static DatabaseException LocateFailure(DatabaseException failure, Location? location)
+    private static DatabaseException LocateFailure(DatabaseException failure, Location? location, bool namedControl)
     {
         // The abort path retains this exact coded cause (#1364). Location attachment must not
         // substitute another exception for a storage failure already recorded on the transaction.
@@ -455,7 +474,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         { return new DatabaseObjectLockedException(ownership.ObjectName, ownership.OwningSchema, ownership.Operation, ownership.Message, located[0]); }
         if (failure is SqlCatalogException)
         { return new SqlCatalogException(located[0].Code!, failure.Message, failure, located[0]); }
-        return new DatabaseException(failure.Message, located, failure);
+        return new DatabaseException(failure.Message, located,
+            namedControl && failure.Diagnostics is [{ Code: "CK04009" }, ..] ? failure.InnerException : failure);
     }
 
     private void TraceStatementCompletion(SqlQueryRequest request, SqlStatementMetrics? previousMetrics)
@@ -546,9 +566,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private async ValueTask<DatabaseResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
+        if (request.Statement.SqlExpression is not SqlTransactionExpression { CommandType: SqlQueryCommandType.Rollback or SqlQueryCommandType.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
-        // must not become a full ROLLBACK while savepoints remain unsupported).
+        // must not become a full ROLLBACK when its name or suffix is malformed).
         foreach (var diagnostic in request.Statement.Diagnostics)
         {
             if (diagnostic.Severity == DiagnosticSeverity.Error)
@@ -583,14 +606,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         if (request.Statement.SqlExpression is SqlTransactionExpression control)
         {
             // Control requests bypass the executor, but their maps obey the same contract.
-            _ = SqlQueryExecutor.NormalizeParameters(request.Parameters);
+            if (control.SavepointName is null) { _ = SqlQueryExecutor.NormalizeParameters(request.Parameters); }
             _lastStatementMetrics = null;
             // Control commands have a fixed, zero-count completion, including COMMIT.
-            if (ResultPreparation is { } preparation)
+            if (control.SavepointName is null && ResultPreparation is { } preparation)
             {
                 await preparation.PrepareAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
             }
-            return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
+            return await ExecuteTransactionControlAsync(control, request.Parameters, cancellationToken).ConfigureAwait(false);
         }
 
         // Inside an explicit transaction, the statement rides its context. A statement is
@@ -913,7 +936,41 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         Location = DiagnosticLocation.Absolute,
     };
 
-    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
+    // Dispatch before creating either async state machine: named failure translation must
+    // add no fields or allocations to an ordinary BEGIN/COMMIT/ROLLBACK control frame.
+    private ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
+        SqlTransactionExpression control, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        => control.SavepointName is { } name
+            ? ExecuteSavepointControlAsync(control, name, parameters, cancellationToken)
+            : ExecuteWholeTransactionControlAsync(control, cancellationToken);
+
+    private async ValueTask<DatabaseResult> ExecuteSavepointControlAsync(
+        SqlTransactionExpression control, string name, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = SqlQueryExecutor.NormalizeParameters(parameters);
+            if (ResultPreparation is { } preparation)
+            { await preparation.PrepareAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false); }
+            if (control.CommandType == SqlQueryCommandType.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else if (control.CommandType == SqlQueryCommandType.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+        }
+        catch (Exception error)
+        {
+            var reported = DatabaseFailure.TranslateSavepointFailure(_database.TranslateFailure(error), CurrentTransaction?.Context);
+            if (DatabaseFailure.IsStorageFailure(reported) && CurrentTransaction is { } failed)
+            {
+                failed.RecordStorageFailure(reported);
+                await failed.AbortStorageFailureAsync().ConfigureAwait(false);
+            }
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteWholeTransactionControlAsync(
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
@@ -931,6 +988,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                     [new Diagnostic { Code = "CS04071", Message = ErrorMessages.TransactionIsolationOutside, Severity = DiagnosticSeverity.Warning }]);
             }
             ThrowIfTransactionRefuses();
+            if (transaction.HasSavepointScope) { return TransactionDiagnostic("CS04074", ErrorMessages.TransactionIsolationSavepoint); }
             if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
             return transaction.TrySetIsolationLevel(isolationLevel)
                 ? new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0)

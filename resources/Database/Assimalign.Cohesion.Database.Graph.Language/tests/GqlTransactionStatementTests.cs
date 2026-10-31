@@ -38,7 +38,7 @@ public sealed class GqlTransactionStatementTests
     [InlineData("START")]
     [InlineData("START TRANSACTION RETURN 1")]
     [InlineData("COMMIT; RETURN 1")]
-    [InlineData("ROLLBACK TO savepoint")]
+    [InlineData("ROLLBACK TO SAVEPOINT marker extra")]
     [InlineData("EXPLAIN COMMIT")]
     [InlineData("BEGIN TRANSACTION RETURN 1")]
     [InlineData("BEGIN TRANSACTION; COMMIT")]

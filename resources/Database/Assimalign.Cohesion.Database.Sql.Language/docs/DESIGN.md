@@ -1,5 +1,14 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+Transaction AST nodes retain the normalized SavepointName. The contextual parser and renderer
+accept standalone SAVEPOINT, RELEASE and ROLLBACK TO; the three adjacent profile clauses and
+complete-statement/execution corpora advance together. Core spelling follows ISO, optional
+SAVEPOINT follows PostgreSQL. Unquoted names fold to lowercase; quoted names preserve case.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+The parser and renderer corpus covers both TO forms with no modifier or WORK and TRANSACTION (PostgreSQL src/backend/parser/gram.y:11414-11431,11483-11486).
+
 ## Index key order grammar (#1631, SQ-K1)
 
 SqlCreateIndexExpression.KeyOrders retains effective per-column direction and NULL placement.
@@ -8,7 +17,13 @@ src/backend/commands/indexcmds.c:2255-2270: ASC NULLS LAST and DESC NULLS FIRST.
 omits default options. Constraint column lists retain their column-only grammar and coded
 syntax refusal (PostgreSQL src/backend/parser/gram.y:4321,8422-8495). The profile gains one
 clause; parser completeness and positive/negative and live execution corpora cover it. SQ-K1
-changes no ORDER BY planning or result wire types. Catalog 32 and compiled v11 fence the
+changes no ORDER BY grammar or result wire types. SQ-K3 adds engine order matching, forward/
+backward sort avoidance and order costing; the live index-order corpus now asserts both scan
+directions and zero retained sort rows (see DIALECT). NULL placement is ignored only for
+keys proven non-NULL by declarations, equality prefixes, mandatory local NULL rejection or a
+proven partial predicate. Strict comparison NULL rejection shares SQ-P2's rule, including
+parameter operands; OR/NOT and outer NULL extension provide no proof. The live corpus also
+covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 32 and compiled v11 fence the
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
@@ -866,7 +881,7 @@ its ordinary bare output alias before SET.
 CORRESPONDING, nested or data-modifying CTEs,
 FROM FIRST/LAST, LATERAL,
 UPDATE SET subqueries,
-RETURNING subqueries/OLD/NEW/INTO, savepoints and cost-hint syntax.
+RETURNING subqueries/OLD/NEW/INTO and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
 
@@ -878,7 +893,8 @@ renderer emits canonical BEGIN or SET TRANSACTION with comma-separated modes. Bo
 have live execution cases. CS00012 identifies malformed isolation syntax. Runtime admission precedes DDL interlocks; outside a block SET returns success with Warning CS04071 and no default change, as documented in DIALECT. READ ONLY/READ WRITE and
 [NOT] DEFERRABLE retain CK00001 naming the complete form. SERIALIZABLE parses and execution inside a transaction block refuses
 it with CS04073. No reserved keywords or formats change. DIALECT records effective isolation,
-early SET timing and the begin-time snapshot difference from PostgreSQL. Savepoints remain #1726.
+early SET timing and the begin-time snapshot difference from PostgreSQL. Active savepoint
+scopes refuse SET TRANSACTION with CS04074 (#1726).
 
 | Code | Condition | SQLSTATE |
 |---|---|---|
@@ -911,17 +927,12 @@ asserts both forms rather than exempting transaction control from the common pol
 The PostgreSQL grammar maps START TRANSACTION to its start node and END to its
 commit node, with WORK/TRANSACTION sharing `opt_transaction`
 (`src/backend/parser/gram.y:11358-11365`, `11471-11485`, local reference clone).
-The family deliberately stops short of that broader grammar: END WORK and
-END TRANSACTION, AND [NO] CHAIN, ROLLBACK [WORK] TO
-[SAVEPOINT], BEGIN TRAN and named transactions, and COMMIT PREPARED remain
-`CS00003`. ABORT [WORK|TRANSACTION], SAVEPOINT, RELEASE, and
-PREPARE TRANSACTION remain `CS00002`. Savepoint support belongs to #1726.
-
-B7 anticipates **`SAVEPOINT <name>`**, **`ROLLBACK TO [SAVEPOINT] <name>`**,
-and **`RELEASE [SAVEPOINT] <name>`**. Those forms remain outside this family, reserved for #1726. The session owns
-exactly one root transaction through `DatabaseSession`, plus a defaulted value of
-the existing transaction coordinator's `IsolationLevel`. Savepoints can add scope
-markers within that transaction, and isolation syntax configures that transaction before its first data statement.
+The family retains CS00003 for END WORK/TRANSACTION, AND [NO] CHAIN, BEGIN TRAN or named
+transactions and COMMIT PREPARED. ABORT and PREPARE TRANSACTION retain CS00002. Named
+SAVEPOINT/RELEASE/ROLLBACK TO now use the normalized transaction AST (#1726). The session
+continues to own one root transaction; the root base owns its lazy stack of memory-only scopes.
+Isolation syntax configures that transaction before its first data statement and while no
+savepoint is active.
 
 ## Constraint normalization and persistence
 
@@ -1245,6 +1256,50 @@ The engine's view metadata contract is documented in DIALECT: complete common ty
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
 
+
+## JSON access (#1722, SQ-N1)
+
+The existing SqlBinaryExpression gains JsonAccess and JsonTextAccess operators at the
+left-associative generic-operator rung. SQL combines the existing RightArrow token
+with an immediately adjacent GreaterThan token for ->>; shared lexer/token/profile
+values and keyword reservations do not change. SqlIsJsonExpression carries one operand,
+negation and SqlJsonKind (default VALUE); its IS precedence and nesting use the existing
+predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refusal.
+
+The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
+ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
+including grouping, windows, correlation, persisted equivalence and definition checks.
+The engine resolves CASE/COALESCE alternatives through one scoped common-type path in JSON
+positions, records the selector overload, and folds adjacent bound arrows over one validated
+document. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
+literal coercion and the CS02080 declared-type mismatch refusal; the conformance corpus covers
+common selectors and JSON partial predicates.
+The shared reader validates complete input with strict UTF-8 and maximum depth 128;
+missing/wrong-container results, JSON null and SQL NULL remain distinct. The dialect
+specifies extraction, Unicode conversion and numeric/Boolean cast rules and PostgreSQL
+source anchors. JSONB storage, comparison and raw serialization remain unnormalized.
+Scalar JSONB roots follow the owner's non-array NULL rule at indexes 0/-1; the local
+PostgreSQL implementation instead indexes its internal raw-scalar wrapper there.
+
+Canonical rendering writes arrows and an explicit predicate kind. The persisted-format
+audit compared 12,951 accepted baseline statements at 311cdf224 with zero canonical
+changes and fixed points in both assemblies. Existing interpretation and stored syntax
+are unchanged; no format bump or compatibility reader is needed. Views, defaults and
+CHECK constraints containing the new forms round-trip across restart. JSON assignment
+admission now refuses malformed input; it does not rewrite existing row bytes.
+
+| Code | Condition |
+| --- | --- |
+| CS01067 | Invalid JSON access or IS JSON signature (42883) |
+| CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
+| CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+
+The extraction oracle performs 10,240 comparisons over generated nested values,
+negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.
+Deterministic three-round allocation minima prove linear input-size allocation; existing
+Release query/DML guards protect non-JSON paths. No reflection, JsonSerializer, public
+interface, cross-assembly visibility grant or wire value type is introduced.
 
 ## Integer bitwise operators (#1721, SQ-O2)
 

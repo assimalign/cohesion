@@ -12,34 +12,24 @@ using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Transactions.Tests.TestObjects;
 
-// Deviates from the repo foreign-test public-surface rule per owner direction for #1726:
-// temporary UnsafeAccessor bindings remain test-only until XT-4.
-// Test-only accessors keep anonymous controls internal until XT-4 supplies the language
-// surface. Linked model tests need no foreign InternalsVisibleTo or runtime inspection.
+// Linked model probes use the owned kernel savepoint surface.
 internal sealed class UndoMarkerDriver : TransactionRecordSpace
 {
-    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "CreateUndoMarkerAsync")]
-    private static extern ValueTask<object> CreateMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken);
-    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "ReleaseUndoMarkerAsync")]
-    private static extern ValueTask ReleaseMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken);
-    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "RollbackToUndoMarkerAsync")]
-    private static extern ValueTask UndoMarker(TransactionRecordSpace? declaringType, TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken);
-    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "GetUndoFailureCode")]
-    private static extern string? FailureCode(TransactionRecordSpace? declaringType, Exception exception);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_UndoBatchApplied")]
     private static extern void ObserveBatch(RecordSpaceVersionStore store, Action? observer);
 
-    internal static ValueTask<object> CreateAsync(TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken = default)
-        => CreateMarker(null, coordinator, context, cancellationToken);
+    internal static async ValueTask<object> CreateAsync(TransactionCoordinator coordinator, TransactionContext context, CancellationToken cancellationToken = default)
+        => await coordinator.CreateSavepointAsync(context, cancellationToken).ConfigureAwait(false);
     internal static ValueTask ReleaseAsync(TransactionCoordinator coordinator, TransactionContext context, object marker)
-        => ReleaseMarker(null, coordinator, context, marker, default);
+        => coordinator.ReleaseSavepointAsync(context, (TransactionSavepoint)marker, default);
     internal static async ValueTask UndoAsync(TransactionCoordinator coordinator, TransactionContext context, object marker, CancellationToken cancellationToken = default)
     {
         ObserveBatch(coordinator.VersionStore, UndoReaderProbe.BatchObserver);
-        try { await UndoMarker(null, coordinator, context, marker, cancellationToken); }
+        try { await coordinator.RollbackToSavepointAsync(context, (TransactionSavepoint)marker, cancellationToken); }
         finally { ObserveBatch(coordinator.VersionStore, null); }
     }
-    internal static string? Code(Exception exception) => FailureCode(null, exception);
+    internal static void SetBatchObserver(TransactionCoordinator coordinator, Action? observer) => ObserveBatch(coordinator.VersionStore, observer);
+    internal static string? Code(Exception exception) => TransactionCoordinator.GetUndoFailureCode(exception);
     internal void FinishStream(TransactionContext context) => EndWriteStream(context);
     protected override ReadOnlyMemory<byte> ReadCore(PageId pageId, int slotIndex) => throw new NotSupportedException();
     protected override void UpdateCore(StorageTransaction transaction, PageId pageId, int slotIndex, ReadOnlySpan<byte> record) => throw new NotSupportedException();

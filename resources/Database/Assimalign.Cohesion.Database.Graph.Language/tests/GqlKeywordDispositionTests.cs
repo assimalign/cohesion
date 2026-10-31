@@ -109,6 +109,8 @@ public sealed class GqlKeywordDispositionTests
         ["TRANSACTION"] = Parses("BEGIN TRANSACTION"),
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),
+        ["SAVEPOINT"] = Parses("SAVEPOINT scope"),
+        ["RELEASE"] = Parses("RELEASE SAVEPOINT scope"),
         ["FINISH"] = Rejects("MATCH (a) FINISH", "FINISH"),
         ["NEXT"] = Parses("MATCH (a) RETURN a NEXT MATCH (b) RETURN b"),
         ["FOR"] = Parses("FOR x IN [1, 2] RETURN x"),
