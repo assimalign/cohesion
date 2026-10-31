@@ -89,12 +89,20 @@ public sealed class BlobContainer
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The blob catalog changed since the transaction's snapshot (retryable).</exception>
-    public async ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions? options = null, CancellationToken cancellationToken = default)
+    public ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions? options = null, CancellationToken cancellationToken = default)
+        => OpenWriteCoreAsync(name, options, null, cancellationToken);
+
+    internal ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions options,
+        BlobDatabaseTransaction expectedTransaction, CancellationToken cancellationToken)
+        => OpenWriteCoreAsync(name, options, expectedTransaction, cancellationToken);
+
+    private async ValueTask<Stream> OpenWriteCoreAsync(string name, BlobWriteOptions? options,
+        BlobDatabaseTransaction? expectedTransaction, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         bool overwrite = options?.Overwrite ?? true;
         string? contentType = options?.ContentType;
-        var operation = await _database.BeginOperationAsync(_session, cancellationToken).ConfigureAwait(false);
+        var operation = await _database.BeginOperationAsync(_session, cancellationToken, expectedTransaction).ConfigureAwait(false);
         try
         {
             await _database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);

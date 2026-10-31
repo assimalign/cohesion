@@ -373,8 +373,9 @@ public sealed class BlobDatabase : DatabaseInstance
     /// </summary>
     /// <param name="session">The session the operation runs on.</param>
     /// <param name="token">Cancellation token for the start.</param>
+    /// <param name="expectedTransaction">The wire upload host that admission must still select, or null.</param>
     /// <returns>The running operation.</returns>
-    internal async ValueTask<BlobOperation> BeginOperationAsync(BlobDatabaseSession session, CancellationToken token)
+    internal async ValueTask<BlobOperation> BeginOperationAsync(BlobDatabaseSession session, CancellationToken token, BlobDatabaseTransaction? expectedTransaction = null)
     {
         ThrowIfDisposed();
         ThrowIfOffline();
@@ -383,6 +384,10 @@ public sealed class BlobDatabase : DatabaseInstance
         BlobOperation? operation = null;
         try
         {
+            // Admission holds the session and the selected transaction. A stale host must
+            // never turn a borrowed stream into an autocommit operation.
+            if (expectedTransaction is not null && !ReferenceEquals(expectedTransaction, explicitTransaction))
+            { throw expectedTransaction.CreateOperationRefusal(); }
             var context = explicitTransaction?.Context ?? await BeginContextAsync(IsolationLevel.Snapshot, token).ConfigureAwait(false);
             operation = new BlobOperation(this, session, context, explicitTransaction);
             await operation.InitializeAsync(token).ConfigureAwait(false);

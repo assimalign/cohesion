@@ -153,6 +153,8 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         }
         catch (ProtocolException exception)
         {
+            // Retain even a pre-operation protocol failure before terminal I/O.
+            await AbortHostTransactionAsync(exception).ConfigureAwait(false);
             // Framing or message-order violation: report and terminate.
             _closeReason = BlobDatabaseEventSource.CloseReason.ProtocolViolation;
             BlobDatabaseEventSource.Log.SessionProtocolViolation(this, exception.Message);
@@ -545,6 +547,11 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         }
     }
 
+    // Scheduling seams inside the assembly's existing internal test boundary.
+    internal Action? BeforeUploadOpen { get; set; }
+    internal Action? DownloadOpened { get; set; }
+    internal Action? DownloadReleased { get; set; }
+
     private async Task UploadAsync(BlobDatabaseSession session, BlobWriteMessage request, CancellationToken cancellationToken)
     {
         ProtocolFrame? start = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
@@ -559,15 +566,16 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         BlobDatabaseTransaction? borrowed = session.CurrentTransaction;
         await using BlobDatabaseTransaction? owned = borrowed is null
             ? await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false) : null;
-        Stream? destination = null;
+        BlobGuardedStream? destination = null;
         try
         {
             BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
-            destination = await container.OpenWriteAsync(request.Name, new BlobWriteOptions
+            BeforeUploadOpen?.Invoke();
+            destination = (BlobGuardedStream)await container.OpenWriteAsync(request.Name, new BlobWriteOptions
             {
                 ContentType = metadata.ContentType.Length == 0 ? null : metadata.ContentType,
                 Overwrite = request.Overwrite
-            }, cancellationToken).ConfigureAwait(false);
+            }, (borrowed ?? owned)!, cancellationToken).ConfigureAwait(false);
             BlobTransferStartMessage received = await BlobProtocolTransfer.ReceiveAsync(
                 _reader, _writer!, destination, metadata, cancellationToken).ConfigureAwait(false);
             await destination.DisposeAsync().ConfigureAwait(false);
@@ -578,6 +586,8 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
         }
         catch (Exception cause)
         {
+            // Abort the destination's operation even if the captured host has already ended.
+            if (destination is not null) { await destination.AbortAsync(cause).ConfigureAwait(false); }
             // Roll back BEFORE successful disposal can finalize the storage stream. Explicit
             // transactions keep even successfully disposed destinations invisible until commit.
             // A failed operation leaves the transaction Faulted until it is rolled back (#1225);
@@ -586,9 +596,6 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             {
                 await owned.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }
-            // A borrowed stream must become inactive before its disposal can publish buffered
-            // content. Retain the failure for the host's later commit, as other wire failures do.
-            else if (borrowed is not null) { await borrowed.AbortForFailedOperationAsync(cause).ConfigureAwait(false); }
             throw;
         }
         finally
@@ -609,10 +616,48 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             ? await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false) : null;
         BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
         var opened = await container.OpenReadWithPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false);
-        await using Stream source = opened.Content;
+        await using var source = (BlobGuardedStream)opened.Content;
+        DownloadOpened?.Invoke();
         BlobProperties properties = opened.Properties;
-        await BlobProtocolTransfer.SendAsync(_reader!, _writer!, source,
-            new BlobTransferStartMessage(properties.Length, properties.ContentType ?? ""), cancellationToken).ConfigureAwait(false);
+        try
+        {
+            long total = await SendDownloadContentAsync(source, properties, cancellationToken).ConfigureAwait(false);
+            await source.DisposeAsync().ConfigureAwait(false);
+            DownloadReleased?.Invoke();
+            await WriteFrameAsync((ProtocolMessageType)BlobProtocolMessageType.TransferComplete,
+                new BlobTransferCompleteMessage(total).Encode(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception cause)
+        {
+            await source.AbortAsync(cause).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    // The server owns storage release and the final completion frame. Keep the bounded
+    // stop-and-wait content exchange here so no extra stream wrapper or public protocol seam
+    // is needed to release the operation before publishing completion.
+    private async ValueTask<long> SendDownloadContentAsync(Stream source, BlobProperties properties, CancellationToken cancellationToken)
+    {
+        await WriteFrameAsync((ProtocolMessageType)BlobProtocolMessageType.TransferStart,
+            new BlobTransferStartMessage(properties.Length, properties.ContentType ?? "").Encode(), cancellationToken).ConfigureAwait(false);
+        var buffer = new byte[BlobProtocol.MaxChunkLength];
+        long total = 0;
+        while (true)
+        {
+            int read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read == 0) { break; }
+            if (read > properties.Length - total) { throw new ProtocolException(ErrorMessages.DownloadLengthInvalid); }
+            total += read;
+            await _writer!.WriteFrameAsync(new BlobChunkMessage(buffer.AsMemory(0, read)).ToFrame(), cancellationToken).ConfigureAwait(false);
+            await _writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            var acknowledgement = await _reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
+            if (acknowledgement is null || acknowledgement.Value.Type != (ProtocolMessageType)BlobProtocolMessageType.ChunkAcknowledgement ||
+                BlobChunkAcknowledgementMessage.Decode(acknowledgement.Value.Payload.Span).Length != total)
+            { throw new ProtocolException(ErrorMessages.DownloadAcknowledgementInvalid); }
+        }
+        if (total != properties.Length) { throw new ProtocolException(ErrorMessages.DownloadLengthInvalid); }
+        return total;
     }
 
     private ValueTask PropertiesAsync(BlobProperties properties, CancellationToken cancellationToken)

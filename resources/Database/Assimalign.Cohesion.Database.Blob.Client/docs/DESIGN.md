@@ -2,18 +2,24 @@
 
 ## Borrowed wire transaction scopes (#1726, XT-5)
 
-The matrix found that upload/download envelopes unconditionally began a transaction and
-refused host-opened scopes with CK04004. They now borrow the session's existing transaction;
-only an automatically created envelope is committed/disposed by the server. Interrupted borrowed
-uploads abort their exact host transaction before disposing buffered content, retaining CB04001
-for later host commit and Blob's terminal wire rule. Downloads select properties and content
-from one catalog record under one operation snapshot, including a borrowed READ COMMITTED
-scope. The internal container read helper changes no public member or stream layout.
-The pump holds no session/model monitor
-across transport awaits; existing operation and kernel admission retain their lock order.
-Tests cover both transports, read-after-upload inside the scope, seven undo stages, cancellation,
-connection drop/return and session disposal after an acknowledged chunk, and CK04010 while open.
-No API, diagnostic identity or format changes are needed.
+The Blob protocol has no transaction-control messages and its pump serializes exchanges, so
+pipelined frames cannot execute a COMMIT or ROLLBACK during a transfer. The host can nevertheless
+end the server session's transaction between container lookup and stream admission; connection
+lifetime cancellation and session disposal can also end it. Upload admission checks the captured
+transaction identity under the existing operation reservation and refuses a stale host with
+CK04005 instead of starting autocommit. Every failed upload aborts the destination's own operation
+before buffered stream disposal, including protocol validation failures with a live lifetime token.
+Pre-operation protocol failures also abort the host before terminal I/O, retaining their exact cause.
+
+Downloads select metadata and content from one catalog record and pinned operation snapshot,
+including READ COMMITTED during a concurrent replacement. EOF releases the operation before
+TransferComplete is written, so immediate host COMMIT cannot encounter the read hold. Protocol
+acknowledgement failures abort the borrowed read operation before disposal and retain their cause.
+Only an automatically created envelope is committed/disposed by the server. No monitor spans a
+transport await; the XT-4 admission and end ordering, public API and storage format 4 are unchanged.
+Deterministic tests cover both transports, stale host COMMIT/ROLLBACK, wrong-length completion
+while the lifetime is live, pre-operation failure, failed downloads, immediate commit, and replacement
+of a 20,000-byte version by a 30,000-byte version while the original download remains pinned.
 
 ## Savepoint adapter conformance (#1726, XT-5)
 

@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -7,6 +8,8 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.Connections;
+using Assimalign.Cohesion.Database.Blob.Protocol;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -83,59 +86,46 @@ public sealed class BlobTransactionFailureWireTests
         (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
     }
 
-    /// <summary>
-    /// An upload refused before its destination stream opens still ends a host-opened transaction,
-    /// because a Blob wire failure is terminal: the server aborts the transaction before it reports
-    /// the failure, then closes the connection. The host's COMMIT fails with CB04001 naming the
-    /// refusal before and after the teardown, its earlier wire write is undone, and a fresh
-    /// connection works.
-    /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: upload refused before stream creation ends the host scope and COMMIT fails with CB04001")]
-    public async Task UploadAsync_MissingContainerBeforeStreamStarts_ShouldEndHostTransactionAndFailCommitWithCode()
+    [Theory(DisplayName = "Cohesion Test [Blob.Client] - A protocol failure before upload operation admission aborts earlier borrowed work with its exact cause (#1726)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UploadAsync_InvalidStartBeforeOperation_ShouldAbortHostWithProtocolCause(bool tcp)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await using var harness = await BlobClientTestHarness.StartAsync(timeout.Token);
-        await WriteAsync(harness.Container, "keep", "original", timeout.Token);
-        var connection = await harness.Client.ConnectAsync(timeout.Token);
-        var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
-        var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
-        (await connection.DeleteAsync("files", "keep", timeout.Token)).ShouldBeTrue();
+        var token = timeout.Token;
+        await using var harness = await BlobClientTestHarness.StartAsync(token, tcp);
+        await WriteAsync(harness.Container, "keep", "original", token);
+        await using var transport = await harness.Factory.ConnectAsync(harness.Listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(transport.AsStream(), BlobProtocol.Family, true);
+        await SendAsync(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "app", "tester").Encode());
+        (await ReadAsync()).Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await SendAsync(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty);
+        channel.SetAgreement(ProtocolReadyMessage.Decode((await ReadAsync()).Payload.Span));
+        var session = (BlobDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+        await using var transaction = await session.BeginTransactionAsync(token);
+        (await (await session.GetContainerAsync("files", token)).DeleteAsync("keep", token)).ShouldBeTrue();
 
-        // Act: container lookup refuses the upload before it can open its destination stream.
-        var failure = await Should.ThrowAsync<BlobClientException>(async () =>
-            await connection.UploadAsync("missing", "other", new MemoryStream(new byte[10]), cancellationToken: timeout.Token));
-        var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
-        await WaitUntilAsync(() => harness.Server.Sessions.Count == 0, timeout.Token);
-        var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
-        await transaction.RollbackAsync(timeout.Token);
-        await connection.DisposeAsync();
+        // Act: UploadAsync has not yet captured a transaction or opened a destination.
+        await SendAsync((ProtocolMessageType)BlobProtocolMessageType.Write, new BlobWriteMessage("files", "other").Encode());
+        await SendAsync((ProtocolMessageType)BlobProtocolMessageType.TransferComplete, new BlobTransferCompleteMessage(0).Encode());
+        var failure = await ReadAsync();
+        var commit = await Should.ThrowAsync<DatabaseException>(() => transaction.CommitAsync(token).AsTask());
 
-        // Assert: the lookup cause survives both the abort and the connection teardown.
-        const string refusalDetail = "Container 'missing' does not exist.";
-        failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldBe("CB01001: " + refusalDetail);
-        failure.Diagnostics.ShouldBeEmpty(); // Blob's Error frame carries the formatted message only.
-        commit.ShouldBeOfType<DatabaseException>();
-        var cause = commit.InnerException.ShouldBeOfType<DatabaseException>();
-        cause.Message.ShouldBe(refusalDetail);
-        var causeDiagnostic = cause.Diagnostics.ShouldHaveSingleItem();
-        causeDiagnostic.Code.ShouldBe("CB01001");
-        causeDiagnostic.Message.ShouldBe(refusalDetail);
-        causeDiagnostic.Severity.ShouldBe(Types.DiagnosticSeverity.Error);
-        causeDiagnostic.Start.ShouldBeNull();
-        causeDiagnostic.End.ShouldBeNull();
-        var commitDiagnostic = commit.Diagnostics.ShouldHaveSingleItem();
-        commitDiagnostic.Code.ShouldBe("CB04001");
-        commitDiagnostic.Message.ShouldBe(commit.Message);
-        commit.Message.ShouldBe("The session's transaction is aborted and cannot commit; nothing was committed. Cause: " + refusalDetail);
-        repeated.Message.ShouldBe(commit.Message);
-        repeated.InnerException.ShouldBeSameAs(cause);
-        repeated.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CB04001");
-        transaction.State.ShouldBe(TransactionState.RolledBack);
-        (await ReadAsync(harness.Container, "keep", timeout.Token)).ShouldBe("original");
-        await using var next = await harness.Client.ConnectAsync(timeout.Token);
-        (await next.GetPropertiesAsync("files", "other", timeout.Token)).ShouldBeNull();
+        // Assert: teardown alone would retain its generic closure cause instead.
+        failure.Type.ShouldBe(ProtocolMessageType.Error);
+        ProtocolErrorMessage.Decode(failure.Payload.Span).Code.ShouldBe(ProtocolErrorCode.ProtocolViolation);
+        commit.Diagnostics.ShouldContain(item => item.Code == "CB04001");
+        commit.InnerException.ShouldBeOfType<ProtocolException>();
+        (await BlobTransactionFailureWireTests.ReadAsync(harness.Container, "keep", token)).ShouldBe("original");
+        (await harness.Container.GetPropertiesAsync("other", token)).ShouldBeNull();
+
+        async Task SendAsync(ProtocolMessageType type, ReadOnlyMemory<byte> payload)
+        {
+            await channel.Writer.WriteFrameAsync(new(type, payload), token);
+            await channel.Writer.FlushAsync(token);
+        }
+        async Task<ProtocolFrame> ReadAsync() => (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
     }
 
     private static async Task WriteAsync(BlobContainer container, string name, string content, CancellationToken cancellationToken)
