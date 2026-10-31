@@ -158,12 +158,14 @@ public sealed class SavepointFailureWireTests
         rows.Select(row => Convert.ToInt64(row[0])).ShouldBe(new long[] { 1, 4 });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Repeated connection return or drop during admitted undo drains the writer and releases the pool slot (#1726)")]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task DisposeAsync_AdmittedUndo_ShouldDrainAndReleasePool(bool tcp, bool drop)
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Repeated connection return, drop or cancellation during admitted undo drains the writer and releases the pool slot (#1726)")]
+    [InlineData(false, 0)]
+    [InlineData(false, 1)]
+    [InlineData(true, 0)]
+    [InlineData(true, 1)]
+    [InlineData(false, 2)]
+    [InlineData(true, 2)]
+    public async Task DisposeAsync_AdmittedUndo_ShouldDrainAndReleasePool(bool tcp, int ending)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -191,14 +193,16 @@ public sealed class SavepointFailureWireTests
                 entered.TrySetResult();
                 release.Wait(token);
             });
-            var undo = writer.ExecuteAsync("ROLLBACK TO target", cancellationToken: token).AsTask();
+            using var caller = CancellationTokenSource.CreateLinkedTokenSource(token);
+            var undo = writer.ExecuteAsync("ROLLBACK TO target", cancellationToken: caller.Token).AsTask();
             Task? returning = null;
 
             // Act: the physical undo callback establishes admission before teardown.
             try
             {
                 await entered.Task.WaitAsync(token);
-                returning = drop ? writer.AbortAsync().AsTask() : writer.DisposeAsync().AsTask();
+                if (ending == 2) { caller.Cancel(); }
+                returning = ending == 1 ? writer.AbortAsync().AsTask() : writer.DisposeAsync().AsTask();
             }
             finally
             {
@@ -250,6 +254,168 @@ public sealed class SavepointFailureWireTests
         refused.Diagnostics.ShouldContain(item => item.Code == "CD04101");
         await writer.ExecuteAsync("ROLLBACK", cancellationToken: token);
     }
+
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Cancellation before dispatch admits no control and a discarded lease resets every scope (#1726)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_CanceledBeforeDispatch_ShouldDiscardAndReset(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp: tcp);
+        var database = harness.Database;
+        await using var writer = await harness.Client.ConnectAsync(token);
+        await writer.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token);
+        await writer.ExecuteAsync("BEGIN", cancellationToken: token);
+        await writer.ExecuteAsync("SAVEPOINT retained", cancellationToken: token);
+        await writer.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('k4', {'n': 4})", cancellationToken: token);
+        var session = (DocumentDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+        var transaction = session.CurrentTransaction!;
+        var coordinator = Coordinator(database);
+        int admitted = 0;
+        Observe(coordinator.VersionStore, () => admitted++);
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+
+        // Act / Assert: the shared client deliberately breaks a canceled exchange (#1313).
+        // The control never entered the kernel; returning that lease must scrub its scope.
+        try
+        {
+            await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await writer.ExecuteAsync("ROLLBACK TO retained", cancellationToken: canceled.Token));
+            admitted.ShouldBe(0);
+            session.CurrentTransaction.ShouldBeSameAs(transaction);
+            transaction.State.ShouldBe(TransactionState.Active);
+        }
+        finally { Observe(coordinator.VersionStore, null); }
+        await writer.DisposeAsync();
+        while (Context(transaction).State == TransactionState.Active) { await Task.Delay(1, token); }
+        await using var next = await harness.Client.ConnectAsync(token);
+        await next.ExecuteAsync("BEGIN", cancellationToken: token);
+        var unknown = await Should.ThrowAsync<DocumentClientException>(async () =>
+            await next.ExecuteAsync("ROLLBACK TO retained", cancellationToken: token));
+        unknown.Diagnostics.ShouldContain(item => item.Code == "CK04013");
+        await next.ExecuteAsync("ROLLBACK", cancellationToken: token);
+        await using var observer = await database.CreateSessionAsync(token);
+        await using var result = (await observer.ExecuteAsync("SELECT n FROM items", cancellationToken: token)).ShouldBeAssignableTo<DatabaseResultSet>();
+        var values = new List<long>();
+        await foreach (var row in result.GetRowsAsync(token)) { values.Add(Convert.ToInt64(row.GetValue(0))); }
+        values.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Offline storage outranks the undo fence over both transports (#1726)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_OfflinePendingUndo_ShouldPreferOfflineRefusal(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp: tcp);
+        var database = harness.Database;
+        var factory = harness.Factory;
+        await using var transport = await factory.ConnectAsync(harness.Listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(transport.AsStream(), DocumentProtocol.Family, true);
+        var wire = new SavepointWireControl(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute, (ProtocolMessageType)DocumentProtocolMessageType.Failure,
+            statement => DocumentProtocolExecuteMessage.Create(statement).Encode(),
+            frame => DocumentProtocolFailureMessage.Decode(frame.Payload.Span).Message, token);
+        await wire.StartAsync("documents");
+        (await wire.ExecuteAsync("CREATE COLLECTION items")).ShouldBeTrue();
+        (await wire.ExecuteAsync("BEGIN")).ShouldBeTrue();
+        (await wire.ExecuteAsync("SAVEPOINT retained")).ShouldBeTrue();
+        (await wire.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('k4', {'n': 4})")).ShouldBeTrue();
+        var session = (DocumentDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+        var coordinator = Coordinator(database);
+        var context = Context(session.CurrentTransaction!);
+        using var fault = new SavepointUndoFault(coordinator, context, 3);
+        try { (await wire.ExecuteAsync("ROLLBACK TO retained")).ShouldBeFalse(); }
+        finally { fault.Disarm(); }
+        wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CK04009:", Case.Sensitive);
+        TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
+
+        // Act
+        Storage(coordinator).TakeOffline(StorageOfflineCause.VersionPurgeFailures,
+            "Injected offline storage with pending undo", new IOException("Offline"));
+        (await wire.ExecuteAsync("ROLLBACK TO retained")).ShouldBeFalse();
+
+        // Assert: a complete failure/Ready E exchange, with the lifecycle cause first.
+        wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CD06102:", Case.Sensitive);
+        session.State.ShouldBe(SessionState.Open);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Documents.Client] - Session and database close drain an admitted wire control on both transports (#1726)")]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task DisposeAsync_AdmittedWireControl_ShouldDrainBeforeClose(bool tcp, bool closeDatabase)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await DocumentClientTestHarness.StartAsync(tcp: tcp);
+        var database = harness.Database;
+        await using var writer = await harness.Client.ConnectAsync(token);
+        await writer.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token);
+        await writer.ExecuteAsync("BEGIN", cancellationToken: token);
+        await writer.ExecuteAsync("SAVEPOINT retained", cancellationToken: token);
+        await writer.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('k4', {'n': 4})", cancellationToken: token);
+        var session = (DocumentDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+        var coordinator = Coordinator(database);
+        var context = Context(session.CurrentTransaction!);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        int admitted = 0;
+        Observe(coordinator.VersionStore, () =>
+        {
+            Interlocked.Increment(ref admitted);
+            entered.TrySetResult();
+            release.Wait(token);
+        });
+        var undo = writer.ExecuteAsync("ROLLBACK TO retained", cancellationToken: token).AsTask();
+        Task? close = null;
+
+        // Act: the physical callback owns admission before either close can claim the end gate.
+        try
+        {
+            await entered.Task.WaitAsync(token);
+            close = closeDatabase ? database.DisposeAsync().AsTask() : session.DisposeAsync().AsTask();
+            close.IsCompleted.ShouldBeFalse();
+            context.State.ShouldBe(TransactionState.Active);
+            if (closeDatabase)
+            { await Should.ThrowAsync<ObjectDisposedException>(async () => await database.CreateSessionAsync(token)); }
+            else { session.State.ShouldBe(SessionState.Closed); }
+        }
+        finally
+        {
+            release.Set();
+            try { await Record.ExceptionAsync(async () => await undo.WaitAsync(token)); }
+            finally
+            {
+                Observe(coordinator.VersionStore, null);
+                if (close is not null) { await close.WaitAsync(token); }
+            }
+        }
+
+        // Assert
+        token.ThrowIfCancellationRequested();
+        admitted.ShouldBe(1);
+        context.State.ShouldNotBe(TransactionState.Active);
+        TransactionCoordinator.IsPartialUndoPending(context).ShouldBeFalse();
+        if (!closeDatabase)
+        {
+            await using var observer = await database.CreateSessionAsync(token);
+            await using var result = (await observer.ExecuteAsync("SELECT n FROM items", cancellationToken: token)).ShouldBeAssignableTo<DatabaseResultSet>();
+            var values = new List<long>();
+            await foreach (var row in result.GetRowsAsync(token)) { values.Add(Convert.ToInt64(row.GetValue(0))); }
+            values.ShouldBeEmpty();
+        }
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_storage")]
+    private static extern ref Assimalign.Cohesion.Database.Storage.Storage Storage(TransactionCoordinator coordinator);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Coordinator")]
     private static extern TransactionCoordinator Coordinator(DocumentDatabase database);

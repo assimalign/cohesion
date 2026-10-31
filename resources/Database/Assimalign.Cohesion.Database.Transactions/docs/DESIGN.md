@@ -49,8 +49,8 @@ plus Ready E on the wire.
 | Nested names, duplicates, release/rollback scope, repeated rollback | NamedSavepointTests | NamedSavepointWireTests |
 | Ordinary statement and failed-control policies | NamedSavepointTests, SavepointMatrixTests | NamedSavepointWireTests, SavepointFailureWireTests |
 | Undo failures, fences, target/outer/root recovery and exact commit | SavepointFixTests, SavepointMatrixTests | SavepointFailureWireTests, SavepointAdapterWireTests |
-| Pre-admission cancellation, admitted completion, root ends and session/database close | NamedSavepointTests, SavepointFixTests, SavepointMatrixTests | SavepointFailureWireTests (return/drop during admitted undo) |
-| Disposal/offline/corruption precedence | SavepointFixTests | SavepointFailureWireTests and model lifecycle/wire suites |
+| Pre-admission cancellation, admitted completion, root ends and session/database close | NamedSavepointTests, SavepointFixTests, SavepointMatrixTests | SavepointFailureWireTests (pre-dispatch cancellation, admitted return/drop and session/database close) |
+| Disposal/offline/corruption precedence | SavepointFixTests | SavepointFailureWireTests (offline over CK04009), model lifecycle/wire suites |
 | Crash after rollback-to, within the second undo bracket, after root commit | SavepointAdapterTests, SavepointMatrixTests in all five models | SavepointMatrixTests drives SQL/OQL/GQL controls through both transports before copying the live image |
 | Snapshot and fresh READ COMMITTED readers, released lock waiters | SavepointAdapterTests, NamedSavepointTests | SavepointMatrixTests drives undo through both transports while both reader isolations progress and scoped lock waiters wake |
 | Documents/Blob stream refusal and saturation; key/value adapters; Graph MERGE accounting | SavepointAdapterTests, SavepointMatrixTests, SavepointMergeLockTests | SavepointAdapterWireTests covers KeyValuePair/Blob mutations without adding control messages |
