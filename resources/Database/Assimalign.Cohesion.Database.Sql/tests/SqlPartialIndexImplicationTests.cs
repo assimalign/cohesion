@@ -199,7 +199,8 @@ public sealed class SqlPartialIndexImplicationTests
 
         // Assert
         Canonical(rows).ShouldBe("0\n2");
-        session.LastStatementMetrics!.AccessPath.ShouldBe("seek:ix");
+        session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix:forward");
+        session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Partial arbiters: inference uses the target predicate and membership for every proposal (#1630)")]

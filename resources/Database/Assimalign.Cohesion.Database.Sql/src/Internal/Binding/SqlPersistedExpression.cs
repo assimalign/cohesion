@@ -392,6 +392,7 @@ internal static class SqlPersistedExpression
         (SqlStarExpression, SqlStarExpression) => true,
         (SqlDistinctExpression a, SqlDistinctExpression b) => a.IsNegated == b.IsNegated,
         (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
+        (SqlIsJsonExpression a, SqlIsJsonExpression b) => a.IsNegated == b.IsNegated && a.Kind == b.Kind,
         (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
         (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
         (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated && a.IsCaseInsensitive == b.IsCaseInsensitive,

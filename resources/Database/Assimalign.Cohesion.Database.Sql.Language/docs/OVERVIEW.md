@@ -16,6 +16,10 @@ infrastructure (`Database.Language`), the declared dialect contract
 ([DIALECT.md](DIALECT.md)), and the type-name translation table (`SqlTypeNames`)
 binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 
+SAVEPOINT, RELEASE [SAVEPOINT] and ROLLBACK TO [SAVEPOINT] retain named nested scopes
+on the session's explicit transaction (#1726). Rollback keeps its target for reuse; RELEASE
+discards its target and descendants. SET TRANSACTION refuses inside an active scope.
+
 ## Scope
 
 Aggregate calls retain FILTER conditions, DISTINCT/ALL and ordered inputs. The executable

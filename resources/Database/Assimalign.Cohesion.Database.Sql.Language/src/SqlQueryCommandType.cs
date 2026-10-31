@@ -29,4 +29,10 @@ public enum SqlQueryCommandType
     Discard,
     /// <summary>Configure the current transaction before its first data statement.</summary>
     SetTransaction,
+    /// <summary>Create a named undo scope.</summary>
+    Savepoint,
+    /// <summary>Release a named undo scope and descendants.</summary>
+    ReleaseSavepoint,
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    RollbackToSavepoint,
 }

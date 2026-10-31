@@ -38,9 +38,12 @@ public sealed class GraphCatalog
     private readonly Dictionary<Guid, HashSet<(byte Kind, string Name)>> _definitions = new();
     private readonly Dictionary<(byte Kind, Guid Parent), SortedSet<string>> _children = new();
     private readonly Dictionary<string, HashSet<(byte Kind, Guid Parent)>> _schemaNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<Reference>> _propertyNames = new(StringComparer.Ordinal);
 
     // Per-instance fault/record-visit seam, reached only by this model's tests.
     internal Action? BeforeRecordRead { get; set; }
+    internal Action? BeforePropertyCheck { get; set; }
+    internal Action<string>? BeforePropertyKeyLookup { get; set; }
     internal Action? BeforeDirectoryKeyVisit { get; set; }
 
     private GraphCatalog(GraphStorage storage, TransactionCoordinator coordinator)
@@ -215,6 +218,35 @@ public sealed class GraphCatalog
 
     internal IReadOnlyList<GraphPropertyKeyMetadata> GetDeclaredPropertyKeys(Guid definitionId, TransactionSnapshot snapshot)
         => List(3, definitionId, snapshot).Select(item => item.Record.Property!.Value).ToArray();
+
+    // Tokens describe names a definition has had, independently of a particular entity's
+    // current values. Consult the writer stamps already loaded by Add, without decoding
+    // metadata or scanning definitions on the read path. Undone versions leave this directory.
+    internal bool HasPropertyKey(string name, TransactionSnapshot snapshot)
+    {
+        BeforePropertyKeyLookup?.Invoke(name);
+        lock (_sync)
+        {
+            if (!_propertyNames.TryGetValue(name, out var versions)) { return false; }
+            foreach (var version in versions)
+            {
+                if (snapshot.IsVisible(version.Writer)) { return true; }
+            }
+            return false;
+        }
+    }
+
+    // Entity records persist string keys, rather than separate property-token identities.
+    // Reuse kind-3 catalog records for discoveries without a mutable definition. A fresh
+    // private identity keeps them outside every definition's metadata and avoids reserving
+    // a public GUID or adding a second registry/record format. Add and undo maintain the
+    // same database-wide name directory as declared keys.
+    internal ValueTask DiscoverPropertyKeyAsync(string name, TransactionContext context, CancellationToken token)
+    {
+        if (HasPropertyKey(name, context.Snapshot)) { return default; }
+        return SaveAsync(new CatalogRecord(property: new GraphPropertyKeyMetadata(Guid.NewGuid(), name)),
+            null, context, token);
+    }
 
     internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
     {
@@ -613,6 +645,11 @@ public sealed class GraphCatalog
         }
         _versions[key] = versions;
         versions.Add(reference);
+        if (record.Kind == 3)
+        {
+            if (!_propertyNames.TryGetValue(record.Name, out var properties)) { _propertyNames[record.Name] = properties = []; }
+            properties.Add(reference);
+        }
         if (record.Kind is 4 or 5)
         {
             if (!_schemaNames.TryGetValue(record.Name, out var routes)) { _schemaNames[record.Name] = routes = []; }
@@ -666,6 +703,11 @@ public sealed class GraphCatalog
     {
         var removed = versions[index];
         versions.RemoveAt(index);
+        if (key.Kind == 3 && _propertyNames.TryGetValue(key.Name, out var properties))
+        {
+            properties.Remove(removed);
+            if (properties.Count == 0) { _propertyNames.Remove(key.Name); }
+        }
         if (key.Kind <= 2 && !versions.Any(item => item.Id == removed.Id) &&
             _definitions.TryGetValue(removed.Id, out var keys))
         {

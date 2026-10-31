@@ -132,6 +132,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return BindDistinct(distinct, out collation, statisticsInput);
             case SqlBooleanTestExpression test:
                 return BindBooleanTest(test, out collation, statisticsInput);
+            case SqlIsJsonExpression json:
+                return BindIsJson(json, out collation, statisticsInput);
             case SqlIsNullExpression isNull:
                 return BindIsNull(isNull, out collation, statisticsInput);
             case SqlBetweenExpression between:
@@ -190,6 +192,24 @@ internal sealed partial class SqlExpressionEvaluator
     [MethodImpl(MethodImplOptions.NoInlining)]
     private SqlBoundExpression BindBinary(SqlBinaryExpression binary, out SqlCollationCandidate collation, bool statisticsInput)
     {
+        if (SqlJsonAccess.IsOperator(binary.Operator))
+        {
+            var types = new Dictionary<SqlExpression, DatabaseType>();
+            var source = ValidateJsonOperand(binary.Left, selector: false, predicate: false, types);
+            var selectorType = ValidateJsonOperand(binary.Right, selector: true, predicate: false, types);
+            var operand = BindJsonOperand(binary.Left, out _, statisticsInput, types);
+            var selector = BindJsonOperand(binary.Right, out var selectorCollation, statisticsInput, types);
+            collation = binary.Operator == SqlBinaryOperator.JsonTextAccess ? selectorCollation : default;
+            var step = new SqlBoundJsonStep(selector, selectorType, selectorType is DatabaseType.Int16 or DatabaseType.Int32, binary.Location);
+            // Only adjacent AST arrows combine. CAST/COLLATE and all other expressions
+            // are evaluation boundaries, even if their bound representation is transparent.
+            if (binary.Left is SqlBinaryExpression previous && SqlJsonAccess.IsOperator(previous.Operator)
+                && operand is SqlBoundJsonAccess { AsText: false } chain)
+            {
+                return new SqlBoundJsonAccess(chain.Operand, [.. chain.Steps, step], source, binary.Operator == SqlBinaryOperator.JsonTextAccess);
+            }
+            return new SqlBoundJsonAccess(operand, [step], source, binary.Operator == SqlBinaryOperator.JsonTextAccess);
+        }
         var left = Bind(binary.Left, out SqlCollationCandidate leftCollation, statisticsInput: statisticsInput);
         var right = Bind(binary.Right, out SqlCollationCandidate rightCollation, statisticsInput: statisticsInput);
         if (binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan
@@ -709,7 +729,7 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCase(SqlCaseExpression conditional, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput)
+    private SqlBoundExpression BindCase(SqlCaseExpression conditional, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput, Dictionary<SqlExpression, DatabaseType>? jsonTypes = null)
     {
         SqlBoundExpression? input = null;
         SqlCollationCandidate inputCollation = default;
@@ -719,7 +739,8 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         // CASE conditions select a result; their collation does not describe that result.
-        bool textResult = !requireBoolean && StaticTypeOf(conditional) == DatabaseType.String;
+        var resultType = jsonTypes is not null ? JsonOperandType(conditional, types: jsonTypes) : StaticTypeOf(conditional);
+        bool textResult = !requireBoolean && resultType == DatabaseType.String;
         var clauses = conditional.WhenClauses;
         var whens = new SqlBoundWhen[clauses.Count];
         var results = new SqlCollationCandidate[clauses.Count + (conditional.ElseResult is null ? 0 : 1)];
@@ -730,7 +751,9 @@ internal sealed partial class SqlExpressionEvaluator
             {
                 condition = BindCharacterComparand(clauses[index].Condition, condition, conditional.Input);
             }
-            var result = Bind(clauses[index].Result, out results[index], requireBoolean, statisticsInput: statisticsInput);
+            var result = jsonTypes is not null ? BindJsonOperand(clauses[index].Result, out results[index], statisticsInput, jsonTypes)
+                : Bind(clauses[index].Result, out results[index], requireBoolean, statisticsInput: statisticsInput);
+            if (jsonTypes is not null) { result = CoerceJsonAlternative(clauses[index].Result, result, resultType, jsonTypes); }
             if (textResult) { result = CharacterToText(clauses[index].Result, result); }
             whens[index] = new SqlBoundWhen(condition, result,
                 input is null ? default : SqlBoundCollation.Of(inputCollation, conditionCollation, _defaultCollation), clauses[index].Condition.Location);
@@ -739,13 +762,15 @@ internal sealed partial class SqlExpressionEvaluator
         SqlBoundExpression? elseResult = null;
         if (conditional.ElseResult is not null)
         {
-            elseResult = Bind(conditional.ElseResult, out results[^1], requireBoolean, statisticsInput: statisticsInput);
+            elseResult = jsonTypes is not null ? BindJsonOperand(conditional.ElseResult, out results[^1], statisticsInput, jsonTypes)
+                : Bind(conditional.ElseResult, out results[^1], requireBoolean, statisticsInput: statisticsInput);
+            if (jsonTypes is not null) { elseResult = CoerceJsonAlternative(conditional.ElseResult, elseResult, resultType, jsonTypes); }
             if (textResult) { elseResult = CharacterToText(conditional.ElseResult, elseResult); }
         }
 
-        collation = StaticTypeOf(conditional) is DatabaseType.String or DatabaseType.Character
+        collation = resultType is DatabaseType.String or DatabaseType.Character
             ? CollationOf(conditional, results) : default;
-        return new SqlBoundCase(input, whens, elseResult, requireBoolean ? DatabaseType.Boolean : StaticTypeOf(conditional));
+        return new SqlBoundCase(input, whens, elseResult, requireBoolean ? DatabaseType.Boolean : resultType);
     }
 
     /// <summary>
@@ -760,7 +785,7 @@ internal sealed partial class SqlExpressionEvaluator
     /// <c>src/backend/optimizer/util/clauses.c</c>); one that fails is left to fail when it is reached.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput)
+    private SqlBoundExpression BindCall(SqlFunctionCallExpression call, out SqlCollationCandidate collation, bool requireBoolean, bool statisticsInput, Dictionary<SqlExpression, DatabaseType>? jsonTypes = null)
     {
         if (SqlSequenceExecution.IsFunction(call.FunctionName))
         {
@@ -777,7 +802,7 @@ internal sealed partial class SqlExpressionEvaluator
         if (SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !SqlStandardLibrary.IsCoalesce(call.FunctionName))
         {
             ValidateEvaluatorForm(call);
-            var operands = BindArguments(call.Arguments, out var specialCollation, statisticsInput);
+            var operands = BindArguments(call.Arguments, out var specialCollation, statisticsInput, jsonTypes);
             collation = CollationOf(call, ChildCollations(call));
             // NULLIF uses equality's CHAR identity for untyped text, while returning the
             // original first value. PostgreSQL: src/backend/parser/parse_expr.c:1083.
@@ -818,21 +843,25 @@ internal sealed partial class SqlExpressionEvaluator
         var collations = new SqlCollationCandidate[arguments.Length];
         for (int index = 0; index < arguments.Length; index++)
         {
-            arguments[index] = Bind(call.Arguments[index], out collations[index], requireBoolean && coalesce, statisticsInput: statisticsInput);
+            arguments[index] = jsonTypes is not null ? BindJsonOperand(call.Arguments[index], out collations[index], statisticsInput, jsonTypes)
+                : Bind(call.Arguments[index], out collations[index], requireBoolean && coalesce, statisticsInput: statisticsInput);
         }
 
         collation = CollationOf(call, collations);
         if (coalesce)
         {
-            if (!requireBoolean && StaticCallType(call) == DatabaseType.String)
+            var resultType = jsonTypes is not null ? JsonOperandType(call, types: jsonTypes) : StaticCallType(call);
+            if (jsonTypes is not null)
+            { for (int index = 0; index < arguments.Length; index++) { arguments[index] = CoerceJsonAlternative(call.Arguments[index], arguments[index], resultType, jsonTypes); } }
+            if (!requireBoolean && resultType == DatabaseType.String)
             {
                 for (int index = 0; index < arguments.Length; index++)
                 {
                     arguments[index] = CharacterToText(call.Arguments[index], arguments[index]);
                 }
             }
-            if (StaticCallType(call) is not (DatabaseType.String or DatabaseType.Character)) { collation = default; }
-            return new SqlBoundCoalesce(arguments, requireBoolean ? DatabaseType.Boolean : StaticCallType(call));
+            if (resultType is not (DatabaseType.String or DatabaseType.Character)) { collation = default; }
+            return new SqlBoundCoalesce(arguments, requireBoolean ? DatabaseType.Boolean : resultType);
         }
 
         var scalar = (SqlScalarFunction)function!;

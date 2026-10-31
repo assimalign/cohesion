@@ -18,8 +18,12 @@ public static partial class SqlExpressionRenderer
             SqlQueryCommandType.SetTransaction => "SET TRANSACTION",
             SqlQueryCommandType.Commit => "COMMIT",
             SqlQueryCommandType.Rollback => "ROLLBACK",
+            SqlQueryCommandType.Savepoint => "SAVEPOINT",
+            SqlQueryCommandType.ReleaseSavepoint => "RELEASE SAVEPOINT",
+            SqlQueryCommandType.RollbackToSavepoint => "ROLLBACK TO SAVEPOINT",
             _ => "DISCARD ALL",
         };
+        if (query.SavepointName is { } name) { return command + " \"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\""; }
         return command + (query.IsolationLevels.Count == 0 ? "" : " " + string.Join(", ", query.IsolationLevels.Select(level =>
             "ISOLATION LEVEL " + (level switch
             {

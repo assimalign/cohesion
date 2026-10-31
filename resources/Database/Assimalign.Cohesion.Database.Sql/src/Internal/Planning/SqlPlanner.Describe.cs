@@ -137,7 +137,8 @@ internal sealed partial class SqlPlanner
                 SqlRecursiveUnionPlan p => (p.IsAll ? "UNION ALL" : "UNION DISTINCT") + "; demand_driven=true; working=previous_iteration" +
                     (metrics is null ? "" : "; iterations=" + (metrics.Analysis(p)?.RecursiveIterations ?? 0) +
                         "; rows=" + (metrics.Analysis(p)?.RecursiveRows ?? 0) + "; candidates=" + (metrics.ActualCandidates(p) ?? 0)),
-                SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
+                SqlSelectPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset) +
+                    (p.Access is SqlOrderedIndexPath ? "; sort_removed=true; order_source=index" : ""),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(recursiveDemand ? "demand-driven inputs" : step.Hash is not null ? "bounded in-memory hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
                     QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
@@ -361,12 +362,14 @@ internal sealed partial class SqlPlanner
             if (access is not SqlIndexSeekPath seek) { throw new UnreachableException(); }
             var bounds = new List<string>();
             for (int i = 0; i < seek.EqualityValues.Count; i++)
-            { bounds.Add($"{seek.Index.ColumnNames[i]} = {Value(seek.EqualityValues[i])}"); }
+            { bounds.Add(seek.EqualityValues[i] is null ? $"{seek.Index.ColumnNames[i]} IS NULL" : $"{seek.Index.ColumnNames[i]} = {Value(seek.EqualityValues[i])}"); }
             int next = seek.EqualityValues.Count;
             if (seek.Lower is { } lower) { bounds.Add($"{seek.Index.ColumnNames[next]} {(lower.Inclusive ? ">=" : ">")} {Value(lower.Value)}"); }
             if (seek.Upper is { } upper) { bounds.Add($"{seek.Index.ColumnNames[next]} {(upper.Inclusive ? "<=" : "<")} {Value(upper.Value)}"); }
-            Add("IndexSeek", parent, Target(table), seek.Index.Name,
-                string.Join(" AND ", bounds) + (seek is SqlPartialIndexSeekPath partial ? "; partial_predicate=" + seek.Index.Predicate + "; implied_by=" + partial.Proof : "") + (probe is null ? string.Empty : "; " + probe),
+            string? proof = seek switch { SqlPartialIndexSeekPath partial => partial.Proof, SqlOrderedIndexPath ordered => ordered.Proof, _ => null };
+            Add(seek is SqlOrderedIndexPath ? "OrderedIndexScan" : "IndexSeek", parent, Target(table), seek.Index.Name,
+                string.Join(" AND ", bounds) + (seek is SqlOrderedIndexPath order ? "; direction=" + (order.Reverse ? "backward" : "forward") + "; sort_removed=true" : "") +
+                (proof is not null ? "; partial_predicate=" + seek.Index.Predicate + "; implied_by=" + proof : "") + (probe is null ? string.Empty : "; " + probe),
                 estimated: estimate?.Count ?? (seek.Index.IsUnique && seek.EqualityValues.Count == seek.Index.ColumnNames.Count ? 1 : null), actual: actual);
         }
 

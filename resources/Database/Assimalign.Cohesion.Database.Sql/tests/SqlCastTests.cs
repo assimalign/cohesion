@@ -200,12 +200,12 @@ public sealed class SqlCastTests
     [InlineData("CAST(1 AS BOOLEAN)", "INTEGER to BOOLEAN")]
     [InlineData("CAST(1.5 AS UUID)", "NUMERIC to UUID")]
     [InlineData("CAST(1 AS BINARY)", "INTEGER to BINARY")]
-    [InlineData("CAST(CAST('1' AS JSON) AS INT)", "JSON to INTEGER")]
-    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END AS INT)", "JSON to INTEGER")]
-    [InlineData("CAST(CASE id WHEN 1 THEN CAST('1' AS JSONB) ELSE CAST('2' AS JSONB) END AS INT)", "JSONB to INTEGER")]
-    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) END AS INT)", "JSON to INTEGER")]
-    [InlineData("CAST(COALESCE(NULL, CAST('1' AS JSON)) AS INT)", "JSON to INTEGER")]
-    [InlineData("CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(CAST('1' AS JSON) AS DATE)", "JSON to DATE")]
+    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) ELSE CAST('2' AS JSON) END AS DATE)", "JSON to DATE")]
+    [InlineData("CAST(CASE id WHEN 1 THEN CAST('1' AS JSONB) ELSE CAST('2' AS JSONB) END AS DATE)", "JSONB to DATE")]
+    [InlineData("CAST(CASE WHEN TRUE THEN CAST('1' AS JSON) END AS DATE)", "JSON to DATE")]
+    [InlineData("CAST(COALESCE(NULL, CAST('1' AS JSON)) AS DATE)", "JSON to DATE")]
+    [InlineData("CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS DATE)", "JSON to DATE")]
     [InlineData("CAST(1 + 2 AS DATE)", "BIGINT to DATE")]
     [InlineData("CAST(-id AS DATE)", "BIGINT to DATE")]
     [InlineData("CAST(+id AS DATE)", "INTEGER to DATE")]
@@ -290,18 +290,18 @@ public sealed class SqlCastTests
         var parameters = new Dictionary<string, object?> { ["condition"] = true };
 
         // Act
-        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS INTEGER) FROM t;", parameters));
+        var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS DATE) FROM t;", parameters));
         await ExecuteAsync(session, "INSERT INTO t VALUES (1);");
-        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS INTEGER) FROM t;", parameters));
+        var populated = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, $"SELECT CAST({expression} AS DATE) FROM t;", parameters));
 
         // Assert
         empty.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS02011");
-        empty.DiagnosticDetail("CS02011").ShouldStartWith("Cannot CAST type JSON to INTEGER: ", Case.Sensitive);
+        empty.DiagnosticDetail("CS02011").ShouldStartWith("Cannot CAST type JSON to DATE: ", Case.Sensitive);
         populated.Message.ShouldBe(empty.Message);
     }
 
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - CAST: aggregate result types reject unsupported pairs while planning")]
-    [InlineData("CAST(MIN(CAST('1' AS JSON)) AS INT)", "JSON to INTEGER")]
+    [InlineData("CAST(MIN(CAST('1' AS JSON)) AS DATE)", "JSON to DATE")]
     [InlineData("CAST(COUNT(*) AS DATE)", "BIGINT to DATE")]
     public async Task Cast_StaticAggregate_ShouldRejectBeforeReadingRows(string expression, string pair)
     {
@@ -329,7 +329,7 @@ public sealed class SqlCastTests
         var database = await engine.CreateDatabaseAsync("db");
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await ExecuteAsync(session, "CREATE TABLE t (id INT);");
-        const string sql = "SELECT CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS INTEGER) FROM t;";
+        const string sql = "SELECT CAST(NULLIF(CAST('1' AS JSON), CAST('2' AS JSON)) AS DATE) FROM t;";
 
         // Act
         var empty = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));

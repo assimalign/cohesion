@@ -49,7 +49,8 @@ public sealed class SqlCollationIndexTests
         await Execute(session, "CREATE INDEX ix_exact ON exact(name)");
         (await Names(session, "SELECT name FROM exact WHERE 'alice' COLLATE case_insensitive = name COLLATE binary ORDER BY name"))
             .ShouldBe(new[] { "Alice", "alice" });
-        Metrics(session).AccessPath.ShouldBe("scan");
+        Metrics(session).AccessPath.ShouldBe("ordered:ix_exact:forward");
+        Metrics(session).PeakOrderedRows.ShouldBe(0);
         (await Names(session, "SELECT name FROM exact WHERE 'alice' COLLATE binary = name COLLATE case_insensitive"))
             .ShouldBe(new[] { "alice" });
         Metrics(session).AccessPath.ShouldBe("seek:ix_exact");

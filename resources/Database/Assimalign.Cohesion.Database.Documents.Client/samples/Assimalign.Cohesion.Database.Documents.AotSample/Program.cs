@@ -155,6 +155,13 @@ internal static class Program
         });
         await using (var connection = await client.ConnectAsync(token))
         {
+            await connection.CreateCollectionAsync("savepoint_native", token);
+            foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT INTO savepoint_native (KEY,VALUE) VALUES ('one', {n:1})", "SAVEPOINT duplicate", "INSERT INTO savepoint_native (KEY,VALUE) VALUES ('two', {n:2})", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT INTO savepoint_native (KEY,VALUE) VALUES ('three', {n:3})", "RELEASE parent", "COMMIT" })
+            { await connection.ExecuteAsync(command, cancellationToken: token); }
+            var savedScope = await connection.QueryAsync("SELECT n FROM savepoint_native", cancellationToken: token);
+            Check(savedScope.Count == 1, "named savepoint result count");
+            Check(Convert.ToInt64(savedScope[0][0]) == 3L, "named savepoint duplicate/release/undo/commit");
+            await connection.DropCollectionAsync("savepoint_native", token);
             Check(await connection.ExecuteAsync("BEGIN", cancellationToken: token) == 0, "wire begin");
             Check(await connection.ExecuteAsync("ROLLBACK", cancellationToken: token) == 0, "wire rollback");
             Check(await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token) == 0, "create collection");
@@ -475,6 +482,7 @@ internal static class Program
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");
             await connection.CreateCollectionAsync("reset", token);
             await connection.ExecuteAsync("BEGIN", cancellationToken: token);
+            await connection.ExecuteAsync("SAVEPOINT pooled", cancellationToken: token);
             await connection.PutAsync("reset", "pending", "{}"u8.ToArray(), cancellationToken: token);
         }
         var sessionId = server.Sessions.Single().Id;

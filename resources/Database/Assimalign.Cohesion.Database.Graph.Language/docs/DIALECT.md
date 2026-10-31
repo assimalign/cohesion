@@ -1,5 +1,38 @@
 # Cohesion GQL dialect
 
+## Named savepoints (#1726, XT-4)
+
+GQL accepts the SQL spellings SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK [WORK | TRANSACTION] TO
+[SAVEPOINT] name as Cohesion extensions to its ISO profile. Names preserve decoded identifier
+spelling and compare ordinally; quoted identifiers decode doubled quotes. Canonical rendering
+quotes the decoded name. The contextual grammar adds three profile clauses without adding lexer
+keywords or changing ordinary query object size: a named control reuses the existing standalone
+body slot. Controls are standalone and ExecutePaths refuses them as CG05001. Ordinary Graph
+statement failures still abort the entire transaction and retain CG04007; ROLLBACK TO cannot
+recover them, and only whole ROLLBACK recovers (owner, 2026-10-25).
+
+Duplicate names are allowed; the newest matching scope wins. RELEASE discards the named scope
+and every newer scope, retaining their effects. ROLLBACK TO undoes rows, index entries and scoped
+locks after its target, discards newer scopes and keeps the target for repeated rollback. The
+root transaction stays open and can continue work and commit. A matched MERGE that writes no
+data remains read-only even inside a savepoint: its bookkeeping requires no journal append,
+durability wait or physical undo bracket. Commands require an explicit
+transaction (CK04012); an unknown name is CK04013. Successful controls return affected count zero.
+Pre-canceled controls change nothing; admitted undo completes despite later cancellation.
+Incomplete undo reports Faulted transaction status and CK04009 for all work except rollback to
+the same or an outer retained scope, or whole ROLLBACK. Pool return rolls back and clears names.
+Failed named controls use the statement error translator; incomplete undo reports CK04009 with
+the translated cause and Ready E on the open connection. Offline, disposed and corruption errors
+keep precedence; corruption aborts the transaction.
+
+PostgreSQL nested-scope behavior follows the locally rechecked
+src/backend/access/transam/xact.c:4426-4498,4511-4607,4620-4733. Markers remain in memory and use
+the existing durable row/index operations; storage remains format 4. SavepointConformanceTests,
+NamedSavepointTests and NamedSavepointWireTests are the parser, in-process and InMemory/TCP
+conformance corpora. The named tests include injected undo failure, lock-wait wakeup and
+counter-driven non-parallel races against root rollback/disposal; adapter tests cover copied
+live crash images with and without the enclosing commit.
+
 Typed GraphSchema manages database-wide index/constraint names (#1738, GQ-D1). Named type
 and existence constraints are independently droppable; creation checks existing data and all
 entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their combined type and
@@ -67,7 +100,22 @@ remain ordinal and case-sensitive across the shared database-wide namespace.
 SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
 CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
 name, followed by relationship type name then constraint name. Other SHOW column contracts
-stay fixed. Graph catalog v2 and graph format 5 remain unchanged. D3 adds unknown-property warnings.
+stay fixed. Graph catalog v2 and graph format 5 remain unchanged.
+
+Read-only statements warn with structured CG01023 for each distinct, ordinal, statically named
+entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship
+property-map keys and entity fields in RETURN, WHERE and ORDER BY, including aliases, lexical
+collections, correlated patterns, NEXT and composite operands. A name known on any label or
+relationship type, or stored by an unlabeled entity or on a schema-owned definition, suppresses the
+warning, even when absent on the entity being read. Parenthesized and typed member accesses in
+ORDER BY use the projected alias's type, including when it shadows an incoming binding. Missing map
+fields, dynamic subscripts (`n[$key]` or `n['key']`) and writing statements do not warn. Values,
+row counts and explicit transaction state retain their normal behavior. EXPLAIN reports these
+warnings too. Each warning carries the property name and, when available, the first field-access
+span; pattern map keys and unlocated typed ASTs have no span. Diagnostics are available on typed
+results and through the negotiated wire Diagnostics channel. Property discovery follows the
+statement snapshot and rolls back with its write; removing a value retains discovery across reopen.
+Writing statements skip this analysis inside correlated reads as well as in the outer query.
 
 SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
 `~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix
@@ -847,9 +895,9 @@ the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid
 `START TRANSACTION`, `COMMIT` and `ROLLBACK` are standalone ISO statements, including over Execute.
 `BEGIN [TRANSACTION]` is a standalone alias of START TRANSACTION (#1725, owner decision 2026-10-25).
 Both use Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
-A failed explicit transaction refuses work until rollback. Savepoints, transaction options,
+A failed explicit transaction refuses work until rollback. Named savepoints follow the contract above; transaction options,
 EXPLAIN controls and multi-statement text are unsupported. ExecutePaths cannot control transactions.
-WORK, TRAN, READ ONLY/READ WRITE, isolation levels and deferrability retain CG00002;
+WORK outside ROLLBACK TO, TRAN, READ ONLY/READ WRITE, isolation levels and deferrability retain CG00002;
 the optional TRANSACTION word adds no transaction options. Keywords are case-insensitive,
 comments may separate words, and one terminal semicolon is optional.
 

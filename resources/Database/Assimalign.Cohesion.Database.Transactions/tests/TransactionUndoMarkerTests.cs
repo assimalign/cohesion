@@ -362,12 +362,17 @@ public sealed class TransactionUndoMarkerTests
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
         var before = storage.Log.ReadAll().Count;
         var marker = await coordinator.CreateUndoMarkerAsync(writer);
+        Should.Throw<ArgumentException>(() => coordinator.ReplaceIsolationLevel(writer, IsolationLevel.ReadCommitted));
+        await coordinator.RollbackToUndoMarkerAsync(writer, marker);
+        await coordinator.ReleaseUndoMarkerAsync(writer, marker);
         var replacement = coordinator.ReplaceIsolationLevel(writer, IsolationLevel.ReadCommitted);
 
         // Act
         await Should.ThrowAsync<TransactionUndoException>(() => coordinator.CreateUndoMarkerAsync(writer).AsTask());
-        await coordinator.RollbackToUndoMarkerAsync(replacement, marker);
-        await coordinator.ReleaseUndoMarkerAsync(replacement, marker);
+        await Should.ThrowAsync<TransactionUndoException>(() => coordinator.RollbackToUndoMarkerAsync(replacement, marker).AsTask());
+        var replacementMarker = await coordinator.CreateUndoMarkerAsync(replacement);
+        await coordinator.RollbackToUndoMarkerAsync(replacement, replacementMarker);
+        await coordinator.ReleaseUndoMarkerAsync(replacement, replacementMarker);
         await coordinator.CommitAsync(replacement);
 
         // Assert

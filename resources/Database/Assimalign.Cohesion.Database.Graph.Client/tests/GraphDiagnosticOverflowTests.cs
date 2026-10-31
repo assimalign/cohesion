@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 public sealed class GraphDiagnosticOverflowTests
 {
-    [Theory(DisplayName = "Cohesion Test [Database.Graph.Client] - 4097 warnings preserve scalar and path success and session reuse")]
+    [Theory(DisplayName = "Cohesion Test [Database.Graph.Client] - overflowing label/property warnings preserve scalar and path success and session reuse")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task QueryAsync_OverflowWarnings_ShouldRetainPrefixNoticeAndSession(bool tcp)
@@ -27,13 +27,14 @@ public sealed class GraphDiagnosticOverflowTests
         // Assert
         scalar.Count.ShouldBe(0);
         count.ShouldBe(0);
-        foreach (var diagnostics in new[] { scalar.Diagnostics, paths.Diagnostics })
+        // The scalar read also names the globally unknown entity property 'name' (#1249).
+        foreach (var (diagnostics, total) in new[] { (scalar.Diagnostics, 4098), (paths.Diagnostics, 4097) })
         {
             diagnostics.Count.ShouldBe(4096);
             diagnostics.Take(4095).ShouldAllBe(item => item.Code == "CG01010");
             diagnostics[^1].Code.ShouldBe("CK07001");
-            diagnostics[^1].Message!.ShouldContain("first 4095 of 4097", Case.Sensitive);
-            diagnostics[^1].Message!.ShouldContain("remaining 2", Case.Sensitive);
+            diagnostics[^1].Message!.ShouldContain($"first 4095 of {total}", Case.Sensitive);
+            diagnostics[^1].Message!.ShouldContain($"remaining {total - 4095}", Case.Sensitive);
             new ProtocolDiagnosticsMessage(diagnostics).Encode().Length.ShouldBeLessThanOrEqualTo(ProtocolDiagnosticsMessage.MaxPayloadLength);
         }
         connection.IsOpen.ShouldBeTrue();

@@ -77,6 +77,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person {never_seen:1}) RETURN a.name", []),
+                new("MATCH (a:Person {name:'Alice'}) WHERE a.never_seen IS NULL RETURN a.never_seen ORDER BY a.never_seen", [[null]]),
                 new("MATCH (a:Person|Robot) RETURN a.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
                 new("MATCH (a:Person&Robot) RETURN a.name", []),
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
@@ -257,6 +259,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.OrderBy] =
             [
+                new("MATCH (a:Person {name:'Alice'}) WITH {a:1} AS a ORDER BY (a).never_seen RETURN a.a ORDER BY a.a", [[1L]]),
+                new("LET a={a:1} MATCH (m:Person {name:'Alice'}) WITH m AS a ORDER BY (a).never_seen RETURN a.name ORDER BY a.name", [["Alice"]]),
                 new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[true]]),
                 new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE all(y IN old WHERE y) | 1][0]", [[new object?[] { true }]]),
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.age", [["Bob"], ["Isolated"], ["Alice"]]),
@@ -380,6 +384,14 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a:Person) WHERE a:Missing OR a.age = 42 RETURN a.name", [["Alice"]]),
                 new("MATCH (a:Person) WHERE NOT a:Missing RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
             ],
+            [GqlClauses.Savepoint] = [new("SAVEPOINT scope", [], 0,
+                [Mutation("ROLLBACK TO scope", 0), Mutation("COMMIT", 0)], Setup: ["BEGIN"])],
+            [GqlClauses.ReleaseSavepoint] = [new("RELEASE SAVEPOINT scope", [], 0,
+                [Mutation("COMMIT", 0), new("MATCH (n:SavepointProof) RETURN n.n", [[1L]])],
+                Setup: ["BEGIN", "SAVEPOINT scope", "INSERT (:SavepointProof {n:1})"])],
+            [GqlClauses.RollbackToSavepoint] = [new("ROLLBACK TO SAVEPOINT scope", [], 0,
+                [Mutation("COMMIT", 0), new("MATCH (n:SavepointProof) RETURN count(*)", [[0L]])],
+                Setup: ["BEGIN", "SAVEPOINT scope", "INSERT (:SavepointProof {n:1})"])],
             [GqlClauses.Show] =
             [
                 new("SHOW LABELS", [["audit", _personLabelId, "Person"], ["audit", _robotLabelId, "Robot"]]),
@@ -640,6 +652,9 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Delete => query.DeleteVariables.Count != 0 && !query.DetachDelete,
         GqlClauses.DetachDelete => query.DeleteVariables.Count != 0 && query.DetachDelete,
         GqlClauses.Where => query.MatchClauses.Any(clause => clause.Predicate is not null),
+        GqlClauses.Savepoint => query.TransactionCommand == GqlTransactionCommand.Savepoint,
+        GqlClauses.ReleaseSavepoint => query.TransactionCommand == GqlTransactionCommand.ReleaseSavepoint,
+        GqlClauses.RollbackToSavepoint => query.TransactionCommand == GqlTransactionCommand.RollbackToSavepoint,
         GqlClauses.Show => query.CatalogSurface is not null,
         GqlClauses.LabelExpression => query.MatchClauses.SelectMany(clause => clause.Paths).Concat(query.Creates).Any(UsesLabelOperators) || query.MatchClauses.Any(clause => HasLabeledPredicate(clause.Predicate)),
         _ => false,
@@ -695,6 +710,8 @@ public sealed class GqlProfileExecutionTests
         string clause, CancellationToken cancellationToken)
     {
         string context = $"{clause}: {executionCase.Statement}";
+        foreach (string setup in executionCase.Setup ?? [])
+        { (await session.ExecuteAsync(setup, cancellationToken: cancellationToken)).Status.ShouldBe(DatabaseResultStatus.Success, context); }
         long postings = session.Database.Store.RelationshipTypeEntriesVisited;
         var result = await session.ExecuteAsync(executionCase.Statement, executionCase.Parameters, cancellationToken);
         result.Status.ShouldBe(DatabaseResultStatus.Success, context);
@@ -725,5 +742,5 @@ public sealed class GqlProfileExecutionTests
 
     private sealed record ExecutionCase(string Statement, object?[][] Rows, long? AffectedCount = null,
         ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null,
-        long? Physical = null, long? Postings = null);
+        long? Physical = null, long? Postings = null, string[]? Setup = null);
 }

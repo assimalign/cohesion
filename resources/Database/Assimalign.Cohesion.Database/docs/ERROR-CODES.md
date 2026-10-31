@@ -159,6 +159,7 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42P20) |
 | New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
 | New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY/ORDER BY or copies an explicit frame (42P20) |
+| New (#1722, SQ-N1) | CS01067 | Invalid JSON access or IS JSON operand signature (42883) |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -188,6 +189,9 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W3) | CS02075 | Incompatible RANGE offset domain (0A000) |
 | New (#1526, SQ-W3) | CS02076 | Negative or NaN RANGE offset (22013) |
 | New (#1721, SQ-O2) | CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
+| New (#1722, SQ-N1) | CS02078 | Malformed JSON access or assignment input, invalid Unicode/UTF-8 or depth over 128 (22032) |
+| New (#1722, SQ-N1) | CS02079 | JSON kind cannot convert to the requested numeric or Boolean scalar (22023) |
+| New (#1722, SQ-N1) | CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -259,6 +263,7 @@ structured-carrier messages remain unprefixed.
 | New (#1012, SQ-I1) | CS04071 | SET TRANSACTION outside a transaction block: Warning with successful no-op (25000) |
 | New (#1012, SQ-I1) | CS04072 | SET TRANSACTION after the first data statement or during an operation (25001) |
 | New (#1012, SQ-I1) | CS04073 | SERIALIZABLE text transaction isolation is unsupported (0A000) |
+| New (#1726, XT-4) | CS04074 | SET TRANSACTION inside an active named savepoint (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -434,6 +439,7 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
 | New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
 | New (#1738, GQ-D2) | CG01022 | Binding/names — schema property references a variable other than its FOR declaration |
+| New (#1249, #1738, GQ-D3) | CG01023 | Warning — statically named entity property is unknown database-wide in a read-only statement |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
 | New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
@@ -543,6 +549,8 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK04009 | Partial undo or failed statement memory compensation is running or incomplete, or a statement/control/end prevents control admission; retry its target or an earlier marker, or roll back the transaction (#1726) | — |
 | CK04010 | An open write stream prevents undo marker creation, release or rollback-to (#1726) | — |
 | CK04011 | A transaction has reached the supported limit of 65,535 open write streams (#1726) | — |
+| CK04012 | Savepoint control requires an explicit transaction with an owned kernel binding (#1726) | — |
+| CK04013 | The named savepoint does not exist in the current transaction (#1726) | — |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
 | CK07003 | Session operations overlap | — |

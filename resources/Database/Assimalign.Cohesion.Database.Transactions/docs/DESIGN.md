@@ -1,6 +1,40 @@
 # Assimalign.Cohesion.Database.Transactions — Design
 
+## Owned savepoint controls (#1726, XT-4)
+
+TransactionCoordinator exposes non-virtual controls over a new sealed TransactionSavepoint token.
+The token owns its coordinator, exact current context and internal marker; foreign, stale,
+released or ended tokens retain CK04008. The wrapper is allocated before kernel admission, so
+an allocation failure cannot orphan a marker. Kernel creation also unwinds its marker if lock
+or model registration fails. This is the common kernel consumer surface for all models. Existing internal marker identities remain internal. GetUndoFailureCode supplies their
+structured CK04 identity without message parsing, and IsPartialUndoPending reads the shared
+lifecycle's existing flag without taking another monitor. The root transaction supplies names
+and the session read fence. Markers remain in memory; storage stays at format 4.
+
+Linked model probes now call this surface instead of UnsafeAccessor for create/release/undo and
+failure classification. Only physical-batch fault/reader observation remains a test-only accessor.
+Named SQL/OQL/GQL tests cover duplicate lookup, descendant lifetime, retry, root-end/disposal
+races, lock waiter wakeup and cancellation. The copied-live crash-image/reader-progress scenarios
+now execute named controls. Root end releases every marker through the existing lifecycle.
+
+The optional rollback scope-discard notification updates attempt-owned state exactly once after
+kernel revalidation; refused attempts do not notify. No exception metadata is used. Consumers
+must keep this notification nonthrowing and nonreentrant. TransactionContext.Current resolves
+the latest kernel-issued replacement so consumers can compare reference identity. Its reference shares the existing
+drain slot; an in-flight drain retains it in Task.AsyncState and restores it before notification.
+No unmarked context gains a field, lock or allocation.
+
+ApplyMemoryChange admits reversible memory changes without writer-log enrollment or a storage
+bracket. It records an existing RecordVersionIndex before-image before mutation and restores its
+memory hook in reverse ledger order. Memory entries split physical undo batches so callbacks run
+outside brackets. A memory-only suffix requires neither the apply gate nor any physical undo
+bracket, while lifecycle admission still makes ends drain it. The source establishes admission,
+ledger and model-monitor order. This kernel seam is shared by scope-aware memory consumers;
+Graph uses it for MERGE bookkeeping. Physical statements retain their existing allocation shape.
+
 ## Isolation configuration (#1012)
+
+Isolation replacement refuses a context with live savepoint tokens, even at the same level, with ArgumentException. Releasing the final scope permits replacement again. Registration precedes the context latch. Marker completion updates a live-scope bit in the existing admission byte under that latch before dropping its apply count, so replacement sees either the running control or its live scopes. Ledger and lock-table monitors are released before taking the latch. A refused replacement leaves every token usable (#1726).
 
 ReplaceIsolationLevel returns an immutable replacement context with the same id, sequence and
 begin snapshot. Earlier handles and statement views share one end/apply lifecycle. Registration
@@ -26,8 +60,7 @@ One transaction substrate for five engines. ACID is the platform's defining requ
 ## In-memory undo markers (#1726, XT-2)
 
 The coordinator's internal `CreateUndoMarkerAsync`, `ReleaseUndoMarkerAsync` and
-`RollbackToUndoMarkerAsync` are the substrate for later named scopes. No language or public session
-savepoint API is added. An opaque marker records a position in the combined ordered ledger of
+`RollbackToUndoMarkerAsync` are the substrate for later named scopes. Named language/session admission is provided by XT-4; the kernel itself owns no names. An opaque marker records a position in the combined ordered ledger of
 row creates, row tombstones, index creates and index tombstones. Maintenance implemented through
 those index undo adapters participates in the same ordering; model-owned maintenance now
 participates through XT-3 adapters. Distinct markers at the same position remain distinct
@@ -167,10 +200,10 @@ maintenance seam and restore idempotently; failed physical statements compensate
 reverse before discarding their ledger suffix. Whole-writer undo now uses the same reverse
 order so these adapters also compose with root abort and retry.
 
-Anonymous controls and failure classification on TransactionRecordSpace are internal.
-The model seam retains only protected instance stream registration and protected internal
-observer hooks. Test-only cached reflection delegates reach anonymous controls from the linked
-model probes; shipped code adds no reflection, public token or friend assembly. Models
+Anonymous controls on TransactionRecordSpace remain internal. XT-4 exposes the owned
+TransactionSavepoint controls on the coordinator and protected non-virtual named controls on
+root sessions. Linked model probes use that surface; batch observation stays test-only.
+Shipped code adds no reflection or friend assembly. Models
 retain their before-images only for marked writers and repair only affected identities. This
 keeps a small undo independent of the database's full catalog or graph population.
 
@@ -186,11 +219,10 @@ an unpaired end throws InvalidOperationException without underflowing the packed
 Same-owner stream/control operations remain
 session-serialized. The existing lifecycle callback restores no stream state.
 
-XT-4 still owns named scopes, language/session integration and the aborted-block read fence.
-It must define the owned marker/token and structured failure surface needed by those sessions;
-protected statics on an arbitrary record-space subclass are not that admission contract.
-The substrate refuses writes and commit after incomplete undo; the session must also refuse
-reads until successful retry or root rollback. XT-5 supplies cross-model wire/reset conformance.
+XT-4 supplies named scopes, the owned token and structured classification, language/session
+integration and the aborted-block read fence described above. The substrate refuses writes and
+commit after incomplete undo; the root session also refuses reads until successful retry or
+whole rollback. XT-5 expands cross-model failure, recovery, cancellation and pool conformance.
 
 Reader probes pause after a physical undo batch releases its page latches and require a read
 to start and finish within that same interval. Every model completes both pinned Snapshot and
@@ -1667,15 +1699,15 @@ arms the `LockWaitBlocked` timer only while a listener takes the source's warnin
 
 - No distributed transactions / two-phase commit — single-node ACID first.
 - No lock escalation policy in the contract — an implementation concern.
-- No named savepoint or language surface yet; the internal undo-marker substrate is delivered in XT-2.
+- Named SQL/OQL/GQL savepoints use the XT-2/XT-3 memory-only undo and lock substrate (XT-4).
 
 ## AOT posture
 
 Static composition, contracts and value objects; `FrozenSet<ulong>` for the active
 set. The shared composition and engine adapters use ordinary calls and BCL
 synchronization. No reflection, dynamic code generation, or `Microsoft.Extensions.*`.
-Foreign marker tests temporarily bind the internal static controls and batch-observer setter with
-UnsafeAccessor until XT-4 supplies the language surface. Lock-journal tests read a nullable internal
+Foreign marker tests use owned coordinator savepoint tokens; only the batch-observer setter
+retains a test-only UnsafeAccessor. Lock-journal tests read a nullable internal
 count snapshot through this project's existing test grant; the ordinary grant path does not read it.
 The event source writes only strings, integers and doubles, which bind to the trim-safe
 `WriteEvent` overloads; a NativeAOT application receives its events only with

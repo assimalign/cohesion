@@ -1,5 +1,40 @@
 # The Declared SQL Dialect
 
+## Named savepoints (#1726, XT-4)
+
+SQL accepts SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK [WORK | TRANSACTION]
+TO [SAVEPOINT] name. The core forms are ISO SQL; optional SAVEPOINT follows the existing
+PostgreSQL spelling family. Names use SQL identifier spelling: unquoted names fold to lowercase,
+quoted names preserve case and doubled quotes decode to one quote. Canonical rendering quotes
+the normalized name. These commands add three profile clauses (SAVEPOINT, RELEASE SAVEPOINT,
+ROLLBACK TO SAVEPOINT). SET TRANSACTION inside an active scope is CS04074. Releasing the last
+scope permits otherwise-early SET again; ROLLBACK TO retains its scope and the refusal. Ordinary
+SQL statement failures remain statement-atomic and keep earlier work usable. Storage corruption
+and I/O failures, including named-control parameter reads and result preparation, abort the explicit transaction
+under #1364; incomplete partial undo instead retains the recoverable CK04009 fence. Named
+CK04009 diagnostics retain the statement span. A closed database with a live fence returns
+CS04005 over SQL and keeps the connection open.
+
+Duplicate names are allowed; the newest matching scope wins. RELEASE discards the named scope
+and every newer scope, retaining their effects. ROLLBACK TO undoes rows, index entries and scoped
+locks after its target, discards newer scopes and keeps the target for repeated rollback. The
+root transaction stays open and can continue work and commit. Commands require an explicit
+transaction (CK04012); an unknown name is CK04013. Successful controls return affected count zero.
+Pre-canceled controls change nothing; admitted undo completes despite later cancellation.
+Incomplete undo reports Faulted transaction status and CK04009 for all work except rollback to
+the same or an outer retained scope, or whole ROLLBACK. Pool return rolls back and clears names.
+Failed named controls use the statement error translator; incomplete undo reports CK04009 with
+the translated cause and Ready E on the open connection. Offline, disposed and corruption errors
+keep precedence; corruption aborts the transaction.
+
+PostgreSQL nested-scope behavior follows the locally rechecked
+src/backend/access/transam/xact.c:4426-4498,4511-4607,4620-4733. Markers remain in memory and use
+the existing durable row/index operations; storage remains format 4. SavepointConformanceTests,
+NamedSavepointTests and NamedSavepointWireTests are the parser, in-process and InMemory/TCP
+conformance corpora. The named tests include injected undo failure, lock-wait wakeup and
+counter-driven non-parallel races against root rollback/disposal; adapter tests cover copied
+live crash images with and without the enclosing commit.
+
 ## Per-column index order (#1631, SQ-K1)
 
 CREATE [UNIQUE] INDEX accepts column [ASC | DESC] [NULLS { FIRST | LAST }] on each key,
@@ -22,10 +57,27 @@ are unchanged by direction. SQL keys now canonicalize signed zeros together and 
 NaN in one class below negative infinity, matching SQL comparison. Row values keep their IEEE
 representation. Floating predicate access remains conservatively restricted as before.
 
-Every ORDER BY still uses an explicit sort, including matching and fully reversed key orders.
-Order matching, cost credit for ordered access and sort avoidance belong to SQ-K3; LIKE-prefix
-bounds are future work beside that ordered access. Both existing wire transports carry these
-declarations, metadata and results without a protocol change.
+A matching single-table ORDER BY may use an OrderedIndexScan without sorting (#1631, SQ-K3).
+Keys must be a contiguous prefix of the suffix after equality-bound index keys (including IS NULL), with identical
+resolved collations, directions and NULL placement. Reversing every direction and every NULL
+placement together permits a backward scan; partial reversal, computed keys, missing equality
+prefixes and incompatible collations retain sorting. Pass-through aliases/ordinals can match.
+A partial index also needs the query's proven predicate implication. ORDER BY's existing defaults
+remain ASC NULLS FIRST and DESC NULLS LAST. NULL placement need not match for keys proven
+non-NULL by NOT NULL (including primary keys), equality prefixes, mandatory local NULL-rejecting
+conjuncts, or a proven partial-index predicate. Strict comparisons (parameters included), IN,
+BETWEEN, LIKE and IS NOT NULL can supply that proof; OR/NOT branches and outer-join NULL
+extension cannot. Directions still must all match or all reverse.
+Equal ordering keys have unspecified tie order; use a unique final key to pin paginated row identity.
+
+Costing credits the avoided sort and top-N work against random base-row fetches; a large full
+ordered scan can lose to heap-scan-plus-sort. Both directions retain the statement's MVCC snapshot
+and full WHERE check. Non-DISTINCT LIMIT/OFFSET stops after enough qualifying entries; DISTINCT
+consumes all candidates before duplicate elimination. Subqueries, volatile projections, recursive
+queries, joins, grouping, windows and JSON ordering retain their existing sort path. EXPLAIN
+reports OrderedIndexScan, direction=forward/backward and sort_removed=true, with implication proof
+for partial indexes. Index-only reads and INCLUDE remain T3 (#1739); LIKE-prefix bounds remain
+future work. Existing InMemory and TCP result/EXPLAIN exchanges carry this behavior unchanged.
 
 
 ## Partial indexes (#1630, SQ-P1/SQ-P2)
@@ -206,6 +258,7 @@ no live PostgreSQL comparison is claimed.
 | CS01064 | Duplicate WINDOW name |
 | CS01065 | Unknown or forward window reference |
 | CS01066 | Invalid copied PARTITION BY or ORDER BY |
+| CS01067 | Invalid JSON access or IS JSON operand signature (42883) |
 | CS02068 | Non-integer offset or bucket argument |
 | CS02069 | Incompatible navigation value/default types |
 | CS05076 | Invalid window placement or missing OVER |
@@ -391,6 +444,9 @@ executor/nodeWindowAgg.c:734-770,3674-3697,3860-3935. No live PostgreSQL compari
 | CS02075 | Incompatible RANGE offset domain (0A000) |
 | CS02076 | Negative or NaN RANGE offset (22013) |
 | CS02077 | Bitwise operand outside SMALLINT/INTEGER/BIGINT (42804) |
+| CS02078 | Invalid JSON access/assignment input, encoding, Unicode conversion or depth (22032) |
+| CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 | CS05086 | Offset RANGE requires exactly one ordering key (42P20) |
 | CS05087 | GROUPS requires ORDER BY (42P20) |
 | CS05088 | NULL treatment on an incompatible function (42601) |
@@ -431,8 +487,7 @@ aborted transaction retains its existing refusal. Repeated early SET is allowed.
 SET after data is refused; PostgreSQL permits that exception, but the owner rule here does not.
 The outside-block warning follows PostgreSQL src/backend/utils/misc/guc_funcs.c:83 and
 src/backend/access/transam/xact.c:3763-3799. A failed SET leaves the transaction usable.
-Savepoints remain unavailable (#1726); when introduced they must refuse isolation changes inside
-a savepoint using the same timing condition.
+An active named savepoint refuses isolation changes with CS04074 (#1726).
 
 Snapshot visibility and the catalog capture are fixed at the original BEGIN, including when
 an early SET changes READ COMMITTED to REPEATABLE READ after a concurrent commit. PostgreSQL
@@ -1042,7 +1097,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **84 of 86 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **87 of 89 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -1109,7 +1164,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CONSTRAINT` / `FOREIGN KEY` / `REFERENCES` / `CHECK` / `UNIQUE` constraints | Supported subset, measured | Column and table declarations normalize into constraint definitions; UNIQUE lowers to a unique catalog index. NULL is an equal index key: a second NULL violates a single-column UNIQUE constraint. Foreign-key NULL values are allowed; CHECK accepts UNKNOWN and rejects FALSE. CHECK expressions must be deterministic Boolean row expressions with the engine's scalar functions (built-in or registered, `IMMUTABLE` only), each called with arguments its signature accepts (`CS01006` otherwise); parameters and aggregates are excluded. CHECK predicates and DEFAULT expressions are stored as canonical text and parsed once per table version; see [Persisted definitions are canonical](#persisted-definitions-are-canonical). |
 | `ON DELETE CASCADE` / `RESTRICT` / `NO ACTION` / `SET NULL` / `SET DEFAULT` | Supported | omitted deletion action defaults to `NO ACTION`; a cascade deletes its whole transitive closure with no depth limit, so a self-referencing chain deletes however long it is (#1164), and a cycle deletes each row once; `DROP TABLE ... CASCADE` is not supported |
 | `ON UPDATE` | Supported | CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION; defaults to NO ACTION. Either order beside ON DELETE, once each. UPDATE_RULE reports the stored action. Actions execute on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE and MERGE, including self-references and mixed delete/update chains. Stored key representation changes fire actions even under an equality collation; NULL keys use MATCH SIMPLE. RESTRICT checks existing children immediately and rejects parent substitution; NO ACTION checks the complete statement state and accepts another final parent. SET DEFAULT evaluates per row, including sequence/identity defaults; absent defaults assign NULL. Conflicting cascade assignments fail with CS05085 (27000); the whole statement rolls back. |
-| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, ROLLBACK [WORK] TO [SAVEPOINT], BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION], SAVEPOINT, RELEASE and PREPARE TRANSACTION stay CS00002 (#1726); TRANSACTION alone is not a statement. |
+| `START TRANSACTION` / `BEGIN [WORK\|TRANSACTION]` / `COMMIT [WORK\|TRANSACTION]` / `END` / `ROLLBACK [WORK\|TRANSACTION]` | Supported | Spellings map to the existing BEGIN/COMMIT/ROLLBACK session commands (+0 clauses). Like every SQL statement, a valid spelling without `;` receives informational CS00009, with no error or warning; with `;` it has no parser diagnostics. START and WORK are contextual, so columns named start/work remain valid. END takes no suffix; without a transaction its CS04002 message names COMMIT. Commit and rollback observe caller cancellation only before their end starts (#1246); a pre-canceled explicit end leaves the transaction usable. Once execution completes, automatic commit ignores caller cancellation and delivers the committed result; real append and durability failures retain their normal errors. Catalog DDL that self-committed finishes mandatory cleanup with CancellationToken.None and delivers its committed result even if the caller canceled; a successful CREATE TABLE requires no retry and exists once after reopen. `SqlCommitCancellationConformanceTests` covers the end boundary and committed rows after reopen. END WORK/TRANSACTION, AND [NO] CHAIN, BEGIN TRAN/named transactions and COMMIT PREPARED stay CS00003. ABORT [WORK\|TRANSACTION] and PREPARE TRANSACTION stay CS00002; TRANSACTION alone is not a statement. |
 | `BEGIN` / `START TRANSACTION ... ISOLATION LEVEL` and `SET TRANSACTION ISOLATION LEVEL` | Supported (+2 clauses) | READ COMMITTED, READ UNCOMMITTED and REPEATABLE READ execute; SERIALIZABLE is CS04073. SET is early-block-only, with an outside-block CS04071 warning/no-op and CS04072 late-state refusals. See Transaction isolation (#1012) for mode lists, timing and begin-snapshot semantics. |
 | `MERGE` | Ordered actions, BY SOURCE and RETURNING, ReadCommitted target rechecks and mixed-action final-state foreign keys | Existing constraint/action codes; CS04064 for Snapshot target conflicts |
 | `GRANT` | Not in the dialect | `CS00002` |
@@ -3117,7 +3172,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 84/86 declared-clause count.
+These contextual exclusions do not change the 87/89 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3581,7 +3636,7 @@ ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
 identifier positions keep their meaning. SIMILAR TO and NOT SIMILAR TO report one
 CK00001; ordinary identifiers `ilike` and `similar` retain their canonical spelling.
-`^` (exponentiation, never XOR), IS JSON, IS OF and IS NORMALIZED report
+`^` (exponentiation, never XOR), IS OF and IS NORMALIZED report
 one CK00001 at the operator. Missing FROM/comparands or ESCAPE operands remain
 CS00003 at the offending or missing token. Adjacent `<-` is less-than followed by a unary minus operand (#1647).
 
@@ -3622,6 +3677,88 @@ identifiers and stored canonical text are unchanged, so this run changes no SQL 
 compiled-schema format. Regex and SIMILAR TO remain deferred; SQ-O2 delivers bitwise execution below.
 PostgreSQL references: src/backend/parser/gram.y:904-914 and
 src/backend/utils/adt/like.c:186-221 (determinism admission and LOWER before matching).
+
+## JSON access (#1722, SQ-N1)
+
+JSON and JSONB support left-associative member/element extraction at PostgreSQL's
+ordinary operator precedence, shared with concatenation and bitwise operators:
+
+| Form | Result |
+| --- | --- |
+| `doc -> text` | Last matching object member, retaining the input JSON/JSONB type |
+| `doc -> integer` | Array element, zero-based; negative indexes count from the end |
+| `doc ->> text` / `doc ->> integer` | Extracted text; JSON strings are unquoted and unescaped |
+
+Missing members, out-of-range indexes and wrong container kinds return SQL NULL.
+The owner's wrong-container rule includes every scalar JSONB root. The local PostgreSQL
+implementation indexes its internal scalar wrapper at 0/-1 (jsonb.h:94-102,
+jsonfuncs.c:939-1005, jsonb_util.c:472-492); this deliberate exception follows the
+owner's explicit non-array NULL rule instead of that storage-wrapper behavior.
+JSON null remains JSON `null` under `->` and becomes SQL NULL under `->>`.
+A SQL NULL input or selector yields SQL NULL. Chaining works, for example
+`doc -> 'a' ->> 'b'`. SMALLINT selectors widen to INTEGER; BIGINT selectors
+are refused, including typed NULLs. Signed integer literals fitting INTEGER retain
+that selector signature; computed BIGINT expressions require an explicit INTEGER cast.
+TINYINT selectors also require an explicit INTEGER cast in this surface.
+The left operand must be declared JSON/JSONB (use CAST for character or polymorphic input).
+An unresolved NULL left operand cannot choose between those signatures and is CS01067;
+CAST(NULL AS JSON/JSONB) propagates SQL NULL. Untyped NULL result alternatives adopt
+a surrounding CASE/COALESCE JSON result type.
+In JSON operands and selectors (including IS JSON), CASE/COALESCE resolve one common SQL
+type before selecting an arrow overload. Untyped string and NULL literals adopt declared
+alternatives; all-unknown sets resolve to TEXT. Declared INTEGER and TEXT alternatives, or
+JSON and JSONB alternatives, refuse with CS02080 (42804) before reading input rows.
+Unknown literals undergo input conversion during binding, including skipped alternatives;
+invalid text retains CS02022. The resolved type, rather than the selected runtime value,
+chooses member lookup or indexing. PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+parse_coerce.c:1357-1456 define these rules. Consecutive arrows validate one document and
+serialize only the final value; CAST or another intervening expression ends that chain.
+Duplicate keys select the last occurrence, including escaped-equivalent names.
+Member lookup is ordinal. Text extraction inherits a text selector's collation;
+without one its output uses the database default (parse_collate.c:577-750).
+JSON/JSONB extraction preserves raw selected JSON spelling, member order and duplicate
+keys; JSONB normalization remains outside T2, including its text serialization.
+Malformed stored/access input fails with CS02078, independently of a missing result.
+An invalid Unicode member selector also fails with CS02078 when looking up an object member.
+Extraction decodes Unicode escapes throughout the document and refuses unmatched
+surrogates and \u0000, as PostgreSQL's get_worker does.
+
+`expression IS [NOT] JSON [VALUE | ARRAY | OBJECT | SCALAR]` accepts character,
+JSON and JSONB input. VALUE is the default and includes JSON null. SCALAR includes
+strings, numbers, Booleans and JSON null, excluding arrays/objects. Malformed text
+returns FALSE (TRUE under NOT); SQL NULL stays SQL NULL under both forms.
+The predicate checks JSON syntax rather than Unicode escape conversion, matching
+PostgreSQL's text predicate. WITH/WITHOUT UNIQUE KEYS remains CK00001.
+Kind words stay contextual; canonical rendering always writes the kind, including VALUE.
+
+Explicit casts from JSON/JSONB to BOOLEAN require a JSON Boolean. Numeric targets
+(TINYINT, SMALLINT, INTEGER, BIGINT, REAL, DOUBLE PRECISION, NUMERIC) require a JSON
+number, accept exponent notation and use the destination's range/precision rules.
+Integer casts round midpoint ties away from zero, following PostgreSQL numeric_int*.
+Floating casts normalize numeric zero to positive zero, including JSON -0.0
+(numeric.c:4576-4611,4675-4715,11871-11875).
+JSON null converts to SQL NULL for these scalar casts. Other kinds, including arrays,
+objects and numeric-looking JSON strings, fail with CS02079. Range failures retain
+CS02002; cast-input syntax failures retain CS02022. TEXT/CHAR casts continue to serialize
+JSON (a string retains its JSON quotes, and arrays/objects serialize as JSON).
+
+Every JSON/JSONB column assignment now validates one complete JSON value, including
+DEFAULT, UPDATE and INSERT SELECT; malformed assignment input fails with CS02078
+and rolls back the statement. The existing strict UTF-8/depth-128 policy is shared by
+access and assignment; IS JSON returns FALSE when that limit or encoding is invalid.
+JSON text and JSONB UTF-8 storage remain unchanged. Existing text/bytes/scalar wire cells
+carry results over InMemory and TCP. Invalid operand signatures are CS01067 (42883),
+checked before rows, including all CASE/COALESCE result alternatives.
+Identical JSON conjuncts can prove partial-index eligibility, including IS JSON kind and
+negation. Different source/selector types, keys and arrow forms do not provide that proof.
+
+PostgreSQL references (local clone): src/backend/utils/adt/jsonfuncs.c:886-1005,
+1105-1116,1160-1296; src/backend/utils/adt/jsonb.c:1819-2006;
+src/backend/executor/execExprInterp.c:4811-4892; src/backend/parser/gram.y:904,
+15368-15371,15753-15787. The [PostgreSQL JSON operator documentation](https://www.postgresql.org/docs/18/functions-json.html)
+also records extraction NULL and negative-index behavior.
+JSON_VALUE, JSON_QUERY, JSON_EXISTS and their lax path subset remain SQ-N2.
+JSON_TABLE, question-mark operators and JSONB normalization remain T3.
 
 ## Integer bitwise operators (#1721, SQ-O2)
 
@@ -4083,8 +4220,8 @@ BINARY/VARBINARY. The shared type-name grammar owns all aliases and modifiers.
 | TIMESTAMPTZ | – | – | – | – | – | – | – | – | Y | – | Y | Y | Y | Y | – | – | – | – | Y |
 | INTERVAL | – | – | – | – | – | – | – | – | Y | – | – | Y | – | – | Y | – | – | – | Y |
 | UUID | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | Y | – | – | Y |
-| JSON | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
-| JSONB | – | – | – | – | – | – | – | – | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| JSON | Y | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | Y | Y | Y |
+| JSONB | Y | Y | Y | Y | Y | Y | Y | Y | Y | – | – | – | – | – | – | – | Y | Y | Y |
 | CHAR | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y | Y |
 
 Identity conversions still apply target bounds. A pair without a conversion fails
@@ -4171,15 +4308,15 @@ supply a floating operand, cast text to REAL or DOUBLE first.
   and preserves the original spelling, property order, duplicates and whitespace.
   JSONB equality is byte equality, unlike PostgreSQL's normalized JSONB equality;
   another binary encoding would require a data migration. JSONB-to-text validates
-  the stored UTF-8 JSON before decoding. JSON columns may still accept unvalidated
-  text on INSERT; that assignment behavior is outside CAST. JSON-to-scalar casts
-  remain outside Tier 1.
+  the stored UTF-8 JSON before decoding. Assignments now validate JSON/JSONB too;
+  scalar JSON casts are specified in the JSON access section (#1722).
 - **NULL:** returns NULL for every supported target, with the target's result
   type metadata even when every row is null or the result has no rows. Invalid
   target names/modifiers are still errors with a NULL operand.
 - **Integers:** signed ranges are -128..127, -32768..32767, -2147483648..2147483647,
   and -9223372036854775808..9223372036854775807. Overflow and nonzero fractional
-  parts are errors; there is no rounding, truncation, wrapping, or zero fallback.
+  parts are errors for ordinary numeric/text conversions; JSON numeric casts use the
+  rounding rule above. Ordinary casts never truncate, wrap or substitute zero.
 - **Decimal:** the implementation uses `System.Decimal` (96-bit coefficient,
   scale 0..28), not arbitrary precision. Bare DECIMAL/NUMERIC has no additional
   bound. `DECIMAL(p)` means scale 0; `DECIMAL(p,s)` requires `1 <= p <= 28` and

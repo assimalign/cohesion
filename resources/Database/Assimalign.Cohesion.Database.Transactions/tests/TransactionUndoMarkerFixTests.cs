@@ -124,14 +124,17 @@ public sealed class TransactionUndoMarkerFixTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Transactions] - Statement compensation: a draining commit must fence and retain an owner through disposal")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Commit_FailedCompensationDuringDrain_ShouldFenceAndReturnEndClaim(bool dispose)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task Commit_FailedCompensationDuringDrain_ShouldFenceAndReturnEndClaim(bool dispose, bool replace)
     {
         // Arrange
         using var storage = new UndoTestStorage();
         await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var writer = await coordinator.BeginAsync(IsolationLevel.Snapshot);
+        if (replace) { writer = coordinator.ReplaceIsolationLevel(writer, IsolationLevel.Snapshot); }
         var marker = await coordinator.CreateUndoMarkerAsync(writer);
         var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int value = 0;
@@ -146,6 +149,7 @@ public sealed class TransactionUndoMarkerFixTests
         }).AsTask();
         var commit = coordinator.CommitAsync(writer).AsTask();
         commit.IsCompleted.ShouldBeFalse();
+        writer.Current.ShouldBeSameAs(writer, "a draining end must retain exact replacement identity");
         Task? disposal = null;
         int drains = 0;
         coordinator.Manager.FailedCompensationDrained = () =>
@@ -176,6 +180,7 @@ public sealed class TransactionUndoMarkerFixTests
             return;
         }
         writer.State.ShouldBe(TransactionState.Active);
+        writer.Current.ShouldBeSameAs(writer, "returning a failed-compensation end claim must restore replacement identity");
         value.ShouldBe(7);
         repair.Fail = false;
         await coordinator.RollbackToUndoMarkerAsync(writer, marker);

@@ -169,7 +169,7 @@ public sealed partial class SqlCatalog
                 var location = pending[slot.Table.ObjectId];
                 _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(location.PageId, location.SlotIndex));
             }
-            foreach (var slot in indexes) { _indexes.Remove((slot.Index.TableObjectId, slot.Index.Name)); }
+            foreach (var slot in indexes) { RemoveIndexSlot((slot.Index.TableObjectId, slot.Index.Name)); }
             foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
             foreach (var slot in defaults) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
             _registrationsLocation = registrationsLocation;

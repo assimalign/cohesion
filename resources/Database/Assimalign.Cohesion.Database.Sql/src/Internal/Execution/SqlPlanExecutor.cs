@@ -235,6 +235,7 @@ internal sealed partial class SqlPlanExecutor
 
     private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         // The access path narrows the candidate set; the full WHERE stays the
         // residual predicate for both paths, so seek results are equivalent to
@@ -248,6 +249,26 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (evaluator.Matches(plan.Where, values)) { yield return values; }
             }
+        }
+    }
+
+    private DatabaseResult ExecuteOrderedSelect(SqlSelectPlan plan, SqlOrderedIndexPath path,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        // Resolve once before omitting the sort. A detached/replaced tree falls back to
+        // a heap scan with the original ordering. The statement's reclamation horizon
+        // retains a successfully resolved handle's pages even if DROP detaches it later.
+        if (!TryResolveSeekTree(plan.Table, path.Index, out var tree))
+        { return ExecuteSelect(plan with { Access = SqlScanPath.Instance }, statement, cancellationToken); }
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+        statement.Metrics.AccessPath = "ordered:" + path.Index.Name + (path.Reverse ? ":backward" : ":forward");
+        return MaterializeSelect(Matches(), plan.Projections, [], plan.Limit, plan.Offset,
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+
+        IEnumerable<object?[]> Matches()
+        {
+            foreach (var (_, values) in SeekRows(plan.Table, path, tree, statement, cancellationToken))
+            { if (evaluator.Matches(plan.Where, values)) { yield return values; } }
         }
     }
 
@@ -1885,7 +1906,7 @@ internal sealed partial class SqlPlanExecutor
         // a DML row-lock wait. DML drains this cursor before taking sorted row locks,
         // then sorted unique-key locks, then the apply gate and storage/index latches.
         // The finally below also disposes on predicate failure and cancellation.
-        var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
+        var cursor = index.OpenCursor(snapshot, range, reverse: seek is SqlOrderedIndexPath { Reverse: true }, cancellationToken: cancellationToken);
 
         try
         {

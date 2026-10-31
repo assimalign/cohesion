@@ -520,6 +520,11 @@ public sealed partial class GraphDatabase : DatabaseInstance
     internal async ValueTask ValidateNodeAsync(GraphOperation operation, IReadOnlyList<string> labels,
         IReadOnlyDictionary<string, object?>? properties, CancellationToken token, bool deferRequired = false)
     {
+        if (labels.Count == 0 && properties is not null)
+        {
+            foreach (var property in properties)
+            { await Catalog.DiscoverPropertyKeyAsync(property.Key, operation.Context, token).ConfigureAwait(false); }
+        }
         foreach (string label in labels)
         {
             var metadata = Catalog.FindLabel(label, operation.Context.Snapshot);
@@ -587,6 +592,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
                 if (!schemaOwned.Value)
                 {
                     await Catalog.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(definition, property.Key), operation.Context, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Catalog.DiscoverPropertyKeyAsync(property.Key, operation.Context, token).ConfigureAwait(false);
                 }
             }
         }

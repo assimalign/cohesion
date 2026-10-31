@@ -71,8 +71,133 @@ internal sealed partial class SqlPlanExecutor
 
         SqlPlan CostSelect(SqlSelectPlan select)
         {
-            var chosen = Choose(select.Table, select.Access);
+            var chosen = select.Access is SqlOrderedIndexPath ordered ? ChooseOrdered(select, ordered) : Choose(select.Table, select.Access);
             return ReferenceEquals(chosen, select.Access) ? select : select with { Access = chosen };
+        }
+
+        SqlAccessPath ChooseOrdered(SqlSelectPlan select, SqlOrderedIndexPath original)
+        {
+            SqlIndexSeekPath best = original;
+            BTreeRangeCount? bestCount = null;
+            double bestWork = double.PositiveInfinity;
+            double window = select.IsDistinct ? double.PositiveInfinity : CostCount(select.Limit, double.PositiveInfinity) + CostCount(select.Offset, 0);
+            var alternatives = original.Cost!.Alternatives;
+            var counts = new BTreeRangeCount?[alternatives.Count];
+            for (int i = 0; i < alternatives.Count; i++) { counts[i] = Probe(select.Table, alternatives[i]); }
+            BTreeRangeCount? total = null;
+            bool totalProbed = false;
+            for (int i = 0; i < alternatives.Count; i++)
+            {
+                var candidate = alternatives[i];
+                var count = counts[i];
+                if (count is null) { continue; }
+                double rows = Estimate(count);
+                // Retain the established four sequential-row units per random heap fetch.
+                // A comparison costs one eighth of a sequential row. A bounded sorter
+                // compares against its retained top-N window, but still reads all candidates.
+                double work = candidate is SqlOrderedIndexPath
+                    ? 4 * Math.Min(rows, window / ResidualSelectivity(candidate)) : 4 * rows + SortWork(rows);
+                if (work < bestWork) { best = candidate; bestCount = count; bestWork = work; }
+            }
+            if (bestCount is null) { return original; }
+            if (bestCount.Value.Count > 16)
+            {
+                total = Total();
+                // An unbounded unconditional index proves the same candidate population
+                // as the table, so its estimate also permits comparing full-scan work.
+                bool wholeTable = best.Index.Predicate is null && best.EqualityValues.Count == 0 && best.Lower is null && best.Upper is null;
+                if (total is { } observed && (observed.IsComplete || wholeTable) && Estimate(total) + SortWork(Estimate(total)) < bestWork)
+                { return new SqlScanPath { Cost = new([]) { Estimate = total } }; }
+            }
+            return best with { Cost = new([]) { Estimate = bestCount } };
+
+            double SortWork(double rows) => rows * Math.Log2(Math.Min(rows, window) + 1) / 8;
+
+            BTreeRangeCount? Total()
+            {
+                if (!totalProbed) { total = Probe(select.Table, null); totalProbed = true; }
+                return total;
+            }
+
+            double ResidualSelectivity(SqlIndexSeekPath candidate)
+            {
+                if (select.Where is null || double.IsPositiveInfinity(window)) { return 1; }
+                SqlIndexSeekPath? known = null;
+                double knownRows = double.PositiveInfinity;
+                for (int j = 0; j < alternatives.Count; j++)
+                {
+                    if (alternatives[j] is SqlOrderedIndexPath || counts[j] is not { IsComplete: true } exact) { continue; }
+                    bool residualEvidence = alternatives[j].Index.Predicate is not null && candidate.Index.Predicate is null;
+                    foreach (var term in SqlPredicateImplication.Conjuncts(select.Where))
+                    { residualEvidence |= Covered(term, alternatives[j]) && !Covered(term, candidate); }
+                    if (residualEvidence && exact.Count < knownRows) { known = alternatives[j]; knownRows = exact.Count; }
+                }
+                // An incomplete base probe proves at least 1,024 rows. Use that lower
+                // bound rather than pretending a sibling's exact count is the table size.
+                double fraction = known is null ? 1 : Math.Min(1, knownRows / Math.Max(1, Estimate(Total())));
+                var enforced = Predicate(candidate);
+                var counted = known is null ? null : Predicate(known);
+                Span<byte> ranges = select.Table.Columns.Count <= 64 ? stackalloc byte[select.Table.Columns.Count] : new byte[select.Table.Columns.Count];
+                ranges.Clear();
+                foreach (var term in SqlPredicateImplication.Conjuncts(select.Where))
+                {
+                    if (Covered(term, candidate) || known is not null && Covered(term, known) ||
+                        ImpliedBy(term, enforced) || ImpliedBy(term, counted)) { continue; }
+                    // PostgreSQL src/include/utils/selfuncs.h:34-55. These are fallback
+                    // estimates for residual restrictions, never stored statistics.
+                    if (term is SqlBoundBinary binary)
+                    {
+                        if (binary.Operator == SqlBinaryOperator.Equal) { fraction *= 0.005; }
+                        else if (binary.Operator is SqlBinaryOperator.LessThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual)
+                        {
+                            if (ComparisonColumn(binary) is int ordinal)
+                            {
+                                bool lower = binary.Operator is SqlBinaryOperator.GreaterThan or SqlBinaryOperator.GreaterOrEqual;
+                                if (binary.Right is SqlBoundColumn) { lower = !lower; }
+                                ranges[ordinal] |= lower ? (byte)2 : (byte)1;
+                            }
+                            else { fraction *= 1d / 3; }
+                        }
+                    }
+                    else if (term is SqlBoundBetween { IsNegated: false }) { fraction *= 0.005; }
+                    else if (term is SqlBoundLike { IsNegated: false }) { fraction *= 0.005; }
+                }
+                foreach (byte range in ranges)
+                { fraction *= range == 3 ? 0.005 : range == 0 ? 1 : 1d / 3; }
+                return Math.Max(double.Epsilon, fraction);
+            }
+
+            SqlBoundExpression? Predicate(SqlIndexSeekPath path) => path.Index.Predicate is null ? null
+                : _definitions.GetIndexPredicate(select.Table, path.Index, cancellationToken);
+
+            bool ImpliedBy(SqlBoundExpression term, SqlBoundExpression? predicate) => predicate is not null &&
+                SqlPredicateImplication.Prove(term, [predicate], cancellationToken: cancellationToken) is not null;
+
+            bool Covered(SqlBoundExpression term, SqlIndexSeekPath path)
+            {
+                int? ordinal = term is SqlBoundBinary binary ? ComparisonColumn(binary)
+                    : term is SqlBoundBetween { IsNegated: false, LowOperand: SqlBoundColumn low, HighOperand: SqlBoundColumn high } && low.Ordinal == high.Ordinal ? low.Ordinal : null;
+                if (ordinal is null) { return false; }
+                string name = select.Table.Columns[ordinal.Value].Name;
+                for (int key = 0; key < path.EqualityValues.Count; key++)
+                { if (string.Equals(path.Index.ColumnNames[key], name, StringComparison.OrdinalIgnoreCase)) { return true; } }
+                return (path.Lower is not null || path.Upper is not null) &&
+                    string.Equals(path.Index.ColumnNames[path.EqualityValues.Count], name, StringComparison.OrdinalIgnoreCase);
+            }
+
+            static int? ComparisonColumn(SqlBoundBinary binary)
+                => binary.Left is SqlBoundColumn left && binary.Right is SqlBoundConstant or SqlBoundParameter ? left.Ordinal
+                    : binary.Right is SqlBoundColumn right && binary.Left is SqlBoundConstant or SqlBoundParameter ? right.Ordinal : null;
+
+            // Never execute count expressions during costing: volatile/deferred values
+            // initialize once at execution. Fixed integers and supplied parameters are safe.
+            static double CostCount(SqlRowCount? count, double absent)
+            {
+                if (count is null) { return absent; }
+                if (count.Expression is null) { return count.Count; }
+                object? value = count.Expression switch { SqlBoundConstant constant => constant.Value, SqlBoundParameter parameter => parameter.Value, _ => null };
+                return value switch { sbyte n when n >= 0 => n, short n when n >= 0 => n, int n when n >= 0 => n, long n when n >= 0 => n, _ => double.PositiveInfinity };
+            }
         }
 
         BTreeRangeCount? Probe(SqlCatalogTable table, SqlIndexSeekPath? seek)

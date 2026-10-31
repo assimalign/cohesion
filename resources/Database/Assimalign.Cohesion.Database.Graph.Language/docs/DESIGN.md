@@ -1,6 +1,21 @@
 # Assimalign.Cohesion.Database.Graph.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+Standalone named controls retain TransactionCommand and SavepointName. The name reuses the
+existing standalone body reference, preserving every ordinary GqlQueryExpression allocation.
+Three profile clauses and parser/keyword conformance corpora advance together; no lexer keyword
+or graph expression syntax changes. SQL savepoint forms are documented Cohesion extensions.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+The parser and renderer corpus covers both TO forms with no modifier or WORK and TRANSACTION (PostgreSQL src/backend/parser/gram.y:11414-11431,11483-11486).
+
 ## SQL operator isolation (#1721)
+
+JSON access isolation (#1722) pins -> and ->> as the existing RightArrow and
+GreaterThan tokens. SQL alone joins them; GQL relationship arrows and OQL comparisons
+retain their grammar, and both languages still refuse SQL JSON access expressions.
+The conformance cases retain accepted -[r]-> and <-[r]- patterns and the existing
+Cypher-spelling refusals: adjacent --> is CG00008; <-- and <--> are CG00002.
 
 The shared lexer is unchanged. The operator corpus pins # as Unrecognized, ~, &, |
 and paired angle brackets as their existing tokens, with SQL bitwise syntax still refused.
@@ -84,6 +99,14 @@ colons with label-expression operators or a wildcard (`:A:B|C`, `:A|B:C`, `:%:A`
 evaluation stays inside the already-bound logical database.
 
 ## Schema DDL (#1738, GQ-D2)
+
+Read-only unknown-property warnings (#1249, GQ-D3) are engine diagnostics, using the existing
+property/member AST and source spans. The parser corpus admits the same syntax independently of
+database contents. Graph DESIGN describes snapshot token resolution and statement-wide
+de-duplication; DIALECT specifies CG01023 and the entity/map/dynamic/write boundary. Parenthesized
+and direct member ASTs use the projected ORDER BY alias's receiver type. Stored-key discovery
+also covers unlabeled entities and undeclared keys on schema-owned definitions, independently
+of their declared property metadata; writing statements suppress analysis in nested reads too.
 
 Standalone CREATE/DROP INDEX and CONSTRAINT plus Cohesion LABEL/RELATIONSHIP TYPE definition
 commands use GqlSchemaCommand, GqlSchemaObjectKind and GqlSchemaPropertyType. The FOR variable

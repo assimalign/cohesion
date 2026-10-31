@@ -124,7 +124,7 @@ public sealed partial class SqlQueryParser : QueryParser
         string firstToken = CurrentText(ref lexer);
         SqlQueryExpression expression;
 
-        if (IsWord(ref lexer, "SET") && StartsSetTransaction(lexer))
+        if (IsWord(ref lexer, "SAVEPOINT") || IsWord(ref lexer, "RELEASE") || IsWord(ref lexer, "SET") && StartsSetTransaction(lexer))
         {
             expression = ParseTransaction(ref lexer);
         }
@@ -318,6 +318,16 @@ public sealed partial class SqlQueryParser : QueryParser
     private SqlTransactionExpression ParseTransaction(ref TokenLexer lexer)
     {
         int start = lexer.Current.Position;
+        if (IsWord(ref lexer, "SAVEPOINT") || IsWord(ref lexer, "RELEASE"))
+        {
+            bool release = IsWord(ref lexer, "RELEASE");
+            RequireSchemaClause(ref lexer, release ? SqlClauses.ReleaseSavepoint : SqlClauses.Savepoint);
+            Advance(ref lexer);
+            if (release && IsWord(ref lexer, "SAVEPOINT")) { Advance(ref lexer); }
+            string name = ParseSavepointName(ref lexer);
+            return new SqlTransactionExpression(release ? SqlQueryCommandType.ReleaseSavepoint : SqlQueryCommandType.Savepoint,
+                Location.Create(1, 1, start, _lastTokenEnd), savepointName: name);
+        }
         bool isStart = IsWord(ref lexer, "START");
         bool isSet = IsWord(ref lexer, "SET");
         bool isEnd = IsKeyword(ref lexer, "END");
@@ -334,6 +344,15 @@ public sealed partial class SqlQueryParser : QueryParser
         else if (!isEnd && (IsKeyword(ref lexer, "TRANSACTION") || IsWord(ref lexer, "WORK")))
         {
             Advance(ref lexer);
+        }
+        if (command == SqlQueryCommandType.Rollback && IsWord(ref lexer, "TO"))
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.RollbackToSavepoint);
+            Advance(ref lexer);
+            if (IsWord(ref lexer, "SAVEPOINT")) { Advance(ref lexer); }
+            string name = ParseSavepointName(ref lexer);
+            return new SqlTransactionExpression(SqlQueryCommandType.RollbackToSavepoint,
+                Location.Create(1, 1, start, _lastTokenEnd), savepointName: name);
         }
         var levels = new List<SqlTransactionIsolationLevel>();
         if (command is SqlQueryCommandType.Begin or SqlQueryCommandType.SetTransaction)
@@ -696,6 +715,9 @@ public sealed partial class SqlQueryParser : QueryParser
             SqlQueryCommandType.SetTransaction => "SET TRANSACTION",
             SqlQueryCommandType.Commit => "COMMIT",
             SqlQueryCommandType.Rollback => "ROLLBACK",
+            SqlQueryCommandType.Savepoint => "SAVEPOINT",
+            SqlQueryCommandType.ReleaseSavepoint => "RELEASE SAVEPOINT",
+            SqlQueryCommandType.RollbackToSavepoint => "ROLLBACK TO SAVEPOINT",
             _ => "SQL",
         },
     };

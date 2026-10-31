@@ -1,5 +1,46 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Named savepoint integration (#1726, XT-4)
+
+The SQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+[SAVEPOINT] name through protected root controls before opening autocommit work. Names and
+duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
+the existing model adapters. The enclosing transaction stays open and can commit after undo.
+SQL statement failures remain statement-atomic. SET TRANSACTION inside an active savepoint
+is CS04074; releasing the last scope permits otherwise-early configuration again.
+The owner's unconditional refusal includes idempotent SET. The local PostgreSQL reference
+allows that no-op (src/backend/commands/variable.c:580-603); the 2026-10-25 owner decision wins. A retained
+ROLLBACK TO target still refuses SET. Existing CS04072 late-data and CS04073 unsupported-level
+conditions keep their meanings.
+
+A coded CK04009 memory-compensation failure retains that recovery path even when its aggregate
+cause contains IOException; it is not reclassified as an ordinary SQL storage abort. Genuine
+offline/corruption translation still takes precedence. The regression uses a real failed bracket
+and retry through the named session scope.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+Named controls dispatch before async frame creation; their translation locals never grow ordinary control frames. Every named control uses the ordinary statement failure translator before reporting CK04009 for an incomplete kernel undo. The translated failure is retained as its cause. Offline, disposed and corruption failures take precedence; corruption aborts the writer (#1364). The server handles a recoverable failure as a statement error followed by Ready E, so retry or whole rollback uses the same connection.
+
+A direct transaction refusal or commit probes disposal/offline state outside root state before
+reporting a live partial-undo fence. Memory-only create/release allocation faults retain the
+model's ordinary statement policy.
+Named-control parameter/preparation I/O uses CS06041 and aborts the explicit transaction under #1364;
+recoverable partial undo remains CK04009. Every named CK04009 carries its statement span and
+translated cause. A closed database with a live fence uses CS04005 over SQL and retains its wire
+session, including the error/Ready E exchange.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+| CS04074 | SET TRANSACTION inside an active savepoint |
+
 ## Directed index keys (#1631, SQ-K1)
 
 Each SqlCatalogIndex carries an immutable KeyOrders vector, one effective order per key
@@ -32,9 +73,8 @@ exercise the cursor even when runtime costing chooses a broad table scan.
 
 The planner derives bounds from `=`, `<`, `<=`, `>`, `>=` and BETWEEN with directed indexes. LIKE remains
 a residual filter after an equality-prefix seek; LIKE-prefix bounds are future work beside
-SQ-K3's ordered access. Every ORDER BY still sorts, including matching and fully reversed
-orders; SQ-K3 owns order matching, order costing and sort avoidance. Conservative floating
-predicate admission remains unchanged even though floating key equality/order now matches SQL
+SQ-K3's ordered access. Matching ORDER BY can use forward or backward index scans without
+sorting (SQ-K3, below). Conservative floating predicate admission remains unchanged even though floating key equality/order now matches SQL
 comparison. Schema snapshots, migration
 comparison and runtime/SDK renderers preserve key order through replacement and recovery.
 
@@ -44,6 +84,70 @@ comparison and runtime/SDK renderers preserve key order through replacement and 
 
 Malformed persisted order vectors retain CS06059; unsupported index extensions retain CS06060;
 earlier SQL data-storage formats retain CS06041. Constraint key options retain CS00003.
+
+## ORDER BY from index order (#1631, SQ-K3)
+
+Single-table SELECT compares bound source columns (including pass-through aliases and ordinals)
+with a contiguous prefix of the index suffix after equality-bound leading columns (including IS NULL). Every requested
+key must match its column's resolved collation and direction, or every direction must be
+reversed together. NULL placement must also agree (or reverse) whenever that key can contain NULL. Partial reversal, skipped unconstrained leading keys,
+computed ordering expressions and different collations retain sorting. The comparison follows
+PostgreSQL src/backend/optimizer/path/pathkeys.c:720-814, particularly :771-780 for reversal.
+Partial indexes additionally require SQ-P2's strong implication proof; EXPLAIN retains that proof.
+
+SqlOrderedIndexPath is a derived transient access record. Existing path, planner and statement
+object layouts stay unchanged. The catalog publishes immutable table-specific index vectors with
+its metadata changes. Planning takes the existing catalog lock only to obtain the queried table's
+vector, then matches outside it. The precheck and allocating pass share one matcher and reuse
+ordinary access's validated equality prefix and partial-index proof. Declining orders allocate
+neither an index list nor candidate paths. Complete unique equality lookups bypass ordered
+candidate construction and costing probes because at most one row can qualify. Integer, decimal, IEEE, Boolean, binary, GUID, temporal
+and index-backed text/CHAR codecs have the same order as the SQL comparer. JSON ordering remains
+on the existing sorter. Queries with scalar subqueries, volatile projections, recursive demand,
+joins, groups or windows retain their existing sorting operators. DISTINCT can omit sorting but
+still consumes all candidates before duplicate elimination and pagination.
+
+ORDER BY keeps its existing defaults, ASC NULLS FIRST and DESC NULLS LAST. Index DDL defaults
+remain PostgreSQL's ASC NULLS LAST and DESC NULLS FIRST. NULL placement is irrelevant for a key
+that cannot be NULL in returned rows: declared NOT NULL (including primary keys), an equality-bound
+prefix, a mandatory local NULL-rejecting conjunct, or a proven partial-index predicate supplies
+the proof. Ordering reuses SQ-P2's shared NULL-rejection rule: strict comparisons against any
+operand (including parameters), IN, BETWEEN, LIKE and IS NOT NULL reject NULL. Only mandatory AND
+conjuncts qualify; OR/NOT and the NULL-extended side of an outer join supply no proof. Joins
+retain their existing sorting stage. Equal ordering keys retain
+SQL's unspecified tie order; a final unique key is needed for deterministic LIMIT/OFFSET identity.
+
+Execution resolves the planned tree identity once before removing the sort. Missing or replaced
+trees use the heap scan and original sort. A resolved handle remains valid under the statement's
+reclamation horizon after detachment. Both directions use the existing incremental BTreeCursor,
+checking index and base-row visibility against the same statement snapshot and retaining the full
+WHERE residual. No index-only execution is claimed. The latch order remains transaction/key locks,
+tree read latch, then page pin/pool monitor; each batch releases all latches before predicates or
+projection run. Non-DISTINCT LIMIT/OFFSET stops after enough qualifying rows, disposing the cursor
+even on cancellation, failure or early termination. No row/index write-maintenance path changes.
+
+Order costing uses the existing bounded transient probes and four sequential-row work units per
+random heap fetch. Sorting contributes n*log2(min(n, LIMIT+OFFSET)+1)/8 work units. An ordered
+path credits the eliminated sort and, for fixed integer counts or supplied integer parameters,
+estimates heap visits as min(candidate rows, (LIMIT+OFFSET)/residual selectivity). An exact
+sibling probe supplies its count divided by the table count; an incomplete table probe supplies
+its known lower bound (at least 1,024). Remaining residual restrictions use PostgreSQL
+src/include/utils/selfuncs.h:34-55 defaults: equality 0.005, one inequality 1/3, a two-sided range
+0.005 and LIKE 0.005; independent conjuncts multiply. Restrictions enforced by the candidate or
+counted sibling are not charged again. Deferred count expressions execute only at startup;
+DISTINCT gets no early-stop credit. The winning full unbounded unconditional index proves the same population as the heap, permitting
+scan-versus-sort comparison even when its probe is a lower bound; selective paths still require
+an exact base count before abandoning index access. These are planning heuristics, never persisted
+statistics. A selective ordered path wins while a broad heap-fetch path can lose to scan-plus-sort.
+
+EXPLAIN emits OrderedIndexScan with direction=forward/backward and sort_removed=true; the SELECT
+retains its bound order_keys and reports order_source=index. The generated oracle covers four key
+order vectors, explicit NULL placements, equality prefixes, collation ties and pagination against
+an unindexed forced-sort table. Work counters demonstrate 1,024 -> 10 heap visits and 10 -> 0
+retained sort rows for LIMIT 7 OFFSET 3. Counter-driven nonparallel readers overlap committing key
+changes and physical rollback in both directions under Snapshot and READ COMMITTED. InMemory and
+TCP carry the same descriptions and rows. No new diagnostics, public APIs, formats or wire types
+are added; catalog 32 and compiled schema v11 from SQ-K1 remain current.
 
 ## Anonymous savepoint adapters (#1726, XT-3)
 
@@ -59,7 +163,7 @@ never-marked writers populate no directory. Restore and retirement update it und
 links monitor, and root end removes that writer's entries. Repeated undo retains only live links.
 
 Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
-format changes. Named controls and language/session admission belong to XT-4. The engine tests
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
 exercise real writes before/after a marker, undo, write-again and copied live crash images with
 and without the root commit. Reader progress is required inside physical undo for pinned Snapshot
 and fresh READ COMMITTED transactions, with deterministic monitor-entry counters for undo/prune.
@@ -2880,8 +2984,8 @@ flowchart LR
   Typed shorthands create ordinary storage pairs. JSON and JSONB share CLR string/byte[]
   representations with TEXT/BYTEA, so their built-in entries use the assembly-local constructor;
   no public API, visibility grant or new storage wrapper is needed. The bound CAST retains
-  the source SQL identity so JSON-to-scalar pairs are refused during planning, rather than
-  being accidentally treated as text casts. All 19 shared SQL types are covered by the
+  the source SQL identity so explicit JSON-to-scalar pairs apply JSON kind conversion,
+  rather than accidentally treating them as text casts (#1722). All 19 shared SQL types are covered by the
   [dialect matrix](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md#explicit-conversion-cast-1022-e3).
   CAST text reads temporal and interval input through public SqlLiteralText. TIME and INTERVAL
   plain-string assignment use those same readers (#1422), including trimmed input, day-time
@@ -2895,7 +2999,8 @@ flowchart LR
   Canonical output is shared with concatenation. REAL/DOUBLE exact conversions parse shortest
   round-trip text before Decimal modifiers. NUMERIC-to-REAL parses the exact Decimal text directly
   to Single, avoiding a DOUBLE midpoint and second rounding (PostgreSQL numeric.c:4691-4696).
-  Integer targets refuse fractions; non-finite floats are range failures, CS02002/22003
+  Integer targets refuse fractions except JSON numbers, which round ties away from zero
+  (#1722); non-finite floats are range failures, CS02002/22003
   (float.c:1267-1270). Backslash-free BYTEA input encodes the original text, including surrounding
   whitespace (bytea.c:230-231); the hex form retains its separate trimmed-input grammar.
   INTERVAL output uses PostgreSQL's postgres-style day units and omits a zero clock after days
@@ -2903,8 +3008,8 @@ flowchart LR
   formatting, and every emitted form still passes through SqlLiteralText on input.
   JSON input uses JsonDocument at depth 128 and strict UTF-8, with no reflection or JsonSerializer.
   JSON text is preserved; JSONB is the same validated UTF-8 without normalization, so equality
-  stays byte equality. A future binary format needs a migration. INSERT's existing unvalidated
-  JSON-text acceptance is unchanged. Binary-producing casts detach delivery through the same
+  stays byte equality. A future binary format needs a migration. JSON/JSONB assignments
+  now validate input through SqlJsonAccess before storage (#1722). Binary-producing casts detach delivery through the same
   ownership path as application casts, including folded/shared constants and empty arrays.
 - **Allocation-free cast lookup (#1422).** The frozen cast index uses a value key holding storage
   ordinals and case-insensitive domain names. Lookup preserves domain-to-domain, domain-to-base,
@@ -2974,7 +3079,7 @@ parameter: PostgreSQL types it `unknown` and resolves it to the parameter, `pars
 `func_select_candidate`, which the design's narrow lattice does not, and which is an owner
 question); a volatility on `SqlCast`, which a phase that runs casts
 in a CHECK, an index or a generated expression, or applies `Implicit` contexts, needs first;
-a `COHESION_SCHEMA` view of casts; and JSON-to-scalar casts.
+a `COHESION_SCHEMA` view of casts. JSON scalar conversions are specified below (#1722).
 
 ## Modifier admission (#1438)
 
@@ -5162,8 +5267,8 @@ description + exported registrations), the engine binds them.
   Violations surface as the area root's `DatabaseException` at the model
   boundary (`IndexUniqueViolationException` translated — the child-root error
   policy); the statement's bracket has rolled back, the session stays usable.
-  Unconditional unique keys treat NULL as a value (stricter than ANSI); partial unique keys retain NULL-distinct semantics. Every ORDER BY sorts in
-  memory after its access path; indexes never supply result order. Physical SQL index order matches SqlValueComparer, including NaN and signed zero; future sort elision still needs matching NULL placement.
+  Unconditional unique keys treat NULL as a value (stricter than ANSI); partial unique keys retain NULL-distinct semantics. An ORDER BY sorts in
+  memory after its access path unless a matching directed index supplies the order through an ordered scan (SQ-K3, #1631). Physical SQL index order matches SqlValueComparer, including NaN and signed zero; NULL placement must agree only for keys that can contain NULL.
 - **A failed statement's pages are restored where no seek sees them half done** (#1371).
   A multi-row `INSERT` (or `INSERT ... SELECT`, `ExecuteInsertRowsAsync` in
   `src/Internal/Execution/SqlPlanExecutor.InsertSelect.cs`) inserts every earlier row and its entries, splitting
@@ -5918,7 +6023,8 @@ Repeated early supported modes use the last level. Inside a block, any SERIALIZA
 refused with CS04073; other modes retain CK00001. Outside a block, SET succeeds with Warning
 CS04071 and changes no default, including for SERIALIZABLE. Nested-BEGIN, aborted-scope and
 missing-block checks precede unsupported-level validation. Refusals preserve transaction usability.
-Savepoints remain unimplemented (#1726); future savepoint admission must join the CS04072 check.
+An active savepoint refuses SET TRANSACTION with CS04074 (#1726); releasing the last scope
+reopens configuration only while no data statement has started.
 
 | Code | Isolation condition | SQLSTATE |
 |---|---|---|
@@ -5926,6 +6032,7 @@ Savepoints remain unimplemented (#1726); future savepoint admission must join th
 | CS04071 | SET TRANSACTION outside an active block (Warning; success) | 25000 |
 | CS04072 | SET TRANSACTION after the first data statement or during an operation | 25001 |
 | CS04073 | SERIALIZABLE text isolation is unsupported | 0A000 |
+| CS04074 | SET TRANSACTION inside an active savepoint | 25001 |
 
 Early SET replaces the immutable kernel context under root transaction state admission,
 preserving id, sequence, lifecycle and the original begin snapshot. The begin-time pin starts
@@ -6011,15 +6118,19 @@ as `CurrentTransaction` until the caller ends it, so one transaction at a time i
 session. The transaction carries its MVCC context and, under `Snapshot`, the catalog capture
 its system-view statements read (taken at BEGIN). The session's default isolation value is
 `Snapshot`; optionless BEGIN and auto-commit pass that value to the coordinator. Before phase 4 the session kept a `Stack<SqlTransactionScope>` with
-one root entry; B7 anticipates `SAVEPOINT name`, `ROLLBACK TO [SAVEPOINT] name`,
-`RELEASE [SAVEPOINT] name`, and will add named scopes and undo markers inside the one
-transaction (#1726). Isolation syntax is implemented by #1012. `Serializable` remains
+one root entry; named SAVEPOINT, ROLLBACK TO and RELEASE now add in-memory nested scopes
+inside that one transaction (#1726), with newest-name lookup and PostgreSQL descendant rules. Isolation syntax is implemented by #1012. `Serializable` remains
 rejected by the existing C# seam until the coordinator supports serialization detection.
 
 The session lifecycle below applies equally to SQL requests and C# transactions.
 
+UndoPending is a recovery path also reported as TransactionState.Faulted; it does not
+represent an ordinary statement-aborted transaction. Only its named rollback retry or whole
+rollback recovers it, as described in the savepoint contract above.
+
 ```mermaid
 stateDiagram-v2
+    state "Faulted: incomplete undo" as UndoPending
     [*] --> Idle
     Idle --> Open: BEGIN
     Open --> Open: query or DML
@@ -6028,6 +6139,11 @@ stateDiagram-v2
     Open --> Faulted: the kernel ends it under the caller
     Faulted --> Idle: ROLLBACK, or COMMIT failing with CS04005
     Idle --> Closed: disconnect
+    Open --> UndoPending: partial undo fails
+    UndoPending --> Open: ROLLBACK TO retained or outer scope
+    UndoPending --> UndoPending: other work refused with CK04009
+    UndoPending --> Idle: ROLLBACK or DisposeAsync
+    UndoPending --> Closed: disconnect rolls back
 ```
 
 State misuse returns `DatabaseResultStatus.Error` with an error diagnostic, without
@@ -7747,6 +7863,57 @@ CK07001 with exact retained/omitted counts; the original Error category/message 
 successful result is preserved and the session stays reusable. Both the 4,096-entry
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
+
+## JSON access (#1722, SQ-N1)
+
+The existing SqlBinaryExpression gains JsonAccess and JsonTextAccess operators at the
+left-associative generic-operator rung. SQL combines the existing RightArrow token
+with an immediately adjacent GreaterThan token for ->>; shared lexer/token/profile
+values and keyword reservations do not change. SqlIsJsonExpression carries one operand,
+negation and SqlJsonKind (default VALUE); its IS precedence and nesting use the existing
+predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refusal.
+
+The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
+ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
+including grouping, windows, correlation, persisted equivalence and definition checks.
+JSON positions share a scoped CASE/COALESCE common-type resolver: unknown literals adopt
+declared alternatives, all-unknown sets become TEXT, and incompatible declared alternatives
+refuse before rows. The ordinary binder has no equivalent resolver; its rules outside these
+positions remain unchanged. This follows PostgreSQL parse_expr.c:1742-1763,2244-2255 and
+parse_coerce.c:1357-1456. Bound selectors retain their SQL type and member/index overload;
+evaluation converts alternatives to that type before access.
+Adjacent arrows fold only in the bound tree into ordered selectors over one owned, validated
+document. Intermediate missing values still evaluate later selectors; casts and other
+expressions end a chain. Only the final value is serialized. Structural partial-index proofs
+compare source/selector types, overloads, ordered selectors, text mode and IS JSON kind/negation,
+map column offsets and render their witnesses. JSON restrictions remain outside error-free
+join pushdown because extraction may raise CS02078 on valid stored Unicode escapes.
+The shared reader validates complete input with strict UTF-8 and maximum depth 128;
+missing/wrong-container results, JSON null and SQL NULL remain distinct. The dialect
+specifies extraction, Unicode conversion and numeric/Boolean cast rules and PostgreSQL
+source anchors. JSONB storage, comparison and raw serialization remain unnormalized.
+Scalar JSONB roots follow the owner's non-array NULL rule at indexes 0/-1; the local
+PostgreSQL implementation instead indexes its internal raw-scalar wrapper there.
+
+Canonical rendering writes arrows and an explicit predicate kind. The persisted-format
+audit compared 12,951 accepted baseline statements at 311cdf224 with zero canonical
+changes and fixed points in both assemblies. Existing interpretation and stored syntax
+are unchanged; no format bump or compatibility reader is needed. Views, defaults and
+CHECK constraints containing the new forms round-trip across restart. JSON assignment
+admission now refuses malformed input; it does not rewrite existing row bytes.
+
+| Code | Condition |
+| --- | --- |
+| CS01067 | Invalid JSON access or IS JSON signature (42883) |
+| CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
+| CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+
+The extraction oracle performs 10,240 comparisons over generated nested values,
+negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.
+Deterministic three-round allocation minima prove linear input-size allocation; existing
+Release query/DML guards protect non-JSON paths. No reflection, JsonSerializer, public
+interface, cross-assembly visibility grant or wire value type is introduced.
 
 ## Integer bitwise operators (#1721, SQ-O2)
 
