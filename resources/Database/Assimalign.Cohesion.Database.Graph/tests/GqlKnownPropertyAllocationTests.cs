@@ -63,9 +63,11 @@ public sealed class GqlKnownPropertyAllocationTests
             _output.WriteLine($"{(several ? "several" : "one")} round {round + 1}: {bytes:F3} B/query");
         }
 
-        // Assert: fresh three-round minima at 311cdf224; d786a2c08 is identical.
+        // Assert: no more than the fresh three-round minima at 311cdf224 (d786a2c08 is identical).
+        // The ceilings were measured on Windows ARM64, the highest of the CI platforms: Ubuntu x64,
+        // macOS and Windows x64 measure a few bytes per query less, so an exact value fails there.
         _output.WriteLine($"{(several ? "several" : "one")} minimum: {minimum:F3} B/query");
-        minimum.ShouldBe(several ? 36_277.824 : 25_721.440);
+        minimum.ShouldBeLessThanOrEqualTo(several ? 36_277.824 : 25_721.440);
     }
 }
 #endif
