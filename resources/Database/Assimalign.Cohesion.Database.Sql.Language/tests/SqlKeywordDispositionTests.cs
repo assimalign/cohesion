@@ -129,7 +129,7 @@ public sealed class SqlKeywordDispositionTests
         ["IS"] = Parses("SELECT a FROM t WHERE a IS NULL"),
         ["ANY"] = Parses("SELECT a FROM t WHERE a = ANY (SELECT b FROM u)"),
         ["SOME"] = Parses("SELECT a FROM t WHERE a = SOME (SELECT b FROM u)"),
-        ["~"] = Rejects("SELECT ~a FROM t", "prefix ~ operator"),
+        ["~"] = Rejects("SELECT a ~ 'x' FROM t", "infix ~ operator"),
         // Literals
         ["NULL"] = Parses("SELECT a FROM t WHERE a IS NULL"),
         ["TRUE"] = Parses("SELECT a FROM t WHERE b = TRUE"),

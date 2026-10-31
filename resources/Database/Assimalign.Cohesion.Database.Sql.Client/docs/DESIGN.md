@@ -1,10 +1,20 @@
 # Database.Sql.Client — Design
 
-## Partial indexes over the existing exchange (#1630, SQ-P1)
+## Directed index keys over the existing exchange (#1631, SQ-K1)
+
+InMemory and TCP carry per-column directions and NULL placement, composite seeks/ranges,
+canonical INDEXES metadata and CS00003 constraint-list refusals. Tests retain usable connections
+and verify that matching ORDER BY retains its ordering keys. No client API or wire format change
+is needed; order-based sort avoidance remains SQ-K3.
+
+
+## Partial indexes over the existing exchange (#1630, SQ-P1/SQ-P2)
 
 InMemory and TCP execute CREATE INDEX WHERE, predicate transitions, NULL-distinct partial
 uniqueness, canonical metadata views and coded predicate refusals. Failed transitions leave
-rows intact and connections usable. No client API or protocol format changes are required.
+rows intact and connections usable. ON CONFLICT target-WHERE inference, subset access and EXPLAIN proof text use the same exchanges
+on both transports. Untargeted and unproven targets retain their prior refusal/membership behavior.
+No client API or protocol format changes are required.
 
 
 ## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
@@ -51,6 +61,13 @@ and 200 idle and graceful-stop notices surfaced by the next concrete-client oper
 An in-memory regression returns an authenticated rental to its pool and leaves the client open
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
+
+## Integer bitwise wire conformance (#1721, SQ-O2)
+
+InMemory and TCP preserve SMALLINT, INTEGER and BIGINT cells for &, |, #, prefix ~,
+<< and >>, including NULL and modulo-width shift results. CS02077 rejects noninteger
+operands through the existing structured diagnostics and leaves the connection usable.
+No client API or value-wire change is needed.
 
 ## ILIKE and postfix CAST wire conformance (#1721)
 

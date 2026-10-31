@@ -74,6 +74,7 @@ public sealed class TransactionManager : IAsyncDisposable
     private static readonly string _errorTransactionManagerEnterApplyFailure = ErrorMessages.TransactionManagerEnterApplyFailure;
 
     private static readonly string _errorTransactionManagerCommitAsyncFailure = ErrorMessages.TransactionManagerCommitAsyncFailure;
+    private static readonly string _errorCommitAbortedByDisposal = ErrorMessages.CommitAbortedByDisposal;
 
     private readonly TransactionLog _log;
     private readonly LockManager _lockManager;
@@ -478,6 +479,9 @@ public sealed class TransactionManager : IAsyncDisposable
         return context;
     }
 
+    // Deterministic seam after a draining commit observes compensation failure.
+    internal Action? FailedCompensationDrained { get; set; }
+
     /// <summary>
     /// Commits the specified transaction. A writer returns only after its commit record is
     /// durable per the engine's durability policy; a read-only transaction writes no record
@@ -493,7 +497,8 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <exception cref="TransactionAbortedException">
     /// Thrown when the transaction was aborted by conflict or deadlock resolution; when
     /// the commit record could not be written, in which case the transaction was
-    /// rolled back and ends as <see cref="TransactionState.Faulted"/>; or, before the
+    /// rolled back and ends as <see cref="TransactionState.Faulted"/>; when manager disposal
+    /// wins a failed-compensation drain and aborts the transaction; or, before the
     /// commit starts, when the transaction is not active or its commit or rollback is
     /// already running.
     /// </exception>
@@ -514,6 +519,25 @@ public sealed class TransactionManager : IAsyncDisposable
             // No statement applies once the end is claimed; one already applying finishes
             // first, so the commit record follows every bracket stamped with the sequence.
             await owned.WaitForAppliesAsync().ConfigureAwait(false);
+            if (owned.HasFailedCompensation)
+            {
+                FailedCompensationDrained?.Invoke();
+                bool closing;
+                lock (_sync)
+                {
+                    // Disposal either sees the returned end claim or this commit
+                    // remains responsible for aborting the writer it is draining.
+                    closing = _disposed;
+                    if (!closing) { owned.ReopenAfterFailedCompensation(); }
+                }
+                if (closing)
+                {
+                    await EndAbortedAsync(owned, TransactionState.Faulted).ConfigureAwait(false);
+                    throw new TransactionAbortedException(
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorCommitAbortedByDisposal, owned.Sequence));
+                }
+                throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
+            }
 
             try
             {
@@ -616,8 +640,12 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <see cref="TransactionContext.ExitApply"/>.
     /// </summary>
     /// <param name="context">The context the statement runs under, or a statement wrapper sharing its sequence.</param>
+    /// <param name="cancellationToken">Cancels a wait for a memory-only undo control.</param>
     /// <returns>The manager's context for the transaction.</returns>
     /// <exception cref="TransactionAbortedException">The transaction has ended or its end has begun.</exception>
+    /// <exception cref="TransactionUndoException">CK04009: partial undo is running or incomplete.</exception>
+    /// <exception cref="OperationCanceledException">A wait for a memory-only undo control was canceled.</exception>
+    /// <remarks>Waits for an admitted marker create or release; waiting statements block new controls.</remarks>
     internal TransactionContext EnterApply(TransactionContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);

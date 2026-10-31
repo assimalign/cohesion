@@ -412,19 +412,27 @@ internal sealed partial class SqlPlanner
         var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
         foreach (var conjunct in conjuncts) { CollectSargablePredicates(table, conjunct, predicates, scope); }
 
-        if (predicates.Count == 0)
+        if (predicates.Count == 0 && !HasPartialIndexes(indexes))
         {
             return SqlScanPath.Instance;
         }
 
-        return SelectAccessPath(table, predicates, indexes);
+        IReadOnlyList<SqlBoundExpression>? restrictions = null;
+        if (HasPartialIndexes(indexes))
+        {
+            scope ??= new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation,
+                functions: _functions, cancellationToken: _cancellationToken, foldConstants: false);
+            restrictions = conjuncts.Select(scope.BindPredicate).ToArray();
+        }
+        return SelectAccessPath(table, predicates, indexes, restrictions);
     }
 
     /// <summary>Shares seek ranking with join inputs whose restrictions are already bound.</summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
-        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null,
+        IReadOnlyList<SqlBoundExpression>? restrictions = null, int offset = 0)
     {
-        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 && restrictions is null || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -437,14 +445,21 @@ internal sealed partial class SqlPlanner
 
         foreach (var index in indexes.OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
         {
-            if (index.Predicate is not null) { continue; }
+            string? proof = null;
+            if (index.Predicate is not null)
+            {
+                if (restrictions is null || ProvePartialIndex(table, index, restrictions, offset) is not { } proven) { continue; }
+                proof = proven;
+            }
             var seek = TryBuildSeek(table, index, predicates, out int prefixLength, out bool hasRange);
 
             if (seek is null)
             {
-                continue;
+                if (proof is null) { continue; }
+                seek = new SqlIndexSeekPath(index, [], null, null);
             }
 
+            if (proof is not null) { seek = new SqlPartialIndexSeekPath(index, seek.EqualityValues, seek.Lower, seek.Upper, proof); }
             if (firstCandidate is null) { firstCandidate = seek; }
             else
             {
@@ -729,8 +744,8 @@ internal sealed partial class SqlPlanner
             return;
         }
 
-        // Physical IEEE keys distinguish signed zero; SQL equality combines them.
-        // A single encoded equality probe would omit the other zero representation.
+        // Retain the existing conservative signed-zero probe admission. SQL keys
+        // now canonicalize zero signs (#1631); widening the predicate matrix is separate work.
         if (value is double doubleValue && doubleValue == 0d || value is float floatValue && floatValue == 0f)
         {
             return;
@@ -748,8 +763,8 @@ internal sealed partial class SqlPlanner
     /// <summary>
     /// Range seeks require evaluator order to match encoded byte order. String
     /// predicates also pass the effective-collation compatibility check above.
-    /// Guid, binary and JSON remain equality-only. Floating keys place NaN last,
-    /// unlike SQL comparison, so even finite range bounds require a scan.
+    /// Guid, binary and JSON remain equality-only. Floating range admission stays
+    /// conservative in this run, although SQL key order now matches the comparer (#1631).
     /// </summary>
     private static bool IsRangeSargable(DatabaseType type) => type switch
     {
@@ -1262,7 +1277,7 @@ internal sealed partial class SqlPlanner
         }
 
         var partial = create.Predicate is null ? null : SqlPartialIndexPredicate.Declare(table, create, _catalog.DefaultCollation, _functions);
-        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists, partial);
+        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists, create.KeyOrders.Select(order => (SqlCatalogIndexKeyOrder)order).ToArray(), partial);
     }
 
     private SqlDropIndexPlan PlanDropIndex(SqlDropIndexExpression drop)
@@ -1817,11 +1832,13 @@ internal sealed partial class SqlPlanner
         {
             SqlParameterExpression => true,
             SqlCollateExpression collate => CastTypeDependsOnParameter(collate.Operand, evaluator),
-            SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate } sign
+            SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate or SqlUnaryOperator.BitwiseNot } sign
                 => CastTypeDependsOnParameter(sign.Operand, evaluator),
             SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic
                 => CastTypeDependsOnParameter(arithmetic.Left, evaluator) || CastTypeDependsOnParameter(arithmetic.Right, evaluator),
+            SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator)
+                => CastTypeDependsOnParameter(bitwise.Left, evaluator) || CastTypeDependsOnParameter(bitwise.Right, evaluator),
             SqlCaseExpression conditional => conditional.WhenClauses.Any(clause => CastTypeDependsOnParameter(clause.Result, evaluator))
                 || conditional.ElseResult is not null && CastTypeDependsOnParameter(conditional.ElseResult, evaluator),
             SqlFunctionCallExpression call when evaluator.CallResultDependsOnArguments(call)
@@ -1881,6 +1898,8 @@ internal sealed partial class SqlPlanner
             SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
             SqlLogicalExpression => DatabaseType.Boolean,
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
+            SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator) => evaluator.StaticTypeOf(bitwise),
+            SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } bitwise => evaluator.StaticTypeOf(bitwise),
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
             SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,

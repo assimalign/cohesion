@@ -409,7 +409,19 @@ public sealed partial class CreateDatabaseMigrationTask : DatabaseTask
             }
             builder.Append("INDEX IF NOT EXISTS ").Append(Identifier(index.Name))
                 .Append(" ON ").Append(QualifiedTable(table))
-                .Append(" (").Append(ColumnList(index.Columns)).Append(')');
+                .Append(" (");
+            for (int i = 0; i < index.Columns.Count; i++)
+            {
+                if (i > 0) { builder.Append(", "); }
+                builder.Append(Identifier(index.Columns[i])).Append(index.KeyOrders[i] switch
+                {
+                    CompiledSchemaIndexKeyOrder.AscendingNullsFirst => " NULLS FIRST",
+                    CompiledSchemaIndexKeyOrder.DescendingNullsFirst => " DESC",
+                    CompiledSchemaIndexKeyOrder.DescendingNullsLast => " DESC NULLS LAST",
+                    _ => "",
+                });
+            }
+            builder.Append(')');
             if (index.Predicate is { } predicate)
             {
                 // Parse both the fragment and a parenthesized carrier to reject trailing

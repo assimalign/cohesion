@@ -17,12 +17,12 @@ public sealed partial class SqlQueryParser
     //   ParseAnd                → ParseNot (AND ParseNot)*     one n-ary node per chain
     //   ParseNot                 → NOT ParseNot | ParseComparison
     //   ParseComparison          → IS (low), comparison, BETWEEN/IN/LIKE (high), nonassociative
-    //   ParseConcat              → ParseAddition (|| ParseAddition)*
+    //   ParseConcat              → ParseAddition ((|| | & | | | # | << | >>) ParseAddition)*
     //   ParseAddition            → ParseMultiplication ((+|-) ParseMultiplication)*
     //   ParseMultiplication     → ParseCollate ((*|/|%) ParseCollate)*
-    //   ParseUnary              → (-|+|~) ParseUnary | ParsePrimary (:: type)*
-    //                            (a prefix ~ reports CK00001; a + directly before a
-    //                            numeric literal is part of the literal, see ParsePrimary)
+    //   ParseUnary              → (-|+) ParseUnary | ~ ParseAddition | ParsePrimary (:: type)*
+    //                            (prefix ~ has PostgreSQL's generic-operator precedence;
+    //                            a + before an uncast numeric literal stays part of the literal)
     //   ParseCollate            → ParseUnary (COLLATE name)*
     //   ParsePrimary            → literal | column_ref | param | function(...)
     //                            | (expr) | (SELECT ...) | CASE | CAST | EXISTS | *
@@ -148,7 +148,7 @@ public sealed partial class SqlQueryParser
         {
             if (IsInfixTilde(ref lexer))
             {
-                RejectInfixTilde(ref lexer, afterPredicate: true);
+                RejectTildeOperator(ref lexer, afterPredicate: true);
                 continue;
             }
             int pos = lexer.Current.Position;
@@ -216,7 +216,8 @@ public sealed partial class SqlQueryParser
             // A completed postfix form has no right operand to absorb a following
             // tighter operator (NULL IS NULL || 'x', or a IN (1) + 1). Resume that
             // operator over the completed left node, as PostgreSQL's a_expr does.
-            var arithmetic = lexer.Current.Type switch
+            bool generic = TryGetGenericOperator(lexer, out var genericOperator, out bool shift);
+            var arithmetic = generic ? ((SqlBinaryOperator?)genericOperator, OperandRule.Addition) : lexer.Current.Type switch
             {
                 TokenType.Concat => ((SqlBinaryOperator?)SqlBinaryOperator.Concat, OperandRule.Addition),
                 TokenType.Plus => (SqlBinaryOperator.Add, OperandRule.Multiplication),
@@ -229,6 +230,7 @@ public sealed partial class SqlQueryParser
             if (arithmetic.Item1 is { } arithmeticOperator)
             {
                 Advance(ref lexer);
+                if (shift) { Advance(ref lexer); }
                 var right = ParseOperand(ref lexer, arithmetic.Item2);
                 left = Nest(ref lexer, new SqlBinaryExpression(left, arithmeticOperator, right, Location.Create(1, 1, pos, pos)));
                 previous = 0;
@@ -246,13 +248,6 @@ public sealed partial class SqlQueryParser
             var op = GetComparisonOperator(ref lexer);
             if (op.HasValue)
             {
-                // << and >> are unsupported operators, rather than two comparisons.
-                if ((lexer.Current.Type is TokenType.LessThan or TokenType.GreaterThan) &&
-                    TryPeekToken(lexer, out string next, out int end) && next == CurrentText(ref lexer))
-                {
-                    RejectPredicateOperator(ref lexer, pos, next + next);
-                    break;
-                }
                 if (minimum > 2) { break; }
                 if (previous == 2) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParsePredicatesVoid2); SkipQueryRemainder(ref lexer); break; }
                 Advance(ref lexer);
@@ -271,11 +266,6 @@ public sealed partial class SqlQueryParser
                 continue;
             }
 
-            if (lexer.Current.Type is TokenType.Ampersand or TokenType.Pipe)
-            {
-                RejectPredicateOperator(ref lexer, pos, CurrentText(ref lexer));
-                break;
-            }
             bool notBefore = IsWord(ref lexer, "NOT");
             bool predicate = notBefore || IsWord(ref lexer, "BETWEEN") || IsWord(ref lexer, "IN") ||
                 IsWord(ref lexer, "LIKE") || IsWord(ref lexer, "ILIKE") || IsWord(ref lexer, "SIMILAR");
@@ -437,14 +427,43 @@ public sealed partial class SqlQueryParser
     private SqlExpression ParseConcat(ref TokenLexer lexer)
     {
         var left = ParseAddition(ref lexer);
-        while (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Concat)
+        while (!IsAtEnd(ref lexer) && TryGetGenericOperator(lexer, out var op, out bool shift))
         {
             int pos = lexer.Current.Position;
             Advance(ref lexer);
+            if (shift) { Advance(ref lexer); }
             var right = ParseOperand(ref lexer, OperandRule.Addition);
-            left = Nest(ref lexer, new SqlBinaryExpression(left, SqlBinaryOperator.Concat, right, Location.Create(1, 1, pos, pos)));
+            int end = op == SqlBinaryOperator.Concat ? pos : pos + (shift ? 2 : 1);
+            left = Nest(ref lexer, new SqlBinaryExpression(left, op, right, Location.Create(1, 1, pos, end)));
         }
         return left;
+    }
+
+    // Keep the shared lexer's tokenization byte-for-byte unchanged for OQL and GQL.
+    // SQL interprets # locally and joins only adjacent angle brackets into a shift.
+    private static bool TryGetGenericOperator(TokenLexer lexer, out SqlBinaryOperator op, out bool shift)
+    {
+        shift = false;
+        switch (lexer.Current.Type)
+        {
+            case TokenType.Concat: op = SqlBinaryOperator.Concat; return true;
+            case TokenType.Ampersand: op = SqlBinaryOperator.BitwiseAnd; return true;
+            case TokenType.Pipe: op = SqlBinaryOperator.BitwiseOr; return true;
+            case TokenType.Unrecognized when lexer.Current.Value.SequenceEqual("#"):
+                op = SqlBinaryOperator.BitwiseXor; return true;
+            case TokenType.LessThan or TokenType.GreaterThan:
+                var type = lexer.Current.Type;
+                int end = lexer.Current.Position + 1;
+                if (lexer.MoveNext() && lexer.Current.Type == type && lexer.Current.Position == end)
+                {
+                    op = type == TokenType.LessThan ? SqlBinaryOperator.ShiftLeft : SqlBinaryOperator.ShiftRight;
+                    shift = true;
+                    return true;
+                }
+                break;
+        }
+        op = default;
+        return false;
     }
 
     private SqlExpression ParseAddition(ref TokenLexer lexer)
@@ -464,7 +483,7 @@ public sealed partial class SqlQueryParser
             }
             else if (IsInfixTilde(ref lexer))
             {
-                RejectInfixTilde(ref lexer, afterPredicate: false);
+                RejectTildeOperator(ref lexer, afterPredicate: false);
                 continue;
             }
             else
@@ -518,6 +537,19 @@ public sealed partial class SqlQueryParser
     // ISO SQL.
     private SqlExpression ParseUnary(ref TokenLexer lexer)
     {
+        // Contiguous regex/LIKE spellings remain one deferred operator, even where a
+        // prefix could occur. In particular ~~1 must not become two bitwise NOTs;
+        // the supported spelling for that tree is ~ ~1 or ~(~1).
+        var next = lexer;
+        if (IsInfixTilde(ref lexer) && (lexer.Current.Type == TokenType.Bang ||
+            next.MoveNext() && next.Current.Position == lexer.Current.Position + 1 &&
+            next.Current.Type is TokenType.Tilde or TokenType.Asterisk))
+        {
+            int pos = lexer.Current.Position;
+            RejectTildeOperator(ref lexer, afterPredicate: false, prefix: true);
+            return new SqlLiteralExpression("NULL", SqlLiteralType.Null, Location.Create(1, 1, pos, pos));
+        }
+
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Minus)
         {
             var pos = lexer.Current.Position;
@@ -540,25 +572,15 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, pos));
         }
 
-        // ~ is recognized but outside the executable scalar subset. The evaluator used to
-        // return NULL for a NULL operand and throw per row otherwise, so SELECT ~NULL and
-        // ~ over an empty table succeeded (#1101). The node is kept for recovery only; the
-        // error means it never executes.
+        // PostgreSQL gram.y:904,15368-15371: prefix ~ has the same precedence as
+        // generic binary operators, below addition; ~1 + 2 means ~(1 + 2).
         if (!IsAtEnd(ref lexer) && lexer.Current.Type == TokenType.Tilde)
         {
-            // A run of prefix operators, ~ ~a, is one construct and one diagnostic.
             var pos = lexer.Current.Position;
-            int end = pos + 1;
-            while (Advance(ref lexer) && lexer.Current.Type == TokenType.Tilde)
-            {
-                end = lexer.Current.Position + 1;
-            }
-
-            AddUnsupportedSurfaceDiagnostic(pos, end,
-                ErrorMessages.SqlQueryParserParseUnaryVoid);
-            var operand = ParseOperand(ref lexer, OperandRule.Unary);
-            return new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
-                Location.Create(1, 1, pos, pos));
+            Advance(ref lexer);
+            var operand = ParseOperand(ref lexer, OperandRule.Addition);
+            return Nest(ref lexer, new SqlUnaryExpression(operand, SqlUnaryOperator.BitwiseNot,
+                Location.Create(1, 1, pos, pos + 1)));
         }
 
         return ParsePostfixCasts(ref lexer, ParsePrimary(ref lexer));
@@ -607,7 +629,8 @@ public sealed partial class SqlQueryParser
     /// </summary>
     /// <param name="lexer">The lexer, at the operator.</param>
     /// <param name="afterPredicate">Whether the operator follows a whole comparison predicate.</param>
-    private void RejectInfixTilde(ref TokenLexer lexer, bool afterPredicate)
+    /// <param name="prefix">Whether a compound deferred spelling occurs in operand position.</param>
+    private void RejectTildeOperator(ref TokenLexer lexer, bool afterPredicate, bool prefix = false)
     {
         int start = lexer.Current.Position;
         if (lexer.Current.Type == TokenType.Bang)
@@ -630,8 +653,9 @@ public sealed partial class SqlQueryParser
 
         string spelling = _sourceText.Substring(start, end - start);
         string meaning = spelling.Contains("~~", StringComparison.Ordinal) ? "LIKE match" : "regular-expression match";
-        AddUnsupportedSurfaceDiagnostic(start, end,
-            string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserRejectInfixTildeVoid, spelling, meaning));
+        AddUnsupportedSurfaceDiagnostic(start, end, prefix
+            ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeferredOperator, spelling + " (" + meaning + ")")
+            : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlQueryParserRejectInfixTildeVoid, spelling, meaning));
         if (CanStartOperand(ref lexer))
         {
             ParseOperand(ref lexer, afterPredicate ? OperandRule.Addition : OperandRule.Multiplication);

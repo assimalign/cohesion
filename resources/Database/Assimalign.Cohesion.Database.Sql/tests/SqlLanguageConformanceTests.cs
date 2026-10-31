@@ -277,7 +277,7 @@ public sealed class SqlLanguageConformanceTests
         // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
         // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
         // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(83);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(84);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -1137,6 +1137,13 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT id FROM t WHERE name='Ada' ORDER BY id;", [[1],[4]]);
                 session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
                 await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET age=1 WHERE id=4;"));
+            }),
+        [SqlClauses.IndexKeyOrder] = new("CREATE INDEX ix_order ON t(age DESC NULLS LAST,name ASC NULLS FIRST);", _seed,
+            expression => expression is SqlCreateIndexExpression create && create.KeyOrders[0] == SqlIndexKeyOrder.DescendingNullsLast,
+            async (session, _) =>
+            {
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name;", [[1]]);
+                session.LastStatementMetrics!.AccessPath.ShouldBe("seek:ix_order");
             }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },

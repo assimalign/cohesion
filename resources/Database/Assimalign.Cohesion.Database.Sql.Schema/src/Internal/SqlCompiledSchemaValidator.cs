@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
@@ -439,6 +440,11 @@ internal static class SqlCompiledSchemaValidator
                     ErrorMessages.SchemaValidatorValidateIndexesVoid3);
             }
 
+            if (declaration.KeyOrders.Count != declaration.Columns.Count || declaration.KeyOrders.Any(order => (uint)order > 3))
+            {
+                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{indexPath}.keyOrders",
+                    ErrorMessages.IndexKeyOrderInvalid);
+            }
             ValidateMemberNames(declaration.Columns, columns, $"{indexPath}.columns", errors);
         }
     }

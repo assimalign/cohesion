@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Assimalign.Cohesion.Database.Language;
 
@@ -110,10 +110,11 @@ public enum TokenType
     // Appended after Eof so every existing member keeps its value.
 
     /// <summary>
-    /// A character no supported language uses, such as <c>?</c>, <c>#</c>, <c>^</c> or <c>§</c>.
-    /// It is never an identifier: each parser reports it with its own syntax diagnostic at the
-    /// character's span and never binds it as a name. A supplementary character (a surrogate
-    /// pair) is one token.
+    /// A character outside the shared lexer's fixed token classes, such as <c>?</c>, <c>#</c>,
+    /// <c>^</c> or <c>§</c>. It is never automatically an identifier. A model parser may recognize
+    /// its raw spelling as an operator (SQL <c>#</c>) or a deferred construct (SQL <c>^</c>);
+    /// otherwise it reports its own syntax diagnostic at the character's span. A supplementary
+    /// character (a surrogate pair) is one token.
     /// </summary>
     Unrecognized,
 }

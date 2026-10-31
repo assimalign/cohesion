@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -1092,20 +1093,38 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Builds an index key from a row's values: one order-preserving component
     /// per key column, transformed under the column's effective collation and
-    /// temporal identity (null components participate — nulls sort first and
-    /// count as key values).
+    /// temporal identity. Each component applies its declared direction and NULL
+    /// placement before concatenation.
     /// </summary>
-    private IndexKey BuildIndexKeyUnchecked(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    private IndexKey BuildIndexKeyUnchecked(SqlCatalogTable table, int[] keyOrdinals, object?[] values, IReadOnlyList<SqlCatalogIndexKeyOrder>? keyOrders = null)
     {
         var writer = new DatabaseKeyWriter();
 
-        foreach (int ordinal in keyOrdinals)
+        int[]? rented = null;
+        Span<int> ends = keyOrdinals.Length <= 64 ? stackalloc int[keyOrdinals.Length]
+            : (rented = ArrayPool<int>.Shared.Rent(keyOrdinals.Length));
+        byte[] encoded;
+        try
         {
-            SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
-                table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
-        }
+            for (int i = 0; i < keyOrdinals.Length; i++)
+            {
+                int ordinal = keyOrdinals[i];
+                SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
+                    table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
+                ends[i] = writer.Length;
+            }
 
-        var key = IndexKey.From(writer);
+            encoded = writer.ToArray();
+            for (int i = 0, start = 0; i < keyOrdinals.Length; start = ends[i++])
+            {
+                SqlIndexKeyEncoding.Transform(encoded.AsSpan(start, ends[i] - start), keyOrders?[i] ?? default);
+            }
+        }
+        finally
+        {
+            if (rented is not null) { ArrayPool<int>.Shared.Return(rented); }
+        }
+        var key = new IndexKey(encoded);
         IndexKeyBuilt?.Invoke(key);
         return key;
     }
@@ -1115,9 +1134,9 @@ internal sealed partial class SqlPlanExecutor
     /// Locking, lookups and tombstones use the unchecked builder so old values and
     /// discarded conflict proposals never fail a write-size check.
     /// </summary>
-    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values, IReadOnlyList<SqlCatalogIndexKeyOrder>? keyOrders = null)
     {
-        var key = BuildIndexKeyUnchecked(table, keyOrdinals, values);
+        var key = BuildIndexKeyUnchecked(table, keyOrdinals, values, keyOrders);
         if (key.Length > BTreeIndex.MaxKeyLength)
         {
             throw SqlEvaluationException.IndexKeyTooLarge($"{table.Schema}.{table.Name}", key.Length, BTreeIndex.MaxKeyLength);
@@ -1135,7 +1154,7 @@ internal sealed partial class SqlPlanExecutor
             if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
             if (liveIndex.Metadata.IsUnique && !PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
             {
-                hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values).Hash());
+                hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders).Hash());
             }
         }
     }
@@ -1148,7 +1167,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var liveIndex in indexes)
         {
             if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
-            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders);
             if (liveIndex.Metadata.IsUnique && !PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values)) { hashes.Add(key.Hash()); }
         }
     }
@@ -1201,7 +1220,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var liveIndex in indexes)
         {
             if (!MatchesIndex(table, liveIndex.Metadata, values, prepared: true)) { continue; }
-            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders);
             try
             {
                 // SQL NULL keys are distinct within a partial unique index. The
@@ -1239,7 +1258,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var liveIndex in indexes)
         {
             if (!MatchesIndex(table, liveIndex.Metadata, values, prepared: true)) { continue; }
-            var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values);
+            var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders);
             if (PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
             {
                 // Attach a borrowed handle to the same fixed root and shared tree latch,
@@ -1351,7 +1370,7 @@ internal sealed partial class SqlPlanExecutor
         _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);
         // A failed UPDATE followed by DELETE in the same transaction must not reuse
         // the failed replacement link (the transaction stamp alone cannot distinguish it).
-        _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex));
+        _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex), statement.Transaction.Sequence);
         statement.Coordinator.VersionStore.RecordTombstoned(statement.Transaction.Sequence, pageId, slotIndex);
     }
 
@@ -1643,7 +1662,7 @@ internal sealed partial class SqlPlanExecutor
         var metadata = new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
             statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
             statement.ProvisioningSchema, predicate: plan.PartialIndex?.Predicate,
-            predicateColumns: plan.PartialIndex?.PredicateColumns, predicateFunctionCalls: plan.PartialIndex?.PredicateFunctionCalls);
+            predicateColumns: plan.PartialIndex?.PredicateColumns, predicateFunctionCalls: plan.PartialIndex?.PredicateFunctionCalls, keyOrders: plan.KeyOrders);
         if (metadata.Predicate is not null) { _definitions.GetIndexPredicate(plan.Table, metadata, cancellationToken); }
         var definition = new IndexDefinition(plan.IndexName, IndexKind.BTree, plan.IsUnique);
         bool registered = false;
@@ -1670,7 +1689,7 @@ internal sealed partial class SqlPlanExecutor
                     foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
                     {
                         if (!MatchesIndex(plan.Table, metadata, values)) { continue; }
-                        var key = BuildIndexKey(plan.Table, ordinals, values);
+                        var key = BuildIndexKey(plan.Table, ordinals, values, metadata.KeyOrders);
 
                         await index.InsertVersionAsync(
                             bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
@@ -1914,95 +1933,7 @@ internal sealed partial class SqlPlanExecutor
     /// non-0xFF byte.
     /// </summary>
     private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek, int[] indexOrdinals)
-    {
-        var prefixWriter = new DatabaseKeyWriter();
-
-        for (int i = 0; i < seek.EqualityValues.Count; i++)
-        {
-            int ordinal = indexOrdinals[i];
-            SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
-                table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
-        }
-
-        byte[] prefix = prefixWriter.ToArray();
-
-        if (seek.Lower is null && seek.Upper is null)
-        {
-            return new IndexKeyRange(
-                new IndexKey(prefix),
-                PrefixSuccessor(prefix) is { } successor ? new IndexKey(successor) : null,
-                IsStartInclusive: true,
-                IsEndInclusive: false);
-        }
-
-        int rangeOrdinal = indexOrdinals[seek.EqualityValues.Count];
-        var rangeType = table.Columns[rangeOrdinal].Type.Type;
-        var rangeCollation = table.Columns[rangeOrdinal].Collation ?? _catalog.DefaultCollation;
-
-        IndexKey? start = seek.EqualityValues.Count > 0 ? new IndexKey(prefix) : null;
-        bool startInclusive = true;
-        IndexKey? end = seek.EqualityValues.Count > 0 && PrefixSuccessor(prefix) is { } prefixEnd ? new IndexKey(prefixEnd) : null;
-        bool endInclusive = false;
-
-        if (seek.Lower is { } lower)
-        {
-            byte[] lowerKey = AppendComponent(prefix, rangeType, lower.Value, rangeCollation);
-
-            // Exclusive lower: skip every composite key whose range component
-            // equals the bound — start at the bound's prefix successor.
-            start = lower.Inclusive
-                ? new IndexKey(lowerKey)
-                : PrefixSuccessor(lowerKey) is { } lowerSuccessor ? new IndexKey(lowerSuccessor) : null;
-            startInclusive = true;
-        }
-
-        if (seek.Upper is { } upper)
-        {
-            byte[] upperKey = AppendComponent(prefix, rangeType, upper.Value, rangeCollation);
-
-            // Inclusive upper: admit every composite key whose range component
-            // equals the bound — end (exclusively) at the bound's successor.
-            end = upper.Inclusive
-                ? PrefixSuccessor(upperKey) is { } upperSuccessor ? new IndexKey(upperSuccessor) : null
-                : new IndexKey(upperKey);
-            endInclusive = false;
-        }
-
-        return new IndexKeyRange(start, end, startInclusive, endInclusive);
-    }
-
-    private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value, Collation collation)
-    {
-        var writer = new DatabaseKeyWriter();
-        SqlRowCodec.AppendKeyValue(writer, type, value, collation);
-        byte[] component = writer.ToArray();
-
-        var combined = new byte[prefix.Length + component.Length];
-        prefix.CopyTo(combined, 0);
-        component.CopyTo(combined, prefix.Length);
-        return combined;
-    }
-
-    /// <summary>
-    /// Computes the smallest byte string greater than every string with the
-    /// given prefix, or null when none exists (an all-0xFF prefix): increment
-    /// the last non-0xFF byte and truncate behind it.
-    /// </summary>
-    private static byte[]? PrefixSuccessor(byte[] prefix)
-    {
-        for (int i = prefix.Length - 1; i >= 0; i--)
-        {
-            if (prefix[i] != 0xFF)
-            {
-                var successor = new byte[i + 1];
-                prefix.AsSpan(0, i + 1).CopyTo(successor);
-                successor[i]++;
-                return successor;
-            }
-        }
-
-        return null;
-    }
+        => SqlIndexKeyEncoding.BuildSeekRange(table, seek, indexOrdinals, _catalog.DefaultCollation);
 
     /// <summary>
     /// Scans the table's visible row versions through the statement's snapshot:

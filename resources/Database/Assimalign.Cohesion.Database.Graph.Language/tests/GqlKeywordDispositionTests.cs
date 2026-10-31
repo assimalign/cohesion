@@ -120,7 +120,7 @@ public sealed class GqlKeywordDispositionTests
         ["PERCENTILE_DISC"] = Rejects("MATCH (a) RETURN PERCENTILE_DISC(a.age, 0.5)", "PERCENTILE_DISC"),
         ["DATABASE"] = Rejects("CREATE DATABASE d", "DATABASE"),
         ["SCHEMA"] = Rejects("CREATE SCHEMA s", "SCHEMA"),
-        ["INDEX"] = Rejects("CREATE INDEX ix", "INDEX"),
+        ["INDEX"] = Parses("CREATE INDEX ix FOR (n:N) ON (n.p)"),
         ["CATALOG"] = Rejects("CREATE CATALOG c", "CATALOG"),
         // ISO/IEC 39075 delete, path and edge constructs
         ["NODETACH"] = Rejects("MATCH (n) NODETACH DELETE n", "NODETACH DELETE"),

@@ -14,6 +14,8 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 internal static class GraphCatalogCodec
 {
+    internal const byte FormatVersion = 2;
+
     private static readonly UTF8Encoding _utf8 = new(false, true);
 
     internal static byte[] Encode(CatalogRecord record, TransactionSequence writer)
@@ -24,7 +26,7 @@ internal static class GraphCatalogCodec
         binary.Write(writer.Value);
         binary.Write(0UL);
         binary.Write(record.Kind);
-        binary.Write((byte)2);
+        binary.Write(FormatVersion);
         binary.Write(record.Id.ToByteArray());
         WriteString(binary, record.Name);
         if (record.Kind <= 2)
@@ -74,7 +76,7 @@ internal static class GraphCatalogCodec
             reader.ReadUInt64();
             byte kind = reader.ReadByte();
             byte version = reader.ReadByte();
-            if (version != 2)
+            if (version != FormatVersion)
             {
                 throw new GraphCatalogException("CG06019", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogFormatUnsupported, version));
             }

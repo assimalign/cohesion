@@ -5,7 +5,7 @@ using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
-/// <summary>A finite graph query or read-only catalog statement in one database.</summary>
+/// <summary>A finite graph query or standalone transaction, catalog or schema statement in one database.</summary>
 [global::System.Diagnostics.DebuggerDisplay("GqlQueryExpression")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Language.GqlQueryExpression.DebugView))]
 public sealed class GqlQueryExpression : GqlExpression
@@ -44,8 +44,12 @@ public sealed class GqlQueryExpression : GqlExpression
         Projections = projections;
     }
 
-    // A union body reuses the existing stage reference, preserving ordinary AST size.
+    // Stages, composite queries and standalone DDL share one body reference.
     private readonly object? _body;
+
+    // Only malformed hand-built combinations retain both bodies, so execution can refuse
+    // them through its existing structured diagnostic instead of hiding a query operand.
+    private object? QueryBody => _body is ValueTuple<GqlSchemaCommand, object?> mixed ? mixed.Item2 : _body;
 
     /// <summary>Initializes an explicitly grouped composite query.</summary>
     /// <param name="composite">The binary composition and its isolated operands.</param>
@@ -58,7 +62,7 @@ public sealed class GqlQueryExpression : GqlExpression
     }
 
     /// <summary>Gets the binary query composition, or null when the query uses pipeline stages.</summary>
-    public GqlCompositeQuery? Composite => _body as GqlCompositeQuery;
+    public GqlCompositeQuery? Composite => QueryBody as GqlCompositeQuery;
 
     /// <summary>Initializes a source-ordered query pipeline.</summary>
     /// <param name="stages">The operations, including composite queries and NEXT segment boundaries.</param>
@@ -87,8 +91,8 @@ public sealed class GqlQueryExpression : GqlExpression
     {
         get
         {
-            if (_body is IReadOnlyList<GqlStage> body) { return body; }
-            if (Composite is not null) { return Array.Empty<GqlStage>(); }
+            if (QueryBody is IReadOnlyList<GqlStage> body) { return body; }
+            if (QueryBody is GqlCompositeQuery or GqlSchemaCommand) { return Array.Empty<GqlStage>(); }
             var stages = new List<GqlStage>();
             if (MatchClauses is not null)
             { foreach (var clause in MatchClauses) { stages.Add(new GqlMatchStage(clause)); } }
@@ -105,7 +109,7 @@ public sealed class GqlQueryExpression : GqlExpression
 
     /// <summary>Renders the semantic query tree with explicit composite grouping.</summary>
     /// <returns>The normalized GQL query, including NEXT precedence.</returns>
-    public override string ToString() => CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
+    public override string ToString() => SchemaCommand is { } schema ? schema.ToString() : CatalogSurface is not null || TransactionCommand != GqlTransactionCommand.None
         ? Text ?? base.ToString()! : Internal.GqlPathRenderer.RenderExpression(this);
 
     /// <summary>Gets SET items across all stages in source order.</summary>
@@ -163,6 +167,19 @@ public sealed class GqlQueryExpression : GqlExpression
     /// <summary>Gets the optional read-only catalog subject; graph clauses cannot accompany it.</summary>
     public GqlCatalogSurface? CatalogSurface { get; init; }
 
+    /// <summary>Gets standalone schema DDL, or null for a query.</summary>
+    public GqlSchemaCommand? SchemaCommand
+    {
+        get => _body is ValueTuple<GqlSchemaCommand, object?> mixed ? mixed.Item1 : _body as GqlSchemaCommand;
+        init
+        {
+            if (value is null) { return; }
+            var stages = Stages;
+            _body = Composite is { } composite ? (value, (object)composite)
+                : stages.Count != 0 ? (value, (object)stages) : value;
+        }
+    }
+
     /// <summary>Gets the transaction command, or None for an ordinary statement.</summary>
     public GqlTransactionCommand TransactionCommand { get; internal init; }
 
@@ -190,6 +207,7 @@ public sealed class GqlQueryExpression : GqlExpression
         public global::Assimalign.Cohesion.Database.Graph.Language.GqlExpression? Limit => _target.Limit;
         public global::Assimalign.Cohesion.Database.Graph.Language.GqlCatalogSurface? CatalogSurface => _target.CatalogSurface;
         public global::Assimalign.Cohesion.Database.Graph.Language.GqlTransactionCommand TransactionCommand => _target.TransactionCommand;
+        public GqlSchemaCommand? SchemaCommand => _target.SchemaCommand;
         public string? Text => _target.Text;
         public global::Assimalign.Cohesion.Database.Language.Location? Location => _target.Location;
     }

@@ -74,7 +74,36 @@ public sealed partial class BlobCatalog
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer), deleter);
         }
         foreach (var versions in catalog._maintenance) { versions.RebuildPublicationOrder(); }
+        storage.UndoScopesChanged = catalog.UndoScopesChanged;
+        storage.CreatedVersionUndone = catalog.CreatedVersionUndone;
         return catalog;
+    }
+
+    private HashSet<TransactionSequence>? _markedWriters;
+
+    private void UndoScopesChanged(TransactionSequence writer, bool active)
+    {
+        lock (_sync)
+        {
+            if (active) { (_markedWriters ??= new()).Add(writer); }
+            else { _markedWriters?.Remove(writer); }
+        }
+    }
+
+    private void CreatedVersionUndone(PageId page, int slot, ReadOnlyMemory<byte> bytes)
+    {
+        if (bytes.Span[16] is not (1 or 2)) { return; }
+        var record = BlobCatalogCodec.Decode(bytes.Span, page, slot);
+        var writer = RecordVersionStamp.ReadStamps(bytes.Span).Writer;
+        lock (_sync)
+        {
+            Versions? versions;
+            if (record.Container is { } container) { _containers.TryGetValue(container.Name, out versions); }
+            else { var blob = record.Blob!.Value; _blobs.TryGetValue((blob.ContainerId, blob.Name), out versions); }
+            if (versions is null) { return; }
+            versions.RemoveLocation(page, slot, writer);
+            if (versions.Count == 0) { Retire(versions); }
+        }
     }
 
     /// <summary>Finds a container visible through a snapshot.</summary>
@@ -342,7 +371,7 @@ public sealed partial class BlobCatalog
                 Track(versions, value => value.Blob is { } blob && blob.ContainerId == key.ContainerId && blob.Name == key.Name, () => _blobs.Remove(key));
             }
         }
-        versions.Add(reference, recoveredDeleter);
+        versions.Add(reference, recoveredDeleter, _markedWriters?.Contains(reference.Writer) == true);
     }
 
     private Found? FindContainerVersion(string name, TransactionSnapshot snapshot)
@@ -376,7 +405,7 @@ public sealed partial class BlobCatalog
     private Found? Find(Versions versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
     {
         // Lock order: model writer lock, catalog monitor, storage page latches.
-        // Apply/undo never enter this monitor. Maintenance runs after the purge gate exits.
+        // Undo closes each storage page latch before entering this monitor; this monitor never spans gate acquisition or a lock wait. Maintenance runs after the purge gate exits.
         long before = _recordReadCount;
         var result = Select(versions, snapshot, matches);
         // Three reads suffice for a current lookup, including cleanup and an undone head.

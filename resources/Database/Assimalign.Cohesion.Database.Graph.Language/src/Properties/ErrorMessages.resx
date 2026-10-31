@@ -14,6 +14,8 @@
   <data name="GqlQueryParserParseCoreVoid7" xml:space="preserve"><value>Unexpected character '?'; it is not part of GQL.</value></data>
   <data name="GqlQueryParserFindUnsupportedVoid" xml:space="preserve"><value>Unknown function '{0}'.</value></data>
   <data name="GqlQueryParserExpectVoid" xml:space="preserve"><value>Expected {0}.</value></data>
+  <data name="SchemaVariableMismatch" xml:space="preserve"><value>The schema property must reference the variable declared by FOR.</value></data>
+  <data name="SchemaIndexParentheses" xml:space="preserve"><value>ON requires a parenthesized property reference.</value></data>
   <data name="GqlQueryParserIdentifierVoid" xml:space="preserve"><value>An identifier cannot be empty.</value></data>
   <data name="GqlQueryParserIdentifierVoid2" xml:space="preserve"><value>Expected an identifier.</value></data>
   <data name="GqlQueryParserHasStackToNestVoid" xml:space="preserve"><value>The statement nests deeper than the stack available to the parser on this thread; reduce the nesting of its parentheses or run it on a thread with a larger stack.</value></data>

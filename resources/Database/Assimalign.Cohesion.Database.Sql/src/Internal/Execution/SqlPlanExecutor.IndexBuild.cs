@@ -49,7 +49,7 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var version in included)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var key = BuildIndexKey(table, ordinals, version.Values);
+                    var key = BuildIndexKey(table, ordinals, version.Values, metadata?.KeyOrders);
                     await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
                         version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
                 }

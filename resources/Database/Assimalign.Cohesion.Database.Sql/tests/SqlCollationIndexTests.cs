@@ -151,6 +151,7 @@ public sealed class SqlCollationIndexTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (name TEXT COLLATE invariant)");
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE INDEX ix ON t(name)"))).Message.ShouldContain("not index-backed");
+        (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE INDEX ix ON t(name DESC NULLS LAST)"))).Message.ShouldContain("not index-backed");
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad (name TEXT COLLATE invariant UNIQUE)"))).Message.ShouldContain("not index-backed");
         await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad_number (id INT COLLATE binary)"));
         database.Catalog.TryGetTable("dbo", "bad", out _).ShouldBeFalse();

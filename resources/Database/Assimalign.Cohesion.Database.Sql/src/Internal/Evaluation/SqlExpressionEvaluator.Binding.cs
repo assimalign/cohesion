@@ -204,9 +204,50 @@ internal sealed partial class SqlExpressionEvaluator
             left = JsonBinaryToText(binary.Left, left);
             right = JsonBinaryToText(binary.Right, right);
         }
+        if (SqlBitwise.IsBinary(binary.Operator))
+        {
+            var leftType = ValidateBitwiseOperand(binary.Left, SqlBitwise.Text(binary.Operator));
+            var rightType = ValidateBitwiseOperand(binary.Right, SqlBitwise.Text(binary.Operator), SqlBitwise.IsShift(binary.Operator));
+            collation = default;
+            return new SqlBoundBitwise(binary.Operator, left, right, SqlBitwise.ResultType(binary.Operator, leftType, rightType), binary.Location);
+        }
         collation = CollationOf(binary, [leftCollation, rightCollation]);
         return new SqlBoundBinary(binary.Operator, left, right,
             SqlBoundCollation.Of(leftCollation, rightCollation, _defaultCollation), binary.Location);
+    }
+
+    // Validate result alternatives, not their selection conditions or explicitly cast inputs.
+    // StaticTypeOf alone reports a single CASE/COALESCE alternative and maps unknown CLR
+    // parameter types to Null; neither can authorize every value a wrapper might return.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private DatabaseType ValidateBitwiseOperand(SqlExpression expression, string op, bool shiftCount = false)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        var type = StaticTypeOf(expression);
+        SqlBitwise.Validate(type, op, expression.Location, shiftCount);
+        switch (expression)
+        {
+            case SqlParameterExpression parameter when TryGetParameterValue(parameter, out var value) && value is not null:
+                SqlBitwise.Validate(SqlBitwise.ValueType(value, op, expression.Location), op, expression.Location, shiftCount);
+                break;
+            case SqlCollateExpression collate:
+                ValidateBitwiseOperand(collate.Operand, op, shiftCount);
+                break;
+            case SqlUnaryExpression { Operator: SqlUnaryOperator.Plus } plus:
+                ValidateBitwiseOperand(plus.Operand, op, shiftCount);
+                break;
+            case SqlCaseExpression conditional:
+                foreach (var clause in conditional.WhenClauses) { ValidateBitwiseOperand(clause.Result, op, shiftCount); }
+                if (conditional.ElseResult is not null) { ValidateBitwiseOperand(conditional.ElseResult, op, shiftCount); }
+                break;
+            case SqlFunctionCallExpression call when SqlStandardLibrary.IsCoalesce(call.FunctionName):
+                foreach (var argument in call.Arguments) { ValidateBitwiseOperand(argument, op, shiftCount); }
+                break;
+            case SqlFunctionCallExpression call when call.FunctionName.Equals("NULLIF", StringComparison.OrdinalIgnoreCase) && call.Arguments.Count > 0:
+                ValidateBitwiseOperand(call.Arguments[0], op, shiftCount);
+                break;
+        }
+        return type;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -371,8 +412,12 @@ internal sealed partial class SqlExpressionEvaluator
         // PostgreSQL parse_coerce.c:233-249 converts an unknown string constant while
         // analyzing the CAST. Include text the engine already folded to a constant;
         // typed numeric casts remain deferred and can be discarded.
-        return _validatingIgnoredIdentityInput && operand is SqlBoundConstant { Value: string or SqlCharacter }
-            ? new SqlBoundConstant(Evaluate(bound, [])) : bound;
+        if (_validatingIgnoredIdentityInput && operand is SqlBoundConstant { Value: string or SqlCharacter })
+        {
+            object? value = Evaluate(bound, []);
+            return operand is SqlBoundParameterConstant ? new SqlBoundParameterConstant(value) : new SqlBoundConstant(value);
+        }
+        return bound;
     }
 
     private SqlCast?[] ResolveExpressionCasts(SqlExpression operand, SqlType? source, SqlType target, Location? location = null)
@@ -519,6 +564,11 @@ internal sealed partial class SqlExpressionEvaluator
 
         var operand = Bind(unary.Operand, out SqlCollationCandidate operandCollation, requireBoolean: unary.Operator == SqlUnaryOperator.Not, statisticsInput: statisticsInput);
         collation = CollationOf(unary, [operandCollation]);
+        if (unary.Operator == SqlUnaryOperator.BitwiseNot)
+        {
+            var type = ValidateBitwiseOperand(unary.Operand, "~");
+            return new SqlBoundBitwise(default, operand, null, type == DatabaseType.Null ? DatabaseType.Int32 : type, unary.Location);
+        }
         var bound = new SqlBoundUnary(unary.Operator, operand, unary.Location);
 
         // A sign over a constant is a constant, as PostgreSQL's grammar reads "-5" as the constant
@@ -534,7 +584,8 @@ internal sealed partial class SqlExpressionEvaluator
     {
         try
         {
-            return new SqlBoundConstant(Evaluate(sign, []));
+            object? value = Evaluate(sign, []);
+            return sign.Operand is SqlBoundParameterConstant ? new SqlBoundParameterConstant(value) : new SqlBoundConstant(value);
         }
         catch (Exception exception) when (!_validatingIgnoredIdentityInput && IsDeferrable(exception))
         {
@@ -785,12 +836,13 @@ internal sealed partial class SqlExpressionEvaluator
         }
 
         var scalar = (SqlScalarFunction)function!;
-        bool fixedArguments = AreFixed(arguments);
+        bool fixedArguments = AreFixed(arguments, out bool parameterDependent);
         var callCollation = SqlBoundCollation.Of(collation, default, _defaultCollation);
         BindParameterCoercions(scalar, arguments, callCollation);
         var bound = new SqlBoundCall(scalar, arguments, SqlFunctionResolver.CoercionTargets(scalar, arguments.Length),
             callCollation, _functions.Database, _cancellationToken, _functions.TransactionStart);
-        return (_foldConstants || _validatingIgnoredIdentityInput) && scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments ? Fold(bound) : bound;
+        return (_foldConstants || _validatingIgnoredIdentityInput) && scalar.Volatility == SqlFunctionVolatility.Immutable && fixedArguments
+            ? Fold(bound, parameterDependent) : bound;
     }
 
     /// <summary>Applies declared CHAR bounds and domain checks before scalar or aggregate STRICT dispatch.</summary>
@@ -810,14 +862,16 @@ internal sealed partial class SqlExpressionEvaluator
     }
 
     /// <summary>Whether every argument has a value fixed when the statement was bound: a constant or a parameter.</summary>
-    private static bool AreFixed(SqlBoundExpression[] arguments)
+    private static bool AreFixed(SqlBoundExpression[] arguments, out bool parameterDependent)
     {
+        parameterDependent = false;
         foreach (var argument in arguments)
         {
             if (argument.Kind is not (SqlBoundExpressionKind.Constant or SqlBoundExpressionKind.Parameter))
             {
                 return false;
             }
+            parameterDependent |= argument is SqlBoundParameter or SqlBoundParameterConstant;
         }
 
         return true;
@@ -828,11 +882,12 @@ internal sealed partial class SqlExpressionEvaluator
     /// fails is kept, and fails, as before folding existed, only when a row reaches it.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SqlBoundExpression Fold(SqlBoundCall call)
+    private SqlBoundExpression Fold(SqlBoundCall call, bool parameterDependent)
     {
         try
         {
-            return new SqlBoundConstant(EvaluateCall(call, []));
+            object? value = EvaluateCall(call, []);
+            return parameterDependent ? new SqlBoundParameterConstant(value) : new SqlBoundConstant(value);
         }
         catch (Exception exception) when (!_validatingIgnoredIdentityInput && IsDeferrable(exception))
         {

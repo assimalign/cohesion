@@ -185,10 +185,7 @@ public sealed class SqlExpressionRendererTests
         // Assert
         rendered.ShouldBe(canonical);
         SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(declared));
-        if (written != "~qty")
-        {
-            diagnostics.ShouldBeEmpty();
-        }
+        diagnostics.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: quoted value-function calls retain their binding tree")]

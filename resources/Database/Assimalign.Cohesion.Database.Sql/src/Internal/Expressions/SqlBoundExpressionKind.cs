@@ -86,4 +86,7 @@ internal enum SqlBoundExpressionKind : byte
 
     /// <summary><see cref="SqlBoundDomainArgument"/>: domain coercion before a function's STRICT dispatch.</summary>
     DomainArgument,
+
+    /// <summary><see cref="SqlBoundBitwise"/>: an integer bitwise operation and its bound width.</summary>
+    Bitwise,
 }

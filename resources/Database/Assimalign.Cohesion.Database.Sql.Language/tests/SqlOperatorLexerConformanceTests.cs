@@ -14,6 +14,12 @@ public sealed class SqlOperatorLexerConformanceTests
     [InlineData(": :", new[] { TokenType.Colon, TokenType.Colon })]
     [InlineData(":::", new[] { TokenType.ColonColon, TokenType.Colon })]
     [InlineData("::::", new[] { TokenType.ColonColon, TokenType.ColonColon })]
+    [InlineData("#", new[] { TokenType.Unrecognized })]
+    [InlineData("~", new[] { TokenType.Tilde })]
+    [InlineData("&", new[] { TokenType.Ampersand })]
+    [InlineData("|", new[] { TokenType.Pipe })]
+    [InlineData("<<", new[] { TokenType.LessThan, TokenType.LessThan })]
+    [InlineData(">>", new[] { TokenType.GreaterThan, TokenType.GreaterThan })]
     [InlineData("~~*", new[] { TokenType.Tilde, TokenType.Tilde, TokenType.Asterisk })]
     [InlineData("!~~*", new[] { TokenType.Bang, TokenType.Tilde, TokenType.Tilde, TokenType.Asterisk })]
     public void Tokenize_OperatorSequences_ShouldRetainTokenTypes(string text, TokenType[] expected)

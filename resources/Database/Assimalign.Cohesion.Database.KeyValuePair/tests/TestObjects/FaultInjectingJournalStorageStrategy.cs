@@ -125,6 +125,20 @@ internal sealed class FaultInjectingJournalStorageStrategy : KeyValueStorageStra
         return new FailureScope(_flushFailures, previous, budget);
     }
 
+    // Copy flushed live files before source cleanup, preserving crash-recovery input.
+    internal void CopyDatabase(string source, string target)
+    {
+        lock (_sync)
+        {
+            foreach (bool catalog in new[] { false, true })
+            {
+                var files = _storages[Key(source, catalog)];
+                _storages[Key(target, catalog)] = new Files(Copy(files.Data, new MemoryStream()),
+                    Copy(files.Journal, new FaultInjectingStream()), Copy(files.Backup, new MemoryStream()));
+            }
+        }
+    }
+
     /// <summary>
     /// Gets the bytes a file set's data and journal streams hold right now.
     /// </summary>

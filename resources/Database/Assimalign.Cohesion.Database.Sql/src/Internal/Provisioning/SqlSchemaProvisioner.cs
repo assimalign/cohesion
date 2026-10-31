@@ -637,7 +637,7 @@ internal sealed partial class SqlSchemaProvisioner
             var indexes = catalogIndexes
                 .Where(index => !index.IsPrimaryKey && IsOwnedBy(index.Owner, index.OwningSchema, desired.Name) && !IsScriptObject(SqlObjectIdentity.Index(catalogTable.Schema, catalogTable.Name, index.Name)))
                 .OrderBy(index => index.Name, StringComparer.Ordinal)
-                .Select(index => new CompiledSchemaIndex(index.Name, index.ColumnNames, index.IsUnique, DeclaredIndexPredicate(desiredTable, index)))
+                .Select(index => new CompiledSchemaIndex(index.Name, index.ColumnNames, index.IsUnique, DeclaredIndexPredicate(desiredTable, index), index.KeyOrders.Select(order => (CompiledSchemaIndexKeyOrder)order).ToArray()))
                 .ToList();
             tables.Add(new CompiledSchemaTable(
                 catalogTable.Name,
@@ -774,6 +774,7 @@ internal sealed partial class SqlSchemaProvisioner
                 }
 
                 if (actualIndex.IsUnique != expectedIndex.IsUnique ||
+                    !actualIndex.KeyOrders.Select(order => (CompiledSchemaIndexKeyOrder)order).SequenceEqual(expectedIndex.KeyOrders) ||
                     !string.Equals(actualIndex.Predicate, expectedIndex.Predicate is null ? null : SqlPersistedExpression.Canonicalize(
                         SqlPersistedExpression.Load(expectedIndex.Predicate, expectedIndex.Name), expectedIndex.Name), StringComparison.Ordinal) ||
                     !NamesEqual(expectedIndex.Columns, actualIndex.ColumnNames))

@@ -8,6 +8,29 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 public sealed class SqlUpsertWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: inference WHERE retains unconditional arbiters on both transports (#1630)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_InferenceWhere_ShouldKeepUnconditionalArbiters(bool tcp)
+    {
+        // Arrange
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
+        await connection.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, age INT)", cancellationToken: SqlClientTestHarness.Timeout(30));
+
+        // Act
+        long first = await connection.ExecuteAsync("INSERT INTO t VALUES (2, 20) ON CONFLICT (id) WHERE age > 0 DO NOTHING", cancellationToken: SqlClientTestHarness.Timeout(30));
+        long outside = await connection.ExecuteAsync("INSERT INTO t VALUES (3, -20) ON CONFLICT (id) WHERE age > 0 DO NOTHING", cancellationToken: SqlClientTestHarness.Timeout(30));
+        long duplicate = await connection.ExecuteAsync("INSERT INTO t VALUES (2, 50) ON CONFLICT (id) WHERE age > 0 DO NOTHING", cancellationToken: SqlClientTestHarness.Timeout(30));
+
+        // Assert
+        first.ShouldBe(1);
+        outside.ShouldBe(1);
+        duplicate.ShouldBe(0);
+        var rows = await connection.QueryAsync("SELECT id, age FROM t ORDER BY id", cancellationToken: SqlClientTestHarness.Timeout(30));
+        rows.Select(row => (row.GetInt32(0), row.GetInt32(1))).ShouldBe([(2, 20), (3, -20)]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Upsert: results carry inserted plus updated counts over each transport")]
     [InlineData(false)]
     [InlineData(true)]
@@ -85,7 +108,6 @@ public sealed class SqlUpsertWireTests
     [InlineData("INSERT OR IGNORE INTO t VALUES (2, 20)", "ON CONFLICT")]
     [InlineData("INSERT OR REPLACE INTO t VALUES (2, 20)", "ON CONFLICT")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (lower(age)) DO NOTHING", "ON CONFLICT inference")]
-    [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (id) WHERE age > 0 DO NOTHING", "ON CONFLICT target WHERE")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (age COLLATE x) DO NOTHING", "ON CONFLICT inference")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (id) DO UPDATE SET age = (SELECT 1)", "SUBQUERY in ON CONFLICT DO UPDATE")]
     [InlineData("INSERT INTO t SELECT id, age FROM t ON CONFLICT (id) DO UPDATE SET age = (SELECT 1)", "SUBQUERY in ON CONFLICT DO UPDATE")]

@@ -2094,12 +2094,13 @@ public sealed partial class SqlCatalog
         }
 
         AppendOwnership(ref writer, index.Owner, index.OwningSchema);
-        writer.AppendInt32(2).AppendBoolean(index.IsPrimaryKey);
+        writer.AppendInt32(3).AppendBoolean(index.IsPrimaryKey);
         AppendOptionalString(ref writer, index.Predicate);
         writer.AppendInt32(index.PredicateColumns.Count);
         foreach (string column in index.PredicateColumns) { writer.AppendString(column, Collation.Binary); }
         writer.AppendInt32(index.PredicateFunctionCalls.Count);
         foreach (string call in index.PredicateFunctionCalls) { writer.AppendString(call, Collation.Binary); }
+        foreach (var order in index.KeyOrders) { writer.AppendInt8((sbyte)order); }
         return writer.ToArray();
     }
 
@@ -2118,7 +2119,7 @@ public sealed partial class SqlCatalog
 
         var (owner, owningSchema) = ReadOwnership(ref reader, allowTrailing: true);
         int version = reader.ReadInt32();
-        if (version != 2)
+        if (version != 3)
         {
             throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
         }
@@ -2130,13 +2131,16 @@ public sealed partial class SqlCatalog
         int calls = reader.ReadInt32();
         var functionCalls = new List<string>();
         for (int i = 0; i < calls; i++) { functionCalls.Add(reader.ReadString(out _)); }
-        if (!reader.IsAtEnd || dependencies < 0 || calls < 0 || (isPrimaryKey && (!isUnique || predicate is not null)) ||
+        var keyOrders = new SqlCatalogIndexKeyOrder[columnCount];
+        for (int i = 0; i < columnCount; i++) { keyOrders[i] = (SqlCatalogIndexKeyOrder)reader.ReadInt8(); }
+        if (keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsLast) ||
+            !reader.IsAtEnd || dependencies < 0 || calls < 0 || (isPrimaryKey && (!isUnique || predicate is not null)) ||
             predicate is null && (dependencies != 0 || calls != 0) || predicate is not null && string.IsNullOrWhiteSpace(predicate))
         {
             throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeIndexSqlCatalog2);
         }
         return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey,
-            predicate, predicateColumns, functionCalls);
+            predicate, predicateColumns, functionCalls, keyOrders);
     }
 
     private static void ValidateConstraints(SqlCatalogTable table)

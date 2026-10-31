@@ -1,7 +1,8 @@
 # OQL SQL++ dialect
 
 SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
-`~~*` and `!~~*` is unchanged. SQL postfix casts remain outside this language's scalar grammar;
+`~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix
+casts remain outside this language's scalar grammar;
 Object-member colons retain their existing meaning.
 
 ## Text transactions (#1725)

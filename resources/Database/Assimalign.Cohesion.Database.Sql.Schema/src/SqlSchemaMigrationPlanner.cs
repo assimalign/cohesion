@@ -288,6 +288,7 @@ public static class SqlSchemaMigrationPlanner
         StringComparer identifiers)
         => identifiers.Equals(left.Name, right.Name)
         && left.IsUnique == right.IsUnique
+        && left.KeyOrders.SequenceEqual(right.KeyOrders)
         && string.Equals(left.Predicate, right.Predicate, StringComparison.Ordinal)
         && left.Columns.SequenceEqual(right.Columns, identifiers);
 

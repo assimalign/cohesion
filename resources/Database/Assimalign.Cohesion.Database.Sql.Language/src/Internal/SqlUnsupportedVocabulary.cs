@@ -45,7 +45,7 @@ internal static class SqlUnsupportedVocabulary
         new("ANY", "ANY array comparison", SqlWordPosition.Rule),
         new("SOME", "SOME array comparison", SqlWordPosition.Rule),
         new("LATERAL", "LATERAL subquery", SqlWordPosition.Rule),
-        new("~", "~ operator", SqlWordPosition.Rule),
+        new("~", "infix ~ operator", SqlWordPosition.Rule),
     ];
 
     /// <summary>Whether a name is a recognized function that does not execute.</summary>

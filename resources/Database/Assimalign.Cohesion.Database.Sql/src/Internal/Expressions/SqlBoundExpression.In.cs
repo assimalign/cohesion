@@ -54,6 +54,7 @@ internal sealed class SqlBoundIn : SqlBoundExpression
 
     private static SqlBoundExpression CharacterComparand(SqlBoundExpression expression) => expression switch
     {
+        SqlBoundParameterConstant { Value: string text } => new SqlBoundParameterConstant(new SqlCharacter(text)),
         SqlBoundConstant { Value: string text } => new SqlBoundConstant(new SqlCharacter(text)),
         SqlBoundParameter { Value: string text } parameter => new SqlBoundParameter(parameter.Name, new SqlCharacter(text)),
         _ => expression,

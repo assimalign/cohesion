@@ -79,7 +79,13 @@ public static partial class SqlExpressionRenderer
         ArgumentNullException.ThrowIfNull(query);
         return "CREATE " + (query.IsUnique ? "UNIQUE " : "") + "INDEX " +
             (query.IfNotExists ? "IF NOT EXISTS " : "") + Identifier(query.IndexName) +
-            " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select(Identifier)) + ")" +
+            " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select((column, i) => Identifier(column) + (query.KeyOrders[i] switch
+            {
+                SqlIndexKeyOrder.AscendingNullsFirst => " NULLS FIRST",
+                SqlIndexKeyOrder.DescendingNullsFirst => " DESC",
+                SqlIndexKeyOrder.DescendingNullsLast => " DESC NULLS LAST",
+                _ => "",
+            }))) + ")" +
             (query.Predicate is null ? "" : " WHERE " + Render(query.Predicate));
     }
 
@@ -223,6 +229,7 @@ public static partial class SqlExpressionRenderer
             if (conflict.Columns.Count > 0)
             { builder.Append(" (").Append(string.Join(", ", conflict.Columns.Select(Identifier))).Append(')'); }
             if (conflict.ConstraintName is { } constraint) { builder.Append(" ON CONSTRAINT ").Append(Identifier(constraint)); }
+            if (conflict.TargetWhere is { } targetWhere) { builder.Append(" WHERE ").Append(Expression(targetWhere)); }
             if (conflict.Action == SqlOnConflictAction.DoNothing) { builder.Append(" DO NOTHING"); }
             else
             {
@@ -471,7 +478,10 @@ public static partial class SqlExpressionRenderer
         SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } => multiplicativeLevel,
+        SqlBinaryExpression { Operator: SqlBinaryOperator.BitwiseAnd or SqlBinaryOperator.BitwiseOr
+            or SqlBinaryOperator.BitwiseXor or SqlBinaryOperator.ShiftLeft or SqlBinaryOperator.ShiftRight } => concatLevel,
         SqlBinaryExpression binary => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, binary.Operator)),
+        SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } => concatLevel,
         SqlUnaryExpression => unaryLevel,
         SqlCollateExpression => collateLevel,
         _ => primaryLevel,
@@ -525,6 +535,11 @@ public static partial class SqlExpressionRenderer
         SqlBinaryOperator.Divide => "/",
         SqlBinaryOperator.Modulo => "%",
         SqlBinaryOperator.Concat => "||",
+        SqlBinaryOperator.BitwiseAnd => "&",
+        SqlBinaryOperator.BitwiseOr => "|",
+        SqlBinaryOperator.BitwiseXor => "#",
+        SqlBinaryOperator.ShiftLeft => "<<",
+        SqlBinaryOperator.ShiftRight => ">>",
         SqlBinaryOperator.Equal => "=",
         SqlBinaryOperator.NotEqual => "<>",
         SqlBinaryOperator.LessThan => "<",
@@ -543,6 +558,13 @@ public static partial class SqlExpressionRenderer
             // plain EXISTS, or to an operand that starts with one, would fold into it.
             string operand = Operand(unary.Operand, notLevel);
             return "NOT " + (operand.StartsWith("EXISTS (", StringComparison.Ordinal) ? "(" + operand + ")" : operand);
+        }
+
+        if (unary.Operator == SqlUnaryOperator.BitwiseNot)
+        {
+            // An equal-level operand needs grouping: ~(a & b), not ~a & b.
+            // Separate prefix operators so their spellings cannot become a regex operator.
+            return "~" + Operand(unary.Operand, additiveLevel);
         }
 
         string sign = unary.Operator switch

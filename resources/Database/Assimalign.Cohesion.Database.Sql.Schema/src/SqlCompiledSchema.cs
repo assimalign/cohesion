@@ -53,6 +53,10 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// Runtime and SDK reject every earlier artifact, including v9.
 /// </para>
 /// <para>
+/// <b>Format <c>v11</c> (#1631).</b> Indexes carry effective per-column key orders.
+/// Runtime and SDK reject v10 and every earlier artifact.
+/// </para>
+/// <para>
 /// <see cref="CanonicalDocument"/> and <see cref="Hash"/> are computed once, the first time either
 /// is read, and kept: the schema is immutable, so they never change.
 /// </para>
@@ -62,7 +66,7 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 public sealed class SqlCompiledSchema
 {
     /// <summary>Gets the current compiled-schema document format.</summary>
-    public const string CurrentFormat = "cohesion/database-schema/v10";
+    public const string CurrentFormat = "cohesion/database-schema/v11";
 
     // Computed once, on first read: the schema is immutable. Two threads that race the first read
     // compute the same strings, so the race costs only the duplicate work.

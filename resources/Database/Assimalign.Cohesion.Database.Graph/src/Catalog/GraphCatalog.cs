@@ -65,7 +65,23 @@ public sealed class GraphCatalog
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer, record.Id));
         }
+        storage.CatalogVersionUndone = catalog.CreatedVersionUndone;
         return catalog;
+    }
+
+    private void CreatedVersionUndone(PageId page, int slot, ReadOnlyMemory<byte> bytes)
+    {
+        if (bytes.Length < 18 || bytes.Span[17] != GraphCatalogCodec.FormatVersion) { return; }
+        var record = GraphCatalogCodec.Decode(bytes.Span, page, slot);
+        var key = (record.Kind, record.Parent, record.Name);
+        lock (_sync)
+        {
+            if (!_versions.TryGetValue(key, out var versions)) { return; }
+            for (int i = versions.Count - 1; i >= 0; i--)
+            {
+                if (versions[i].PageId == page && versions[i].SlotIndex == slot) { RemoveStaleReference(key, versions, i); }
+            }
+        }
     }
 
     // Run before logical recovery can scrub any catalog record, including abandoned v1 records.
