@@ -1,5 +1,14 @@
 # Documents client design
 
+## Savepoint lifecycle conformance (#1726, XT-5)
+
+The shared failure schedule now checks index erase/clear, memory before/after restoration and
+three physical undo brackets on both transports. A failed undo returns CK04009 and Ready E;
+retry or whole rollback is followed by exact committed rows. A fenced pool return clears the
+same authenticated session's names and effects. Progress-counted, non-parallel stress returns
+or drops a connection inside an admitted undo and verifies root rollback, pool-slot release
+and exact next-lease contents. Failed unknown-name controls retain the ordinary model policy.
+
 ## Named savepoint wire conformance (#1726, XT-4)
 
 The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,

@@ -22,6 +22,13 @@ model's ordinary statement policy.
 | CK04012 | A savepoint command requires an explicit bound transaction |
 | CK04013 | The named savepoint does not exist |
 
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real KeyValuePair mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 The existing record-space and BTreeRecordVersionIndex adapters already cover every

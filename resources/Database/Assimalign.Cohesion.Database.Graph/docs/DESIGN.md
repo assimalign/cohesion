@@ -68,6 +68,13 @@ model's ordinary statement policy.
 The central advertised-clause execution matrix also proves each savepoint AST command and
 its row visibility/effects through a live session; the unmapped-clause guard remains intact.
 
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real Graph mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog undo removes the exact undone metadata reference, including definition,

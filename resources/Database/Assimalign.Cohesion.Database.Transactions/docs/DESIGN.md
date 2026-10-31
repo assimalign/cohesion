@@ -32,6 +32,44 @@ bracket, while lifecycle admission still makes ends drain it. The source establi
 ledger and model-monitor order. This kernel seam is shared by scope-aware memory consumers;
 Graph uses it for MERGE bookkeeping. Physical statements retain their existing allocation shape.
 
+## Cross-model conformance (#1726, XT-5)
+
+The shared test-only SavepointUndoFault schedule runs through SQL, Documents and Graph
+sessions and their InMemory/TCP Execute exchanges, and through KeyValuePair and Blob kernel
+savepoint tokens over real model writes, including their existing host-owned wire transaction
+corpus. It fails index erase, index deleter restoration,
+memory restoration both before and after mutation, and each of the first three physical undo
+brackets. Every injected failure must be observed; recovery by the retained target, an outer
+scope or whole rollback is followed by an exact commit and a fresh observer. Memory restoration
+is idempotent after a callback throws. Exception identity is retained in-process; SQL/OQL/GQL retain CK04009
+plus Ready E on the wire.
+
+| Contract | In-process conformance | InMemory and TCP conformance |
+|---|---|---|
+| Nested names, duplicates, release/rollback scope, repeated rollback | NamedSavepointTests | NamedSavepointWireTests |
+| Ordinary statement and failed-control policies | NamedSavepointTests, SavepointMatrixTests | NamedSavepointWireTests, SavepointFailureWireTests |
+| Undo failures, fences, target/outer/root recovery and exact commit | SavepointFixTests, SavepointMatrixTests | SavepointFailureWireTests, SavepointAdapterWireTests |
+| Pre-admission cancellation, admitted completion, root ends and session/database close | NamedSavepointTests, SavepointFixTests, SavepointMatrixTests | SavepointFailureWireTests (return/drop during admitted undo) |
+| Disposal/offline/corruption precedence | SavepointFixTests | SavepointFailureWireTests and model lifecycle/wire suites |
+| Crash after rollback-to, within the second undo bracket, after root commit | SavepointAdapterTests, SavepointMatrixTests in all five models | SavepointMatrixTests drives SQL/OQL/GQL controls through both transports before copying the live image |
+| Snapshot and fresh READ COMMITTED readers, released lock waiters | SavepointAdapterTests, NamedSavepointTests | SavepointMatrixTests drives undo through both transports while both reader isolations progress and scoped lock waiters wake |
+| Documents/Blob stream refusal and saturation; key/value adapters; Graph MERGE accounting | SavepointAdapterTests, SavepointMatrixTests, SavepointMergeLockTests | SavepointAdapterWireTests covers KeyValuePair/Blob mutations without adding control messages |
+
+Connection-return/drop stress runs in a non-parallel collection for at least 250 ms and eight
+rounds, then until admission and completion counters match, with a 45-second ceiling and a
+60-second cancellation guard. The physical-batch callback establishes the overlap; cleanup
+always releases it, joins the exchange and returns/discards the connector before the next lease.
+A returned fenced connector is rented as the exact same server session and must have no names,
+uncommitted rows or retained memory. Existing engine reader/end stress uses the same
+progress-based discipline. The root lock order remains session operation flag, transaction end
+gate, root state reservation, manager registration/context admission, then ledger/model/storage
+work with the earlier monitors released. Ends and teardown join the admitted control.
+
+Crash images are copied from live storage before source cleanup, including a committed first
+undo bracket and an uncommitted second bracket. Reopen must scrub the whole uncommitted root
+writer; after root commit it must retain only the prefix. These checks add no persisted marker,
+wire frame, diagnostic identity, public API or ordinary-path allocation. Storage stays format 4.
+
 ## Isolation configuration (#1012)
 
 Isolation replacement refuses a context with live savepoint tokens, even at the same level, with ArgumentException. Releasing the final scope permits replacement again. Registration precedes the context latch. Marker completion updates a live-scope bit in the existing admission byte under that latch before dropping its apply count, so replacement sees either the running control or its live scopes. Ledger and lock-table monitors are released before taking the latch. A refused replacement leaves every token usable (#1726).
@@ -222,7 +260,7 @@ session-serialized. The existing lifecycle callback restores no stream state.
 XT-4 supplies named scopes, the owned token and structured classification, language/session
 integration and the aborted-block read fence described above. The substrate refuses writes and
 commit after incomplete undo; the root session also refuses reads until successful retry or
-whole rollback. XT-5 expands cross-model failure, recovery, cancellation and pool conformance.
+whole rollback. XT-5 supplies the cross-model failure, recovery, cancellation and pool matrix above.
 
 Reader probes pause after a physical undo batch releases its page latches and require a read
 to start and finish within that same interval. Every model completes both pinned Snapshot and

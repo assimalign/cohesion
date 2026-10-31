@@ -11,6 +11,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Connections;
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Protocol;
 using Assimalign.Cohesion.Database.Storage;
@@ -21,16 +22,22 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 [Collection("Savepoint wire failures")]
 public sealed class SavepointFailureWireTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Failed undo reports CK04009 and Ready E, then recovers exactly on both transports (#1726)")]
-    [InlineData(false, false, false)]
-    [InlineData(false, false, true)]
-    [InlineData(false, true, false)]
-    [InlineData(false, true, true)]
-    [InlineData(true, false, false)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, false)]
-    [InlineData(true, true, true)]
-    public async Task ExecuteAsync_UndoFailure_ShouldKeepReadyAndRecover(bool tcp, bool adapter, bool wholeRollback)
+    public static IEnumerable<object[]> UndoFailures
+    {
+        get
+        {
+            foreach (var fault in SavepointUndoFault.Cases())
+            {
+                if ((int)fault[1] == 1) { continue; }
+                yield return [false, fault[0], (int)fault[1] == 2];
+                yield return [true, fault[0], (int)fault[1] == 2];
+            }
+        }
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Every undo stage reports CK04009 and Ready E, then recovers exactly on both transports (#1726)")]
+    [MemberData(nameof(UndoFailures))]
+    public async Task ExecuteAsync_UndoFailure_ShouldKeepReadyAndRecover(bool tcp, int stage, bool wholeRollback)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -54,13 +61,10 @@ public sealed class SavepointFailureWireTests
         await Execute("INSERT INTO items VALUES (2, 2)");
         await Execute("SAVEPOINT scope");
         await Execute("INSERT INTO items VALUES (3, 3)");
-        for (int i = 0; i < 78; i++) { await Execute("UPDATE items SET n = n + 1 WHERE id = 3"); }
+        for (int i = 0; i < 100; i++) { await Execute("UPDATE items SET n = n + 1 WHERE id = 3"); }
         var session = (SqlDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
         var coordinator = Coordinator(database);
-        var undo = new FailingUndo();
-        if (adapter) { coordinator.VersionStore.RecordIndexEntryCreated(Context(session.CurrentTransaction!).Sequence, undo, ReadOnlyMemory<byte>.Empty, 0); }
-        int batches = 0;
-        if (!adapter) { Observe(coordinator.VersionStore, () => { if (++batches == 2) { throw undo.Failure; } }); }
+        using var fault = new SavepointUndoFault(coordinator, Context(session.CurrentTransaction!), stage);
 
         // Act
         try
@@ -76,11 +80,12 @@ public sealed class SavepointFailureWireTests
             ready.Type.ShouldBe(ProtocolMessageType.Ready);
             ProtocolTransactionStatusMessage.Decode(ready.Payload.Span).Status.ShouldBe(ProtocolTransactionStatus.Failed);
         }
-        finally { Observe(coordinator.VersionStore, null); undo.Fail = false; }
+        finally { fault.Disarm(); }
 
         // Assert
-        (adapter ? undo.Calls : batches).ShouldBe(adapter ? 1 : 2);
+        fault.Calls.ShouldBe(stage < 4 ? 1 : stage - 3);
         await Execute(wholeRollback ? "ROLLBACK" : "ROLLBACK TO scope");
+        if (stage is 2 or 3) { fault.Value.ShouldBe(7); }
         if (wholeRollback) { await Execute("BEGIN"); }
         await Execute("INSERT INTO items VALUES (4, 4)");
         await Execute("COMMIT");
@@ -168,6 +173,142 @@ public sealed class SavepointFailureWireTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Returning a fenced connection rolls back all scopes and certifies an exact clean lease (#1726)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DisposeAsync_PendingUndo_ShouldResetBeforeNextLease(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp, configureSettings: settings => settings.MaxPoolSize = 1);
+        var database = harness.Engine.TryGetDatabase("app", out var found) ? found! : throw new InvalidOperationException();
+        await using var writer = await harness.Client.ConnectAsync(token);
+        await writer.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY, n INT)", cancellationToken: token);
+        await writer.ExecuteAsync("INSERT INTO items VALUES (1, 1)", cancellationToken: token);
+        await writer.ExecuteAsync("BEGIN", cancellationToken: token);
+        await writer.ExecuteAsync("INSERT INTO items VALUES (2, 2)", cancellationToken: token);
+        await writer.ExecuteAsync("SAVEPOINT pooled", cancellationToken: token);
+        await writer.ExecuteAsync("INSERT INTO items VALUES (3, 3)", cancellationToken: token);
+        var server = harness.Server.Sessions.Single(item => item.DatabaseSession!.CurrentTransaction is not null);
+        var session = (SqlDatabaseSession)server.DatabaseSession!;
+        using var fault = new SavepointUndoFault(Coordinator(database), Context(session.CurrentTransaction!), 3);
+        try
+        {
+            (await Should.ThrowAsync<SqlClientException>(async () => await writer.ExecuteAsync("ROLLBACK TO pooled", cancellationToken: token)))
+                .Diagnostics.ShouldContain(item => item.Code == "CK04009");
+        }
+        finally { fault.Disarm(); }
+
+        // Act
+        await writer.DisposeAsync();
+        session.CurrentTransaction.ShouldBeNull();
+        fault.Value.ShouldBe(7);
+        await using var next = await harness.Client.ConnectAsync(token);
+        await next.ExecuteAsync("BEGIN", cancellationToken: token);
+        harness.Server.Sessions.Single(item => item.DatabaseSession!.CurrentTransaction is not null).Id.ShouldBe(server.Id);
+        var unknown = await Should.ThrowAsync<SqlClientException>(async () => await next.ExecuteAsync("ROLLBACK TO pooled", cancellationToken: token));
+        unknown.Diagnostics.ShouldContain(item => item.Code == "CK04013");
+        await next.ExecuteAsync("ROLLBACK", cancellationToken: token);
+        await next.ExecuteAsync("INSERT INTO items VALUES (4, 4)", cancellationToken: token);
+
+        // Assert
+        var rows = await next.QueryAsync("SELECT n FROM items ORDER BY id", cancellationToken: token);
+        rows.Select(row => Convert.ToInt64(row[0])).ShouldBe(new long[] { 1, 4 });
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Repeated connection return or drop during admitted undo drains the writer and releases the pool slot (#1726)")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task DisposeAsync_AdmittedUndo_ShouldDrainAndReleasePool(bool tcp, bool drop)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var token = timeout.Token;
+        int rounds = 0, admitted = 0, completed = 0;
+        var elapsed = System.Diagnostics.Stopwatch.StartNew();
+        do
+        {
+            await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp, configureSettings: settings => settings.MaxPoolSize = 1);
+            var database = harness.Engine.TryGetDatabase("app", out var found) ? found! : throw new InvalidOperationException();
+            await using var writer = await harness.Client.ConnectAsync(token);
+            await writer.ExecuteAsync("CREATE TABLE items (id INT PRIMARY KEY, n INT)", cancellationToken: token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES (1, 1)", cancellationToken: token);
+            await writer.ExecuteAsync("BEGIN", cancellationToken: token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES (2, 2)", cancellationToken: token);
+            await writer.ExecuteAsync("SAVEPOINT target", cancellationToken: token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES (3, 3)", cancellationToken: token);
+            var session = (SqlDatabaseSession)harness.Server.Sessions.Single(item => item.DatabaseSession!.CurrentTransaction is not null).DatabaseSession!;
+            var context = Context(session.CurrentTransaction!);
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var release = new ManualResetEventSlim();
+            Observe(Coordinator(database).VersionStore, () =>
+            {
+                Interlocked.Increment(ref admitted);
+                entered.TrySetResult();
+                release.Wait(token);
+            });
+            var undo = writer.ExecuteAsync("ROLLBACK TO target", cancellationToken: token).AsTask();
+            Task? returning = null;
+
+            // Act: the physical undo callback establishes admission before teardown.
+            try
+            {
+                await entered.Task.WaitAsync(token);
+                returning = drop ? writer.AbortAsync().AsTask() : writer.DisposeAsync().AsTask();
+            }
+            finally
+            {
+                release.Set();
+                try { await Record.ExceptionAsync(async () => await undo.WaitAsync(token)); }
+                finally { Observe(Coordinator(database).VersionStore, null); }
+                if (returning is not null) { await returning.WaitAsync(token); }
+            }
+
+            // Assert: both a retained connector and a discarded peer must free the pool slot.
+            await using var next = await harness.Client.ConnectAsync(token);
+            await next.ExecuteAsync("BEGIN", cancellationToken: token);
+            await next.ExecuteAsync("ROLLBACK", cancellationToken: token);
+            while (context.State == TransactionState.Active) { await Task.Delay(1, token); }
+            context.State.ShouldBe(TransactionState.RolledBack);
+            var rows = await next.QueryAsync("SELECT n FROM items ORDER BY id", cancellationToken: token);
+            rows.Select(row => Convert.ToInt64(row[0])).ShouldBe(new long[] { 1 });
+            completed++;
+            rounds++;
+        }
+        while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 8 || admitted < 8 || completed < 8)
+            && elapsed.Elapsed < TimeSpan.FromSeconds(45));
+        rounds.ShouldBeGreaterThanOrEqualTo(8);
+        admitted.ShouldBe(rounds);
+        completed.ShouldBe(rounds);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - Failed savepoint controls keep the ordinary model failure rule over both transports (#1726)")]
+    [InlineData(false, "RELEASE absent_scope")]
+    [InlineData(true, "RELEASE absent_scope")]
+    [InlineData(false, "ROLLBACK TO absent_scope")]
+    [InlineData(true, "ROLLBACK TO absent_scope")]
+    public async Task ExecuteAsync_UnknownControl_ShouldKeepModelFailureRule(bool tcp, string control)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        await using var writer = await harness.Client.ConnectAsync(token);
+        await writer.ExecuteAsync("BEGIN", cancellationToken: token);
+        await writer.ExecuteAsync("SAVEPOINT retained", cancellationToken: token);
+
+        // Act
+        var error = await Should.ThrowAsync<SqlClientException>(async () => await writer.ExecuteAsync(control, cancellationToken: token));
+
+        // Assert
+        error.Diagnostics.ShouldContain(item => item.Code == "CK04013");
+        await writer.ExecuteAsync("ROLLBACK TO retained", cancellationToken: token);
+        await writer.ExecuteAsync("ROLLBACK", cancellationToken: token);
+    }
+
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_disposed")]
     private static extern ref int Disposed(DatabaseInstance database);
 
@@ -178,13 +319,4 @@ public sealed class SavepointFailureWireTests
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_UndoBatchApplied")]
     private static extern void Observe(RecordSpaceVersionStore store, Action? observer);
 
-    private sealed class FailingUndo : RecordVersionIndex
-    {
-        internal readonly IOException Failure = new("Injected recorded undo failure");
-        internal bool Fail = true;
-        internal int Calls;
-        protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong reference, TransactionSequence writer, CancellationToken token)
-        { Calls++; if (Fail) { throw Failure; } return default; }
-        protected override ValueTask ClearDeleterCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong reference, TransactionSequence writer, CancellationToken token) => default;
-    }
 }

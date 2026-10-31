@@ -41,6 +41,13 @@ session, including the error/Ready E exchange.
 | CK04013 | The named savepoint does not exist |
 | CS04074 | SET TRANSACTION inside an active savepoint |
 
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real Sql mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
+
 ## Directed index keys (#1631, SQ-K1)
 
 Each SqlCatalogIndex carries an immutable KeyOrders vector, one effective order per key
