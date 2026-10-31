@@ -4,7 +4,7 @@ Rezolvr is the L3 networking service platform intended to be a standalone DNS se
 
 Rezolvr is a DNS server product and is never the service-discovery subsystem. Discovery uses observed endpoints, Service DNS, and export documents.
 
-The host supports enabled-resource control planes; domain services remain fillers pending the area program.
+The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -40,7 +40,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering and dependencies
 
-As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.Hosting, HTTP, and TCP for its resource listener.
+As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation.
 
 ## Project documentation
 
@@ -48,19 +48,6 @@ As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting`
 - [Root design](./Assimalign.Cohesion.Rezolvr/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.Rezolvr.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md)
-
-## Declarative control-plane commands
-
-| Wire kind | Descriptor verb | Ownership key |
-|---|---|---|
-| `rezolvr.add-a-record` | `AddARecord` | record name |
-| `rezolvr.add-cname-record` | `AddCnameRecord` | record name |
-
-The ApplicationModel declares
-commands; [Hosting](Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md) applies them; the gateway's
-generic `ResourceControlPlaneCommandClient` (`Assimalign.Cohesion.ApplicationModel.Gateway`) delivers them
-to the resource control plane, so the area ships no client package. ApplicationModel is a standalone
-NuGet package.
 
 ## Application composition (O34)
 

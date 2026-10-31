@@ -26,8 +26,7 @@ public sealed class IdentityHubApplicationContext : HostContext, IIdentityHubApp
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
 
-        // The opt-in resource runner asserts that the host content root equals the ambient resource content root,
-        // so an enabled resource seeds it from the ambient context; a plain application keeps it unset.
+        // The host environment carries the content root the builder resolved.
         _environment = new HostEnvironment(environmentName) { ContentRootPath = contentRootPath };
     }
 

@@ -9,14 +9,15 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
-
 namespace Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
 [global::System.Diagnostics.DebuggerDisplay("RezolvrRecordRepository")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RezolvrRecordRepository
 {
+    internal const string AddARecord = "rezolvr.add-a-record";
+    internal const string AddCnameRecord = "rezolvr.add-cname-record";
+
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Dictionary<string, StoredRezolvrRecord>? _records;
@@ -30,7 +31,7 @@ internal sealed class RezolvrRecordRepository
         _path = Path.Combine(Path.GetFullPath(dataPath), "records.json");
     }
 
-    internal async Task<IReadOnlyList<ResourceCommand>> ReadCommandsAsync(CancellationToken cancellationToken = default)
+    internal async Task<IReadOnlyList<RezolvrRecordCommand>> ReadCommandsAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -44,32 +45,32 @@ internal sealed class RezolvrRecordRepository
         }
     }
 
-    internal async Task MutateAsync(ResourceCommand command, bool delete, CancellationToken cancellationToken = default)
+    internal async Task MutateAsync(RezolvrRecordCommand command, bool delete, CancellationToken cancellationToken = default)
     {
         using JsonDocument document = JsonDocument.Parse(command.Payload);
         JsonElement payload = document.RootElement;
         string name = Required(payload, "name");
-        bool addressRecord = command.Kind == RezolvrResourceCommandHandler.AddARecord;
+        bool addressRecord = command.Kind == AddARecord;
         string value = Required(payload, addressRecord ? "address" : "target");
         if (name != command.Key || name.Contains('/') || Uri.CheckHostName(name.TrimEnd('.')) != UriHostNameType.Dns)
         {
-            throw new ResourceCommandRejectedException($"{command.Kind} requires a DNS name matching key '{command.Key}'.");
+            throw new InvalidOperationException($"{command.Kind} requires a DNS name matching key '{command.Key}'.");
         }
         if (!payload.TryGetProperty("ttlSeconds", out JsonElement ttl) || !ttl.TryGetInt32(out int seconds) || seconds <= 0)
         {
-            throw new ResourceCommandRejectedException($"{command.Kind} record '{name}' requires a positive ttlSeconds.");
+            throw new InvalidOperationException($"{command.Kind} record '{name}' requires a positive ttlSeconds.");
         }
         if (addressRecord)
         {
             if (!IPAddress.TryParse(value, out IPAddress? address) || address.AddressFamily != AddressFamily.InterNetwork)
             {
-                throw new ResourceCommandRejectedException($"{command.Kind} record '{name}' requires an IPv4 address.");
+                throw new InvalidOperationException($"{command.Kind} record '{name}' requires an IPv4 address.");
             }
             value = address.ToString();
         }
         else if (value.Contains('/') || Uri.CheckHostName(value.TrimEnd('.')) != UriHostNameType.Dns)
         {
-            throw new ResourceCommandRejectedException($"{command.Kind} record '{name}' requires a DNS target.");
+            throw new InvalidOperationException($"{command.Kind} record '{name}' requires a DNS target.");
         }
 
         string key = name.TrimEnd('.');
@@ -81,11 +82,11 @@ internal sealed class RezolvrRecordRepository
             {
                 if (existing.Owner != command.Owner)
                 {
-                    throw new ResourceCommandRejectedException($"{command.Kind} record '{name}' belongs to owner '{existing.Owner}'; owner '{command.Owner}' cannot overwrite or delete it.");
+                    throw new InvalidOperationException($"{command.Kind} record '{name}' belongs to owner '{existing.Owner}'; owner '{command.Owner}' cannot overwrite or delete it.");
                 }
                 if (existing.Kind != command.Kind || existing.Value != value || existing.TtlSeconds != seconds)
                 {
-                    throw new ResourceCommandRejectedException($"{command.Kind} record '{name}' conflicts with its stored declaration; delete that declaration before changing the record.");
+                    throw new InvalidOperationException($"{command.Kind} record '{name}' conflicts with its stored declaration; delete that declaration before changing the record.");
                 }
             }
             else if (delete)
@@ -159,12 +160,16 @@ internal sealed class RezolvrRecordRepository
     }
 }
 
+// One record declaration as the repository receives and replays it: the idempotency id, the record
+// kind (AddARecord or AddCnameRecord), the owning application, the record-name key, and the JSON payload.
+internal sealed record RezolvrRecordCommand(string Id, string Kind, string Owner, string Key, ReadOnlyMemory<byte> Payload);
+
 [global::System.Diagnostics.DebuggerDisplay("StoredRezolvrRecord {Id,nq}")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed record StoredRezolvrRecord(string Id, string Kind, string Owner, string Key, byte[] Payload, string Value, int TtlSeconds)
 {
     [JsonIgnore]
-    internal ResourceCommand Command => new(Id, Kind, Owner, Key, Payload);
+    internal RezolvrRecordCommand Command => new(Id, Kind, Owner, Key, Payload);
 
     private sealed class DebugView
     {

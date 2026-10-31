@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class LogSpaceApplication : Host<LogSpaceApplicationContext>, ILog
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(LogSpaceApplication).Assembly);
-    }
-
-    internal static LogSpaceApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new LogSpaceApplicationBuilder(args, resourceAssembly);
+        return new LogSpaceApplicationBuilder(args);
     }
 
     private sealed class DebugView

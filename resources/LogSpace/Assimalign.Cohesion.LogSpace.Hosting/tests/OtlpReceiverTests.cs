@@ -7,32 +7,12 @@ using System.Text.Json;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Tests;
 
 public sealed class OtlpReceiverTests
 {
-    [Fact(DisplayName = "Cohesion Test [LogSpace.Hosting] - Scoped token cannot authorize management or query")]
-    public void Verify_TelemetryScope_ShouldSeparateManagement()
-    {
-        using var identity = new TestBootstrapIdentity("app", "local");
-        var context = new ResourceContext(applicationName: "app", resourceName: "logs", environmentName: "Development", gatewayName: "local",
-            contentRootPath: null, endpoints: null, mounts: null, settings: null, references: null,
-            bootstrapCredential: ReadOnlyMemory<byte>.Empty, applicationTrustKey: identity.PublicKey, ambientValues: null);
-        var verifier = new LogSpaceTokenVerifier(context);
-        string token = identity.Issue("logs", "web", telemetry: true);
-        ResourceCredentialVerification emitted = verifier.Validate(token, "logs", DateTimeOffset.UtcNow, true);
-        emitted.Status.ShouldBe(ResourceCredentialStatus.Authorized);
-        emitted.Caller.ShouldNotBeNull().Subject.ShouldBe("web");
-        emitted.Caller.Kind.ShouldBe(ResourceCallerKind.TelemetryEmitter);
-        verifier.Validate(token, "logs", DateTimeOffset.UtcNow, false).Status.ShouldBe(ResourceCredentialStatus.Forbidden);
-        verifier.Validate(identity.Issue("other", "web", telemetry: true), "logs", DateTimeOffset.UtcNow, true).Status.ShouldBe(ResourceCredentialStatus.Forbidden);
-        verifier.Validate(identity.Issue("logs"), "logs", DateTimeOffset.UtcNow, false).Status.ShouldBe(ResourceCredentialStatus.Authorized);
-        verifier.Validate(identity.Issue("logs"), "logs", DateTimeOffset.UtcNow, true).Status.ShouldBe(ResourceCredentialStatus.Forbidden);
-    }
-
     [Fact(DisplayName = "Cohesion Test [LogSpace.Hosting] - Segments: persisted restart, filters and cursor retain ordering")]
     public void Store_Restart_ShouldAppendAndPage()
     {

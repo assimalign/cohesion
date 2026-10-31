@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
@@ -16,9 +15,9 @@ using IPEndPoint = System.Net.IPEndPoint;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting.Tests;
 
-public sealed class StandaloneControlPlaneTests
+public sealed class LogSpaceHttpTests
 {
-    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - Standalone query gate refuses remote callers before the shared control plane")]
+    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - Standalone query gate refuses remote callers on every namespaced route")]
     [InlineData("/cohesion/v1")]
     [InlineData("/cohesion/v1/logs")]
     [InlineData("/cohesion/v1/endpoints")]
@@ -34,8 +33,7 @@ public sealed class StandaloneControlPlaneTests
         bool nextCalled = false;
 
         // Act
-        await LogSpaceHttp.QueryAsync(exchange, _ => { nextCalled = true; return Task.CompletedTask; },
-            new ResourceContext(), store: null);
+        await LogSpaceHttp.QueryAsync(exchange, _ => { nextCalled = true; return Task.CompletedTask; }, store: null);
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -53,7 +51,7 @@ public sealed class StandaloneControlPlaneTests
         await using var exchange = CreateExchange("/cohesion/v1/logs", address);
 
         // Act
-        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, new ResourceContext(), store: null);
+        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, store: null);
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
@@ -73,7 +71,7 @@ public sealed class StandaloneControlPlaneTests
         exchange.Request.Headers["Forwarded"] = "for=127.0.0.1";
 
         // Act
-        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, new ResourceContext(), store: null);
+        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, store: null);
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -89,7 +87,7 @@ public sealed class StandaloneControlPlaneTests
         exchange.Connection.RemoteEndPoint = dnsEndpoint ? new DnsEndPoint("localhost", 12345) : null;
 
         // Act
-        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, new ResourceContext(), store: null);
+        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, store: null);
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -99,61 +97,60 @@ public sealed class StandaloneControlPlaneTests
     [InlineData("/healthz")]
     [InlineData("/readyz")]
     [InlineData("/livez")]
-    public async Task QueryAsync_StandaloneRemoteProbe_ShouldForwardToSharedProbe(string path)
+    public async Task QueryAsync_StandaloneRemoteProbe_ShouldForwardToNextMiddleware(string path)
     {
         // Arrange
         await using var exchange = CreateExchange(path, "192.0.2.1");
         bool nextCalled = false;
 
         // Act
-        await LogSpaceHttp.QueryAsync(exchange, _ => { nextCalled = true; return Task.CompletedTask; },
-            new ResourceContext(), store: null);
+        await LogSpaceHttp.QueryAsync(exchange, _ => { nextCalled = true; return Task.CompletedTask; }, store: null);
 
         // Assert
         nextCalled.ShouldBeTrue();
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
     }
 
-    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - Managed remote query keeps gateway credential behavior")]
+    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - A bearer credential no longer admits a remote query peer")]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task QueryAsync_ManagedRemotePeer_ShouldRetainCredentialChecks(bool credential)
+    public async Task QueryAsync_RemotePeerWithOrWithoutCredential_ShouldRefuseQuery(bool credential)
     {
         // Arrange
-        using var identity = new TestBootstrapIdentity("app", "gateway");
-        var resource = new ResourceContext("app", "logs", AppEnvironment.Keys.Local, "gateway",
-            contentRootPath: null, endpoints: null, mounts: null, settings: null, references: null,
-            bootstrapCredential: default, applicationTrustKey: identity.PublicKey, ambientValues: null);
         await using var exchange = CreateExchange("/cohesion/v1/logs", "192.0.2.1");
         if (credential)
         {
-            exchange.Request.Headers[HttpHeaderKey.Authorization] = "Bearer " + identity.Issue("logs");
+            exchange.Request.Headers[HttpHeaderKey.Authorization] = "Bearer eyJhbGciOiJFUzI1NiJ9.e30.c2ln";
         }
 
         // Act
-        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, resource, store: null);
+        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, store: null);
 
         // Assert
-        exchange.Response.StatusCode.ShouldBe(credential ? HttpStatusCode.Ok : HttpStatusCode.Unauthorized);
+        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
-    [Fact(DisplayName = "Cohesion Test [LogSpace.Hosting] - Standalone telemetry behavior stays separate from control-plane restrictions")]
-    public async Task IngestAsync_StandaloneRemotePeer_ShouldRetainTelemetryBehavior()
+    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - OTLP ingest fails closed for every peer")]
+    [InlineData("192.0.2.1")]
+    [InlineData("127.0.0.1")]
+    public async Task IngestAsync_AnyPeer_ShouldRefuseTelemetry(string address)
     {
         // Arrange
         await using var exchange = new ControlPlaneExchange("/v1/traces", HttpMethod.Post)
         {
             RequestCancelled = CancellationToken.None,
         };
-        exchange.Connection.RemoteEndPoint = new IPEndPoint(IPAddress.Parse("192.0.2.1"), 12345);
+        exchange.Connection.RemoteEndPoint = new IPEndPoint(IPAddress.Parse(address), 12345);
         exchange.Request.Headers[HttpHeaderKey.ContentType] = "application/json";
+        exchange.Request.Headers[HttpHeaderKey.Authorization] = "Bearer eyJhbGciOiJFUzI1NiJ9.e30.c2ln";
         var store = new LogSegmentStore(Path.GetTempPath());
 
         // Act
-        await LogSpaceHttp.IngestAsync(exchange, new ResourceContext(), store);
+        await LogSpaceHttp.IngestAsync(exchange, store);
 
         // Assert
-        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.NotImplemented);
+        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        exchange.Response.Body.Length.ShouldBe(0);
     }
 
     private static ControlPlaneExchange CreateExchange(string path, string address)

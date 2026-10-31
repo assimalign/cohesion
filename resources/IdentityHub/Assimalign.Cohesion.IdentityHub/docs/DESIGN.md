@@ -12,7 +12,7 @@ The public options carry a client secret only during composition. Hosting snapsh
 
 ## Hosting isolation and AOT
 
-The root references Core and IdentityModel contracts, with no Hosting library reference. HTTP serving, persistence, cryptography, and ResourceRuntime integration belong to the Hosting module. The surface requires no runtime scanning, dynamic code generation, or container activation and remains trimming- and NativeAOT-safe.
+The root references Core and IdentityModel contracts, with no Hosting library reference. HTTP serving, persistence, and cryptography belong to the Hosting module. The surface requires no runtime scanning, dynamic code generation, or container activation and remains trimming- and NativeAOT-safe.
 
 ## Hosting-free application contract (O34)
 

@@ -2,7 +2,7 @@
 
 IdentityHub is the L3 identity service platform intended to manage tenants, directories, applications, principals, credentials, sessions, token services, federation, and provisioning.
 
-The application builder configures a minimal code-first OpenID Connect issuer with persisted ES256 keys, client credentials, a loopback Local device-authorization flow, and a Cohesion resource control plane. Production HTTPS consumes a gateway-materialized `tls` Secret mount; the self-signed fallback is Local-only.
+The application builder configures a minimal code-first OpenID Connect issuer with persisted ES256 keys, client credentials, and a loopback Local device-authorization flow. The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`. The self-signed fallback is Local-only.
 
 ## Project map
 
@@ -36,14 +36,14 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 ## Projects
 
 - `Assimalign.Cohesion.IdentityHub` defines the public area-root application and builder contracts alongside the existing identity domain contracts.
-- `Assimalign.Cohesion.IdentityHub.Hosting` provides the concrete creation entry point, issuer endpoints, key persistence, control-plane integration, and host lifecycle.
+- `Assimalign.Cohesion.IdentityHub.Hosting` provides the concrete creation entry point, issuer endpoints, key persistence, and host lifecycle.
 - `Assimalign.Cohesion.IdentityHub.Models` retains the existing tenant-directory DTO shapes while linking principals and credentials to the canonical `Assimalign.Cohesion.IdentityModel` contracts.
 
 ## Layering and dependencies
 
-As an L3 service platform, IdentityHub composes the L2 `Assimalign.Cohesion.Hosting` runtime, which is built on the L1 `Assimalign.Cohesion.Core` foundation. The root and Models projects consume the L1 `Assimalign.Cohesion.IdentityModel` contracts; Models also retains Core for its generated ULID identifiers. The Hosting project depends only on the area root and shared Hosting runtime. The AOT-safe ApplicationModel project references only shared ApplicationModel and Hosting.Resources seams and is guarded by COHAM001.
+As an L3 service platform, IdentityHub composes the L2 `Assimalign.Cohesion.Hosting` runtime, which is built on the L1 `Assimalign.Cohesion.Core` foundation. The root and Models projects consume the L1 `Assimalign.Cohesion.IdentityModel` contracts; Models also retains Core for its generated ULID identifiers. The Hosting project depends only on the area root and shared Hosting runtime.
 
-The IdentityHub SDK's orchestration defaults describe one private `https` endpoint with readiness and liveness probes, one `data` Volume, and a single-replica `StatefulSet`. The planner also preserves optional non-persistent inputs such as the Hosting convention's `tls` mount. Runtime `AddAudience` and `AddClient` composition ships now; the generated resource control plane advertises identityhub.add-audience and identityhub.add-client for the corresponding declarative verbs.
+The IdentityHub SDK's orchestration defaults describe one private `https` endpoint with readiness and liveness probes, one `data` Volume, and a single-replica `StatefulSet`. The planner also preserves optional non-persistent inputs such as the Hosting convention's `tls` mount. Runtime `AddAudience` and `AddClient` composition ships now.
 
 ## Project documentation
 
@@ -53,19 +53,6 @@ The IdentityHub SDK's orchestration defaults describe one private `https` endpoi
 - [Hosting design](./Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md)
 - [Models overview](./Assimalign.Cohesion.IdentityHub.Models/docs/OVERVIEW.md)
 - [Models design](./Assimalign.Cohesion.IdentityHub.Models/docs/DESIGN.md)
-
-## Declarative control-plane commands
-
-| Wire kind | Descriptor verb | Ownership key |
-|---|---|---|
-| `identityhub.add-audience` | `AddAudience` | audience name |
-| `identityhub.add-client` | `AddClient` | client id |
-
-The ApplicationModel declares
-commands; [Hosting](Assimalign.Cohesion.IdentityHub.Hosting/docs/DESIGN.md) applies them; the gateway's
-generic `ResourceControlPlaneCommandClient` (`Assimalign.Cohesion.ApplicationModel.Gateway`) delivers them
-to the resource control plane, so the area ships no client package. ApplicationModel is a standalone
-NuGet package.
 
 ## Application composition (O34)
 
