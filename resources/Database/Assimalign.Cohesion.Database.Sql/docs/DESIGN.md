@@ -9538,6 +9538,12 @@ Volatile and set-returning expressions are never moved into a different evaluati
 UPDATE FROM, DELETE USING and MERGE search only their source graph (two through eight
 sources); the target remains outside it at the original target/source boundary. MERGE's root
 outer kind, ON predicate and presence tracking remain unchanged.
+Flat UPDATE/DELETE WHERE conjuncts referencing both target and sources are a dependency
+barrier: source probes are parameterized by the target row, and replacing them with an
+independently materialized source can regress constant indexed work to a full source scan.
+Those association plans retain bound order. Independent FROM/USING graphs and MERGE's
+already separate source subtree remain eligible. Source search also retains ordinary access
+costing for the target input without including it in the order search.
 
 Input access-path estimates are reused or probed once per search input with the existing
 32-page/512-entry bounded snapshot probe and definition-invalidation fallback.
@@ -9566,8 +9572,9 @@ Deterministic tests assert 3/15/63/255 states and 2/50/602/6050 ordered partitio
 An exhaustive four-input binary-tree oracle verifies the bushy optimum. Generated data
 compares selected plans with forced bound plans for duplicates, NULLs, multi-column and
 non-equi joins, grouped/CROSS joins, outer barriers, EXISTS/NOT EXISTS and DML sources.
-A later selective third input reduces tested pairs from 12,800 to 160. This is work evidence,
-not a duration threshold. PostgreSQL reference anchors (local clone):
+A later selective third input reduces tested pairs from 12,800 to 160, and target-parameterized
+DML retains three examined rows at 16/500/2000-row sources rather than materializing
+33/1001/4001 rows. These are work counters, not duration thresholds. PostgreSQL reference anchors (local clone):
 src/backend/optimizer/README:199-285 (identities, strictness, semi/anti and FULL barriers),
 src/backend/optimizer/path/joinrels.c:355-676 (legality and LATERAL constraints), and
 src/backend/optimizer/plan/initsplan.c:2018-2110 (make_outerjoininfo and FULL's fixed sets).

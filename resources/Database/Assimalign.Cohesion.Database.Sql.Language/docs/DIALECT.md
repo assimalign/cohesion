@@ -806,6 +806,9 @@ Two through eight eligible source relations use exact join-order search (#1629).
 UPDATE FROM, DELETE USING and MERGE retain the target/source boundary: only source
 relations participate in search. One source retains existing planning. Outer source joins,
 derived sources and predicates without the non-throwing safety proof retain bound order.
+Target-referencing cross-conjuncts in UPDATE/DELETE WHERE also retain bound order: their
+source index probes depend on the target row. Independent FROM/USING graphs and MERGE's
+existing source subtree can be searched without discarding that parameterization.
 
 SET values, WHERE and RETURNING resolve against the target plus source namespace. SET destinations
 remain target columns. An alias hides the original relation name; self-joins require distinct

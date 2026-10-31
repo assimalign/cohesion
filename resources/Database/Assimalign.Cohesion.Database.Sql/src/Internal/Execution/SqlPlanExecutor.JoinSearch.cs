@@ -52,12 +52,15 @@ internal sealed partial class SqlPlanExecutor
                     if (binding < start) { target = true; }
                     else { mask |= 1 << (binding - start); }
                 }
+                // A flat UPDATE/DELETE source can be parameterized by the target's row.
+                // Independent source materialization would discard those indexed probes.
+                if (target && mask != 0 && boundary is null) { return null; }
                 if (target) { targetTerms.Add(term); }
                 else { terms.Add((mask == 0 ? 1 : mask, term)); }
             }
         }
-        var inputs = plan.Inputs.Select((input, i) => i < start ? input
-            : input with { Access = choose(plan.Bindings[i].Source.Table!, input.Access) }).ToArray();
+        var inputs = plan.Inputs.Select((input, i) =>
+            input with { Access = choose(plan.Bindings[i].Source.Table!, input.Access) }).ToArray();
         var estimates = new BTreeRangeCount?[plan.Bindings.Count];
         var baseRows = new double[count];
         for (int i = 0; i < count; i++)

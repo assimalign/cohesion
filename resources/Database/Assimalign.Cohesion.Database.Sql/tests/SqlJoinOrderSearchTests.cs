@@ -18,6 +18,41 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 [Collection(nameof(SqlDatabaseEventSourceCollection))]
 public sealed class SqlJoinOrderSearchTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: target-parameterized DML retains constant indexed row visits (#1629)")]
+    [InlineData(16, false)]
+    [InlineData(16, true)]
+    [InlineData(500, false)]
+    [InlineData(500, true)]
+    [InlineData(2000, false)]
+    [InlineData(2000, true)]
+    public async Task ExecuteAsync_TargetParameterizedSources_ShouldRetainProbeWork(int count, bool delete)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("join-target-probes", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t(id INT PRIMARY KEY,v INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES(1,0)", cancellationToken: CancellationToken.None);
+        foreach (string table in new[] { "a", "b" })
+        {
+            await session.ExecuteAsync($"CREATE TABLE {table}(id INT PRIMARY KEY,v INT)", cancellationToken: CancellationToken.None);
+            for (int start = 1; start <= count; start += 500)
+            {
+                await session.ExecuteAsync($"INSERT INTO {table} VALUES " + string.Join(',',
+                    Enumerable.Range(start, Math.Min(500, count - start + 1)).Select(id => $"({id},{id})")), cancellationToken: CancellationToken.None);
+            }
+        }
+
+        // Act
+        var result = await session.ExecuteAsync(delete
+            ? "DELETE FROM t USING a JOIN b ON a.id=b.id WHERE t.id=a.id"
+            : "UPDATE t SET v=b.v FROM a JOIN b ON a.id=b.id WHERE t.id=a.id", cancellationToken: CancellationToken.None);
+
+        // Assert: one target and one primary-key probe per source, independently of source size.
+        result.AffectedCount.ShouldBe(1);
+        session.LastStatementMetrics.ShouldNotBeNull().RecordsExamined.ShouldBe(3);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Join search: each input estimate is probed once and reused by every partition (#1629)")]
     [InlineData(4, 15, 50)]
     [InlineData(6, 63, 602)]
@@ -137,14 +172,16 @@ public sealed class SqlJoinOrderSearchTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Join search: DML source search fixes the target boundary and matches written execution (#1629)")]
-    [InlineData("UPDATE t SET v=c.v FROM a JOIN c ON a.id=c.id WHERE t.id=c.id")]
-    [InlineData("DELETE FROM t USING a JOIN c ON a.id=c.id WHERE t.id=c.id")]
-    [InlineData("MERGE INTO t USING a JOIN c ON a.id=c.id ON t.id=c.id WHEN MATCHED THEN UPDATE SET v=c.v WHEN NOT MATCHED THEN INSERT(id,v) VALUES(c.id,c.v) WHEN NOT MATCHED BY SOURCE THEN DELETE")]
-    [InlineData("UPDATE t SET v=c.v FROM a JOIN b ON a.id=b.id JOIN c ON b.id=c.id WHERE t.id=c.id")]
-    [InlineData("DELETE FROM t USING a JOIN b ON a.id=b.id JOIN c ON b.id=c.id WHERE t.id=c.id")]
-    [InlineData("MERGE INTO t USING a JOIN b ON a.id=b.id JOIN c ON b.id=c.id ON t.id=c.id WHEN MATCHED THEN UPDATE SET v=c.v")]
-    [InlineData("MERGE INTO t USING a JOIN b ON a.id=b.id JOIN c ON b.id=c.id ON t.id=c.id WHEN MATCHED THEN UPDATE SET v=c.v WHEN NOT MATCHED THEN INSERT(id,v) VALUES(c.id,c.v) WHEN NOT MATCHED BY SOURCE THEN DELETE")]
-    public async Task ExecuteAsync_DmlSources_ShouldMatchWrittenOracle(string sql)
+    [InlineData("UPDATE t SET v=c.v FROM a JOIN c ON a.id=c.id WHERE t.id=c.id", false)]
+    [InlineData("DELETE FROM t USING a JOIN c ON a.id=c.id WHERE t.id=c.id", false)]
+    [InlineData("UPDATE t SET v=c.v FROM a JOIN c ON a.id=c.id AND c.id=1 WHERE t.v=11", true)]
+    [InlineData("DELETE FROM t USING a JOIN c ON a.id=c.id AND c.id=1 WHERE t.v=11", true)]
+    [InlineData("MERGE INTO t USING a JOIN c ON a.id=c.id ON t.id=c.id WHEN MATCHED THEN UPDATE SET v=c.v WHEN NOT MATCHED THEN INSERT(id,v) VALUES(c.id,c.v) WHEN NOT MATCHED BY SOURCE THEN DELETE", true)]
+    [InlineData("UPDATE t SET v=c.v FROM a JOIN b ON a.id=b.id JOIN c ON b.id=c.id WHERE t.id=c.id", false)]
+    [InlineData("DELETE FROM t USING a JOIN b ON a.id=b.id JOIN c ON b.id=c.id WHERE t.id=c.id", false)]
+    [InlineData("MERGE INTO t USING a JOIN b ON a.id=b.id JOIN c ON b.id=c.id ON t.id=c.id WHEN MATCHED THEN UPDATE SET v=c.v", true)]
+    [InlineData("MERGE INTO t USING a JOIN b ON a.id=b.id JOIN c ON b.id=c.id ON t.id=c.id WHEN MATCHED THEN UPDATE SET v=c.v WHEN NOT MATCHED THEN INSERT(id,v) VALUES(c.id,c.v) WHEN NOT MATCHED BY SOURCE THEN DELETE", true)]
+    public async Task ExecuteAsync_DmlSources_ShouldMatchWrittenOracle(string sql, bool search)
     {
         // Arrange
         var results = new List<string[]>();
@@ -171,9 +208,18 @@ public sealed class SqlJoinOrderSearchTests
                 if (round == 1)
                 {
                     var source = selected switch { SqlUpdatePlan p => p.Source!, SqlDeletePlan p => p.Source!, SqlMergePlan p => p.Source, _ => throw new InvalidOperationException() };
-                    var join = source.Associations.ShouldBeOfType<SqlSearchedJoinPlan>();
-                    join.SourceOnly.ShouldBeTrue();
-                    (join.Tree!.Left!.Binding == 0 || join.Tree.Right!.Binding == 0).ShouldBeTrue();
+                    if (search)
+                    {
+                        var join = source.Associations.ShouldBeOfType<SqlSearchedJoinPlan>();
+                        join.SourceOnly.ShouldBeTrue();
+                        (join.Tree!.Left!.Binding == 0 || join.Tree.Right!.Binding == 0).ShouldBeTrue();
+                    }
+                    else
+                    {
+                        var join = source.Associations.ShouldBeOfType<SqlJoinPlan>();
+                        join.FirstBinding.ShouldBe(0);
+                        join.Steps.Select(step => step.Binding).ShouldBe(Enumerable.Range(1, join.Bindings.Count - 1));
+                    }
                 }
                 _ = await executor.ExecuteAsync(selected, context, CancellationToken.None);
                 var query = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql("SELECT id,v FROM t ORDER BY id").Statement.SqlExpression);
