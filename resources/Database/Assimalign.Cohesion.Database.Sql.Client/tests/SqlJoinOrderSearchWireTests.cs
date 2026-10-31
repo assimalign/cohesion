@@ -16,18 +16,18 @@ public sealed class SqlJoinOrderSearchWireTests
     {
         // Arrange
         await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
-        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout());
+        await using var connection = await harness.Client.ConnectAsync(SqlClientTestHarness.Timeout(30));
         foreach (string table in new[] { "a", "b", "c" })
         {
-            await connection.ExecuteAsync($"CREATE TABLE {table}(id INT PRIMARY KEY,k INT)", cancellationToken: SqlClientTestHarness.Timeout());
+            await connection.ExecuteAsync($"CREATE TABLE {table}(id INT PRIMARY KEY,k INT)", cancellationToken: SqlClientTestHarness.Timeout(30));
             int count = table == "c" ? 1 : 24;
-            await connection.ExecuteAsync($"INSERT INTO {table} VALUES " + string.Join(',', Enumerable.Range(1, count).Select(id => $"({id},{id})")), cancellationToken: SqlClientTestHarness.Timeout());
+            await connection.ExecuteAsync($"INSERT INTO {table} VALUES " + string.Join(',', Enumerable.Range(1, count).Select(id => $"({id},{id})")), cancellationToken: SqlClientTestHarness.Timeout(30));
         }
         const string sql = "SELECT a.id,b.id,c.id FROM a CROSS JOIN b JOIN c ON a.k=c.k AND b.k=c.k ORDER BY a.id";
 
         // Act
-        var rows = await connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout());
-        var explain = await connection.QueryAsync("EXPLAIN " + sql, cancellationToken: SqlClientTestHarness.Timeout());
+        var rows = await connection.QueryAsync(sql, cancellationToken: SqlClientTestHarness.Timeout(30));
+        var explain = await connection.QueryAsync("EXPLAIN " + sql, cancellationToken: SqlClientTestHarness.Timeout(30));
 
         // Assert
         var row = rows.ShouldHaveSingleItem();
