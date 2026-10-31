@@ -9,7 +9,11 @@ quoted names preserve case and doubled quotes decode to one quote. Canonical ren
 the normalized name. These commands add three profile clauses (SAVEPOINT, RELEASE SAVEPOINT,
 ROLLBACK TO SAVEPOINT). SET TRANSACTION inside an active scope is CS04074. Releasing the last
 scope permits otherwise-early SET again; ROLLBACK TO retains its scope and the refusal. Ordinary
-SQL statement failures remain statement-atomic and keep earlier work usable.
+SQL statement failures remain statement-atomic and keep earlier work usable. Storage corruption
+and I/O failures, including named-control parameter reads and result preparation, abort the explicit transaction
+under #1364; incomplete partial undo instead retains the recoverable CK04009 fence. Named
+CK04009 diagnostics retain the statement span. A closed database with a live fence returns
+CS04005 over SQL and keeps the connection open.
 
 Duplicate names are allowed; the newest matching scope wins. RELEASE discards the named scope
 and every newer scope, retaining their effects. ROLLBACK TO undoes rows, index entries and scoped

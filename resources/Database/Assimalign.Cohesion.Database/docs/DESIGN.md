@@ -29,7 +29,18 @@ Graph/Documents statement failure still aborts the whole transaction: ROLLBACK T
 that failure (owner decision, 2026-10-25), unlike PostgreSQL aborted subtransactions. The read
 fence uses a volatile read of the existing kernel admission flags, adding no monitor or allocated
 object to a transaction that never creates a savepoint. CK04012 requires an explicit bound
-transaction; CK04013 denotes an absent name. The coordinator records the actual scope-discard transition in error-only exception metadata keyed by its opaque owned token. The root trims descendants only with that attempt's evidence; a canceled or refused pre-admission outer retry cannot discard a still-live inner name. This also preserves newest-name lookup when discarded descendants shadow an older duplicate. No public member or unmarked transaction field is added. Unexpected cancellation thrown by admitted undo is CK04009; an owned carrier retains its original cause and admission evidence until model translation, keeping pre-admission cancellation distinct. Exception-data synchronization follows kernel release and never spans callbacks or root/kernel calls. UpdateSavepointContext requires this active transaction's immutable id and sequence and the admitted configuration callback; validation adds no tracking monitor or snapshot allocation. RunningOperations counts admitted work and hides the control/configuration reservations, always reporting a nonnegative number. Offline and aborted/ended causes precede the retry fence.
+transaction; CK04013 denotes an absent name. The coordinator notifies the owning rollback attempt
+when it discards descendants. The root consumes that attempt-local state once; no exception Data
+is read or written and public kernel callers retain no token through a failure. A refused or
+canceled pre-admission retry cannot trim live inner names. Unexpected cancellation after admission
+is CK04009 with the original cancellation as its cause.
+UpdateSavepointContext requires the admitted configuration callback and the exact current kernel
+handle by reference identity. TransactionContext.Current reuses the existing lifecycle drain
+reference for replacement identity, including while an end drains applies; validation adds no
+monitor, snapshot copy or unmarked field. RunningOperations hides control/configuration sentinels.
+Offline propagation runs outside the root monitor because it may wait on storage latches. A
+disposed database precedes a live undo fence on direct controls, refusals and commit as well as
+model statements; ordinary aborted/ended and corruption precedence remains intact.
 All three language clients retain their negotiated
 Ready I/T/E and rollback-on-pool-return contracts.
 

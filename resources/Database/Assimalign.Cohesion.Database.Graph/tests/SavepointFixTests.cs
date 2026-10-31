@@ -44,7 +44,7 @@ public sealed class SavepointFixTests
         visits.ShouldBe(1);
         failure.Diagnostics[0].Code.ShouldBe("CK04009");
         var cause = failure.InnerException.ShouldBeOfType<OperationCanceledException>()!;
-        cause.InnerException.ShouldBeSameAs(injected);
+        cause.ShouldBeSameAs(injected);
         cause.Data.Contains(typeof(TransactionSavepoint)).ShouldBeFalse();
         TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
         await session.ExecuteAsync("ROLLBACK TO scope", cancellationToken: timeout.Token);
@@ -145,28 +145,32 @@ public sealed class SavepointFixTests
         values.ShouldBe(new long[] { 1 });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Graph] - Create and release failures use the statement translator (#1726)")]
+    [Theory(DisplayName = "Cohesion Test [Graph] - Memory-only create and release allocation faults preserve identity and transaction outcome (#1726)")]
     [InlineData("SAVEPOINT other")]
     [InlineData("RELEASE scope")]
-    public async Task ExecuteAsync_ControlIoFailure_ShouldUseStatementCode(string control)
+    public async Task ExecuteAsync_ControlAllocationFailure_ShouldKeepStatementPolicy(string control)
     {
-        // Arrange
-        await using var engine = GraphDatabaseEngine.Create("control-translation", new());
+        // Arrange: marker/lock/scope registration allocates; it performs no production I/O.
+        await using var engine = GraphDatabaseEngine.Create("control-allocation", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("BEGIN");
         await session.ExecuteAsync("SAVEPOINT scope");
+        var transaction = session.CurrentTransaction!;
+        var injected = new OutOfMemoryException("Injected marker allocation failure");
         int admissions = 0;
-        SetAdmissionObserver(database.Coordinator, () => { admissions++; throw new IOException("Injected admitted control failure"); });
+        SetAdmissionObserver(database.Coordinator, () => { admissions++; throw injected; });
 
         // Act
-        DatabaseException failure;
-        try { failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(control)); }
+        Exception? failure;
+        try { failure = await Record.ExceptionAsync(() => session.ExecuteAsync(control).AsTask()); }
         finally { SetAdmissionObserver(database.Coordinator, null); }
 
-        // Assert
-        failure.Diagnostics[0].Code.ShouldBe("CG06006");
+        // Assert: the ordinary model statement policy aborts the explicit transaction.
+        failure.ShouldBeSameAs(injected);
         admissions.ShouldBe(1);
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        transaction.Context.State.ShouldBe(TransactionState.RolledBack);
         await session.ExecuteAsync("ROLLBACK");
     }
 

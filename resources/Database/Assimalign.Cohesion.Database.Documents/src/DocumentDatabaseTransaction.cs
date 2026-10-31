@@ -149,7 +149,12 @@ public sealed class DocumentDatabaseTransaction : DatabaseTransaction
     }
 
     /// <inheritdoc />
-    protected override DatabaseException? GetOfflineRefusal() => _database.GetOfflineRefusal();
+    protected override DatabaseException? GetOfflineRefusal()
+    {
+        if (TransactionCoordinator.IsPartialUndoPending(KernelContext))
+        { ObjectDisposedException.ThrowIf(_database.IsClosed, _database); }
+        return _database.GetOfflineRefusal();
+    }
 
     /// <inheritdoc />
     protected override DatabaseException CreateAbortedException(Exception? cause, bool commit)

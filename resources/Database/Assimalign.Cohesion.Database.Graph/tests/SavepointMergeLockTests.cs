@@ -10,6 +10,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Transactions;
@@ -19,6 +20,46 @@ namespace Assimalign.Cohesion.Database.Graph.Tests;
 [Collection("Savepoint engine races")]
 public sealed class SavepointMergeLockTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph] - Matched marked MERGE uses no WAL, undo bracket or durability wait even with fsync failure armed (#1726)")]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_ReadOnlyMerge_ShouldRemainMemoryOnly(bool undo, bool failFsync)
+    {
+        // Arrange
+        var strategy = new FaultInjectingJournalStorageStrategy(durable: true);
+        await using var engine = GraphDatabaseEngine.Create("memory-merge", new() { StorageStrategy = strategy,
+            CheckpointInterval = TimeSpan.FromHours(1), PageWriteBackInterval = TimeSpan.FromHours(1), MaintenanceInterval = TimeSpan.FromHours(1) });
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("MERGE (:Item {id: 1})");
+        long journal = database.DataStorage.WriteAheadJournal.Length;
+        int brackets = 0, flushes = 0;
+        SetTransactionCommitting(database.DataStorage, _ => brackets++);
+        FaultInjectingJournalStorageStrategy.BeforeCommitFlush = () => flushes++;
+        using var failure = failFsync ? FaultInjectingJournalStorageStrategy.FailJournalFlushes(1) : null;
+
+        // Act
+        try
+        {
+            await session.ExecuteAsync("BEGIN");
+            await session.ExecuteAsync("SAVEPOINT scope");
+            await session.ExecuteAsync("MERGE (:Item {id: 1})");
+            if (undo) { await session.ExecuteAsync("ROLLBACK TO scope"); }
+            await session.ExecuteAsync("COMMIT");
+        }
+        finally { SetTransactionCommitting(database.DataStorage, null); FaultInjectingJournalStorageStrategy.BeforeCommitFlush = null; }
+
+        // Assert
+        database.DataStorage.WriteAheadJournal.Length.ShouldBe(journal);
+        brackets.ShouldBe(0);
+        flushes.ShouldBe(0);
+        if (failure is not null) { failure.Attempts.ShouldBe(0); failure.Remaining.ShouldBe(1); }
+        database.IsOffline.ShouldBeFalse();
+        session.State.ShouldBe(SessionState.Open);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph] - Marked MERGE bookkeeping drains before rollback or disposal removes its ledger (#1726)")]
     [InlineData(false)]
     [InlineData(true)]
@@ -49,10 +90,9 @@ public sealed class SavepointMergeLockTests
             var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             using var release = new ManualResetEventSlim();
             int armed = 0;
-            SetTransactionCommitting(database.DataStorage, bracket =>
+            SetTrackedChangeObserver(null, () =>
             {
-                if (database.Coordinator.TryGetStorageTransaction(transaction.Context, out var current) &&
-                    ReferenceEquals(bracket, current) && Interlocked.CompareExchange(ref armed, 1, 0) == 0)
+                if (Interlocked.CompareExchange(ref armed, 1, 0) == 0)
                 {
                     Interlocked.Increment(ref admitted);
                     entered.TrySetResult();
@@ -73,13 +113,16 @@ public sealed class SavepointMergeLockTests
             {
                 await entered.Task.WaitAsync(timeout.Token);
                 ending = dispose ? transaction.DisposeAsync().AsTask() : transaction.RollbackAsync(timeout.Token).AsTask();
-                ending.IsCompleted.ShouldBeFalse("the admitted bookkeeping bracket must drain first");
+                // WaitForAppliesAsync publishes this signal only after an end has claimed
+                // the lifecycle and observed a nonzero admission count. A mere yield is insufficient.
+                Drained(transaction.Context).ShouldBeOfType<TaskCompletionSource>("the end must actually wait for admitted memory bookkeeping");
+                ending.IsCompleted.ShouldBeFalse();
                 pendingEnds++;
             }
             finally
             {
                 release.Set();
-                SetTransactionCommitting(database.DataStorage, null);
+                SetTrackedChangeObserver(null, null);
                 try { failure = await Record.ExceptionAsync(() => acquiring); }
                 finally
                 {
@@ -167,6 +210,12 @@ public sealed class SavepointMergeLockTests
         await Execute(session, "MERGE (:Item {id: 100})");
         await Execute(session, "COMMIT");
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "set_BeforeTrackedChange")]
+    private static extern void SetTrackedChangeObserver(GraphMergeLocks? type, Action? observer);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_drained")]
+    private static extern ref object? Drained(TransactionContext context);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "set_TransactionCommitting")]
     private static extern void SetTransactionCommitting(global::Assimalign.Cohesion.Database.Storage.Storage storage, Action<StorageTransaction>? observer);

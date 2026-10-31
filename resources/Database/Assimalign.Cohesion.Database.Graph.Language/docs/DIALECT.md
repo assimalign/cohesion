@@ -14,7 +14,9 @@ recover them, and only whole ROLLBACK recovers (owner, 2026-10-25).
 Duplicate names are allowed; the newest matching scope wins. RELEASE discards the named scope
 and every newer scope, retaining their effects. ROLLBACK TO undoes rows, index entries and scoped
 locks after its target, discards newer scopes and keeps the target for repeated rollback. The
-root transaction stays open and can continue work and commit. Commands require an explicit
+root transaction stays open and can continue work and commit. A matched MERGE that writes no
+data remains read-only even inside a savepoint: its bookkeeping requires no journal append,
+durability wait or physical undo bracket. Commands require an explicit
 transaction (CK04012); an unknown name is CK04013. Successful controls return affected count zero.
 Pre-canceled controls change nothing; admitted undo completes despite later cancellation.
 Incomplete undo reports Faulted transaction status and CK04009 for all work except rollback to

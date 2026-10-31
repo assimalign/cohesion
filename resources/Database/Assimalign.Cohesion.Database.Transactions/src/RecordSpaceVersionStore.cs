@@ -120,6 +120,9 @@ public sealed class RecordSpaceVersionStore : VersionStore
         lock (_sync) { entries.RemoveRange(_statementPosition, entries.Count - _statementPosition); }
     }
 
+    internal void RecordMemoryUndo(TransactionSequence writer, RecordVersionIndex undo)
+        => Record(writer, new LedgerEntry(LedgerEntryKind.Memory, 0, undo));
+
     private int LedgerPosition(TransactionSequence writer)
         => _ledger.TryGetValue(writer.Value, out var entries) ? entries.Count : 0;
 
@@ -170,7 +173,12 @@ public sealed class RecordSpaceVersionStore : VersionStore
         }
 
         lock (_sync) { _undoScopes![writer.Value].TombstonesToUndo = tombstonesToUndo; }
-        return entries is not null && entries.Count > marker.Position;
+        if (entries is not null)
+        {
+            for (int i = marker.Position; i < entries.Count; i++)
+            { if (entries[i].Kind != LedgerEntryKind.Memory) { return true; } }
+        }
+        return false;
     }
 
     internal async ValueTask RollbackToMarkerUnderGateAsync(TransactionSequence writer, TransactionUndoMarker marker)
@@ -190,7 +198,16 @@ public sealed class RecordSpaceVersionStore : VersionStore
         while (entries is not null && entries.Count > marker.Position)
         {
             int end = entries.Count;
+            if (entries[end - 1].Kind == LedgerEntryKind.Memory)
+            {
+                entries[end - 1].Index!.StatementRolledBack();
+                lock (_sync) { entries.RemoveAt(end - 1); }
+                continue;
+            }
             int start = Math.Max(marker.Position, end - mutationBatchSize);
+            // Keep memory callbacks outside physical brackets and preserve reverse order.
+            for (int i = end - 2; i >= start; i--)
+            { if (entries[i].Kind == LedgerEntryKind.Memory) { start = i + 1; break; } }
             using var bracket = _storage.BeginTransaction();
             for (int index = end - 1; index >= start; index--)
             {
@@ -629,11 +646,19 @@ public sealed class RecordSpaceVersionStore : VersionStore
         await _applyGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            for (int end = entries.Count; end > 0; end -= mutationBatchSize)
+            for (int end = entries.Count; end > 0;)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                using var bracket = _storage.BeginTransaction();
+                if (entries[end - 1].Kind == LedgerEntryKind.Memory)
+                {
+                    entries[end - 1].Index!.StatementRolledBack();
+                    end--;
+                    continue;
+                }
                 int start = Math.Max(0, end - mutationBatchSize);
+                for (int i = end - 2; i >= start; i--)
+                { if (entries[i].Kind == LedgerEntryKind.Memory) { start = i + 1; break; } }
+                using var bracket = _storage.BeginTransaction();
                 for (int index = end - 1; index >= start; index--)
                 {
                     removed += await UndoEntryAsync(writer, entries[index], bracket, cancellationToken).ConfigureAwait(false);
@@ -642,6 +667,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
                 // Undo remains idempotent across batches: every mutation checks
                 // stamps, so retry/recovery can repeat already committed batches.
                 bracket.Commit(awaitDurability: false);
+                end = start;
             }
         }
         finally
@@ -797,6 +823,7 @@ public sealed class RecordSpaceVersionStore : VersionStore
         Tombstoned,
         IndexEntryCreated,
         IndexEntryTombstoned,
+        Memory,
     }
 
     private readonly record struct LedgerEntry(

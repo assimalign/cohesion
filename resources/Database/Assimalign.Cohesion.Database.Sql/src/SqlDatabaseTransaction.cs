@@ -159,7 +159,8 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     /// (<see cref="TryBeginStatement"/> returned false): the base's refusal, for the session.
     /// </summary>
     /// <returns>The refusal.</returns>
-    internal DatabaseException CreateStatementRefusal() => CreateRefusal();
+    internal DatabaseException CreateStatementRefusal()
+        => _database.IsClosed ? CreateAbortedException(null, commit: false) : CreateRefusal();
 
     internal bool HasStorageFailure => _storageFailure is not null;
 
@@ -242,7 +243,12 @@ public sealed class SqlDatabaseTransaction : DatabaseTransaction
     }
 
     /// <inheritdoc />
-    protected override DatabaseException? GetOfflineRefusal() => _database.GetOfflineRefusal();
+    protected override DatabaseException? GetOfflineRefusal()
+    {
+        if (TransactionCoordinator.IsPartialUndoPending(KernelContext))
+        { ObjectDisposedException.ThrowIf(_database.IsClosed, _database); }
+        return _database.GetOfflineRefusal();
+    }
 
     /// <inheritdoc />
     protected override DatabaseException CreateAbortedException(Exception? cause, bool commit)

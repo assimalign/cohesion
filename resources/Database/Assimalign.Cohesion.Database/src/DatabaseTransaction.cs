@@ -135,7 +135,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <summary>Updates the current context during this transaction's admitted isolation configuration.</summary>
     /// <param name="context">The replacement lifecycle handle.</param>
     /// <exception cref="ArgumentNullException">The context is null.</exception>
-    /// <exception cref="ArgumentException">The context belongs to another transaction or is not active.</exception>
+    /// <exception cref="ArgumentException">The context is foreign, stale, a statement view, a snapshot pin or not active.</exception>
     /// <exception cref="InvalidOperationException">Isolation configuration is not running on this thread.</exception>
     protected void UpdateSavepointContext(TransactionContext context)
     {
@@ -143,12 +143,13 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         // TryConfigureIsolationLevel owns _sync and its -2 reservation throughout the callback.
         if (!Monitor.IsEntered(_sync) || _operations != -2 || _ended || Failure is not null)
         { throw new InvalidOperationException(ErrorMessages.SavepointContextConfigurationRequired); }
-        // Identity and ordering sequence are immutable across isolation replacement. Checking
-        // those owned values adds no manager/tracking monitor or snapshot allocation to SET.
-        if (_savepointContext is null || context.Id != _id || context.Sequence != _savepointContext.Sequence ||
-            context.State != TransactionState.Active)
-        { throw new ArgumentException(ErrorMessages.SavepointContextOwnerInvalid, nameof(context)); }
-        _savepointContext = context;
+        // Resolve the manager-issued handle from this transaction's existing lifecycle slot.
+        // Reference identity refuses foreign handles, stale replacements and statement views
+        // without a tracking monitor, snapshot copy or additional transaction field.
+        if (_savepointContext is not null && ReferenceEquals(context, _savepointContext.Current) &&
+            context.State == TransactionState.Active)
+        { _savepointContext = context; return; }
+        throw new ArgumentException(ErrorMessages.SavepointContextOwnerInvalid, nameof(context));
     }
 
     /// <summary>Gets whether the transaction currently contains a named undo scope.</summary>
@@ -168,11 +169,12 @@ public abstract class DatabaseTransaction : IAsyncDisposable
         await _endGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         bool admitted = false;
         int targetIndex = -1;
+        bool scopeDiscarded = false;
         try
         {
             lock (_sync)
             {
-                if (_ended || Failure is not null || GetKernelState() != TransactionState.Active) { throw CreateRefusal(); }
+                if (_ended || Failure is not null || GetKernelState() != TransactionState.Active) { throw CreateRefusalLocked(); }
                 if (_operations != 0) { throw ControlBusyRefusal(); }
                 if (operation != DatabaseSavepointOperation.Rollback && UndoPending) { throw UndoRefusal(); }
                 _operations = -1;
@@ -202,29 +204,17 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             }
             else
             {
-                await _savepointCoordinator.RollbackToSavepointAsync(_savepointContext, Savepoints![index].Token, cancellationToken).ConfigureAwait(false);
+                await _savepointCoordinator.RollbackToSavepointAsync(_savepointContext, Savepoints![index].Token, cancellationToken,
+                    () => scopeDiscarded = true).ConfigureAwait(false);
                 Savepoints.RemoveRange(index + 1, Savepoints.Count - index - 1);
             }
         }
         catch (Exception failure)
         {
-            // Only this attempt's kernel admission can discard descendants. A pending fence
-            // alone says nothing about a canceled/refused outer retry. The coordinator stamps
-            // every caught failure with this owned token's actual scope-discard transition.
-            bool scopeDiscarded = false;
-            if (operation == DatabaseSavepointOperation.Rollback && targetIndex >= 0)
-            {
-                var token = Savepoints![targetIndex].Token;
-                var data = failure.Data;
-                // End gate -> exception-data sync root; kernel admission has ended. Never
-                // call root/kernel/ledger code while locked. Adapters may reuse an exception.
-                lock (data.SyncRoot)
-                {
-                    scopeDiscarded = data[token] is true;
-                    data.Remove(token); // Consumed evidence must not retain the coordinator.
-                }
-                if (scopeDiscarded) { Savepoints.RemoveRange(targetIndex + 1, Savepoints.Count - targetIndex - 1); }
-            }
+            // This attempt owns its admission evidence. A refused retry starts with false;
+            // exceptions never carry tokens, contexts or coordinators.
+            if (scopeDiscarded && targetIndex >= 0)
+            { Savepoints!.RemoveRange(targetIndex + 1, Savepoints.Count - targetIndex - 1); }
             if (TransactionCoordinator.GetUndoFailureCode(failure) is { } code)
             {
                 throw new DatabaseException(failure.Message, [new Assimalign.Cohesion.Database.Types.Diagnostic
@@ -232,12 +222,9 @@ public abstract class DatabaseTransaction : IAsyncDisposable
             }
             if (scopeDiscarded && UndoPending && failure is OperationCanceledException canceled)
             {
-                // Undo ignores cancellation after admission. Give its unexpected cancellation
-                // fault an owned carrier, so a reused adapter exception cannot share this witness
-                // with another attempt. The model translates it, then consumes the witness.
-                var reported = new OperationCanceledException(canceled.Message, canceled, canceled.CancellationToken);
-                reported.Data[typeof(TransactionSavepoint)] = true;
-                throw reported;
+                // Cancellation faults after admission retain their original cause.
+                throw new DatabaseException(canceled.Message, [new Types.Diagnostic
+                { Code = "CK04009", Message = canceled.Message, Severity = Types.DiagnosticSeverity.Error }], canceled);
             }
             throw;
         }
@@ -385,6 +372,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <param name="cancellationToken">Observed only until the commit starts.</param>
     /// <returns>A task that completes once the commit ended.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled before the commit started.</exception>
+    /// <exception cref="ObjectDisposedException">The database is disposed while a live undo fence remains.</exception>
     /// <exception cref="DatabaseException">
     /// The transaction was aborted or already ended (nothing was committed), or an operation of the
     /// transaction is still running or partial undo needs recovery (the transaction stays open); the model's own errors besides.
@@ -682,28 +670,31 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <returns>The refusal.</returns>
     protected internal DatabaseException CreateRefusal()
     {
-        lock (_sync)
+        // Lock order: offline/storage propagation completes before root state is taken.
+        // A leaf probe may wait for storage latches behind an in-flight write or flush.
+        if (GetOfflineRefusal() is { } offline) { return offline; }
+        lock (_sync) { return CreateRefusalLocked(); }
+    }
+
+    // Caller holds root state; never run a leaf/storage probe from this helper.
+    private DatabaseException CreateRefusalLocked()
+    {
+        if (Failure is not null)
         {
-            // The leaf's offline observation is nonblocking. Lifecycle/abort causes win over
-            // the retry fence, including an offline disposal that skipped physical rollback.
-            if (GetOfflineRefusal() is { } offline) { return offline; }
-            if (Failure is not null)
-            {
-                return CreateAbortedException(Failure, commit: false);
-            }
-
-            if (_ended)
-            {
-                return GetKernelState() == TransactionState.Active
-                    ? DatabaseException.CreateRootFailure("CK04006", ErrorMessages.TransactionCreateRefusalDatabase)
-                    : DatabaseException.CreateRootFailure("CK04005", ErrorMessages.TransactionCreateRefusalDatabase2);
-            }
-
-            if (UndoPending) { return UndoRefusal(); }
-            if (_operations < 0) { return ControlBusyRefusal(); }
-
-            return CreateAbortedException(null, commit: false);
+            return CreateAbortedException(Failure, commit: false);
         }
+
+        if (_ended)
+        {
+            return GetKernelState() == TransactionState.Active
+                ? DatabaseException.CreateRootFailure("CK04006", ErrorMessages.TransactionCreateRefusalDatabase)
+                : DatabaseException.CreateRootFailure("CK04005", ErrorMessages.TransactionCreateRefusalDatabase2);
+        }
+
+        if (UndoPending) { return UndoRefusal(); }
+        if (_operations < 0) { return ControlBusyRefusal(); }
+
+        return CreateAbortedException(null, commit: false);
     }
 
     /// <summary>
@@ -735,7 +726,9 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <summary>
     /// Gets the model's refusal while the database cannot serve the transaction because it is
     /// offline (#1243), or null while it is online. Called before a commit or rollback starts, and
-    /// before every kernel rollback, which an offline database skips.
+    /// before every kernel rollback, which an offline database skips. Always called outside
+    /// the root monitor: propagation may acquire storage latches or wait for an in-flight flush.
+    /// A leaf must also refuse disposal before a live partial-undo fence.
     /// </summary>
     /// <returns>The refusal to throw, or null.</returns>
     protected abstract DatabaseException? GetOfflineRefusal();

@@ -45,20 +45,8 @@ internal static class DatabaseFailure
     // before admission and lifecycle/corruption failures keep their existing contracts.
     internal static Exception TranslateSavepointFailure(Exception reported, Transactions.TransactionContext? context)
     {
-        bool admittedCancellation = false;
-        if (Find<OperationCanceledException>(reported) is { } cancellation)
-        {
-            // No root/kernel lock is held or acquired under exception-data sync. The root's
-            // owned carrier distinguishes a fault in undo from cancellation before admission.
-            var data = cancellation.Data;
-            lock (data.SyncRoot)
-            {
-                admittedCancellation = data[typeof(Transactions.TransactionSavepoint)] is true;
-                data.Remove(typeof(Transactions.TransactionSavepoint));
-            }
-        }
         return context is not null && Transactions.TransactionCoordinator.IsPartialUndoPending(context)
-            && (reported is not OperationCanceledException || admittedCancellation)
+            && reported is not OperationCanceledException
             && Find<DatabaseOfflineException>(reported) is null
             && Find<DatabaseTransactionCommitUnconfirmedException>(reported) is null
             && Find<StorageOfflineException>(reported) is null
