@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -300,7 +302,9 @@ public sealed class SqlLanguageConformanceTests
         // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
         // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
         // Named savepoint controls (#1726, XT-4) add exactly three measured clauses.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(90);
+        // SQL/JSON query functions (#1722, SQ-N2) add three measured expression clauses.
+        // Table COPY TO STDOUT (#1724, SQ-C1) adds one measured streaming clause.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(91);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -319,7 +323,9 @@ public sealed class SqlLanguageConformanceTests
                 (await ExecuteAsync(session, setup)).Status.ShouldBe(DatabaseResultStatus.Success, $"{clause}: {setup}");
             }
 
-            var result = await ExecuteAsync(session, executionCase.Statement);
+            var result = executionCase.Execute is { } execute
+                ? await execute(session, executionCase.Statement)
+                : await ExecuteAsync(session, executionCase.Statement);
             result.Status.ShouldBe(DatabaseResultStatus.Success, clause);
             await executionCase.Verify(session, result);
         }
@@ -1137,6 +1143,16 @@ public sealed class SqlLanguageConformanceTests
                 await ExecuteAsync(session, "INSERT INTO t VALUES (9, 'after', 99);");
                 await ExpectRowsAsync(session, "SELECT id FROM t;", [[9]]);
             }),
+        [SqlClauses.CopyTo] = new("COPY t(name,id) TO STDOUT (FORMAT csv, HEADER);", _seed,
+            expression => expression is SqlCopyToExpression { Columns.Count: 2, Options.IsCsv: true },
+            static (_, result) => { result.AffectedCount.ShouldBe(3); return Task.CompletedTask; },
+            static async (session, statement) =>
+            {
+                using var output = new MemoryStream();
+                long rows = await session.CopyToAsync(statement, output, CancellationToken.None);
+                Encoding.UTF8.GetString(output.ToArray()).ShouldBe("name,id\nAda,1\nGrace,2\nAlan,3\n");
+                return new SqlQueryResult(DatabaseResultStatus.Success, rows);
+            }),
         [SqlClauses.CreateView] = new("CREATE VIEW v AS SELECT id FROM t;", _seed,
             expression => expression is SqlCreateViewExpression,
             async (session, _) => await ExpectRowsAsync(session, "SELECT id FROM v ORDER BY id LIMIT 1;", [[1]])),
@@ -1503,5 +1519,6 @@ public sealed class SqlLanguageConformanceTests
         string Statement,
         string[] Setup,
         Func<SqlQueryExpression, bool> ContainsClause,
-        Func<SqlDatabaseSession, DatabaseResult, Task> Verify);
+        Func<SqlDatabaseSession, DatabaseResult, Task> Verify,
+        Func<SqlDatabaseSession, string, Task<DatabaseResult>>? Execute = null);
 }

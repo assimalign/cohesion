@@ -23,6 +23,8 @@ public enum SqlQueryCommandType
     Rollback,
     /// <summary>Empty a set of tables through deferred storage replacement.</summary>
     Truncate,
+    /// <summary>Export a table through a caller-owned stream.</summary>
+    CopyTo,
     /// <summary>Associate source rows with a target and select ordered actions.</summary>
     Merge,
     /// <summary>Discard logical-session state outside a transaction.</summary>

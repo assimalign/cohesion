@@ -4,6 +4,10 @@
 <resheader name="version"><value>2.0</value></resheader>
 <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
 <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CopyCapabilityRequired" xml:space="preserve"><value>COPY TO requires the negotiated sql.outbound-stream capability.</value></data>
+  <data name="CopyDeliveryFailed" xml:space="preserve"><value>COPY destination delivery failed.</value></data>
+  <data name="CopyDestinationInvalid" xml:space="preserve"><value>The COPY destination must be writable.</value></data>
+  <data name="CopyStreamInvalid" xml:space="preserve"><value>CK07005: The SQL export stream order, payload or terminal counters are invalid.</value></data>
   <data name="DiagnosticsOrderInvalid" xml:space="preserve"><value>Diagnostics must immediately precede completion or Error.</value></data>
   <data name="SqlClientCreateArgument" xml:space="preserve"><value>Connection settings are required.</value></data>
   <data name="SqlClientCreateArgument2" xml:space="preserve"><value>A connection factory is required.</value></data>

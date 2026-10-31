@@ -1,5 +1,64 @@
 # Assimalign.Cohesion.Database.Sql — Design
 
+## Bounded COPY TO (#1724, SQ-C1)
+
+SqlDatabaseSession.CopyToAsync owns a caller-supplied Stream through ordinary session admission,
+timeout, reclamation and auto-commit snapshot lifetime. Inside BEGIN it refuses with CS04075.
+The dedicated executor binds a physical table and actual CAST(column AS TEXT) projections,
+then encodes one visible row at a time. It never invokes SELECT result materialization. Lock
+order is session admission, snapshot, binding's short catalog monitor, then page read pins;
+no writer/row/object lock or page latch spans destination backpressure. The root snapshot and
+reclamation epoch retain historical rows/tables until success, exception, cancellation or teardown.
+An internal delivery exception stores the original destination failure outside InnerException
+during cleanup, preventing generic IOException storage classification; the public seam rethrows
+that exact failure after releasing the snapshot. The destination always remains open.
+
+COPY uses SELECT's owner-scoped physical iterator: it visits only the table's data pages and
+copies no unrelated rows or index pages. The iterator verifies ownership while copying each row;
+no later page-header lookup can race reclamation of an unrelated retired owner. It retains an
+8-byte entry per table page, one decoded row, row text, one nonlocking iterator pin and 16 KiB
+encoded bytes. The byte buffer fills across rows before delivery; rows wider after a custom cast
+still encode in fixed chunks. No public storage seam or shared streaming change is needed.
+Ordinary query/DML allocations and planning are unchanged.
+
+Deferred migration admission includes the COPY target before snapshot capture and binding, so
+headers and missing values come from the published layout. Embedded ordinary execution and COPY
+share the root session hold; the export's own internal request passes through that admission.
+An overlapping statement, BEGIN or SAVEPOINT control is refused while the export holds it.
+
+The server's separately negotiated sql.outbound-stream exchange uses Sql.Protocol frames 80-84
+and Database.Client's existing framed exchange admission. The client copies bounded frames
+directly to its supplied destination.
+Each data frame has an empty delivery acknowledgment; the one-frame window bounds queued bytes
+even on transports without backpressure. Success certifies row/byte counts; terminal statement
+Errors before CopyStart preserve the connection/transaction. Late Errors retain their diagnostic
+and partial destination bytes, but discard the transfer to avoid racing a pending acknowledgment.
+Incomplete responses, cancellation and destination failures discard the rental. COPY drains the
+existing negotiated Ready postamble; ordinary Execute framing, protocol version and disk formats
+remain unchanged. EOF or peer-close cancellation while awaiting a delivery acknowledgment closes as PeerClosed; malformed
+acknowledgments remain protocol violations. Blank COPY-frame text receives CS00003 ParseFailure
+and retains the session. Session disposal cancels an active embedded COPY and joins snapshot cleanup;
+destinations must honor cancellation and must not reenter the session from a write callback.
+COPY FROM remains gated.
+See Sql.Language DIALECT for defaults, PostgreSQL references and representation differences.
+
+| Code | COPY condition |
+|---|---|
+| CS01070 | Invalid, repeated or incompatible option |
+| CS01071 | Repeated output column or FORCE_QUOTE outside output |
+| CS04075 | COPY inside BEGIN |
+| CS05045 | Malformed Unicode in rendered text (existing result-encoding condition) |
+| CS05095 | Streaming API received another statement kind |
+| CS05096 | Missing export sink or negotiated capability |
+| CK07005 | Invalid export envelope/order/counters |
+
+The conformance corpus covers every storage scalar, independent PostgreSQL field escaping,
+selected/default columns, early failures, bounded byte progress, both wire transports and
+counter-driven non-parallel writer overlap. Frame/acknowledgment counts scale with encoded bytes,
+and visited-page counts and minimum-of-three allocation ceilings exclude unrelated-table growth.
+Existing SQL Release guards continue to cover ordinary requests. Acknowledgment waits have no
+independent deadline, as with ordinary SELECT delivery; a delivery deadline remains a follow-up.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The SQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO

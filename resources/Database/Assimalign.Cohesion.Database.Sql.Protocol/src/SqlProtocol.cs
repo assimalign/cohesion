@@ -5,8 +5,11 @@ namespace Assimalign.Cohesion.Database.Sql.Protocol;
 /// <summary>The immutable Sql endpoint message family.</summary>
 public static partial class SqlProtocol
 {
+    /// <summary>Gets the independently negotiated bounded SQL table export capability.</summary>
+    public static ProtocolCapability OutboundStream { get; } = new("sql.outbound-stream", 80, 81, 82, 83, 84);
+
     /// <summary>Gets the family bound to every Sql protocol connection.</summary>
-    public static ProtocolMessageFamily Family { get; } = new("Sql", [ProtocolCapability.Diagnostics, ProtocolCapability.TransactionStatus], "DISCARD ALL", 5, 6, 7, 8, 9);
+    public static ProtocolMessageFamily Family { get; } = new("Sql", [ProtocolCapability.Diagnostics, ProtocolCapability.TransactionStatus, OutboundStream], "DISCARD ALL", 5, 6, 7, 8, 9, 80, 81, 82, 83, 84);
 
     extension(ProtocolMessageType)
     {

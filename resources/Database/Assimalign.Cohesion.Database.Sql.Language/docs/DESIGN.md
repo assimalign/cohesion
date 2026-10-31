@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## COPY table export grammar (#1724)
+
+SqlCopyToExpression retains the ordered table column list and immutable resolved SqlCopyOptions.
+COPY and its option words remain contextual, preserving every existing identifier and persisted
+expression. The profile adds COPY TO STDOUT beside TRUNCATE (+1 clause). The parser validates
+option duplicates and incompatibilities before execution; the renderer emits explicit defaults.
+The language and engine conformance corpora and DIALECT specify PostgreSQL source references,
+formatting differences, parenthesized-only option grammar and deliberate refusals. CS01070 is an
+invalid option; CS01071 is an invalid output-column selection. No persisted syntax changes.
+The execution corpus also verifies table-scoped COPY scan cost, byte-sized delivery batches,
+deferred migration admission and shared embedded-session admission; DIALECT records these contracts.
+
 ## Savepoint grammar and rendering (#1726, XT-4)
 
 Transaction AST nodes retain the normalized SavepointName. The contextual parser and renderer

@@ -1,5 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="CopyAcknowledgmentInvalid" xml:space="preserve"><value>COPY requires an empty delivery acknowledgment after each data frame.</value></data>
+  <data name="CopyDeliveryFailed" xml:space="preserve"><value>COPY destination delivery failed.</value></data>
+  <data name="CopyAlreadyActive" xml:space="preserve"><value>A COPY export is already active.</value></data>
+  <data name="CopySessionBusy" xml:space="preserve"><value>A statement or transaction control (BEGIN or SAVEPOINT) already holds this session.</value></data>
+  <data name="CopyStatementMissing" xml:space="preserve"><value>A COPY statement is required.</value></data>
+  <data name="CopyColumnInvalid" xml:space="preserve"><value>A COPY column selection is repeated, or FORCE_QUOTE names a column outside the export.</value></data>
+  <data name="CopyDestinationInvalid" xml:space="preserve"><value>The COPY destination must be writable.</value></data>
+  <data name="CopyExplicitTransaction" xml:space="preserve"><value>COPY is refused inside an explicit transaction.</value></data>
+  <data name="CopyRowMalformed" xml:space="preserve"><value>A scanned SQL row is shorter than its version header.</value></data>
+  <data name="CopyPhysicalTableRequired" xml:space="preserve"><value>COPY TO supports physical tables only.</value></data>
+  <data name="CopyStatementRequired" xml:space="preserve"><value>The streaming operation requires COPY table TO STDOUT.</value></data>
+  <data name="CopyStreamRequired" xml:space="preserve"><value>COPY TO requires the negotiated SQL outbound-stream capability and streaming consumer API.</value></data>
   <data name="UpsertPredicateInvalid" xml:space="preserve">
     <value>ON CONFLICT target WHERE must use row-local scalar expressions.</value>
   </data>

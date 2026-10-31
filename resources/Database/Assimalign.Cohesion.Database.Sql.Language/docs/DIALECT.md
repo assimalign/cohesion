@@ -1,5 +1,80 @@
 # The Declared SQL Dialect
 
+## COPY TO STDOUT (#1724, SQ-C1)
+
+`COPY table [(column, ...)] TO STDOUT [WITH] [(option, ...)]` exports a physical table
+in written column order, or every live column in catalog order. Row order is unspecified.
+Column binding is case-insensitive; HEADER uses the catalog spelling. COPY and option words are
+contextual identifiers. Parenthesized options support FORMAT text/csv, DELIMITER, NULL,
+HEADER [boolean], QUOTE, ESCAPE, FORCE_QUOTE * or (columns), and ENCODING UTF8/'UTF-8'/UNICODE.
+Scalar option arguments accept strings, words and signed numbers. Unquoted option words fold to
+lowercase; quoted option names and FORMAT values preserve case and must use the lowercase spelling.
+Canonical rendering spells out resolved defaults. Legacy unparenthesized options are excluded
+with CS00003. Unknown, repeated or incompatible options use CS01070; duplicate output columns
+and FORCE_QUOTE columns outside the output use CS01071. Missing columns retain CS01015.
+
+Defaults: text format, tab delimiter, `\N` NULL, no header, UTF-8 without BOM, LF record ends.
+CSV defaults to comma delimiter, empty unquoted NULL, double-quote QUOTE and matching ESCAPE;
+FORCE_QUOTE defaults to no forced fields. HEADER accepts omitted/true/on/1 and false/off/0,
+including quoted/signed/zero-padded integer forms. Encoding aliases follow PostgreSQL's ASCII
+case/punctuation cleanup and 63-byte name limit, but accept UTF-8 only. Delimiter/quote/escape
+must each be a nonzero single ASCII byte.
+Text forbids backslash, dot, lowercase letters and digits as delimiters. Both formats forbid
+CR/LF delimiters and CR/LF/NUL in the NULL marker; NULL cannot contain the delimiter or CSV quote.
+QUOTE/ESCAPE/FORCE_QUOTE require CSV. Options are validated independent of written order.
+These rules follow local PostgreSQL `src/backend/commands/copy.c:389-473,581-780,817-980` and
+`src/common/encnames.c:194-197,519-560`.
+
+Text escapes backslash, delimiter, backspace, form feed, LF, CR, tab and vertical tab. NULL is
+written verbatim. CSV quotes fields matching the NULL marker or containing delimiter, quote,
+CR or LF; it also quotes a single-column `\.`. Inside quotes, quote and escape characters are
+prefixed with ESCAPE. FORCE_QUOTE affects non-NULL data only; headers use ordinary escaping.
+This follows PostgreSQL `src/backend/commands/copyto.c:231-250,1443-1708`.
+
+Values use the engine's actual `CAST(column AS TEXT)`, including application casts and domains.
+Representation differences from PostgreSQL output functions are deliberate: BOOLEAN is
+TRUE/FALSE instead of t/f; CHAR loses trailing padding through CAST; temporal fractions can
+retain seven tick digits instead of PostgreSQL's six microsecond digits; TIMESTAMPTZ retains
+the stored offset with `hh:mm` spelling rather than the session timezone and PostgreSQL's
+abbreviated hour-only offset; INTERVAL has the engine's day/time-only, tick-precision range.
+REAL/DOUBLE use invariant .NET shortest round-trip spelling, which can differ in exponent case,
+notation threshold or selected shortest digits. JSONB preserves validated JSON text spelling
+instead of PostgreSQL's normalized key order and whitespace. BYTEA uses PostgreSQL's default
+lowercase `\x` hex spelling, without its configurable escape output. Integers, declared NUMERIC
+scale, TEXT/VARCHAR, DATE and UUID have the same ordinary spelling within engine type ranges.
+Custom casts own their representation; malformed UTF-16 output refuses with existing CS05045. No PostgreSQL binary compatibility is implied.
+
+Files, PROGRAM, binary, query-form export, views and COPY FROM use CK00001. PostgreSQL's file
+privilege alternative is `src/backend/commands/copy.c:74-110`; Cohesion deliberately refuses it.
+COPY inside BEGIN uses CS04075. Embedded consumers use SqlDatabaseSession.CopyToAsync;
+remote consumers use SqlConnection.CopyToAsync with separately negotiated sql.outbound-stream.
+Ordinary Execute/Query has no export sink and refuses COPY with CS05096. COPY FROM remains
+gated by #1656/#1545; query-form export remains gated by bounded query production (#1523).
+
+One statement snapshot covers binding, row reads and delivery.
+Each data frame has an empty delivery acknowledgment; the one-frame window bounds queued bytes
+even on transports without backpressure. The 16 KiB byte buffer fills across rows before sending,
+so delivery round trips scale with encoded bytes. The producer retains one row, one nonlocking
+page pin, a reusable row encoder and the table-scoped iterator's 8-byte entry per table page.
+It takes no writer, row or object locks. Its physical iterator visits only the target's data
+pages, excluding unrelated tables and indexes. COPY waits for deferred migration admission before
+capturing its snapshot or binding its columns. Embedded statement execution shares COPY's session
+admission; overlapping statements and transaction controls are refused.
+Backpressure, cancellation, disconnect and destination exceptions release statement admission,
+snapshot and buffers. Concurrent commits remain invisible to the export. A destination can
+contain partial output on failure. A statement Error before CopyStart preserves the connection and transaction. Late Errors
+retain their diagnostics but discard the incomplete transfer, including any pending acknowledgment.
+Cancellation, malformed/incomplete responses and destination failures discard the
+rental; missing capability refuses locally and leaves it usable. Existing Execute framing and
+disk formats are unchanged. Remote COPY drains the existing negotiated Ready status postamble.
+Blank text in a COPY frame receives CS00003 ParseFailure and keeps the session. A peer closing
+while an acknowledgment is awaited is recorded as PeerClosed. Destinations must honor cancellation;
+embedded session disposal cancels and waits for its export to release its snapshot.
+
+SqlCopyToTests (language and engine), SqlCopyToWireTests (InMemory/TCP) and SqlCopyProtocolTests
+form the conformance corpus: all scalar types through SELECT CAST plus independent PostgreSQL
+formatting, options, refusals, negotiation, bounded production, early exits and recorded overlap.
+
 ## Savepoint execution conformance (#1726, XT-5)
 
 The engine SavepointMatrixTests and client SavepointFailureWireTests extend the named-control
@@ -1108,7 +1183,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **90 of 92 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), table COPY TO STDOUT (#1724, +1 clause), SQL/JSON path functions JSON_VALUE, JSON_QUERY and JSON_EXISTS (#1722, +3 clauses), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **91 of 93 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -1149,6 +1224,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `CREATE TABLE AS` | Supported | Optional complete output names and WITH [NO] DATA; unpublished durable build and atomic publication. See the CTAS contract above. |
 | `ALTER TABLE` | Supported subset, measured | ADD/DROP COLUMN and ADD/DROP CONSTRAINT execute. Full-definition `ALTER COLUMN c <type> [NULL | NOT NULL] [DEFAULT expression]` retains the validation-only path for nullability, length and precision when storage type, scale, collation and domain stay unchanged; DEFAULT changes on that path use SET/DROP DEFAULT. Tightening and every CHAR length change validate existing values and refuse repadding through that path. Storage-type, scale, domain and collation changes use the shared rewrite; full-definition identity-type changes retain their refusal. RENAME TO, RENAME [COLUMN], ALTER [COLUMN] SET/DROP DEFAULT and SET/DROP NOT NULL also execute (#1122). PostgreSQL TYPE/SET DATA TYPE with optional COLLATE/USING execute through the exclusive rewrite (#1447); see the ALTER TYPE contract below. ADD COLUMN nonvolatile defaults backfill old-row reads and apply to subsequent inserts that omit the column; explicit NULL follows nullability. Nullable additions without a default read NULL. NOT NULL additions to populated tables require a non-null default. Invalid defaults reject before mutation; expression defaults follow the fast-default contract below. Column COLLATE persists and governs default comparisons. See the default, atomicity and MVCC contract below (#1023). DROP COLUMN changes only the catalog: it rewrites no row, survives a crash at any point on one definition, and SELECTs running beside it read every value in its own column; see the DROP COLUMN contract below (#1241). |
 | `TRUNCATE` | Supported | Table lists, per-table ONLY, CONTINUE/RESTART IDENTITY and CASCADE/RESTRICT; auto-commit only; old snapshots retain their rows and defer storage reclamation. See the contract below. |
+| `COPY table [(columns)] TO STDOUT` | Supported | Snapshot-consistent UTF-8 text/CSV, parenthesized PostgreSQL options and bounded outbound streaming; explicit transactions, query form, files, PROGRAM and binary refuse with codes. See COPY TO STDOUT above. |
 | `DROP TABLE` | Supported | `IF EXISTS`; returns after catalog unpublication, with page reclamation asynchronous after older readers finish; the name may be recreated immediately |
 | `CREATE SCHEMA` | Supported subset, measured | `CREATE SCHEMA [IF NOT EXISTS] name` persists an empty SQL namespace; AUTHORIZATION and nested schema elements report named `CK00001` errors. Namespace names compare without case and keep their stored spelling. |
 | `DROP SCHEMA` | Supported subset, measured | `DROP SCHEMA [IF EXISTS] name [RESTRICT \| CASCADE]`; omission means RESTRICT. CASCADE removes contained tables/indexes and incoming foreign keys atomically, retaining external child tables. Compiled ownership blocks the operation. `dbo` cannot be dropped. |
@@ -3197,7 +3273,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 90/92 declared-clause count.
+These contextual exclusions do not change the 91/93 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906

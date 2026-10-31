@@ -56,6 +56,8 @@ public class SqlConformanceTests
     [InlineData("MERGE INTO t USING (SELECT 1 AS k) s ON t.k=s.k WHEN NOT MATCHED THEN INSERT(id,k) OVERRIDING USER VALUE VALUES(CAST('abc' AS INT),1);", SqlQueryCommandType.Merge)]
     [InlineData("CREATE SEQUENCE s OWNED BY t.id;", SqlQueryCommandType.Create)]
     [InlineData("DISCARD ALL;", SqlQueryCommandType.Discard)]
+    [InlineData("COPY t TO STDOUT;", SqlQueryCommandType.CopyTo)]
+    [InlineData("COPY t (b, a) TO STDOUT WITH (FORMAT csv, HEADER, FORCE_QUOTE (a));", SqlQueryCommandType.CopyTo)]
     [InlineData("BEGIN ISOLATION LEVEL READ COMMITTED;", SqlQueryCommandType.Begin)]
     [InlineData("START TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;", SqlQueryCommandType.Begin)]
     [InlineData("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ;", SqlQueryCommandType.Begin)]
