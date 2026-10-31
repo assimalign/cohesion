@@ -106,6 +106,7 @@ public static class SqlLanguageProfile
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
         SqlClauses.Truncate,
+        SqlClauses.CopyTo,
         SqlClauses.CreateView,
         SqlClauses.DropView,
         SqlClauses.DropSchema,

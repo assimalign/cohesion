@@ -66,7 +66,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("SqlDatabaseSession")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession.DebugView))]
-public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
+public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
     private SqlSequenceSessionState? _sequenceState;
     internal SqlSequenceSessionState SequenceState => _sequenceState ??= new SqlSequenceSessionState();
@@ -623,6 +623,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // never runs in a half-rolled-back transaction or silently autocommits (#1225).
         if (CurrentTransaction is { } transaction)
         {
+            if (request.Statement.SqlExpression is SqlCopyToExpression)
+            { throw new SqlExecutionException("CS04075", ErrorMessages.CopyExplicitTransaction); }
             // The admission also keeps a commit from starting while the statement runs. A rollback
             // may still end the transaction underneath it (a host's rollback of a wire session's
             // transaction): the statement then fails, and the kernel applies nothing for it.

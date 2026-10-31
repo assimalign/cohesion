@@ -22,7 +22,7 @@ using Assimalign.Cohesion.Database.Types;
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlQueryExecutor")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlQueryExecutor.DebugView))]
-internal sealed class SqlQueryExecutor
+internal sealed partial class SqlQueryExecutor
 {
     // Deterministic snapshot-versus-publication tests stop before any table binding.
     internal static Action<SqlQueryRequest>? BeforePlan { get; set; }
@@ -64,6 +64,8 @@ internal sealed class SqlQueryExecutor
 
         var parameters = NormalizeParameters(request.Parameters);
         _definitions.EnsureDefinitions(cancellationToken);
+        if (request.Statement.SqlExpression is SqlCopyToExpression copy)
+        { return ExecuteCopyAsync(copy, statement, session?.CopyDestination(request), cancellationToken); }
         BeforePlan?.Invoke(request);
         var planner = new SqlPlanner(_catalog, parameters, _definitions.Functions, cancellationToken, statement);
         SqlPlan plan;

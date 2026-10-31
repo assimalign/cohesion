@@ -1,5 +1,7 @@
 # Assimalign.Cohesion.Database.Sql.Language — Overview
 
+Table COPY TO STDOUT exports text and CSV with validated options and canonical rendering (#1724).
+
 CREATE [UNIQUE] INDEX supports an immutable row-local WHERE predicate. SQ-P1 persists and
 maintains the matching subset; SQ-P2 proves conservative implication for partial-index access,
 ON CONFLICT target-WHERE inference and EXPLAIN proof text. See DIALECT for supported proof

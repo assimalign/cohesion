@@ -4,6 +4,7 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CopyStreamInvalid" xml:space="preserve"><value>CK07005: The SQL export stream payload or terminal counters are invalid.</value></data>
   <data name="ProtocolExecuteMessageDecodeProtocol" xml:space="preserve"><value>Malformed payload: negative parameter count.</value></data>
   <data name="ProtocolExecuteMessageDecodeProtocol2" xml:space="preserve"><value>Malformed payload: invalid parameter length.</value></data>
   <data name="ResultHeaderMessageDecodeProtocol" xml:space="preserve"><value>Unsupported SQL result-header format; rebuild the client and server together.</value></data>

@@ -30,7 +30,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("SqlDatabaseServerSession")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDatabaseServerSession.DebugView))]
-internal sealed class SqlDatabaseServerSession : DatabaseServerSession
+internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
 {
     private readonly SqlDatabaseServer _server;
     private readonly IDuplexConnection _connection;
@@ -381,6 +381,10 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
 
             switch (frame.Value.Type)
             {
+                case (ProtocolMessageType)SqlProtocolMessageType.CopyTo:
+                    await CopyToAsync(frame.Value, _lifetimeSource.Token).ConfigureAwait(false);
+                    await WriteTransactionStatusAsync().ConfigureAwait(false);
+                    break;
                 case (ProtocolMessageType)SqlProtocolMessageType.Execute:
                     // Executions run on the session lifetime token, not the soft-stop
                     // token: a drain lets in-flight statements finish.
@@ -409,6 +413,17 @@ internal sealed class SqlDatabaseServerSession : DatabaseServerSession
                     return;
             }
         }
+    }
+
+    private async ValueTask WriteTransactionStatusAsync()
+    {
+        if (!_channel!.Capabilities.Contains(ProtocolCapability.TransactionStatus.Name)) { return; }
+        var transaction = _databaseSession!.CurrentTransaction;
+        var status = transaction is null ? ProtocolTransactionStatus.Idle
+            : transaction.State == Assimalign.Cohesion.Database.Transactions.TransactionState.Faulted
+                ? ProtocolTransactionStatus.Failed : ProtocolTransactionStatus.Active;
+        await WriteFrameAsync(ProtocolMessageType.Ready,
+            new ProtocolTransactionStatusMessage(status, _databaseSession!.HasRetainedState).Encode(), _lifetimeSource.Token).ConfigureAwait(false);
     }
 
     private async Task ExecuteAsync(ProtocolFrame frame, CancellationToken cancellationToken)

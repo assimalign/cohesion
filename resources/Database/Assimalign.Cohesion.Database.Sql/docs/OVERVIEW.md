@@ -1,5 +1,7 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+SqlDatabaseSession.CopyToAsync and its negotiated SQL outbound stream export physical tables as snapshot-consistent UTF-8 text/CSV (#1724).
+
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
 Conservative implication also supports ON CONFLICT target-WHERE inference; EXPLAIN reports the
 selected index and proof. Unproven cases use the existing complete access paths (#1630).

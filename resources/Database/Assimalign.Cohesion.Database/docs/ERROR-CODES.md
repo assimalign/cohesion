@@ -160,6 +160,8 @@ structured-carrier messages remain unprefixed.
 | New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
 | New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY/ORDER BY or copies an explicit frame (42P20) |
 | New (#1722, SQ-N1) | CS01067 | Invalid JSON access or IS JSON operand signature (42883) |
+| New (#1724, SQ-C1) | CS01068 | Invalid, duplicate or incompatible COPY option |
+| New (#1724, SQ-C1) | CS01069 | Duplicate COPY output column or FORCE_QUOTE column outside the export |
 | COHSQLE001 | CS02001 | Values/types |
 | COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
@@ -264,6 +266,7 @@ structured-carrier messages remain unprefixed.
 | New (#1012, SQ-I1) | CS04072 | SET TRANSACTION after the first data statement or during an operation (25001) |
 | New (#1012, SQ-I1) | CS04073 | SERIALIZABLE text transaction isolation is unsupported (0A000) |
 | New (#1726, XT-4) | CS04074 | SET TRANSACTION inside an active named savepoint (25001) |
+| New (#1724, SQ-C1) | CS04075 | COPY inside an explicit transaction (25001, Cohesion policy) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -301,6 +304,8 @@ structured-carrier messages remain unprefixed.
 | New (#1719, SQ-R2 reader fix) | CS05090 | Execution/internal invariant — a CTE opens more readers than its plan counted (XX000) |
 | New (#1630, SQ-P1) | CS05091 | Prohibited expression or non-immutable function in a partial-index predicate (42P17) |
 | New (#1630, SQ-P2) | CS05092 | Non-row-local ON CONFLICT inference predicate |
+| New (#1724, SQ-C1) | CS05093 | A streaming COPY consumer was given another statement kind |
+| New (#1724, SQ-C1) | CS05094 | COPY TO requires its SQL outbound-stream capability and consumer API |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
@@ -555,6 +560,7 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK06005 | Physical data or catalog file set is absent | — |
 | CK07003 | Session operations overlap | — |
 | CK07004 | Session is closed | — |
+| CK07005 | SQL outbound stream has invalid request parameters, ordering, payload size or terminal counters | — |
 | CS06059 | Persisted SQL catalog metadata is malformed | XX001 |
 | CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
 | CS06061 | Sequence catalog definition, reservation or ownership is malformed | XX001 |

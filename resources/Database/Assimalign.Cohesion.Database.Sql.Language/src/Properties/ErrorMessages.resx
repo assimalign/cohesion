@@ -4,6 +4,7 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CopyOptionInvalid" xml:space="preserve"><value>COPY option {0} is invalid, repeated or incompatible with the selected format.</value></data>
   <data name="DateTextInvalid" xml:space="preserve"><value>DATE text must be a valid ISO 8601 date, yyyy-mm-dd.</value></data>
   <data name="TimestampTextInvalid" xml:space="preserve"><value>TIMESTAMP text requires yyyy-mm-dd and an optional time.</value></data>
   <data name="TimestampSeparatorInvalid" xml:space="preserve"><value>TIMESTAMP requires a space or T before the time.</value></data>

@@ -89,6 +89,8 @@ public static class SqlClauses
 
     /// <summary>Empty one or more tables, with identity and foreign-key policies.</summary>
     public const string Truncate = "TRUNCATE";
+    /// <summary>Table export through a caller-owned stream.</summary>
+    public const string CopyTo = "COPY TO STDOUT";
 
     /// <summary>A <c>DROP SCHEMA</c> SQL namespace removal.</summary>
     public const string DropSchema = "DROP SCHEMA";
