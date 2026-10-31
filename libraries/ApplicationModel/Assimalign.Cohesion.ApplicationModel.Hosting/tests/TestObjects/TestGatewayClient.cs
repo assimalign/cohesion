@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// snapshots and lease it was given, as a gateway answers with the state written since the last
 /// deployment. It records the control plane it carries the gateway's calls to while it does.
 /// </summary>
-internal sealed class TestGatewayClient : IApplicationGatewayClient
+internal sealed class TestGatewayClient : IApplicationResourceInstanceGatewayClient
 {
     private readonly IReadOnlyList<ApplicationActionSnapshot> _snapshots;
     private int _renewals;

@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// <summary>
 /// One running instance of <c>Web/orders-api</c> with a log-level control.
 /// </summary>
-internal sealed class TestResource : IApplicationResourceInstance
+internal sealed class TestResource : IApplicationInstance
 {
     public LogLevelAction LogLevel { get; } = new();
 
@@ -22,5 +22,5 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions => [LogLevel];
 
-    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors => [];
+    public IReadOnlyCollection<IApplicationInstanceHealthContributor> HealthContributors => [];
 }

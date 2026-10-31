@@ -22,7 +22,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// Members are safe to call concurrently.
 /// </para>
 /// </remarks>
-public interface IApplicationResourceDeployment : IApplicationResource
+public interface IApplicationGatewayDeployment : IApplicationResource
 {
     /// <summary>
     /// Gets the resource as the deployment declared it.
@@ -43,7 +43,7 @@ public interface IApplicationResourceDeployment : IApplicationResource
     /// <summary>
     /// Gets the infrastructure actions the gateway exposes on the resource, ordered by name.
     /// </summary>
-    IReadOnlyCollection<IApplicationResourceAction> Actions { get; }
+    IReadOnlyCollection<IApplicationGatewayDeploymentAction> Actions { get; }
 
     /// <summary>
     /// Gets the values the resource's platform reported once it was deployed, such as its endpoint;

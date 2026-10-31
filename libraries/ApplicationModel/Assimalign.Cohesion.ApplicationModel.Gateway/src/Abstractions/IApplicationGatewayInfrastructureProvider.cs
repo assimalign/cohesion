@@ -37,7 +37,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// environment variables.
 /// </para>
 /// </remarks>
-public interface IInfrastructureProvider
+public interface IApplicationGatewayInfrastructureProvider
 {
     /// <summary>
     /// Gets the platform the provider deploys onto, such as <c>kubernetes</c>.
@@ -59,7 +59,7 @@ public interface IInfrastructureProvider
     /// platform's extensions.
     /// </param>
     /// <returns>The actions; empty for none.</returns>
-    IReadOnlyCollection<IApplicationResourceAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource);
+    IReadOnlyCollection<IApplicationGatewayDeploymentAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource);
 
     /// <summary>
     /// Plans a resource's deployment without changing anything: whether its workload must be created

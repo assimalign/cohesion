@@ -29,7 +29,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// </remarks>
 [DebuggerDisplay("{Value}")]
 [DebuggerTypeProxy(typeof(ApplicationActionState<>.DebugView))]
-public sealed class ApplicationActionState<TState> : IApplicationActionState
+public sealed class ApplicationActionState<TState> : IApplicationInstanceActionState
 {
     private readonly Func<TState, CancellationToken, ValueTask> _apply;
     private TState _value;

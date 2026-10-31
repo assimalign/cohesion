@@ -50,14 +50,14 @@ public sealed class ApplicationInstanceService : IApplicationInstanceService
 
     private static readonly TimeSpan _minimumRenewalInterval = TimeSpan.FromMilliseconds(10);
 
-    private readonly IApplicationGatewayClient _client;
+    private readonly IApplicationResourceInstanceGatewayClient _client;
     private readonly Lock _lifecycleLock = new();
     private CancellationTokenSource? _renewal;
     private Task _renewing = Task.CompletedTask;
     private int _lifecycle;
     private bool _serving;
 
-    private ApplicationInstanceService(IApplicationInstanceControlPlane controlPlane, IApplicationGatewayClient client)
+    private ApplicationInstanceService(IApplicationInstanceControlPlane controlPlane, IApplicationResourceInstanceGatewayClient client)
     {
         ControlPlane = controlPlane;
         _client = client;
@@ -79,7 +79,7 @@ public sealed class ApplicationInstanceService : IApplicationInstanceService
     /// </param>
     /// <returns>The service.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
-    public static ApplicationInstanceService Create(IApplicationInstanceControlPlane controlPlane, IApplicationGatewayClient client)
+    public static ApplicationInstanceService Create(IApplicationInstanceControlPlane controlPlane, IApplicationResourceInstanceGatewayClient client)
     {
         ArgumentNullException.ThrowIfNull(controlPlane);
         ArgumentNullException.ThrowIfNull(client);

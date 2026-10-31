@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// gateway the platform currently runs, as a fixed endpoint reaches a restarted gateway, and names
 /// the address the test platform's instance client reaches the instance at.
 /// </summary>
-internal sealed class GatewayForwarder : IApplicationGatewayClient
+internal sealed class GatewayForwarder : IApplicationResourceInstanceGatewayClient
 {
     private readonly TestInfrastructure _infrastructure;
 

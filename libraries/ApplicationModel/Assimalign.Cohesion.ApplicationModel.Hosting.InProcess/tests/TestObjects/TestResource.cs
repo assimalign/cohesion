@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.Tests;
 /// <summary>
 /// One running instance of <c>Web/orders-api</c>, whose one action reports the environment it runs in.
 /// </summary>
-internal sealed class TestResource : IApplicationResourceInstance
+internal sealed class TestResource : IApplicationInstance
 {
     public ProviderName Provider => "Web";
 
@@ -19,7 +19,7 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; } = [new EnvironmentAction()];
 
-    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors => [];
+    public IReadOnlyCollection<IApplicationInstanceHealthContributor> HealthContributors => [];
 
     public static IApplicationInstanceControlPlane CreateControlPlane()
     {
@@ -33,7 +33,7 @@ internal sealed class TestResource : IApplicationResourceInstance
 
         public ApplicationActionKind Kind => ApplicationActionKind.Read;
 
-        public IApplicationActionState? State => null;
+        public IApplicationInstanceActionState? State => null;
 
         public async ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
         {

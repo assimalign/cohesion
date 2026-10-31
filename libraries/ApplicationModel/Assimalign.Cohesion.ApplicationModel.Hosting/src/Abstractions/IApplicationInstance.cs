@@ -20,10 +20,10 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// </para>
 /// <para>
 /// An instance knows nothing of how its gateway reaches it: the platform's
-/// <see cref="IApplicationGatewayClient"/> carries its manifest out and the gateway's calls in.
+/// <see cref="IApplicationResourceInstanceGatewayClient"/> carries its manifest out and the gateway's calls in.
 /// </para>
 /// </remarks>
-public interface IApplicationResourceInstance : IApplicationResource
+public interface IApplicationInstance : IApplicationResource
 {
     /// <summary>
     /// Gets the key of this instance, unique to one start of one process.
@@ -54,5 +54,5 @@ public interface IApplicationResourceInstance : IApplicationResource
     /// <summary>
     /// Gets the contributors to this instance's health.
     /// </summary>
-    IReadOnlyCollection<IApplicationHealthContributor> HealthContributors { get; }
+    IReadOnlyCollection<IApplicationInstanceHealthContributor> HealthContributors { get; }
 }

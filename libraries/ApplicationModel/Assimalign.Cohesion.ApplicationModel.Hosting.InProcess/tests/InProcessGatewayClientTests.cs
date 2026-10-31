@@ -19,7 +19,7 @@ public class InProcessGatewayClientTests
         TestOptions options = OptIn(TestGateway.CreateEndpoint().AbsoluteUri);
 
         // Assert
-        IApplicationGatewayClient client = options.GetGatewayClient().ShouldNotBeNull();
+        IApplicationResourceInstanceGatewayClient client = options.GetGatewayClient().ShouldNotBeNull();
         client.Platform.ShouldBe(InProcessPlatform.Name);
         InProcessPlatform.Name.ShouldBe((PlatformName)"inprocess");
     }
@@ -41,7 +41,7 @@ public class InProcessGatewayClientTests
         Uri endpoint = TestGateway.CreateEndpoint();
         var gateway = new TestGateway();
         using IDisposable registration = InProcessPlatform.RegisterGateway(endpoint, gateway);
-        IApplicationGatewayClient client = OptIn(endpoint.AbsoluteUri).GetGatewayClient()!;
+        IApplicationResourceInstanceGatewayClient client = OptIn(endpoint.AbsoluteUri).GetGatewayClient()!;
         IApplicationInstanceControlPlane controlPlane = TestResource.CreateControlPlane();
 
         // Act
@@ -61,7 +61,7 @@ public class InProcessGatewayClientTests
     {
         // Arrange
         Uri endpoint = TestGateway.CreateEndpoint();
-        IApplicationGatewayClient client = OptIn(endpoint.AbsoluteUri).GetGatewayClient()!;
+        IApplicationResourceInstanceGatewayClient client = OptIn(endpoint.AbsoluteUri).GetGatewayClient()!;
         IApplicationInstanceControlPlane controlPlane = TestResource.CreateControlPlane();
         InProcessPlatform.RegisterGateway(endpoint, new TestGateway()).Dispose();
 
@@ -79,7 +79,7 @@ public class InProcessGatewayClientTests
     public async Task PublishAsync_WithoutInProcessEndpoint_ShouldThrow(string? endpoint)
     {
         // Arrange
-        IApplicationGatewayClient client = OptIn(endpoint).GetGatewayClient()!;
+        IApplicationResourceInstanceGatewayClient client = OptIn(endpoint).GetGatewayClient()!;
 
         // Act & Assert
         await Should.ThrowAsync<InvalidOperationException>(() => client.PublishAsync(TestResource.CreateControlPlane().Manifest).AsTask());
@@ -93,7 +93,7 @@ public class InProcessGatewayClientTests
         var gateway = new TestGateway();
         using IDisposable registration = InProcessPlatform.RegisterGateway(endpoint, gateway);
         IApplicationInstanceControlPlane controlPlane = TestResource.CreateControlPlane();
-        IApplicationGatewayClient client;
+        IApplicationResourceInstanceGatewayClient client;
         using (EnterInstanceEnvironment(endpoint.AbsoluteUri))
         {
             client = new TestOptions().UseInProcess().GetGatewayClient()!;
@@ -118,7 +118,7 @@ public class InProcessGatewayClientTests
         Uri endpoint = TestGateway.CreateEndpoint();
         var gateway = new TestGateway();
         using IDisposable registration = InProcessPlatform.RegisterGateway(endpoint, gateway);
-        IApplicationGatewayClient client = OptIn(endpoint.AbsoluteUri).GetGatewayClient()!;
+        IApplicationResourceInstanceGatewayClient client = OptIn(endpoint.AbsoluteUri).GetGatewayClient()!;
         IApplicationInstanceControlPlane controlPlane = TestResource.CreateControlPlane();
         await client.StartAsync(controlPlane);
 

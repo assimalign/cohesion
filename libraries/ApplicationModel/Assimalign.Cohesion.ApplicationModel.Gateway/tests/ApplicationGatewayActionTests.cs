@@ -156,7 +156,7 @@ public sealed class ApplicationGatewayActionTests
         result.Status.ShouldBe(ApplicationActionStatus.Succeeded);
         second.Level.Level.ShouldBe("Debug");
         _infrastructure.Client.Calls.ShouldBe([$"execute:{first.Key}", $"execute:{second.Key}"]);
-        IApplicationResourceDeployment resource = running.Gateway.Resources.Single();
+        IApplicationGatewayDeployment resource = running.Gateway.Resources.Single();
         await Eventually.WaitUntilAsync(() => first.Level.Level == "Debug" && resource.Instances.Any(instance => instance.Key == first.Key));
     }
 
@@ -167,7 +167,7 @@ public sealed class ApplicationGatewayActionTests
         await using RunningGateway running = await StartAsync(_shortLease);
         TestInstance second = await StartAnotherInstanceAsync();
         _infrastructure.Client.Refusing[second.Key] = true;
-        IApplicationResourceDeployment resource = running.Gateway.Resources.Single();
+        IApplicationGatewayDeployment resource = running.Gateway.Resources.Single();
 
         // Act
         await running.Gateway.ExecuteAsync("Web", "orders-api", TestManifests.LogLevel, Write("Debug"));

@@ -51,7 +51,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         // Assert
         _infrastructure.Deployed.ShouldHaveSingleItem();
         _infrastructure.TornDown.ShouldBeEmpty();
-        IApplicationResourceDeployment ordersApi = second.Gateway.Resources.ShouldHaveSingleItem();
+        IApplicationGatewayDeployment ordersApi = second.Gateway.Resources.ShouldHaveSingleItem();
         ordersApi.Instances.ShouldHaveSingleItem();
         ordersApi.State.ShouldHaveSingleItem().Action.ShouldBe((ActionName)"log-level");
     }
@@ -110,7 +110,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
         // Assert
         _infrastructure.Deployed.Count.ShouldBe(2);
-        IApplicationResourceDeployment ordersApi = second.Gateway.Resources.Single();
+        IApplicationGatewayDeployment ordersApi = second.Gateway.Resources.Single();
         ordersApi.State.ShouldBeEmpty();
         ApplicationInstanceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
         _infrastructure.Instances[instance.Key].Instance.Level.Level.ShouldBe("Information");
@@ -133,7 +133,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
         // Assert
         _infrastructure.Deployed.Count.ShouldBe(2);
-        IApplicationResourceDeployment ordersApi = second.Gateway.Resources.Single();
+        IApplicationGatewayDeployment ordersApi = second.Gateway.Resources.Single();
         ordersApi.State.ShouldHaveSingleItem();
         ApplicationInstanceManifest instance = ordersApi.Instances.ShouldHaveSingleItem();
         _infrastructure.Instances[instance.Key].Instance.Level.Level.ShouldBe("Debug");

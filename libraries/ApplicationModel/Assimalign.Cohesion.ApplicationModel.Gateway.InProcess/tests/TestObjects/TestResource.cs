@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Tests;
 /// <summary>
 /// One running instance of a resource, whose one action reports the environment it runs in.
 /// </summary>
-internal sealed class TestResource : IApplicationResourceInstance
+internal sealed class TestResource : IApplicationInstance
 {
     public TestResource(ProviderName provider, ResourceName name, DeploymentId? deployment)
     {
@@ -28,7 +28,7 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; } = [new EnvironmentAction()];
 
-    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors => [];
+    public IReadOnlyCollection<IApplicationInstanceHealthContributor> HealthContributors => [];
 
     /// <summary>Reads the resource name the environment the action runs in holds.</summary>
     private sealed class EnvironmentAction : IApplicationInstanceAction
@@ -37,7 +37,7 @@ internal sealed class TestResource : IApplicationResourceInstance
 
         public ApplicationActionKind Kind => ApplicationActionKind.Read;
 
-        public IApplicationActionState? State => null;
+        public IApplicationInstanceActionState? State => null;
 
         public ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
         {

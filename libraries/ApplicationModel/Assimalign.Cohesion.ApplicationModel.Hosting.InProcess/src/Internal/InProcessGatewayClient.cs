@@ -21,7 +21,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.Internal;
 /// manifest the client publishes names that endpoint as the control plane's.
 /// </para>
 /// </remarks>
-internal sealed class InProcessGatewayClient : IApplicationGatewayClient
+internal sealed class InProcessGatewayClient : IApplicationResourceInstanceGatewayClient
 {
     private readonly string? _endpoint;
     private readonly Lock _lock = new();

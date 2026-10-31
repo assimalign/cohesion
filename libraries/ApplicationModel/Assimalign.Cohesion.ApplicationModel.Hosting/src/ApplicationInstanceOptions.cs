@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// </remarks>
 public abstract class ApplicationInstanceOptions
 {
-    private readonly List<IApplicationGatewayClient> _clients = [];
+    private readonly List<IApplicationResourceInstanceGatewayClient> _clients = [];
 
     /// <summary>
     /// Initializes the options from the instance's environment.
@@ -67,7 +67,7 @@ public abstract class ApplicationInstanceOptions
     /// Gets the gateway clients the resource uses, at most one per platform, in the order they were
     /// added.
     /// </summary>
-    public IReadOnlyList<IApplicationGatewayClient> GatewayClients => _clients;
+    public IReadOnlyList<IApplicationResourceInstanceGatewayClient> GatewayClients => _clients;
 
     /// <summary>
     /// Opts the resource into a platform: adds the client its instances reach that platform's gateway
@@ -83,7 +83,7 @@ public abstract class ApplicationInstanceOptions
     /// <exception cref="ArgumentException">
     /// The client names no platform, or the resource already uses a client for its platform.
     /// </exception>
-    public ApplicationInstanceOptions UseGatewayClient(IApplicationGatewayClient client)
+    public ApplicationInstanceOptions UseGatewayClient(IApplicationResourceInstanceGatewayClient client)
     {
         ArgumentNullException.ThrowIfNull(client);
 
@@ -93,7 +93,7 @@ public abstract class ApplicationInstanceOptions
             throw new ArgumentException(ErrorMessages.GatewayClientPlatformMissing, nameof(client));
         }
 
-        foreach (IApplicationGatewayClient used in _clients)
+        foreach (IApplicationResourceInstanceGatewayClient used in _clients)
         {
             if (used.Platform == platform)
             {
@@ -111,14 +111,14 @@ public abstract class ApplicationInstanceOptions
     /// </summary>
     /// <returns>The client, or <see langword="null"/> when no platform is named and the instance runs unmanaged.</returns>
     /// <exception cref="InvalidOperationException">The resource uses no client for the named platform.</exception>
-    public IApplicationGatewayClient? GetGatewayClient()
+    public IApplicationResourceInstanceGatewayClient? GetGatewayClient()
     {
         if (Platform is not { } platform)
         {
             return null;
         }
 
-        foreach (IApplicationGatewayClient client in _clients)
+        foreach (IApplicationResourceInstanceGatewayClient client in _clients)
         {
             if (client.Platform == platform)
             {

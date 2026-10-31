@@ -170,7 +170,7 @@ public class ApplicationResourceDeploymentTests
     public void Create_WithDuplicateActionNames_ShouldThrow()
     {
         // Arrange
-        IApplicationResourceAction[] actions = [new TestInfrastructureAction("scale"), new TestInfrastructureAction("scale")];
+        IApplicationGatewayDeploymentAction[] actions = [new TestInfrastructureAction("scale"), new TestInfrastructureAction("scale")];
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationResourceDeployment.Create(TestManifests.OrdersApi, actions: actions));

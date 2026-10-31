@@ -47,7 +47,7 @@ public sealed class ApplicationGatewayDeploymentTests
         bool startedBeforeRelease = gateway.Started.IsCompleted;
         release.SetResult();
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        IApplicationResourceDeployment resource = gateway.Resources.ShouldHaveSingleItem();
+        IApplicationGatewayDeployment resource = gateway.Resources.ShouldHaveSingleItem();
         ApplicationInstanceManifest[] instances = [.. resource.Instances];
         await stop.CancelAsync();
         await run;

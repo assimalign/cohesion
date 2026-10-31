@@ -35,7 +35,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
     private readonly SemaphoreSlim _mutations = new(1, 1);
 
     private ApplicationInstanceControlPlane(
-        IApplicationResourceInstance resource,
+        IApplicationInstance resource,
         IApplicationContentSerializer serializer,
         FrozenDictionary<ActionName, IApplicationInstanceAction> actions,
         ApplicationInstanceManifest manifest)
@@ -47,7 +47,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
     }
 
     /// <inheritdoc/>
-    public IApplicationResourceInstance Resource { get; }
+    public IApplicationInstance Resource { get; }
 
     /// <inheritdoc/>
     public ApplicationInstanceManifest Manifest { get; }
@@ -71,7 +71,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
     /// shares a name with another, declares an operation other than Read or Write, or has state
     /// without accepting writes; or <paramref name="serializer"/> cannot write an action's state.
     /// </exception>
-    public static ApplicationInstanceControlPlane Create(IApplicationResourceInstance resource, IApplicationContentSerializer serializer)
+    public static ApplicationInstanceControlPlane Create(IApplicationInstance resource, IApplicationContentSerializer serializer)
     {
         ArgumentNullException.ThrowIfNull(resource);
         ArgumentNullException.ThrowIfNull(serializer);
@@ -119,7 +119,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
                 throw new ArgumentException(Format(ErrorMessages.ApplicationActionKindInvalid, name), nameof(resource));
             }
 
-            IApplicationActionState? state = action.State;
+            IApplicationInstanceActionState? state = action.State;
             if (state is not null && !action.Kind.HasFlag(ApplicationActionKind.Write))
             {
                 throw new ArgumentException(Format(ErrorMessages.ApplicationActionStateReadOnly, name), nameof(resource));
@@ -255,7 +255,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
             _controlPlane = controlPlane;
         }
 
-        public IApplicationResourceInstance Resource => _controlPlane.Resource;
+        public IApplicationInstance Resource => _controlPlane.Resource;
 
         public ApplicationInstanceManifest Manifest => _controlPlane.Manifest;
 

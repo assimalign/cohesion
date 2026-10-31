@@ -170,7 +170,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
 
         // Act: while api waits, one of its recorded instances renews.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
-        IApplicationResourceDeployment api = Resource(gateway, "api");
+        IApplicationGatewayDeployment api = Resource(gateway, "api");
         ApplicationInstanceManifest renewing = api.Instances.Single(instance => instance.Key == recorded[0]);
         bool renewed = await gateway.RenewAsync(renewing);
         release.SetResult();
@@ -216,7 +216,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
             .Single(instance => instance.Name.Value == resource && (match is null || match(instance)));
     }
 
-    private static IApplicationResourceDeployment Resource(ApplicationGateway gateway, string name)
+    private static IApplicationGatewayDeployment Resource(ApplicationGateway gateway, string name)
     {
         return gateway.Resources.Single(resource => resource.Manifest.Name.Value == name);
     }

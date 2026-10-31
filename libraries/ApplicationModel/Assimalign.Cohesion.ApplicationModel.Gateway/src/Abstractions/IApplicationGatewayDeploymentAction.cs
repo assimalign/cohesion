@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// the action set until the resource is next deployed. The invocation and its result use the same
 /// types as a control.
 /// </remarks>
-public interface IApplicationResourceAction
+public interface IApplicationGatewayDeploymentAction
 {
     /// <summary>
     /// Gets the action's name, unique among its resource's infrastructure actions.

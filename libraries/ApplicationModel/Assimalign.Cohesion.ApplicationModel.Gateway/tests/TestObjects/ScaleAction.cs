@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// <summary>
 /// An infrastructure action that sets how many instances the platform runs.
 /// </summary>
-internal sealed class ScaleAction : IApplicationResourceAction
+internal sealed class ScaleAction : IApplicationGatewayDeploymentAction
 {
     public int Replicas { get; private set; } = 1;
 

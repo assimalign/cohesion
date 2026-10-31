@@ -41,7 +41,7 @@ public interface IApplicationInstanceAction
     /// The control plane snapshots this state after each successful write, and restores a snapshot
     /// into it on request. Return the same object on every call.
     /// </remarks>
-    IApplicationActionState? State { get; }
+    IApplicationInstanceActionState? State { get; }
 
     /// <summary>
     /// Executes one invocation of the action.

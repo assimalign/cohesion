@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// Restoring one applies that value whatever the instance's current state, so a restore can be
 /// repeated, and restores of different actions can run in any order.
 /// </remarks>
-public interface IApplicationActionState
+public interface IApplicationInstanceActionState
 {
     /// <summary>
     /// Writes the state's current value as a snapshot.

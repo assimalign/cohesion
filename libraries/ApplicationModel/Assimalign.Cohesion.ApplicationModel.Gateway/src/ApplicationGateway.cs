@@ -55,7 +55,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </para>
 /// <para>
 /// A child gateway joins through <see cref="JoinAsync"/>, which this gateway implements as an
-/// <see cref="IApplicationParentGateway"/>; the child joins again three times per lease, and one that
+/// <see cref="IApplicationGatewayParent"/>; the child joins again three times per lease, and one that
 /// stops is dropped once its lease lapses. The gateway knows nothing of a child before it joins, so
 /// each gateway deploys on its own. A value a child read changes for the child on its next run.
 /// </para>
@@ -68,7 +68,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </remarks>
 [DebuggerDisplay("{Name}")]
 [DebuggerTypeProxy(typeof(DebugView))]
-public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstancePublisher, IApplicationParentGateway
+public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstancePublisher, IApplicationGatewayParent
 {
     private const int idle = 0;
     private const int running = 1;
@@ -82,9 +82,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private static readonly Guid _deploymentNamespace = new("c7e50fe9-ea03-4156-a9fe-9748a45e60ca");
 
     private readonly IApplicationModel _model;
-    private readonly IInfrastructureProvider _infrastructure;
+    private readonly IApplicationGatewayInfrastructureProvider _infrastructure;
     private readonly IApplicationGatewayStore _store;
-    private readonly IApplicationParentGateway? _parent;
+    private readonly IApplicationGatewayParent? _parent;
     private readonly IApplicationGatewayTransport[] _transports;
     private readonly IApplicationInstanceClient? _client;
     private readonly SemaphoreSlim _saves = new(1, 1);
@@ -94,7 +94,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private FrozenDictionary<ApplicationResourceOutput, string> _received = FrozenDictionary<ApplicationResourceOutput, string>.Empty;
     private GatewayResource[] _ordered = [];
     private ApplicationResourceRecord[] _retiredResources = [];
-    private ReadOnlyCollection<IApplicationResourceDeployment> _aggregates = ReadOnlyCollection<IApplicationResourceDeployment>.Empty;
+    private ReadOnlyCollection<IApplicationGatewayDeployment> _aggregates = ReadOnlyCollection<IApplicationGatewayDeployment>.Empty;
     private long _epoch;
     private CancellationTokenSource? _run;
     private ApplicationGatewayException? _superseded;
@@ -103,9 +103,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     internal ApplicationGateway(
         IApplicationModel model,
-        IInfrastructureProvider infrastructure,
+        IApplicationGatewayInfrastructureProvider infrastructure,
         IApplicationGatewayStore store,
-        IApplicationParentGateway? parent,
+        IApplicationGatewayParent? parent,
         IApplicationGatewayTransport[] transports,
         IApplicationInstanceClient? client,
         TimeSpan startupTimeout,
@@ -146,7 +146,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// Gets the aggregates of the resources the gateway runs, in dependency order, each after the
     /// resources it depends on; empty before <see cref="RunAsync"/>.
     /// </summary>
-    public IReadOnlyCollection<IApplicationResourceDeployment> Resources => Volatile.Read(ref _aggregates);
+    public IReadOnlyCollection<IApplicationGatewayDeployment> Resources => Volatile.Read(ref _aggregates);
 
     /// <summary>
     /// Gets the manifests of the child gateways that joined this one and whose leases have not
@@ -837,7 +837,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     // Joins the parent until it reports every output of its resources that the gateway's settings
     // use, retrying while the parent is not running or a resource of its is not ready yet, within the
     // startup window.
-    private async Task<ApplicationGatewayMembership> JoinParentAsync(IApplicationModel model, IApplicationParentGateway parent, CancellationToken cancellationToken)
+    private async Task<ApplicationGatewayMembership> JoinParentAsync(IApplicationModel model, IApplicationGatewayParent parent, CancellationToken cancellationToken)
     {
         var needed = new List<(ApplicationResourceManifest Resource, ApplicationResourceSetting Setting, ApplicationResourceOutput Output)>();
         foreach (ApplicationResourceManifest resource in model.Manifest.Resources)
@@ -951,7 +951,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     // Joins the parent again three times per lease, so it keeps this gateway registered. A parent
     // that is unreachable, or not running, is retried on the next tick; a value that changed applies
     // on the gateway's next run.
-    private static async Task RenewMembershipAsync(IApplicationModel model, IApplicationParentGateway parent, TimeSpan lease, CancellationToken cancellationToken)
+    private static async Task RenewMembershipAsync(IApplicationModel model, IApplicationGatewayParent parent, TimeSpan lease, CancellationToken cancellationToken)
     {
         TimeSpan interval = lease / 3;
         if (interval < _minimumExpiryInterval)
@@ -1055,7 +1055,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             // The provider sees a resource as declared for its platform: no other platform's
             // extensions reach it.
             ApplicationResourceManifest declared = ForPlatform(manifest);
-            IReadOnlyCollection<IApplicationResourceAction> actions = _infrastructure.GetResourceActions(model, declared)
+            IReadOnlyCollection<IApplicationGatewayDeploymentAction> actions = _infrastructure.GetResourceActions(model, declared)
                 ?? throw new InvalidOperationException(Format(ErrorMessages.GatewayResourceActionsNull, manifest.Provider, manifest.Name));
 
             // Until its step plans it, a resource runs as the previous run left it: its recorded
@@ -1067,7 +1067,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
         // The resources are kept in the order they deploy in.
         var ordered = new List<GatewayResource>();
-        var aggregates = new List<IApplicationResourceDeployment>();
+        var aggregates = new List<IApplicationGatewayDeployment>();
         foreach (GatewayStep step in steps)
         {
             GatewayResource resource = lookup[(step.Resource.Provider, step.Resource.Name)];
@@ -1504,7 +1504,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
         public TimeSpan StartupTimeout => _gateway.StartupTimeout;
 
-        public IReadOnlyCollection<IApplicationResourceDeployment> Resources => _gateway.Resources;
+        public IReadOnlyCollection<IApplicationGatewayDeployment> Resources => _gateway.Resources;
 
         public IReadOnlyCollection<ApplicationManifest> Children => _gateway.Children;
     }

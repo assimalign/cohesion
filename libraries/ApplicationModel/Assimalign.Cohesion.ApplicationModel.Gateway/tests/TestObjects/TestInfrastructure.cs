@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// the gateway, unless the resource is silent; every call is recorded. Its workloads outlive the
 /// gateway that deployed them, so a second gateway over the same platform finds them running.
 /// </summary>
-internal sealed class TestInfrastructure : IInfrastructureProvider
+internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProvider
 {
     private readonly Lock _calls = new();
     private readonly List<string> _events = [];
@@ -91,7 +91,7 @@ internal sealed class TestInfrastructure : IInfrastructureProvider
         return ValueTask.FromResult(outputs);
     }
 
-    public IReadOnlyCollection<IApplicationResourceAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource)
+    public IReadOnlyCollection<IApplicationGatewayDeploymentAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource)
     {
         Seen[resource.Name] = resource;
         return [Scale];

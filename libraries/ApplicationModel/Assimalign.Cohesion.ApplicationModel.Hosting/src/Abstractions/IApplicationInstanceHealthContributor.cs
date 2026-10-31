@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// <summary>
 /// Contributes a named, transport-neutral health result to a resource instance.
 /// </summary>
-public interface IApplicationHealthContributor
+public interface IApplicationInstanceHealthContributor
 {
     /// <summary>
     /// Gets the stable name that identifies this contribution in a health report.

@@ -24,7 +24,7 @@ internal sealed class InProcessControlPlane : IApplicationInstanceControlPlane
         _context = context;
     }
 
-    public IApplicationResourceInstance Resource => _controlPlane.Resource;
+    public IApplicationInstance Resource => _controlPlane.Resource;
 
     public ApplicationInstanceManifest Manifest => _controlPlane.Manifest;
 

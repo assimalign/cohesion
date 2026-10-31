@@ -30,7 +30,7 @@ internal sealed class RunningGateway : IAsyncDisposable
         IApplicationModel model,
         TimeSpan? startupTimeout = null,
         TimeSpan? leaseDuration = null,
-        IApplicationParentGateway? parent = null)
+        IApplicationGatewayParent? parent = null)
     {
         var gateway = new ApplicationGateway(
             model,
@@ -52,7 +52,7 @@ internal sealed class RunningGateway : IAsyncDisposable
         IApplicationModel model,
         TimeSpan? startupTimeout = null,
         TimeSpan? leaseDuration = null,
-        IApplicationParentGateway? parent = null)
+        IApplicationGatewayParent? parent = null)
     {
         var running = new RunningGateway(Create(infrastructure, store, model, startupTimeout, leaseDuration, parent));
         await running.Gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));

@@ -16,12 +16,11 @@ public interface IApplicationGateway
     /// <summary>
     /// Gets the model the gateway runs.
     /// </summary>
-    IApplicationModel Model { get; }
+    IApplicationGatewayContext Context { get; }
 
-    /// <summary>
-    /// Runs the gateway: deploys its model, then manages it until cancellation.
-    /// </summary>
-    /// <param name="cancellationToken">Signals that the gateway should stop.</param>
-    /// <returns>A task that completes when the gateway stops.</returns>
-    Task RunAsync(CancellationToken cancellationToken = default);
+
+    Task StartAsync(CancellationToken cancellationToken = default);
+
+
+    Task StopAsync(CancellationToken cancellationToken = default);
 }

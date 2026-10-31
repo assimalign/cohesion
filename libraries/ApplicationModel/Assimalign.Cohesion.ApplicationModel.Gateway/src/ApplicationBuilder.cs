@@ -36,10 +36,10 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
 
     private readonly IApplicationModelBuilder _model;
     private readonly List<IApplicationGatewayTransport> _transports = [];
-    private IInfrastructureProvider? _infrastructure;
+    private IApplicationGatewayInfrastructureProvider? _infrastructure;
     private IApplicationGatewayStore? _store;
     private IApplicationInstanceClient? _client;
-    private IApplicationParentGateway? _parent;
+    private IApplicationGatewayParent? _parent;
     private IApplicationModel? _built;
     private TimeSpan _startupTimeout = _defaultStartupTimeout;
     private TimeSpan _leaseDuration = _defaultLeaseDuration;
@@ -103,7 +103,7 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
     /// <exception cref="ArgumentNullException"><paramref name="parent"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The parent has this gateway's name.</exception>
     /// <exception cref="InvalidOperationException">The gateway already joins a parent, or is built.</exception>
-    public IApplicationParent UseParent(IApplicationParentGateway parent)
+    public IApplicationParent UseParent(IApplicationGatewayParent parent)
     {
         ArgumentNullException.ThrowIfNull(parent);
         ThrowIfBuilt();
@@ -121,7 +121,7 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
     /// <exception cref="ArgumentNullException"><paramref name="infrastructure"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="infrastructure"/> names no platform.</exception>
     /// <exception cref="InvalidOperationException">The gateway is built.</exception>
-    public ApplicationBuilder UseInfrastructure(IInfrastructureProvider infrastructure)
+    public ApplicationBuilder UseInfrastructure(IApplicationGatewayInfrastructureProvider infrastructure)
     {
         ArgumentNullException.ThrowIfNull(infrastructure);
 
@@ -243,7 +243,7 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
         return BuildModel();
     }
 
-    IApplicationGatewayBuilder IApplicationGatewayBuilder.UseInfrastructure(IInfrastructureProvider infrastructure)
+    IApplicationGatewayBuilder IApplicationGatewayBuilder.UseInfrastructure(IApplicationGatewayInfrastructureProvider infrastructure)
     {
         return UseInfrastructure(infrastructure);
     }
@@ -263,7 +263,7 @@ public sealed class ApplicationBuilder : IApplicationModelBuilder, IApplicationG
         return UseStore(store);
     }
 
-    IApplicationGatewayBuilder IApplicationGatewayBuilder.UseParent(IApplicationParentGateway parent)
+    IApplicationGatewayBuilder IApplicationGatewayBuilder.UseParent(IApplicationGatewayParent parent)
     {
         UseParent(parent);
         return this;

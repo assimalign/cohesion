@@ -178,7 +178,7 @@ public sealed class ApplicationGatewayJoinTests : IDisposable
         return RunningGateway.StartAsync(_root, _store, CreateRoot());
     }
 
-    private Task<RunningGateway> StartEastAsync(IApplicationParentGateway parent)
+    private Task<RunningGateway> StartEastAsync(IApplicationGatewayParent parent)
     {
         return RunningGateway.StartAsync(_east, _store, CreateEast(), parent: parent);
     }

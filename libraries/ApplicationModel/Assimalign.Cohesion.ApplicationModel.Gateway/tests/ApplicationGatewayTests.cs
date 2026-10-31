@@ -142,7 +142,7 @@ public class ApplicationGatewayTests
         Task run = gateway.RunAsync(stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
         TestInstance second = await infrastructure.StartInstanceAsync("Web", "orders-api");
-        IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
+        IApplicationGatewayDeployment ordersApi = gateway.Resources.Single();
         (TestInstance first, ApplicationInstanceService firstService) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
 
         // Act: the write runs once; the gateway records it and restores it on the others.
@@ -174,7 +174,7 @@ public class ApplicationGatewayTests
         using var stop = new CancellationTokenSource();
         Task run = gateway.RunAsync(stop.Token);
         await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        IApplicationResourceDeployment ordersApi = gateway.Resources.Single();
+        IApplicationGatewayDeployment ordersApi = gateway.Resources.Single();
 
         // Act
         ApplicationActionResult scaled = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));

@@ -49,7 +49,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// </remarks>
 [DebuggerDisplay("{Endpoint}")]
 [DebuggerTypeProxy(typeof(DebugView))]
-public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicationGatewayTransport, IApplicationInstanceClient, IAsyncDisposable
+public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureProvider, IApplicationGatewayTransport, IApplicationInstanceClient, IAsyncDisposable
 {
     // The program's code is part of the gateway program's own build, so the infrastructure tells no
     // versions apart: a resource is a new definition only when its model changes.
@@ -188,12 +188,12 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         _registration.Dispose();
     }
 
-    IReadOnlyCollection<IApplicationResourceAction> IInfrastructureProvider.GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource)
+    IReadOnlyCollection<IApplicationGatewayDeploymentAction> IApplicationGatewayInfrastructureProvider.GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource)
     {
         return [];
     }
 
-    ValueTask<InfrastructurePlan> IInfrastructureProvider.PlanResourceAsync(
+    ValueTask<InfrastructurePlan> IApplicationGatewayInfrastructureProvider.PlanResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
@@ -209,7 +209,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         return ValueTask.FromResult(new InfrastructurePlan(change, revision));
     }
 
-    async ValueTask IInfrastructureProvider.DeployResourceAsync(
+    async ValueTask IApplicationGatewayInfrastructureProvider.DeployResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
@@ -237,7 +237,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         }
     }
 
-    async ValueTask IInfrastructureProvider.WatchResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, DeploymentId deployment, CancellationToken cancellationToken)
+    async ValueTask IApplicationGatewayInfrastructureProvider.WatchResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, DeploymentId deployment, CancellationToken cancellationToken)
     {
         // The program's entry point returning or throwing is its whole run, so the gateway hears of
         // it at once: an exception arrives as the program threw it. A deployment whose program no
@@ -248,7 +248,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         }
     }
 
-    ValueTask<IReadOnlyDictionary<OutputName, string>> IInfrastructureProvider.GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken)
+    ValueTask<IReadOnlyDictionary<OutputName, string>> IApplicationGatewayInfrastructureProvider.GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken)
     {
         IReadOnlyDictionary<OutputName, string> outputs = _workloads.TryGetValue((resource.Provider, resource.Name), out InProcessWorkload? workload)
             ? new Dictionary<OutputName, string> { [OutputName.Endpoint] = CreateLoopbackUrl(workload.EndpointPort) }
@@ -257,7 +257,7 @@ public sealed class InProcessInfrastructure : IInfrastructureProvider, IApplicat
         return ValueTask.FromResult(outputs);
     }
 
-    async ValueTask IInfrastructureProvider.TeardownResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken)
+    async ValueTask IApplicationGatewayInfrastructureProvider.TeardownResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken)
     {
         (ProviderName, ResourceName) key = (resource.Provider, resource.Name);
         if (_workloads.TryRemove(key, out InProcessWorkload? workload))

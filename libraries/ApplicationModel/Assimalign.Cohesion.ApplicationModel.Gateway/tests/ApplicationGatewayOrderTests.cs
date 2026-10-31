@@ -158,7 +158,7 @@ public sealed class ApplicationGatewayOrderTests : IDisposable
         // Act: an instance of the api the platform still runs restarts while api waits for db.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
         TestInstance restarted = await _infrastructure.StartInstanceAsync("Web", "api");
-        IApplicationResourceDeployment api = gateway.Resources.Single(resource => resource.Manifest.Name.Value == "api");
+        IApplicationGatewayDeployment api = gateway.Resources.Single(resource => resource.Manifest.Name.Value == "api");
         bool registered = api.Instances.Any(instance => instance.Key == restarted.Key);
         release.SetResult();
 

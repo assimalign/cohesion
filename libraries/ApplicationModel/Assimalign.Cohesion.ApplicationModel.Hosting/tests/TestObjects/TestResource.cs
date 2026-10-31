@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// <summary>
 /// One instance of the <c>Web/orders-api</c> resource unless a test says otherwise.
 /// </summary>
-internal sealed class TestResource : IApplicationResourceInstance
+internal sealed class TestResource : IApplicationInstance
 {
     public TestResource(params IApplicationInstanceAction[] actions)
     {
@@ -23,5 +23,5 @@ internal sealed class TestResource : IApplicationResourceInstance
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; init; }
 
-    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors { get; init; } = [];
+    public IReadOnlyCollection<IApplicationInstanceHealthContributor> HealthContributors { get; init; } = [];
 }

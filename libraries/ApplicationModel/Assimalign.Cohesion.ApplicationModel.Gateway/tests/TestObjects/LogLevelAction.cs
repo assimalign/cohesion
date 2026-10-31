@@ -19,7 +19,7 @@ internal sealed class LogLevelAction : IApplicationInstanceAction
 
     public ApplicationActionKind Kind => ApplicationActionKind.ReadWrite;
 
-    public IApplicationActionState? State => _state;
+    public IApplicationInstanceActionState? State => _state;
 
     public async ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {

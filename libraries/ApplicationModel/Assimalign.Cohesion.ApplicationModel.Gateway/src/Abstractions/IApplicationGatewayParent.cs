@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// directly; a transport carries the call between processes.
 /// </para>
 /// </remarks>
-public interface IApplicationParentGateway
+public interface IApplicationGatewayParent
 {
     /// <summary>
     /// Gets the parent gateway's name, which a child's manifest names as its parent.

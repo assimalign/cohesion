@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// <summary>
 /// A write-only infrastructure action that counts its invocations.
 /// </summary>
-internal sealed class TestInfrastructureAction : IApplicationResourceAction
+internal sealed class TestInfrastructureAction : IApplicationGatewayDeploymentAction
 {
     public TestInfrastructureAction(string name)
     {

@@ -36,7 +36,7 @@ public interface IApplicationGatewayBuilder
     /// <exception cref="ArgumentNullException"><paramref name="infrastructure"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="infrastructure"/> names no platform.</exception>
     /// <exception cref="InvalidOperationException">The gateway is built.</exception>
-    IApplicationGatewayBuilder UseInfrastructure(IInfrastructureProvider infrastructure);
+    IApplicationGatewayBuilder UseInfrastructure(IApplicationGatewayInfrastructureProvider infrastructure);
 
     /// <summary>
     /// Adds a transport the gateway's instances reach it through. A gateway may have several, and
@@ -78,7 +78,7 @@ public interface IApplicationGatewayBuilder
     /// <exception cref="ArgumentNullException"><paramref name="parent"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The parent has this gateway's name.</exception>
     /// <exception cref="InvalidOperationException">The gateway already joins a parent, or is built.</exception>
-    IApplicationGatewayBuilder UseParent(IApplicationParentGateway parent);
+    IApplicationGatewayBuilder UseParent(IApplicationGatewayParent parent);
 
     /// <summary>
     /// Builds the gateway with its model. The builder accepts no changes afterward.

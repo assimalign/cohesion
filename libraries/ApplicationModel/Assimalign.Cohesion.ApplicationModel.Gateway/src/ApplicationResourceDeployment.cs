@@ -19,12 +19,12 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </remarks>
 [DebuggerDisplay("{Manifest.Provider}/{Manifest.Name}")]
 [DebuggerTypeProxy(typeof(DebugView))]
-public sealed class ApplicationResourceDeployment : IApplicationResourceDeployment
+public sealed class ApplicationResourceDeployment : IApplicationGatewayDeployment
 {
     private readonly Lock _lock = new();
     private readonly SortedDictionary<InstanceKey, ApplicationInstanceManifest> _instances = new();
     private readonly SortedDictionary<ActionName, ApplicationActionSnapshot> _state;
-    private readonly FrozenDictionary<ActionName, IApplicationResourceAction> _actions;
+    private readonly FrozenDictionary<ActionName, IApplicationGatewayDeploymentAction> _actions;
     private ReadOnlyCollection<ApplicationInstanceManifest> _instancesView = ReadOnlyCollection<ApplicationInstanceManifest>.Empty;
     private ReadOnlyCollection<ApplicationActionSnapshot> _stateView;
     private FrozenDictionary<OutputName, string> _outputs;
@@ -32,7 +32,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     private ApplicationResourceDeployment(
         ApplicationResourceManifest manifest,
         SortedDictionary<ActionName, ApplicationActionSnapshot> state,
-        SortedDictionary<ActionName, IApplicationResourceAction> actions,
+        SortedDictionary<ActionName, IApplicationGatewayDeploymentAction> actions,
         FrozenDictionary<OutputName, string> outputs)
     {
         Manifest = manifest;
@@ -59,7 +59,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     public IReadOnlyCollection<ApplicationActionSnapshot> State => Volatile.Read(ref _stateView);
 
     /// <inheritdoc/>
-    public IReadOnlyCollection<IApplicationResourceAction> Actions { get; }
+    public IReadOnlyCollection<IApplicationGatewayDeploymentAction> Actions { get; }
 
     /// <inheritdoc/>
     public IReadOnlyDictionary<OutputName, string> Outputs => Volatile.Read(ref _outputs);
@@ -92,7 +92,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     public static ApplicationResourceDeployment Create(
         ApplicationResourceManifest manifest,
         IEnumerable<ApplicationActionSnapshot>? state = null,
-        IEnumerable<IApplicationResourceAction>? actions = null,
+        IEnumerable<IApplicationGatewayDeploymentAction>? actions = null,
         IReadOnlyDictionary<OutputName, string>? outputs = null)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -121,8 +121,8 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
             }
         }
 
-        var exposed = new SortedDictionary<ActionName, IApplicationResourceAction>();
-        foreach (IApplicationResourceAction action in actions ?? [])
+        var exposed = new SortedDictionary<ActionName, IApplicationGatewayDeploymentAction>();
+        foreach (IApplicationGatewayDeploymentAction action in actions ?? [])
         {
             if (action is null)
             {
@@ -204,7 +204,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (!_actions.TryGetValue(action, out IApplicationResourceAction? target))
+        if (!_actions.TryGetValue(action, out IApplicationGatewayDeploymentAction? target))
         {
             return ApplicationActionResult.NotFound();
         }
@@ -372,7 +372,7 @@ public sealed class ApplicationResourceDeployment : IApplicationResourceDeployme
 
         public IReadOnlyCollection<ApplicationActionSnapshot> State => _resource.State;
 
-        public IReadOnlyCollection<IApplicationResourceAction> Actions => _resource.Actions;
+        public IReadOnlyCollection<IApplicationGatewayDeploymentAction> Actions => _resource.Actions;
 
         public IReadOnlyDictionary<OutputName, string> Outputs => _resource.Outputs;
     }

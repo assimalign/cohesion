@@ -69,7 +69,7 @@ internal sealed class TestProgram
         // names selects the client. It repeats the deployment that started it, as every managed
         // instance does.
         TestProgramOptions options = new TestProgramOptions().UseInProcess();
-        IApplicationGatewayClient client = options.GetGatewayClient()
+        IApplicationResourceInstanceGatewayClient client = options.GetGatewayClient()
             ?? throw new InvalidOperationException("The program's environment names no platform.");
         var resource = new TestResource(_provider, _name, options.Deployment);
 

@@ -35,7 +35,7 @@ public class InProcessInfrastructureTests
 
         // Assert
         TestProgramRun program = orders.Runs.ShouldHaveSingleItem();
-        IApplicationResourceDeployment deployment = run.Gateway.Resources.ShouldHaveSingleItem();
+        IApplicationGatewayDeployment deployment = run.Gateway.Resources.ShouldHaveSingleItem();
         ApplicationInstanceManifest instance = deployment.Instances.ShouldHaveSingleItem();
         instance.Key.ShouldBe(program.Key);
         instance.Deployment.ShouldBe(DeploymentId.Parse(program.Environment[AppEnvironment.Variables.Deployment]!));
@@ -272,7 +272,7 @@ public class InProcessInfrastructureTests
     {
         // Arrange: an instance opted into the platform, in an environment that names the endpoint.
         await using var infrastructure = new InProcessInfrastructure();
-        IApplicationGatewayClient client;
+        IApplicationResourceInstanceGatewayClient client;
         using (AppEnvironment.Enter(AppEnvironmentScope.Create(
             new Dictionary<string, string>
             {

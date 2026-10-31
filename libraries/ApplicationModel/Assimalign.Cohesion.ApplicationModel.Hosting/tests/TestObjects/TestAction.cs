@@ -13,7 +13,7 @@ internal sealed class TestAction : IApplicationInstanceAction
 
     public ApplicationActionKind Kind { get; init; } = ApplicationActionKind.Write;
 
-    public IApplicationActionState? State { get; init; }
+    public IApplicationInstanceActionState? State { get; init; }
 
     public Func<ApplicationActionContext, ValueTask<ApplicationActionResult>> Handler { get; init; } =
         _ => ValueTask.FromResult(ApplicationActionResult.Success());

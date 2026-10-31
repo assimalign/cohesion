@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// <summary>
 /// One running instance of a resource, with a stateful log-level control.
 /// </summary>
-internal sealed class TestInstance : IApplicationResourceInstance, IApplicationInstanceAction
+internal sealed class TestInstance : IApplicationInstance, IApplicationInstanceAction
 {
     private readonly ApplicationActionState<LogLevelSetting> _state =
         ApplicationActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
@@ -39,13 +39,13 @@ internal sealed class TestInstance : IApplicationResourceInstance, IApplicationI
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions => [this];
 
-    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors => [];
+    public IReadOnlyCollection<IApplicationInstanceHealthContributor> HealthContributors => [];
 
     ActionName IApplicationInstanceAction.Name => "log-level";
 
     ApplicationActionKind IApplicationInstanceAction.Kind => ApplicationActionKind.ReadWrite;
 
-    IApplicationActionState? IApplicationInstanceAction.State => _state;
+    IApplicationInstanceActionState? IApplicationInstanceAction.State => _state;
 
     async ValueTask<ApplicationActionResult> IApplicationInstanceAction.ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken)
     {
