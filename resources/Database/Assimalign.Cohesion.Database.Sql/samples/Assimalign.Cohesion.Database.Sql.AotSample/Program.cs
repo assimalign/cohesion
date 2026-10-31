@@ -87,6 +87,10 @@ internal static class Program
         "'broken' IS NOT JSON VALUE, '{}' IS JSON OBJECT, 'null' IS JSON SCALAR, NULL IS NOT JSON, " +
         "'12.5'::JSONB::INT, 'true'::JSON::BOOLEAN, 'null'::JSONB::NUMERIC";
     private static readonly object?[][] _jsonAccess = [["café", Encoding.UTF8.GetBytes("3"), null, true, true, true, null, 13, true, null]];
+    private const string jsonPaths = "SELECT JSON_VALUE('{\"a\":12}', '$.a' RETURNING INT), " +
+        "JSON_QUERY('[1,null,3]', '$[*]' WITH WRAPPER), JSON_EXISTS('{}', 'strict $.a' UNKNOWN ON ERROR), " +
+        "JSON_VALUE('{}', '$.missing' DEFAULT 'empty' ON EMPTY), JSON_QUERY('\"café\"', '$' RETURNING TEXT OMIT QUOTES)";
+    private static readonly object?[][] _jsonPaths = [[12, Encoding.UTF8.GetBytes("[1, null, 3]"), null, "empty", "café"]];
 
     private const string predicates = "SELECT NULL IS NOT DISTINCT FROM NULL, 1 IS DISTINCT FROM NULL, " +
         "NULL IS UNKNOWN, FALSE IS NOT TRUE, 1 = 1 IS TRUE, '50%' LIKE '50X%' ESCAPE 'X', " +
@@ -371,6 +375,7 @@ internal static class Program
         Check("in process: TOP after sorting", await RowsAsync(session, "SELECT TOP (1) Id FROM customers ORDER BY Id DESC"), [[2L]]);
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
         Check("in process: JSON access and scalar conversions", await RowsAsync(session, jsonAccess), _jsonAccess);
+        Check("in process: SQL/JSON path clauses and coercions", await RowsAsync(session, jsonPaths), _jsonPaths);
         Check("in process: distinct truth tests and ESCAPE", await RowsAsync(session, predicates), _predicates);
         Check("in process: integer bitwise types and precedence", await RowsAsync(session, bitwise), _bitwise);
         Check("in process: ordinary invariant LIKE anchors", await RowsAsync(session,
@@ -677,6 +682,7 @@ internal static class Program
         Check("over the wire: hash analysis keeps typed counts", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L) && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
         Check("over the wire: JSON access and scalar conversions", await RowsAsync(connection, jsonAccess, timeout.Token), _jsonAccess);
+        Check("over the wire: SQL/JSON path clauses and coercions", await RowsAsync(connection, jsonPaths, timeout.Token), _jsonPaths);
         Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
         Check("over the wire: integer bitwise types and precedence", await RowsAsync(connection, bitwise, timeout.Token), _bitwise);
         Check("over the wire: ordinary invariant LIKE anchors", await RowsAsync(connection,

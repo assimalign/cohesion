@@ -300,7 +300,7 @@ public sealed class SqlLanguageConformanceTests
         // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
         // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
         // Named savepoint controls (#1726, XT-4) add exactly three measured clauses.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(87);
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(90);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -946,6 +946,17 @@ public sealed class SqlLanguageConformanceTests
         [SqlClauses.Case] = Query("SELECT CASE WHEN age > 40 THEN 'senior' ELSE 'junior' END, CASE id WHEN 1 THEN 'first' ELSE 'later' END FROM t ORDER BY id;",
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCaseExpression),
             [["junior", "first"], ["senior", "later"], ["senior", "later"]]),
+        [SqlClauses.JsonValue] = new("SELECT JSON_VALUE('2', '$' RETURNING INT), JSON_VALUE('\"hello\"', '$' RETURNING json_domain);",
+            ["CREATE DOMAIN json_domain AS JSON;"], expression => expression is SqlSelectExpression,
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[2, null]]);
+                var parameterResult = await session.ExecuteAsync(SqlQueryRequest.FromSql(
+                    "SELECT JSON_VALUE('{\"a\":1}', $1)", new Dictionary<string, object?> { ["1"] = "$.a" }), CancellationToken.None);
+                CheckRows(await ReadRowsAsync(parameterResult), [["1"]]);
+            }),
+        [SqlClauses.JsonQuery] = Query("SELECT JSON_QUERY('[1,2]', '$[*]' RETURNING TEXT WITH WRAPPER);", expression => expression is SqlSelectExpression, [["[1, 2]"]]),
+        [SqlClauses.JsonExists] = Query("SELECT JSON_EXISTS('{}', '$.a'),JSON_EXISTS('null', '$');", expression => expression is SqlSelectExpression, [[false, true]]),
         [SqlClauses.Cast] = new("SELECT CAST('42' AS INT), CAST(age AS TEXT) FROM t ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression select && select.Columns.All(column => column.Expression is SqlCastExpression),
             async (_, result) =>

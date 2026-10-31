@@ -68,6 +68,7 @@ public class SqlConformanceTests
     [InlineData("SELECT a,(SELECT GROUPING(t.a) GROUP BY t.a) FROM t GROUP BY ROLLUP(a);", SqlQueryCommandType.Select)]
     [InlineData("SELECT a,(SELECT GROUPING(t.a)) FROM t GROUP BY ROLLUP(a);", SqlQueryCommandType.Select)]
     [InlineData("SELECT COUNT(*) FROM t GROUP BY GROUPING SETS (ROLLUP((a,(b,c))),GROUPING SETS ((a),()));", SqlQueryCommandType.Select)]
+    [InlineData("SELECT JSON_VALUE(doc,'$.a' RETURNING INT),JSON_QUERY(doc,'$[*]' WITH WRAPPER),JSON_EXISTS(doc,'strict $.a' UNKNOWN ON ERROR) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT * FROM users;", SqlQueryCommandType.Select)]
     [InlineData("SELECT BOOL_AND(flag), BOOL_OR(flag), EVERY(flag), STDDEV(v), STDDEV_SAMP(v), STDDEV_POP(v), VARIANCE(v), VAR_SAMP(v), VAR_POP(v) FROM t;", SqlQueryCommandType.Select)]
     [InlineData("SELECT SUM(v) FILTER(WHERE flag) OVER w,COUNT(*) OVER w,BOOL_AND(flag) OVER w,VAR_POP(v) OVER w,FIRST_VALUE(v) OVER w,LAST_VALUE(v) OVER w,NTH_VALUE(v,2) OVER w FROM t WINDOW w AS(PARTITION BY p ORDER BY k ROWS BETWEEN 2 PRECEDING AND 1 FOLLOWING);", SqlQueryCommandType.Select)]

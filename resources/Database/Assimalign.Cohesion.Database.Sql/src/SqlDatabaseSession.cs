@@ -789,6 +789,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         var planner = new SqlPlanner(_database.Catalog, parameters, _database.Definitions.Functions, cancellationToken, scope);
         try
         {
+            using var jsonPlanning = SqlJsonPathExecution.BeginPlanning(scope.Metrics, _database.Definitions.StatementMemoryBudget, cancellationToken);
             var plan = planner.Plan(explain.Statement, scope.Snapshot);
             var sequenceUsage = plan.SequenceUsage;
             if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }

@@ -96,6 +96,30 @@
   <data name="CastUtf8Text" xml:space="preserve">
     <value>CAST text must be valid UTF-8.</value>
   </data>
+  <data name="JsonPathBudget" xml:space="preserve">
+    <value>SQL/JSON path work or result exceeds the statement budget.</value>
+  </data>
+  <data name="JsonPathInvalid" xml:space="preserve">
+    <value>Invalid or unsupported SQL/JSON path; only the documented accessor subset is supported.</value>
+  </data>
+  <data name="JsonPathStructural" xml:space="preserve">
+    <value>SQL/JSON strict path accessor does not match the context item.</value>
+  </data>
+  <data name="JsonPathConstantRequired" xml:space="preserve">
+    <value>SQL/JSON path must be a string constant or parameter.</value>
+  </data>
+  <data name="JsonFunctionSignature" xml:space="preserve">
+    <value>Invalid SQL/JSON function operand, RETURNING or DEFAULT expression.</value>
+  </data>
+  <data name="JsonPathCardinality" xml:space="preserve">
+    <value>SQL/JSON path must return a single item of the required kind.</value>
+  </data>
+  <data name="JsonPathEmpty" xml:space="preserve">
+    <value>SQL/JSON path returned no item.</value>
+  </data>
+  <data name="JsonNumberOutOfRange" xml:space="preserve">
+    <value>SQL/JSON context number exceeds jsonb exponent, precision or scale bounds.</value>
+  </data>
   <data name="JsonInputInvalid" xml:space="preserve">
     <value>JSON input is malformed, exceeds depth 128, has an invalid Unicode escape or is not valid UTF-8.</value>
   </data>

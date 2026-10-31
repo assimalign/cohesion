@@ -233,6 +233,8 @@ internal sealed partial class SqlPlanner
         { throw new SqlPlanningException("CS05076", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WindowRequiresOver, bare.FunctionName), expression.Location); }
         RecordSequenceUsage(expression);
         _containsLike |= expression is SqlLikeExpression;
+        if (expression is SqlJsonFunctionExpression json)
+        { _containsJsonPath = true; SqlExpressionEvaluator.BindJsonPath(json, _parameters); }
         // Subqueries recurse through here as well as children (#1151).
         RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
