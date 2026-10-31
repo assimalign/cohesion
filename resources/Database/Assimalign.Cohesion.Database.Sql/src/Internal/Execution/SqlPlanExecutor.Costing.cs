@@ -263,6 +263,16 @@ internal sealed partial class SqlPlanExecutor
             join = join with { Bindings = join.Bindings.Select(binding => binding.Source.Derived is { } derived
                 ? binding with { Source = new SqlRelationSource(RewriteRelation(derived)) } : binding).ToArray() };
             if (join.Steps.Count == 0) { return join; }
+            // Preserve the allocation/probe contract of one- and two-relation queries.
+            if (join.Bindings.Count >= 3 && join.Bindings.Count <= SqlJoinSearch.ExactRelationLimit + (pinFirst ? 1 : 0) &&
+                SearchJoinOrder(join, pinFirst, Choose, Probe, cancellationToken) is { } searched)
+            {
+                // An earlier input can change while a later input's count is observed.
+                // Invalidate the entire optional rewrite, including all memoized subplans.
+                foreach (var binding in join.Bindings)
+                { if (binding.Source.Table is { } table) { _ = HasCurrentDefinition(table); } }
+                return searched;
+            }
             if (join.Tree is { } root)
             {
                 var normalized = new Dictionary<SqlJoinStep, SqlJoinStep>(ReferenceEqualityComparer.Instance);

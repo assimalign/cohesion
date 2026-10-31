@@ -908,10 +908,11 @@ before evaluating SET or writing. Association plans use SELECT predicate pushdow
 costing with the target pinned as the outer input. Safe target-only WHERE terms select target
 seeks; mandatory target/source equalities drive source index probes or the existing budgeted
 hash build. EXPLAIN exposes those access paths and algorithms. The full WHERE remains a residual.
-Equality-driven hash or seek steps are formed one at a time in written source order. For example,
-`UPDATE t SET v = b.v FROM a, b WHERE t.id = b.tid AND b.aid = a.id` visits |t| * |a|
-pairs before reaching b's hash. Write `FROM b, a` to make these equality joins linear in the
-input sizes. Both orders return correct results; general join-order search belongs to #1629.
+One source and source graphs with legality barriers retain written step order. Two
+through eight eligible INNER/CROSS source relations use #1629's exact DP search described
+under costing below, without joining the target into the search graph. The target identity
+uses the flat frame's final slot or the normalized frame's penultimate slot; the normalized
+final slot retains MERGE's independent source-presence marker.
 The pushed target filter runs before retaining target identities. Collection keeps the writer
 stamp from the original decode, avoiding a second whole-row read. Internal statement counters
 record association reads separately from total row reads, which also include stamp checks and
@@ -1295,7 +1296,9 @@ Computed merged keys do not acquire physical index probes. Ordinary equality and
 precedence remain unchanged. Grouping compares bound column values so qualified inputs and
 coerced merged names cannot accidentally share a key slot with different types.
 
-Execution is left-deep in written order. Only the first INNER pair may swap for an index;
+The bound fallback executes left-deep in written order; only its first INNER pair may swap
+for an index. #1629's exact DP search may replace eligible three-to-eight relation INNER/CROSS
+graphs with a costed left-deep or bushy tree (see the costing section below). Fallback
 later steps seek into the added input, and LEFT always preserves its left side. Each LEFT
 step tests its own residual before deciding whether to extend an unmatched row with NULL.
 Proven non-throwing single-binding WHERE conjuncts also filter inputs before pair allocation and
@@ -1314,7 +1317,8 @@ CHARACTER_LENGTH and the six captured transaction-clock forms. Volatility metada
 never proves error safety. Arithmetic, other calls, row-dependent LIKE patterns/escapes,
 lazy scalar forms without a safety proof, subqueries, outer references and deferred
 failures stay at their original level, preserving short-circuit errors even for rows
-discarded by another input or join key. Complete ON and WHERE residuals still run. Compatible mandatory
+discarded by another input or join key. Bound fallback retains complete ON and WHERE residuals;
+searched plans place each proven-safe conjunct at its lowest available subtree. Compatible mandatory
 equijoin equalities propagate exact constants transitively across INNER inputs, and only
 from preserved to nullable inputs across LEFT. Floating keys and incompatible text
 collations/types never infer constants. A full unique WHERE seek takes priority when
@@ -9510,6 +9514,64 @@ counts remain unchanged; no scan bound is widened (#1420).
 
 ## Transient probe costing and bounded hash builds (#1522, D3)
 
+### Exact join-order search (#1629, SQ-Z1)
+
+Three through eight eligible stored-table relations use subset dynamic programming over
+all ordered binary partitions, including bushy trees and Cartesian partitions. Each subset
+keeps one minimum-cost tree; its cardinality depends only on the relation set and mandatory
+predicates, so child costs are reusable. The default exact limit is eight relations. One/two
+relations retain the previous costing/allocation path. Larger graphs retain bound order until
+SQ-Z2 supplies its bounded heuristic. Search allocates no persistent statistics or public API,
+changes no format or wire contract, and introduces no diagnostic identity.
+
+The legal graph deliberately implements a conservative subset of PostgreSQL's outer-join
+identities: every outer join is a barrier, including RIGHT's existing physical normalization
+and FULL's preserved sides. An entire SELECT containing such a boundary retains bound order.
+Derived/view/system inputs, LATERAL, semi/anti subquery predicates, correlated slots, application
+calls and expressions lacking the existing non-throwing restriction proof also prevent search.
+Only INNER/CROSS nodes with proven-safe ON/WHERE conjuncts commute/associate. Each conjunct
+is attached at the lowest subtree containing all its references; singleton restrictions use
+input filters, and normalized seeks repeat their local filter as a full-frame residual.
+Volatile and set-returning expressions are never moved into a different evaluation level.
+UPDATE FROM, DELETE USING and MERGE search only their source graph (two through eight
+sources); the target remains outside it at the original target/source boundary. MERGE's root
+outer kind, ON predicate and presence tracking remain unchanged.
+
+Input access-path estimates are reused or probed once per search input with the existing
+32-page/512-entry bounded snapshot probe and definition-invalidation fallback.
+All bound table definitions are rechecked after search so a change during a later input's
+probe also discards earlier memoized choices. Unknown inputs
+retain the 4096 estimate; incomplete counts retain max(1024, 2*observed). Unique complete
+constant seeks need no probe. Output estimates multiply input estimates and apply a heuristic
+1/max(input cardinalities) per column equality or 1/3 per other crossing predicate; singleton
+scan filters have no extra selectivity assumption. Loop, index lookup and hash work reuse
+the existing product, outer*(1+log2(inner+1)), and 4*(outer+inner) costs. A unique complete
+probe keeps its established preference. Proven partial indexes remain eligible only with a
+binding proof. No persisted distribution or distinct-count claim is implied.
+
+Ties retain ascending leaf ordinals, then the deterministic subset enumeration. EXPLAIN
+reports the parenthesized chosen_order, reordered (including association changes), exact_dp
+or bound, collapse_limit, search_scope and memo state/partition counts. Searched plan evidence
+uses an internal derived record; ordinary plan object sizes stay unchanged. Left-deep SELECT
+winners use the flat executor; bushy and source-only winners use the normalized executor,
+copying each right relation's physical slots separately for noncontiguous subsets. Index
+seek fallback still applies the residual. Joins keep their sort (SQ-K3 remains single-table).
+
+Deterministic tests assert 3/15/63/255 states and 2/50/602/6050 ordered partitions at
+2/4/6/8 inputs (2 exercises the search kernel; production retains its old two-input path).
+An exhaustive four-input binary-tree oracle verifies the bushy optimum. Generated data
+compares selected plans with forced bound plans for duplicates, NULLs, multi-column and
+non-equi joins, grouped/CROSS joins, outer barriers, EXISTS/NOT EXISTS and DML sources.
+A later selective third input reduces tested pairs from 12,800 to 160. This is work evidence,
+not a duration threshold. PostgreSQL reference anchors (local clone):
+src/backend/optimizer/README:199-285 (identities, strictness, semi/anti and FULL barriers),
+src/backend/optimizer/path/joinrels.c:355-676 (legality and LATERAL constraints), and
+src/backend/optimizer/plan/initsplan.c:2018-2110 (make_outerjoininfo and FULL's fixed sets).
+src/backend/utils/misc/guc_parameters.dat:1107-1114,1186-1192,1537-1544 keeps the collapse
+defaults of eight and GEQO's distinct threshold of twelve as separate policies.
+
+### Existing costing contract
+
 No catalog statistic, maintenance command, storage format change or legacy reader is introduced.
 Binding still proves sargability and keeps the entire WHERE/ON residual. Competing seek paths
 are ranked by snapshot-visible B+Tree range counts. Each probe visits at most 32 pages and
@@ -9537,7 +9599,7 @@ more than 16 candidates loses to a scan only when an exact base probe costs no m
 random fetch units per seek candidate. Small indexed inner inputs (at most 16 exact candidates)
 and unique complete probes retain their index nested loop.
 
-For a safe mandatory equality, hash build plus probe work is compared with nested work.
+In the bound fallback, a safe mandatory equality compares hash build plus probe work with nested work.
 An unindexed loop costs the input product; an index loop costs outer rows times
 (1 + log2(inner rows + 1)). Loops remain when that work is at most four times the input sum.
 Unknown outer cardinality conservatively retains an available index probe. When both first-pair

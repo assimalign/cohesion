@@ -130,8 +130,8 @@ internal sealed partial class SqlPlanExecutor
             var fresh = plan.Bindings[last.InnerBinding];
             Array.Fill(sharedColumns, false, fresh.Offset, fresh.Source.Columns.Count);
         }
-        bool reversed = plan.FirstBinding == 1;
-        var initial = plan.Bindings[reversed ? 1 : 0];
+        bool reversed = plan is not SqlSearchedJoinPlan && plan.FirstBinding == 1;
+        var initial = plan.Bindings[plan.FirstBinding];
         var buffered = new List<object?[]>?[plan.Steps.Count];
         var hashes = new SqlHashJoinTable?[plan.Steps.Count];
         var cursors = new IEnumerator<object?[]>?[plan.Steps.Count];
@@ -140,11 +140,11 @@ internal sealed partial class SqlPlanExecutor
         var rows = new object?[plan.Steps.Count + 1][];
         try
         {
-            foreach (var first in ReadInput(reversed ? 1 : 0))
+            foreach (var first in ReadInput(plan.FirstBinding))
             {
                 rows[0] = new object?[plan.Columns.Count + (dmlTarget is null ? 0 : 1)];
                 first.CopyTo(rows[0], initial.Offset);
-                if (dmlTarget?.Binding == (reversed ? 1 : 0)) { rows[0][^1] = first; }
+                if (dmlTarget?.Binding == plan.FirstBinding) { rows[0][^1] = first; }
                 // An explicit cursor stack keeps N inputs from becoming N recursive
                 // MoveNext calls. Query text controls N independently of expression depth.
                 int level = 0;
