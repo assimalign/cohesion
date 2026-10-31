@@ -39,13 +39,14 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
 {
-    private readonly RequestDecompressionOptions _options;
+    private readonly long _maxDecompressedSizeBytes;
 
     public RequestDecompressionMiddleware(RequestDecompressionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _options = options;
+        // A snapshot: the registered middleware never observes a later change to the options object.
+        _maxDecompressedSizeBytes = options.MaxDecompressedSizeBytes;
     }
 
     /// <inheritdoc />
@@ -81,7 +82,7 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         Stream decoded = BuildDecodeChain(context.Request.Body, codings);
         // The server's client-fault report tells a decoder's malformed-content failure apart from a
         // malformed message framing under it, which is the transport's to answer (#1340).
-        LimitedDecompressionStream limited = new(decoded, _options.MaxDecompressedSizeBytes, context.Features.Get<IWebClientFaultFeature>());
+        LimitedDecompressionStream limited = new(decoded, _maxDecompressedSizeBytes, context.Features.Get<IWebClientFaultFeature>());
 
         // Downstream now reads the decoded identity representation; the coding and the compressed
         // length no longer describe it.
@@ -96,7 +97,7 @@ internal sealed class RequestDecompressionMiddleware : IWebApplicationMiddleware
         }
         catch (RequestDecompressionLimitException)
         {
-            CompressionEventSource.Log.DecompressionLimitExceeded(context, _options.MaxDecompressedSizeBytes, codings);
+            CompressionEventSource.Log.DecompressionLimitExceeded(context, _maxDecompressedSizeBytes, codings);
             await RejectAsync(context, HttpStatusCode.RequestEntityTooLarge).ConfigureAwait(false);
         }
         catch (RequestDecompressionFormatException exception)

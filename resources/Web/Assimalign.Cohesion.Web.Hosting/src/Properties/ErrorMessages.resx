@@ -132,6 +132,9 @@
   <data name="ApplicationFeatureFactoryResultNull" xml:space="preserve">
     <value>The web application feature factory returned null.</value>
   </data>
+  <data name="ApplicationSettingFactoryResultNull" xml:space="preserve">
+    <value>The web application setting factory returned null.</value>
+  </data>
   <data name="ApplicationResourceDisposalFailed" xml:space="preserve">
     <value>One or more application resources failed to dispose.</value>
   </data>
@@ -199,7 +202,7 @@
     <value>The HTTPS endpoint &apos;{0}&apos; declares a &apos;Certificate&apos; section without a &apos;Path&apos;.</value>
   </data>
   <data name="EndpointCertificateRequired" xml:space="preserve">
-    <value>The HTTPS endpoint &apos;{0}&apos; requires its Certificate Secret mount (default &apos;tls&apos;) or a &apos;Certificate:Path&apos; file.</value>
+    <value>The HTTPS endpoint &apos;{0}&apos; requires a &apos;Certificate:Path&apos; file.</value>
   </data>
   <data name="EndpointClientCertificateModeUnsupported" xml:space="preserve">
     <value>The HTTP endpoint &apos;{0}&apos; declares an unsupported &apos;ClientCertificateMode&apos; (&apos;{1}&apos;). Supported values: NoCertificate, AllowCertificate, RequireCertificate.</value>
@@ -215,9 +218,6 @@
   </data>
   <data name="EndpointProtocolUnsupported" xml:space="preserve">
     <value>The HTTP endpoint &apos;{0}&apos; declares an unsupported &apos;Protocol&apos; (&apos;{1}&apos;). Supported values: Http1, Http2, Https, Http1s, Http2s, Http3.</value>
-  </data>
-  <data name="HealthContributorStatusUnsupported" xml:space="preserve">
-    <value>The contributor returned an unsupported health status.</value>
   </data>
   <data name="Http3QuicRequired" xml:space="preserve">
     <value>The HTTP endpoint &apos;{0}&apos; declares &apos;Protocol&apos; Http3, which requires QUIC (Windows, Linux, or macOS).</value>

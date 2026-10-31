@@ -9,7 +9,6 @@ using Xunit;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 
@@ -20,8 +19,8 @@ public class ApplicationDependencyInjectionTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = CreateScope(directory);
-        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
 
         // Act
         await using SecretStoreApplication application = builder.Build();
@@ -38,9 +37,9 @@ public class ApplicationDependencyInjectionTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = CreateScope(directory);
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
         var events = new List<string>();
-        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
         builder.AddService(new RecordingHostService("first", events));
         builder.Services.AddSingleton<IHostService>(new RecordingHostService("second", events));
         builder.AddService(_ => new RecordingHostService("third", events));
@@ -69,10 +68,10 @@ public class ApplicationDependencyInjectionTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = CreateScope(directory);
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
         var owned = new DisposableHostService();
         var borrowed = new DisposableHostService();
-        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
         builder.AddService(borrowed);
         builder.AddService(_ => owned);
         SecretStoreApplication application = builder.Build();
@@ -90,9 +89,9 @@ public class ApplicationDependencyInjectionTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = CreateScope(directory);
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
         var created = new DisposableHostService();
-        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
         builder.AddService(_ => created);
         builder.AddService(_ => throw new InvalidOperationException("factory failure"));
 
@@ -109,8 +108,8 @@ public class ApplicationDependencyInjectionTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = CreateScope(directory);
-        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
+        ISecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
         builder.AddSecret("db/password", new byte[] { 1, 2, 3 }).AddCertificateAuthority();
 
         // Act & Assert
@@ -119,12 +118,6 @@ public class ApplicationDependencyInjectionTests
         Should.Throw<InvalidOperationException>(() => builder.AddCertificateAuthority())
             .Message.ShouldContain("already declared", Case.Insensitive);
     }
-
-    private static IDisposable CreateScope(TemporaryDirectory directory) =>
-        ResourceRuntime.CreateScope(SecretStoreTestHost.CreateContext(
-            SecretStoreTestHost.GetEndpoint(),
-            directory.Path,
-            gatewayName: null));
 
     private sealed class RecordingHostService : IHostService
     {

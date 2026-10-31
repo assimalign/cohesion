@@ -6,9 +6,10 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.StaticFiles;
 
 /// <summary>
-/// Builder-time configuration for <c>UseStaticFiles</c>. All values are snapshotted when the
-/// middleware is composed — mutating an options instance after that snapshot has no effect, and
-/// nothing is resolved or re-read per request.
+/// Configuration of the static-files middleware: <see cref="StaticFilesBuilder.Options"/> for
+/// <c>builder.Services.AddStaticFiles(files =&gt; ...)</c>, and the options <c>MapFallbackToFile</c>
+/// serves its file with. All values are snapshotted when the middleware is built — mutating an
+/// options instance after that snapshot has no effect, and nothing is resolved or re-read per request.
 /// </summary>
 public sealed class StaticFilesOptions
 {
@@ -32,17 +33,17 @@ public sealed class StaticFilesOptions
     /// (<c>200</c>/<c>206</c>/<c>304</c>/<c>416</c>), for example
     /// <c>public, max-age=3600, immutable</c>. <see langword="null"/> or empty emits no
     /// <c>Cache-Control</c> header. The value is validated against the RFC 9111 grammar when the
-    /// middleware is composed.
+    /// middleware is built.
     /// </summary>
     public string? CacheControl { get; set; }
 
     /// <summary>
     /// Gets the extension-to-content-type overrides overlaid onto
-    /// <see cref="HttpContentTypes.Default"/> when the middleware is composed. Keys are extensions;
+    /// <see cref="HttpContentTypes.Default"/> when the middleware is built. Keys are extensions;
     /// they may be given with or without a leading dot and are case-insensitive, and a key matching
     /// a default extension replaces the default value. A key maps an extension only: the key
     /// <c>gltf</c> maps <c>model.gltf</c>, never a file named <c>gltf</c>. Every value must be a
-    /// non-empty <see cref="HttpFieldValue"/>; the field grammar is checked at composition.
+    /// non-empty <see cref="HttpFieldValue"/>; the field grammar is checked when the middleware is built.
     /// </summary>
     /// <remarks>
     /// No key can type a file without an extension, such as
@@ -68,7 +69,7 @@ public sealed class StaticFilesOptions
     /// Gets or sets the content type used for files with no mapped extension when
     /// <see cref="ServeUnknownContentTypes"/> is enabled. The default is
     /// <c>application/octet-stream</c>. The value must be a non-empty <see cref="HttpFieldValue"/>;
-    /// the field grammar is checked at composition even when unknown content types are not served.
+    /// the field grammar is checked when the middleware is built, even when unknown content types are not served.
     /// </summary>
     public string FallbackContentType { get; set; } = HttpContentTypes.Fallback;
 

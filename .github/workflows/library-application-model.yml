@@ -51,9 +51,11 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.ApplicationModel',
+            'Assimalign.Cohesion.ApplicationModel.Definition',
             'Assimalign.Cohesion.ApplicationModel.Gateway',
-            'Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane',
-            'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
+            'Assimalign.Cohesion.ApplicationModel.Gateway.InProcess',
+            'Assimalign.Cohesion.ApplicationModel.Hosting',
+            'Assimalign.Cohesion.ApplicationModel.Hosting.InProcess'
         ]]
     steps:
       - uses: actions/checkout@v7

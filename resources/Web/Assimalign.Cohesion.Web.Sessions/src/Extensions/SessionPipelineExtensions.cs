@@ -1,5 +1,5 @@
 using System;
-using System.Globalization;
+using System.Linq;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Sessions.Internal;
@@ -7,28 +7,25 @@ using Assimalign.Cohesion.Web.Sessions.Internal;
 namespace Assimalign.Cohesion.Web.Sessions;
 
 /// <summary>
-/// Pipeline-builder members that add per-request HTTP session support to a web
+/// Pipeline-builder members that place per-request HTTP session support in a web
 /// application.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Register <c>UseSessions</c> before any middleware or endpoint that reads or
+/// Place <c>UseSessions</c> before any middleware or endpoint that reads or
 /// writes the session, and — because a new session establishes its cookie
 /// synchronously on first access — before the response head is committed.
-/// Composition is dependency-free: the store and options are captured at builder
-/// time and no request-time service location occurs.
 /// </para>
 /// <para>
-/// With no store argument the middleware uses an in-process
-/// <see cref="InMemoryHttpSessionStore"/>. An out-of-process deployment (behind a
-/// load balancer, without sticky sessions) supplies a distributed
-/// <see cref="IHttpSessionStore"/> adapter through the store overload; nothing
-/// else in the pipeline changes.
+/// The cookie, idle timeout, and store are configured where the middleware is
+/// registered, <c>builder.Services.AddSessions(sessions =&gt; ...)</c>
+/// (<see cref="SessionsBuilder"/>); this verb only positions it. Composition is
+/// dependency-free and no request-time service location occurs.
 /// </para>
 /// <para>
 /// The session-id cookie carries <c>Secure</c> whenever the effective scheme
 /// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>) is HTTPS. Behind a
-/// TLS-terminating proxy, register <c>UseForwardedHeaders</c> ahead of
+/// TLS-terminating proxy, place <c>UseForwardedHeaders</c> ahead of
 /// <c>UseSessions</c> so the proxy's <c>https</c> is known when the cookie is
 /// established; without it the transport-derived scheme decides.
 /// </para>
@@ -38,63 +35,28 @@ public static class SessionPipelineExtensions
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds the session middleware backed by an in-memory session store.
+        /// Places the session middleware the application registered with
+        /// <c>builder.Services.AddSessions(sessions =&gt; ...)</c>, or one with the defaults when it
+        /// registered none: the <c>.Cohesion.Session</c> cookie, a 20-minute idle timeout, and a new
+        /// in-memory session store.
         /// </summary>
-        /// <param name="configure">An optional callback to configure the cookie name/path/HttpOnly flag and the idle timeout.</param>
+        /// <remarks>
+        /// When the application registered the middleware more than once, the last registration wins.
+        /// Placing the verb twice places the same registered instance, so both positions share one store.
+        /// </remarks>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive;
-        /// <paramref name="configure"/> assigns <see cref="HttpSessionOptions.CookieName"/> a
-        /// string outside RFC 6265 <c>token</c>, or <see cref="HttpSessionOptions.CookiePath"/>
-        /// one outside <c>path-value</c> (thrown by the conversion); or either cookie option is
-        /// <see langword="default"/> (with parameter name <c>configure</c>).
-        /// </exception>
-        public IWebApplicationPipelineBuilder UseSessions(Action<HttpSessionOptions>? configure = null)
-            => builder.UseSessions(new InMemoryHttpSessionStore(), configure);
-
-        /// <summary>
-        /// Adds the session middleware backed by the supplied session store.
-        /// </summary>
-        /// <param name="store">The backing store the session state round-trips through.</param>
-        /// <param name="configure">An optional callback to configure the cookie name/path/HttpOnly flag and the idle timeout.</param>
-        /// <returns>The same pipeline builder for chaining.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="store"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// The configured <see cref="HttpSessionOptions.IdleTimeout"/> is not positive;
-        /// <paramref name="configure"/> assigns <see cref="HttpSessionOptions.CookieName"/> a
-        /// string outside RFC 6265 <c>token</c>, or <see cref="HttpSessionOptions.CookiePath"/>
-        /// one outside <c>path-value</c> (thrown by the conversion); or either cookie option is
-        /// <see langword="default"/> (with parameter name <c>configure</c>).
-        /// </exception>
-        public IWebApplicationPipelineBuilder UseSessions(IHttpSessionStore store, Action<HttpSessionOptions>? configure = null)
+        public IWebApplicationPipelineBuilder UseSessions()
         {
             ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(store);
 
-            HttpSessionOptions options = new();
-            configure?.Invoke(options);
-
-            if (options.IdleTimeout <= TimeSpan.Zero)
+            return builder.Use(static (context, next) =>
             {
-                throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.SessionIdleTimeoutInvalid, options.IdleTimeout),
-                    nameof(configure));
-            }
+                IWebApplicationMiddleware middleware = context.Middleware.OfType<SessionMiddleware>().LastOrDefault()
+                    ?? new SessionsBuilder().Build();
 
-            // The value types reject out-of-grammar strings at assignment; default is the
-            // one value they cannot see. Refuse it before any middleware is registered.
-            if (options.CookieName.Value is null)
-            {
-                throw new ArgumentException(ErrorMessages.SessionCookieNameInvalid, nameof(configure));
-            }
-
-            if (options.CookiePath.Value is null)
-            {
-                throw new ArgumentException(ErrorMessages.SessionCookiePathInvalid, nameof(configure));
-            }
-
-            return builder.Use(new SessionMiddleware(store, options));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
     }
 }

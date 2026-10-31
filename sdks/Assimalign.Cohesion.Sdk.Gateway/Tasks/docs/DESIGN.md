@@ -30,8 +30,8 @@ It imports `Assimalign.Cohesion.Sdk.ApplicationModel` unconditionally and then
 imports `Assimalign.Cohesion.Sdk`, but it does not create or reference an
 `Assimalign.Cohesion.App.Gateway` framework. The orchestration plane consists of
 `Assimalign.Cohesion.ApplicationModel`,
-`Assimalign.Cohesion.ApplicationModel.Gateway`,
-`Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`, optional provider packages, and the
+`Assimalign.Cohesion.ApplicationModel.Gateway` (the retired `Gateway.ControlPlane` was removed on
+2026-10-29), optional provider packages, and the
 `<Area>.ApplicationModel` package of each referenced resource project's area. No area client
 package is part of it: the gateway delivers commands through its generic control-plane command
 client. Store, certificate-authority, and trust providers come from opt-in

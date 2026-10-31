@@ -65,7 +65,7 @@ public sealed class StaticFilesShortNameAliasTests : IDisposable
     private async Task<TestHttpContext> RunMiddlewareAsync(string path, bool[] passedThrough)
     {
         var builder = new TestPipelineBuilder();
-        builder.UseStaticFiles(_mount);
+        builder.Use(StaticFilesMount.Build(_mount));
         builder.Use((context, next) =>
         {
             passedThrough[0] = true;

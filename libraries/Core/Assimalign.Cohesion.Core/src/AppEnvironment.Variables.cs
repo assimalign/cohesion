@@ -92,6 +92,21 @@ public static partial class AppEnvironment
         /// <summary>Gets the optional structured log format variable.</summary>
         public const string LogFormat = "COHESION_LOG_FORMAT";
 
+        /// <summary>Gets the variable naming the URL a resource instance publishes its manifest to.</summary>
+        public const string ManifestEndpoint = "COHESION_MANIFEST_ENDPOINT";
+
+        /// <summary>Gets the variable naming the URL a resource instance serves its control plane on.</summary>
+        public const string ControlPlaneEndpoint = "COHESION_CONTROL_PLANE_ENDPOINT";
+
+        /// <summary>
+        /// Gets the variable naming the deployment that started a resource instance, which the instance
+        /// repeats in the manifest it publishes.
+        /// </summary>
+        public const string Deployment = "COHESION_DEPLOYMENT";
+
+        // The prefix every variable of the contract starts with. Internal: it names no variable.
+        internal const string Prefix = "COHESION_";
+
         /// <summary>
         /// Builds a declared-endpoint environment-variable name.
         /// </summary>
@@ -187,6 +202,21 @@ public static partial class AppEnvironment
             return ConfigurationPattern
                 .Replace("<Section>", section, StringComparison.Ordinal)
                 .Replace("<Key>", key, StringComparison.Ordinal);
+        }
+
+        /// <summary>
+        /// Builds the configuration bridge variable of a configuration key whose sections are
+        /// separated by colons, such as <c>Orders:Url</c>.
+        /// </summary>
+        /// <param name="key">The configuration key.</param>
+        /// <returns>The configuration variable name, with a double underscore for each colon.</returns>
+        /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> is empty.</exception>
+        public static string Configuration(string key)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+            int sections = ConfigurationPattern.IndexOf("<Section>", StringComparison.Ordinal);
+            return string.Concat(ConfigurationPattern.AsSpan(0, sections), key.Replace(":", "__", StringComparison.Ordinal));
         }
 
         private static string NormalizeName(string value)

@@ -43,19 +43,6 @@
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
-	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.MessageHub.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.MessageHub.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.MessageHub.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.MessageHub.ApplicationModel/src/Assimalign.Cohesion.MessageHub.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.MessageHub.ApplicationModel/tests/Assimalign.Cohesion.MessageHub.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/MessageHub/Assimalign.Cohesion.MessageHub.Refs/">
 		<File Path="Assimalign.Cohesion.MessageHub.Refs/Directory.Build.props" />
 	</Folder>

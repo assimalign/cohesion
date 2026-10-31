@@ -1,19 +1,17 @@
 # Assimalign.Cohesion.ConfigurationStore.Hosting
 
 The ConfigurationStore area's runtime composition root. `ConfigurationStoreApplication.CreateBuilder(args)`
-captures code-first namespace declarations and builds either a plain host or, when resource opt-in is
-enabled, the area's default control-plane endpoint.
+captures code-first namespace declarations and builds a plain host.
 
-The enabled host stores each namespace as plain JSON beneath the durable `data` volume and serves
-authenticated list, read, set, and remove operations under `/cohesion/v1`. ES256 bootstrap JWTs are
-verified against the application's durable trusted-issuer set; the ambient application key seeds the
-set on first start and reconciles key rotation. Declarations seed only absent namespace documents, and
-mutations become visible only after their atomic durable write succeeds.
+The host stores each namespace as plain JSON beneath the durable `data` volume and serves
+list and read operations under `/cohesion/v1`. The retired resource integration (control plane,
+declarative commands, bootstrap-token trust, telemetry) was removed on 2026-10-31 with the
+application-model restart (assimalign/cohesion#1759), and the area's resource integration returns
+as `Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`. Declarations seed only absent
+namespace documents.
 
-The HTTP implementation is internal and composed from Cohesion Hosting, Hosting.Resources,
-Hosting.Health, IdentityModel, and the private Web transport. Public construction remains limited to
-`ConfigurationStoreApplication`; the resource still behaves as a plain application when opt-in is
-disabled.
+The HTTP implementation is internal and composed from Cohesion Hosting and the private Web
+transport. Public construction remains limited to `ConfigurationStoreApplication`.
 
 - [Overview](docs/OVERVIEW.md)
 - [Design](docs/DESIGN.md)

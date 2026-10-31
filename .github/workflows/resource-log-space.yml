@@ -5,9 +5,6 @@ on:
       - "resources/LogSpace/**"
       - "!resources/LogSpace/**/*.slnx"
       - "!resources/LogSpace/**/*.md"
-      # The area's acceptance fixture lives in the fixtures/ folder of the project whose
-      # tests drive it (.claude/rules/resource-areas.md) - still this area's input.
-      - "libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost/**"
       - ".github/workflows/resource-log-space.yml" # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
       - ".github/actions/build/**"
@@ -50,7 +47,7 @@ jobs:
         os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # One leg per OS builds and tests the whole area: the inner list is a single matrix value
         # that .github/actions/build receives whole. The release inventory guard reads this list.
-        projects: [["Assimalign.Cohesion.LogSpace", "Assimalign.Cohesion.LogSpace.ApplicationModel", "Assimalign.Cohesion.LogSpace.Hosting"]]
+        projects: [["Assimalign.Cohesion.LogSpace", "Assimalign.Cohesion.LogSpace.Hosting"]]
     steps:
       - uses: actions/checkout@v7
         name: Checkout
@@ -61,22 +58,3 @@ jobs:
           area: "resources"
           category: "LogSpace"
           projects: ${{ toJSON(matrix.projects) }}
-
-  sink-sample:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      # Every leg reports its own result: with fail-fast, one failing leg cancels the rest of the
-      # matrix and leaves the other projects without a signal (#1093).
-      fail-fast: false
-      matrix:
-        # Windows and macOS legs run on main, or on a manual run with all-os set; other pushes run
-        # Linux only, because the organization's plan runs at most 5 macOS jobs at once.
-        os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
-        projects: ['Assimalign.Cohesion.LogSpace.SinkHost']
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
-        with:
-          global-json-file: global.json
-      - run: dotnet build build/Tasks -c Release
-      - run: dotnet build libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/${{ matrix.projects }}/${{ matrix.projects }}.csproj -c Release

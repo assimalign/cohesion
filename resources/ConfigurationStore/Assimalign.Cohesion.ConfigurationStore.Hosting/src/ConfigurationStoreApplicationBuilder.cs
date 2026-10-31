@@ -1,16 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ConfigurationStore;
 using Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 
@@ -29,18 +25,15 @@ namespace Assimalign.Cohesion.ConfigurationStore.Hosting;
 public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreApplicationBuilder
 {
     private const string DefaultEndpoint = "http://127.0.0.1:8080";
+    private const string DefaultEnvironment = "production";
 
     private readonly string[] _args;
-    private readonly string _environmentName;
     private readonly ConfigurationStoreApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
     private bool _isBuilt;
 
-    internal ConfigurationStoreApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal ConfigurationStoreApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         _args = (string[])args.Clone();
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -49,28 +42,7 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException(
-                "The registered ConfigurationStore control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
-
-        _environmentName = _resourceContext?.EnvironmentName ?? "production";
-        _context = new ConfigurationStoreApplicationContext(
-            _environmentName,
-            _resourceContext is null ? (System.IO.FileSystemPath?)null : System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
+        _context = new ConfigurationStoreApplicationContext(DefaultEnvironment, contentRootPath: null);
     }
 
     /// <summary>
@@ -167,8 +139,8 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
     /// </summary>
     /// <returns>The configured configuration store application.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The builder has already built an application, a registered host service factory returns
-    /// <see langword="null"/>, or the data mount has no filesystem path.
+    /// The builder has already built an application, or a registered host service factory returns
+    /// <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException">A command-line endpoint or data option is invalid or missing its value.</exception>
     public ConfigurationStoreApplication Build()
@@ -198,8 +170,6 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
         Services.AddSingleton<IHostService>(serviceProvider => new ConfigurationEndpointService(
             endpoint,
             serviceProvider.GetRequiredService<ConfigurationStoreRepository>(),
-            _controlPlane,
-            _resourceContext,
             _context));
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<IConfigurationStoreApplicationContext>(_context);
@@ -218,15 +188,9 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
         {
             _context.ResolveHostedServices();
 
-            var application = new ConfigurationStoreApplication(
-                new ConfigurationStoreApplicationOptions { Environment = _environmentName },
+            return new ConfigurationStoreApplication(
+                new ConfigurationStoreApplicationOptions { Environment = DefaultEnvironment },
                 _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
         }
         catch (Exception exception)
         {
@@ -252,16 +216,6 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
 
     private Uri ResolveEndpoint()
     {
-        if (_controlPlane?.ObservedEndpoints.TryGetValue("api", out Uri? observed) is true)
-        {
-            return observed;
-        }
-
-        if (_resourceContext?.Endpoints.TryGetValue("api", out Uri? supplied) is true)
-        {
-            return supplied;
-        }
-
         return ParseArgument("--endpoint") is string configured
             ? ParseEndpoint(configured)
             : new Uri(DefaultEndpoint, UriKind.Absolute);
@@ -269,21 +223,8 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
 
     private string ResolveDataPath()
     {
-        if (_resourceContext?.Mounts.TryGetValue("data", out ResourceMount? mount) is true)
-        {
-            if (string.IsNullOrWhiteSpace(mount.Path))
-            {
-                throw new InvalidOperationException(
-                    "The ConfigurationStore 'data' volume must expose a file-system path.");
-            }
-
-            return Path.GetFullPath(mount.Path);
-        }
-
         string? configured = ParseArgument("--data");
-        string path = configured ?? Path.Combine(
-            _resourceContext?.ContentRootPath ?? AppContext.BaseDirectory,
-            "data");
+        string path = configured ?? Path.Combine(AppContext.BaseDirectory, "data");
         return Path.GetFullPath(path);
     }
 

@@ -9,10 +9,10 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.RateLimiting;
 
 /// <summary>
-/// Builder-time options for the rate-limiting middleware
-/// (<see cref="RateLimitingExtensions.UseRateLimiting(IWebApplicationPipelineBuilder, Action{RateLimitingOptions})"/>).
-/// Composition is dependency-free: policies, the rejection status, and the hooks are captured at
-/// builder time; no service container, configuration binding, or request-time service location occurs.
+/// Registration-time options for the rate-limiting middleware, configured through
+/// <see cref="RateLimitingBuilder.Options"/> in <c>builder.Services.AddRateLimiting(rateLimiting =&gt; ...)</c>.
+/// Composition is dependency-free: policies, the rejection status, and the hooks are captured when the
+/// middleware is built; no service container, configuration binding, or request-time service location occurs.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("RateLimitingOptions")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
@@ -77,6 +77,32 @@ public sealed class RateLimitingOptions
     /// Resolves a named policy registered through <see cref="AddPolicy"/>.
     /// </summary>
     internal bool TryGetPolicy(string name, out RateLimitingPolicy? policy) => _policies.TryGetValue(name, out policy);
+
+    /// <summary>
+    /// Copies these options for one middleware: the global policy, the rejection status, the hooks, and
+    /// the named-policy map, so a change made to these options afterwards never reaches the middleware.
+    /// The policies themselves are shared, not copied.
+    /// </summary>
+    /// <remarks>
+    /// Every option needs a line here, or a middleware built from the snapshot sees its default.
+    /// </remarks>
+    internal RateLimitingOptions Snapshot()
+    {
+        RateLimitingOptions snapshot = new()
+        {
+            GlobalPolicy = GlobalPolicy,
+            RejectionStatusCode = RejectionStatusCode,
+            OnRejected = OnRejected,
+            OnDecision = OnDecision,
+        };
+
+        foreach (KeyValuePair<string, RateLimitingPolicy> policy in _policies)
+        {
+            snapshot._policies.Add(policy.Key, policy.Value);
+        }
+
+        return snapshot;
+    }
 
     private sealed class DebugView
     {

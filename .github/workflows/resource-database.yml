@@ -72,7 +72,6 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.Database',
-            'Assimalign.Cohesion.Database.ApplicationModel',
             'Assimalign.Cohesion.Database.Blob',
             'Assimalign.Cohesion.Database.Blob.Client',
             'Assimalign.Cohesion.Database.Blob.Protocol',

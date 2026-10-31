@@ -22,10 +22,9 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - **Never reference `Assimalign.Cohesion.Web.Hosting`** from a feature library. Hosting composes
   DI, configuration, logging, and transports; a reference to it drags that surface into every
   consumer and pushes users toward container-driven design.
-- `Web.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself (owner decision 57,
-  2026-10-13). Its public integrations live in `src/Health/` and `src/Resources/`, keeping the
-  `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources` namespaces. No separate Web
-  hosting-family package exists. A future `Web.Hosting.<Suffix>` package is permitted only for
+- `Web.Hosting` is a plain host. The resource integration is `Web.Hosting.Resources`, which
+  references `Web.Hosting` (application-model restart, 2026-10-27/28), and `Hosting.Health` was
+  removed on 2026-10-28. A future `Web.Hosting.<Suffix>` package is permitted only for
   an integration that must not land in every framework carrying `Web.Hosting`; it retains the
   family constraints in `resource-areas.md`. Roots and features may not reference the hosting
   module, its family (COHRES001) or shared Hosting libraries (COHRES004).
@@ -106,7 +105,11 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 - **Pipeline verbs ship with the feature as `extension(...)` members:** `Use<Feature>` extends
   `IWebApplicationPipelineBuilder`, and `Map*` verbs extend the pipeline or router surface (all
   from `Assimalign.Cohesion.Web` and `Web.Routing`). Ordering matters there, which the
-  component-integration mechanism does not model.
+  component-integration mechanism does not model. A `Use<Feature>` verb takes no configuration:
+  the feature's registration verb owns it and registers the configured middleware, which the
+  `Use` verb finds in `IWebApplicationContext.Middleware` (`resource-areas.md`, "`Add` configures,
+  `Use` places"). A value an operator may change while the application runs is an `IWebApplicationSetting` the
+  registration verb registers; the middleware reads it from `IWebApplicationContext.Settings`.
 - Registration stays dependency-free: a factory or builder composes values and options objects
   into the feature eagerly. No configuration binding and no request-time service location — the
   `*.Hosting`-only DI rule still stands; the feature package never sees the container.

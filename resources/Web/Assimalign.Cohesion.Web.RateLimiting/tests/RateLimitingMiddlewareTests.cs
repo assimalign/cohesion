@@ -17,11 +17,13 @@ using IPAddress = System.Net.IPAddress;
 namespace Assimalign.Cohesion.Web.RateLimiting.Tests;
 
 /// <summary>
-/// Middleware-level coverage for <c>UseRateLimiting</c> over the pipeline harness: the global gate
-/// (admit / 429 / Retry-After / OnRejected / OnDecision / custom status), the endpoint gate over the
-/// endpoint published ahead of the middleware (named / inline / disabled / unknown policy, queueing
-/// and cancellation, CORS-preflight skip), forwarded-composing client-address partitioning, the
-/// started-response abort, and the request-lifetime permit hold.
+/// Middleware-level coverage for the middleware <see cref="RateLimitingBuilder"/> builds, over the
+/// pipeline harness: the global gate (admit / 429 / Retry-After / OnRejected / OnDecision / custom
+/// status), the endpoint gate over the endpoint published ahead of the middleware (named / inline /
+/// disabled / unknown policy, queueing and cancellation, CORS-preflight skip), forwarded-composing
+/// client-address partitioning, the started-response abort, and the request-lifetime permit hold.
+/// The <c>UseRateLimiting</c> tests cover placement: the registered middleware, the last of two
+/// registrations, and the defaults without one.
 /// </summary>
 public class RateLimitingMiddlewareTests
 {
@@ -583,6 +585,135 @@ public class RateLimitingMiddlewareTests
         policyNameSeenByEndpoint.ShouldBe("ep");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - UseRateLimiting: Should place the middleware the application registered")]
+    public async Task UseRateLimiting_WithRegisteredMiddleware_ShouldPlaceIt()
+    {
+        // Arrange — the registration's global policy admits one request per window.
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(BuildRateLimiting(options => options.GlobalPolicy = TestPolicies.FixedWindowSingle()));
+        builder.UseRateLimiting();
+        builder.Use(next => context =>
+        {
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+        IWebApplicationPipeline pipeline = builder.Build();
+
+        await using RateLimitTestContext first = new();
+        await using RateLimitTestContext second = new();
+
+        // Act
+        await ExecuteAsync(pipeline, first);
+        await ExecuteAsync(pipeline, second);
+
+        // Assert
+        first.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        second.Response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - UseRateLimiting: Should place the last registration when rate limiting is registered twice")]
+    public async Task UseRateLimiting_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange — both registrations exhaust after one request; only their rejection status differs.
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(BuildRateLimiting(options =>
+        {
+            options.GlobalPolicy = TestPolicies.FixedWindowSingle("first");
+            options.RejectionStatusCode = HttpStatusCode.ServiceUnavailable;
+        }));
+        builder.Registered.Add(BuildRateLimiting(options => options.GlobalPolicy = TestPolicies.FixedWindowSingle("last")));
+        builder.UseRateLimiting();
+        builder.Use(next => context =>
+        {
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+        IWebApplicationPipeline pipeline = builder.Build();
+
+        await using RateLimitTestContext first = new();
+        await using RateLimitTestContext second = new();
+
+        // Act
+        await ExecuteAsync(pipeline, first);
+        await ExecuteAsync(pipeline, second);
+
+        // Assert — the last registration's default 429, not the first registration's 503.
+        first.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        second.Response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - UseRateLimiting: Should place the defaults when the application registered none")]
+    public async Task UseRateLimiting_WithoutRegistration_ShouldPlaceTheDefaults()
+    {
+        // Arrange — the defaults limit nothing globally, but the middleware still runs: it publishes the
+        // feature and applies an endpoint's inline policy.
+        TestPipelineBuilder builder = new();
+        FakeRouteMatchFeature endpoint = new(new RateLimitingMetadata(TestPolicies.FixedWindowSingle("inline")));
+        int endpointInvocations = 0;
+        bool featurePresent = false;
+
+        builder.Use(next => context =>
+        {
+            context.Features.Set<IRouteMatchFeature>(endpoint);
+            return next.Invoke(context);
+        });
+        builder.UseRateLimiting();
+        builder.Use(next => context =>
+        {
+            endpointInvocations++;
+            featurePresent = context.Features.Get<IRateLimitingFeature>() is not null;
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+        IWebApplicationPipeline pipeline = builder.Build();
+
+        await using RateLimitTestContext first = new();
+        await using RateLimitTestContext second = new();
+
+        // Act
+        await ExecuteAsync(pipeline, first);
+        await ExecuteAsync(pipeline, second);
+
+        // Assert
+        first.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        featurePresent.ShouldBeTrue();
+        second.Response.StatusCode.ShouldBe(HttpStatusCode.TooManyRequests);
+        endpointInvocations.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RateLimiting] - Build: Options changed after Build should not reach the built middleware")]
+    public async Task Build_PolicyAddedAfterBuild_ShouldNotReachTheMiddleware()
+    {
+        // Arrange — Build snapshots the options; the endpoint names a policy added only afterwards.
+        RateLimitingBuilder rateLimiting = new();
+        IWebApplicationMiddleware middleware = rateLimiting.Build();
+        rateLimiting.Options.AddPolicy("late", TestPolicies.FixedWindowSingle("late"));
+        rateLimiting.Options.GlobalPolicy = TestPolicies.FixedWindowSingle("late-global");
+
+        TestPipelineBuilder builder = new();
+        builder.Use(next => context =>
+        {
+            context.Features.Set<IRouteMatchFeature>(new FakeRouteMatchFeature(new RateLimitingMetadata("late")));
+            return next.Invoke(context);
+        });
+        builder.Use(middleware);
+        builder.Use(next => context => Task.CompletedTask);
+        IWebApplicationPipeline pipeline = builder.Build();
+
+        await using RateLimitTestContext context = new();
+
+        // Act / Assert — the snapshot names no policy, so resolving "late" fails.
+        await Should.ThrowAsync<InvalidOperationException>(() => ExecuteAsync(pipeline, context));
+    }
+
+    private static IWebApplicationMiddleware BuildRateLimiting(Action<RateLimitingOptions>? configure)
+    {
+        RateLimitingBuilder rateLimiting = new();
+        configure?.Invoke(rateLimiting.Options);
+
+        return rateLimiting.Build();
+    }
+
     private static IWebApplicationPipeline BuildPipeline(
         Action<RateLimitingOptions>? configure,
         WebApplicationMiddleware terminal,
@@ -600,7 +731,7 @@ public class RateLimitingMiddlewareTests
             });
         }
 
-        builder.UseRateLimiting(configure);
+        builder.Use(BuildRateLimiting(configure));
         builder.Use(next => context => terminal.Invoke(context));
 
         return builder.Build();

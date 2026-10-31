@@ -1,8 +1,8 @@
 # Assimalign.Cohesion.Rezolvr.Hosting
 
-`RezolvrApplication.CreateBuilder(args)` returns the public concrete `RezolvrApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `admin` endpoint (http). The plain host opens no listener without registration.
+`RezolvrApplication.CreateBuilder(args)` returns the public concrete `RezolvrApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel`. The plain host opens no listener without registration.
 
-Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Record commands persist A and CNAME declarations; serving DNS answers remains deferred.
+The private Web implementation stays out of consumer reference packs. Record commands persist A and CNAME declarations; serving DNS answers remains deferred.
 
 See [DESIGN.md](DESIGN.md).
 
@@ -17,11 +17,8 @@ A-record declarations use a BCL IPv4 IPAddress serialized as a string. CNAME dec
 carry a DNS target string; TTL is a positive integer in seconds, defaulting to 300. COHAM001 keeps
 Dns assemblies outside the ApplicationModel dependency closure.
 
-Hosting stores records atomically in `records.json` under `ResourceContext.GetMount("data",
-Path.GetFullPath(Path.Combine(ContentRootPath, "data")))`. Without a data mount, storage therefore
-lives in the content-root-derived data directory. No CohesionMount or CohesionWorkloadKind change
+Hosting stores records atomically in `records.json`. No CohesionMount or CohesionWorkloadKind change
 is made: GenericPlanner requires StatefulSet for a Volume while RezolvrPlanner requires Deployment.
-The command registry survives restart and restores ownership before the listener starts.
 
 Records are stored, not served as DNS answers. ResolverEndpointService remains parked. DNS serving
 and reconciling a durable Volume with the Deployment contract are deferred area work.

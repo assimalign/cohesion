@@ -4,19 +4,20 @@ namespace Assimalign.Cohesion.Web.HostFiltering;
 
 /// <summary>
 /// Configuration for allowed-hosts enforcement: an allowlist of host patterns the request's
-/// effective host must match, applied by the middleware <c>UseHostFiltering</c> registers.
+/// effective host must match, applied by the middleware <c>builder.Services.AddHostFiltering</c>
+/// registers (through <see cref="HostFilteringBuilder.Options"/>) and <c>UseHostFiltering</c> places.
 /// A defense against Host-header injection (cache poisoning, password-reset poisoning,
 /// absolute-URL generation against an attacker-chosen host).
 /// </summary>
 /// <remarks>
 /// <para>
 /// The allowlist is compiled into an <c>Assimalign.Cohesion.Http.HttpHostMatcher</c> exactly
-/// once, when <c>UseHostFiltering</c> is called (builder time); requests whose effective host
-/// does not match are rejected with <c>400 Bad Request</c> before any later middleware runs.
-/// The effective host is the host a trusted proxy forwarded when <c>UseForwardedHeaders</c> ran
-/// first and accepted a hop, otherwise the transport-resolved host. Invalid patterns — and an
-/// empty allowlist, which would silently reject every request — throw from the registration
-/// call, never from a request.
+/// once, when <c>AddHostFiltering</c> builds the middleware (registration time); requests whose
+/// effective host does not match are rejected with <c>400 Bad Request</c> before any later
+/// middleware runs. The effective host is the host a trusted proxy forwarded when
+/// <c>UseForwardedHeaders</c> ran first and accepted a hop, otherwise the transport-resolved host.
+/// Invalid patterns — and an empty allowlist, which would silently reject every request — throw
+/// from the registration call, never from a request.
 /// </para>
 /// <para>
 /// Patterns follow the <c>HttpHostMatcher</c> grammar: exact hosts (<c>example.com</c>,
@@ -30,8 +31,8 @@ public sealed class HostFilteringOptions
 {
     /// <summary>
     /// Gets the allowlist of host patterns. At least one pattern is required — to accept
-    /// every host, pass <c>*</c> explicitly (which keeps the empty-host policy enforced) or
-    /// do not register the middleware at all.
+    /// every host, add <c>*</c> explicitly (which keeps the empty-host policy enforced) or
+    /// do not use host filtering at all.
     /// </summary>
     public IList<string> AllowedHosts { get; } = new List<string>();
 

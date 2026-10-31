@@ -4,7 +4,7 @@ Rezolvr is the L3 networking service platform intended to be a standalone DNS se
 
 Rezolvr is a DNS server product and is never the service-discovery subsystem. Discovery uses observed endpoints, Service DNS, and export documents.
 
-The host supports enabled-resource control planes; domain services remain fillers pending the area program.
+The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -14,26 +14,20 @@ An arrow means "references": `Rezolvr.Hosting --> Rezolvr` reads
 ```mermaid
 flowchart LR
     P0["Rezolvr — area root"]
-    P1["Rezolvr.ApplicationModel"]
     P3["Rezolvr.Hosting — runtime module"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
     P0 --> CORE
-    P1 --> APPMODEL
-    P1 --> HOSTFAM
     P3 --> HOSTFAM
     P3 --> P0
     P3 -->|"private"| PRIV
-    P1 -.->|"COHRES001 ✗"| P3
+    P0 -.->|"COHRES001 ✗"| P3
 ```
 
 Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
 rejects: **no library in the area may reference its own `Rezolvr.Hosting` runtime
-module**, and the declarative `.ApplicationModel` package in particular never does — generated
-code in an opted-in consumer executable joins the two sides at run time through
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. The area root and its feature
+module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
 The full reference graph for every Cohesion assembly, including the exact external dependencies
@@ -43,11 +37,10 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.Rezolvr` defines the public area-root application and builder contracts for the standalone server product.
 - `Assimalign.Cohesion.Rezolvr.Hosting` provides the concrete creation entry point and the caller-configurable host-service lifecycle.
-- `Assimalign.Cohesion.Rezolvr.ApplicationModel` supplies the typed manifest, planner, descriptor, and default control-plane factory as a NuGet-only package.
 
 ## Layering and dependencies
 
-As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.Hosting, HTTP, and TCP for its resource listener.
+As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation.
 
 ## Project documentation
 
@@ -55,19 +48,6 @@ As an L3 service platform, Rezolvr composes the L2 `Assimalign.Cohesion.Hosting`
 - [Root design](./Assimalign.Cohesion.Rezolvr/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.Rezolvr.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md)
-
-## Declarative control-plane commands
-
-| Wire kind | Descriptor verb | Ownership key |
-|---|---|---|
-| `rezolvr.add-a-record` | `AddARecord` | record name |
-| `rezolvr.add-cname-record` | `AddCnameRecord` | record name |
-
-The [ApplicationModel](Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/OVERVIEW.md) declares
-commands; [Hosting](Assimalign.Cohesion.Rezolvr.Hosting/docs/DESIGN.md) applies them; the gateway's
-generic `ResourceControlPlaneCommandClient` (`Assimalign.Cohesion.ApplicationModel.Gateway`) delivers them
-to the resource control plane, so the area ships no client package. ApplicationModel is a standalone
-NuGet package.
 
 ## Application composition (O34)
 

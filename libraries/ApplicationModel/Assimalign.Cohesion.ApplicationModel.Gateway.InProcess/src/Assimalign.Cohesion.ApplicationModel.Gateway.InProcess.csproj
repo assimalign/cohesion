@@ -3,15 +3,9 @@
 		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Gateway.InProcess</RootNamespace>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
-	</ItemGroup>
-	<ItemGroup>
-		<None
-			Include="..\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.props"
-			Pack="true"
-			PackagePath="buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.props" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+		<!-- The instance half of the in-process platform: the endpoints both halves meet at. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting.InProcess" />
 	</ItemGroup>
 </Project>

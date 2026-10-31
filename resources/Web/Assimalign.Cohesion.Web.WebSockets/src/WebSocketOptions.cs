@@ -8,14 +8,14 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.WebSockets;
 
 /// <summary>
-/// Builder-time options for the WebSocket policy middleware
-/// (<see cref="WebSocketExtensions.UseWebSockets(IWebApplicationPipelineBuilder, Action{WebSocketOptions})"/>):
-/// which origins may open a socket, and the defaults every accept takes.
+/// Options for the WebSocket policy middleware, configured on <see cref="WebSocketsBuilder.Options"/>
+/// where <c>builder.Services.AddWebSockets(webSockets =&gt; ...)</c> registers it: which origins may open
+/// a socket, and the defaults every accept takes.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Composition is dependency-free: <c>UseWebSockets</c> validates the options and keeps its own
-/// copy, so changing them afterwards has no effect. No service container, configuration binding or
+/// Composition is dependency-free: <see cref="WebSocketsBuilder.Build"/> validates the options and
+/// keeps its own copy, so changing them afterwards has no effect. No configuration binding or
 /// request-time service location is involved.
 /// </para>
 /// <para>
@@ -34,7 +34,8 @@ public sealed class WebSocketOptions
     /// Gets the origins, besides the request's own, whose pages may open a WebSocket. Each is a
     /// serialized origin, <c>scheme://host[:port]</c>, as a browser sends it in <c>Origin</c>, for
     /// example <c>https://app.example</c>. Case and a default port are normalized; a path, a
-    /// wildcard and the opaque origin <c>null</c> are rejected when <c>UseWebSockets</c> runs.
+    /// wildcard and the opaque origin <c>null</c> are rejected when the policy is built, where
+    /// <c>builder.Services.AddWebSockets</c> registers it.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -48,7 +49,7 @@ public sealed class WebSocketOptions
     /// <para>
     /// The request's own origin is built from the effective scheme and host
     /// (<c>context.EffectiveScheme</c>, <c>context.EffectiveHost</c>). Behind a proxy that
-    /// terminates TLS, register <c>UseForwardedHeaders</c> before <c>UseWebSockets</c>, or list
+    /// terminates TLS, place <c>UseForwardedHeaders</c> before <c>UseWebSockets</c>, or list
     /// the public origin here; otherwise a same-site page reads as cross-site.
     /// </para>
     /// </remarks>

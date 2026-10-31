@@ -22,17 +22,6 @@
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database/tests/">
 		<Project Path="Assimalign.Cohesion.Database/tests/Assimalign.Cohesion.Database.Tests.csproj" />
 	</Folder>
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.ApplicationModel/" />
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.Database.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Database.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.Database.ApplicationModel/src/Assimalign.Cohesion.Database.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.Database.ApplicationModel/tests/Assimalign.Cohesion.Database.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Testing/" />
 	<Folder Name="/Database/Core/Assimalign.Cohesion.Database.Testing/docs/">
 		<File Path="Assimalign.Cohesion.Database.Testing/docs/DESIGN.md" />

@@ -57,11 +57,10 @@
 
 	        * COHAM001 - An opted-in resources/ assembly whose name ends in
 	          .ApplicationModel may reference only Assimalign.Cohesion.Core,
-	          Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.Hosting,
-	          Assimalign.Cohesion.Hosting.Health, Assimalign.Cohesion.Hosting.Resources,
+	          Assimalign.Cohesion.ApplicationModel, Assimalign.Cohesion.ApplicationModel.Definition,
+	          Assimalign.Cohesion.ApplicationModel.Hosting, Assimalign.Cohesion.Hosting,
 	          assemblies supplied by the Microsoft.NETCore.App reference pack, and
-	          the System.Security.Cryptography.ProtectedData BCL facade used by
-	          Hosting.Resources' Windows-only mount carrier.
+	          the System.Security.Cryptography.ProtectedData BCL facade.
 	          The explicit CohesionApplicationModelGuard=true rollout gate is
 	          required because Web.ApplicationModel is not clean yet.
 
@@ -285,11 +284,13 @@
 	<!-- COHAM002: the shared ApplicationModel namespace, checked through RootNamespace. It covers
 	     the area ApplicationModel packages and their opt-in .ApplicationModel.Orchestration
 	     companions alike: a gateway's Program.cs composes AddWeb(...) and UseSecretStore(...)
-	     under the same single using. -->
+	     under the same single using. An area's <Area>.Hosting.ApplicationModel package is the
+	     instance side's integration, not the gateway-side plane, so it keeps its own namespace. -->
 	<Target Name="ValidateCohesionApplicationModelNamespace"
 	        BeforeTargets="CoreCompile"
 	        Condition="'$(_CohesionResourceBoundaryRulesApply)' == 'true'
 	                   AND '$(AssemblyName)' != ''
+	                   AND !$([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.hosting.applicationmodel'))
 	                   AND ($([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel'))
 	                   OR $([System.String]::Copy('$(AssemblyName)').ToLowerInvariant().EndsWith('.applicationmodel.orchestration')))">
 		<Error Condition="'$(RootNamespace)' != 'Assimalign.Cohesion.ApplicationModel'"
@@ -382,8 +383,8 @@
 				           AND '%(Filename)' != 'Assimalign.Cohesion.Core'
 				           AND '%(Filename)' != 'Assimalign.Cohesion.ApplicationModel'
 				           AND '%(Filename)' != 'Assimalign.Cohesion.Hosting'
-				           AND '%(Filename)' != 'Assimalign.Cohesion.Hosting.Health'
-				           AND '%(Filename)' != 'Assimalign.Cohesion.Hosting.Resources'" />
+				           AND '%(Filename)' != 'Assimalign.Cohesion.ApplicationModel.Definition'
+				           AND '%(Filename)' != 'Assimalign.Cohesion.ApplicationModel.Hosting'" />
 
 			<_CohesionGatewayProjectReferenceViolation
 				Include="@(ProjectReference)"
@@ -400,7 +401,7 @@
 
 		<Error Condition="'@(_CohesionApplicationModelProjectReferenceViolation)' != ''"
 		       Code="COHAM001"
-		       Text="ApplicationModel dependency rule: '$(AssemblyName)' has disallowed project-reference assembly/assemblies '@(_CohesionApplicationModelProjectReferenceViolation->'%(Filename)', ', ')'. A guarded resources/** assembly ending in '.ApplicationModel' may reference only 'Assimalign.Cohesion.Core', 'Assimalign.Cohesion.ApplicationModel', 'Assimalign.Cohesion.Hosting', 'Assimalign.Cohesion.Hosting.Health', 'Assimalign.Cohesion.Hosting.Resources', and BCL assemblies. See .claude/rules/resource-areas.md." />
+		       Text="ApplicationModel dependency rule: '$(AssemblyName)' has disallowed project-reference assembly/assemblies '@(_CohesionApplicationModelProjectReferenceViolation->'%(Filename)', ', ')'. A guarded resources/** assembly ending in '.ApplicationModel' may reference only 'Assimalign.Cohesion.Core', 'Assimalign.Cohesion.ApplicationModel', 'Assimalign.Cohesion.ApplicationModel.Definition', 'Assimalign.Cohesion.ApplicationModel.Hosting', 'Assimalign.Cohesion.Hosting', and BCL assemblies. See .claude/rules/resource-areas.md." />
 
 		<Error Condition="'@(_CohesionGatewayProjectReferenceViolation)' != ''"
 		       Code="COHRES003"
@@ -467,8 +468,8 @@
 				Condition="'%(Filename)' != 'Assimalign.Cohesion.Core'
 				           AND '%(Filename)' != 'Assimalign.Cohesion.ApplicationModel'
 				           AND '%(Filename)' != 'Assimalign.Cohesion.Hosting'
-				           AND '%(Filename)' != 'Assimalign.Cohesion.Hosting.Health'
-				           AND '%(Filename)' != 'Assimalign.Cohesion.Hosting.Resources'
+				           AND '%(Filename)' != 'Assimalign.Cohesion.ApplicationModel.Definition'
+				           AND '%(Filename)' != 'Assimalign.Cohesion.ApplicationModel.Hosting'
 				           AND '%(Filename)' != 'System.Security.Cryptography.ProtectedData'" />
 
 			<_CohesionGatewayResolvedReferenceViolation
@@ -486,7 +487,7 @@
 
 		<Error Condition="'@(_CohesionApplicationModelResolvedReferenceViolation)' != ''"
 		       Code="COHAM001"
-		       Text="ApplicationModel dependency rule: '$(AssemblyName)' resolves disallowed assembly/assemblies '@(_CohesionApplicationModelResolvedReferenceViolation->'%(Filename)', ', ')' through its direct/transitive/package/HintPath closure. A guarded resources/** assembly ending in '.ApplicationModel' may resolve only 'Assimalign.Cohesion.Core', 'Assimalign.Cohesion.ApplicationModel', 'Assimalign.Cohesion.Hosting', 'Assimalign.Cohesion.Hosting.Health', 'Assimalign.Cohesion.Hosting.Resources', Microsoft.NETCore.App BCL assemblies, and the Windows-only 'System.Security.Cryptography.ProtectedData' BCL facade. See .claude/rules/resource-areas.md." />
+		       Text="ApplicationModel dependency rule: '$(AssemblyName)' resolves disallowed assembly/assemblies '@(_CohesionApplicationModelResolvedReferenceViolation->'%(Filename)', ', ')' through its direct/transitive/package/HintPath closure. A guarded resources/** assembly ending in '.ApplicationModel' may resolve only 'Assimalign.Cohesion.Core', 'Assimalign.Cohesion.ApplicationModel', 'Assimalign.Cohesion.ApplicationModel.Definition', 'Assimalign.Cohesion.ApplicationModel.Hosting', 'Assimalign.Cohesion.Hosting', Microsoft.NETCore.App BCL assemblies, and the Windows-only 'System.Security.Cryptography.ProtectedData' BCL facade. See .claude/rules/resource-areas.md." />
 
 		<Error Condition="'@(_CohesionGatewayResolvedReferenceViolation)' != ''"
 		       Code="COHRES003"

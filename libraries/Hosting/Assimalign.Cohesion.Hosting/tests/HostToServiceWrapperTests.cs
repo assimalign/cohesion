@@ -150,12 +150,11 @@ public class HostToServiceWrapperTests
         inner.Context.State.ShouldBe(HostState.Stopped);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "A nested child's shutdown request stops it without invoking its runner")]
-    public async Task Shutdown_WhenRequestedByNestedChild_StopsChildWithoutInvokingRunner()
+    [Fact(DisplayName = DisplayPrefix + "A nested child's shutdown request stops it")]
+    public async Task Shutdown_WhenRequestedByNestedChild_StopsChild()
     {
         // Arrange
         var childStopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runner = new CountingRunner();
         var childOptions = new TestHostOptions();
         childOptions.HostedServices.Add(new DelegateHostService(
             static _ => Task.CompletedTask,
@@ -165,7 +164,6 @@ public class HostToServiceWrapperTests
                 return Task.CompletedTask;
             }));
         var child = new TestHost(childOptions);
-        child.Context.Runner = runner;
         IHostService service = ((IHost)child).AsService();
         using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await service.StartAsync(timeoutSource.Token);
@@ -177,7 +175,6 @@ public class HostToServiceWrapperTests
         await childStopped.Task.WaitAsync(timeoutSource.Token);
         await service.StopAsync(timeoutSource.Token);
         child.Context.State.ShouldBe(HostState.Stopped);
-        runner.InvocationCount.ShouldBe(0);
     }
 
     [Fact(DisplayName = DisplayPrefix + "When the wrapped host stops on its own the wrapper completes without an outer cancel")]
@@ -336,8 +333,6 @@ public class HostToServiceWrapperTests
     {
         // Arrange
         var child = new DelayedStartingHost();
-        var runner = new CountingRunner();
-        child.Context.Runner = runner;
         var parentOptions = new TestHostOptions
         {
             StartupTimeout = TimeSpan.FromMilliseconds(25),
@@ -362,7 +357,6 @@ public class HostToServiceWrapperTests
 
         child.Context.State.ShouldBe(HostState.Stopped);
         child.StopCount.ShouldBe(1);
-        runner.InvocationCount.ShouldBe(0);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Readiness budget: A late faulted child start still receives deferred cleanup")]
@@ -370,8 +364,6 @@ public class HostToServiceWrapperTests
     {
         // Arrange
         var child = new DelayedStartingHost(faultAfterRelease: true);
-        var runner = new CountingRunner();
-        child.Context.Runner = runner;
         var parentOptions = new TestHostOptions
         {
             StartupTimeout = TimeSpan.FromMilliseconds(25),
@@ -390,7 +382,6 @@ public class HostToServiceWrapperTests
         await child.Stopped.Task.WaitAsync(timeoutSource.Token);
         child.Context.State.ShouldBe(HostState.Stopped);
         child.StopCount.ShouldBe(1);
-        runner.InvocationCount.ShouldBe(0);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Nested startup: Re-entry is rejected while the raw child start is pending")]
@@ -566,14 +557,14 @@ public class HostToServiceWrapperTests
         parent.Context.State.ShouldBe(HostState.Stopped);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "Runner ownership: Nested execution does not invoke the child runner")]
-    public async Task RunAsync_WhenChildHasRunner_DoesNotInvokeChildRunner()
+    [Fact(DisplayName = DisplayPrefix + "Signal ownership: Only the outer run listens for shutdown signals")]
+    public async Task RunAsync_WithNestedChild_RegistersShutdownSignalsForTheOuterRunOnly()
     {
         // Arrange
-        var runner = new CountingRunner();
-        var child = new TestHost(new TestHostOptions());
-        child.Context.Runner = runner;
-        var parentOptions = new TestHostOptions();
+        var childSignals = new TestShutdownSignals();
+        var parentSignals = new TestShutdownSignals();
+        var child = new TestHost(new TestHostOptions { ShutdownSignals = childSignals.Register });
+        var parentOptions = new TestHostOptions { ShutdownSignals = parentSignals.Register };
         parentOptions.HostedServices.Add(((IHost)child).AsService());
         IHost parent = new TestHost(parentOptions);
         using var timeoutSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
@@ -581,12 +572,14 @@ public class HostToServiceWrapperTests
         // Act
         Task run = parent.RunAsync(timeoutSource.Token);
         await WaitForStateAsync(parent, HostState.Started, timeoutSource.Token);
-        parent.Context.Shutdown();
+        parentSignals.Raise();
         await run.WaitAsync(timeoutSource.Token);
 
         // Assert
-        runner.InvocationCount.ShouldBe(0);
-        child.Context.Runner.ShouldBeSameAs(runner);
+        parentSignals.Registrations.ShouldBe(1);
+        childSignals.Registrations.ShouldBe(0);
+        child.Context.State.ShouldBe(HostState.Stopped);
+        parent.Context.State.ShouldBe(HostState.Stopped);
     }
 
     [Fact(DisplayName = DisplayPrefix + "An idle nested host does not busy-spin a core")]
@@ -802,17 +795,6 @@ public class HostToServiceWrapperTests
         public ValueTask DisposeAsync()
         {
             return ValueTask.CompletedTask;
-        }
-    }
-
-    private sealed class CountingRunner : IHostRunner
-    {
-        internal int InvocationCount { get; private set; }
-
-        public Task RunAsync(IHostRun run, CancellationToken cancellationToken = default)
-        {
-            InvocationCount++;
-            return run.RunAsync(observer: null, cancellationToken);
         }
     }
 }

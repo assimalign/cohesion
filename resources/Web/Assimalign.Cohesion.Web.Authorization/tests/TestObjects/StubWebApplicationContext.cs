@@ -26,4 +26,5 @@ internal sealed class StubWebApplicationContext : IWebApplicationContext
     public IEnumerable<IWebApplicationServer> Servers => [];
 
     public IEnumerable<IHttpFeature> Features { get; }
+    public IEnumerable<IWebApplicationSetting> Settings => global::System.Array.Empty<IWebApplicationSetting>();
 }

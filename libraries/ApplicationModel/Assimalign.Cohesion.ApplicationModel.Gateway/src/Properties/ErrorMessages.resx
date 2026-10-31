@@ -1,33 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
-  <resheader name="resmimetype">
-    <value>text/microsoft-resx</value>
-  </resheader>
-  <resheader name="version">
-    <value>2.0</value>
-  </resheader>
-  <resheader name="reader">
-    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </resheader>
-  <resheader name="writer">
-    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
-  </resheader>
-  <data name="CredentialSchemeNotBearer" xml:space="preserve">
-    <value>The registered credential issuer returned a '{0}' credential for purpose '{1}', but that credential is presented as a bearer token. Return a Bearer credential, or null to use the default ES256 application-key issuer.</value>
-  </data>
-  <data name="ProbeIntervalInvalid" xml:space="preserve">
-    <value>ProbeInterval must be greater than zero.</value>
-  </data>
-  <data name="ProbeTimeoutInvalid" xml:space="preserve">
-    <value>ProbeTimeout must be greater than zero.</value>
-  </data>
-  <data name="InitialRestartBackoffInvalid" xml:space="preserve">
-    <value>InitialRestartBackoff must be zero or greater.</value>
-  </data>
-  <data name="MaximumRestartBackoffInvalid" xml:space="preserve">
-    <value>MaximumRestartBackoff must be at least InitialRestartBackoff.</value>
-  </data>
-  <data name="StopGraceInvalid" xml:space="preserve">
-    <value>StopGrace must be greater than zero.</value>
-  </data>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="ApplicationGatewayAlreadyRun" xml:space="preserve"><value>The gateway has already run an application; a gateway runs once.</value></data>
+  <data name="GatewayPublicationsClosed" xml:space="preserve"><value>The gateway is not running, so it accepts no publications.</value></data>
+  <data name="GatewayResourceUnknown" xml:space="preserve"><value>Gateway '{0}' does not run resource '{1}/{2}'.</value></data>
+  <data name="GatewayResourceTornDown" xml:space="preserve"><value>Gateway '{0}' tore down resource '{1}/{2}' after it missed its startup window.</value></data>
+  <data name="GatewayStartupTimedOut" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) published no manifest within {2}: {3}. New resources were torn down; updated resources keep whatever instances the platform still runs.</value></data>
+  <data name="GatewayStartupTimedOutWithSkipped" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) published no manifest within {2}: {3}. New resources were torn down; updated resources keep whatever instances the platform still runs. Not deployed, because something they depend on did not start: {4}.</value></data>
+  <data name="GatewayDeploymentCycle" xml:space="preserve"><value>Gateway '{0}' cannot deploy its part in dependency order: {1}. A gateway deploys each child gateway, with everything below it, as one step; move one of these resources into the other's gateway.</value></data>
+  <data name="GatewayStepWaits" xml:space="preserve"><value>{0} waits for {1}, because {2} depends on {3}</value></data>
+  <data name="GatewayResourceUpdateMissed" xml:space="preserve"><value>Gateway '{0}' stopped accepting resource '{1}/{2}' after its update missed the startup window.</value></data>
+  <data name="GatewayResourceOutputsNull" xml:space="preserve"><value>The infrastructure provider returned no outputs for resource '{0}/{1}'.</value></data>
+  <data name="GatewayResourcePlanNull" xml:space="preserve"><value>The infrastructure provider returned no plan, or a plan without a revision, for resource '{0}/{1}'.</value></data>
+  <data name="GatewayPlatformMissing" xml:space="preserve"><value>The infrastructure provider names no platform.</value></data>
+  <data name="GatewayTransportDuplicate" xml:space="preserve"><value>The transport is already added to the gateway.</value></data>
+  <data name="GatewaySettingOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}', which its infrastructure provider did not report.</value></data>
+  <data name="ApplicationGatewayStoreDirectoryInvalid" xml:space="preserve"><value>A gateway store directory is a non-empty path.</value></data>
+  <data name="ApplicationGatewayRecordNull" xml:space="preserve"><value>The gateway record file '{0}' holds the JSON literal null.</value></data>
+  <data name="ApplicationGatewayRecordSnapshotInvalid" xml:space="preserve"><value>A recorded snapshot is a JSON object with a string 'action' and a non-empty base64 'value'.</value></data>
+  <data name="GatewayNameMissing" xml:space="preserve"><value>A gateway name is required.</value></data>
+  <data name="GatewayResourceActionsNull" xml:space="preserve"><value>The infrastructure provider returned no action list for resource '{0}/{1}'.</value></data>
+  <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="ApplicationResourceOutputsNull" xml:space="preserve"><value>Resource '{0}/{1}' was given null outputs, an output without a name, or an output without a value.</value></data>
+  <data name="InstanceKeyMissing" xml:space="preserve"><value>A resource instance key is required.</value></data>
+  <data name="ApplicationInstanceManifestActionsMissing" xml:space="preserve"><value>The instance manifest has no action list.</value></data>
+  <data name="ApplicationResourceMismatch" xml:space="preserve"><value>An instance of resource '{0}/{1}' cannot register with resource '{2}/{3}'.</value></data>
+  <data name="ApplicationResourceInstanceUnknown" xml:space="preserve"><value>Instance '{0}' is not registered with resource '{1}/{2}'.</value></data>
+  <data name="ApplicationResourceActionNotStateful" xml:space="preserve"><value>Instance '{0}' declares no stateful action '{1}'.</value></data>
+  <data name="ApplicationResourceStateNull" xml:space="preserve"><value>The initial state contains a null snapshot.</value></data>
+  <data name="ApplicationResourceStateDuplicate" xml:space="preserve"><value>The initial state has more than one snapshot for action '{0}'.</value></data>
+  <data name="ActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
+  <data name="ApplicationResourceActionNull" xml:space="preserve"><value>The infrastructure action list contains null.</value></data>
+  <data name="ApplicationResourceActionKindInvalid" xml:space="preserve"><value>Infrastructure action '{0}' must accept Read, Write, or both, and nothing else.</value></data>
+  <data name="ApplicationResourceActionDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' has more than one infrastructure action named '{2}'.</value></data>
+  <data name="ApplicationResourceActionResultNull" xml:space="preserve"><value>Infrastructure action '{0}' returned null instead of a result.</value></data>
+  <data name="GatewayParentMismatch" xml:space="preserve"><value>Gateway '{0}' names '{1}' as its parent, not '{2}'.</value></data>
+  <data name="GatewayParentMembershipNull" xml:space="preserve"><value>Parent gateway '{0}' answered a join with null.</value></data>
+  <data name="GatewayParentUnavailable" xml:space="preserve"><value>Gateway '{0}' could not join parent '{1}' within {2}: the parent was not running.</value></data>
+  <data name="GatewayParentOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in parent gateway '{7}', which the parent did not report within {8}.</value></data>
+  <data name="GatewayInfrastructureMissing" xml:space="preserve"><value>Gateway '{0}' has no infrastructure provider; call UseInfrastructure before Build.</value></data>
+  <data name="GatewayParentMissing" xml:space="preserve"><value>The model of gateway '{0}' joins parent '{1}', but the gateway has no connection to it; call UseParent with the parent gateway.</value></data>
+  <data name="ApplicationGatewayAlreadyBuilt" xml:space="preserve"><value>The gateway is already built; its builder accepts no changes.</value></data>
+  <data name="GatewayResourcesStopped" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) stopped before an instance published: {2}. New resources were torn down; updated resources keep whatever instances the platform still runs.</value></data>
+  <data name="GatewayResourcesStoppedAlsoMissed" xml:space="preserve"><value>{0} more published no manifest within {1}: {2}.</value></data>
+  <data name="GatewayResourcesStoppedSkipped" xml:space="preserve"><value>Not deployed, because something they depend on did not start: {0}.</value></data>
+  <data name="GatewayResourceFailedWith" xml:space="preserve"><value>{0} ({1}: {2})</value></data>
+  <data name="GatewayResourceEnded" xml:space="preserve"><value>{0} (ended)</value></data>
+  <data name="GatewayRecordNull" xml:space="preserve"><value>The record store returned no record when gateway '{0}' took its record over.</value></data>
+  <data name="GatewayRecordSuperseded" xml:space="preserve"><value>Gateway '{0}' stopped: a later run of it took its record over, so this run, epoch {1}, can no longer save it.</value></data>
+  <data name="GatewayInstanceUnavailable" xml:space="preserve"><value>Gateway '{0}' could not run action '{3}' on {1}/{2}: no registered instance that declares it serves a control plane the gateway reached.</value></data>
+  <data name="InstanceClientResultNull" xml:space="preserve"><value>The instance client returned null instead of a result.</value></data>
+  <data name="GatewayInstanceClientMissing" xml:space="preserve"><value>Gateway '{0}' has no instance client, so it cannot run action '{3}' on an instance of {1}/{2}: the gateway half of its platform sets one (UseInstanceClient).</value></data>
 </root>

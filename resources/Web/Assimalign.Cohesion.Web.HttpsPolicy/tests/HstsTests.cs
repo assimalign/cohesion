@@ -235,14 +235,14 @@ public class HstsTests
         context.Response.Headers.ContainsKey(HttpHeaderKey.StrictTransportSecurity).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHsts: Should reject a negative max-age at builder time")]
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - AddHsts: Should reject a negative max-age at registration")]
     public void Hsts_NegativeMaxAge_ShouldThrowAtBuilderTime()
     {
         // Arrange & Act & Assert
         Should.Throw<ArgumentException>(() => BuildHsts(options => options.MaxAge = TimeSpan.FromSeconds(-1)));
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHsts: Should reject an invalid excluded-host pattern at builder time")]
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - AddHsts: Should reject an invalid excluded-host pattern at registration")]
     public void Hsts_PortBearingExcludedHost_ShouldThrowAtBuilderTime()
     {
         // Arrange & Act & Assert — a port-bearing pattern is rejected by HttpHostMatcher.Create.
@@ -253,12 +253,60 @@ public class HstsTests
         }));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHsts: Should place the middleware the application registered")]
+    public async Task UseHsts_WithRegisteredMiddleware_ShouldPlaceIt()
+    {
+        // Arrange
+        TestPipelineBuilder pipeline = new();
+        pipeline.Registered.Add(BuildHsts(options => options.Preload = true));
+        TestHttpContext context = new(HttpScheme.Https, "example.com");
+
+        // Act
+        pipeline.UseHsts();
+        await pipeline.LastComposed.ShouldNotBeNull().Invoke(context);
+
+        // Assert
+        context.Response.Headers[HttpHeaderKey.StrictTransportSecurity].Value.ShouldBe("max-age=31536000; preload");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHsts: Should place the last registration when HSTS is registered twice")]
+    public async Task UseHsts_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange
+        TestPipelineBuilder pipeline = new();
+        pipeline.Registered.Add(BuildHsts(options => options.Preload = true));
+        pipeline.Registered.Add(BuildHsts(options => options.IncludeSubDomains = true));
+        TestHttpContext context = new(HttpScheme.Https, "example.com");
+
+        // Act
+        pipeline.UseHsts();
+        await pipeline.LastComposed.ShouldNotBeNull().Invoke(context);
+
+        // Assert
+        context.Response.Headers[HttpHeaderKey.StrictTransportSecurity].Value.ShouldBe("max-age=31536000; includeSubDomains");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHsts: Should place the default policy when the application registered none")]
+    public async Task UseHsts_WithoutRegistration_ShouldPlaceTheDefaultPolicy()
+    {
+        // Arrange
+        TestPipelineBuilder pipeline = new();
+        TestHttpContext context = new(HttpScheme.Https, "example.com");
+
+        // Act
+        pipeline.UseHsts();
+        await pipeline.LastComposed.ShouldNotBeNull().Invoke(context);
+
+        // Assert
+        context.Response.Headers[HttpHeaderKey.StrictTransportSecurity].Value.ShouldBe("max-age=31536000");
+    }
+
     private static IWebApplicationMiddleware BuildHsts(Action<HstsOptions>? configure = null)
     {
-        TestPipelineBuilder builder = new();
-        builder.UseHsts(configure);
+        HstsBuilder hsts = new();
+        configure?.Invoke(hsts.Options);
 
-        return builder.LastMiddleware.ShouldNotBeNull();
+        return hsts.Build();
     }
 
     private static Task Terminal(IHttpContext context) => Task.CompletedTask;

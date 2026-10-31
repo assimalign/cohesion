@@ -2,9 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
+using System.Threading;
 
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.IdentityHub;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Tests;
@@ -22,37 +21,16 @@ internal static class IdentityHubTestHost
     internal static IdentityHubApplicationBuilder CreateBuilder(
         string dataPath,
         Uri? endpoint = null,
-        string? gatewayName = null,
-        ReadOnlyMemory<byte> applicationTrustKey = default,
-        string applicationName = "appa",
-        string resourceName = "identity",
-        string environmentName = AppEnvironment.Keys.Local,
-        ResourceMount? tlsCertificate = null)
+        string environmentName = AppEnvironment.Keys.Local)
     {
         endpoint ??= GetEndpoint();
-        var mounts = new Dictionary<string, ResourceMount>
-        {
-            ["data"] = new ResourceMount(dataPath),
-        };
-        if (tlsCertificate is not null)
-        {
-            mounts.Add("tls", tlsCertificate);
-        }
 
-        var context = new ResourceContext(
-            applicationName,
-            resourceName,
-            environmentName,
-            gatewayName,
-            dataPath,
-            new Dictionary<string, Uri> { ["https"] = endpoint },
-            mounts,
-            settings: null,
-            references: null,
-            bootstrapCredential: ReadOnlyMemory<byte>.Empty,
-            applicationTrustKey,
-            ambientValues: null);
-        using IDisposable scope = ResourceRuntime.CreateScope(context);
-        return IdentityHubApplication.CreateBuilder([], typeof(IdentityHubTestHost).Assembly);
+        // The builder reads the environment name when it is created, so a scope around its creation
+        // supplies one without touching the process environment.
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(
+            new Dictionary<string, string> { [AppEnvironment.Variables.Environment] = environmentName },
+            CancellationToken.None);
+        using IDisposable entered = AppEnvironment.Enter(scope);
+        return IdentityHubApplication.CreateBuilder(["--endpoint", endpoint.ToString(), "--data", dataPath]);
     }
 }

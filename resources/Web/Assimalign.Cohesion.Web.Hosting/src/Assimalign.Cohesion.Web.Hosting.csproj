@@ -4,24 +4,20 @@
 	</PropertyGroup>
 	<!-- Web-area dependency rule: the hosting/runtime module references the root
 	     Assimalign.Cohesion.Web project, the Web features it runs, and non-Web-area libraries.
-	     Health and Resources integrate here (decision 57, 2026-10-13). COHRES002 (relaxed
+	     COHRES002 (relaxed
 	     2026-10-09) lets it reference any other Web library except Web.Testing,
 	     Web.ApplicationModel, the App.Web producers, and harnesses - but only for runtime machinery
 	     it composes itself: the App.Web shared framework delivers features to applications, their
 	     builder verbs ship in their own packages, and every reference added here ships its closure
-	     in all 18 area frameworks. See resources/Web/README.md. -->
+	     in all 18 area frameworks. See resources/Web/README.md. The resource integration lives in
+	     Web.Hosting.Resources, which references this module. -->
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<!-- Owner decision 33 (#1379): the pipeline ends in Web.Routing's WebApplicationTerminal. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
 		<!-- Owner decision 57 (b) (#1458): the public engine and its exchange features live in Web.Server. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Server" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging.EventSource" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
@@ -39,9 +35,5 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Tcp" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Quic" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.Security" />
-	</ItemGroup>
-	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.Hosting.Resources" Module="CommandDiagnostics" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" Module="Validation" />
 	</ItemGroup>
 </Project>

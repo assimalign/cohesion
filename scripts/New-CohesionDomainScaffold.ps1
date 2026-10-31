@@ -265,14 +265,14 @@ $ApplicationModelCsprojTemplate = @'
 		<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
 	</PropertyGroup>
 	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 	</ItemGroup>
 </Project>
 '@
 
 $ResourceControlPlaneTemplate = @'
-using Assimalign.Cohesion.Hosting.Resources;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.{NAME}.ApplicationModel;
 

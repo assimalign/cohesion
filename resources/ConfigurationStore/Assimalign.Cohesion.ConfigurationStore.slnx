@@ -22,25 +22,6 @@
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore/tests/">
 		<Project Path="Assimalign.Cohesion.ConfigurationStore/tests/Assimalign.Cohesion.ConfigurationStore.Tests.csproj" />
 	</Folder>
-	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel/tests/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Tests.csproj" />
-	</Folder>
-	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/docs/">
-		<File Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/src/">
-		<Project Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/src/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.csproj" />
-	</Folder>
-	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/tests/">
-		<Project Path="Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/tests/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration.Tests.csproj" />
-	</Folder>
 	<Folder Name="/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client/">
 		<File Path="Assimalign.Cohesion.ConfigurationStore.Client/README.md" />
 	</Folder>

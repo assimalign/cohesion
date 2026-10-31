@@ -1,12 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Testing</RootNamespace>
-		<Description>Integration testing for Cohesion web applications. WebApplicationTestFactory supports socketless manual HTTP/1.1 and HTTP/2 composition plus FromProgram&lt;Program&gt; execution under an isolated ambient ResourceContext with graceful control-plane lifecycle.</Description>
+		<Description>Integration testing for Cohesion web applications. WebApplicationTestFactory supports socketless HTTP/1.1 and HTTP/2 composition over the in-memory transport.</Description>
 		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES001,
 		     .claude/rules/resource-areas.md): the test factory drives the concrete runtime
 		     (WebApplication/WebApplicationBuilder), which cannot be done through the
-		     abstractions alone. Web.Hosting also owns the control-plane terminal
-		     (owner decision 57, 2026-10-13), so only that assembly needs the exemption. -->
+		     abstractions alone. -->
 		<CohesionHostingIsolationExemptions>Assimalign.Cohesion.Web.Hosting</CohesionHostingIsolationExemptions>
 	</PropertyGroup>
 	<ItemGroup>
@@ -17,7 +16,5 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections.InMemory" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
 	</ItemGroup>
 </Project>

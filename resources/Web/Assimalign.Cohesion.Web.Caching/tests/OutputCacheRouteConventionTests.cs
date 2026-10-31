@@ -76,6 +76,7 @@ public class OutputCacheRouteConventionTests
 
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddPolicy("catalog", policy => policy.Duration = _longDuration));
 
         int[] hits = new int[2];
 
@@ -84,7 +85,7 @@ public class OutputCacheRouteConventionTests
         catalog.Map(CohesionHttpMethod.Get, "items", Counting("items", hits, 0));
         catalog.Map(CohesionHttpMethod.Get, "live", Counting("live", hits, 1)).DisableOutputCache();
 
-        factory.Application.UseOutputCache(options => options.AddPolicy("catalog", policy => policy.Duration = _longDuration));
+        factory.Application.UseOutputCache();
 
         using HttpClient client = factory.CreateClient();
 

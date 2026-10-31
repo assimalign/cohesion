@@ -7,6 +7,6 @@
     <PackageId>ThirdParty.ApplicationModel</PackageId>
   </PropertyGroup>
   <ItemGroup>
-    <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel" Version="$(CohesionVersion)" />
+    <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Definition" Version="$(CohesionVersion)" />
   </ItemGroup>
 </Project>

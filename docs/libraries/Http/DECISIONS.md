@@ -43,7 +43,7 @@ A real-time hub framework (SignalR-style) waits on this decision, but it is a se
      - the request surface: `IsWebSocketRequest`, the requested subprotocols, and an accept call that returns the `WebSocket`.
 
      It references Http, Http.ProtocolUpgrade and Http.ExtendedConnect. *(As built: #1316 moved `IHttpExtendedConnectFeature` into Http, and until #1368 the package referenced Http and Http.ProtocolUpgrade only, reading the feature from the exchange's features. #1368 returned the feature to Http.ExtendedConnect and restored this reference; the handshake reads `context.ExtendedConnect`.)*
-   - `Assimalign.Cohesion.Web.WebSockets` (resources/Web) owns the policy: `UseWebSockets(options)` middleware for the origin policy, the keep-alive interval, and closing open WebSockets with `1001` when the server drains.
+   - `Assimalign.Cohesion.Web.WebSockets` (resources/Web) owns the policy: the `UseWebSockets()` middleware, configured with `builder.Services.AddWebSockets(...)`, for the origin policy, the keep-alive interval, and closing open WebSockets with `1001` when the server drains.
 4. **The extended CONNECT tunnel ships in the transports.** `IHttpExtendedConnectFeature` gains an accept call on HTTP/2 and HTTP/3. It sends `200` and returns a duplex `Stream`:
    - reads deliver the client's DATA;
    - writes go out as DATA at once;

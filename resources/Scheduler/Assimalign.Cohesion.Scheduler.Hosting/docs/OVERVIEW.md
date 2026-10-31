@@ -2,7 +2,7 @@
 
 Assimalign.Cohesion.Scheduler.Hosting supplies SchedulerApplication.CreateBuilder. The concrete application executes all schedules supplied through registered providers while preserving caller-added host services.
 
-Enabled resources inherit their environment, content root, http endpoint, bootstrap credential, and shutdown grace from ResourceRuntime. The runtime observes the endpoint, attaches the default control plane, exposes health/readiness/liveness and management routes, and drains active occurrences during stop.
+The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel`. The runtime drains active occurrences during stop.
 
 ## Concrete composition (T10 / O34)
 

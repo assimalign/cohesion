@@ -6,7 +6,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
 
@@ -19,15 +18,14 @@ internal static class LogSpaceHttp
 {
     private const int maxBodyBytes = 1024 * 1024;
 
-    internal static async Task IngestAsync(IHttpContext context, ResourceContext resource, LogSegmentStore store)
+    internal static async Task IngestAsync(IHttpContext context, LogSegmentStore store)
     {
         string path = context.Request.Path.Value;
         if (path is not ("/v1/logs" or "/v1/traces" or "/v1/metrics"))
         { context.Response.StatusCode = HttpStatusCode.NotFound; return; }
         if (context.Request.Method != HttpMethod.Post)
         { context.Response.StatusCode = HttpStatusCode.MethodNotAllowed; context.Response.Headers[HttpHeaderKey.Allow] = "POST"; return; }
-        (bool authorized, string? emitter) = await AuthorizeAsync(context, resource, telemetry: true).ConfigureAwait(false);
-        if (!authorized) { return; }
+        if (!Authorize(context, telemetry: true)) { return; }
         string contentType = context.Request.Headers[HttpHeaderKey.ContentType].ToString().Split(';')[0].Trim();
         if (!string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase))
         {
@@ -68,7 +66,7 @@ internal static class LogSpaceHttp
             }
             finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
             using JsonDocument document = JsonDocument.Parse(body.GetBuffer().AsMemory(0, (int)body.Length), new JsonDocumentOptions { MaxDepth = 32 });
-            var records = OtlpLogReader.Read(document.RootElement, emitter);
+            var records = OtlpLogReader.Read(document.RootElement, authenticatedResource: null);
             long rejected = 0;
             foreach (StoredLog record in records) { if (!store.TryEnqueue(record)) { rejected++; } }
             context.Response.StatusCode = HttpStatusCode.Ok;
@@ -89,13 +87,13 @@ internal static class LogSpaceHttp
         catch (IOException) { context.Response.StatusCode = HttpStatusCode.BadRequest; }
     }
 
-    internal static async Task QueryAsync(IHttpContext context, WebApplicationMiddleware next, ResourceContext resource, LogSegmentStore? store)
+    internal static async Task QueryAsync(IHttpContext context, WebApplicationMiddleware next, LogSegmentStore? store)
     {
         string path = context.Request.Path.Value;
         if (path == "/cohesion/v1" || path.StartsWith("/cohesion/v1/", StringComparison.Ordinal))
         {
-            // Reject scoped emitter credentials on EVERY management route before the shared control plane.
-            if (!(await AuthorizeAsync(context, resource, telemetry: false).ConfigureAwait(false)).Authorized) { return; }
+            // Every namespaced route admits only a loopback transport peer.
+            if (!Authorize(context, telemetry: false)) { return; }
         }
         if (path != "/cohesion/v1/logs") { await next(context).ConfigureAwait(false); return; }
         if (context.Request.Method != HttpMethod.Get)
@@ -128,103 +126,28 @@ internal static class LogSpaceHttp
         { context.Response.StatusCode = HttpStatusCode.ServiceUnavailable; }
     }
 
-    private static async ValueTask<(bool Authorized, string? Emitter)> AuthorizeAsync(
-        IHttpContext context,
-        ResourceContext resource,
-        bool telemetry)
+    // The OTLP routes authenticated callers only through the retired resource credentials (a
+    // telemetry-scoped emitter token; without a gateway they admitted every caller), so they refuse every
+    // caller until an authentication path returns. The query keeps its transport-peer rule: only a
+    // loopback peer, and forwarded headers never grant access.
+    private static bool Authorize(IHttpContext context, bool telemetry)
     {
-        if (resource.GatewayName is null)
+        if (!telemetry && context.ConnectionInfo.RemoteEndPoint is IPEndPoint endpoint)
         {
-            if (telemetry) { return (true, null); }
-
-            // Query runs before the shared control plane, so it must check the transport peer too.
-            if (context.ConnectionInfo.RemoteEndPoint is IPEndPoint endpoint)
+            IPAddress address = endpoint.Address;
+            if (address.IsIPv4MappedToIPv6)
             {
-                IPAddress address = endpoint.Address;
-                if (address.IsIPv4MappedToIPv6)
-                {
-                    address = address.MapToIPv4();
-                }
-
-                if (address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback))
-                {
-                    return (true, null);
-                }
+                address = address.MapToIPv4();
             }
 
-            context.Response.StatusCode = HttpStatusCode.Forbidden;
-            return (false, null);
-        }
-        string header = context.Request.Headers[HttpHeaderKey.Authorization].ToString();
-        ResourceCredentialVerification verification = default;
-        if (header.Length < 16384)
-        {
-            ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
-                header,
-                resource.ResourceName!,
-                DateTimeOffset.UtcNow);
-            if (ResourceRuntime.TryGetCredentialVerifier(resource, out IResourceCredentialVerifier? registered))
+            if (address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback))
             {
-                verification = await registered.VerifyAsync(presentation, context.RequestCancelled).ConfigureAwait(false);
-            }
-
-            if (verification.Status is ResourceCredentialStatus.NoResult &&
-                presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase))
-            {
-                verification = new LogSpaceTokenVerifier(resource).Validate(
-                    presentation.Credential.Trim(),
-                    presentation.ExpectedAudience,
-                    presentation.Now,
-                    telemetry);
+                return true;
             }
         }
 
-        ResourceCredentialStatus status = AuthorizeCaller(verification, resource, telemetry, out string? emitter);
-        if (status is ResourceCredentialStatus.Authorized) { return (true, emitter); }
-        context.Response.StatusCode = status is ResourceCredentialStatus.Forbidden ? HttpStatusCode.Forbidden : HttpStatusCode.Unauthorized;
-        if (status is ResourceCredentialStatus.Unauthorized) { context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer"; }
-        return (false, null);
-    }
-
-    // Applies the sink's caller rules to a verified credential: ingestion accepts only this application's
-    // telemetry emitters (the subject names the emitting resource), and management routes accept only
-    // this application's gateway. The default verifier already enforces both, so this is the mapped form
-    // of its iss, sub, and scope rules and only narrows what a registered verifier may admit.
-    internal static ResourceCredentialStatus AuthorizeCaller(
-        ResourceCredentialVerification verification,
-        ResourceContext resource,
-        bool telemetry,
-        out string? emitter)
-    {
-        emitter = null;
-        if (verification.Status is not ResourceCredentialStatus.Authorized)
-        {
-            return verification.Status is ResourceCredentialStatus.Forbidden
-                ? ResourceCredentialStatus.Forbidden
-                : ResourceCredentialStatus.Unauthorized;
-        }
-
-        if (verification.Caller is not { } caller ||
-            !string.Equals(caller.Application, resource.ApplicationName, StringComparison.Ordinal))
-        {
-            return ResourceCredentialStatus.Forbidden;
-        }
-
-        if (telemetry)
-        {
-            if (caller.Kind is not ResourceCallerKind.TelemetryEmitter || string.IsNullOrWhiteSpace(caller.Subject))
-            {
-                return ResourceCredentialStatus.Forbidden;
-            }
-
-            emitter = caller.Subject;
-            return ResourceCredentialStatus.Authorized;
-        }
-
-        return caller.Kind is ResourceCallerKind.Gateway &&
-            string.Equals(caller.Subject, resource.GatewayName, StringComparison.Ordinal)
-                ? ResourceCredentialStatus.Authorized
-                : ResourceCredentialStatus.Forbidden;
+        context.Response.StatusCode = HttpStatusCode.Forbidden;
+        return false;
     }
 
     private static Task DetailAsync(IHttpContext context, string detail) => JsonAsync(context, writer =>

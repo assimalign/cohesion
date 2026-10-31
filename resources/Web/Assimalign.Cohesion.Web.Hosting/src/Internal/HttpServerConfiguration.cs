@@ -9,7 +9,6 @@ using System.Security.Cryptography.X509Certificates;
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Connections.Security;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 
@@ -587,9 +586,8 @@ internal static class HttpServerConfiguration
     }
 
     /// <summary>
-    /// Resolves a TLS endpoint's certificate: from a file when <c>Certificate</c> is a section
-    /// (<c>Path</c>, optional <c>KeyPath</c> and <c>Password</c>), otherwise from the Secret mount the
-    /// scalar <c>Certificate</c> names (the endpoint's registered mount, or <c>tls</c>, when absent).
+    /// Resolves a TLS endpoint's certificate from the file its <c>Certificate</c> section names
+    /// (<c>Path</c>, optional <c>KeyPath</c> and <c>Password</c>).
     /// </summary>
     private static (X509Certificate2 Leaf, X509Certificate2Collection Chain) ResolveCertificate(
         IConfigurationSection endpoint,
@@ -614,13 +612,10 @@ internal static class HttpServerConfiguration
                 GetString(certificate, "Password"));
         }
 
-        if (!ResourceRuntime.Current.TryGetEndpointCertificate(endpointName, GetString(endpoint, "Certificate"), out X509Certificate2? leaf, out X509Certificate2Collection chain))
-        {
-            throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
-        }
-
-        return (leaf, chain);
+        // A scalar Certificate named a Secret mount of the retired resource runtime. There is no
+        // secret store any more: the platform supplies certificates as files.
+        throw new InvalidOperationException(
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
     }
 
     /// <summary>
@@ -854,6 +849,29 @@ internal static class HttpServerConfiguration
                 || protocol.Equals("Http/3", StringComparison.OrdinalIgnoreCase)
                 || protocol.Equals("Http3.0", StringComparison.OrdinalIgnoreCase)
                 || protocol.Equals("h3", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Gets the address the application's platform assigned it: the runtime contract's <c>http</c>
+    /// endpoint (<see cref="AppEnvironment.TryGetEndpoint(string, out Uri?)"/>), when it is a plain
+    /// <c>http</c> one.
+    /// </summary>
+    /// <remarks>
+    /// A platform that shares the machine's ports among its resources, such as a gateway that runs
+    /// them in its own process, assigns each its port this way. An <c>https</c> endpoint needs a
+    /// certificate, which the application configures itself, so it is not bound here.
+    /// </remarks>
+    /// <returns>The endpoint, or <see langword="null"/> when the platform assigned none.</returns>
+    /// <exception cref="InvalidOperationException">The endpoint's host is neither an IP address nor <c>localhost</c>.</exception>
+    public static IPEndPoint? GetPlatformEndPoint()
+    {
+        if (!AppEnvironment.TryGetEndpoint("http", out Uri? address)
+            || !string.Equals(address.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return new IPEndPoint(ResolveHost(address.IdnHost), address.Port);
     }
 
     private static IPAddress ResolveHost(string? host)

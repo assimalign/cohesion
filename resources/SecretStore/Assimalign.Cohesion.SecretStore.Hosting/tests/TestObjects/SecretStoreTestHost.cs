@@ -3,11 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Reflection;
-using System.Text;
-
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.SecretStore;
+using System.Threading;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 
@@ -31,36 +27,23 @@ internal static class SecretStoreTestHost
         return path;
     }
 
-    internal static ResourceContext CreateContext(
-        Uri endpoint,
-        string dataPath,
-        string? bootstrapCredential = null,
-        ReadOnlyMemory<byte> applicationTrustKey = default,
-        string? gatewayName = "local",
-        string applicationName = "appa",
-        string resourceName = "secrets",
-        string environmentName = AppEnvironment.Keys.Local)
+    /// <summary>
+    /// Runs the current flow in the named environment. A SecretStore permits plaintext HTTP only on
+    /// loopback in Local, and every test endpoint is plaintext loopback.
+    /// </summary>
+    internal static IDisposable EnterEnvironment(string environmentName = AppEnvironment.Keys.Local)
     {
-        return new ResourceContext(
-            applicationName,
-            resourceName,
-            environmentName,
-            gatewayName,
-            dataPath,
-            new Dictionary<string, Uri> { ["api"] = endpoint },
-            new Dictionary<string, ResourceMount>
-            {
-                ["data"] = new ResourceMount(dataPath),
-            },
-            settings: null,
-            references: null,
-            bootstrapCredential is null
-                ? ReadOnlyMemory<byte>.Empty
-                : Encoding.ASCII.GetBytes(bootstrapCredential),
-            applicationTrustKey,
-            ambientValues: null);
+        return AppEnvironment.Enter(AppEnvironmentScope.Create(
+            new Dictionary<string, string> { [AppEnvironment.Variables.Environment] = environmentName },
+            CancellationToken.None));
     }
 
     internal static SecretStoreApplicationBuilder CreateBuilder()
-        => SecretStoreApplication.CreateBuilder([], typeof(SecretStoreTestHost).Assembly);
+        => SecretStoreApplication.CreateBuilder([]);
+
+    internal static SecretStoreApplicationBuilder CreateBuilder(string dataPath)
+        => CreateBuilder(GetEndpoint(), dataPath);
+
+    internal static SecretStoreApplicationBuilder CreateBuilder(Uri endpoint, string dataPath)
+        => SecretStoreApplication.CreateBuilder(["--endpoint", endpoint.AbsoluteUri, "--data", dataPath]);
 }

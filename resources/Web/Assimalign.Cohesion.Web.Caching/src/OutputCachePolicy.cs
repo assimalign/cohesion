@@ -203,6 +203,47 @@ public sealed class OutputCachePolicy
         return this;
     }
 
+    /// <summary>
+    /// Copies this policy, its key dimensions and tags included, for the options snapshot a built
+    /// output-cache middleware reads (<see cref="OutputCacheOptions.Snapshot"/>).
+    /// </summary>
+    internal OutputCachePolicy Clone()
+    {
+        // Copies every member; a member added to the policy needs a line here, or a built middleware
+        // sees only its default. The backing fields hold values their setters already validated.
+        OutputCachePolicy clone = new()
+        {
+            Enabled = Enabled,
+            HonorResponseCacheControl = HonorResponseCacheControl,
+            CacheAuthenticated = CacheAuthenticated,
+        };
+
+        clone._duration = _duration;
+        clone._maximumBodySize = _maximumBodySize;
+
+        foreach (HttpFieldName headerName in VaryByHeaders)
+        {
+            clone.VaryByHeaders.Add(headerName);
+        }
+
+        foreach (string queryKey in VaryByQueryKeys)
+        {
+            clone.VaryByQueryKeys.Add(queryKey);
+        }
+
+        foreach (string routeValueName in VaryByRouteValues)
+        {
+            clone.VaryByRouteValues.Add(routeValueName);
+        }
+
+        foreach (string tag in Tags)
+        {
+            clone.Tags.Add(tag);
+        }
+
+        return clone;
+    }
+
     private sealed class DebugView
     {
         private readonly OutputCachePolicy _target;

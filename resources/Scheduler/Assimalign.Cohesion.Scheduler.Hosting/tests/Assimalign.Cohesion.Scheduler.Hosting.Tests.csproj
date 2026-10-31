@@ -13,7 +13,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Scheduler.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Scheduler.Timer" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />

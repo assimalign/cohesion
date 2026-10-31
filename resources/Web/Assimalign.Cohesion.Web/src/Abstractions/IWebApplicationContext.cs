@@ -7,7 +7,7 @@ using System.IO;
 
 /// <summary>
 /// The composed Web application as its middleware sees it at pipeline build: its content and web
-/// roots, middleware, servers, and request features.
+/// roots, middleware, servers, request features, and settings.
 /// </summary>
 public interface IWebApplicationContext
 {
@@ -47,4 +47,13 @@ public interface IWebApplicationContext
     /// A collection of features that are available in the web application context.
     /// </summary>
     IEnumerable<IHttpFeature> Features { get; }
+
+    /// <summary>
+    /// Gets the application's settings, in registration order.
+    /// </summary>
+    /// <remarks>
+    /// A pipeline verb finds the setting its feature registered here and reads it while the
+    /// application serves; an operator surface, such as a resource's control plane, changes it.
+    /// </remarks>
+    IEnumerable<IWebApplicationSetting> Settings { get; }
 }

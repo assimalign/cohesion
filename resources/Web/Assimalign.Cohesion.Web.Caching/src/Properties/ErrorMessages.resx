@@ -133,7 +133,7 @@
     <value>An output cache policy named &apos;{0}&apos; is already registered.</value>
   </data>
   <data name="OutputCachePolicyNotRegistered" xml:space="preserve">
-    <value>No output cache policy named &apos;{0}&apos; has been registered. Register it with options.AddPolicy(name, configure) in UseOutputCache.</value>
+    <value>No output cache policy named &apos;{0}&apos; has been registered. Register it with cache.Options.AddPolicy(name, configure) in builder.Services.AddOutputCache(cache =&gt; ...).</value>
   </data>
   <data name="CacheFieldNameInvalid" xml:space="preserve">
     <value>A cache header name must be a non-empty RFC 9110 field-name token.</value>

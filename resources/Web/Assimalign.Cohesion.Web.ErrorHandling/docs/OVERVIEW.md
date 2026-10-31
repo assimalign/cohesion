@@ -11,17 +11,18 @@ decides what the client sees, with an overridable default that renders the RFC 9
   the response for it (return `true`) or pass (`false`).
 - **Builder-time registration** — `builder.Services.AddErrorHandling(errors => errors.OnError(...))`,
   a component integration the application's compilation receives; handlers are consulted in
-  registration order.
+  registration order. The same registration configures the exception boundary (`errors.Options`).
 - **The exchange feature** — `IErrorHandlingFeature`, seeded onto every exchange; a pipeline
   exception boundary invokes `HandleAsync(context, exception)` to turn a caught fault into the
   application's response.
 - **The terminal default** — when no registration owns a fault, the response is
   `500` + `application/problem+json` (`about:blank`, status phrase, no exception detail).
-- **The pipeline exception boundary** — `UseErrorHandling()` installs the middleware that catches
+- **The pipeline exception boundary** — `UseErrorHandling()` places the middleware that catches
   faults escaping downstream, publishes the caught exception as an `IHttpExceptionFeature`, resets
   an unstarted response (aborting the exchange when it has already started), and dispatches through
-  the `OnError` chain. A developer-detail toggle enriches the terminal payload; a diagnostics
-  observer (`OnException`) and its suppression predicate provide the fault-observation seam. A
+  the `OnError` chain. Its options are set where the hook is registered (`errors.Options`): a
+  developer-detail toggle enriches the terminal payload; a diagnostics observer (`OnException`) and
+  its suppression predicate provide the fault-observation seam. A
   request body that broke its framing or a limit while it was read is the client's fault, which
   the default Web server reports through
   `IWebClientFaultFeature` on every version: the boundary skips `OnException` and the `OnError` chain
@@ -32,34 +33,49 @@ decides what the client sees, with an overridable default that renders the RFC 9
   `IWebResponseClientFaultFeature`; it cancels without `OnException`, `OnError` or a replacement
   response, even when another writer wraps the transport failure (#1432).
 - **Status-code pages** — `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal response
-  (such as the pipeline's bodyless 404) into problem+json, or a custom responder body.
+  (such as the pipeline's bodyless 404) into problem+json, or the body of the custom responder
+  `builder.Services.AddStatusCodePages(pages => ...)` registered.
 
 ## Usage
+
+Configuration lives on the `Add` verbs only ("Add configures, Use places"). `UseErrorHandling()` and
+`UseStatusCodePages()` take no arguments: the boundary runs with the options of the hook registered
+last (the production defaults when there is none), and the status-code pages are the middleware
+registered last (the problem+json default when there is none).
 
 ```csharp
 // Composition (builder time). With no OnError registrations, every fault renders as
 // problem+json 500 — the hook is useful with zero configuration.
-builder.Services.AddErrorHandling(errors => errors.OnError(async (context, exception, cancellationToken) =>
+builder.Services.AddErrorHandling(errors =>
 {
-    if (exception is not StorageUnavailableException)
-    {
-        return false; // pass to the next registration (or the default)
-    }
+    // The boundary: exception detail in its terminal payload, here in development only.
+    errors.Options.IncludeDeveloperDetails = builder.Environment.IsDevelopment();
 
-    context.Response.StatusCode = 503;
-    await context.Response.WriteProblemDetailsAsync(
-        ProblemDetails.FromStatus(503, detail: "Storage is briefly unavailable; retry."),
-        cancellationToken);
-    return true;
-}));
+    errors.OnError(async (context, exception, cancellationToken) =>
+    {
+        if (exception is not StorageUnavailableException)
+        {
+            return false; // pass to the next registration (or the default)
+        }
+
+        context.Response.StatusCode = 503;
+        await context.Response.WriteProblemDetailsAsync(
+            ProblemDetails.FromStatus(503, detail: "Storage is briefly unavailable; retry."),
+            cancellationToken);
+        return true;
+    });
+});
+
+// Optional: a custom body for bodyless 4xx/5xx responses in place of problem+json.
+builder.Services.AddStatusCodePages(pages => pages.Options.Responder = RenderErrorPageAsync);
 ```
 
-Install the boundary (and, optionally, status-code pages) on the pipeline. Register
+Place the boundary (and, optionally, status-code pages) on the pipeline. Place
 `UseErrorHandling()` first so it wraps everything downstream:
 
 ```csharp
-app.UseErrorHandling(options => options.IncludeDeveloperDetails = builder.Environment.IsDevelopment());
-app.UseStatusCodePages();   // upgrades the pipeline's bodyless 404 (and any bodyless 4xx/5xx) to problem+json
+app.UseErrorHandling();
+app.UseStatusCodePages();   // upgrades the pipeline's bodyless 404 (and any bodyless 4xx/5xx)
 // ... routing, endpoints, and the rest of the pipeline
 ```
 

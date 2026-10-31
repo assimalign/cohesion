@@ -2,14 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
-using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ConfigurationStore.Hosting.Internal;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
@@ -29,7 +27,7 @@ public sealed class StandaloneControlPlaneTests
         // Arrange
         using ConfigurationEndpointService service = CreateService(basePath);
         var remoteEndPoint = new IPEndPoint(IPAddress.Parse(peer), 41000);
-        foreach (string route in new[] { "", "/", "/healthz", "/readyz", "/livez", "/endpoints", "/namespaces", "/commands", "/stop", "/unknown" })
+        foreach (string route in new[] { "", "/", "/healthz", "/readyz", "/livez", "/endpoints", "/namespaces", "/unknown" })
         {
             foreach (HttpMethod method in new[] { HttpMethod.Get, HttpMethod.Post, HttpMethod.Delete })
             {
@@ -117,63 +115,14 @@ public sealed class StandaloneControlPlaneTests
         exchange.Response.Body.Length.ShouldBeGreaterThan(0);
     }
 
-    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Hosting] - Invoke: gateway-managed non-loopback callers retain credential authorization")]
-    public async Task InvokeAsync_GatewayManagedRemotePeer_ShouldPreserveCredentials()
-    {
-        // Arrange
-        string dataPath = Path.Combine(Path.GetTempPath(), "cohesion-configuration-control-plane", Guid.NewGuid().ToString("N"));
-        try
-        {
-            using var identity = new TestBootstrapIdentity();
-            Uri endpoint = ConfigurationStoreTestHost.GetEndpoint();
-            string credential = identity.Issue("configuration");
-            ResourceContext resourceContext = ConfigurationStoreTestHost.CreateContext(endpoint, dataPath, credential, identity.PublicKey);
-            using ConfigurationEndpointService service = CreateService(resourceContext: resourceContext, endpoint: endpoint, dataPath: dataPath);
-            await service.StartAsync(CancellationToken.None);
-            try
-            {
-                var remoteEndPoint = new IPEndPoint(IPAddress.Parse("192.0.2.10"), 41000);
-                await using var authorized = new ConfigurationControlPlaneExchange("/cohesion/v1/endpoints", HttpMethod.Get, remoteEndPoint);
-                authorized.Request.Headers[HttpHeaderKey.Authorization] = "Bearer " + credential;
-                await using var missing = new ConfigurationControlPlaneExchange("/cohesion/v1/endpoints", HttpMethod.Get, remoteEndPoint);
-
-                // Act
-                await service.InvokeAsync(authorized, UnexpectedNext);
-                await service.InvokeAsync(missing, UnexpectedNext);
-
-                // Assert
-                authorized.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
-                missing.Response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-                missing.Response.Headers[HttpHeaderKey.WWWAuthenticate].Value.ShouldBe("Bearer");
-            }
-            finally
-            {
-                await service.StopAsync(CancellationToken.None);
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(dataPath))
-            {
-                Directory.Delete(dataPath, recursive: true);
-            }
-        }
-    }
-
-    private static ConfigurationEndpointService CreateService(
-        string basePath = "",
-        ResourceContext? resourceContext = null,
-        Uri? endpoint = null,
-        string? dataPath = null)
+    private static ConfigurationEndpointService CreateService(string basePath = "")
     {
         var repository = new ConfigurationStoreRepository(
-            dataPath ?? Path.Combine(Path.GetTempPath(), "cohesion-configuration-control-plane", Guid.NewGuid().ToString("N")),
+            Path.Combine(Path.GetTempPath(), "cohesion-configuration-control-plane", Guid.NewGuid().ToString("N")),
             new Dictionary<string, IReadOnlyDictionary<string, string?>>());
         return new ConfigurationEndpointService(
-            endpoint ?? new Uri("http://127.0.0.1:8080" + basePath),
+            new Uri("http://127.0.0.1:8080" + basePath),
             repository,
-            ResourceControlPlane.Create(),
-            resourceContext ?? new ResourceContext(environmentName: "test"),
             new ConfigurationStoreApplicationContext("test", null));
     }
 

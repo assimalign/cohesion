@@ -21,24 +21,37 @@ See [Diagnostics in the design](DESIGN.md#diagnostics) for events and payloads.
   `InMemoryFileSystem`, `AggregateFileSystem` composites. The middleware can never address
   anything outside the mount — path-traversal defense is a hard guarantee, not an option.
 - **`GET`/`HEAD` only.** Everything else passes through to the next middleware.
-- **Builder-time composition only.** The file system and every option are supplied at
-  `UseStaticFiles(...)` and frozen into the middleware; there is no service container, no
-  configuration binding, and no request-time service location (the Web-area rule).
+- **Registration-time composition only.** The file system and every option are supplied where the
+  middleware is registered, `builder.Services.AddStaticFiles(files => ...)`, and frozen into it;
+  `UseStaticFiles()` only places it. The package takes no service-container reference, binds no
+  configuration, and locates no service per request (the Web-area rule).
 
 ## Usage
 
-`DefaultDocuments` entries must be valid bare file names of at most 255 characters. Invalid
-characters (for example `?`) fail when `UseStaticFiles` is called. `MapFallbackToFile` similarly
-rejects paths that cannot parse inside the web-root mount, including `bad?.html`, during registration.
+Configuration lives on the `Add` verb only ("Add configures, Use places"). `AddStaticFiles` is a
+generated component integration over `StaticFilesBuilder`: `files.Options` holds the options and
+`files.UseFileSystem(...)` names the mount. `UseStaticFiles()` takes no arguments: it places every mount
+`AddStaticFiles` registered, in registration order (mounts add up: a request goes to the first mount that
+serves it), or one with the default options over the web root when the application registered none.
 
-The parameterless verb serves the application's web root: `wwwroot` under the content root
-(`IWebApplicationContext.WebRootPath`, set by the hosting runtime). It never serves the content
-root itself or the working directory, and it passes every request through when the application
-has no web root:
+`DefaultDocuments` entries must be valid bare file names of at most 255 characters. Invalid
+characters (for example `?`) fail when `AddStaticFiles` registers the middleware. `MapFallbackToFile`
+similarly rejects paths that cannot parse inside the web-root mount, including `bad?.html`, during
+registration.
+
+A registration that names no file system, and `UseStaticFiles()` without a registration, serve the
+application's web root: `wwwroot` under the content root (`IWebApplicationContext.WebRootPath`, set by
+the hosting runtime), which `UseStaticFiles()` mounts when the pipeline is built. It never serves the
+content root itself or the working directory, and it passes every request through when the
+application has no web root:
 
 ```csharp
-app.UseStaticFiles();                                  // serves <content root>/wwwroot
-app.UseStaticFiles(options => options.CacheControl = "public, max-age=3600");
+app.UseStaticFiles();                                  // no registration: serves <content root>/wwwroot
+
+// Or configure the web root's middleware where it is registered:
+builder.Services.AddStaticFiles(files => files.Options.CacheControl = "public, max-age=3600");
+// ...
+app.UseStaticFiles();
 ```
 
 Mount any other file system explicitly:
@@ -49,16 +62,22 @@ using Assimalign.Cohesion.Web.StaticFiles;
 
 var contentRoot = new PhysicalFileSystem(new PhysicalFileSystemOptions { /* root */ });
 
-app.UseStaticFiles(contentRoot, options =>
+builder.Services.AddStaticFiles(files =>
 {
-    options.RequestPath = new HttpPath("/static");     // mount prefix (default "/")
-    options.CacheControl = "public, max-age=3600";     // emitted on every served response
-    options.DefaultDocuments.Add("default.html");      // probed after index.html/index.htm
-    options.ContentTypeMappings[".gltf"] = "model/gltf+json";
-    options.ServeUnknownContentTypes = false;          // default: unmapped or missing extensions pass through
-    options.ServePrecompressedAssets = true;           // default: .br/.gz siblings negotiate
+    files.UseFileSystem(contentRoot);                        // default: the application's web root
+    files.Options.RequestPath = new HttpPath("/static");     // mount prefix (default "/")
+    files.Options.CacheControl = "public, max-age=3600";     // emitted on every served response
+    files.Options.DefaultDocuments.Add("default.html");      // probed after index.html/index.htm
+    files.Options.ContentTypeMappings[".gltf"] = "model/gltf+json";
+    files.Options.ServeUnknownContentTypes = false;          // default: unmapped or missing extensions pass through
+    files.Options.ServePrecompressedAssets = true;           // default: .br/.gz siblings negotiate
 });
+
+WebApplication app = builder.Build();
+app.UseStaticFiles();
 ```
+
+The application keeps ownership of a file system it mounts: the middleware never disposes it.
 
 `ContentTypeMappings` values and `FallbackContentType` must be non-empty HTTP field values.
 Registration rejects RFC CTLs other than interior HTAB, plus leading or trailing SP/HTAB,
@@ -67,15 +86,20 @@ using `HttpFieldValue`; case and obs-text (including C1 characters) are preserve
 
 A `ContentTypeMappings` key maps an extension, never a whole file name, so no key types a file
 without one, such as `apple-app-site-association`. Give such files a mount of their own whose
-fallback type is theirs, or send them from a handler with an explicit type:
+fallback type is theirs, registered beside the web root, or send them from a handler with an explicit
+type:
 
 ```csharp
-app.UseStaticFiles(wellKnownRoot, options =>         // holds only the extensionless files
+builder.Services.AddStaticFiles(wellKnown =>
 {
-    options.RequestPath = new HttpPath("/.well-known");
-    options.ServeUnknownContentTypes = true;
-    options.FallbackContentType = "application/json";
+    wellKnown.UseFileSystem(wellKnownRoot);              // holds only the extensionless files
+    wellKnown.Options.RequestPath = new HttpPath("/.well-known");
+    wellKnown.Options.ServeUnknownContentTypes = true;
+    wellKnown.Options.FallbackContentType = "application/json";
 });
+builder.Services.AddStaticFiles();                       // the web root
+
+app.UseStaticFiles();                                    // places both mounts, in that order
 
 // or: context.Response.SendFileAsync(wellKnownRoot, name, "application/json")
 ```

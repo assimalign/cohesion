@@ -1,14 +1,10 @@
 using System;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.LoadBalancer;
 using Assimalign.Cohesion.LoadBalancer.Hosting.Internal;
-using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.LoadBalancer.Hosting;
 
@@ -25,12 +21,10 @@ namespace Assimalign.Cohesion.LoadBalancer.Hosting;
 public sealed class LoadBalancerApplicationBuilder : ILoadBalancerApplicationBuilder
 {
     private readonly LoadBalancerApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
 
     private bool _isBuilt;
 
-    internal LoadBalancerApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal LoadBalancerApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -39,24 +33,8 @@ public sealed class LoadBalancerApplicationBuilder : ILoadBalancerApplicationBui
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered LoadBalancer control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
 
-        _context = new LoadBalancerApplicationContext(_resourceContext);
+        _context = new LoadBalancerApplicationContext();
     }
 
     /// <summary>
@@ -121,19 +99,6 @@ public sealed class LoadBalancerApplicationBuilder : ILoadBalancerApplicationBui
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The load balancer application has already been built.");
 
-        if (_controlPlane is not null)
-        {
-            _controlPlane.AddHealthContributor(_context);
-            if (_resourceContext!.Endpoints.TryGetValue("http", out Uri? endpoint))
-            {
-                _controlPlane.ObserveEndpoint("http", endpoint);
-
-                // Registered after every AddService call, so the endpoint starts last and stops first.
-                Services.AddSingleton<IHostService>(_ => new LoadBalancerControlPlaneEndpointService(
-                    endpoint, _controlPlane, _resourceContext, _context));
-            }
-        }
-
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<ILoadBalancerApplicationContext>(_context);
 
@@ -151,13 +116,7 @@ public sealed class LoadBalancerApplicationBuilder : ILoadBalancerApplicationBui
         {
             _context.ResolveHostedServices();
 
-            var application = new LoadBalancerApplication(new LoadBalancerApplicationOptions(), _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
+            return new LoadBalancerApplication(new LoadBalancerApplicationOptions(), _context);
         }
         catch (Exception exception)
         {

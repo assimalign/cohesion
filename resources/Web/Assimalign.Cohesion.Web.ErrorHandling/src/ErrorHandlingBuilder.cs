@@ -8,7 +8,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling;
 /// <summary>
 /// Composes the <c>OnError</c> hook: the fault handlers an application registers, consulted in the order
 /// they are added. The first to handle a fault ends the chain, so register specific handlers before general
-/// ones.
+/// ones. It also configures the exception boundary that <c>UseErrorHandling()</c> places
+/// (<see cref="Options"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,12 +32,23 @@ public sealed class ErrorHandlingBuilder
     private readonly List<IErrorHandler> _handlers = new();
 
     /// <summary>
-    /// Initializes a builder with no handlers. Built as is, it yields a hook that renders every fault as the
-    /// RFC 9457 <c>ProblemDetails</c> payload.
+    /// Initializes a builder with no handlers and the boundary's production defaults. Built as is, it yields
+    /// a hook that renders every fault as the RFC 9457 <c>ProblemDetails</c> payload, with no developer detail
+    /// and no fault observer.
     /// </summary>
     public ErrorHandlingBuilder()
     {
     }
+
+    /// <summary>
+    /// Gets the options of the exception boundary <c>UseErrorHandling()</c> places: the developer-detail
+    /// toggle, the fault-observation hook, and the diagnostics-suppression predicate.
+    /// </summary>
+    /// <remarks>
+    /// The boundary reads them from the hook the application registered last; without a registration it
+    /// runs with the defaults. <see cref="Build"/> copies them, so changing them afterwards has no effect.
+    /// </remarks>
+    public ExceptionBoundaryOptions Options { get; } = new();
 
     /// <summary>
     /// Appends a handler to the <c>OnError</c> chain.
@@ -73,18 +85,31 @@ public sealed class ErrorHandlingBuilder
     /// Builds the <c>OnError</c> hook from the handlers registered so far.
     /// </summary>
     /// <remarks>
-    /// The hook holds a snapshot of the registrations: handlers added after this call do not reach it.
+    /// The hook holds a snapshot of the registrations and of <see cref="Options"/>: handlers added and
+    /// options changed after this call do not reach it.
     /// </remarks>
     /// <returns>The hook, an <see cref="IErrorHandlingFeature"/> for the application to register.</returns>
     public IErrorHandlingFeature Build()
     {
-        return new ErrorHandlingFeature(_handlers.ToArray());
+        ExceptionBoundaryOptions boundary = new()
+        {
+            IncludeDeveloperDetails = Options.IncludeDeveloperDetails,
+            OnException = Options.OnException,
+            SuppressDiagnosticsCallback = Options.SuppressDiagnosticsCallback,
+        };
+
+        return new ErrorHandlingFeature(_handlers.ToArray(), boundary);
     }
 
     private sealed class DebugView
     {
+        private readonly ErrorHandlingBuilder _target;
+
         public DebugView(ErrorHandlingBuilder value)
         {
+            _target = value;
         }
+
+        public ExceptionBoundaryOptions Options => _target.Options;
     }
 }

@@ -26,9 +26,11 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders.Tests;
 
 /// <summary>
 /// The middleware over the in-memory <see cref="WebApplicationTestFactory"/> (HTTP/1.1, real wire
-/// exchange): the defaults, the opt-in fields, responses that never reach an endpoint (unmatched routes,
-/// short-circuiting middleware, the exception boundary's error page, static files), the no-clobber and
-/// framing-ownership rules, the per-request nonce, and streamed responses that commit their own head.
+/// exchange), registered with the generated <c>builder.Services.AddSecurityHeaders</c> verb and placed by
+/// <c>UseSecurityHeaders()</c>: the defaults, the opt-in fields, responses that never reach an endpoint
+/// (unmatched routes, short-circuiting middleware, the exception boundary's error page, static files), the
+/// no-clobber and framing-ownership rules, the per-request nonce, streamed responses that commit their own
+/// head, and the registration itself.
 /// </summary>
 public class SecurityHeadersEndToEndTests
 {
@@ -64,12 +66,13 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy =>
+        factory.Builder.Services.AddSecurityHeaders(headers =>
         {
-            policy.ContentTypeOptions = false;
-            policy.Framing = null;
-            policy.ReferrerPolicy = null;
+            headers.Options.ContentTypeOptions = false;
+            headers.Options.Framing = null;
+            headers.Options.ReferrerPolicy = null;
         });
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, "home"));
         using HttpClient client = factory.CreateClient();
 
@@ -90,23 +93,24 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy =>
+        factory.Builder.Services.AddSecurityHeaders(headers =>
         {
-            policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+            headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
                 .DefaultSrc(sources => sources.Self())
                 .ImgSrc(sources => sources.Self().Scheme("data"))
                 .ObjectSrc(sources => sources.None()));
-            policy.ContentSecurityPolicyReportOnly = ContentSecurityPolicy.Create(csp => csp
+            headers.Options.ContentSecurityPolicyReportOnly = ContentSecurityPolicy.Create(csp => csp
                 .ScriptSrc(sources => sources.Self())
                 .ReportTo("csp-endpoint"));
-            policy.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin;
-            policy.CrossOriginEmbedderPolicy = CrossOriginEmbedderPolicy.RequireCorp;
-            policy.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameSite;
-            policy.PermissionsPolicy = PermissionsPolicy.Create(permissions => permissions
+            headers.Options.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin;
+            headers.Options.CrossOriginEmbedderPolicy = CrossOriginEmbedderPolicy.RequireCorp;
+            headers.Options.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameSite;
+            headers.Options.PermissionsPolicy = PermissionsPolicy.Create(permissions => permissions
                 .Disable("camera")
                 .AllowSelf("geolocation"));
-            policy.ReferrerPolicy = ReferrerPolicy.NoReferrer;
+            headers.Options.ReferrerPolicy = ReferrerPolicy.NoReferrer;
         });
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, "home"));
         using HttpClient client = factory.CreateClient();
 
@@ -222,8 +226,9 @@ public class SecurityHeadersEndToEndTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         using InMemoryFileSystem site = CreateSite(("index.html", "<html>home</html>"));
         await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Builder.Services.AddStaticFiles(files => files.UseFileSystem(site));
         factory.Application.UseSecurityHeaders();
-        factory.Application.UseStaticFiles(site);
+        factory.Application.UseStaticFiles();
         using HttpClient client = factory.CreateClient();
 
         // Act
@@ -249,7 +254,8 @@ public class SecurityHeadersEndToEndTests
         // Arrange — the application's own policy has no frame-ancestors, so X-Frame-Options still guards framing.
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy => policy.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameOrigin);
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameOrigin);
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) =>
         {
             context.Response.Headers[HttpHeaderKey.ReferrerPolicy] = "no-referrer";
@@ -276,8 +282,9 @@ public class SecurityHeadersEndToEndTests
         // Arrange — a frame-ancestors 'none' beside the application's SAMEORIGIN would override it.
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
             .DefaultSrc(sources => sources.Self())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) =>
         {
             context.Response.Headers[HttpHeaderKey.XFrameOptions] = "SAMEORIGIN";
@@ -322,7 +329,8 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy => policy.OverwriteExistingHeaders = true);
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.OverwriteExistingHeaders = true);
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) =>
         {
             context.Response.Headers[HttpHeaderKey.ReferrerPolicy] = "unsafe-url";
@@ -347,9 +355,10 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
             .ScriptSrc(sources => sources.Nonce().StrictDynamic())
             .ObjectSrc(sources => sources.None())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, ReadNonce(context)));
         using HttpClient client = factory.CreateClient();
 
@@ -368,8 +377,9 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
             .ScriptSrc(sources => sources.Nonce())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, ReadNonce(context)));
         using HttpClient client = factory.CreateClient();
 
@@ -393,11 +403,12 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy =>
+        factory.Builder.Services.AddSecurityHeaders(headers =>
         {
-            policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.ScriptSrc(sources => sources.Self().Nonce()));
-            policy.ContentSecurityPolicyReportOnly = ContentSecurityPolicy.Create(csp => csp.StyleSrc(sources => sources.Nonce()));
+            headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.ScriptSrc(sources => sources.Self().Nonce()));
+            headers.Options.ContentSecurityPolicyReportOnly = ContentSecurityPolicy.Create(csp => csp.StyleSrc(sources => sources.Nonce()));
         });
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, ReadNonce(context)));
         using HttpClient client = factory.CreateClient();
 
@@ -417,13 +428,14 @@ public class SecurityHeadersEndToEndTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         FixedNonceFeature feature = new("Zml4ZWQtbm9uY2U=");
         await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+            .ScriptSrc(sources => sources.Nonce())));
         factory.Application.Use((context, next) =>
         {
             context.Features.Set<ISecurityHeadersFeature>(feature);
             return next.Invoke(context);
         });
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
-            .ScriptSrc(sources => sources.Nonce())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, ReadNonce(context)));
         using HttpClient client = factory.CreateClient();
 
@@ -442,13 +454,14 @@ public class SecurityHeadersEndToEndTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         FixedNonceFeature feature = new("Zml4ZWQtbm9uY2U=");
         await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+            .DefaultSrc(sources => sources.Self())));
         factory.Application.Use((context, next) =>
         {
             context.Features.Set<ISecurityHeadersFeature>(feature);
             return next.Invoke(context);
         });
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
-            .DefaultSrc(sources => sources.Self())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, "home"));
         using HttpClient client = factory.CreateClient();
 
@@ -467,13 +480,14 @@ public class SecurityHeadersEndToEndTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         FixedNonceFeature feature = new("abc'; script-src *");
         await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+            .ScriptSrc(sources => sources.Nonce())));
         factory.Application.Use((context, next) =>
         {
             context.Features.Set<ISecurityHeadersFeature>(feature);
             return next.Invoke(context);
         });
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
-            .ScriptSrc(sources => sources.Nonce())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, "home"));
         using HttpClient client = factory.CreateClient();
 
@@ -493,7 +507,8 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory(streaming: true);
-        factory.Application.UseSecurityHeaders(policy => policy.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin);
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin);
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => StreamTextAsync(context, "streamed"));
         using HttpClient client = factory.CreateClient();
 
@@ -648,8 +663,9 @@ public class SecurityHeadersEndToEndTests
             Protocol = WebApplicationTestProtocol.Http2,
         });
         factory.Builder.Server.UseServer(options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
             .ScriptSrc(sources => sources.Nonce())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => context.Request.Path.ToString() == "/stream"
             ? StreamTextAsync(context, ReadNonce(context))
             : WriteTextAsync(context, ReadNonce(context)));
@@ -675,8 +691,9 @@ public class SecurityHeadersEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory(streaming: true);
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
             .ScriptSrc(sources => sources.Nonce())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => StreamTextAsync(context, ReadNonce(context)));
         using HttpClient client = factory.CreateClient();
 
@@ -710,27 +727,28 @@ public class SecurityHeadersEndToEndTests
         Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Composition: An undefined enumeration value should throw when the middleware is registered")]
-    public async Task UseSecurityHeaders_UndefinedEnumerationValue_ShouldThrowAtComposition()
+    [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Composition: An undefined enumeration value should throw when the headers are registered")]
+    public async Task AddSecurityHeaders_UndefinedEnumerationValue_ShouldThrowAtRegistration()
     {
         // Arrange
         await using WebApplicationTestFactory factory = CreateFactory();
 
         // Act
-        Action act = () => factory.Application.UseSecurityHeaders(policy => policy.ReferrerPolicy = (ReferrerPolicy)42);
+        Action act = () => factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ReferrerPolicy = (ReferrerPolicy)42);
 
         // Assert
         act.ShouldThrow<ArgumentOutOfRangeException>();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Composition: A policy reference kept by the callback should not reconfigure the pipeline")]
-    public async Task UseSecurityHeaders_PolicyMutatedAfterRegistration_ShouldKeepCapturedPolicy()
+    public async Task AddSecurityHeaders_PolicyMutatedAfterRegistration_ShouldKeepCapturedPolicy()
     {
         // Arrange
         using CancellationTokenSource cancellation = new(TestTimeout);
         SecurityHeadersPolicy? captured = null;
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseSecurityHeaders(policy => captured = policy);
+        factory.Builder.Services.AddSecurityHeaders(headers => captured = headers.Options);
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => WriteTextAsync(context, "home"));
         captured!.Framing = null;
         captured.ReferrerPolicy = ReferrerPolicy.UnsafeUrl;
@@ -755,5 +773,54 @@ public class SecurityHeadersEndToEndTests
 
         // Assert
         act.ShouldThrow<ArgumentNullException>();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - AddSecurityHeaders: The last registration should be the policy UseSecurityHeaders places")]
+    public async Task AddSecurityHeaders_RegisteredTwice_ShouldServeTheLastRegistration()
+    {
+        // Arrange — the generated verb registers each configured middleware in the application's container;
+        // UseSecurityHeaders() places the last one it finds. Each registration opts into a different field.
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin);
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameSite);
+        factory.Application.UseSecurityHeaders();
+        factory.Application.Use((context, next) => WriteTextAsync(context, "home"));
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        Header(response, "Cross-Origin-Resource-Policy").ShouldBe("same-site");
+        Header(response, "Cross-Origin-Opener-Policy").ShouldBeNull();
+        Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - AddSecurityHeaders: A provider callback should configure the policy UseSecurityHeaders places")]
+    public async Task AddSecurityHeaders_ProviderCallback_ShouldServeTheConfiguredPolicy()
+    {
+        // Arrange — the provider overload builds the middleware when it is first resolved, as the pipeline
+        // is composed, with the application's service provider.
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        IServiceProvider? configuredWith = null;
+        await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Builder.Services.AddSecurityHeaders((services, headers) =>
+        {
+            configuredWith = services;
+            headers.Options.ReferrerPolicy = ReferrerPolicy.SameOrigin;
+        });
+        factory.Application.UseSecurityHeaders();
+        factory.Application.Use((context, next) => WriteTextAsync(context, "home"));
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/", cancellation.Token);
+
+        // Assert
+        configuredWith.ShouldNotBeNull();
+        Header(response, "Referrer-Policy").ShouldBe("same-origin");
+        Header(response, "X-Frame-Options").ShouldBe("DENY");
     }
 }

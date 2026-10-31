@@ -32,7 +32,7 @@ public sealed class ResourceAreaDefaultsTests
         mount.Attribute("ContainerPath")!.Value.ShouldBe("/cohesion/mounts/tls");
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sdk] - Generic area defaults register their control plane and probes")]
+    [Theory(DisplayName = "Cohesion Test [Sdk] - Generic area defaults declare their control-plane endpoint and probes, and no area model")]
     [InlineData("ApiManager", "http")]
     [InlineData("EmailHub", "http")]
     [InlineData("EventHub", "http")]
@@ -56,12 +56,9 @@ public sealed class ResourceAreaDefaultsTests
         XDocument defaults = XDocument.Load(Path.Combine(root.FullName, "sdks",
             $"Assimalign.Cohesion.Sdk.{area}", "Targets", $"Sdk.{area}.props"));
 
-        XElement model = defaults.Descendants("CohesionResourceApplicationModel").Single();
-        XElement factory = defaults.Descendants("CohesionResourceControlPlaneType").Single();
-        model.Value.ShouldBe($"Assimalign.Cohesion.{area}.ApplicationModel");
-        factory.Value.ShouldBe($"Assimalign.Cohesion.ApplicationModel.{area}ResourceControlPlane");
-        model.Attribute("Condition")!.Value.ShouldBe("'$(CohesionResourceApplicationModel)' == ''");
-        factory.Attribute("Condition")!.Value.ShouldBe("'$(CohesionResourceControlPlaneType)' == ''");
+        // Areas ship no ApplicationModel package or default control-plane type since 2026-10-30.
+        defaults.Descendants("CohesionResourceApplicationModel").ShouldBeEmpty();
+        defaults.Descendants("CohesionResourceControlPlaneType").ShouldBeEmpty();
         defaults.Descendants("CohesionControlPlaneEndpoint").Single().Value.ShouldBe(endpoint);
         defaults.Descendants("CohesionEndpoint").ShouldContain(item => (string?)item.Attribute("Include") == endpoint);
         XElement[] probes = defaults.Descendants("CohesionProbe").ToArray();

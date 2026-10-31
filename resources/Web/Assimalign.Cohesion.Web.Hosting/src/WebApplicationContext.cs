@@ -92,6 +92,8 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
 
     public IEnumerable<IHttpFeature> Features => ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
 
+    public IEnumerable<IWebApplicationSetting> Settings => ServiceProvider.GetRequiredService<IEnumerable<IWebApplicationSetting>>();
+
     // Pipeline composition owns these resources until final application teardown.
     internal void RegisterForDisposal(IDisposable resource)
     {
@@ -199,6 +201,5 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
         public FileSystemPath? WebRootPath => _target.WebRootPath;
         public HostId HostId => _target.HostId;
         public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

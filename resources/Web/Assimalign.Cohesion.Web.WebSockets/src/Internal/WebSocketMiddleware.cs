@@ -5,9 +5,9 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 
 /// <summary>
-/// The middleware <c>UseWebSockets</c> registers. An ordinary request passes straight through. A
-/// WebSocket handshake attempt is refused when it is malformed (<c>400</c>, or <c>426</c> for
-/// another version) or comes from a disallowed origin (<c>403</c>); a valid one continues with
+/// The middleware <c>AddWebSockets</c> registers and <c>UseWebSockets</c> places. An ordinary request
+/// passes straight through. A WebSocket handshake attempt is refused when it is malformed (<c>400</c>,
+/// or <c>426</c> for another version) or comes from a disallowed origin (<c>403</c>); a valid one continues with
 /// <see cref="WebSocketPolicyFeature"/> installed, so the accept downstream takes the policy.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("WebSocketMiddleware")]

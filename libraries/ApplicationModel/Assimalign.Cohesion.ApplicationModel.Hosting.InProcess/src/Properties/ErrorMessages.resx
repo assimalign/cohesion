@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="EndpointInvalid" xml:space="preserve"><value>An in-process endpoint is an absolute inprocess URL, such as inprocess://local/.</value></data>
+  <data name="EndpointRegistered" xml:space="preserve"><value>The in-process endpoint '{0}' is already registered.</value></data>
+  <data name="EndpointMissing" xml:space="preserve"><value>The in-process platform names the instance's gateway in the {0} variable, which the instance's environment does not set. A gateway that runs the instance in its own process sets it.</value></data>
+  <data name="EndpointVariableInvalid" xml:space="preserve"><value>The {0} variable holds '{1}', which is not an in-process endpoint: an absolute inprocess URL, such as inprocess://local/.</value></data>
+  <data name="GatewayUnknown" xml:space="preserve"><value>No gateway receives at the in-process endpoint '{0}'.</value></data>
+  <data name="ClientAlreadyStarted" xml:space="preserve"><value>The in-process gateway client already carries its gateway's calls to a control plane.</value></data>
+</root>

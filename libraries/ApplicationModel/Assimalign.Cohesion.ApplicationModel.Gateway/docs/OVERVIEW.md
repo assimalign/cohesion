@@ -1,134 +1,76 @@
-# Application gateway overview
+# Assimalign.Cohesion.ApplicationModel.Gateway — Overview
 
-The gateway realizes an immutable application graph in dependency order, waits for each target's
-readiness gate, applies its resource commands, and then admits dependents. Runtime stop preserves
-owned declarations; teardown removes commands and realized resources in reverse order.
+## Purpose
 
-Configure local supervision with `LocalGatewayOptions.LivenessFailureThreshold` (positive,
-default 3) and `MaximumRestartAttempts` (nonnegative, default 5; zero disables restarts). Both
-properties throw `ArgumentOutOfRangeException` on invalid assignment and preserve their previous
-value, including after gateway construction. Valid later assignments remain supported. This
-changes 10.0.0-preview.1 behavior, where only gateway construction checked these limits.
+Runs one gateway's application model: deploys its resources through an infrastructure provider in
+dependency order, each resource once what it depends on is ready and with its settings filled in from
+their outputs or its parent's, receives the manifests the deployed instances publish, lets child
+gateways join it, and exposes each resource's deployment and infrastructure actions. The design
+record is [DESIGN.md](DESIGN.md).
 
-Out-of-process command delivery uses `ApplicationGatewayOptions.CommandClients`, which by default
-holds one `ResourceControlPlaneCommandClient`. That client serves every resource kind
-(`IGatewayResourceCommandClient.AnyKind`) over the standard control-plane `commands` route.
-To customize one kind, add an `IGatewayResourceCommandClient` whose `ResourceKind` is that manifest
-kind. An exact-kind client always wins over the catch-all. In-process hosts expose their
-registered control plane directly; remote commands use the peer gateway client.
-Custom clients must accept the `serverCertificateValidator` parameter on apply and delete and
-use it for the target application's TLS trust; `null` preserves platform default trust.
-Command outcomes are available through `IApplicationResourceStateManager.GetCommandObservations`
-and exported with provider detail. Required rejection blocks dependent startup.
+## Scope
 
-Stores, source-free endpoint certificates, trusted issuers, command-payload rewriting, and the
-telemetry sink reach the gateway only through the providers the application registers in
-`builder.Providers` and `Build()` freezes into `IApplicationModel.Providers`; this package
-references no store client and knows no area kind. Unregistered, a `<source>:<key>` mount fails
-`Build()`, as does a command whose target manifest requires an input resolver (SecretStore's
-`secretstore.add-secret`); the development certificate authority and local trusted-issuers file are
-Local-only, and no telemetry is injected. A model's registrations serve only its own application's resources.
-A model imported from a document carries none and never inherits them: an application set registers
-each member's providers explicitly in `AddApplication(Applications.X, member => member.UseSecretStore("secrets"))`,
-attaches them to that member's model alone, and fails a store-backed member without one at start,
-naming the member. A model reaching the gateway without the registration a mount needs gets an
-unresolved input naming it, and a Local `--realize` closure's mounts are unresolved with the
-cross-application limit named. Cross-application store sources are rejected until a peer-credential
-design lands.
+- In scope: `ApplicationGateway` and its `ApplicationBuilder`; the `IApplicationGateway`,
+  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, `IApplicationGatewayTransport`, and
+  `IInfrastructureProvider` seams, and the use of the contracts' `IApplicationInstanceClient`; an
+  operator's actions on a resource's instances (`ApplicationGateway.ExecuteAsync`); the deployment
+  of a resource (`IApplicationResourceDeployment`, `ApplicationResourceDeployment`,
+  `IApplicationResourceAction`); the `IApplicationGatewayStore` record with its JSON file store; and
+  `ApplicationGatewayException`.
+- Out of scope: every transport. A platform's gateway half supplies the infrastructure, the transport
+  instances publish through, and the instance client the gateway calls them with, such as
+  `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`. Also out of scope: identity and
+  authentication.
 
-Mount-source syntax is shared with manifest and provider validation through `ResourceMountSource`:
-`literal:` may be empty or contain colons, `parameter:` needs a nonblank name, and other sources
-need exactly one colon between nonblank source and key. Probe and control-plane path validation
-uses `ResourceHttpPath`: paths begin with `/` and contain no query or fragment. These manifest DTO
-properties retain their string types for the owner's Database freeze (#1168), with typed DTO
-adoption deferred to #1470. Manifest validation checks those strings through the value objects'
-`IsValid`/`TryCreate` rules and rejects invalid text with `InvalidDataException` before reconcile;
-plan `MountBinding.Source` remains a value type.
+## Dependencies
 
-Every credential the gateway mints — each resource's bootstrap credential, its own calls to resource
-control planes and stores, telemetry-emitter credentials, peer-gateway calls, and developer tokens —
-goes through the application's registered `IApplicationCredentialIssuer` first and falls back to the
-default ES256 application-key issuer, whose tokens are unchanged. Resources that must accept an
-identity provider's credentials register a matching verifier with
-`ResourceRuntime.RegisterCredentialVerifier`.
+`Assimalign.Cohesion.ApplicationModel.Definition`, and through it the contracts in `Assimalign.Cohesion.ApplicationModel`.
 
-Issuer results use `ApplicationCredentialScheme` and `ApplicationCredentialValue`. String inputs
-still convert when constructing a credential, but schemes must be HTTP tokens and values must be
-nonblank without CR or LF. Invalid replacements are also refused in `with` expressions. Credential
-value displays are redacted; custom transports read `credential.Value.Value` explicitly to obtain
-the secret. Bearer-only carriers continue to refuse another valid authentication scheme.
+## Usage
 
-See [DESIGN.md](DESIGN.md) for dependency boundaries, ownership, credential restrictions, the
-provider registrations, the identity seams, and the scope of commands-only model replacement.
+The root gateway declares its model and runs it through a provider for its platform:
 
-## Command trust grants (O25 / item 31c)
+```csharp
+ApplicationBuilder builder = ApplicationGateway.CreateBuilder("root");
+builder.AddResource("IdentityHub", "identity");
 
-TrustedIssuer.AllowedCommandKinds is an immutable normalized ordinal list. The original
-constructor remains unrestricted. Absent or empty means every kind is allowed; a nonempty list
-permits exactly those case-sensitive wire kinds. `--mode trust-add --peer peer --from peer.json
---allow rezolvr.add-a-record,identityhub.add-audience` accepts repeated --allow arguments and
-comma-separated values. --allow is rejected for trust-issue and other modes. The CLI forwards
---allow but still rejects --against, whose endpoint-selection contract remains item #982.
+ApplicationGateway root = builder.UseInfrastructure(infrastructure).Build();
+await root.RunAsync(cancellationToken);
+```
 
-Local trusted-issuers.json and a registered trust store both persist optional
-allowedCommandKinds arrays; the gateway hands the store a `TrustedIssuer` that carries the list.
-Old documents remain unrestricted. The SecretStore orchestration store writes restricted grants as
-{trustKey,allowedCommandKinds}; unrestricted grants retain the bare JWK protocol. Its export returns
-the array to the gateway. AddTrustedIssuerAsync accepts the new collection while preserving the
-existing overload and its unrestricted behavior.
+A child gateway is its own program. It names its parent and reads the parent's outputs: it joins
+the parent before it deploys anything, and its `orders-api` deploys once `orders-db` is ready, with
+both endpoints in its configuration:
 
-The serving gateway carries the matched issuer's list onto the authenticated principal and checks
-both apply and delete. A forbidden kind returns the existing 409 Rejected observation with a detail
-naming the issuer and kind. It does not dispatch the command or release existing ownership.
-Manifest advertisement, command-token scope and owner-equals-issuer checks remain in force.
+```csharp
+ApplicationBuilder builder = ApplicationGateway.CreateBuilder("east");
+IApplicationParent root = builder.UseParent(rootGateway);
 
-## Command delivery
+IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "orders-db");
+builder.AddResource("Web", "orders-api")
+    .DependsOn(database, "data.read")
+    .WithSetting("Identity:Authority", root.Endpoint("IdentityHub", "identity"))
+    .WithSetting("Database:Endpoint", database.Endpoint);
 
-`ResourceControlPlaneCommandClient` replaced the five internal per-area adapters (Database,
-ConfigurationStore, IdentityHub, Rezolvr, SecretStore), so this package no longer references the
-Database, IdentityHub or Rezolvr client packages. For the same address it sends the method, URL
-and body they sent:
+ApplicationGateway east = builder.UseInfrastructure(infrastructure).Build();
+await east.RunAsync(cancellationToken);
+```
 
-- `POST` or `DELETE` to `<control-plane address>/commands`.
-- A bearer credential and a JSON body `{id,kind,owner,key,payload(base64)}`, with no `Accept`
-  header.
+A transport (`builder.UseTransport(transport)`) hands each publication to
+`gateway.PublishAsync(manifest)` and returns its snapshots; the gateway starts its transports when it
+runs and stops them when the run ends. A child gateway in the same process joins through
+`gateway.JoinAsync(manifest)`, using the gateway as its `IApplicationParentGateway`. To run every
+resource inside the gateway program's own process, use Gateway.InProcess:
+`builder.UseInProcess(infrastructure)` sets its infrastructure, which is also its transport.
 
-It maps responses as they did. Success is Applied, and a JSON `{status,detail}` body can override
-it. A refusal is Rejected with the body's detail, or otherwise the neutral
-`Command '<kind>' was refused: HTTP <code> <reason>.` SecretStore's empty successful trust response
-still maps to Applied. Kinds that had no adapter, such as Web, now receive commands through the
-same client instead of being rejected for lack of one.
+An operator manages a resource through the gateway. The action runs on one instance's control plane,
+and a write's state is recorded and restored on every other instance; an instance that starts later
+restores it when it publishes:
 
-The client applies the supplied validator through a per-call transport that it disposes.
-`IResourceTransportTrustProvider` supplies the same application trust to hosted control planes.
-
-Before an apply, a command-input resolver the application registered for the command's kind
-(`ApplicationProviders.CommandInputs`, such as the SecretStore orchestration package's
-`secretstore.add-secret` resolver) rewrites the payload for delivery. When the target's manifest
-marks the kind `requiresInputResolver`, as SecretStore's manifest marks `secretstore.add-secret`, a
-missing resolver fails `Build()` (or the application set, for a member) with a message naming the
-package and verb, so a validated model never delivers it unresolved. Any other kind with none
-registered is delivered as declared; the store's rejection of an unresolved `secretstore.add-secret`
-remains as defense in depth. The resolver resolves `parameter:` and `<source>:<key>`
-expressions through the gateway's `IResourceSourceResolver`, over the same `Sources` registrations as
-mounts and with the same explicit-target-dependency rule. Refusals become named Rejected details.
-Resolved bytes exist only in the transient delivery envelope; model declarations, ids and the
-applied-declaration ledger retain the original source reference. Literal secret sources are
-prohibited in the descriptor verb.
-
-## HTTPS transport identities (31t)
-
-Certificate mounts remain ordinary single-file Secret inputs. Explicit `parameter:` or `<source>:<key>` sources are authoritative and unusable bundles return a named Unresolved result. A source-free certificate mount gets its leaf from the registered certificate authority (`ApplicationProviders.CertificateAuthority`, for example `UseSecretStore(store).AsCertificateAuthority()`) once its resource is Running. The authority resource's own leaf always comes from the gateway development authority. Without a registered authority only Local uses the development authority; every other environment fails loudly, naming the endpoint and the registration to add, and a registered authority that cannot issue falls back to the development authority in Local only. The development authority persists a P-256 root and protected PKCS#8 key under `<state>/<application>/.state/certs/`; leaf bundles cache by resource/endpoint with loopback and observed/declared host SANs. New bundles use leaf, intermediates if any, and one PKCS#8 key; readers preserve both existing producer orders and tolerate a supplied root.
-
-Certificates-only transport anchors are carried in ResourceInputs, materialized beside bootstrap.token as a protected `.state/trust.pem`, and exposed through AppEnvironment.Variables.TrustBundlePath. Local and in-process probes use the shared CustomRootTrust validator while preserving hostname checks. Providers receive the same trust policy as `ResourceProviderConnection.ServerCertificateValidator`. This transport root is distinct from the ES256 application trust-signing key.
-
-
-## Checked manifest paths and sources (#1470)
-
-Manifest probe `Http` is `ResourceHttpPath?`, control-plane `Path` is `ResourceHttpPath`, and mount
-`Source` is `ResourceMountSource?`. Consumers use the underlying `Value` when composing addresses
-or comparing raw text. Valid string initializers remain supported; malformed strings are refused
-at construction or typed JSON import. Default structs still pass through explicit manifest/plan
-validation. JSON stays plain strings/nulls under `cohesion/resource/v1`; no transport message,
-Database storage format, diagnostic identity, event or counter changes. All binary consumers
-must be rebuilt together, including installed SDK/framework E2E payloads.
+```csharp
+ApplicationActionResult result = await gateway.ExecuteAsync(
+    "Web",
+    "orders-api",
+    "cors",
+    ApplicationActionContext.Create(ApplicationActionKind.Write, serializer, """{"origins":["https://partner.example"]}"""u8.ToArray()));
+```

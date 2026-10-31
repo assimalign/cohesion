@@ -35,19 +35,6 @@
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/Http/Assimalign.Cohesion.Http/src/Assimalign.Cohesion.Http.csproj" />
 	</Folder>
-	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/src/Assimalign.Cohesion.LoadBalancer.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.LoadBalancer.ApplicationModel/tests/Assimalign.Cohesion.LoadBalancer.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Refs/">
 		<File Path="Assimalign.Cohesion.LoadBalancer.Refs/Directory.Build.props" />
 	</Folder>

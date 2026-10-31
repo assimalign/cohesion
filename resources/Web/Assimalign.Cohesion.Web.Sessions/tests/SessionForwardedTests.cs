@@ -39,8 +39,9 @@ public class SessionForwardedTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
 
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Application.UseForwardedHeaders();
         factory.Application.UseSessions();
         UseSessionTouchingHandler(factory);
 
@@ -117,13 +118,10 @@ public class SessionForwardedTests
 
     private static async Task RunBehindForwardedHeadersAsync(SessionTestContext context)
     {
-        TestPipelineBuilder builder = new();
-        builder.UseForwardedHeaders(options =>
-        {
-            options.Headers = ForwardedHeaderNames.XForwarded;
-            options.KnownProxies.Add(_trustedProxy.Address);
-        });
-        IWebApplicationMiddleware forwarded = builder.LastMiddleware.ShouldNotBeNull();
+        ForwardedHeadersBuilder forwardedHeaders = new();
+        forwardedHeaders.Options.Headers = ForwardedHeaderNames.XForwarded;
+        forwardedHeaders.Options.KnownProxies.Add(_trustedProxy.Address);
+        IWebApplicationMiddleware forwarded = forwardedHeaders.Build();
 
         SessionMiddleware sessions = new(new InMemoryHttpSessionStore(), new HttpSessionOptions());
 

@@ -80,7 +80,8 @@ public class OutputCacheWebSocketTests
 
     private static void ConfigureEchoOrPage(WebApplicationTestFactory factory, Func<int> nextPage)
     {
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(policy => policy.Duration = _longDuration));
+        factory.Application.UseOutputCache();
         factory.Application.Use(async (context, next) =>
         {
             IHttpWebSocketFeature webSockets = context.WebSockets;

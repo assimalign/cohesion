@@ -47,7 +47,7 @@ jobs:
         os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # One leg per OS builds and tests the whole area: the inner list is a single matrix value
         # that .github/actions/build receives whole. The release inventory guard reads this list.
-        projects: [["Assimalign.Cohesion.NatGateway", "Assimalign.Cohesion.NatGateway.ApplicationModel", "Assimalign.Cohesion.NatGateway.Hosting"]]
+        projects: [["Assimalign.Cohesion.NatGateway", "Assimalign.Cohesion.NatGateway.Hosting"]]
     steps:
       - uses: actions/checkout@v7
         name: Checkout

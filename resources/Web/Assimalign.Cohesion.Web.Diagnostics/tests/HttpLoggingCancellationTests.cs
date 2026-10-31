@@ -28,15 +28,14 @@ public class HttpLoggingCancellationTests
         var exception = new OperationCanceledException("The application operation was cancelled.", operationCancellation.Token);
         var recorded = new RecordingLoggerProvider();
         using ILoggerFactory factory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
-        var pipeline = new TestPipelineBuilder();
-        pipeline.UseHttpLogging(factory);
+        IWebApplicationMiddleware middleware = new HttpLoggingBuilder().UseLoggerFactory(factory).Build();
         var context = new LoggingTestContext(new HttpConnectionInfo());
 
         // Act
         OperationCanceledException? thrown = null;
         try
         {
-            await pipeline.LastMiddleware!.InvokeAsync(context, _ => Task.FromException(exception));
+            await middleware.InvokeAsync(context, _ => Task.FromException(exception));
         }
         catch (OperationCanceledException failure)
         {

@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class VpnGatewayApplication : Host<VpnGatewayApplicationContext>, 
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(VpnGatewayApplication).Assembly);
-    }
-
-    internal static VpnGatewayApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new VpnGatewayApplicationBuilder(args, resourceAssembly);
+        return new VpnGatewayApplicationBuilder(args);
     }
 
     private sealed class DebugView

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -49,16 +48,16 @@ public sealed class DatabaseApplication : Host<DatabaseApplicationContext>, IDat
     /// <summary>
     /// Creates a builder whose configuration loads the default sources now: optional
     /// <c>appsettings.json</c> and <c>appsettings.{Environment}.json</c> under the content root,
-    /// environment variables prefixed <c>COHESION_CONFIG__</c>, the ambient resource settings and
-    /// <paramref name="args"/>, later sources winning.
+    /// environment variables prefixed <c>COHESION_CONFIG__</c> and <paramref name="args"/>, later
+    /// sources winning.
     /// </summary>
     /// <param name="args">The arguments, loaded before returning.</param>
-    /// <returns>A new builder honoring the existing enabled-resource host integration when present.</returns>
+    /// <returns>A new builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
     public static DatabaseApplicationBuilder CreateBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(DatabaseApplication).Assembly;
-        return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), resourceAssembly, args);
+        return new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), args);
     }
 
     /// <inheritdoc />

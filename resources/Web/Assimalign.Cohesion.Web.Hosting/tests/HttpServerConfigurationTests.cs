@@ -11,7 +11,6 @@ using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Hosting.Internal;
 using Assimalign.Cohesion.Web.Hosting.Tests.TestObjects;
@@ -141,51 +140,9 @@ public class HttpServerConfigurationTests
         options.AllowAlternateSchemes.ShouldBeFalse();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Resolves the named Secret mount for each secure protocol")]
-    [InlineData("Https", HttpProtocol.Http11 | HttpProtocol.Http20)]
-    [InlineData("Http1s", HttpProtocol.Http11)]
-    [InlineData("Http2s", HttpProtocol.Http20)]
-    public async Task Bind_HttpsProtocols_ShouldUseCertificateMount(string protocol, HttpProtocol expected)
-    {
-        var local = new ResourceContext(environmentName: AppEnvironment.Keys.Local);
-        using X509Certificate2 certificate = local.CreateDevelopmentEndpointCertificate("localhost");
-        using var key = certificate.GetECDsaPrivateKey()!;
-        string pem = certificate.ExportCertificatePem() + "\n" + key.ExportPkcs8PrivateKeyPem();
-        var resource = new ResourceContext(mounts: new Dictionary<string, ResourceMount>
-        {
-            ["https-key"] = ResourceMount.FromBytes(Encoding.UTF8.GetBytes(pem)),
-        });
-        using IDisposable scope = ResourceRuntime.CreateScope(resource);
-        IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
-        {
-            ["Http:Endpoints:Secure:Protocol"] = protocol,
-            ["Http:Endpoints:Secure:Host"] = "localhost",
-            ["Http:Endpoints:Secure:Port"] = "0",
-            ["Http:Endpoints:Secure:Certificate"] = "https-key",
-            ["Http:Limits:MaxRequestBodySize"] = "1024",
-        });
-        var options = new HttpConnectionListenerOptions();
-        var owned = new List<X509Certificate2>();
-        try
-        {
-            HttpServerConfiguration.Bind(configuration, "Http", options, owned.Add);
-            await using HttpConnectionListener listener = new(options);
-            listener.Protocols.ShouldBe(expected);
-            owned[0].Thumbprint.ShouldBe(certificate.Thumbprint);
-        }
-        finally
-        {
-            foreach (X509Certificate2 item in owned)
-            {
-                item.Dispose();
-            }
-        }
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Missing material names the endpoint and tls mount")]
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HTTPS configuration: Missing material names the endpoint and the certificate file setting")]
     public void Bind_MissingHttpsCertificate_ShouldFailClosed()
     {
-        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext());
         IConfiguration configuration = BuildConfiguration(new Dictionary<string, string?>
         {
             ["Http:Endpoints:Secure:Protocol"] = "Https",
@@ -193,7 +150,7 @@ public class HttpServerConfigurationTests
         });
         InvalidOperationException error = Should.Throw<InvalidOperationException>(() => HttpServerConfiguration.Bind(configuration, "Http", new HttpConnectionListenerOptions()));
         error.Message.ShouldContain("Secure");
-        error.Message.ShouldContain("tls");
+        error.Message.ShouldContain("Certificate:Path");
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should bind server limits from configuration")]
@@ -532,6 +489,57 @@ public class HttpServerConfigurationTests
         // Assert
         await using HttpConnectionListener listener = new(options);
         listener.Protocols.ShouldBe(HttpProtocol.Http20);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: the http endpoint the platform assigned replaces the development endpoint")]
+    public void GetPlatformEndPoint_WithAssignedHttpEndpoint_ShouldReturnIt()
+    {
+        // Arrange — a scope, as a gateway that runs the application in its own process gives it.
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(
+            new Dictionary<string, string>
+            {
+                [AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1",
+                [AppEnvironment.Variables.Endpoint("http", "PORT")] = "5123",
+                [AppEnvironment.Variables.Endpoint("http", "SCHEME")] = "http",
+            },
+            CancellationToken.None);
+
+        // Act
+        System.Net.IPEndPoint? endPoint;
+        using (AppEnvironment.Enter(scope))
+        {
+            endPoint = HttpServerConfiguration.GetPlatformEndPoint();
+        }
+
+        // Assert
+        endPoint.ShouldBe(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 5123));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Web.Hosting] - Default endpoints: no http endpoint, or an https one, leaves the development endpoint")]
+    [InlineData(null)]
+    [InlineData("https")]
+    public void GetPlatformEndPoint_WithoutPlainHttpEndpoint_ShouldReturnNull(string? scheme)
+    {
+        // Arrange
+        var variables = new Dictionary<string, string>();
+        if (scheme is not null)
+        {
+            variables[AppEnvironment.Variables.Endpoint("http", "HOST")] = "127.0.0.1";
+            variables[AppEnvironment.Variables.Endpoint("http", "PORT")] = "5124";
+            variables[AppEnvironment.Variables.Endpoint("http", "SCHEME")] = scheme;
+        }
+
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(variables, CancellationToken.None);
+
+        // Act
+        System.Net.IPEndPoint? endPoint;
+        using (AppEnvironment.Enter(scope))
+        {
+            endPoint = HttpServerConfiguration.GetPlatformEndPoint();
+        }
+
+        // Assert
+        endPoint.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.Hosting] - HttpServerConfiguration: Should register an HTTP/3 endpoint and advertise it through Alt-Svc")]

@@ -34,7 +34,6 @@ public class RequestTimeoutMiddlewareTests
 
         // Act / Assert
         Should.Throw<ArgumentNullException>(() => builder.UseRequestTimeouts());
-        Should.Throw<ArgumentNullException>(() => builder.UseRequestTimeouts(TimeSpan.FromSeconds(1)));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - InvokeAsync: Global policy expiry should write 504 and cancel downstream work")]
@@ -464,12 +463,127 @@ public class RequestTimeoutMiddlewareTests
         context.Response.StatusCode.ShouldBe(HttpStatusCode.GatewayTimeout);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - UseRequestTimeouts: Should place the middleware the application registered")]
+    public async Task UseRequestTimeouts_WithRegisteredMiddleware_ShouldPlaceIt()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using TimeoutTestContext context = new();
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(BuildRequestTimeouts(options => options.DefaultPolicy = new RequestTimeoutPolicy
+        {
+            Timeout = _armedTimeout,
+            StatusCode = HttpStatusCode.ServiceUnavailable,
+        }));
+
+        builder.UseRequestTimeouts();
+        builder.Use(next => ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled));
+
+        // Act
+        await builder.Build().ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - UseRequestTimeouts: Should place the last registration when the middleware is registered twice")]
+    public async Task UseRequestTimeouts_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange — both policies expire at once; only the status tells them apart.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using TimeoutTestContext context = new();
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(BuildRequestTimeouts(options => options.DefaultPolicy = new RequestTimeoutPolicy
+        {
+            Timeout = _armedTimeout,
+            StatusCode = HttpStatusCode.GatewayTimeout,
+        }));
+        builder.Registered.Add(BuildRequestTimeouts(options => options.DefaultPolicy = new RequestTimeoutPolicy
+        {
+            Timeout = _armedTimeout,
+            StatusCode = HttpStatusCode.ServiceUnavailable,
+        }));
+
+        builder.UseRequestTimeouts();
+        builder.Use(next => ctx => Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled));
+
+        // Act
+        await builder.Build().ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - UseRequestTimeouts: Should place the defaults when the application registered none")]
+    public async Task UseRequestTimeouts_WithoutRegistration_ShouldPlaceTheDefaults()
+    {
+        // Arrange — the defaults arm no global timeout, but the middleware is in place: its per-exchange
+        // feature is installed, and a timeout the handler arms through it is answered with 504.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using TimeoutTestContext context = new();
+        TestPipelineBuilder builder = new();
+
+        builder.UseRequestTimeouts();
+        builder.Use(next => async ctx =>
+        {
+            ctx.Features.Get<IRequestTimeoutFeature>().ShouldNotBeNull().SetTimeout(_armedTimeout);
+            await Task.Delay(Timeout.InfiniteTimeSpan, ctx.RequestCancelled);
+        });
+
+        // Act
+        await builder.Build().ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.GatewayTimeout);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.RequestTimeouts] - Build: A change to the options after Build should not reach the middleware")]
+    public async Task Build_OptionsChangedAfterBuild_ShouldKeepTheSnapshot()
+    {
+        // Arrange — a policy set after Build reaches nothing: the registered middleware keeps none.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using TimeoutTestContext context = new();
+        RequestTimeoutsBuilder timeouts = new();
+        IWebApplicationMiddleware middleware = timeouts.Build();
+        timeouts.Options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = _armedTimeout };
+
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(middleware);
+        builder.UseRequestTimeouts();
+        builder.Use(next => async ctx =>
+        {
+            await Task.Delay(_pastArmedTimeout, ctx.RequestCancelled);
+            ctx.Response.StatusCode = HttpStatusCode.Ok;
+        });
+
+        // Act
+        await builder.Build().ExecuteAsync(context, cancellationToken).WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+    }
+
     private static IWebApplicationPipeline BuildPipeline(
         Action<RequestTimeoutOptions>? configure,
         WebApplicationMiddleware terminal,
         Routing.IRouteMatchFeature? endpoint = null)
     {
         TestPipelineBuilder builder = new();
+
+        // What builder.Services.AddRequestTimeouts(configure) registers. Without a configuration nothing
+        // is registered, and UseRequestTimeouts() places the defaults.
+        if (configure is not null)
+        {
+            builder.Registered.Add(BuildRequestTimeouts(configure));
+        }
 
         if (endpoint is not null)
         {
@@ -481,9 +595,17 @@ public class RequestTimeoutMiddlewareTests
             });
         }
 
-        builder.UseRequestTimeouts(configure);
+        builder.UseRequestTimeouts();
         builder.Use(next => context => terminal.Invoke(context));
 
         return builder.Build();
+    }
+
+    private static IWebApplicationMiddleware BuildRequestTimeouts(Action<RequestTimeoutOptions>? configure = null)
+    {
+        RequestTimeoutsBuilder timeouts = new();
+        configure?.Invoke(timeouts.Options);
+
+        return timeouts.Build();
     }
 }

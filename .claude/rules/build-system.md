@@ -202,14 +202,13 @@ The Runtime csproj converts the public items to `<CohesionProjectReference>` ite
 
 **Package-delivered assemblies are members too.** A member that takes a `CohesionPackageReference` on a package outside `Microsoft.NETCore.App` needs that package's assembly at run time, and an `Sdk.<Area>` application has no reference to the package. The framework lists the assembly by name, beside the members: public when a member's public API exposes its types (`System.Threading.RateLimiting` in `App.Web`, because `RateLimitingPolicy` takes a `PartitionedRateLimiter<IHttpContext>`), private otherwise. The name resolves to no project. Every Runtime producer sets `CopyLocalLockFileAssemblies` (in `App.props`), so the package's runtime asset reaches the producer's bin through the member's project reference, and the pack collects it there like any member. Its manifest entries keep the package's own versions and token (*Each framework is two NuGet packages*). The framework tests read each closure member's package references. They reject a package the framework does not carry, and a package entry no member references. The App framework's packages count for every area. The tests read direct package references only, and the packages assume the assembly name equals the package id.
 
-Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting and its Health/Resources/Telemetry siblings, Connections, the host-composed configuration providers, Logging.Console, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Connections is a kernel root because generated resource accessors and every area hosting module depend on it. Everything outside that hosting kernel remains an ordinary package. The derivation walks project references only, so the kernel's package-delivered assemblies are App's one explicit list: `CohesionFrameworkPrivateAssembly` items in App's group, today `System.Security.Cryptography.ProtectedData`, which Hosting.Resources uses to decrypt Windows mount files.
+Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting and its Resources sibling, Connections, the host-composed configuration providers, Logging.Console, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Connections is a kernel root because generated resource accessors and every area hosting module depend on it. Everything outside that hosting kernel remains an ordinary package. The derivation walks project references only, so the kernel's package-delivered assemblies are App's one explicit list: `CohesionFrameworkPrivateAssembly` items in App's group, today `System.Security.Cryptography.ProtectedData`, which Hosting.Resources uses to decrypt Windows mount files.
 
-The Hosting-area package graph is exact: `Assimalign.Cohesion.Hosting.Health` references Core only;
-`Assimalign.Cohesion.Hosting.Resources` references Core, plain Hosting, Hosting.Health, and the
-ProtectedData facade; plain Hosting references neither sibling. The `Assimalign.Cohesion.App`
-hosting kernel carries both opt-in siblings. All 18 resource SDKs emit generated code that references
+The Hosting-area package graph is exact: `Assimalign.Cohesion.Hosting.Resources` references Core
+and plain Hosting; plain Hosting does not reference it. The `Assimalign.Cohesion.App` hosting
+kernel carries Hosting.Resources. All 18 resource SDKs emit generated code that references
 `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`, so Resources belongs beside the
-already-shared plain Hosting assembly; Health follows because Resources references it. This
+already-shared plain Hosting assembly. This
 framework-level delivery does not add direct project references to the 16 filler resource areas.
 Those generated accessors also expose `Assimalign.Cohesion.Connections.ConnectionString`, and
 every area hosting module reaches Connections, so Connections is carried once by App rather than
@@ -245,11 +244,11 @@ orchestration gateway:
   `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`; every resource
   `*.ApplicationModel` project — all 18 at HEAD — sets the guard. Once active, the only permitted non-BCL assemblies
   are `Assimalign.Cohesion.Core` (the evaluated Core assembly name),
-  `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
-  `Assimalign.Cohesion.Hosting.Health`, and `Assimalign.Cohesion.Hosting.Resources`. The area's
+  `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`, and
+  `Assimalign.Cohesion.Hosting.Resources`. The area's
   ApplicationModel project directly references only `Assimalign.Cohesion.ApplicationModel` and
-  `Assimalign.Cohesion.Hosting.Resources`; the latter brings the plain host and health contracts
-  into the resolved closure. BCL means assemblies supplied by the `Microsoft.NETCore.App`
+  `Assimalign.Cohesion.Hosting.Resources`; the latter brings the plain host into the
+  resolved closure. BCL means assemblies supplied by the `Microsoft.NETCore.App`
   reference pack, plus the `System.Security.Cryptography.ProtectedData` facade used by
   Hosting.Resources' Windows mount reader; third-party packages are not implicitly allowed.
 - **COHRES003** applies automatically to every non-harness project under `resources/**` and bans

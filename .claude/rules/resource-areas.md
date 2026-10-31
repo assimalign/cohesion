@@ -51,14 +51,13 @@ ApplicationModel packages have an additional rollout guard:
 > `.ApplicationModel` sets `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`,
 > its entire dependency closure is limited to `Assimalign.Cohesion.Core` (the Core assembly's
 > actual name), `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
-> `Assimalign.Cohesion.Hosting.Health`, `Assimalign.Cohesion.Hosting.Resources`, BCL assemblies
+> `Assimalign.Cohesion.Hosting.Resources`, BCL assemblies
 > supplied by `Microsoft.NETCore.App`, and the `System.Security.Cryptography.ProtectedData` BCL
 > facade used by Hosting.Resources' Windows-only mount carrier. The opt-in is a migration gate, not an
 > architectural exemption: once enabled, a project cannot add to the allowlist locally.
 
-The Hosting-area dependency graph behind that closure is fixed: Hosting.Health references Core
-only; Hosting.Resources references Core, plain Hosting, Hosting.Health, and ProtectedData; plain
-Hosting references neither sibling. An area ApplicationModel reaches the closure through its
+The Hosting-area dependency graph behind that closure is fixed: Hosting.Resources references Core
+and plain Hosting; plain Hosting does not reference it. An area ApplicationModel reaches the closure through its
 direct Hosting.Resources reference.
 
 The opposite direction has its own guard, because resources consume libraries and libraries never
@@ -321,6 +320,45 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   forward to the private engine registry rather than to `Services`, which reserves each engine
   name at registration (owner decision 52 of 2026-10-09).
 
+## `Add` configures, `Use` places (owner decision, 2026-10-28)
+
+An area whose features compose with a registration verb and a pipeline verb keeps all of a
+feature's configuration on the registration verb.
+
+- **`Add<Feature>(...)` configures.** The registration verb, a component integration on
+  `builder.Services` (`component-integration.md`) or an `extension(I<Area>ApplicationBuilder)`
+  member, owns the feature's options, policies and defaults, and validates them where they are
+  registered. It registers what the pipeline reads, one of three things:
+  - **The configured middleware**, for configuration fixed at startup. Web: the builder's `Build()`
+    returns an `IWebApplicationMiddleware` (Contract `IWebApplicationMiddleware`), which
+    `IWebApplicationContext.Middleware` lists. Precedent:
+    `builder.Services.AddHsts(hsts => hsts.Options.Preload = true)`.
+  - **A setting**, for a value an operator may change while the application runs. Precedent:
+    `builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(...))` registers the `cors`
+    setting.
+  - **A request feature**, for state each exchange carries (Web: `IHttpFeature`, such as
+    `AddErrorHandling`'s handlers). Never register configuration as a feature of its own: the host
+    stamps every registered feature onto every exchange, so each one costs every request. A feature
+    the package already registers may carry its composition-time options (precedent:
+    `AddErrorHandling` carries the exception boundary's).
+- **`Use<Feature>()` places.** The pipeline verb only positions the feature's middleware. It takes
+  no configuration callback, options object or policy, and it never sets or overrides a registered
+  value: it reads what `Add` registered (Web: `IWebApplicationContext.Middleware`, `Settings` and
+  `Features`, at composition). The last registration wins, except where registrations add up: each
+  `AddStaticFiles` registration is a mount, and `UseStaticFiles()` places them all, in registration
+  order. With none, it places the feature's
+  defaults, or fails the pipeline's composition with a message naming the `Add` verb when the
+  feature has no safe default (precedent: `UseForwardedHeaders()`). It may complete a registration
+  with what only the application context has, such as a file system for the web root. Arguments
+  that shape the pipeline rather than configure a feature, such as `UseWhen`'s predicate and branch
+  or a `Map*` route pattern, are not configuration.
+- **Why.** Configuration on `Use` splits one feature's settings across two call sites and keeps
+  them out of the registrations the host and an operator surface enumerate. A
+  `<Area>.Hosting.Resources` package could then expose the feature only if the application were
+  rewritten.
+- **Web follows it throughout** since 2026-10-28: every Web `Use<Feature>` verb is parameterless
+  (Web.Cors moved first; the other 16 feature packages followed the same day).
+
 ## What every area is expected to provide
 
 - `Assimalign.Cohesion.<Area>` — the area root: the base abstractions and composition seams
@@ -338,12 +376,11 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
   the area exception root — the layer that owns both vocabularies translates at its boundary).
   Child-to-child references are fine. The breakdown signal for either shape is the root (or a
   child root) pulling in anything feature- or model-specific.
-- **Hosting integrations live in the runtime module:** an area's
-  `Assimalign.Cohesion.<Area>.Hosting` integrates `Assimalign.Cohesion.Hosting.Health` and
-  `Assimalign.Cohesion.Hosting.Resources` itself. Public members live in `src/Health/` and
-  `src/Resources/`, with namespaces `Assimalign.Cohesion.<Area>.Hosting.Health` and
-  `Assimalign.Cohesion.<Area>.Hosting.Resources`. The precedent is `Web.Hosting` (owner
-  decision 57, 2026-10-13).
+- **Hosting integrations:** an area's resource integration ships as
+  `Assimalign.Cohesion.<Area>.Hosting.Resources`, which references the area's hosting module
+  (application-model restart, 2026-10-27/28; precedent `Web.Hosting.Resources`).
+  `Assimalign.Cohesion.Hosting.Health` was removed on 2026-10-28: a Web application serves health
+  through Web.Health, and a resource reports its health through Hosting.Resources.
   A separate `Assimalign.Cohesion.<Area>.Hosting.<Suffix>` package is permitted only for an
   integration that must not land in every framework that carries the runtime module, so it stays
   opt-in; no area has one today. Such a package keeps the hosting-family constraints: it may
@@ -383,8 +420,8 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing the area root, its own hosting
   family, the same-area libraries the runtime itself needs, and non-area infrastructure. Roots and
   feature libraries reference no `Assimalign.Cohesion.Hosting*` library. Enabled-resource
-  implementations consume the plain lifecycle host, `Assimalign.Cohesion.Hosting.Resources`, and
-  `Assimalign.Cohesion.Hosting.Health` without referencing their area's ApplicationModel package.
+  implementations consume the plain lifecycle host and `Assimalign.Cohesion.Hosting.Resources` without
+  referencing their area's ApplicationModel package.
   **The module may reference any library in its own area except COHRES002's exclusions** (owner
   decision 2026-10-09), so runtime machinery that belongs in its own package — a server, a router
   the host drives — no longer has to be pushed into the root or routed through an exemption.

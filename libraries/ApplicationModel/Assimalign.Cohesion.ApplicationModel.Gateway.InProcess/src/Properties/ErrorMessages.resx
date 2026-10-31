@@ -4,19 +4,12 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="StateDirectoryEmpty" xml:space="preserve">
-    <value>StateDirectory must not be empty when specified.</value>
-  </data>
-  <data name="ProbeIntervalInvalid" xml:space="preserve">
-    <value>ProbeInterval must be greater than zero.</value>
-  </data>
-  <data name="ProbeTimeoutInvalid" xml:space="preserve">
-    <value>ProbeTimeout must be greater than zero.</value>
-  </data>
-  <data name="InitialRestartBackoffInvalid" xml:space="preserve">
-    <value>InitialRestartBackoff must be zero or greater.</value>
-  </data>
-  <data name="MaximumRestartBackoffInvalid" xml:space="preserve">
-    <value>MaximumRestartBackoff must be at least InitialRestartBackoff.</value>
-  </data>
+  <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="ProgramDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' already has a program.</value></data>
+  <data name="ProgramMissing" xml:space="preserve"><value>Resource '{0}/{1}' has no program to run in process; bind one with AddProgram.</value></data>
+  <data name="ProgramStopTimedOut" xml:space="preserve"><value>The program of resource '{0}/{1}' did not stop within {2}.</value></data>
+  <data name="TransportAlreadyStarted" xml:space="preserve"><value>A gateway already receives the in-process publications.</value></data>
+  <data name="TransportNotReceiving" xml:space="preserve"><value>No gateway receives publications at the in-process endpoint '{0}'.</value></data>
+  <data name="InstanceNotAttached" xml:space="preserve"><value>Instance {0} of {1}/{2} has no control plane attached at the in-process endpoint '{3}': its program has not finished starting, or has stopped.</value></data>
 </root>

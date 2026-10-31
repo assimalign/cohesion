@@ -51,7 +51,6 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.IoTHub',
-            'Assimalign.Cohesion.IoTHub.ApplicationModel',
             'Assimalign.Cohesion.IoTHub.Hosting'
         ]]
     steps:

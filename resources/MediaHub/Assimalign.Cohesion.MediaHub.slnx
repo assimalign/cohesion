@@ -34,19 +34,6 @@
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
-	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.MediaHub.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.MediaHub.ApplicationModel/src/Assimalign.Cohesion.MediaHub.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.MediaHub.ApplicationModel/tests/Assimalign.Cohesion.MediaHub.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/MediaHub/Assimalign.Cohesion.MediaHub.Refs/">
 		<File Path="Assimalign.Cohesion.MediaHub.Refs/Directory.Build.props" />
 	</Folder>

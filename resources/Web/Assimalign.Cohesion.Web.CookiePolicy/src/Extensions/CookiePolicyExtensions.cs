@@ -1,40 +1,40 @@
 using System;
+using System.Linq;
 
 using Assimalign.Cohesion.Web.CookiePolicy.Internal;
 
 namespace Assimalign.Cohesion.Web.CookiePolicy;
 
 /// <summary>
-/// Pipeline-builder members that add cookie-policy enforcement to a web application.
+/// Pipeline-builder extension that places cookie-policy enforcement in a web application's middleware
+/// pipeline.
 /// </summary>
 public static class CookiePolicyExtensions
 {
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds the cookie-policy middleware. From this point in the pipeline, every cookie appended through
+        /// Places the cookie-policy middleware the application registered with
+        /// <c>builder.Services.AddCookiePolicy(policy =&gt; ...)</c>, or one with the default policy when it
+        /// registered none. From this point in the pipeline, every cookie appended through
         /// <c>context.Response.Cookies</c> is judged before it reaches a <c>Set-Cookie</c> field: consent
         /// for non-essential cookies, the <c>Secure</c>, <c>HttpOnly</c>, and minimum <c>SameSite</c>
         /// floors, the RFC 6265bis requirements, and the lifetime cap. A dropped cookie is reported to
         /// <see cref="CookiePolicyOptions.OnRejected"/>.
         /// </summary>
-        /// <param name="configure">
-        /// An optional callback that configures the policy. Without one the defaults apply: <c>Secure</c>
-        /// whenever the effective request scheme is HTTPS, the RFC 6265bis requirements upgraded rather than
-        /// rejected, the 400-day lifetime cap, and no consent requirement.
-        /// </param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// An option is not a defined value, the maximum lifetime is not greater than zero or exceeds
-        /// 400 days, the time provider is <see langword="null"/>, or the consent cookie has a
-        /// <see langword="default"/> name or value, an empty value, a non-positive <c>Max-Age</c>, or
-        /// an <c>Expires</c>. Assigning an out-of-grammar name or value in <paramref name="configure"/>
-        /// throws from its value-type conversion before the setter runs.
-        /// </exception>
         /// <remarks>
         /// <para>
-        /// Register it early: after <c>UseForwardedHeaders</c> and <c>UseHostFiltering</c>, and before
+        /// The policy is configured where it is registered (<see cref="CookiePolicyBuilder"/>), which
+        /// validates and captures the options; this verb only positions it, and nothing is resolved per
+        /// request. When the application registered the policy more than once, the last registration wins.
+        /// The default policy adds <c>Secure</c> whenever the effective request scheme is HTTPS, upgrades
+        /// rather than rejects the RFC 6265bis violations, applies the 400-day lifetime cap, and requires no
+        /// consent.
+        /// </para>
+        /// <para>
+        /// Place it early: after <c>UseForwardedHeaders</c> and <c>UseHostFiltering</c>, and before
         /// <c>UseRouting</c>, <c>UseSessions</c>, <c>UseAuthentication</c>, and anything else that writes
         /// cookies. The middleware replaces the exchange's response cookie feature and keeps the feature in
         /// place after <c>next</c> returns, so a cookie is judged whenever it is appended, before or after
@@ -50,20 +50,20 @@ public static class CookiePolicyExtensions
         /// </para>
         /// <para>
         /// The middleware installs an <see cref="ICookieConsentFeature"/> on each exchange, through which
-        /// the application reads and changes consent. The options are validated and captured here, at
-        /// registration; nothing is resolved per request.
+        /// the application reads and changes consent.
         /// </para>
         /// </remarks>
-        public IWebApplicationPipelineBuilder UseCookiePolicy(Action<CookiePolicyOptions>? configure = null)
+        public IWebApplicationPipelineBuilder UseCookiePolicy()
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            CookiePolicyOptions options = new();
-            configure?.Invoke(options);
+            return builder.Use(static (context, next) =>
+            {
+                IWebApplicationMiddleware middleware = context.Middleware.OfType<CookiePolicyMiddleware>().LastOrDefault()
+                    ?? new CookiePolicyBuilder().Build();
 
-            CookiePolicyRules rules = CookiePolicyRules.Create(options, nameof(configure));
-
-            return builder.Use(new CookiePolicyMiddleware(rules));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
     }
 }

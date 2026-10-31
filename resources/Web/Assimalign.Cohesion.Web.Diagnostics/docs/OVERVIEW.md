@@ -3,9 +3,11 @@
 HTTP request/response logging and W3C access logs for Cohesion web applications, in one
 diagnostics package:
 
-- **`UseHttpLogging`** — an `IWebApplicationMiddleware` that captures request/response metadata
-  for each exchange and emits one structured `LoggerEntry` through the application's Cohesion
-  logging pipeline when the downstream pipeline completes (or faults).
+- **`AddHttpLogging` / `UseHttpLogging`** — an `IWebApplicationMiddleware` that captures
+  request/response metadata for each exchange and emits one structured `LoggerEntry` through the
+  application's Cohesion logging pipeline when the downstream pipeline completes (or faults). The
+  registration verb on `builder.Services` configures it (`HttpLoggingBuilder`), and the pipeline
+  verb places it.
 - **`W3CAccessLogProvider`** — an `ILoggerProvider` that renders those entries as W3C Extended
   or NCSA common/combined access-log files with buffered, size- and day-rolled output.
 
@@ -28,19 +30,31 @@ var accessLog = new W3CAccessLogProvider(new W3CAccessLogOptions
 builder.Logging.AddProvider(new ConsoleLoggerProvider());
 builder.Logging.AddProvider(accessLog);
 
-// The middleware takes the composed logger explicitly - builder time only, no service location.
+// The middleware is configured where it is registered, over the application's own logger factory.
+// The provider overload resolves the factory once, when the pipeline is composed - never per request.
+builder.Services.AddHttpLogging((services, logging) =>
+{
+    logging.UseLoggerFactory(services.GetRequiredService<ILoggerFactory>());
+    logging.Options.Fields = HttpLoggingFields.Default | HttpLoggingFields.RequestQuery;
+    logging.Options.AllowedRequestHeaders.Add("X-Correlation-Id");
+});
+
+WebApplication application = builder.Build();
 application
-    .UseHttpLogging(loggerFactory, options =>
-    {
-        options.Fields = HttpLoggingFields.Default | HttpLoggingFields.RequestQuery;
-        options.AllowedRequestHeaders.Add("X-Correlation-Id");
-    })
+    .UseHttpLogging()
     .Use(...);
 ```
 
-Register `UseHttpLogging` **first** — ahead of authentication, CORS, and routing — so rejected
+Configuration lives on `AddHttpLogging` only ("Add configures, Use places"), and the logger has no
+default: `logging.UseLoggerFactory(...)` (a logger for `Options.Category`) or `logging.UseLogger(...)`
+(a composed logger as it is) is required. A registration without one, or with an invalid option, throws
+inside the `AddHttpLogging` call (when the pipeline is composed, for the provider overload).
+`UseHttpLogging()` takes no arguments and places the last registration; without one the application
+fails to start with an error that names `AddHttpLogging`.
+
+Place `UseHttpLogging()` **first** — ahead of authentication, CORS, and routing — so rejected
 exchanges are logged too. Behind a proxy, `UseForwardedHeaders` follows it, after
-`UseSecurityHeaders` when that is registered (the area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)): the entry
+`UseSecurityHeaders` when that is placed (the area's [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)): the entry
 records the effective (forwarded) client address, scheme, and host, and keeps the transport peer
 beside them under `network.peer.address`.
 
@@ -63,7 +77,7 @@ usually through the convention verb on a mapped route or a route group:
 `app.MapGroup("/probes").WithHttpLogging(HttpLoggingFields.None)`. `HttpLoggingFields.None`
 silences an endpoint entirely — the usual choice for health probes. The
 override is read from the endpoint `UseRouting` published when the pipeline unwinds, so it applies
-with `UseHttpLogging` registered first. It covers the exchanges the endpoint handles, not a CORS
+with `UseHttpLogging` placed first. It covers the exchanges the endpoint handles, not a CORS
 preflight that names it, which is logged with the configured fields.
 
 ## Dependencies

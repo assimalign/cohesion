@@ -2,8 +2,7 @@
 
 The Web runtime composes a concrete `WebApplication : Host<WebApplicationContext>`
 through `WebApplication.CreateBuilder(args)`. It implements the root application and
-builder contracts and integrates DI, configuration, logging, HTTP transports, and
-the enabled resource's control plane at builder time.
+builder contracts and integrates DI, configuration, logging, and HTTP transports at builder time.
 
 ## Composition and lifecycle
 
@@ -135,21 +134,17 @@ what is deliberately not emitted.
 
 ## Dependencies and hosting integrations
 
-Within its area the module references the Web root, `Web.Routing`, `Web.Server`, and `Web.Health`.
-Routing supplies the pipeline terminal; Server supplies the engine, telemetry and exchange features,
-including request id, completion and drain; Health supplies the independent health model used by the
-Hosting.Health adapter. COHRES002 permits Web libraries except Web.Testing, Web.ApplicationModel,
-Web.ApplicationModel.Orchestration, the App.Web producers, and harnesses. The two ApplicationModel
-packages also stay outside its resolved closure. Every reference ships in each area framework
-that carries this module.
+Within its area the module references the Web root, `Web.Routing`, and `Web.Server`. Routing
+supplies the pipeline terminal; Server supplies the engine, telemetry and exchange features,
+including request id, completion and drain. COHRES002 permits Web libraries except Web.Testing,
+Web.ApplicationModel, Web.ApplicationModel.Orchestration, the App.Web producers, and harnesses. The
+two ApplicationModel packages also stay outside its resolved closure. Every reference ships in each
+area framework that carries this module.
 
 The module also references Cohesion hosting, configuration, DI, logging, and transport
-infrastructure. It integrates Hosting.Health and Hosting.Resources itself (owner decision 57,
-2026-10-13); the Web root references no hosting library. Public integration namespaces stay
-`Assimalign.Cohesion.Web.Hosting.Health` and `.Resources`, but package references now use
-`Assimalign.Cohesion.Web.Hosting`. The former two packages are removed.
-All public composition is explicit and AOT-compatible. See [Design](DESIGN.md) for
-listener ownership, cancellation, failure isolation, and control-plane behavior.
+infrastructure: plain Hosting, never Hosting.Resources. The Web root references no hosting library.
+All public composition is explicit and AOT-compatible. See [Design](DESIGN.md) for listener
+ownership, cancellation, and failure isolation.
 
 ## Response-starting callbacks
 
@@ -185,98 +180,8 @@ Compared with 10.0.0-preview.1, entry-point applications now forward these frame
 their existing sinks. The built application owns its logger factory and disposes its providers and
 forwarders at final teardown; a factory obtained from its service provider cannot outlive the app.
 
-## Health integration
+## Resources
 
-The adapter in Web.Hosting extends `IHealthChecksBuilder` with `AddContributor`.
-It references `Assimalign.Cohesion.Web.Health` and `Assimalign.Cohesion.Hosting.Health`.
-The Web health model and HTTP endpoints remain in `Web.Health`.
-
-### Usage
-
-```csharp
-using Assimalign.Cohesion.Web.Health;
-using Assimalign.Cohesion.Web.Hosting.Health;
-
-IHealthCheckService health = new HealthChecksBuilder()
-    .AddContributor(contributor)
-    .Build();
-pipeline.MapHealthChecks(health);
-```
-
-The contributor name identifies the check. Omitted tags include readiness and liveness;
-explicit tags replace those defaults. Failure status and timeout use Web health policy.
-The application owns contributor lifetime; the adapter only evaluates it.
-
-`App.Web` exposes the adapter through Web.Hosting. Database.Hosting consumes the module through
-a private project reference paired with Web.Hosting and Web.Health in the App.Database runtime
-pack. See [Health integration](DESIGN.md#health-integration) for dependency and cancellation contracts.
-
-## Resource control plane
-
-Install the resource protocol on a private Web application's pipeline:
-
-```csharp
-using Assimalign.Cohesion.Web.Hosting.Resources;
-
-IWebApplicationPipelineBuilder pipeline = privateApplication;
-pipeline.UseResourceControlPlane(controlPlane, resourceContext,
-    () => resourceApplication.Context.State is HostState.Started);
-```
-
-Install before application middleware. An optional trailing port gates every route; null serves every listener. Hosts composing manually retain `ResourceControlPlaneMiddleware.CreateLifetime(resourceContext)` while serving requests through `InvokeAsync(...)`, then dispose the lease after those requests drain. Stop uses Web.Server's response-completion feature to send its acknowledgement before requesting shutdown. The feature serves health, readiness, liveness, endpoint discovery, stop, and command envelopes. Gateway-managed namespaced routes authenticate against the published application trust key; standalone namespaced routes accept only transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1` and return 403 to other or unknown peers. Forwarded headers do not grant access. Bare `/healthz`, `/readyz`, and `/livez` stay public. Remote standalone management is no longer supported (a behavioral break from 10.0.0-preview.1, #1431). Domain command handlers remain the owning area's responsibility.
-
-Managed middleware reuses one ECDSA verification handle while its lifetime leases are active
-(#1412). `UseResourceControlPlane` transfers its lease directly to WebApplicationContext's
-internal disposal registration and releases it during final application disposal. A stop and
-restart keep it alive. A custom managed pipeline context outside Web.Hosting fails composition
-with a clear `InvalidOperationException`, a behavior change from 10.0.0-preview.1; use the manual
-lifetime API below. A disposed composed pipeline refuses
-further invocation.
-
-This integration lives in Web.Hosting under `src/Resources/`, keeping the
-`Assimalign.Cohesion.Web.Hosting.Resources` namespace. Its dependencies are Web root, Web.Server
-(for `IWebResponseCompletionFeature`, #1379), Hosting.Resources, Hosting.Health, and
-IdentityModel.Token.JsonWebToken. Web roots and features cannot reference the hosting module;
-other areas' hosting modules consume it privately. App.Web exposes it publicly.
-
-See [Resource control plane](DESIGN.md#resource-control-plane) for protocol, authentication, ownership, and parity constraints.
-
-### Manual composition API
-
-`ResourceControlPlaneMiddleware.Validate(ResourceContext resourceContext)` performs the verb's eager managed-identity validation. It rejects a null context, a blank managed resource name, a missing application identity or public trust key, and an invalid P-256 JWK. Standalone contexts need no identity.
-
-`ResourceControlPlaneMiddleware.CreateLifetime(ResourceContext resourceContext)` performs the same
-validation and returns an idempotent `IDisposable` lease. The first lease imports the verification
-handle; the last disposal releases it. Multiple owners of the same resource context share that
-handle, and verification is synchronized with disposal. Keep the lease across the manual host's
-request loop:
-
-```csharp
-using IDisposable lifetime =
-    ResourceControlPlaneMiddleware.CreateLifetime(resourceContext);
-
-// exchanges is the host's request stream; end it only after accepting has stopped.
-await foreach (IHttpContext exchange in exchanges)
-{
-    await ResourceControlPlaneMiddleware.InvokeAsync(
-        controlPlane, resourceContext, isApplicationReady(), controlPlanePort, exchange, next);
-}
-// Every request above has completed before the lifetime scope ends.
-```
-
-`ResourceControlPlaneMiddleware.InvokeAsync(IResourceControlPlane controlPlane, ResourceContext resourceContext, bool isApplicationReady, int? controlPlanePort, IHttpContext context, WebApplicationMiddleware next)` returns a `Task` for one exchange. Required reference arguments cannot be null. A mismatched non-null port forwards every path to `next`; null applies no port gate. Unknown namespaced paths apply the gateway credential check or standalone loopback restriction before returning 404.
-
-Acquire the lifetime during composition, then register `InvokeAsync` ahead of routes the terminal should own. The owning host supplies readiness and listener selection and drains concurrent requests before disposing the lease. Existing callers that only call `Validate` and `InvokeAsync` remain supported: they reuse the parsed key and validation profile but create and dispose a temporary ECDSA handle for each signed token. Stop registers a callback on `IWebResponseCompletionFeature` when present; the callback requests stop with `CancellationToken.None` after transmission. A custom server without the feature uses the request token for the direct-stop fallback.
-
-The server accepts HTTP connections through `AcceptAsync` and reports `ServerBound` addresses
-from `IHttpConnectionListener.EndPoints` after binding. Raw `UseServer` listener registrations
-report the same assigned TCP or QUIC ports as the hosting convenience registrations.
-
-
-## Health-check builder construction (#1470)
-
-Composition uses the public sealed `HealthChecksBuilder` in `Assimalign.Cohesion.Web.Health`,
-with its public parameterless constructor. The standalone `HealthChecks.CreateBuilder()` factory
-is removed. Existing `IHealthChecksBuilder` adapters, duplicate-name checks and immutable service
-snapshots are preserved; Database's admin endpoint uses the same public constructor. No Database
-interface, protocol, format, diagnostic code, event or counter is added or changed.
+A Web application becomes a managed resource through `Web.Hosting.ApplicationModel`, with
+`builder.Services.AddResource("orders-api", ...)`. That package references this module; this module knows nothing
+of resources. Health endpoints come from Web.Health, which an application maps itself.

@@ -9,6 +9,10 @@ namespace Assimalign.Cohesion.Configuration;
 /// <summary>
 /// Loads configuration values from process environment variables.
 /// </summary>
+/// <remarks>
+/// A program that runs in an <see cref="AppEnvironmentScope"/>, as a gateway that hosts it in its own
+/// process gives it, loads the variables of its scope instead (<see cref="AppEnvironment.GetValues"/>).
+/// </remarks>
 public class ConfigurationEnvironmentVariablesProvider : ConfigurationProvider
 {
     private const string CustomConnectionStringPrefix = "CUSTOMCONNSTR_";
@@ -46,7 +50,11 @@ public class ConfigurationEnvironmentVariablesProvider : ConfigurationProvider
     /// <inheritdoc />
     protected override Task OnLoadAsync(IDictionary<Path, string?> entries, CancellationToken cancellationToken = default)
     {
-        Load(Environment.GetEnvironmentVariables(), entries, _prefix, cancellationToken);
+        IDictionary variables = AppEnvironment.Current is null
+            ? Environment.GetEnvironmentVariables()
+            : new Dictionary<string, string?>(AppEnvironment.GetValues());
+
+        Load(variables, entries, _prefix, cancellationToken);
         return Task.CompletedTask;
     }
 

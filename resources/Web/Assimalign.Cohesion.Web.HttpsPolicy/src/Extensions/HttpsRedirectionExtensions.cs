@@ -1,5 +1,5 @@
 using System;
-using System.Globalization;
+using System.Linq;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
@@ -8,7 +8,7 @@ using Assimalign.Cohesion.Web.HttpsPolicy.Internal;
 namespace Assimalign.Cohesion.Web.HttpsPolicy;
 
 /// <summary>
-/// Pipeline-builder extension that wires HTTP-to-HTTPS redirection into the Web application middleware
+/// Pipeline-builder extension that places HTTP-to-HTTPS redirection in the Web application middleware
 /// pipeline.
 /// </summary>
 public static class HttpsRedirectionExtensions
@@ -16,25 +16,23 @@ public static class HttpsRedirectionExtensions
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds middleware that answers an insecure request with a method-preserving redirect to the
-        /// same host and request target on the <c>https</c> scheme and the configured HTTPS port, and
-        /// lets an already-secure request pass through.
+        /// Places the middleware that answers an insecure request with a method-preserving redirect to
+        /// the same host and request target on the <c>https</c> scheme, and lets an already-secure
+        /// request pass through: the middleware the application registered with
+        /// <c>builder.Services.AddHttpsRedirection(redirection =&gt; ...)</c>, or one with the defaults
+        /// (<c>307</c> to port <c>443</c>) when it registered none.
         /// </summary>
-        /// <param name="configure">
-        /// An optional callback to configure the redirect status (<c>307</c> default, <c>308</c>
-        /// permanent) and the HTTPS port (default <c>443</c>). When <see langword="null"/>, the defaults
-        /// apply.
-        /// </param>
         /// <returns>The same <see cref="IWebApplicationPipelineBuilder"/> for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// The configured status is neither <c>307</c> nor <c>308</c>, or the configured HTTPS port is
-        /// outside the range 1–65535.
-        /// </exception>
         /// <remarks>
         /// <para>
-        /// Register this <em>early</em> — before response-shaping middleware such as compression or
-        /// serialization — so an insecure request is redirected and short-circuited before any work is
+        /// The status and port are configured where the redirection is registered
+        /// (<see cref="HttpsRedirectionBuilder"/>); this verb only positions it. When the application
+        /// registered the redirection more than once, the last registration wins.
+        /// </para>
+        /// <para>
+        /// Place this <em>early</em>, before response-shaping middleware such as compression or
+        /// serialization, so an insecure request is redirected and short-circuited before any work is
         /// done on a response that is about to be discarded. The redirect is bodyless (status +
         /// <c>Location</c>).
         /// </para>
@@ -43,36 +41,23 @@ public static class HttpsRedirectionExtensions
         /// (<see cref="HttpContextForwardedExtensions.EffectiveScheme"/>): the scheme a trusted proxy
         /// asserted when the forwarded-headers middleware resolved one, otherwise the transport-derived
         /// scheme (from the listener's transport security capability, #763). Behind a TLS-terminating
-        /// proxy, register <c>UseForwardedHeaders</c> <em>before</em> this verb so the proxy's
+        /// proxy, place <c>UseForwardedHeaders</c> <em>before</em> this verb so the proxy's
         /// <c>https</c> is recognized and requests are not redirected in a loop; the redirect
         /// <c>Location</c> then targets the effective host the client addressed. There is no
-        /// scheme-string or header sniffing here. The status and port are validated here, at builder
-        /// time, never per request.
+        /// scheme-string or header sniffing here.
         /// </para>
         /// </remarks>
-        public IWebApplicationPipelineBuilder UseHttpsRedirection(Action<HttpsRedirectionOptions>? configure = null)
+        public IWebApplicationPipelineBuilder UseHttpsRedirection()
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            HttpsRedirectionOptions options = new();
-            configure?.Invoke(options);
-
-            int status = options.StatusCode.Value;
-            if (status is not (307 or 308))
+            return builder.Use(static (context, next) =>
             {
-                throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpsRedirectStatusInvalid, status),
-                    nameof(configure));
-            }
+                IWebApplicationMiddleware middleware = context.Middleware.OfType<HttpsRedirectionMiddleware>().LastOrDefault()
+                    ?? new HttpsRedirectionBuilder().Build();
 
-            if (options.HttpsPort is < 1 or > 65535)
-            {
-                throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HttpsPortOutOfRange, options.HttpsPort),
-                    nameof(configure));
-            }
-
-            return builder.Use(new HttpsRedirectionMiddleware(options.StatusCode, options.HttpsPort));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
     }
 }

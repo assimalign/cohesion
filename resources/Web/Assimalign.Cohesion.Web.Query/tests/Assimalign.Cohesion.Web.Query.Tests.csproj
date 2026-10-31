@@ -16,4 +16,8 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 	</ItemGroup>
+	<ItemGroup>
+		<!-- builder.Services.AddQueryValidation / AddQueryConditionals are component integrations this generator projects. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
 </Project>

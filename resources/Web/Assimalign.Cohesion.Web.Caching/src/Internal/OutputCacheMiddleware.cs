@@ -41,10 +41,16 @@ namespace Assimalign.Cohesion.Web.Caching.Internal;
 /// Because the variant key folds in the stored <c>Vary</c>, a client that cannot accept a stored variant
 /// computes a different key and never receives it.
 /// </para>
+/// <para>
+/// <b>Store ownership.</b> A store the middleware was handed is borrowed: the application that supplied
+/// it disposes it. The in-memory store <see cref="OutputCacheBuilder"/> creates when none was supplied is
+/// owned, and <see cref="Dispose"/> disposes it; the container <c>AddOutputCache</c> registers the
+/// middleware in disposes the middleware with the application.
+/// </para>
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("OutputCacheMiddleware")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
+internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware, IDisposable
 {
     private static readonly HashSet<string> _nonCacheableHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -60,8 +66,9 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
     private readonly OutputCachePolicy _defaultPolicy = new();
     private readonly OutputCacheFeature _feature;
     private readonly TimeProvider _timeProvider;
+    private readonly bool _ownsStore;
 
-    public OutputCacheMiddleware(IOutputCacheStore store, OutputCacheOptions options)
+    public OutputCacheMiddleware(IOutputCacheStore store, OutputCacheOptions options, bool ownsStore = false)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(options);
@@ -70,6 +77,18 @@ internal sealed class OutputCacheMiddleware : IWebApplicationMiddleware
         _options = options;
         _feature = new OutputCacheFeature(store);
         _timeProvider = options.TimeProvider ?? TimeProvider.System;
+        _ownsStore = ownsStore;
+    }
+
+    /// <summary>
+    /// Disposes the store when this middleware created it; a borrowed store is left to its owner.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_ownsStore && _store is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     public async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)

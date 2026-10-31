@@ -252,14 +252,14 @@ public class HttpsRedirectionTests
         context.Response.Headers.ContainsKey(HttpHeaderKey.Location).ShouldBeFalse();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should reject a non-method-preserving status at builder time")]
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - AddHttpsRedirection: Should reject a non-method-preserving status at registration")]
     public void Redirection_NonMethodPreservingStatus_ShouldThrowAtBuilderTime()
     {
         // Arrange & Act & Assert
         Should.Throw<ArgumentException>(() => BuildRedirection(options => options.StatusCode = HttpStatusCode.Found));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should reject an out-of-range HTTPS port at builder time")]
+    [Theory(DisplayName = "Cohesion Test [Web.HttpsPolicy] - AddHttpsRedirection: Should reject an out-of-range HTTPS port at registration")]
     [InlineData(0)]
     [InlineData(70000)]
     public void Redirection_OutOfRangeHttpsPort_ShouldThrowAtBuilderTime(int port)
@@ -268,12 +268,44 @@ public class HttpsRedirectionTests
         Should.Throw<ArgumentException>(() => BuildRedirection(options => options.HttpsPort = port));
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should place the middleware the application registered")]
+    public async Task UseHttpsRedirection_WithRegisteredMiddleware_ShouldPlaceIt()
+    {
+        // Arrange
+        TestPipelineBuilder pipeline = new();
+        pipeline.Registered.Add(BuildRedirection(options => options.StatusCode = HttpStatusCode.PermanentRedirect));
+        TestHttpContext context = new(HttpScheme.Http, "example.com");
+
+        // Act
+        pipeline.UseHttpsRedirection();
+        await pipeline.LastComposed.ShouldNotBeNull().Invoke(context);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(308);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - UseHttpsRedirection: Should place the defaults when the application registered none")]
+    public async Task UseHttpsRedirection_WithoutRegistration_ShouldPlaceTheDefaults()
+    {
+        // Arrange
+        TestPipelineBuilder pipeline = new();
+        TestHttpContext context = new(HttpScheme.Http, "example.com");
+
+        // Act
+        pipeline.UseHttpsRedirection();
+        await pipeline.LastComposed.ShouldNotBeNull().Invoke(context);
+
+        // Assert
+        context.Response.StatusCode.Value.ShouldBe(307);
+        context.Response.Headers[HttpHeaderKey.Location].Value.ShouldBe("https://example.com/");
+    }
+
     private static IWebApplicationMiddleware BuildRedirection(Action<HttpsRedirectionOptions>? configure = null)
     {
-        TestPipelineBuilder builder = new();
-        builder.UseHttpsRedirection(configure);
+        HttpsRedirectionBuilder redirection = new();
+        configure?.Invoke(redirection.Options);
 
-        return builder.LastMiddleware.ShouldNotBeNull();
+        return redirection.Build();
     }
 
     private static Task Terminal(IHttpContext context) => Task.CompletedTask;

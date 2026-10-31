@@ -35,19 +35,6 @@
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.IoTHub.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.IoTHub.ApplicationModel/src/Assimalign.Cohesion.IoTHub.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.IoTHub.ApplicationModel/tests/Assimalign.Cohesion.IoTHub.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/IoTHub/Assimalign.Cohesion.IoTHub.Refs/">
 		<File Path="Assimalign.Cohesion.IoTHub.Refs/Directory.Build.props" />
 	</Folder>

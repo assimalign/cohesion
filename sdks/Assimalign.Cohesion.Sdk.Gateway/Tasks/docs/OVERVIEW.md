@@ -121,10 +121,11 @@ packages are restored only when their names appear in `CohesionGateways`, at
 `CohesionPlatformsVersion`. A provider with `RequiresJit=true` makes
 `CohesionGatewayAot=auto` select `PublishAot=false` for the whole gateway executable.
 
-`Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane` is a fixed gateway dependency rather
-than a selectable provider. Generated `UseGateway(args)` composition installs its authenticated
-resolver client in every mode and serves its listener for the realizing `Run` and `Apply` modes;
-`Describe`, `Render`, and `Bootstrap` stay listener-free.
+`Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane`, the retired gateway's authenticated
+listener and resolver client, was removed on 2026-10-29 with the application-model restart, so the
+SDK no longer injects it and generated `UseGateway(args)` composition no longer configures it. A
+gateway's HTTP surface returns as a transport of the restarted gateway (ApplicationModel.Gateway,
+G9 and G33).
 
 Selecting `InProcess` does not by itself authorize resource assembly loading. A gateway with
 project resources must also set `CohesionGatewayInProcess=true`. The two-factor gate promotes

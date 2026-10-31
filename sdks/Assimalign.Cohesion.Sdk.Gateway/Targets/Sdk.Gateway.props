@@ -9,7 +9,6 @@
 		<IsAotCompatible>true</IsAotCompatible>
 		<CohesionApplicationModel>enabled</CohesionApplicationModel>
 		<CohesionResourceKind>Composite</CohesionResourceKind>
-		<CohesionResourceApplicationModel>Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane</CohesionResourceApplicationModel>
 		<CohesionResourceComposable>true</CohesionResourceComposable>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
@@ -28,10 +27,9 @@
 		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
 
 		<!--
-			No resource-kind or client-package table: the gateway's Program.cs composes each
-			resource with the hand-written verb of the area's ApplicationModel package over the
-			generated Manifests member (builder.AddWeb(Manifests.X, options)), or with
-			builder.AddResource(Manifests.X) for a kind that has none.
+			No resource-kind or client-package table: the gateway's Program.cs declares each
+			resource itself (builder.AddResource(provider, name)); areas ship no ApplicationModel
+			package since 2026-10-30.
 		-->
 
 		<!-- Provider-name to package-id map. Only the selected names are restored. -->
@@ -43,17 +41,17 @@
 
 	<!-- Core orchestration packages are always present. -->
 	<ItemGroup>
-		<_CohesionGatewayApplicationModelProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel\src\Assimalign.Cohesion.ApplicationModel.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel\src\Assimalign.Cohesion.ApplicationModel.csproj')" />
+		<_CohesionGatewayApplicationModelProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Definition\src\Assimalign.Cohesion.ApplicationModel.Definition.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Definition\src\Assimalign.Cohesion.ApplicationModel.Definition.csproj')" />
 		<_CohesionGatewayRuntimeProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\src\Assimalign.Cohesion.ApplicationModel.Gateway.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\src\Assimalign.Cohesion.ApplicationModel.Gateway.csproj')" />
-		<_CohesionGatewayResourceHostingProject Include="$(CohesionRepositoryDirectory)libraries\Hosting\Assimalign.Cohesion.Hosting.Resources\src\Assimalign.Cohesion.Hosting.Resources.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\Hosting\Assimalign.Cohesion.Hosting.Resources\src\Assimalign.Cohesion.Hosting.Resources.csproj')" />
+		<_CohesionGatewayResourceHostingProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Hosting\src\Assimalign.Cohesion.ApplicationModel.Hosting.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Hosting\src\Assimalign.Cohesion.ApplicationModel.Hosting.csproj')" />
 		<_CohesionGatewayConnectionsProject Include="$(CohesionRepositoryDirectory)libraries\Connections\Assimalign.Cohesion.Connections\src\Assimalign.Cohesion.Connections.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\Connections\Assimalign.Cohesion.Connections\src\Assimalign.Cohesion.Connections.csproj')" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" ProjectPath="@(_CohesionGatewayApplicationModelProject)" Condition="'@(_CohesionGatewayApplicationModelProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" ProjectPath="@(_CohesionGatewayApplicationModelProject)" Condition="'@(_CohesionGatewayApplicationModelProject)' != ''" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" ProjectPath="@(_CohesionGatewayRuntimeProject)" Condition="'@(_CohesionGatewayRuntimeProject)' != ''" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" ProjectPath="@(_CohesionGatewayResourceHostingProject)" Condition="'@(_CohesionGatewayResourceHostingProject)' != ''" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" ProjectPath="@(_CohesionGatewayResourceHostingProject)" Condition="'@(_CohesionGatewayResourceHostingProject)' != ''" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" ProjectPath="@(_CohesionGatewayConnectionsProject)" Condition="'@(_CohesionGatewayConnectionsProject)' != ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayApplicationModelProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Definition" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayApplicationModelProject)' == ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayRuntimeProject)' == ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.Hosting.Resources" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayResourceHostingProject)' == ''" />
+		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayResourceHostingProject)' == ''" />
 		<CohesionPackageReference Include="Assimalign.Cohesion.Connections" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConnectionsProject)' == ''" />
 	</ItemGroup>
 

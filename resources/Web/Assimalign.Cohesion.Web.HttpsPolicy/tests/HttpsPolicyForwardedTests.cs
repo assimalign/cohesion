@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Web.HttpsPolicy.Tests;
 
 /// <summary>
 /// Proxy-awareness coverage (#1050): the HTTPS-policy middleware behind a simulated TLS-terminating
-/// proxy. The real forwarded-headers middleware is captured through <see cref="TestPipelineBuilder"/>
+/// proxy. The real forwarded-headers middleware is built through <see cref="ForwardedHeadersBuilder"/>
 /// and run in front of the policy middleware; the request arrives over plain HTTP from a proxy
 /// address the forwarded-headers trust model knows, carrying the proxy's <c>X-Forwarded-*</c> headers.
 /// </summary>
@@ -190,30 +190,27 @@ public class HttpsPolicyForwardedTests
 
     private static IWebApplicationMiddleware BuildForwardedHeaders()
     {
-        TestPipelineBuilder builder = new();
-        builder.UseForwardedHeaders(options =>
-        {
-            options.Headers = ForwardedHeaderNames.XForwarded;
-            options.KnownProxies.Add(_trustedProxy.Address);
-        });
+        ForwardedHeadersBuilder forwarded = new();
+        forwarded.Options.Headers = ForwardedHeaderNames.XForwarded;
+        forwarded.Options.KnownProxies.Add(_trustedProxy.Address);
 
-        return builder.LastMiddleware.ShouldNotBeNull();
+        return forwarded.Build();
     }
 
     private static IWebApplicationMiddleware BuildRedirection(Action<HttpsRedirectionOptions>? configure = null)
     {
-        TestPipelineBuilder builder = new();
-        builder.UseHttpsRedirection(configure);
+        HttpsRedirectionBuilder redirection = new();
+        configure?.Invoke(redirection.Options);
 
-        return builder.LastMiddleware.ShouldNotBeNull();
+        return redirection.Build();
     }
 
     private static IWebApplicationMiddleware BuildHsts(Action<HstsOptions>? configure = null)
     {
-        TestPipelineBuilder builder = new();
-        builder.UseHsts(configure);
+        HstsBuilder hsts = new();
+        configure?.Invoke(hsts.Options);
 
-        return builder.LastMiddleware.ShouldNotBeNull();
+        return hsts.Build();
     }
 
     private static Task Terminal(IHttpContext context) => Task.CompletedTask;

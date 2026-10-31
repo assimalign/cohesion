@@ -568,13 +568,10 @@ public sealed class CookieAuthenticationHandlerTests : IDisposable
 
     private static IWebApplicationMiddleware BuildForwardedHeaders()
     {
-        TestPipelineBuilder builder = new();
-        builder.UseForwardedHeaders(options =>
-        {
-            options.Headers = ForwardedHeaderNames.XForwarded;
-            options.KnownProxies.Add(_trustedProxy.Address);
-        });
+        ForwardedHeadersBuilder forwarded = new();
+        forwarded.Options.Headers = ForwardedHeaderNames.XForwarded;
+        forwarded.Options.KnownProxies.Add(_trustedProxy.Address);
 
-        return builder.LastMiddleware.ShouldNotBeNull();
+        return forwarded.Build();
     }
 }

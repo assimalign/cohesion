@@ -4,14 +4,17 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="ApplicationNameInvalid" xml:space="preserve"><value>Application name is invalid. Use an RFC1123 label containing 1-63 lowercase letters, numbers, or '-' characters, beginning and ending with a letter or number.</value></data>
-  <data name="ApplicationNameRequired" xml:space="preserve"><value>An RFC1123 application name is required. Pass it to Application.CreateBuilder(ApplicationName, args) or call UseName(...) before Build(); only unnamed Local builders use the entry-assembly fallback.</value></data>
-  <data name="ApplicationCredentialSchemeInvalid" xml:space="preserve"><value>The application credential scheme must be a nonempty HTTP authentication token.</value></data>
-  <data name="ApplicationCredentialValueInvalid" xml:space="preserve"><value>The application credential value must be nonblank and contain no carriage return or line feed.</value></data>
-  <data name="ResourceHttpPathInvalid" xml:space="preserve"><value>A resource HTTP path must begin with '/' and contain no query or fragment.</value></data>
-  <data name="ResourceMountSourceInvalid" xml:space="preserve"><value>A mount source must use parameter:&lt;name&gt;, literal:&lt;value&gt;, or &lt;source&gt;:&lt;key&gt;, with nonblank names and keys.</value></data>
-  <data name="VolumeMountSourceInvalid" xml:space="preserve"><value>Volume mount '{0}' cannot declare Source.</value></data>
-  <data name="LiteralMountKindInvalid" xml:space="preserve"><value>Mount '{0}' uses literal:, which is allowed only for Configuration mounts.</value></data>
-  <data name="ProviderMountSourceInvalid" xml:space="preserve"><value>Resource '{0}' mount '{1}' source must use parameter:&lt;name&gt;, literal:&lt;value&gt;, or &lt;source&gt;:&lt;key&gt;.</value></data>
-  <data name="ApplicationNameJsonString" xml:space="preserve"><value>An application name must be a JSON string.</value></data>
+  <data name="ResourceNameInvalid" xml:space="preserve"><value>A resource name is 1 to 63 lowercase ASCII letters, digits, or hyphens, starting with a letter and ending with a letter or digit.</value></data>
+  <data name="ProviderNameInvalid" xml:space="preserve"><value>A provider name is one or more dot-separated segments of ASCII letters and digits, each starting with a letter, at most 128 characters.</value></data>
+  <data name="ActionNameInvalid" xml:space="preserve"><value>An action name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="ActionNameMissing" xml:space="preserve"><value>An action name is required.</value></data>
+  <data name="ResourceActionOperationInvalid" xml:space="preserve"><value>An invocation requests exactly one operation: Read or Write.</value></data>
+  <data name="ApplicationActionSnapshotEmpty" xml:space="preserve"><value>A state snapshot is a UTF-8 JSON value and cannot be empty.</value></data>
+  <data name="ApplicationActionSnapshotInvalid" xml:space="preserve"><value>A state snapshot is a JSON object with a string 'action' and a 'value'.</value></data>
+  <data name="ApplicationActionResultInvalid" xml:space="preserve"><value>An action result is a JSON object whose 'status' is Succeeded, Rejected, NotFound, or NotSupported; a rejection carries a 'reason'.</value></data>
+  <data name="PlatformNameInvalid" xml:space="preserve"><value>A platform name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ResourceContentTypeUnsupported" xml:space="preserve"><value>The content serializer does not know type '{0}'. Create it with the source-generated context that declares the type.</value></data>
+  <data name="JsonContextNull" xml:space="preserve"><value>The JSON contexts cannot contain null.</value></data>
 </root>

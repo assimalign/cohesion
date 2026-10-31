@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Web.Testing;
 
 using Shouldly;
@@ -18,10 +19,12 @@ using NetHttpStatusCode = System.Net.HttpStatusCode;
 namespace Assimalign.Cohesion.Web.Query.Tests;
 
 /// <summary>
-/// RFC 10008 &#167; 2.1 / &#167; 2.3 compliance tests for <c>UseQueryValidation</c>, driven end to
+/// RFC 10008 &#167; 2.1 / &#167; 2.3 compliance tests for the middleware the generated
+/// <c>AddQueryValidation</c> verb registers and <c>UseQueryValidation()</c> places, driven end to
 /// end over the in-memory transport (real client, real HTTP/1.1 exchange, real dispatch): the
 /// missing / malformed / unaccepted <c>Content-Type</c> refusals (400/415), the <c>Accept</c>
-/// negotiation refusal (406), the <c>Accept-Query</c> advertisement, and the pass-through paths.
+/// negotiation refusal (406), the <c>Accept-Query</c> advertisement, the pass-through paths, and
+/// placement (the defaults without a registration, the last of two registrations, the provider overload).
 /// </summary>
 public class WebQueryValidationTests
 {
@@ -31,10 +34,19 @@ public class WebQueryValidationTests
     private static async Task<(WebApplicationTestFactory Factory, HttpClient Client)> CreateEchoAppAsync(
         Action<WebQueryValidationOptions>? configure = null,
         CancellationToken cancellationToken = default)
+        => await CreateRegisteredEchoAppAsync(
+            services => services.AddQueryValidation(validation => configure?.Invoke(validation.Options)),
+            cancellationToken);
+
+    // Registers through the generated verbs (or not at all), places UseQueryValidation(), then an echo terminal.
+    private static async Task<(WebApplicationTestFactory Factory, HttpClient Client)> CreateRegisteredEchoAppAsync(
+        Action<IServiceProviderBuilder> register,
+        CancellationToken cancellationToken)
     {
         var factory = new WebApplicationTestFactory();
 
-        factory.Application.UseQueryValidation(configure);
+        register(factory.Builder.Services);
+        factory.Application.UseQueryValidation();
         factory.Application.Use(async (context, next) =>
         {
             string body;
@@ -266,5 +278,74 @@ public class WebQueryValidationTests
 
         Should.Throw<ArgumentOutOfRangeException>(
             () => options.InvalidContentTypeStatusCode = CohesionHttpStatusCode.NotAcceptable);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Query] - UseQueryValidation: Should place the defaults when the application registered none")]
+    public async Task UseQueryValidation_WithoutRegistration_ShouldPlaceTheDefaults()
+    {
+        // Arrange — nothing registered: the placed middleware still validates, with the default policy.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        (WebApplicationTestFactory factory, HttpClient client) = await CreateRegisteredEchoAppAsync(_ => { }, cancellation.Token);
+        await using WebApplicationTestFactory ownedFactory = factory;
+        using HttpClient ownedClient = client;
+
+        // Act
+        using HttpResponseMessage untyped = await client.SendAsync(
+            CreateQuery("/search", new ByteArrayContent("{\"q\":1}"u8.ToArray())), cancellation.Token);
+        using HttpResponseMessage typed = await client.SendAsync(
+            CreateQuery("/search", new StringContent("name eq 'x'", Encoding.UTF8, "text/plain")), cancellation.Token);
+
+        // Assert — 400 for untyped content; any valid Content-Type is accepted.
+        untyped.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
+        typed.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Query] - UseQueryValidation: Should place the last registration when validation is registered twice")]
+    public async Task UseQueryValidation_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange — the first registration accepts JSON queries only, the last plain text only.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        (WebApplicationTestFactory factory, HttpClient client) = await CreateRegisteredEchoAppAsync(
+            services => services
+                .AddQueryValidation(validation => validation.Options.AcceptedMediaTypes.Add(CohesionMediaType.Parse("application/json")))
+                .AddQueryValidation(validation => validation.Options.AcceptedMediaTypes.Add(CohesionMediaType.Parse("text/plain"))),
+            cancellation.Token);
+        await using WebApplicationTestFactory ownedFactory = factory;
+        using HttpClient ownedClient = client;
+
+        // Act
+        using HttpResponseMessage json = await client.SendAsync(
+            CreateQuery("/search", new StringContent("{\"q\":1}", Encoding.UTF8, "application/json")), cancellation.Token);
+        using HttpResponseMessage text = await client.SendAsync(
+            CreateQuery("/search", new StringContent("name eq 'x'", Encoding.UTF8, "text/plain")), cancellation.Token);
+
+        // Assert
+        json.StatusCode.ShouldBe(NetHttpStatusCode.UnsupportedMediaType);
+        text.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Query] - AddQueryValidation: A service-provider callback should configure the middleware UseQueryValidation places")]
+    public async Task AddQueryValidation_ServiceProviderCallback_ShouldConfigureThePlacedMiddleware()
+    {
+        // Arrange — the provider overload builds on first resolve, when the pipeline is composed.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        bool configured = false;
+        (WebApplicationTestFactory factory, HttpClient client) = await CreateRegisteredEchoAppAsync(
+            services => services.AddQueryValidation((provider, validation) =>
+            {
+                configured = provider is not null;
+                validation.Options.InvalidContentTypeStatusCode = CohesionHttpStatusCode.UnsupportedMediaType;
+            }),
+            cancellation.Token);
+        await using WebApplicationTestFactory ownedFactory = factory;
+        using HttpClient ownedClient = client;
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(
+            CreateQuery("/search", new ByteArrayContent("{\"q\":1}"u8.ToArray())), cancellation.Token);
+
+        // Assert
+        configured.ShouldBeTrue();
+        response.StatusCode.ShouldBe(NetHttpStatusCode.UnsupportedMediaType);
     }
 }

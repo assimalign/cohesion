@@ -312,7 +312,6 @@ internal static class GatewaySourceWriter
             source.AppendLine("        configure?.Invoke(options);");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
             WriteProviderCommandLine(source, provider, "        ");
-            source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
             source.Append("        gateway = new ").Append(provider.GatewayType).AppendLine("(options);");
             source.AppendLine("    }");
             source.AppendLine();
@@ -343,7 +342,6 @@ internal static class GatewaySourceWriter
             source.Append("        var options = new ").Append(provider.OptionsType).AppendLine("();");
             source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ApplicationGatewayCommandLine.Apply(options, args);");
             WriteProviderCommandLine(source, provider, "        ");
-            source.AppendLine("        global::Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane.GatewayControlPlane.Configure(options, runMode);");
             source.Append("        return new ").Append(provider.GatewayType).AppendLine("(options);");
             source.AppendLine("    }");
             source.AppendLine();

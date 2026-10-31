@@ -14,7 +14,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.VpnGateway.Hosting" />
 	</ItemGroup>
   <ItemGroup>
-    <CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Resources" />
+    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
     <CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
   </ItemGroup>
 </Project>

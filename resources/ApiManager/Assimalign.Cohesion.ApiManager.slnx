@@ -34,19 +34,6 @@
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.ApiManager.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.ApiManager.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.ApiManager.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.ApiManager.ApplicationModel/src/Assimalign.Cohesion.ApiManager.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.ApiManager.ApplicationModel/tests/Assimalign.Cohesion.ApiManager.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Refs/">
 		<File Path="Assimalign.Cohesion.ApiManager.Refs/Directory.Build.props" />
 	</Folder>

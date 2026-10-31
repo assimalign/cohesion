@@ -1,0 +1,209 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace Assimalign.Cohesion.ApplicationModel.Gateway;
+
+/// <summary>
+/// The infrastructure a gateway deploys onto, such as Kubernetes, Docker, or the local machine.
+/// It is the third layer an application brings together, beside the tenant and its identity
+/// provider.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The provider answers "where": its own configuration says where resources run. The gateway answers
+/// "what", from its model. A provider deploys resources only: a child gateway is deployed by its own
+/// pipeline and joins its parent.
+/// </para>
+/// <para>
+/// The gateway reconciles: it plans each resource (<see cref="PlanResourceAsync"/>), deploys only
+/// the ones whose plan changes something, and tears down the resources the model no longer
+/// declares. Workloads outlive the gateway, so a provider answers from what the platform runs, not
+/// from what it was told earlier in the same process. A deployed resource's instances publish their
+/// manifests to the gateway; the provider only starts them.
+/// </para>
+/// <para>
+/// The gateway deploys in dependency order: a resource once everything it depends on is ready, and
+/// those that do not depend on each other at the same time. It plans a resource at that point too,
+/// because the resource's settings may be filled in from what it depends on. So the gateway may call
+/// the provider concurrently for different resources, but never concurrently for the same one.
+/// </para>
+/// <para>
+/// A resource's settings are configuration values its instances receive with their deployment
+/// (<see cref="ApplicationResourceManifest.Settings"/>). The gateway passes their values, with every
+/// output filled in, from a dependency or from the parent gateway, to <see cref="PlanResourceAsync"/>
+/// and <see cref="DeployResourceAsync"/>; the provider delivers them to the instances, for example as
+/// environment variables.
+/// </para>
+/// </remarks>
+public interface IInfrastructureProvider
+{
+    /// <summary>
+    /// Gets the platform the provider deploys onto, such as <c>kubernetes</c>.
+    /// </summary>
+    /// <remarks>
+    /// A resource's platform extensions (<see cref="ApplicationResourceManifest.Extensions"/>) apply
+    /// only on their platform. The gateway passes every method the resource as declared for this
+    /// platform: its manifest with only the extensions for <see cref="Platform"/>, so the provider
+    /// reads its own with its own JSON contract and never sees another platform's.
+    /// </remarks>
+    PlatformName Platform { get; }
+
+    /// <summary>
+    /// Gets the infrastructure actions the provider exposes on a resource, such as scaling it.
+    /// </summary>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Manifest"/>, with only this
+    /// platform's extensions.
+    /// </param>
+    /// <returns>The actions; empty for none.</returns>
+    IReadOnlyCollection<IApplicationResourceAction> GetResourceActions(IApplicationModel model, ApplicationResourceManifest resource);
+
+    /// <summary>
+    /// Plans a resource's deployment without changing anything: whether its workload must be created
+    /// or updated, and the revision it would run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The gateway plans a resource once every resource it depends on is ready, so
+    /// <paramref name="settings"/> holds the values the deployment would deliver. A workload that runs
+    /// other values needs an update.
+    /// </para>
+    /// <para>
+    /// The revision fingerprints everything the provider deploys for the resource that the model does
+    /// not carry, such as its image and the provider's own configuration. It leaves out the settings'
+    /// values and the resource's extensions: the gateway fingerprints the manifest as declared for
+    /// this platform, extensions included, itself. The gateway compares the whole with the revision it
+    /// recorded: a different one is a new definition, which starts without the state recorded for the
+    /// previous one. A value filled in from a dependency's output changes when that dependency is
+    /// redeployed, and one from the parent gateway when the parent redeploys its resource; neither is a
+    /// new definition of this resource.
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Manifest"/>, with only this
+    /// platform's extensions.
+    /// </param>
+    /// <param name="settings">
+    /// The values of the resource's settings by name, with every output filled in; the manifest's
+    /// <see cref="ApplicationResourceManifest.Settings"/> gives their order.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the plan.</param>
+    /// <returns>What deploying the resource would change, and the revision it would run.</returns>
+    ValueTask<InfrastructurePlan> PlanResourceAsync(
+        IApplicationModel model,
+        ApplicationResourceManifest resource,
+        IReadOnlyDictionary<SettingName, string> settings,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates or updates a resource's workload, as its plan said, and delivers its settings and the
+    /// deployment's id to the instances it starts.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The gateway calls it only when the plan's change is <see cref="InfrastructureChange.Create"/>
+    /// or <see cref="InfrastructureChange.Update"/>, right after the plan, once every resource the
+    /// resource depends on is ready: an instance of it has published and its outputs are read. How an
+    /// update replaces running instances, all at once or a few at a time, is the platform's rollout.
+    /// </para>
+    /// <para>
+    /// Every instance the deployment starts must receive <paramref name="deployment"/> as its
+    /// <see cref="AppEnvironment.Variables.Deployment"/> variable, and keep it for its lifetime: the
+    /// gateway counts the deployment ready only once an instance that repeats the id publishes. A
+    /// platform that rolls an update out keeps each rollout's id with its own instances, such as a
+    /// literal value in a Kubernetes pod template, so an instance of an earlier rollout that restarts
+    /// still reports its own deployment and never stands in for this one.
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Manifest"/>, with only this
+    /// platform's extensions.
+    /// </param>
+    /// <param name="settings">The values the plan was made with.</param>
+    /// <param name="deployment">
+    /// The deployment's id, derived from the resource's definition, the plan's revision, and the
+    /// settings' values: the same inputs give the same id.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the deployment.</param>
+    /// <returns>A task that completes when the workload has been started, not when it is ready.</returns>
+    ValueTask DeployResourceAsync(
+        IApplicationModel model,
+        ApplicationResourceManifest resource,
+        IReadOnlyDictionary<SettingName, string> settings,
+        DeploymentId deployment,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Watches a deployment's workload while the gateway waits for its first instance, and reports a
+    /// workload that stops first.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The gateway calls it right after <see cref="DeployResourceAsync"/> and cancels it once an
+    /// instance of the deployment publishes or the startup window closes. Return when the workload has
+    /// ended, and throw the failure when the platform reports one, such as a program's exception or a
+    /// container that keeps crashing. The gateway then fails the resource's step at once with that
+    /// failure, instead of waiting out the window, and treats the resource as one that missed it: a
+    /// new one is torn down, and nothing that depends on it deploys.
+    /// </para>
+    /// <para>
+    /// Until then, and on a platform that cannot tell, wait for the cancellation and throw
+    /// <see cref="OperationCanceledException"/>. Only stopping before the first instance publishes
+    /// counts: what happens to a resource's instances after that is not this method's to report.
+    /// </para>
+    /// </remarks>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Manifest"/>, with only this
+    /// platform's extensions.
+    /// </param>
+    /// <param name="deployment">The deployment whose workload to watch, as <see cref="DeployResourceAsync"/> received it.</param>
+    /// <param name="cancellationToken">Cancelled when the gateway stops waiting.</param>
+    /// <returns>A task that completes when the workload has ended.</returns>
+    /// <exception cref="OperationCanceledException">The gateway stopped waiting while the workload still ran.</exception>
+    ValueTask WatchResourceAsync(
+        IApplicationModel model,
+        ApplicationResourceManifest resource,
+        DeploymentId deployment,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads the values the platform gave a deployed resource, such as the endpoint of the load
+    /// balancer or service in front of its instances.
+    /// </summary>
+    /// <remarks>
+    /// The gateway reads a resource's outputs once an instance of its deployment has published, or,
+    /// for a resource the plan left unchanged, right after the plan, and before it plans anything that
+    /// depends on the resource. It records them on the resource, fills them in where a dependent's
+    /// setting refers to them (<see cref="ApplicationResourceOutput"/>), and hands them to the child
+    /// gateways that use them. Answer from what the platform runs: an output the platform assigns
+    /// later, such as a load balancer's address, is read again on the next run.
+    /// </remarks>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Manifest"/>, with only this
+    /// platform's extensions.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The outputs by name; empty when the resource has none.</returns>
+    ValueTask<IReadOnlyDictionary<OutputName, string>> GetResourceOutputsAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes a resource's workload: after a new resource missed its startup window, or after the
+    /// model stopped declaring it.
+    /// </summary>
+    /// <param name="model">The model the gateway runs.</param>
+    /// <param name="resource">
+    /// The resource, from the model's <see cref="IApplicationModel.Manifest"/>, with only this
+    /// platform's extensions; for a resource the model removed, its provider and name as the gateway
+    /// recorded them, with no dependencies.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the teardown.</param>
+    /// <returns>A task that completes when the workload has been removed.</returns>
+    ValueTask TeardownResourceAsync(IApplicationModel model, ApplicationResourceManifest resource, CancellationToken cancellationToken = default);
+}

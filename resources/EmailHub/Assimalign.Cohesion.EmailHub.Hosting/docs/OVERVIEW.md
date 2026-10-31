@@ -1,8 +1,8 @@
 # Assimalign.Cohesion.EmailHub.Hosting
 
-`EmailHubApplication.CreateBuilder(args)` returns the public concrete `EmailHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `http` endpoint (http). The plain host opens no listener without registration.
+`EmailHubApplication.CreateBuilder(args)` returns the public concrete `EmailHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel`.
 
-Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Domain service behavior and command kinds remain deferred.
+Domain service behavior remains deferred.
 
 See [DESIGN.md](DESIGN.md).
 

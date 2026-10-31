@@ -1,32 +1,26 @@
+using System;
 using System.Collections.Generic;
 
-using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
-/// <summary>A minimal resource for base-gateway tests.</summary>
-internal sealed class TestResource : IApplicationResource
+/// <summary>
+/// One running instance of <c>Web/orders-api</c> with a log-level control.
+/// </summary>
+internal sealed class TestResource : IApplicationResourceInstance
 {
-    public TestResource(string name)
-    {
-        Name = name;
-    }
+    public LogLevelAction LogLevel { get; } = new();
 
-    public ResourceName Name { get; }
-}
+    public ProviderName Provider => "Web";
 
-/// <summary>A minimal executable resource for local-gateway tests.</summary>
-internal sealed class TestExecutableResource : IExecutableResource
-{
-    public TestExecutableResource(string name, string artifact)
-    {
-        Name = name;
-        Artifact = artifact;
-    }
+    public ResourceName Name => "orders-api";
 
-    public ResourceName Name { get; }
+    public InstanceKey Key { get; } = InstanceKey.New();
 
-    public string Artifact { get; }
+    public DeploymentId? Deployment { get; init; }
 
-    public IReadOnlyDictionary<string, string> EnvironmentVariables { get; } = new Dictionary<string, string>();
+    public IReadOnlyCollection<IApplicationInstanceAction> Actions => [LogLevel];
+
+    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors => [];
 }

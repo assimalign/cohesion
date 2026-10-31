@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -12,10 +13,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Security.DataProtection;
 
-using Assimalign.Cohesion.ApplicationModel.Internal;
 using Assimalign.Cohesion.SecretStore.Client.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
@@ -168,15 +167,8 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 
-    internal Task<string> GetCertificatePemAsync(
-        string name,
-        CancellationToken cancellationToken)
-        => GetCertificatePemAsync(name, null, null, cancellationToken);
-
     internal async Task<string> GetCertificatePemAsync(
         string name,
-        string? subject,
-        IReadOnlyList<string>? subjectAlternativeNames,
         CancellationToken cancellationToken)
     {
         if (!SecretStoreCertificateReferenceGrammar.IsValid(name))
@@ -194,9 +186,8 @@ internal sealed class CertificateAuthorityManager : IDisposable
             }
 
             string leafName = NormalizeLeafName(name);
-            X500DistinguishedName? effectiveSubject = subject is null ? null :
-                subject.Contains('=') ? new X500DistinguishedName(subject) : CreateSubject(subject);
-            X509Extension? effectiveNames = subjectAlternativeNames is null ? null : CreateAlternativeNames(subjectAlternativeNames);
+            X500DistinguishedName? effectiveSubject = null;
+            X509Extension? effectiveNames = null;
             string leafPath = GetLeafPath(leafName);
             byte[]? durable = await ProtectedFileStore.ReadAsync(
                     leafPath,
@@ -209,15 +200,10 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 {
                     string existingPem = Encoding.UTF8.GetString(durable);
                     using X509Certificate2 existing = LoadLeafBundle(existingPem);
-                    X509Extension? storedNames = existing.Extensions["2.5.29.17"];
-                    if ((effectiveSubject is not null && !effectiveSubject.RawData.AsSpan().SequenceEqual(existing.SubjectName.RawData)) ||
-                        (effectiveNames is not null && (storedNames is null || !effectiveNames.RawData.AsSpan().SequenceEqual(storedNames.RawData))))
-                    {
-                        throw new Assimalign.Cohesion.Hosting.Resources.ResourceCommandRejectedException(
-                            $"secretstore.issue-certificate certificate '{leafName}' already has a different subject or SAN set; delete its declaration before changing its identity.");
-                    }
-                    effectiveSubject ??= existing.SubjectName;
-                    effectiveNames ??= storedNames;
+
+                    // A renewal keeps the subject and alternative names the leaf was issued with.
+                    effectiveSubject = existing.SubjectName;
+                    effectiveNames = existing.Extensions["2.5.29.17"];
                     if (!RequiresRenewal(existing, DateTimeOffset.UtcNow))
                     {
                         return existingPem;
@@ -230,7 +216,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
             }
 
             using X509Certificate2 leaf = CreateLeaf(leafName,
-                subjectAlternativeNames ?? [leafName, "localhost", "127.0.0.1", "::1"], effectiveSubject, effectiveNames);
+                [leafName, "localhost", "127.0.0.1", "::1"], effectiveSubject, effectiveNames);
             string pem = ExportLeafBundle(leaf);
             byte[] encoded = Encoding.UTF8.GetBytes(pem);
             try
@@ -740,27 +726,12 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 
-    internal async Task DeleteCertificateAsync(string name, CancellationToken cancellationToken = default)
-    {
-        string leafName = NormalizeLeafName("certs/" + name);
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureReady();
-            File.Delete(GetLeafPath(leafName));
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
     private static X509Extension CreateAlternativeNames(IReadOnlyList<string> values)
     {
         var names = new SubjectAlternativeNameBuilder();
         foreach (string value in values.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal))
         {
-            if (!SecretStoreCommandGrammar.IsValidSubjectAlternativeName(value))
+            if (!IsValidSubjectAlternativeName(value))
             {
                 throw new ArgumentException(ErrorMessages.AlternativeNameInvalid, nameof(values));
             }
@@ -1075,12 +1046,44 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 "Certificate='public' uses ACME or another public CA and is not implemented by this design item.");
         }
 
-        if (!SecretStoreCommandGrammar.IsValidCertificateName(leafName))
+        if (!IsValidCertificateName(leafName))
         {
             throw new ArgumentException(ErrorMessages.CertificateNameInvalid, nameof(name));
         }
 
         return leafName;
+    }
+
+    // The leaf-name and alternative-name rules formerly shared with the retired command grammar
+    // (SecretStore.ApplicationModel's Commands module), kept unchanged.
+    private static bool IsValidCertificateName(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value is not "." and not ".." &&
+        value.IndexOfAny(['/', '\\']) < 0;
+
+    private static bool IsValidSubjectAlternativeName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (IPAddress.TryParse(value, out _))
+        {
+            return true;
+        }
+
+        try
+        {
+            // SubjectAlternativeNameBuilder.AddDnsName uses default IdnMapping.GetAscii
+            // before IA5 encoding. Parse that grammar directly; do not construct a certificate.
+            // This preserves certificate wildcard/IDN acceptance rather than hostname rules.
+            string ascii = new IdnMapping().GetAscii(value);
+            return ascii.AsSpan().IndexOfAnyExceptInRange((char)0, (char)127) < 0;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static byte[] CreateSerialNumber()

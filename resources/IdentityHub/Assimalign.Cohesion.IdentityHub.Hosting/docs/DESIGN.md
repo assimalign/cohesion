@@ -4,7 +4,7 @@
 
 `Local` is the developer-machine environment. `Development` is a deployable environment and follows the same transport and device-approval restrictions as `Production`; an unset environment still resolves to `Production`.
 
-Every built host registers one internal HTTP issuer after user services. The endpoint is resolved from the generated control plane, the ambient `https` resource endpoint, `--endpoint`, then `https://127.0.0.1:8443`. State is resolved from the `data` mount, `--data`, then the resource content root. Plain HTTP is permitted only on loopback in Local.
+Every built host registers one internal HTTP issuer after user services. The endpoint is resolved from `--endpoint`, then `https://127.0.0.1:8443`. State is resolved from `--data`, then the content root. Plain HTTP is permitted only on loopback in Local.
 
 The issuer exposes public OpenID Provider metadata, JWKS, and token endpoints. It accepts exactly the implemented `openid` scope or an empty scope and returns `invalid_scope` for every other client-controlled value. Client authentication accepts exactly one of HTTP Basic or form credentials, constrains the requested `audience`/`resource` to the registration, and issues ES256 bearer JWTs. Confidential clients authenticate at device authorization and polling as well as for client credentials.
 
@@ -14,75 +14,19 @@ Device authorization and the built-in verification page are available only when 
 
 The data mount contains one persisted P-256 PKCS#8 signing key. Creation uses an atomic same-directory move and owner-only permissions on Unix. JWKS publishes only public `EC`/`P-256`/`ES256` coordinates; `kid` is the RFC 7638 SHA-256 thumbprint of canonical public members. Token creation uses IdentityModel's `JsonWebTokenWriter`. Signing is serialized because the ECDSA instance is shared.
 
-HTTPS consumes a materialized `tls` resource mount containing the PEM leaf certificate, matching private key, and optional chain. This uses the existing `ResourceMount` carrier, including its in-process bytes and Windows protected-file behavior. When that mount is absent, an ephemeral self-signed certificate is allowed only on loopback in Local; every other HTTPS binding fails closed with an explicit configuration error. TLS material is always distinct from the issuer signing key. ResourceContext resolves generated endpoint-to-mount metadata, with `tls` as the compatibility fallback. The shared reader preserves the same single PEM document and certificate chain.
+An ephemeral self-signed certificate is allowed only on loopback in Local; every other HTTPS binding fails closed with an explicit configuration error. TLS material is always distinct from the issuer signing key.
 
 Issued access tokens contain `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `client_id`, and token-use metadata. The configured lifetime is capped at 24 hours.
 
 ## Resource control plane
 
-The builder captures `ResourceRuntime.Current`, resolves a registered area control plane from the executable assembly, and calls `ResourceRuntime.HostBuilt` exactly once. Public `/healthz`, `/readyz`, and `/livez` routes coexist with `/cohesion/v1/healthz`, `/readyz`, `/livez`, `/endpoints`, `/stop`, and `/commands`.
-
-Every `/cohesion/v1/*` request is authenticated when a gateway is ambient. A credential verifier registered for the resource (`ResourceRuntime.TryGetCredentialVerifier`) is consulted first; `NoResult` falls through to the default application-key verifier, and the mapped `ResourceCaller` must be a `Gateway` of the ambient application whose `Subject` is the ambient gateway (the mapped form of the default issuer and subject rules). The default verifier configures the shared ES256 `JsonWebTokenValidator` with `ResourceCredentialProfile` constants: it parses the application trust JWK, verifies the ES256 signature, then validates issuer, gateway subject, resource audience, required claims, temporal bounds, token ID, and a maximum 24-hour lifetime. Missing or malformed credentials return 401 with `WWW-Authenticate: Bearer`; a valid token for another resource returns 403. The default control plane serves the declarative AddAudience and AddClient command kinds.
-
-Without a gateway identity, `/cohesion/v1` and every path below it, including namespaced probes,
-accept only transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. The check reads the
-exchange's connection `RemoteEndPoint`; forwarded headers never grant access, and a missing or
-non-IP peer fails closed. Other peers receive `403 Forbidden`, chosen to make the development-only
-access restriction clear. The same rule applies beneath an endpoint base path. Bare `/healthz`,
-`/readyz`, and `/livez` stay open for orchestrators and load balancers; the issuer's OAuth and
-discovery routes and gateway credential checks retain their existing behavior. This is a breaking
-security change from 10.0.0-preview.1, which admitted remote standalone management requests
-(#1431, owner decision 46; preview compatibility follows decision 15).
+The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`.
 
 ## AOT and dependency boundary
 
 Hosting privately composes Cohesion Web/HTTP/connection libraries and the shared IdentityModel JWT implementation. Routes use direct dispatch and `Utf8JsonWriter`; there is no reflection-based routing, serializer metadata discovery, or dynamic activation.
 
 Security headers come from `Web.SecurityHeaders`, registered first in the private pipeline: every response, JSON and the Local device-approval page alike, carries `Content-Security-Policy: default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY` and `X-Content-Type-Options: nosniff`. These are the values the approval page used to set by hand; the page now sets only its `Cache-Control: no-store` and `Pragma: no-cache`. `Web.SecurityHeaders` and the `Web.Routing` and `Http.Streaming` assemblies it closes over are private members of `App.IdentityHub`.
-
-## Declarative commands (item 31c)
-
-| Wire kind | Descriptor verb | Ownership key |
-|---|---|---|
-| `identityhub.add-audience` | `AddAudience` | audience name |
-| `identityhub.add-client` | `AddClient` | client id |
-
-Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
-`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
-Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
-advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
-The default control plane handles id replay and owner isolation; each area handler also accepts
-an identical reapplication with a different id. Conflicts return named Rejected details.
-
-The typed IIdentityHubResourceDescriptor retains its command surface through DependsOn chaining.
-Audience and client commands are registered on the default control plane and served by the existing
-authenticated API endpoint, with POST/DELETE and JSON refusal observations. Owner must equal the
-authenticated application issuer; transport and bootstrap-token verification are unchanged.
-
-The command registry is written atomically to `registry.json` beside IdentitySigningKey under the
-resource data path. Startup restores the registry and control-plane ownership before serving.
-Token issuance reads the live combined registry of builder-declared and command-declared clients;
-discovery and JWKS remain the same issuer surface. Audience removal is rejected while a client uses it.
-
-Client credentialSource names a resource Secret mount, optionally prefixed with `mount:`. The
-declaration stores the mount name, never credential bytes. Hosting reads and hashes the mounted
-credential when initializing or updating the registry, so restart requires the mount again.
-Clients must reference existing audiences; add the audience before the client. Conflicting resource
-seeds or changed client declarations are rejected until the owning declaration is deleted.
-
-`IdentityHubCommandProtocolTests` drives both kinds over the `commands` route of a real managed
-host: apply, replay under a new id, the owner-must-match-issuer refusal, ownership restored after a
-restart, and deletion revoking the command-declared client. The gateway delivers the same envelope
-through its generic `ResourceControlPlaneCommandClient`; the area ships no client package.
-
-## HTTPS endpoint certificate contract (31t)
-
-The enabled resource's `https` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. The existing loopback Local fallback and plaintext restriction remain; production errors continue to name tls.
-
-## Optional telemetry (31b)
-
-The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
 
 ## Concrete composition (T10 / O34)
 
@@ -96,7 +40,7 @@ The concrete application and IHost route share it. Startup failures still roll b
 
 ## Dependency injection composition
 
-`IdentityHubApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<IdentityHubApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: telemetry registers in the builder constructor, so it starts first and stops last; `IdentityEndpointService` registers in `Build`, so it starts last and stops first.
+`IdentityHubApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<IdentityHubApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: `IdentityEndpointService` registers in `Build`, so it starts last and stops first.
 
 `Build` closes registration (the container becomes read-only, and a second `Build` throws), creates the provider once, and resolves `IEnumerable<IHostService>` once into the snapshot the host reuses for every start, stop, and rollback pass. The application owns the provider: disposal stops the host, then disposes the provider, which disposes every factory-created service in reverse creation order while instance registrations stay with their callers. A failed `Build` disposes the provider before rethrowing. The concrete context exposes the provider as `ServiceProvider` to hosting-layer factories; the area root and its features never see it.
 
