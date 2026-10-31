@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
 using Assimalign.Cohesion.Scheduler;
 using Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
@@ -17,9 +16,9 @@ namespace Assimalign.Cohesion.Scheduler.Hosting;
 /// <summary>
 /// Provides the Scheduler application environment and runtime composition.
 /// </summary>
-[global::System.Diagnostics.DebuggerDisplay("SchedulerApplicationContext {Name,nq}")]
+[global::System.Diagnostics.DebuggerDisplay("SchedulerApplicationContext")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplicationContext, IHealthContributor
+public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplicationContext
 {
     private readonly IHostEnvironment _environment;
     private IServiceProvider? _serviceProvider;
@@ -30,10 +29,7 @@ public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplica
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _environment = new HostEnvironment(options.Environment ?? "production")
-        {
-            ContentRootPath = options.ContentRootPath,
-        };
+        _environment = new HostEnvironment(options.Environment ?? "production");
     }
 
     /// <summary>
@@ -78,40 +74,6 @@ public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplica
     public IReadOnlyList<IScheduleProvider> ScheduleProviders { get; private set; } = Array.Empty<IScheduleProvider>();
 
     internal IReadOnlyList<ISchedule> Schedules { get; private set; } = Array.Empty<ISchedule>();
-
-    /// <summary>
-    /// Gets the name used for this application health contribution.
-    /// </summary>
-    public string Name => "scheduler";
-
-    /// <summary>
-    /// Reports the health of the application.
-    /// </summary>
-    /// <param name="cancellationToken">The token that cancels the health check.</param>
-    /// <returns>The current application health contribution.</returns>
-    /// <exception cref="OperationCanceledException">The cancellation token is cancelled.</exception>
-    public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        string[] failed = Schedules
-            .Where(static schedule => schedule.Status is ScheduleStatus.Failed)
-            .Select(static schedule => schedule.Name ?? schedule.Id.ToString())
-            .ToArray();
-        var data = new Dictionary<string, object>(StringComparer.Ordinal)
-        {
-            ["jobCount"] = Jobs.Count,
-            ["scheduleCount"] = Schedules.Count,
-            ["runningCount"] = Schedules.Count(static schedule => schedule.Status is ScheduleStatus.Running),
-        };
-
-        HealthContribution contribution = failed.Length == 0
-            ? HealthContribution.Healthy($"{Schedules.Count} schedule(s) are available.", data)
-            : HealthContribution.Unhealthy(
-                $"Failed schedules: {string.Join(", ", failed)}.",
-                data);
-        return ValueTask.FromResult(contribution);
-    }
 
     internal void SetServiceProvider(IServiceProvider serviceProvider)
     {
@@ -243,7 +205,6 @@ public sealed class SchedulerApplicationContext : HostContext, ISchedulerApplica
         public IEnumerable<IHostService> HostedServices => _target.HostedServices;
         public IReadOnlyList<IScheduleJob> Jobs => _target.Jobs;
         public IReadOnlyList<IScheduleProvider> ScheduleProviders => _target.ScheduleProviders;
-        public string Name => _target.Name;
         public HostId HostId => _target.HostId;
         public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
     }

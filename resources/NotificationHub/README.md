@@ -2,7 +2,7 @@
 
 NotificationHub is the L3 messaging service platform intended to manage subscriptions and audiences, templates, channel routing, delivery policy, receipts, retries, and suppression.
 
-The host supports enabled-resource control planes; domain services remain fillers pending the area program.
+The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.NotificationHub.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -40,7 +40,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering and dependencies
 
-As an L3 service platform, NotificationHub composes the L2 `Assimalign.Cohesion.Hosting` runtime and also references the L1 `Assimalign.Cohesion.Core` foundation directly. Hosting consumes the area root and resource/health contracts publicly, and composes the Web control-plane listener privately.
+As an L3 service platform, NotificationHub composes the L2 `Assimalign.Cohesion.Hosting` runtime and also references the L1 `Assimalign.Cohesion.Core` foundation directly. Hosting consumes the area root publicly.
 
 ## Project documentation
 

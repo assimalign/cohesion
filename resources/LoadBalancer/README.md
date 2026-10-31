@@ -2,7 +2,7 @@
 
 LoadBalancer is the L3 networking service platform intended to manage backend pools, health probes, routing and affinity policy, draining, failover, and load-balancing decisions.
 
-The host supports enabled-resource control planes; domain services remain fillers pending the area program.
+The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -36,7 +36,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering and dependencies
 
-As an L3 service platform, LoadBalancer composes the L2 `Assimalign.Cohesion.Hosting` runtime, which is built on the L1 `Assimalign.Cohesion.Core` foundation. The root project also depends on the L1 `Assimalign.Cohesion.Http` library for HTTP-facing primitives; Hosting additionally consumes the resource/health contracts and privately composes the Web control-plane listener.
+As an L3 service platform, LoadBalancer composes the L2 `Assimalign.Cohesion.Hosting` runtime, which is built on the L1 `Assimalign.Cohesion.Core` foundation. The root project also depends on the L1 `Assimalign.Cohesion.Http` library for HTTP-facing primitives.
 
 ## Project documentation
 

@@ -2,7 +2,7 @@
 
 MessageHub is the L3 messaging service platform intended to provide queues, topics, producers, consumers, settlement, retries, dead-lettering, and message correlation.
 
-The host supports enabled-resource control planes; domain services remain fillers pending the area program.
+The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.MessageHub.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -40,7 +40,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering and dependencies
 
-As an L3 service platform, MessageHub composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.Hosting, HTTP, and TCP for its resource listener.
+As an L3 service platform, MessageHub composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation.
 
 ## Project documentation
 
