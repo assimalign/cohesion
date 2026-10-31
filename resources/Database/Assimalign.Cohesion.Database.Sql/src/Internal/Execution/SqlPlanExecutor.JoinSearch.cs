@@ -73,10 +73,11 @@ internal sealed partial class SqlPlanExecutor
             // An unprobed unique equality has an upper bound of one, not an exact observation.
             baseRows[i] = inputs[binding].Access is SqlIndexSeekPath unique && unique.Index.IsUnique &&
                 unique.EqualityValues.Count == unique.Index.ColumnNames.Count ? 1 : Estimate(estimates[binding]);
-            var local = terms.Where(term => term.Mask == (1 << i)).Select(term => term.Expression).ToList();
-            if (local.Count != 0)
+            var local = Conjuncts(inputs[binding].Filter)
+                .Concat(terms.Where(term => term.Mask == (1 << i)).Select(term => term.Expression))
+                .Distinct<SqlBoundExpression>(ReferenceEqualityComparer.Instance).ToArray();
+            if (local.Length != 0)
             {
-                if (inputs[binding].Filter is { } filter) { local.Insert(0, filter); }
                 inputs[binding] = inputs[binding] with { Filter = Combine(local) };
             }
         }
@@ -143,10 +144,6 @@ internal sealed partial class SqlPlanExecutor
                 (term.Mask & left) != 0 && (term.Mask & right) != 0).Select(term => term.Expression).ToArray();
             var condition = Combine(crossing);
             int inner = start + BitOperations.TrailingZeroCount(right);
-            // A normalized index probe bypasses ReadInput; retain its local restrictions
-            // in the step's full-frame residual as well as on the input scan.
-            if (BitOperations.IsPow2(right) && inputs[inner].Filter is { } filter)
-            { condition = condition is null ? filter : new SqlBoundLogical(false, [condition, filter]); }
             var keys = SqlPlanner.HashKeys(condition, plan.Bindings, plan.Columns, inner,
                 fullFrame: true, innerMask: right << start);
             SqlJoinIndexPath? access = BitOperations.IsPow2(right) ? IndexPath(inner, left << start, crossing) : null;

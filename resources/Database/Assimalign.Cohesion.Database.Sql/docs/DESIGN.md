@@ -9531,7 +9531,9 @@ Derived/view/system inputs, LATERAL, semi/anti subquery predicates, correlated s
 calls and expressions lacking the existing non-throwing restriction proof also prevent search.
 Only INNER/CROSS nodes with proven-safe ON/WHERE conjuncts commute/associate. Each conjunct
 is attached at the lowest subtree containing all its references; singleton restrictions use
-input filters, and normalized seeks repeat their local filter as a full-frame residual.
+input filters. Normalized seeks apply their local filter in the joined ordinal frame when
+the probe bypasses the input reader; scan fallback uses the input reader's filter instead.
+Reference-identity deduplication prevents repeating bound local conjuncts during graph assembly.
 Volatile and set-returning expressions are never moved into a different evaluation level.
 UPDATE FROM, DELETE USING and MERGE search only their source graph (two through eight
 sources); the target remains outside it at the original target/source boundary. MERGE's root

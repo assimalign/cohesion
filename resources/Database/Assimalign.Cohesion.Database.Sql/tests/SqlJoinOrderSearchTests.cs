@@ -321,7 +321,7 @@ public sealed class SqlJoinOrderSearchTests
         var terms = written.Where.ShouldBeOfType<SqlBoundLogical>().Operands;
         var left = new SqlJoinStep(2, SqlJoinType.Inner, terms[0], null)
         { Hash = SqlPlanner.HashKeys(terms[0], written.Bindings, written.Columns, 2, fullFrame: true, innerMask: 4) };
-        var right = new SqlJoinStep(3, SqlJoinType.Inner, new SqlBoundLogical(false, [terms[1], terms[3]]), null)
+        var right = new SqlJoinStep(3, SqlJoinType.Inner, terms[1], null)
         { Hash = SqlPlanner.HashKeys(terms[1], written.Bindings, written.Columns, 3, fullFrame: true, innerMask: 8) };
         if (indexed)
         {

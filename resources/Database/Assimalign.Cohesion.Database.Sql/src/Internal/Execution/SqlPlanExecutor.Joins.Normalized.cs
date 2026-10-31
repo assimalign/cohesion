@@ -124,6 +124,10 @@ internal sealed partial class SqlPlanExecutor
                                 }
                             }
                             else { right.AsSpan(seek ? 0 : inner.Start, inner.End - inner.Start).CopyTo(joined.AsSpan(inner.Start)); }
+                            // A seek bypasses ReadInput. Apply its local restriction once in
+                            // the full ordinal frame, just as the flat seek reader does.
+                            if (seek && plan is SqlSearchedJoinPlan &&
+                                !evaluator.Matches(plan.Inputs[step.Access!.InnerBinding].Filter, joined)) { continue; }
                             if (dmlTarget is not null && !seek)
                             {
                                 joined[^2] ??= right[^2];
