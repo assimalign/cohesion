@@ -11,10 +11,12 @@ internal sealed class SqlCopyGateStream : MemoryStream
     internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal int Writes { get; private set; }
+    internal int MaximumWriteLength { get; private set; }
     internal bool Fail { get; set; }
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
     {
         Writes++;
+        MaximumWriteLength = Math.Max(MaximumWriteLength, buffer.Length);
         if (Interlocked.Exchange(ref _entered, 1) == 0)
         {
             Entered.TrySetResult();

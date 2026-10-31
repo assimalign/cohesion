@@ -53,11 +53,13 @@ gated by #1656/#1545; query-form export remains gated by bounded query productio
 
 One statement snapshot covers binding, row reads and delivery.
 Each data frame has an empty delivery acknowledgment; the one-frame window bounds queued bytes
-even on transports without backpressure. The producer retains one row,
-one nonlocking page pin, a reusable row encoder and a 16 KiB byte buffer. It takes no writer,
-row or object locks. Its physical iterator scans the database page ceiling to avoid retaining
-the existing owner iterator's table-sized page vector. Thus work is O(database pages/records),
-while retained export memory is independent of row count (and depends on row/cast text width).
+even on transports without backpressure. The 16 KiB byte buffer fills across rows before sending,
+so delivery round trips scale with encoded bytes. The producer retains one row, one nonlocking
+page pin, a reusable row encoder and the table-scoped iterator's 8-byte entry per table page.
+It takes no writer, row or object locks. Its physical iterator visits only the target's data
+pages, excluding unrelated tables and indexes. COPY waits for deferred migration admission before
+capturing its snapshot or binding its columns. Embedded statement execution shares COPY's session
+admission; overlapping statements and transaction controls are refused.
 Backpressure, cancellation, disconnect and destination exceptions release statement admission,
 snapshot and buffers. Concurrent commits remain invisible to the export. A destination can
 contain partial output on failure. A statement Error before CopyStart preserves the connection and transaction. Late Errors
@@ -65,6 +67,9 @@ retain their diagnostics but discard the incomplete transfer, including any pend
 Cancellation, malformed/incomplete responses and destination failures discard the
 rental; missing capability refuses locally and leaves it usable. Existing Execute framing and
 disk formats are unchanged. Remote COPY drains the existing negotiated Ready status postamble.
+Blank text in a COPY frame receives CS00003 ParseFailure and keeps the session. A peer closing
+while an acknowledgment is awaited is recorded as PeerClosed. Destinations must honor cancellation;
+embedded session disposal cancels and waits for its export to release its snapshot.
 
 SqlCopyToTests (language and engine), SqlCopyToWireTests (InMemory/TCP) and SqlCopyProtocolTests
 form the conformance corpus: all scalar types through SELECT CAST plus independent PostgreSQL

@@ -383,6 +383,7 @@ internal sealed partial class SqlDatabaseServerSession : DatabaseServerSession
             {
                 case (ProtocolMessageType)SqlProtocolMessageType.CopyTo:
                     await CopyToAsync(frame.Value, _lifetimeSource.Token).ConfigureAwait(false);
+                    if (_closeReason == SqlDatabaseEventSource.CloseReason.PeerClosed) { return; }
                     await WriteTransactionStatusAsync().ConfigureAwait(false);
                     break;
                 case (ProtocolMessageType)SqlProtocolMessageType.Execute:

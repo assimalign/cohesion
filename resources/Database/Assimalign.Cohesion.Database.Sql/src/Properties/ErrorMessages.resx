@@ -3,6 +3,8 @@
   <data name="CopyAcknowledgmentInvalid" xml:space="preserve"><value>COPY requires an empty delivery acknowledgment after each data frame.</value></data>
   <data name="CopyDeliveryFailed" xml:space="preserve"><value>COPY destination delivery failed.</value></data>
   <data name="CopyAlreadyActive" xml:space="preserve"><value>A COPY export is already active.</value></data>
+  <data name="CopySessionBusy" xml:space="preserve"><value>A statement or transaction control (BEGIN or SAVEPOINT) already holds this session.</value></data>
+  <data name="CopyStatementMissing" xml:space="preserve"><value>A COPY statement is required.</value></data>
   <data name="CopyColumnInvalid" xml:space="preserve"><value>A COPY column selection is repeated, or FORCE_QUOTE names a column outside the export.</value></data>
   <data name="CopyDestinationInvalid" xml:space="preserve"><value>The COPY destination must be writable.</value></data>
   <data name="CopyExplicitTransaction" xml:space="preserve"><value>COPY is refused inside an explicit transaction.</value></data>

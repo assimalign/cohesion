@@ -535,7 +535,8 @@ SqlConnection.CopyToAsync copies a negotiated table export to a caller-owned Str
 the verified data-row count. The API accepts a destination, so DatabaseProtocolExchange owns
 one admitted transfer and hands it bounded frames directly, without an independent download
 queue. Each frame is acknowledged only after destination delivery, bounding the server's
-one-frame window even on transports without backpressure. It checks opening metadata, chunk
+one-frame window even on transports without backpressure. The producer fills its 16 KiB buffer
+across rows, so frame and acknowledgment counts grow with bytes. It checks opening metadata, chunk
 lengths/order, diagnostics placement and terminal byte
 counts, then the existing core drains Ready. A statement Error marks the response complete for Ready
 draining. Before CopyStart it preserves connection and transaction; a late Error keeps its
@@ -544,7 +545,8 @@ acknowledgment after a server timeout. Cancellation,
 malformed/incomplete responses and destination failures abort and join the rental. An internal
 delivery wrapper preserves the original destination exception outside transport-I/O translation;
 the caller receives that original exception after teardown. The destination stays open and must
-honor cancellation and avoid reentering the same connection from its write callbacks. Missing
+honor cancellation and avoid reentering the same connection from its write callbacks. Destination
+exceptions retain their original type and instance, including exceptions other than IOException. Missing
 capability is CS05094 before any new frame, preserving older peers. Existing command events and
 observer hooks cover COPY. There is no new public interface, reflection, generic virtual member,
 SQL parsing dependency, or shared-client boundary expansion.

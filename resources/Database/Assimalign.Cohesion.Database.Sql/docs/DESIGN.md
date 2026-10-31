@@ -13,12 +13,18 @@ An internal delivery exception stores the original destination failure outside I
 during cleanup, preventing generic IOException storage classification; the public seam rethrows
 that exact failure after releasing the snapshot. The destination always remains open.
 
-COPY uses the existing constant-state physical iterator with a fixed page ceiling and filters
-page owners. The owner-scoped iterator retains an O(table-pages) directory, so COPY deliberately
-pays O(database-pages/records) work to bound retained memory by one decoded row, row text, one
-nonlocking iterator pin and 16 KiB encoded bytes. No public storage seam or shared streaming change
-is needed. Ordinary query/DML allocations and planning are unchanged. Rows wider after a custom
-cast still encode in fixed byte chunks, while retaining their one-row text representation.
+COPY uses SELECT's owner-scoped physical iterator: it visits only the table's data pages and
+copies no unrelated rows or index pages. The iterator verifies ownership while copying each row;
+no later page-header lookup can race reclamation of an unrelated retired owner. It retains an
+8-byte entry per table page, one decoded row, row text, one nonlocking iterator pin and 16 KiB
+encoded bytes. The byte buffer fills across rows before delivery; rows wider after a custom cast
+still encode in fixed chunks. No public storage seam or shared streaming change is needed.
+Ordinary query/DML allocations and planning are unchanged.
+
+Deferred migration admission includes the COPY target before snapshot capture and binding, so
+headers and missing values come from the published layout. Embedded ordinary execution and COPY
+share the root session hold; the export's own internal request passes through that admission.
+An overlapping statement, BEGIN or SAVEPOINT control is refused while the export holds it.
 
 The server's separately negotiated sql.outbound-stream exchange uses Sql.Protocol frames 80-84
 and Database.Client's existing framed exchange admission. The client copies bounded frames
@@ -29,7 +35,10 @@ Errors before CopyStart preserve the connection/transaction. Late Errors retain 
 and partial destination bytes, but discard the transfer to avoid racing a pending acknowledgment.
 Incomplete responses, cancellation and destination failures discard the rental. COPY drains the
 existing negotiated Ready postamble; ordinary Execute framing, protocol version and disk formats
-remain unchanged. Session disposal cancels an active embedded COPY and joins snapshot cleanup.
+remain unchanged. EOF or peer-close cancellation while awaiting a delivery acknowledgment closes as PeerClosed; malformed
+acknowledgments remain protocol violations. Blank COPY-frame text receives CS00003 ParseFailure
+and retains the session. Session disposal cancels an active embedded COPY and joins snapshot cleanup;
+destinations must honor cancellation and must not reenter the session from a write callback.
 COPY FROM remains gated.
 See Sql.Language DIALECT for defaults, PostgreSQL references and representation differences.
 
@@ -44,9 +53,11 @@ See Sql.Language DIALECT for defaults, PostgreSQL references and representation 
 | CK07005 | Invalid export envelope/order/counters |
 
 The conformance corpus covers every storage scalar, independent PostgreSQL field escaping,
-selected/default columns, early failures, bounded first-row progress, both wire transports and
-counter-driven non-parallel writer overlap. Allocation guards take minima of three rounds at
-two sizes; existing SQL Release guards continue to cover ordinary requests.
+selected/default columns, early failures, bounded byte progress, both wire transports and
+counter-driven non-parallel writer overlap. Frame/acknowledgment counts scale with encoded bytes,
+and visited-page counts and minimum-of-three allocation ceilings exclude unrelated-table growth.
+Existing SQL Release guards continue to cover ordinary requests. Acknowledgment waits have no
+independent deadline, as with ordinary SELECT delivery; a delivery deadline remains a follow-up.
 
 ## Named savepoint integration (#1726, XT-4)
 

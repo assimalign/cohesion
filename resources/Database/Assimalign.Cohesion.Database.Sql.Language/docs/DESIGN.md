@@ -9,6 +9,8 @@ option duplicates and incompatibilities before execution; the renderer emits exp
 The language and engine conformance corpora and DIALECT specify PostgreSQL source references,
 formatting differences, parenthesized-only option grammar and deliberate refusals. CS01068 is an
 invalid option; CS01069 is an invalid output-column selection. No persisted syntax changes.
+The execution corpus also verifies table-scoped COPY scan cost, byte-sized delivery batches,
+deferred migration admission and shared embedded-session admission; DIALECT records these contracts.
 
 ## Savepoint grammar and rendering (#1726, XT-4)
 

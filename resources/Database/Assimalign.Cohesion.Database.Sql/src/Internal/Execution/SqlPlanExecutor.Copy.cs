@@ -14,6 +14,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    // COPY-only observations for deterministic scan-cost and reclamation regressions.
+    internal static Action<StorageUnitIterator>? CopyIteratorOpened { get; set; }
+    internal static Action<StorageUnit>? CopyUnitRead { get; set; }
+
     internal async Task<DatabaseResult> CopyToAsync(SqlSelectPlan plan, SqlCopyOptions options, Stream destination,
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
@@ -24,26 +28,39 @@ internal sealed partial class SqlPlanExecutor
         // Do not dispose a StreamWriter with pending data after cancellation or failure: its
         // Dispose would write again without the operation token. The encoder owns no resource.
         var utf8 = new UTF8Encoding(false, true);
+        var encoder = utf8.GetEncoder();
         byte[] bytes = new byte[16 * 1024];
+        int buffered = 0;
         async ValueTask WriteAsync()
         {
             try
             {
                 // A stored row is bounded by the engine's record limit; casts can produce longer
                 // text, so encode it into fixed chunks, including split surrogate pairs.
-                var encoder = utf8.GetEncoder();
                 foreach (var chunk in row.GetChunks())
                 {
                     int offset = 0;
-                    do
+                    while (offset < chunk.Length)
                     {
-                        encoder.Convert(chunk.Span[offset..], bytes, false, out int used, out int written, out _);
+                        // Leave room for the next complete UTF-8 scalar, including a low
+                        // surrogate whose high surrogate the encoder retained from a chunk.
+                        int scalarBytes = chunk.Span[offset] switch
+                        {
+                            <= '\u007f' => 1,
+                            <= '\u07ff' => 2,
+                            >= '\ud800' and <= '\udfff' => 4,
+                            _ => 3,
+                        };
+                        if (bytes.Length - buffered < scalarBytes)
+                        { await DeliverAsync(buffered).ConfigureAwait(false); buffered = 0; }
+                        encoder.Convert(chunk.Span[offset..], bytes.AsSpan(buffered), false, out int used, out int written, out _);
                         offset += used;
-                        if (written > 0) { await DeliverAsync(written).ConfigureAwait(false); }
-                    } while (offset < chunk.Length);
+                        buffered += written;
+                    }
                 }
-                encoder.Convert(ReadOnlySpan<char>.Empty, bytes, true, out _, out int tail, out _);
-                if (tail > 0) { await DeliverAsync(tail).ConfigureAwait(false); }
+                encoder.Convert(ReadOnlySpan<char>.Empty, bytes.AsSpan(buffered), true, out _, out int tail, out _);
+                buffered += tail;
+                if (buffered == bytes.Length) { await DeliverAsync(buffered).ConfigureAwait(false); buffered = 0; }
                 row.Clear();
             }
             catch (EncoderFallbackException exception) { throw SqlResultPreparation.TranslateFailure(exception); }
@@ -69,31 +86,21 @@ internal sealed partial class SqlPlanExecutor
         // Lock/latch order: root session admission -> snapshot -> catalog publication monitor
         // (binding only) -> page pin / optimistic page read. No row/object/writer lock or page
         // latch spans a destination await. The iterator retains at most one nonlocking pin.
-        // The unscoped iterator captures a scalar page ceiling instead of an O(table-pages)
-        // owner directory. COPY alone pays an O(database-pages) scan to keep retained memory
-        // independent of table size; SELECT's existing owner-scoped access path is unchanged.
-        using var iterator = _storage.GetUnitIterator();
-        PageId? page = null;
-        bool targetPage = false;
+        // Share SELECT's owner-scoped access path. Membership is checked while the iterator
+        // copies the row, so neither unrelated rows/indexes nor a later page-header lookup
+        // can race an already retired owner's reclamation.
+        using var iterator = _storage.GetUnitIterator(plan.Table.ObjectId);
+        CopyIteratorOpened?.Invoke(iterator);
         while (iterator.MoveNext())
         {
             cancellationToken.ThrowIfCancellationRequested();
             var unit = iterator.Current;
+            CopyUnitRead?.Invoke(unit);
             if (unit.Data.Length < SqlRowCodec.StampHeaderSize)
             { throw new StorageCorruptionException(unit.PageId, unit.SlotIndex, ErrorMessages.CopyRowMalformed); }
             var (writer, deleter) = SqlRowCodec.ReadStamps(unit.Data.Span);
             if (!statement.Snapshot.IsVisible(writer) || deleter != TransactionSequence.None && statement.Snapshot.IsVisible(deleter))
             { continue; }
-            // Discard invisible private copies before consulting page ownership. Rollback may
-            // free/reassign an uncommitted page after the iterator copied a row from it. A visible
-            // row's page instead stays retained by this snapshot and the reclamation epoch.
-            if (page != unit.PageId)
-            {
-                using var header = _storage.PageManager.GetPage(unit.PageId);
-                targetPage = header.Page.OwnerId == plan.Table.ObjectId;
-                page = unit.PageId;
-            }
-            if (!targetPage) { continue; }
             statement.Metrics.RecordsExamined++;
             var values = DecodeRow(unit.Data, unit.PageId, unit.SlotIndex, plan.Table, defaults, out _, out _);
             for (int i = 0; i < plan.Projections.Count; i++)
@@ -106,6 +113,8 @@ internal sealed partial class SqlPlanExecutor
             await WriteAsync().ConfigureAwait(false);
             count++;
         }
+        cancellationToken.ThrowIfCancellationRequested();
+        if (buffered > 0) { await DeliverAsync(buffered).ConfigureAwait(false); }
         return new SqlQueryResult(DatabaseResultStatus.Success, count);
     }
 }

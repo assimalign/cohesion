@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql.Protocol;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
@@ -19,10 +20,31 @@ internal sealed partial class SqlDatabaseServerSession
         var sink = new CopyFrameStream(this);
         try
         {
+            if (string.IsNullOrWhiteSpace(request.Statement))
+            {
+                throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.ExecuteStatementCoreAsyncFailure, "CS00003", ErrorMessages.CopyStatementMissing),
+                    [new Diagnostic { Code = "CS00003", Message = ErrorMessages.CopyStatementMissing, Severity = DiagnosticSeverity.Error }]);
+            }
             long rows = await _databaseSession!.CopyToAsync(request.Statement, sink, cancellationToken).ConfigureAwait(false);
             await sink.StartAsync(cancellationToken).ConfigureAwait(false);
             await WriteFrameAsync((ProtocolMessageType)SqlProtocolMessageType.CopyComplete,
                 new ProtocolCopyCompleteMessage(rows, sink.ByteCount).Encode(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (EndOfStreamException)
+        {
+            // EOF at the acknowledgment frame boundary is a normal peer half-close.
+            // CopyToAsync has already released its snapshot and session hold.
+            _closeReason = Volatile.Read(ref _abortRequested) == 0
+                ? SqlDatabaseEventSource.CloseReason.PeerClosed : SqlDatabaseEventSource.CloseReason.Cancelled;
+            return;
+        }
+        catch (OperationCanceledException) when (_connection.ConnectionClosed.IsCancellationRequested && Volatile.Read(ref _abortRequested) == 0)
+        {
+            // TCP can publish its receive EOF through ConnectionClosed before the frame
+            // reader resumes. That is the same peer close, not a server cancellation.
+            _closeReason = SqlDatabaseEventSource.CloseReason.PeerClosed;
+            return;
         }
         catch (DatabaseParseException exception)
         {
@@ -70,7 +92,8 @@ internal sealed partial class SqlDatabaseServerSession
                 // may be unbounded; require the consumer's acknowledgment before advancing.
                 // No page latch or writer lock is held across this read.
                 var acknowledgment = await _owner._reader!.ReadFrameAsync(cancellationToken).ConfigureAwait(false);
-                if (acknowledgment is not { } received || received.Type != (ProtocolMessageType)SqlProtocolMessageType.CopyAcknowledged || !received.Payload.IsEmpty)
+                if (acknowledgment is not { } received) { throw new EndOfStreamException(); }
+                if (received.Type != (ProtocolMessageType)SqlProtocolMessageType.CopyAcknowledged || !received.Payload.IsEmpty)
                 { throw new ProtocolException("CK07005: " + ErrorMessages.CopyAcknowledgmentInvalid); }
                 ByteCount = checked(ByteCount + length);
                 buffer = buffer[length..];

@@ -16,15 +16,17 @@ public sealed partial class SqlDatabaseSession
 
     /// <summary>Exports one table as UTF-8 text or CSV to a caller-owned destination.</summary>
     /// <param name="statement">A COPY table TO STDOUT statement.</param>
-    /// <param name="destination">The writable destination, left open on every outcome.</param>
+    /// <param name="destination">The writable destination, left open on every outcome; it must honor cancellation.</param>
     /// <param name="cancellationToken">Cancellation token for binding, scanning and delivery.</param>
     /// <returns>The number of exported data rows, excluding an optional header.</returns>
     /// <exception cref="ArgumentException">The statement is blank or the destination is not writable.</exception>
     /// <exception cref="ArgumentNullException">The destination is null.</exception>
-    /// <exception cref="InvalidOperationException">Another export is active.</exception>
+    /// <exception cref="InvalidOperationException">A statement, export or transaction control holds the session.</exception>
     /// <exception cref="DatabaseException">Parsing, binding or execution fails, including COPY inside BEGIN.</exception>
     /// <exception cref="OperationCanceledException">The operation is canceled.</exception>
-    /// <exception cref="IOException">The destination cannot accept the export.</exception>
+    /// <exception cref="Exception">The destination's original exception is rethrown unchanged after cleanup.</exception>
+    /// <remarks>Session disposal cancels and waits for the export. The destination must honor
+    /// cancellation and must not reenter this session from its write callbacks.</remarks>
     public async ValueTask<long> CopyToAsync(string statement, Stream destination, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(statement);
@@ -39,7 +41,8 @@ public sealed partial class SqlDatabaseSession
         bool entered = false;
         try
         {
-            if (!TryEnterOperation()) { throw new InvalidOperationException(ErrorMessages.CopyAlreadyActive); }
+            if (!TryEnterOperation())
+            { throw new InvalidOperationException(Volatile.Read(ref _copyOperation) is null ? ErrorMessages.CopySessionBusy : ErrorMessages.CopyAlreadyActive); }
             entered = true;
             // Publish before Execute's closed-session check. Disposal either cancels and joins
             // this operation, or closes first and Execute refuses before taking a snapshot.
@@ -57,6 +60,30 @@ public sealed partial class SqlDatabaseSession
             }
             await operation.CompleteAsync().ConfigureAwait(false);
         }
+    }
+
+    // Reuse the existing execution state machine and its finally: ordinary statements gain
+    // no wrapper/task/state field. BEGIN and SAVEPOINT already own root admission internally.
+    private long EnterStatementExecution(SqlQueryRequest request)
+    {
+        if (CopyDestination(request) is null)
+        {
+            if (Volatile.Read(ref _copyOperation) is not null) { throw new InvalidOperationException(ErrorMessages.CopyAlreadyActive); }
+            if (request.Statement.SqlExpression is not SqlTransactionExpression && !TryEnterOperation())
+            {
+                // Preserve an active transaction's more specific recovery/state refusal.
+                ThrowIfPartialUndoPending();
+                ThrowIfTransactionRefuses();
+                throw new InvalidOperationException(ErrorMessages.CopySessionBusy);
+            }
+        }
+        try { return _database.TableReclamation.EnterStatement(); }
+        catch { ExitExecution(request); throw; }
+    }
+
+    private void ExitExecution(SqlQueryRequest request)
+    {
+        if (request.Statement.SqlExpression is not SqlTransactionExpression && CopyDestination(request) is null) { ExitOperation(); }
     }
 
     /// <inheritdoc />

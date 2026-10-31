@@ -39,8 +39,8 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// Wire result encoding is part of statement execution (#1651). A statement is admitted
 /// into the transaction through the base's operation admission, so a commit cannot start while it
 /// runs, and a transaction that refuses work (its commit or rollback is running, or the kernel
-/// ended it under its caller) refuses the statement. Statements do not hold the session (the
-/// base's operation hold): sessions are single-threaded by contract, as before the bases.
+/// ended it under its caller) refuses the statement. Statements and COPY share the base's
+/// operation hold; BEGIN and SAVEPOINT controls take that hold internally.
 /// </para>
 /// <para>
 /// <b>Transaction control through statement text.</b> <c>BEGIN</c> on a session with a usable
@@ -304,6 +304,10 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
     private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
         if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
+        // Refuse before a competing request can replace the active export's timer state.
+        // The export's own internal request still uses the ordinary execution pipeline.
+        if (Volatile.Read(ref _copyOperation) is { } copy && !ReferenceEquals(copy.Request, request))
+        { throw new InvalidOperationException(ErrorMessages.CopyAlreadyActive); }
         if (!_resetValuesCaptured)
         {
             _initialStatementTimeout = _statementTimeout;
@@ -357,7 +361,7 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
         // The statement's own metrics are the ones set after this point; a statement that fails
         // before it runs leaves the previous statement's, which never classify this one.
         var previousMetrics = _lastStatementMetrics;
-        long readerEpoch = _database.TableReclamation.EnterStatement();
+        long readerEpoch = EnterStatementExecution(request);
         try
         {
             if (_provisioningSchema is null && _database.SchemaProvisioner.Deferred is not null)
@@ -419,7 +423,8 @@ public sealed partial class SqlDatabaseSession : DatabaseLanguageSession<SqlQuer
             {
                 // The session retains metrics after execution, but wire buffers belong to delivery.
                 if (_lastStatementMetrics is not null) { _lastStatementMetrics.ResultPreparation = null; }
-                _database.TableReclamation.ExitStatement(readerEpoch);
+                try { _database.TableReclamation.ExitStatement(readerEpoch); }
+                finally { ExitExecution(request); }
             }
         }
     }

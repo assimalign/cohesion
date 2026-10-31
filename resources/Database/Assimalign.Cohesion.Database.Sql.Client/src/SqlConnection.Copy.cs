@@ -25,7 +25,8 @@ public sealed partial class SqlConnection
     /// <exception cref="InvalidOperationException">Another command is active.</exception>
     /// <exception cref="OperationCanceledException">The operation is canceled; its connection is discarded.</exception>
     /// <exception cref="SqlClientException">The capability is absent or the server or protocol rejects the export.</exception>
-    /// <exception cref="IOException">Destination delivery fails; its connection is discarded.</exception>
+    /// <exception cref="Exception">The destination's original exception is rethrown unchanged after
+    /// the incomplete exchange is torn down and its connection discarded.</exception>
     /// <remarks>Retains bounded buffers. Failure may leave a partial export in the destination.
     /// Coded statement errors before streaming preserve the connection and transaction. Late, canceled or
     /// malformed transfers discard the connection; missing capability refuses before sending.
