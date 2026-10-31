@@ -1,5 +1,10 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+Eligible stored-table INNER/CROSS graphs use exact join-order search through eight inputs
+and deterministic bounded connected greedy search above eight. EXPLAIN reports the chosen
+order and search work; legality barriers and zero additional retained execution memory govern
+both paths (#1629).
+
 SqlDatabaseSession.CopyToAsync and its negotiated SQL outbound stream export physical tables as snapshot-consistent UTF-8 text/CSV (#1724).
 
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.

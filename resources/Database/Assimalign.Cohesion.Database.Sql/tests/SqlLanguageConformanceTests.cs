@@ -23,6 +23,28 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Conformance: heuristic join search preserves output columns, ordering and EXPLAIN (#1629)")]
+    public async Task ExecuteAsync_LargeJoinSearchCorpus_ShouldPreserveColumns()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("large-search-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(id INT PRIMARY KEY,k INT)");
+        await ExecuteAsync(session, "CREATE TABLE s(id INT PRIMARY KEY,k INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(2,2),(1,1)");
+        await ExecuteAsync(session, "INSERT INTO s VALUES(1,1)");
+        string from = "t r0,t r1," + string.Join(',', Enumerable.Range(2, 10).Select(i => $"s r{i}"));
+        string query = "SELECT r11.id,r1.id,r0.id FROM " + from + " WHERE " +
+            string.Join(" AND ", Enumerable.Range(1, 11).Select(i => $"r{i - 1}.k=r{i}.k"));
+
+        // Act / Assert
+        await ExpectRowsAsync(session, query + " ORDER BY r0.id", [[1, 1, 1]]);
+        (await RowsAsync(session, "EXPLAIN " + query)).SelectMany(row => row).OfType<string>()
+            .ShouldContain(detail => detail.Contains("join_search=greedy_connected", StringComparison.Ordinal) &&
+                detail.Contains("collapse_limit=8", StringComparison.Ordinal));
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: exact join search retains written output ordinals and ordering (#1629)")]
     [InlineData("a JOIN b ON a.id=b.id JOIN c ON b.id=c.id")]
     [InlineData("a CROSS JOIN b CROSS JOIN c WHERE a.id=b.id AND b.id=c.id")]

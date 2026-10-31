@@ -9647,8 +9647,8 @@ Three through eight eligible stored-table relations use subset dynamic programmi
 all ordered binary partitions, including bushy trees and Cartesian partitions. Each subset
 keeps one minimum-cost tree; its cardinality depends only on the relation set and mandatory
 predicates, so child costs are reusable. The default exact limit is eight relations. One/two
-relations retain the previous costing/allocation path. Larger graphs retain bound order until
-SQ-Z2 supplies its bounded heuristic. Search allocates no persistent statistics or public API,
+relations retain the previous costing/allocation path. Larger graphs use the bounded heuristic
+below. Search allocates no persistent statistics or public API,
 changes no format or wire contract, and introduces no diagnostic identity.
 
 The legal graph deliberately implements a conservative subset of PostgreSQL's outer-join
@@ -9662,8 +9662,8 @@ input filters. Normalized seeks apply their local filter in the joined ordinal f
 the probe bypasses the input reader; scan fallback uses the input reader's filter instead.
 Reference-identity deduplication prevents repeating bound local conjuncts during graph assembly.
 Volatile and set-returning expressions are never moved into a different evaluation level.
-UPDATE FROM, DELETE USING and MERGE search only their source graph (two through eight
-sources); the target remains outside it at the original target/source boundary. MERGE's root
+UPDATE FROM, DELETE USING and MERGE search only their source graph (exact for two through
+eight sources, greedy above eight); the target remains outside it at the original target/source boundary. MERGE's root
 outer kind, ON predicate and presence tracking remain unchanged.
 Flat UPDATE/DELETE WHERE conjuncts referencing both target and sources are a dependency
 barrier: source probes are parameterized by the target row, and replacing them with an
@@ -9726,6 +9726,75 @@ src/backend/optimizer/path/joinrels.c:355-676 (legality and LATERAL constraints)
 src/backend/optimizer/plan/initsplan.c:2018-2110 (make_outerjoininfo and FULL's fixed sets).
 src/backend/utils/misc/guc_parameters.dat:1107-1114,1186-1192,1537-1544 keeps the collapse
 defaults of eight and GEQO's distinct threshold of twelve as separate policies.
+
+### Bounded large-join search (#1629, SQ-Z2)
+
+Above eight eligible relations, `greedy_connected` compares every ordered seed pair,
+then repeatedly adds one remaining relation to the chosen component. Connected extensions
+precede Cartesian extensions; work, estimated retained memory and ascending binding ordinals
+settle ties, in that order. This is greedy operator ordering with a left-deep pruning rule:
+there are no bushy alternatives, exact refinement windows, random seeds or restart rounds.
+Left-deep pruning avoids spending search on new materialized trees that SQ-Z1's physical
+memory certificate cannot admit. Physical alternatives are likewise pruned to the bound
+plan's existing index/hash paths when their outer keys are available. New hash builds and
+new index paths are not proposed. The common work function retains the exact search's loop,
+index and hash formulas. The final candidate must have strictly lower total estimated work,
+no greater estimated retention, and pass the unchanged SQ-Z1 physical retention certificate;
+otherwise the original costed plan survives, including expression hash keys, activation
+prefixes, target buffers, partial-index proofs and multiple-match refusals. Existing hash
+builds and DML buffering therefore often prevent an otherwise cheaper reorder.
+
+Both search sizes enter through the same legality proof, including whole-SELECT outer-join,
+derived/view/system, subquery, unsafe-expression and target-dependency barriers. The heuristic
+uses ordinal-indexed component arrays and sorted predicate-reference arrays; it has no added
+relation cap. The eight-input DP keeps its `int` masks and four-bit order representation.
+At least 64 and 65 inputs are exercised, including a reference to binding 64 and local
+restriction there. Cardinalities implement the same product/selectivity model in logarithms
+to avoid intermediate overflow and NaN when an empty input follows a huge product;
+the 1e100 cap and the existing unknown/incomplete/input-selectivity defaults are unchanged.
+
+For n inputs, seed/extension comparisons are exactly
+`n*(n-1) + (n-2)*(n-1)/2 = (n-1)*(3*n-2)/2`. Total join cost evaluations add
+`2*(n-1)` for the written plan and winner materialization. State count is `2*n-1`
+(n inputs and n-1 selected prefixes). With R total predicate references and C physical
+columns, graph search takes `O(n*n*(n+R))` work after the common safety proof/input costing.
+It allocates no candidate object per comparison: working and resulting storage is
+`O(n+P+R+C+L)`, where P is conjunct count and L is the emitted order's character count.
+Input access costing retains its existing bounded probes and catalog-index enumeration.
+All counters use 64-bit integers where quadratic growth requires it; cancellation is checked
+at every candidate. No new planning refusal or diagnostic identity is needed.
+
+EXPLAIN reports `join_search=greedy_connected` only for an admitted winner; rejected or tied
+candidates report `join_search=bound`. Both carry `collapse_limit=8`, `chosen_order`,
+`reordered`, `search_method=greedy_connected`, `search_states`, `search_pairs`,
+`search_cost_evaluations` and the existing source/target scope. Evidence lives in a separate
+internal derived plan so neither ordinary nor exact-plan allocation sizes grow.
+
+Physical planning measurements time `Cost` (including its snapshot probes, excluding parse,
+binding and fixture setup), warmed and taking the minimum of three rounds. Chain, star,
+clique and two disconnected components are measured at 2/8/16/64 inputs, with a 65-input
+boundary regression. Durations are reported, never asserted. Tests pin the historical exact
+kernel's 3/255 states and 2/6050 partitions at 2/8, and the heuristic's 31/127 states,
+345/5985 comparisons and 375/6111 evaluations at 16/64. Representative fixture allocation
+ceilings are `32768 + 8192*n + 4096*P` bytes above eight, or
+`32768 + 8192*partitions + 4096*P` at 2/8; these are guard ceilings for the measured schema,
+not a universal grant for arbitrary column/predicate widths. Generated 9-20 input result
+oracles cover NULLs, duplicates, non-equi and multi-column ON/WHERE conditions; large barrier,
+volatile/sequence-count, DML, memory-admission and InMemory/TCP cases retain SQ-Z1's contracts.
+The skewed 16-input chain/star fixtures reduce executed candidate pairs from 24000 to 93;
+a connected greedy trap is estimated worse and keeps the written plan.
+
+PostgreSQL reference anchors in `C:/Source/repos/postgres/postgres`:
+`src/backend/optimizer/path/allpaths.c:3830-3908` (`make_rel_from_joinlist`, nested sublists
+and the separate GEQO threshold), `:3913-3992` (`standard_join_search` and level DP),
+`src/backend/optimizer/plan/initsplan.c:1396-1413,1538-1563,1741-1756`
+(`deconstruct_jointree`, FROM/JOIN collapse limits and FULL boundaries), and
+`src/backend/optimizer/geqo/geqo_main.c:111-128` plus `geqo_random.c:19-43`
+(seeded random initialization and genetic search). Collapse-limit decomposition was not
+chosen because written sublists can conceal the selective relation; GEQO was not chosen
+because it uses seeded pseudorandom genetic search. This run requires no randomness and
+a fixed bound on comparisons in binding-ordinal order.
+The collapse default of eight remains distinct from PostgreSQL's GEQO default of twelve.
 
 ### Existing costing contract
 

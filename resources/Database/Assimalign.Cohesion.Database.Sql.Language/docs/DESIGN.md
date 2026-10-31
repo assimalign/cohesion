@@ -360,8 +360,11 @@ so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
 retains visible output ordinals separately from physical association slots; plain DML is unchanged.
-Equality-driven steps follow written source order; DIALECT.md documents the dependence and the
-source-order workaround pending general join-order search in #1629. No reordering is introduced.
+Eligible source graphs now use exact search through eight sources and deterministic bounded
+connected greedy growth above eight (#1629). The engine retains the target boundary, physical
+output ordinals, parameterized-source barriers and zero additional retained-memory certificate.
+DIALECT.md records the legality, work bounds and EXPLAIN evidence; parsing, profiles and persisted
+syntax representations are unchanged.
 
 ## Cascade progress and deadlock diagnostics (w11 review)
 

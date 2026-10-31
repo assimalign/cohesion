@@ -39,6 +39,7 @@ internal sealed partial class SqlPlanExecutor
         var sourceSteps = sourceTree is null ? plan.Steps : TreeSteps(sourceTree).ToArray();
         if (sourceSteps.Any(step => step.Kind is not (SqlJoinType.Inner or SqlJoinType.Cross))) { return null; }
         var terms = new List<(int Mask, SqlBoundExpression Expression)>();
+        var largeTerms = count > SqlJoinSearch.ExactRelationLimit ? new List<(int[] Bindings, SqlBoundExpression Expression)>() : null;
         var targetTerms = new List<SqlBoundExpression>();
         var seen = new HashSet<SqlBoundExpression>(ReferenceEqualityComparer.Instance);
         foreach (var expression in sourceSteps.Select(step => step.Condition).Append(plan.Where))
@@ -49,19 +50,37 @@ internal sealed partial class SqlPlanExecutor
                 var columns = new HashSet<int>();
                 if (!SqlPlanner.JoinRestrictionColumns(term, columns, plan.Columns)) { return null; }
                 int mask = 0;
+                List<int>? members = largeTerms is null ? null : new();
                 bool target = false;
+                bool source = false;
                 foreach (int ordinal in columns)
                 {
                     int binding = BindingOf(ordinal);
                     if (binding < start) { target = true; }
-                    else { mask |= 1 << (binding - start); }
+                    else
+                    {
+                        source = true;
+                        if (members is null) { mask |= 1 << (binding - start); }
+                        else if (!members.Contains(binding - start)) { members.Add(binding - start); }
+                    }
                 }
                 // A flat UPDATE/DELETE source can be parameterized by the target's row.
                 // Independent source materialization would discard those indexed probes.
-                if (target && mask != 0 && boundary is null) { return null; }
+                if (target && source && boundary is null) { return null; }
                 if (target) { targetTerms.Add(term); }
+                else if (members is not null)
+                {
+                    if (members.Count == 0) { members.Add(0); }
+                    members.Sort();
+                    largeTerms!.Add((members.ToArray(), term));
+                }
                 else { terms.Add((mask == 0 ? 1 : mask, term)); }
             }
+        }
+        if (largeTerms is not null)
+        {
+            if (boundary is not null && targetTerms.Count != 0) { throw new System.Diagnostics.UnreachableException(); }
+            return SearchLargeJoinOrder(plan, sourceOnly, largeTerms, targetTerms, choose, probe, costBound, retainedFrames, cancellationToken);
         }
         var inputs = plan.Inputs.Select((input, i) =>
             input with { Access = choose(plan.Bindings[i].Source.Table!, input.Access) }).ToArray();
@@ -235,17 +254,7 @@ internal sealed partial class SqlPlanExecutor
             var keys = SqlPlanner.HashKeys(condition, plan.Bindings, plan.Columns, inner,
                 fullFrame: true, innerMask: right << start);
             SqlJoinIndexPath? access = BitOperations.IsPow2(right) ? IndexPath(inner, left << start, crossing) : null;
-            double work = rows[left] * rows[right];
-            if (access is not null)
-            {
-                double seek = rows[left] * (1 + Math.Log2(baseRows[inner - start] + 1));
-                // Unique probes bound candidate work even with duplicate outer keys.
-                if (seek <= work || access.Index.IsUnique && access.OuterOrdinals.Count == access.Index.ColumnNames.Count) { work = seek; }
-                else { access = null; }
-            }
-            double hash = 4 * (rows[left] + rows[right]);
-            if (keys is null || hash >= work) { keys = null; }
-            else { access = null; work = hash; }
+            double work = SearchJoinWork(rows[left], rows[right], baseRows[inner - start], ref access, ref keys);
             return (new(inner, condition is null ? SqlJoinType.Cross : SqlJoinType.Inner, condition, access) { Hash = keys }, work);
         }
 
@@ -312,6 +321,22 @@ internal sealed partial class SqlPlanExecutor
             for (int i = 1; i < original.Bindings.Count; i++) { order = "(" + order + "," + i.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")"; }
             return order;
         }
+    }
+
+    private static double SearchJoinWork(double outerRows, double innerRows, double baseInnerRows,
+        ref SqlJoinIndexPath? access, ref SqlHashJoinPath? keys)
+    {
+        double work = outerRows * innerRows;
+        if (access is not null)
+        {
+            double seek = outerRows * (1 + Math.Log2(baseInnerRows + 1));
+            if (seek <= work || access.Index.IsUnique && access.OuterOrdinals.Count == access.Index.ColumnNames.Count) { work = seek; }
+            else { access = null; }
+        }
+        double hash = 4 * (outerRows + innerRows);
+        if (keys is null || hash >= work) { keys = null; }
+        else { access = null; work = hash; }
+        return work;
     }
 
     private static bool IsLeftDeep(SqlJoinTree tree) => tree.Step is null || tree.Right!.Step is null && IsLeftDeep(tree.Left!);

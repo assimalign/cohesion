@@ -57,7 +57,7 @@ internal static class SqlJoinSearch
 }
 
 /// <summary>Search evidence exists only on searched plans; ordinary plan sizes stay unchanged.</summary>
-internal sealed record SqlSearchedJoinPlan : SqlJoinPlan
+internal record SqlSearchedJoinPlan : SqlJoinPlan
 {
     internal SqlSearchedJoinPlan(SqlJoinPlan original, int states, int partitions, double cost,
         string order, bool reordered, bool sourceOnly) : base(original)

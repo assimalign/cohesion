@@ -405,7 +405,7 @@ public sealed class SqlJoinOrderSearchTests
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: above eight relations retains the bound order for SQ-Z2 (#1629)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: large empty graphs retain bound order after equal-cost heuristic search (#1629)")]
     [InlineData(9)]
     [InlineData(16)]
     public async Task Cost_AboveExactLimit_ShouldKeepBoundOrder(int count)
@@ -422,10 +422,11 @@ public sealed class SqlJoinOrderSearchTests
         {
             // Act
             var selected = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions)
-                .Cost(written, new(transaction, database.Coordinator), CancellationToken.None).ShouldBeOfType<SqlJoinPlan>();
+                .Cost(written, new(transaction, database.Coordinator), CancellationToken.None).ShouldBeOfType<SqlHeuristicJoinPlan>();
 
             // Assert
             selected.Steps.Select(step => step.Binding).ShouldBe(Enumerable.Range(1, count - 1));
+            selected.Accepted.ShouldBeFalse();
         }
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }

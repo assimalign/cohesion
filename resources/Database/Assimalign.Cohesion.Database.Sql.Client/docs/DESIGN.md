@@ -1,10 +1,12 @@
 # Database.Sql.Client — Design
 
-## Exact join-order search over the existing exchange (#1629, SQ-Z1)
+## Join-order search over the existing exchange (#1629, SQ-Z1/SQ-Z2)
 
 InMemory and TCP return stable written-column results after cost-based join reassociation.
-EXPLAIN carries chosen_order, reordered, exact_dp/bound and search work counts in existing
+EXPLAIN carries chosen_order, reordered, exact_dp/greedy_connected/bound and search work counts in existing
 plan detail columns. No client API, capability, frame or protocol version changes are required.
+The wire corpus exercises a reordered 12-relation join over both transports and pins the
+heuristic name, collapse limit and deterministic component-pair count.
 
 ## Savepoint lifecycle conformance (#1726, XT-5)
 

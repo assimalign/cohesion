@@ -140,6 +140,9 @@ internal static class Program
     private const string fullJoin = "SELECT Id, a.Id, b.Id FROM customers a FULL JOIN (SELECT CAST(3 AS BIGINT) AS Id) b USING(Id) ORDER BY Id";
     private const string rightJoin = "SELECT a.Id, b.Id FROM customers a RIGHT OUTER JOIN customers b ON a.Id = b.Id AND a.Id = 1 ORDER BY b.Id";
     private const string crossJoin = "SELECT COUNT(*) FROM customers a, customers b CROSS JOIN customers c";
+    private static readonly string _largeJoin = "SELECT r0.Id,r11.Id FROM " +
+        "large_join_input r0,large_join_input r1," + string.Join(',', Enumerable.Range(2, 10).Select(i => $"large_join_seed r{i}")) + " WHERE " +
+        string.Join(" AND ", Enumerable.Range(1, 11).Select(i => $"r{i - 1}.k=r{i}.k"));
     private const string correlatedRows = "SELECT c.Id, (SELECT other.Score FROM customers other WHERE other.Id = c.Id) FROM customers c " +
         "WHERE EXISTS (SELECT other.Id FROM customers other WHERE other.Id = c.Id) AND c.Id IN (SELECT other.Id FROM customers other WHERE other.Id = c.Id) ORDER BY c.Id";
     private const string correlatedCardinality = "SELECT (SELECT other.Id FROM customers other WHERE other.Id = c.Id OR c.Id = 2) FROM customers c ORDER BY c.Id";
@@ -400,6 +403,13 @@ internal static class Program
         Check("in process: FULL merged grouping keys", await RowsAsync(session, fullGroup), [[1L, 1L], [2L, 1L], [3L, 1L]]);
         Check("in process: three-way USING and LEFT", await RowsAsync(session, expandedJoin), [[1L, 1L], [2L, null]]);
         Check("in process: comma and CROSS", await RowsAsync(session, crossJoin), [[8L]]);
+        await session.ExecuteAsync("CREATE TABLE large_join_input(id BIGINT PRIMARY KEY,k BIGINT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE large_join_seed(id BIGINT PRIMARY KEY,k BIGINT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO large_join_input VALUES(1,1),(2,2),(3,3)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO large_join_seed VALUES(1,1)", cancellationToken: CancellationToken.None);
+        Check("in process: large greedy join", await RowsAsync(session, _largeJoin), [[1L, 1L]]);
+        Check("in process: greedy EXPLAIN", (await RowsAsync(session, "EXPLAIN " + _largeJoin)).SelectMany(row => row).OfType<string>()
+            .Any(detail => detail.Contains("join_search=greedy_connected", StringComparison.Ordinal)), true);
         Check("in process: set operations", await RowsAsync(session, setOperations), [[2L]]);
         Check("in process: set subquery", await RowsAsync(session, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)"), [[2L]]);
         Check("in process: quantified comparisons", await RowsAsync(session, "SELECT 1 = ANY (SELECT 1 UNION ALL SELECT NULL), NULL <> SOME (SELECT 1 WHERE FALSE), NULL < ALL (SELECT 1 WHERE FALSE), 1 > ALL (SELECT NULL)"), [[true, false, true, null]]);
@@ -713,6 +723,9 @@ internal static class Program
         Check("over the wire: FULL merged grouping keys", await RowsAsync(connection, fullGroup, timeout.Token), [[1L, 1L], [2L, 1L], [3L, 1L]]);
         Check("over the wire: three-way USING and LEFT", await RowsAsync(connection, expandedJoin, timeout.Token), [[1L, 1L], [2L, null]]);
         Check("over the wire: comma and CROSS", await RowsAsync(connection, crossJoin, timeout.Token), [[8L]]);
+        Check("over the wire: large greedy join", await RowsAsync(connection, _largeJoin, timeout.Token), [[1L, 1L]]);
+        Check("over the wire: greedy EXPLAIN", (await RowsAsync(connection, "EXPLAIN " + _largeJoin, timeout.Token)).SelectMany(row => row).OfType<string>()
+            .Any(detail => detail.Contains("join_search=greedy_connected", StringComparison.Ordinal)), true);
         Check("over the wire: set operations", await RowsAsync(connection, setOperations, timeout.Token), [[2L]]);
         Check("over the wire: set subquery", await RowsAsync(connection, "SELECT Id FROM customers WHERE Id IN (SELECT Id FROM customers EXCEPT SELECT Id FROM customers WHERE Id = 1)", timeout.Token), [[2L]]);
         Check("over the wire: quantified correlation", await RowsAsync(connection, "SELECT c.Id, c.Id >= ALL (SELECT d.Id FROM customers d WHERE d.Id <= c.Id), c.Id = SOME (SELECT d.Id FROM customers d WHERE d.Id > c.Id), (SELECT 1 / (c.Id - c.Id)) = ANY (SELECT d.Id FROM customers d WHERE d.Id = c.Id AND FALSE) FROM customers c ORDER BY c.Id", timeout.Token), [[1L, true, false, false], [2L, true, false, false]]);

@@ -16,6 +16,10 @@ internal sealed partial class SqlPlanner
 {
     private static string JoinSearchDetail(SqlJoinPlan plan)
     {
+        if (plan is SqlHeuristicJoinPlan heuristic)
+        {
+            return $"; join_search={(heuristic.Accepted ? "greedy_connected" : "bound")}; collapse_limit={SqlJoinSearch.ExactRelationLimit}; chosen_order={heuristic.ChosenOrder}; reordered={heuristic.Reordered.ToString().ToLowerInvariant()}; search_method=greedy_connected; search_states={heuristic.States}; search_pairs={heuristic.ComponentPairs}; search_cost_evaluations={heuristic.CostEvaluations}; search_scope={(heuristic.SourceOnly ? "source_only; target_boundary=fixed" : "select")}";
+        }
         if (plan is SqlSearchedJoinPlan searched)
         {
             return $"; join_search=exact_dp; collapse_limit={SqlJoinSearch.ExactRelationLimit}; chosen_order={searched.ChosenOrder}; reordered={searched.Reordered.ToString().ToLowerInvariant()}; search_states={searched.States}; search_partitions={searched.Partitions}; search_scope={(searched.SourceOnly ? "source_only; target_boundary=fixed" : "select")}";
