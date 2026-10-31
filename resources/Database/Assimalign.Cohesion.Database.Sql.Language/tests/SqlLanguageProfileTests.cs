@@ -17,6 +17,9 @@ public class SqlLanguageProfileTests
 {
     [Theory]
     [InlineData(SqlClauses.Select, "SELECT 1;")]
+    [InlineData(SqlClauses.JsonValue, "SELECT JSON_VALUE(doc,'$.a' RETURNING INT) FROM t;")]
+    [InlineData(SqlClauses.JsonQuery, "SELECT JSON_QUERY(doc,'$[*]' WITH WRAPPER) FROM t;")]
+    [InlineData(SqlClauses.JsonExists, "SELECT JSON_EXISTS(doc,'$.a') FROM t;")]
     [InlineData(SqlClauses.SetOperation, "SELECT a FROM t UNION SELECT a FROM u;")]
     [InlineData(SqlClauses.Intersect, "SELECT a FROM t INTERSECT SELECT a FROM u;")]
     [InlineData(SqlClauses.Except, "SELECT a FROM t EXCEPT SELECT a FROM u;")]

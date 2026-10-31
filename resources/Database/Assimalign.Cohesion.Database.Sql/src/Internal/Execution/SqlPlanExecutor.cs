@@ -92,6 +92,8 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if ((plan.ContainsJsonPath || _definitions.ContainsJsonPaths) && !SqlJsonPathExecution.IsStatement(statement.Metrics))
+        { return ExecuteJsonStatementAsync(plan, statement, cancellationToken); }
         if (plan.ContainsRecursion && RecursiveState is null)
         { return ExecuteRecursiveStatementAsync(plan, statement, cancellationToken); }
         // Set before WITH and subquery materialization, and retain it in every child read.
@@ -100,6 +102,13 @@ internal sealed partial class SqlPlanExecutor
             ? ExecuteJoinedStatementAsync(plan, statement, cancellationToken)
             : statement.Metrics.IsAnalyzing ? ExecuteAnalyzedAsync(plan, statement, cancellationToken)
             : ExecuteCoreAsync(plan, statement, cancellationToken);
+    }
+
+    private async Task<DatabaseResult> ExecuteJsonStatementAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        using var work = SqlJsonPathExecution.ForStatement(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken);
+        work.Enter();
+        return await ExecuteAsync(plan, statement, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<DatabaseResult> ExecuteAnalyzedAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)

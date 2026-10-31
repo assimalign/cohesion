@@ -132,6 +132,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return BindDistinct(distinct, out collation, statisticsInput);
             case SqlBooleanTestExpression test:
                 return BindBooleanTest(test, out collation, statisticsInput);
+            case SqlJsonFunctionExpression jsonFunction:
+                return BindJsonFunction(jsonFunction, out collation, statisticsInput);
             case SqlIsJsonExpression json:
                 return BindIsJson(json, out collation, statisticsInput);
             case SqlIsNullExpression isNull:
@@ -476,6 +478,8 @@ internal sealed partial class SqlExpressionEvaluator
                 }
             case SqlCastExpression inner:
                 return TryResolveCastTarget(inner) is { IsDomain: true } target ? target : null;
+            case SqlJsonFunctionExpression json:
+                return JsonReturning(json) is { IsDomain: true } jsonTarget ? jsonTarget : null;
             default:
                 return null;
         }

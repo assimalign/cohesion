@@ -77,6 +77,13 @@ An in-memory regression returns an authenticated rental to its pool and leaves t
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
 
+## SQL/JSON path wire conformance (#1722, SQ-N2)
+
+InMemory and TCP carry parameterized paths, INTEGER values, JSONB wrapper bytes,
+Boolean existence and SQL NULL/default results. Structured path, context, cardinality,
+empty and structural refusals leave the connection usable. No client API or wire format
+change is required.
+
 ## JSON access wire conformance (#1722, SQ-N1)
 
 InMemory and TCP preserve JSON text, JSONB bytes, unescaped extraction text, Boolean

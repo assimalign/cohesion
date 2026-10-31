@@ -69,6 +69,7 @@ internal sealed class SqlQueryExecutor
         SqlPlan plan;
         try
         {
+            using var jsonPlanning = SqlJsonPathExecution.BeginPlanning(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken);
             plan = planner.Plan(request.Statement.SqlExpression, statement.Snapshot);
         }
         catch (SqlUnsupportedQueryException exception)
@@ -82,7 +83,8 @@ internal sealed class SqlQueryExecutor
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
         var sequenceUsage = plan.SequenceUsage;
         if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
-        plan = executor.Cost(plan, statement, cancellationToken);
+        using (SqlJsonPathExecution.BeginPlanning(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken))
+        { plan = executor.Cost(plan, statement, cancellationToken); }
         return sequenceUsage is not null ? ExecuteSequencesAsync(executor, plan, statement, session, cancellationToken, sequenceUsage)
             : executor.ExecuteAsync(plan, statement, cancellationToken);
     }

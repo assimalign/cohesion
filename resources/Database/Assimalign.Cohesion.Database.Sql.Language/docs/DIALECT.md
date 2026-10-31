@@ -159,7 +159,7 @@ NULL-containing partial keys neither conflict nor take uniqueness locks, includi
 COHESION_SCHEMA.INDEXES and its nonstandard INFORMATION_SCHEMA.INDEXES alias expose nullable
 canonical PREDICATE text per key column. Views over these relations retain that text. Partial
 unique indexes are excluded from TABLE_CONSTRAINTS because their uniqueness is conditional.
-Current SQL record-space format is 32 and compiled-schema format is v11; earlier files and
+Current SQL record-space format is 33 and compiled-schema format is v11; earlier files and
 artifacts are refused with the existing coded format gates and no upgrade reader.
 
 
@@ -171,7 +171,7 @@ ON DELETE and ON UPDATE can appear in either order, once each; omitted actions i
 mean NO ACTION. Canonical constraint SQL renders ON DELETE before ON UPDATE. Duplicate actions
 and incomplete actions report CS00003. Action column lists remain CK00001.
 
-Catalog format 32 and compiled-schema v11 retain OnUpdate; INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
+Catalog format 33 and compiled-schema v11 retain OnUpdate; INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS
 and views over it report the stored UPDATE_RULE. CompiledSchemaConstraint exposes the action;
 the typed References builder keeps its existing declaration and defaults update metadata to NO ACTION.
 Declared provisioning scripts may carry the SQL clause and persistent views over its metadata.
@@ -1097,7 +1097,7 @@ src/backend/commands/tablecmds.c:2033-2090 and src/backend/catalog/heap.c:3701-3
 
 ## Statement matrix
 
-With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **87 of 89 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
+With INSERT ... ON CONFLICT (#1118), DML RETURNING (#1117), persisted CREATE/DROP VIEW (#1124), CREATE/DROP SCHEMA (#1030), set operations (#1114), quantified comparisons (#1718), UPDATE ... FROM / DELETE ... USING (#1714), TRUNCATE and CREATE TABLE AS (#1716), MERGE (#1715), aggregate FILTER (#1720), grouping sets (#1720), and sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717), window functions, frame modes, exclusion and NULL treatment (#1526) and identity, SERIAL and OVERRIDING forms (#1717), and foreign-key ON UPDATE declarations (#1723, SQ-F1), plus isolation options and SET TRANSACTION (#1012) and named savepoints (+3 clauses, #1726), and partial index predicates (#1630, SQ-P1), plus per-column index ordering (#1631, SQ-K1), the profile has **90 of 92 declared clauses** measured against the live SQL engine, including MERGE actions and RETURNING. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) includes one measured clause with demand-driven recursive fixpoints.
 Phase 22 measured 33 of 49.
 The earlier 32/48 figure included `JOIN`, `GROUP BY`, `HAVING`, and `SUBQUERY`,
 removed in Phase 12e (#1019–#1021), plus a no-op `CAST` removed in Phase 13.
@@ -1145,6 +1145,7 @@ complete ISO SQL support; the boundaries below are part of the contract.
 | `DROP INDEX` | Supported | `DROP INDEX [IF EXISTS] <name> ON <table>` — the `ON <table>` qualifier is required: index names are scoped per table |
 | `CASE` | Supported, measured | Simple and searched forms, multiple branches, `ELSE`, implicit null result, and row expressions; branch expressions remain limited to the executable scalar subset. |
 | `ORDER BY` | Supported subset, measured | Multiple source-column/scalar-expression keys, projection aliases (bare or nested in expressions), and one-based select-list ordinals execute with ASC/DESC. Unqualified aliases take precedence over same-named source columns; qualified references bind to the source. Composes with DISTINCT, LIMIT/OFFSET, supported joins, grouped/aggregate queries, and system relations. Zero, negative, out-of-range, and non-integer numeric ordinals error; `1 + 1` remains a constant expression. Explicit NULLS FIRST/LAST and derived-table output ordering execute; GROUP BY ordinals report `CK00001`. See the ordering contract below (#1024). |
+| `JSON_VALUE` / `JSON_QUERY` / `JSON_EXISTS` | Supported accessor subset, measured (+3 clauses) | Lax/strict paths, RETURNING, wrappers, quotes, empty/error behavior and statement budgets; see SQL/JSON path functions below. |
 | `CAST` | Supported subset, measured | Built-in conversions across all 19 shared types according to the [conversion matrix](#explicit-conversion-cast-1022-e3), plus application-registered casts (E3's cast registry), in projections, predicates, ordering, and DML expressions, including the SQL server/client. See the exact pair and error contract below. CAST executes in DEFAULT; CHECK still rejects CAST. |
 | `COLLATE` | Supported subset, measured | Column and expression overrides: `binary`, `case_insensitive`, `case_accent_insensitive`, plus compatibility `invariant` with scan execution only. Effective collation governs comparisons, `LIKE`, ordering, grouping, `DISTINCT`, and unique keys. See the collation contract below. |
 | `JOIN` / `USING` | Supported subset, measured | N-way INNER (or bare JOIN), LEFT [OUTER], RIGHT [OUTER], FULL [OUTER], CROSS and comma joins over stored/system/derived sources, with parenthesized join groups. INNER/LEFT/RIGHT/FULL require ON or USING; CROSS accepts neither. FULL requires hash-compatible conditions (CS05070 otherwise). NATURAL, LATERAL and qualified wildcards remain excluded. See the precise contract below. |
@@ -2346,7 +2347,7 @@ its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1
 and needs only the drop and create. Upgrading databases across format versions
-is tracked by #1152. Format 29 added owned-sequence metadata to format 28's shared sequence records and retained TYPE default assignment coercion. Format 30 added foreign-key ON UPDATE metadata; new databases use format 32 for index predicates; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
+is tracked by #1152. Format 29 added owned-sequence metadata to format 28's shared sequence records and retained TYPE default assignment coercion. Format 30 added foreign-key ON UPDATE metadata; new databases use format 33, retaining partial predicates and directed keys and fencing SQL/JSON function spelling; earlier files are refused. Recoverable table rewrite and dropped-ordinal compaction (#1265) reuse its existing records and TRUNCATE publication contract. SqlDatabase.RewriteTableAsync is a C# maintenance operation on the provisioning worker; it adds no SQL statement. Read-only snapshots retain the original layout until they end. Writers bound to a retired table, including old snapshot transactions reading it inside DML, abort retryably with CS04006; retry the entire transaction. FK probes against a replacement their probe snapshot cannot see also abort with CS04006, including after a parent rename. Empty DML input, MATCH SIMPLE null keys and self-keys satisfied by the same input do not probe a parent and do not trigger this refusal. Read-committed ON CONFLICT checks its refreshed probe snapshot after arbitration. Format 26 fenced changed temporal DEFAULT and frozen missing-value text (#1422). Format 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted expressions and views; format 24 admits explicit NULL placement in
 stored view bodies; earlier formats are refused at open, with no upgrade reader.
 
 From format 4 on, the catalog stores the format marker in a record that engines
@@ -3172,7 +3173,7 @@ and complete strengths follow PostgreSQL `src/backend/parser/gram.y:13119-13176,
 WITH RECURSIVE before MERGE is refused with CK00001 at RECURSIVE, even for acyclic
 definitions (PostgreSQL `src/backend/parser/parse_merge.c:124-129`). Plain WITH
 before MERGE remains supported and shares SELECT's CTE binding and materialization.
-These contextual exclusions do not change the 87/89 declared-clause count.
+These contextual exclusions do not change the 90/92 declared-clause count.
 
 References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
 345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
@@ -3630,7 +3631,7 @@ and `parse_expr.c:2541-2560,3085-3105`.
 
 These forms are storable in CHECK, parenthesized DEFAULT, domain definitions,
 SQL function bodies and views. Canonical CHECK text is exposed by
-INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 32 refuses older files;
+INFORMATION_SCHEMA.CHECK_CONSTRAINTS. Storage format 33 refuses older files;
 there is no upgrade reader. No named clause is added; the profile count does not change.
 ESCAPE and UNKNOWN stay contextual. ISNULL and NOTNULL are recognized in
 postfix position and refused with one CK00001; explicit AS aliases and ordinary
@@ -3757,7 +3758,91 @@ PostgreSQL references (local clone): src/backend/utils/adt/jsonfuncs.c:886-1005,
 src/backend/executor/execExprInterp.c:4811-4892; src/backend/parser/gram.y:904,
 15368-15371,15753-15787. The [PostgreSQL JSON operator documentation](https://www.postgresql.org/docs/18/functions-json.html)
 also records extraction NULL and negative-index behavior.
-JSON_VALUE, JSON_QUERY, JSON_EXISTS and their lax path subset remain SQ-N2.
+### SQL/JSON path functions (#1722, SQ-N2)
+
+SQL format 33 fences the new contextual function names and quoted ordinary-call
+rendering. Format 32 and earlier files are refused before expression loading; compiled
+schema v11 and JSONB storage bytes are unchanged. Quoted names such as `"json_value"`
+remain ordinary function calls (PostgreSQL gram.y:16017-16027,16576-16633).
+
+The three contextual functions are measured profile clauses. Their names and clause
+words add no lexical reservation, preserving older identifiers and canonical expressions.
+
+- `JSON_VALUE(context, path [RETURNING type] [behavior ON EMPTY] [behavior ON ERROR])`
+  returns one scalar. Its default type is TEXT, strings are unquoted, Boolean text is
+  PostgreSQL's `t`/`f`, and JSON null becomes SQL NULL. Objects, arrays and multiple
+  items are errors. A numeric JSON string can convert through the RETURNING type's
+  input conversion; integer input refuses decimal/exponent spelling, including
+  `12.0`, rather than rounding it. JSON numbers normalize first (`1e2` becomes 100),
+  whereas JSON strings retain their spelling (`"1e2"` fails integer input).
+  Built-in BOOLEAN input accepts PostgreSQL's unique true/false/yes/no prefixes,
+  on/off and 1/0 (bool.c:29-116); application cast overrides still apply.
+- `JSON_QUERY(context, path [RETURNING type] [WITHOUT [ARRAY] WRAPPER |
+  WITH [CONDITIONAL | UNCONDITIONAL] [ARRAY] WRAPPER] [{KEEP | OMIT} QUOTES
+  [ON SCALAR STRING]] [behavior ON EMPTY] [behavior ON ERROR])` defaults to JSONB,
+  WITHOUT WRAPPER and KEEP QUOTES. One scalar (including JSON null), object or array
+  succeeds without a wrapper. CONDITIONAL wraps multiple items only; UNCONDITIONAL
+  wraps every nonempty sequence. Empty sequences reach ON EMPTY even WITH WRAPPER.
+  OMIT QUOTES requires WITHOUT WRAPPER. With a JSON/JSONB target it reparses the
+  unquoted string: `"12"` becomes JSON number 12; `"x"` is a conversion error.
+- `JSON_EXISTS(context, path [{TRUE | FALSE | UNKNOWN | ERROR} ON ERROR])` returns
+  BOOLEAN, defaults to FALSE ON ERROR, and treats JSON null as an existing item.
+
+VALUE and QUERY default to NULL ON EMPTY and NULL ON ERROR. Both accept ERROR, NULL
+and DEFAULT expression for either clause; QUERY also accepts EMPTY [ARRAY] and EMPTY
+OBJECT. ON EMPTY precedes ON ERROR and each appears at most once. DEFAULT may contain
+parameters, scalar calls and operators, but no columns, subqueries, aggregates or windows.
+Unknown string defaults convert during binding, including unused defaults. Domain
+input conversion checks the base type; its domain CHECK runs only when the
+default is selected (parse_coerce.c:232-360, clauses.c:4222-4278). SQL NULL
+contexts and NULL path parameters skip the path and produce SQL NULL; RETURNING domain
+constraints still run, with coercion errors reaching ON ERROR (execExpr.c:4817-4930). Context conversion
+runs first: malformed JSON, invalid UTF-8/Unicode and numeric input outside PostgreSQL's
+jsonb numeric range fail independently of ON ERROR, including with a NULL path.
+ON ERROR handles structural path errors, result cardinality/kind errors and RETURNING
+conversion/domain errors. ERROR ON EMPTY and errors evaluating or converting a behavior
+value escape; budgets and cancellation always escape. RETURNING character bounds use
+input conversion checks; existing domain checks also run on SQL NULL results.
+
+The owner-selected path subset defaults to lax, with optional `lax` or
+`strict`: `$`, `.name`, `."quoted name"`, `.*`, `[n]`, `[n, m]`, `[n to m]`, `last`,
+`last - k`, and `[*]`. Names use Unicode letters, underscores and subsequent
+letters/digits/underscores; other names require quotes, which use JSON string escapes.
+Mode, `last` and `to` keywords ignore case (jsonpath_scan.l:398-492); member names retain case.
+Indexes are signed INTEGER constants; k is nonnegative. Lax member access unwraps
+one array level; array access wraps a non-array as a singleton. Missing members,
+incompatible containers and out-of-range indexes disappear in lax mode; ranges clip
+to valid indexes. Strict mode raises structural errors and checks the entire path
+even for EXISTS after a prior match. Arrays are never implicitly flattened at the
+final result. Duplicates resolve to the last member; transient query results use
+jsonb key ordering and numeric spelling. JSONB storage, equality and arrow
+serialization retain their existing bytes. Context conversion validates numeric values even
+in overwritten duplicate members (jsonb.c:391-401, jsonb_util.c:2070-2125); exponent
+magnitudes are limited to INT32_MAX / 2 before normalization (numeric.c:6889-6945).
+
+Paths must be string constants or parameters, parsed before rows even in a skipped CASE
+branch or an empty input. Every other path construct reports CS02081: filters, methods,
+arithmetic/comparison/Boolean expressions, regex/prefix tests, exists/is unknown, @,
+variables, recursive .**, and malformed accessors. PASSING is a coded syntax refusal.
+Nonconstant paths report CS01068; invalid function/default signatures report CS01069.
+CS02082 reports structural errors; CS02083 reports ERROR ON EMPTY; CS02084 reports
+context numbers outside jsonb input bounds; CS05093 reports
+cardinality/scalar-kind errors. CS05094 bounds paths at 65,536 UTF-16 code units and 256
+accessors, and path execution and window-frame recomputation share a 1,000,000-visit
+statement cap. Transient DOM,
+normalization, wildcard result references and serialization share StatementMemoryBudget;
+all temporary grants unwind after the expression. Wildcard access streams matches rather
+than retaining intermediate sequences. Existing wire text, bytes and scalar cells suffice.
+
+Reference rules from the local PostgreSQL clone: parser/parse_expr.c:4444-4452
+(OMIT/wrapper), 4598-4612 (context conversion), 4639-4747 (defaults), 4855-4895
+(DEFAULT restrictions); executor/execExpr.c:4762-4789 (NULL ordering),
+executor/execExprInterp.c:4909-5304 (path/coercion and behavior boundaries),
+utils/adt/jsonpath_exec.c:270-273,740-741 (lax), 885-1005,1056-1100 (accessors),
+4214-4395 (existence, wrapping, cardinality); utils/adt/jsonfuncs.c:3124-3207,
+3344-3400 (RETURNING); utils/adt/bool.c:158-165 (Boolean text).
+
+
 JSON_TABLE, question-mark operators and JSONB normalization remain T3.
 
 ## Integer bitwise operators (#1721, SQ-O2)
@@ -4802,7 +4887,7 @@ wrappers and domain CHECKs, including domains in casts and function parameter/re
 Reopening with the original compatible registration restores use.
 New declarations still reject incompatible volatility. CHECK rechecks Immutable-only admission
 on every bind. Domain defaults remain literal-only
-and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 32, with no compatibility reader.
+and carry an empty call list. Call vectors were introduced in format 10; the current record-space format is 33, with no compatibility reader.
 Format 28 adds the internal sequence definition and reservation records (#1717). Relation-name
 collisions involving an existing sequence use CS03070 (42P07), as sequence creation does for any
 occupied relation name; the diagnostic names the existing kind. Table-on-table collisions retain
@@ -4968,7 +5053,7 @@ SQL does not infer it from a CLR exception type. This follows PostgreSQL datetim
 REAL and DOUBLE text retain CS02022 / 22P02 for malformed input and CS02002 / 22003
 for overflow/underflow. Floating assignment rejects 1,000 and overflowing 1e400, as CAST does.
 
-Catalog format 32 and compiled-schema v11 refuse earlier definitions rather than reinterpret
+Catalog format 33 and compiled-schema v11 refuse earlier definitions rather than reinterpret
 retained default text. Format-25 INTERVAL defaults such as '12' (formerly days) and
 '2.03:04:05.1234567' are never rebound by this engine. A catalog refusal carries CS06041;
 a schema refusal uses InvalidDocument at schema.format. Export with the writing engine,

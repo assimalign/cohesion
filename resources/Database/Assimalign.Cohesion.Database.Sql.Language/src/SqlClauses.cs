@@ -171,6 +171,13 @@ public static class SqlClauses
     /// <summary>A <c>CAST</c> expression.</summary>
     public const string Cast = "CAST";
 
+    /// <summary>A scalar SQL/JSON path query.</summary>
+    public const string JsonValue = "JSON_VALUE";
+    /// <summary>A JSON SQL/JSON path query.</summary>
+    public const string JsonQuery = "JSON_QUERY";
+    /// <summary>A SQL/JSON existence test.</summary>
+    public const string JsonExists = "JSON_EXISTS";
+
     /// <summary>A column or expression <c>COLLATE</c> override.</summary>
     public const string Collate = "COLLATE";
 

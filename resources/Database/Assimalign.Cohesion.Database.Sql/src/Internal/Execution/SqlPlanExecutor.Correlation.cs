@@ -61,6 +61,13 @@ internal sealed partial class SqlPlanExecutor
         if (expression is SqlBoundQuantifiedComparison comparison &&
             SqlSubqueryValues.Get(frame, comparison.Slot).Length == 0) { return; }
         // Branch predicates are cached by the frame so volatile functions still run once.
+        if (expression is SqlBoundJsonFunction json)
+        {
+            // DEFAULT disallows subqueries. Preparing its CASE/COALESCE branches
+            // could run volatile predicates even when no behavior is selected.
+            await PrepareExpressionAsync(json.Context, row, statement, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         if (expression is SqlBoundLogical logical)
         {
             foreach (var operand in logical.Operands)
@@ -121,7 +128,7 @@ internal sealed partial class SqlPlanExecutor
         return value;
     }
 
-    private static IEnumerable<SqlBoundExpression> BoundChildren(SqlBoundExpression expression)
+    internal static IEnumerable<SqlBoundExpression> BoundChildren(SqlBoundExpression expression)
     {
         switch (expression)
         {
@@ -132,6 +139,11 @@ internal sealed partial class SqlPlanExecutor
                 if (bitwise.Right is not null) { yield return bitwise.Right; }
                 break;
             case SqlBoundDistinct distinct: yield return distinct.Left; yield return distinct.Right; break;
+            case SqlBoundJsonFunction json:
+                yield return json.Context;
+                if (json.EmptyDefault is not null) { yield return json.EmptyDefault; }
+                if (json.ErrorDefault is not null) { yield return json.ErrorDefault; }
+                break;
             case SqlBoundJsonAccess json:
                 yield return json.Operand;
                 foreach (var step in json.Steps) { yield return step.Selector; }

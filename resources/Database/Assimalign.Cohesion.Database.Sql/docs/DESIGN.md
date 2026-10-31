@@ -172,7 +172,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Catalog/record-space format 32 refuses all earlier files before data recovery;
+extension 3. Current catalog/record-space format 33 refuses all earlier files before data recovery;
 compiled-schema v11 adds CompiledSchemaIndex.Predicate and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -4541,7 +4541,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 32 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 33 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -7864,6 +7864,52 @@ successful result is preserved and the session stays reusable. Both the 4,096-en
 and 1 MiB bounds include the notice. See [wire policy](WIRE-PROTOCOL.md#negotiated-statement-diagnostics-1105).
 
 
+## SQL/JSON path execution (#1722, SQ-N2)
+
+SqlJsonFunctionExpression retains context, path, RETURNING, wrapper, quotes and both
+behavior/default operands. Canonical rendering emits effective wrapper, quotes and
+behavior defaults, while preserving older vocabulary and expression spelling. Three
+contextual profile clauses and parser/live conformance cases cover the functions.
+The closed internal SqlJsonPath parser accepts only the owner's accessor subset and
+parses constants/parameters before rows, including skipped branches. Bound nodes retain
+path and output conversion; context CASE/COALESCE uses the N1 common-type resolver.
+The DIALECT records every effective default and the exact PostgreSQL source anchors.
+An expanded audit of 32,652 accepted statements/scalar wrappers from the batch-base
+Database corpus found zero canonical text changes. Additional quoted ordinary-call probes
+require quoted function names in canonical text; SQL format 33 fences that grammar change. New views,
+DEFAULTs, CHECKs and partial predicates round-trip; format 32 and earlier files are refused.
+
+Context conversion uses the validated N1 reader and a transient jsonb representation:
+last duplicate keys, UTF-8 length/binary key order and numeric spelling. Stored JSONB,
+its equality and arrows remain unchanged. Input conversion precedes error handling;
+ON ERROR covers path/cardinality and result coercion only. ERROR ON EMPTY, behavior
+failures, cancellation and budget failures escape. Result conversions reuse the local
+cast registry, modifiers and domain checks without a new assembly boundary.
+
+A JSON-only execution scope shares SqlStatementMetrics' existing retained-memory ledger
+and the database StatementMemoryBudget. Path visits and window-frame recomputation share
+the existing 1,000,000-visit statement cap; each inspected member, array item and serialized item is
+charged. Parsed paths are limited to 65,536 UTF-16 units and 256 accessors. Wildcard
+access recursively pushes one match at a time, retaining only final results; strict
+EXISTS completes the walk to detect later errors while retaining one result reference.
+Synchronous planning uses a stack-owned budget scope; JSON-only weak statement state
+keeps one work counter through binding, costing and execution. Direct wildcard proofs show
+n+1 visits and 32n result-reference bytes; lax EXISTS stops at two visits. Cached
+definitions publish JSON usage monotonically while binding; databases without such definitions
+leave ordinary statements without a scope. Nested statements retain separate work and memory ledgers.
+
+| Code | Condition |
+| --- | --- |
+| CS01068 | Path must be a string constant or parameter (42804) |
+| CS01069 | Invalid SQL/JSON operand/default/RETURNING signature (42804) |
+| CS02081 | Invalid or unsupported path before rows (42601/0A000) |
+| CS02082 | Strict accessor structural error (2203A) |
+| CS02083 | ERROR ON EMPTY (2203F) |
+| CS02084 | Context jsonb number exceeds exponent, precision or scale bounds (22003) |
+| CS05093 | Result cardinality or scalar-kind error (22034/2203B) |
+| CS05094 | Path size, statement work or memory budget (54000) |
+
+
 ## JSON access (#1722, SQ-N1)
 
 The existing SqlBinaryExpression gains JsonAccess and JsonTextAccess operators at the
@@ -8089,7 +8135,7 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **32** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **33** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v11 is current.
@@ -8416,7 +8462,7 @@ The populated-table worker handoff and expanded crash/wire convergence coverage 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 32); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 33); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8599,7 +8645,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 32 requires the complete table extension 8 record,
+after the existing constraints. Current format 33 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -8677,7 +8723,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 32 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 33 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).

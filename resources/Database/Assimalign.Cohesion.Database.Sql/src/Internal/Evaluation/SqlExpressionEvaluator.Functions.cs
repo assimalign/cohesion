@@ -171,6 +171,7 @@ internal sealed partial class SqlExpressionEvaluator
                 => OutputTypeInfo(window.Function.Arguments[0]),
             SqlColumnReferenceExpression column => ColumnMetadata(column).Type,
             SqlCastExpression cast => TryResolveCastTarget(cast)?.Storage,
+            SqlJsonFunctionExpression json => JsonReturning(json).Storage,
             SqlCollateExpression collate => OutputTypeInfo(collate.Operand),
             SqlSubqueryExpression => _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.TypeInfo : null,
             SqlCaseExpression conditional => CaseOutputTypeInfo(conditional),
@@ -227,6 +228,7 @@ internal sealed partial class SqlExpressionEvaluator
                 return OutputDomainName(window.Function.Arguments[0]);
             case SqlColumnReferenceExpression column: return ColumnMetadata(column).DomainName;
             case SqlCastExpression cast: return TryResolveCastTarget(cast) is { IsDomain: true } domain ? domain.Name : null;
+            case SqlJsonFunctionExpression json: return JsonReturning(json) is { IsDomain: true } jsonDomain ? jsonDomain.Name : null;
             case SqlCollateExpression collate: return OutputDomainName(collate.Operand);
             case SqlSubqueryExpression: return _subquerySlots is not null && _subquerySlots.TryGetValue(expression, out var slot) ? slot.DomainName : null;
             case SqlCaseExpression conditional:
@@ -325,6 +327,7 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic:
                 return ArithmeticType(arithmetic.Operator, StaticTypeOf(arithmetic.Left), StaticTypeOf(arithmetic.Right));
+            case SqlJsonFunctionExpression jsonFunction: return JsonReturning(jsonFunction).Storage.Type;
             case SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator):
                 return SqlJsonAccess.ResultType(json.Operator, JsonOperandType(json.Left));
             case SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator):

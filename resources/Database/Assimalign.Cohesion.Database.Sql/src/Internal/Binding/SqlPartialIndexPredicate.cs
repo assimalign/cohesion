@@ -126,6 +126,8 @@ internal static class SqlPartialIndexPredicate
         }
         if (expression is SqlCastExpression cast && scope.TryResolveCastTarget(cast) is { Check: SqlExpressionFunction { Unresolved: { } domainReason } } target)
         { return (target.Name, domainReason); }
+        if (expression is SqlJsonFunctionExpression json && scope.JsonReturning(json) is { Check: SqlExpressionFunction { Unresolved: { } jsonReason } } jsonTarget)
+        { return (jsonTarget.Name, jsonReason); }
         return null;
     }
 
@@ -135,11 +137,11 @@ internal static class SqlPartialIndexPredicate
             cancellationToken: cancellationToken, foldConstants: false, bindingContext: SqlBindingContext.IndexPredicate);
 
     internal static void ValidateConversions(SqlCast?[] conversions, SqlType target, SqlExpression operand,
-        SqlExpressionEvaluator scope, Assimalign.Cohesion.Database.Language.Location? location)
+        SqlExpressionEvaluator scope, Assimalign.Cohesion.Database.Language.Location? location, DatabaseType? inputType = null)
     {
         // Dispatch uses the value's runtime type, not CASE's inferred type. Check the
         // union of all alternatives (including unreachable ones), or every slot if unknown.
-        uint types = RuntimeTypes(operand, scope);
+        uint types = inputType is { } input ? 1u << (int)input : RuntimeTypes(operand, scope);
         uint slots = types == uint.MaxValue ? uint.MaxValue : 0;
         for (int type = 0; type < conversions.Length; type++)
         {

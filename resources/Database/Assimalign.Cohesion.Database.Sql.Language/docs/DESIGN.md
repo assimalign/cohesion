@@ -27,7 +27,7 @@ covers default ORDER BY against default indexes on primary keys and filtered nul
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 32; index predicates are persisted by Sql, independently
+The current record-space format is 33; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -155,7 +155,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 32's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 33's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -1255,6 +1255,48 @@ are parsed independently of the foreign-key action capability flags.
 The engine's view metadata contract is documented in DIALECT: complete common type modifiers
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
+
+
+## SQL/JSON path execution (#1722, SQ-N2)
+
+SqlJsonFunctionExpression retains context, path, RETURNING, wrapper, quotes and both
+behavior/default operands. Canonical rendering emits effective wrapper, quotes and
+behavior defaults, while preserving older vocabulary and expression spelling. Three
+contextual profile clauses and parser/live conformance cases cover the functions.
+The closed internal SqlJsonPath parser accepts only the owner's accessor subset and
+parses constants/parameters before rows, including skipped branches. Bound nodes retain
+path and output conversion; context CASE/COALESCE uses the N1 common-type resolver.
+The DIALECT records every effective default and the exact PostgreSQL source anchors.
+
+Context conversion uses the validated N1 reader and a transient jsonb representation:
+last duplicate keys, UTF-8 length/binary key order and numeric spelling. Stored JSONB,
+its equality and arrows remain unchanged. Input conversion precedes error handling;
+ON ERROR covers path/cardinality and result coercion only. ERROR ON EMPTY, behavior
+failures, cancellation and budget failures escape. Result conversions reuse the local
+cast registry, modifiers and domain checks without a new assembly boundary.
+
+A JSON-only execution scope shares SqlStatementMetrics' existing retained-memory ledger
+and the database StatementMemoryBudget. Path visits and window-frame recomputation share
+the existing 1,000,000-visit statement cap; each inspected member, array item and serialized item is
+charged. Parsed paths are limited to 65,536 UTF-16 units and 256 accessors. Wildcard
+access recursively pushes one match at a time, retaining only final results; strict
+EXISTS completes the walk to detect later errors while retaining one result reference.
+Synchronous planning uses a stack-owned budget scope; JSON-only weak statement state
+keeps one work counter through binding, costing and execution. Direct wildcard proofs show
+n+1 visits and 32n result-reference bytes; lax EXISTS stops at two visits. Cached
+definitions publish JSON usage monotonically while binding; databases without such definitions
+leave ordinary statements without a scope. Nested statements retain separate work and memory ledgers.
+
+| Code | Condition |
+| --- | --- |
+| CS01068 | Path must be a string constant or parameter (42804) |
+| CS01069 | Invalid SQL/JSON operand/default/RETURNING signature (42804) |
+| CS02081 | Invalid or unsupported path before rows (42601/0A000) |
+| CS02082 | Strict accessor structural error (2203A) |
+| CS02083 | ERROR ON EMPTY (2203F) |
+| CS02084 | Context jsonb number exceeds exponent, precision or scale bounds (22003) |
+| CS05093 | Result cardinality or scalar-kind error (22034/2203B) |
+| CS05094 | Path size, statement work or memory budget (54000) |
 
 
 ## JSON access (#1722, SQ-N1)

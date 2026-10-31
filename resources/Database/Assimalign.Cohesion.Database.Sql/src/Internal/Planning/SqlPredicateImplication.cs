@@ -160,6 +160,10 @@ internal static class SqlPredicateImplication
                 Same(q.Operand, p.Operand, offset) && q.Steps.Length == p.Steps.Length && q.Steps.Zip(p.Steps).All(pair =>
                     pair.First.SelectorType == pair.Second.SelectorType && pair.First.IsIndex == pair.Second.IsIndex &&
                     Same(pair.First.Selector, pair.Second.Selector, offset)),
+            (SqlBoundJsonFunction q, SqlBoundJsonFunction p) => SqlPersistedExpression.SameJsonFunction(q.Syntax, p.Syntax) &&
+                q.Syntax.Path is SqlLiteralExpression && p.Syntax.Path is SqlLiteralExpression &&
+                SqlPersistedExpression.AreEquivalent(q.Syntax.Path, p.Syntax.Path) && Same(q.Context, p.Context, offset) &&
+                Same(q.Conversion, p.Conversion, offset) && SameOptional(q.EmptyDefault, p.EmptyDefault, offset) && SameOptional(q.ErrorDefault, p.ErrorDefault, offset),
             (SqlBoundIsJson q, SqlBoundIsJson p) => q.Source == p.Source && q.JsonKind == p.JsonKind && q.IsNegated == p.IsNegated &&
                 Same(q.Operand, p.Operand, offset),
             (SqlBoundIsNull q, SqlBoundIsNull p) => q.IsNegated == p.IsNegated && Same(q.Operand, p.Operand, offset),
@@ -269,6 +273,8 @@ internal static class SqlPredicateImplication
             SqlBoundLogical { IsOr: false } logical => logical.Operands.All(Local),
             SqlBoundBinary binary => Local(binary.Left) && Local(binary.Right),
             SqlBoundJsonAccess json => Local(json.Operand) && json.Steps.All(step => Local(step.Selector)),
+            SqlBoundJsonFunction json => json.Syntax.Path is SqlLiteralExpression && Local(json.Context) && Local(json.Conversion) &&
+                (json.EmptyDefault is null || Local(json.EmptyDefault)) && (json.ErrorDefault is null || Local(json.ErrorDefault)),
             SqlBoundIsJson json => Local(json.Operand),
             SqlBoundIsNull test => Local(test.Operand),
             SqlBoundBooleanTest test => Local(test.Operand),
@@ -313,6 +319,7 @@ internal static class SqlPredicateImplication
             SqlBoundJsonAccess json => "(" + Render(json.Operand) + string.Concat(json.Steps.Select((step, index) =>
                 (json.AsText && index == json.Steps.Length - 1 ? " ->> " : " -> ") + Render(step.Selector))) + ")",
             SqlBoundIsJson json => Render(json.Operand) + (json.IsNegated ? " IS NOT JSON " : " IS JSON ") + json.JsonKind.ToString().ToUpperInvariant(),
+            SqlBoundJsonFunction json => SqlExpressionRenderer.Render(json.Syntax),
             SqlBoundIsNull test => Render(test.Operand) + (test.IsNegated ? " IS NOT NULL" : " IS NULL"),
             SqlBoundCall call => call.Function.Name + "(" + string.Join(", ", call.Arguments.Select(Render)) + ")",
             SqlBoundUnary unary => unary.Operator + "(" + Render(unary.Operand) + ")",
