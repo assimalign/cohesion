@@ -1,5 +1,11 @@
 # Database.Sql.Client — Design
 
+## Exact join-order search over the existing exchange (#1629, SQ-Z1)
+
+InMemory and TCP return stable written-column results after cost-based join reassociation.
+EXPLAIN carries chosen_order, reordered, exact_dp/bound and search work counts in existing
+plan detail columns. No client API, capability, frame or protocol version changes are required.
+
 ## Named savepoint wire conformance (#1726, XT-4)
 
 The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
