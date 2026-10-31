@@ -15,7 +15,8 @@ internal sealed partial class SqlPlanExecutor
 {
     private SqlJoinPlan? SearchJoinOrder(SqlJoinPlan plan, bool sourceOnly,
         Func<SqlCatalogTable, SqlAccessPath, SqlAccessPath> choose,
-        Func<SqlCatalogTable, SqlIndexSeekPath?, BTreeRangeCount?> probe, CancellationToken cancellationToken)
+        Func<SqlCatalogTable, SqlIndexSeekPath?, BTreeRangeCount?> probe,
+        Func<SqlJoinInput[], BTreeRangeCount?[], SqlJoinPlan> costBound, bool retainedFrames, CancellationToken cancellationToken)
     {
         int start = sourceOnly ? 1 : 0;
         int count = plan.Bindings.Count - start;
@@ -28,6 +29,9 @@ internal sealed partial class SqlPlanExecutor
         SqlJoinTree? sourceTree = null;
         if (boundary is not null)
         {
+            // MERGE associations have no WHERE (BindDmlSources/PlanMerge). Moving it
+            // below the preserved boundary, or dropping target terms, is not legal.
+            if (plan.Where is not null) { throw new System.Diagnostics.UnreachableException(); }
             if (boundary.Left is { Binding: 0, Step: null }) { sourceTree = boundary.Right; }
             else if (boundary.Right is { Binding: 0, Step: null }) { sourceTree = boundary.Left; }
             else { return null; }
@@ -61,6 +65,7 @@ internal sealed partial class SqlPlanExecutor
         }
         var inputs = plan.Inputs.Select((input, i) =>
             input with { Access = choose(plan.Bindings[i].Source.Table!, input.Access) }).ToArray();
+        var boundInputs = inputs.ToArray();
         var estimates = new BTreeRangeCount?[plan.Bindings.Count];
         var baseRows = new double[count];
         for (int i = 0; i < count; i++)
@@ -104,12 +109,16 @@ internal sealed partial class SqlPlanExecutor
             .OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase).ThenBy(index => index.Name, StringComparer.Ordinal).ToArray()).ToArray();
         var provenPaths = plan.Steps.SelectMany(step => step.Access is { } access
             ? access.Alternatives ?? new[] { access } : Array.Empty<SqlJoinIndexPath>()).OfType<SqlPartialJoinIndexPath>().ToArray();
-        var result = SqlJoinSearch.Find(count, mask => rows[mask], MakeJoin, cancellationToken);
+        var baseline = costBound(boundInputs, estimates);
+        var result = SqlJoinSearch.Find(count, mask => rows[mask], MakeJoin, cancellationToken, RetainedBytes);
         var tree = Remap(result.Tree);
         if (sourceOnly)
         {
             if (boundary is not null)
-            { tree = ReferenceEquals(sourceTree, boundary.Left) ? boundary with { Left = tree } : boundary with { Right = tree }; }
+            {
+                if (targetTerms.Count != 0) { throw new System.Diagnostics.UnreachableException(); }
+                tree = ReferenceEquals(sourceTree, boundary.Left) ? boundary with { Left = tree } : boundary with { Right = tree };
+            }
             else
             {
                 var condition = Combine(targetTerms);
@@ -131,15 +140,91 @@ internal sealed partial class SqlPlanExecutor
         string written = plan.Tree is { } original ? Order(original, identities: true) : FlatOrder(plan);
         var searched = new SqlSearchedJoinPlan(selected, result.States, result.Partitions, result.Cost, order,
             Order(tree, identities: true) != written, sourceOnly);
-        // A left-deep SELECT uses the streaming flat executor and local hash-key ordinals.
-        // DML keeps its explicit target/source boundary even when both sides are INNER.
-        if (!sourceOnly && IsLeftDeep(tree))
+        // Expression vectors evaluate full ordinal frames, so retain the normalized executor.
+        bool expressions = steps.Any(step => step.Hash is { } hash &&
+            (hash.OuterExpressions is not null || hash.InnerExpressions is not null));
+        if (sourceOnly && boundary is null && IsLeftDeep(tree.Right!) && !expressions)
         {
-            var flat = steps.Select(step => step with { Hash = step.Hash is null ? null :
-                SqlPlanner.HashKeys(step.Condition, plan.Bindings, plan.Columns, step.Binding) }).ToArray();
-            return searched with { Tree = null, Steps = flat, FirstBinding = tree.Leaves().First() };
+            // Flatten the independent source tree after the pinned target. Yield directly
+            // to association deduplication; never retain the target x source output.
+            var first = tree.Right!.Leaves().First();
+            var flat = new[] { new SqlJoinStep(first, SqlJoinType.Cross, null, null) }
+                .Concat(TreeSteps(tree.Right!)).Select(LocalKeys).ToArray();
+            selected = selected with { Tree = null, Steps = flat, FirstBinding = 0, Where = Combine(targetTerms) };
         }
-        return searched;
+        else if (!sourceOnly && IsLeftDeep(tree) && !expressions)
+        {
+            selected = selected with { Tree = null, Steps = steps.Select(LocalKeys).ToArray(), FirstBinding = tree.Leaves().First() };
+        }
+        // Estimates rank work; they cannot prove a byte bound for arbitrary stored values,
+        // duplicate fanout or incomplete probes. Certify the physical retention separately.
+        // Normalized/full-width candidates currently have no such certificate: use the old
+        // executor and paths, including expression hashes. The permitted byte increase is zero.
+        if (!PreservesRetention(baseline, selected, sourceOnly || retainedFrames))
+        {
+            var oldTree = PhysicalTree(baseline);
+            if (baseline.Tree is null && baseline.FirstBinding == 1)
+            { baseline = baseline with { Steps = baseline.Steps.Select((step, i) => i == 0 ? step with { Binding = 0 } : step).ToArray() }; }
+            return new SqlSearchedJoinPlan(baseline, result.States, result.Partitions, result.Cost,
+                Order(oldTree), Order(oldTree, identities: true) != written, sourceOnly);
+        }
+        return searched with { Tree = selected.Tree, Steps = selected.Steps, FirstBinding = selected.FirstBinding, Where = selected.Where };
+
+        SqlJoinStep LocalKeys(SqlJoinStep step) => step with { Hash = step.Hash is null ? null :
+            SqlPlanner.HashKeys(step.Condition, plan.Bindings, plan.Columns, step.Binding) };
+
+        SqlJoinTree PhysicalTree(SqlJoinPlan original)
+        {
+            if (original.Tree is { } normalized) { return normalized; }
+            var node = new SqlJoinTree(original.FirstBinding);
+            for (int i = 0; i < original.Steps.Count; i++)
+            {
+                var step = original.Steps[i];
+                int inner = i == 0 && original.FirstBinding == 1 ? 0 : step.Binding;
+                node = new(-1, node, new(inner), step);
+            }
+            return node;
+        }
+
+        double RetainedBytes(SqlJoinTree node)
+        {
+            // Cost the actual executor shape, including padded ordinal arrays. Scalar
+            // payloads use the hash accountant's 32-byte allowance. Variable payloads
+            // remain estimates, never the retention certificate below.
+            bool flat = IsLeftDeep(node) && !TreeSteps(node).Any(step => step.Hash is { } hash &&
+                (hash.OuterExpressions is not null || hash.InnerExpressions is not null));
+            if (flat)
+            {
+                double retained = 0;
+                foreach (var step in TreeSteps(node))
+                {
+                    if (step.Hash is not null)
+                    { retained += Build(baseRows[step.Binding - start], 24 + 40 * plan.Bindings[step.Binding].Source.Columns.Count); }
+                }
+                return retained;
+            }
+            return Materialized(node).Peak;
+
+            (double Peak, double Output) Materialized(SqlJoinTree current)
+            {
+                int mask = 0, width = 0;
+                foreach (int leaf in current.Leaves())
+                { mask |= 1 << leaf; width += plan.Bindings[leaf + start].Source.Columns.Count; }
+                double output = rows[mask] * (24 + 8 * plan.Columns.Count + 32 * width);
+                if (current.Step is null) { return (output, output); }
+                var left = Materialized(current.Left!);
+                var right = Materialized(current.Right!);
+                double build = current.Step.Hash is null ? right.Output : Build(rows[current.Right!.Leaves().Aggregate(0, (m, leaf) => m | (1 << leaf))],
+                    24 + 8 * plan.Columns.Count + 32 * current.Right.Leaves().Sum(leaf => plan.Bindings[leaf + start].Source.Columns.Count));
+                return (Math.Max(left.Peak, Math.Max(left.Output + right.Peak + build, left.Output + build + output)), output);
+            }
+            static double Build(double count, double width)
+            {
+                double capacity = count <= 0 ? 0 : Math.Max(16, Math.Pow(2, Math.Ceiling(Math.Log2(count))));
+                // Include old and new bucket/entry arrays at the largest growth.
+                return 104 + count * width + (capacity == 0 ? 0 : 96 + 30 * capacity);
+            }
+        }
 
         (SqlJoinStep Step, double Work) MakeJoin(int left, int right)
         {
@@ -230,6 +315,42 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private static bool IsLeftDeep(SqlJoinTree tree) => tree.Step is null || tree.Right!.Step is null && IsLeftDeep(tree.Left!);
+
+    private static bool PreservesRetention(SqlJoinPlan baseline, SqlJoinPlan candidate, bool dml)
+    {
+        if (baseline.Tree is not null || candidate.Tree is not null) { return false; }
+        var old = baseline.Steps.Select((step, i) => i == 0 && baseline.FirstBinding == 1
+            ? step with { Binding = 0 } : step).ToArray();
+        // Joined DML also charges buffered inputs and selected frames through its ledger.
+        // Until it has a width/fanout proof, retain the same streaming order and buffers.
+        // Hash activation must also retain its prefix: a zero-result prefix in the old
+        // plan can avoid a later build whose complete input would exceed the grant.
+        if ((dml || old.Any(step => step.Hash is not null)) && (candidate.FirstBinding != baseline.FirstBinding ||
+            !candidate.Steps.Select(step => step.Binding).SequenceEqual(old.Select(step => step.Binding)))) { return false; }
+        for (int i = 0; i < baseline.Inputs.Count; i++)
+        { if (!ReferenceEquals(baseline.Inputs[i].Access, candidate.Inputs[i].Access)) { return false; } }
+        foreach (var step in candidate.Steps)
+        {
+            var previous = old.FirstOrDefault(item => item.Binding == step.Binding);
+            // Replacing a shared input buffer with repeated seeks can retain fresh
+            // boxed/text cells per association instead of aliasing one decoded row.
+            if (dml && previous?.Access is null && step.Access is not null) { return false; }
+            // All flat hash tables coexist. Preserve each build input and its NULL-key
+            // population, with local-width rows and unchanged bucket growth. Added safe
+            // input restrictions can only remove rows. No new budgeted build is allowed.
+            if (step.Hash is { } hash && (previous?.Hash is not { } prior ||
+                !hash.InnerOrdinals.SequenceEqual(prior.InnerOrdinals) ||
+                !hash.Collations.SequenceEqual(prior.Collations))) { return false; }
+        }
+        foreach (var step in old)
+        {
+            var next = candidate.Steps.FirstOrDefault(item => item.Binding == step.Binding);
+            if (step.Hash is not null && next?.Hash is null) { return false; }
+            if (step.Access is { } access && (next?.Access is not { } chosen ||
+                !ReferenceEquals(access.Index, chosen.Index) || !access.OuterOrdinals.SequenceEqual(chosen.OuterOrdinals))) { return false; }
+        }
+        return true;
+    }
 
     private static IEnumerable<SqlJoinStep> TreeSteps(SqlJoinTree node)
     {

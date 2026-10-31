@@ -373,7 +373,7 @@ internal sealed partial class SqlPlanner
             }
             else
             {
-                if (!fullFrame || innerMask != 0 || !TryHashExpressionKey(equality, columns, binding.Offset, endOrdinal, out bool leftInner)) { continue; }
+                if (!fullFrame || !TryHashExpressionKey(equality, columns, bindings, binding.Offset, endOrdinal, innerMask, out bool leftInner)) { continue; }
                 source = leftInner ? equality.Left : equality.Right;
                 probe = leftInner ? equality.Right : equality.Left;
                 // Backfill earlier column keys only when this side first needs an expression vector.
@@ -412,14 +412,15 @@ internal sealed partial class SqlPlanner
     }
 
     private static bool TryHashExpressionKey(SqlBoundBinary equality, IReadOnlyList<SqlCatalogColumn> columns,
-        int startOrdinal, int endOrdinal, out bool leftInner)
+        IReadOnlyList<SqlRelationBinding> bindings, int startOrdinal, int endOrdinal, int innerMask, out bool leftInner)
     {
         var left = new HashSet<int>();
         var right = new HashSet<int>();
         leftInner = false;
         if (!JoinRestrictionColumns(equality.Left, left, columns) ||
             !JoinRestrictionColumns(equality.Right, right, columns) || left.Count == 0 || right.Count == 0) { return false; }
-        bool Inside(int ordinal) => ordinal >= startOrdinal && ordinal < endOrdinal;
+        bool Inside(int ordinal) => innerMask == 0 ? ordinal >= startOrdinal && ordinal < endOrdinal
+            : InsideJoinMask(ordinal, bindings, innerMask);
         leftInner = left.All(Inside);
         bool rightInner = right.All(Inside);
         if (leftInner == rightInner || !(leftInner ? right : left).All(ordinal => !Inside(ordinal))) { return false; }

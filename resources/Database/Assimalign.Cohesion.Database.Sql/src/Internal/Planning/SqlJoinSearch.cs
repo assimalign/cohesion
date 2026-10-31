@@ -11,7 +11,7 @@ internal static class SqlJoinSearch
 
     internal static (SqlJoinTree Tree, int States, int Partitions, double Cost) Find(int count,
         Func<int, double> rows, Func<int, int, (SqlJoinStep Step, double Work)> join,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, Func<SqlJoinTree, double>? retainedBytes = null)
     {
         int size = 1 << count;
         var trees = new SqlJoinTree[size];
@@ -30,6 +30,7 @@ internal static class SqlJoinSearch
                 continue;
             }
             double best = double.PositiveInfinity;
+            double bestMemory = double.PositiveInfinity;
             ulong bestOrder = ulong.MaxValue;
             for (int left = (mask - 1) & mask; left != 0; left = (left - 1) & mask)
             {
@@ -37,12 +38,16 @@ internal static class SqlJoinSearch
                 var candidate = join(left, right);
                 partitions++;
                 double cost = costs[left] + costs[right] + candidate.Work;
+                if (cost > best) { continue; }
+                var tree = new SqlJoinTree(-1, trees[left], trees[right], candidate.Step);
+                double memory = retainedBytes?.Invoke(tree) ?? 0;
                 ulong order = (orders[left] << (4 * BitOperations.PopCount((uint)right))) | orders[right];
-                // Ascending subsets and leaf ordinals give stable ties, independent of hashes.
-                if (cost > best || cost == best && order >= bestOrder) { continue; }
+                // Retained builds precede ordinal ties; all flat builds coexist until disposal.
+                if (cost == best && (memory > bestMemory || memory == bestMemory && order >= bestOrder)) { continue; }
                 best = cost;
+                bestMemory = memory;
                 bestOrder = order;
-                trees[mask] = new(-1, trees[left], trees[right], candidate.Step);
+                trees[mask] = tree;
             }
             costs[mask] = best;
             orders[mask] = bestOrder;

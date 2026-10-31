@@ -21,10 +21,10 @@ internal sealed partial class SqlPlanExecutor
         => plan.ContainsRecursion || plan is SqlSelectPlan { Access: SqlScanPath } ||
            plan is SqlSelectPlan { Access: SqlIndexSeekPath { Cost: null, Index.IsUnique: true } unique } &&
                unique.EqualityValues.Count == unique.Index.ColumnNames.Count
-            ? plan : CostCore(plan, statement, cancellationToken, new(ReferenceEqualityComparer.Instance));
+            ? plan : CostCore(plan, statement, cancellationToken, new(ReferenceEqualityComparer.Instance), JoinedDml(plan));
 
     private SqlPlan CostCore(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken,
-        Dictionary<SqlDerivedRelation, SqlDerivedRelation> relations)
+        Dictionary<SqlDerivedRelation, SqlDerivedRelation> relations, bool retainedFrames)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         cancellationToken.ThrowIfCancellationRequested();
@@ -54,7 +54,7 @@ internal sealed partial class SqlPlanExecutor
         SqlPlan Rewrite(SqlPlan child) => child is SqlSelectPlan { Access: SqlScanPath } ||
             child is SqlSelectPlan { Access: SqlIndexSeekPath { Cost: null, Index.IsUnique: true } seek } &&
                 seek.EqualityValues.Count == seek.Index.ColumnNames.Count
-                ? child : CostCore(child, statement, cancellationToken, relations);
+                ? child : CostCore(child, statement, cancellationToken, relations, retainedFrames);
 
         SqlDerivedRelation RewriteRelation(SqlDerivedRelation relation)
         {
@@ -258,14 +258,25 @@ internal sealed partial class SqlPlanExecutor
             return best;
         }
 
+        // Keep the search callback's capture out of the ordinary one/two-input path.
+        SqlJoinPlan? TrySearchJoin(SqlJoinPlan join, bool pinFirst)
+            => SearchJoinOrder(join, pinFirst, Choose, Probe,
+                (inputs, estimates) => CostJoin(join with { Inputs = inputs, InputEstimates = estimates }, pinFirst),
+                retainedFrames, cancellationToken);
+
         SqlJoinPlan CostJoin(SqlJoinPlan join, bool pinFirst = false)
         {
-            join = join with { Bindings = join.Bindings.Select(binding => binding.Source.Derived is { } derived
-                ? binding with { Source = new SqlRelationSource(RewriteRelation(derived)) } : binding).ToArray() };
+            // A search baseline supplies already-chosen inputs and observed counts. The
+            // ordinary path, including its closure layout, remains the original coster.
+            if (join.InputEstimates is null)
+            {
+                join = join with { Bindings = join.Bindings.Select(binding => binding.Source.Derived is { } derived
+                    ? binding with { Source = new SqlRelationSource(RewriteRelation(derived)) } : binding).ToArray() };
+            }
             if (join.Steps.Count == 0) { return join; }
             // Preserve the allocation/probe contract of one- and two-relation queries.
-            if (join.Bindings.Count >= 3 && join.Bindings.Count <= SqlJoinSearch.ExactRelationLimit + (pinFirst ? 1 : 0) &&
-                SearchJoinOrder(join, pinFirst, Choose, Probe, cancellationToken) is { } searched)
+            if (join.InputEstimates is null && join.Bindings.Count >= 3 && join.Bindings.Count <= SqlJoinSearch.ExactRelationLimit + (pinFirst ? 1 : 0) &&
+                TrySearchJoin(join, pinFirst) is { } searched)
             {
                 // An earlier input can change while a later input's count is observed.
                 // Invalidate the entire optional rewrite, including all memoized subplans.
@@ -293,7 +304,7 @@ internal sealed partial class SqlPlanExecutor
                 join = join with { Steps = normalizedSteps };
                 return join with { Tree = root.ReplaceSteps(normalized) };
             }
-            var inputs = join.Inputs.Select((input, i) => join.Bindings[i].Source.Table is { } table
+            var inputs = join.Inputs.Select((input, i) => join.InputEstimates is null && join.Bindings[i].Source.Table is { } table
                 ? input with { Access = Choose(table, input.Access) } : input).ToArray();
             BTreeRangeCount?[]? estimates = null;
             bool[]? estimated = null;
@@ -328,7 +339,9 @@ internal sealed partial class SqlPlanExecutor
                 if (step.Access is not null && outerCount is null) { continue; }
                 var innerCount = GetEstimate(inner);
                 double outerRows = i == 0 ? Estimate(outerCount) : 4096;
-                double innerRows = Estimate(innerCount);
+                // Search can reuse an unprobed constant unique seek. Zero or one row
+                // both keep this pair on the old loop/probe path, never a new hash build.
+                double innerRows = join.InputEstimates is not null && UniqueInput(inner) ? 1 : Estimate(innerCount);
                 // A unique per-row seek wins; broad/unindexed equijoins compare build+probe work
                 // with nested candidates. Keep tiny pairs on their allocation-free loop path.
                 double nestedWork = step.Access is null ? outerRows * innerRows
@@ -343,10 +356,11 @@ internal sealed partial class SqlPlanExecutor
                 }
                 steps[i] = step with { Access = null, Hash = keys };
             }
-            return join with { Inputs = inputs, Steps = steps, FirstBinding = first, InputEstimates = estimates };
+            return join with { Inputs = inputs, Steps = steps, FirstBinding = first, InputEstimates = join.InputEstimates ?? estimates };
 
             BTreeRangeCount? GetEstimate(int binding)
             {
+                if (join.InputEstimates is { } observed) { return observed[binding]; }
                 estimates ??= new BTreeRangeCount?[join.Bindings.Count];
                 estimated ??= new bool[join.Bindings.Count];
                 if (!estimated[binding])

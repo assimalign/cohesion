@@ -156,6 +156,16 @@ public sealed class SqlJoinOrderSearchTests
             "a JOIN b ON a.k=b.k JOIN c ON b.k=c.k JOIN d ON c.k=d.k WHERE EXISTS(SELECT 1 FROM b x WHERE x.k=a.k)",
             "a JOIN b ON a.k=b.k JOIN c ON b.k=c.k JOIN d ON c.k=d.k WHERE NOT EXISTS(SELECT 1 FROM b x WHERE x.k=a.k)",
             "a CROSS JOIN (SELECT k FROM b) b JOIN c ON b.k=c.k JOIN d ON c.k=d.k",
+            "a LEFT JOIN b ON a.k=b.k LEFT JOIN c ON b.k=c.k JOIN d ON a.k=d.k WHERE b.k IS NULL",
+            "a JOIN b ON a.k=b.k JOIN c ON b.k=c.k LEFT JOIN d ON c.k=d.k WHERE d.v IS NULL",
+            "a LEFT JOIN (b JOIN c ON b.k=c.k) ON a.k=b.k JOIN d ON a.k=d.k",
+            "a JOIN (b LEFT JOIN c ON b.k=c.k) ON a.k=b.k JOIN d ON a.k=d.k",
+            "a JOIN b ON a.k=b.k JOIN (c LEFT JOIN d ON c.k=d.k) ON b.k=c.k",
+            "a RIGHT JOIN (b JOIN c ON b.k=c.k) ON a.k=b.k JOIN d ON b.k=d.k",
+            "a JOIN b ON a.k=b.k FULL JOIN c ON b.k=c.k JOIN d ON c.k=d.k",
+            "a JOIN b ON a.k=b.k LEFT JOIN c ON b.k=c.k AND c.v=1 JOIN d ON a.k=d.k WHERE c.k IS NULL",
+            "a JOIN b ON a.k=b.k JOIN c ON b.k=c.k JOIN d ON c.k=d.k WHERE a.id IN(SELECT id FROM b)",
+            "a LEFT JOIN b USING(k) JOIN c ON b.k=c.k JOIN d ON c.k=d.k",
         ];
         for (int seed = 0; seed < 4; seed++)
         { for (int i = 0; i < from.Length; i++) { yield return [seed, from[i], i < 6]; } }
@@ -212,7 +222,8 @@ public sealed class SqlJoinOrderSearchTests
                     {
                         var join = source.Associations.ShouldBeOfType<SqlSearchedJoinPlan>();
                         join.SourceOnly.ShouldBeTrue();
-                        (join.Tree!.Left!.Binding == 0 || join.Tree.Right!.Binding == 0).ShouldBeTrue();
+                        if (join.Tree is { } tree) { (tree.Left!.Binding == 0 || tree.Right!.Binding == 0).ShouldBeTrue(); }
+                        else { join.FirstBinding.ShouldBe(0); }
                     }
                     else
                     {

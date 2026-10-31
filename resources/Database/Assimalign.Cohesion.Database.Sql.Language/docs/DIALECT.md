@@ -809,6 +809,8 @@ derived sources and predicates without the non-throwing safety proof retain boun
 Target-referencing cross-conjuncts in UPDATE/DELETE WHERE also retain bound order: their
 source index probes depend on the target row. Independent FROM/USING graphs and MERGE's
 existing source subtree can be searched without discarding that parameterization.
+UPDATE/DELETE winners stream associations into target deduplication; an unproven source
+rewrite keeps the old streaming plan and UPDATE's CS05068 multiple-match refusal.
 
 SET values, WHERE and RETURNING resolve against the target plus source namespace. SET destinations
 remain target columns. An alias hides the original relation name; self-joins require distinct
@@ -2055,7 +2057,11 @@ ON/WHERE conjunctions move to the lowest subtree containing their referenced inp
 restrictions also remain on scans. Physical columns, USING outputs and ORDER BY semantics
 retain written ordinals. Joins retain their sort; ordered index sort removal is single-table only.
 EXPLAIN shows chosen_order, reordered, exact_dp/bound, and exact search state/partition counts.
-Equal costs use deterministic binding-ordinal and subset order. A LEFT
+Equal work costs prefer smaller estimated retained builds/frames before deterministic
+binding-ordinal and subset order. Execution admission separately requires zero extra retained
+bytes against the pre-search costed plan and preserves its hash/index paths and build-activation
+prefix; unproven full-width/bushy candidates keep that old plan. Expression hash keys remain
+eligible and use normalized full-frame evaluation. A LEFT
 step always drives from its preserved left input. Mandatory equalities must bind an
 index-key prefix under the existing type and effective-collation rules. The full ON
 remains a residual predicate. Otherwise the added input buffers once. System inputs

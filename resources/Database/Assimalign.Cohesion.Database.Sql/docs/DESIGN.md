@@ -1298,7 +1298,7 @@ coerced merged names cannot accidentally share a key slot with different types.
 
 The bound fallback executes left-deep in written order; only its first INNER pair may swap
 for an index. #1629's exact DP search may replace eligible three-to-eight relation INNER/CROSS
-graphs with a costed left-deep or bushy tree (see the costing section below). Fallback
+graphs with a certified plan after costing left-deep and bushy candidates (see the costing section below). Fallback
 later steps seek into the added input, and LEFT always preserves its left side. Each LEFT
 step tests its own residual before deciding whether to extend an unmatched row with NULL.
 Proven non-throwing single-binding WHERE conjuncts also filter inputs before pair allocation and
@@ -9559,12 +9559,31 @@ probe takes preference over an unindexed product estimate; hash work can still w
 Proven partial indexes remain eligible only with a
 binding proof. No persisted distribution or distinct-count claim is implied.
 
-Ties retain ascending leaf ordinals, then the deterministic subset enumeration. EXPLAIN
+Equal-work ties compare estimated retained bytes before ascending leaf ordinals and the
+deterministic subset enumeration. The estimate includes row width, padded full ordinal
+frames, bucket-array growth and simultaneously retained builds; it is not a memory proof.
+PostgreSQL costsize.c:4364-4400 and nodeHash.c:683-720 likewise distinguish build work and
+tuple width. A separate conservative certificate permits zero additional retained bytes
+against the pre-search costed plan: streaming hash builds retain the same input, NULL-key
+population, local row width and activation prefix, and every old hash/index path survives.
+Joined DML (including its nested queries) also retains the same streaming buffer order and
+probe row sharing: a new seek cannot replace one shared decoded buffer with fresh retained cells.
+Unproven candidates, including bushy full-width materialization, keep the old costed plan;
+an incomplete cardinality probe or heuristic fanout never proves a byte bound. This can
+decline a cheaper estimated plan deliberately. Exact enumeration and its optimum remain
+available independently of this execution admission check. EXPLAIN
 reports the parenthesized chosen_order, reordered (including association changes), exact_dp
 or bound, collapse_limit, search_scope and memo state/partition counts. Searched plan evidence
 uses an internal derived record; ordinary plan object sizes stay unchanged. Left-deep SELECT
-winners use the flat executor; bushy and source-only winners use the normalized executor,
-copying each right relation's physical slots separately for noncontiguous subsets. Index
+winners use the flat executor. Independent UPDATE/DELETE sources flatten after their pinned
+target so associations stream into deduplication; multiple UPDATE matches still refuse with
+CS05068 before later products can consume the grant. Expression hash keys use mask-based
+membership, including noncontiguous source sets, and keep full-frame evaluation in the
+normalized executor when selected. Unproven normalized rewrites retain the old normalized
+plan, including its expression hashes. MERGE explicitly asserts both the absence of an
+association WHERE and the absence of target predicates inside its source graph before
+relying on either invariant. The normalized executor copies each right relation's physical
+slots separately for noncontiguous subsets. Index
 seek fallback still applies the residual. Joins keep their sort (SQ-K3 remains single-table).
 
 Deterministic tests assert 3/15/63/255 states and 2/50/602/6050 ordered partitions at
