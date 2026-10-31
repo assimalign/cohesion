@@ -9,6 +9,9 @@ failure schedule exercises index erase/clear, memory restoration before/after mu
 three physical undo brackets; target retry or whole rollback must permit an exact subsequent
 commit. Test-only accessors reach the existing coordinator/context; shipped boundaries do not change.
 
+Wire adapter recovery covers target, outer and root over InMemory and TCP, including index
+and memory failures reached only after newer real undo brackets have committed.
+
 ## Terminal TCP conformance (#1087)
 
 The real KeyValueClient and model server run missing-database handshakes on InMemory and

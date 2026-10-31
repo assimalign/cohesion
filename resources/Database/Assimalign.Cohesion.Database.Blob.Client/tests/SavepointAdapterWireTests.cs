@@ -24,18 +24,17 @@ public sealed class SavepointAdapterWireTests
         {
             foreach (var fault in SavepointUndoFault.Cases())
             {
-                if ((int)fault[1] == 1) { continue; }
-                yield return [false, fault[0], (int)fault[1] == 2, false];
-                yield return [true, fault[0], (int)fault[1] == 2, false];
-                yield return [false, fault[0], (int)fault[1] == 2, true];
-                yield return [true, fault[0], (int)fault[1] == 2, true];
+                yield return [false, fault[0], (int)fault[1], false];
+                yield return [true, fault[0], (int)fault[1], false];
+                yield return [false, fault[0], (int)fault[1], true];
+                yield return [true, fault[0], (int)fault[1], true];
             }
         }
     }
 
     [Theory(DisplayName = "Cohesion Test [Blob.Client] - Wire mutations recover every undo stage through host-owned kernel savepoints on both transports (#1726)")]
     [MemberData(nameof(UndoFailures))]
-    public async Task RollbackToSavepointAsync_WireMutations_ShouldRecoverExactCommit(bool tcp, int stage, bool wholeRollback, bool readCommitted)
+    public async Task RollbackToSavepointAsync_WireMutations_ShouldRecoverExactCommit(bool tcp, int stage, int recovery, bool readCommitted)
     {
         // Arrange: these protocols have no transaction controls; the host owns the
         // server session's transaction, as in the existing transaction-failure corpus.
@@ -49,12 +48,17 @@ public sealed class SavepointAdapterWireTests
         await using var transaction = await session.BeginTransactionAsync(readCommitted ? IsolationLevel.ReadCommitted : IsolationLevel.Snapshot, token);
         var context = Context(transaction);
         var coordinator = Coordinator(database!);
+        var outer = await coordinator.CreateSavepointAsync(context, token);
         await Write("one", 1);
         await Read("one", 1);
         transaction.State.ShouldBe(TransactionState.Active);
         var marker = await coordinator.CreateSavepointAsync(context, token);
         for (int i = 0; i < 100; i++) { await Write("one", (byte)(i + 2)); }
         using var fault = new SavepointUndoFault(coordinator, context, stage);
+        if (stage >= 7)
+        {
+            for (int i = 0; i < 100; i++) { await Write("one", (byte)(i + 2)); }
+        }
 
         // Act
         try
@@ -62,17 +66,18 @@ public sealed class SavepointAdapterWireTests
             var failure = await Record.ExceptionAsync(() => coordinator.RollbackToSavepointAsync(context, marker, token).AsTask());
             failure.ShouldNotBeNull();
             fault.IsCauseOf(failure).ShouldBeTrue();
-            fault.Calls.ShouldBe(stage < 4 ? 1 : stage - 3);
+            fault.Calls.ShouldBe(fault.ExpectedCalls);
             var refused = await Should.ThrowAsync<DatabaseException>(() => transaction.CommitAsync(token).AsTask());
             refused.Diagnostics.ShouldContain(item => item.Code == "CK04009");
         }
         finally { fault.Disarm(); }
-        if (wholeRollback) { await transaction.RollbackAsync(token); }
-        else { await coordinator.RollbackToSavepointAsync(context, marker, token); }
+        if (recovery == 2) { await transaction.RollbackAsync(token); }
+        else { await coordinator.RollbackToSavepointAsync(context, recovery == 1 ? outer : marker, token); }
 
         // Assert: another wire mutation can commit, and prefix/content are exact.
-        if (stage is 2 or 3) { fault.Value.ShouldBe(7); }
-        if (wholeRollback)
+        if (stage is 2 or 3 or 9 or 10) { fault.Value.ShouldBe(7); }
+        if (stage is < 4 or >= 7) { fault.Calls.ShouldBe(2); }
+        if (recovery == 2)
         {
             await using var next = await session.BeginTransactionAsync(cancellationToken: token);
             await Write("two", 9);
@@ -83,7 +88,7 @@ public sealed class SavepointAdapterWireTests
             await Write("two", 9);
             await transaction.CommitAsync(token);
         }
-        await Read("one", wholeRollback ? (byte)0 : (byte)1);
+        await Read("one", recovery != 0 ? (byte)0 : (byte)1);
         await Read("two", 9);
 
         async Task Write(string name, byte value)
@@ -115,7 +120,7 @@ public sealed class SavepointAdapterWireTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var token = timeout.Token;
-        int admitted = 0, completed = 0, rounds = 0;
+        int admitted = 0, completed = 0, rounds = 0, overlapped = 0;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         do
         {
@@ -123,7 +128,8 @@ public sealed class SavepointAdapterWireTests
             await using var connection = await harness.Client.ConnectAsync(token);
             using (var original = new MemoryStream(new byte[20_000]))
             { await connection.UploadAsync("files", "one", original, cancellationToken: token); }
-            var session = (BlobDatabaseSession)harness.Server.Sessions.ShouldHaveSingleItem().DatabaseSession!;
+            var serverSession = harness.Server.Sessions.ShouldHaveSingleItem();
+            var session = (BlobDatabaseSession)serverSession.DatabaseSession!;
             await using var transaction = await session.BeginTransactionAsync(token);
             var context = Context(transaction);
             var coordinator = Coordinator(harness.Database);
@@ -137,16 +143,21 @@ public sealed class SavepointAdapterWireTests
             try
             {
                 await source.FirstChunkAccepted.Task.WaitAsync(token);
-                admitted++;
                 var create = await Record.ExceptionAsync(() => coordinator.CreateSavepointAsync(context, token).AsTask());
                 var release = await Record.ExceptionAsync(() => coordinator.ReleaseSavepointAsync(context, marker, token).AsTask());
                 var undo = await Record.ExceptionAsync(() => coordinator.RollbackToSavepointAsync(context, marker, token).AsTask());
                 foreach (var refused in new[] { create, release, undo })
                 { TransactionCoordinator.GetUndoFailureCode(refused!).ShouldBe("CK04010"); }
+                admitted++;
                 if (ending == 0) { cancellation.Cancel(); }
                 else if (ending == 1) { harness.Factory.LastConnection!.Abort(new IOException("Injected upload disconnect")); }
                 else if (ending == 2) { end = connection.DisposeAsync().AsTask(); }
                 else { end = session.DisposeAsync().AsTask(); }
+                while (ending == 3 ? session.State != SessionState.Closed : !Lifetime(serverSession).IsCancellationRequested)
+                { await Task.Delay(1, token); }
+                source.Resume.Task.IsCompleted.ShouldBeFalse();
+                if (session.State == SessionState.Closed || Lifetime(serverSession).IsCancellationRequested) { overlapped++; }
+                overlapped.ShouldBe(rounds + 1);
             }
             finally { source.Resume.TrySetResult(); }
             var failure = await Record.ExceptionAsync(async () => await upload.WaitAsync(token));
@@ -166,12 +177,17 @@ public sealed class SavepointAdapterWireTests
             completed++;
             rounds++;
         }
-        while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 8 || admitted < 8 || completed < 8)
+        while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 8 || overlapped < 8)
             && elapsed.Elapsed < TimeSpan.FromSeconds(45));
         rounds.ShouldBeGreaterThanOrEqualTo(8);
         admitted.ShouldBe(rounds);
         completed.ShouldBe(rounds);
+        overlapped.ShouldBe(rounds);
     }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lifetimeSource")]
+    private static extern ref CancellationTokenSource Lifetime(
+        [UnsafeAccessorType("Assimalign.Cohesion.Database.Blob.Internal.BlobDatabaseServerSession, Assimalign.Cohesion.Database.Blob")] object session);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Coordinator")]
     private static extern TransactionCoordinator Coordinator(BlobDatabase database);

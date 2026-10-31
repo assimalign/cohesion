@@ -14,6 +14,11 @@ same authenticated session's names and effects. Progress-counted, non-parallel s
 or drops/cancels a connection inside an admitted undo and verifies root rollback, pool-slot release
 and exact next-lease contents. Failed unknown-name controls retain the ordinary model policy.
 
+Wire conformance also checks outer recovery at every stage, every fenced command family,
+corruption during undo, and disposed/offline precedence. Ready checks require the exact expected
+letter; teardown stress keeps undo blocked until the server lifetime cancellation is recorded.
+Pool reset fails before memory restoration and must invoke restoration again before re-leasing.
+
 ## Named savepoint wire conformance (#1726, XT-4)
 
 The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,

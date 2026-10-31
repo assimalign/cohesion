@@ -21,13 +21,16 @@ Deterministic tests cover both transports, stale host COMMIT/ROLLBACK, wrong-len
 while the lifetime is live, pre-operation failure, failed downloads, immediate commit, and replacement
 of a 20,000-byte version by a 30,000-byte version while the original download remains pinned.
 
+Wire adapter recovery covers target, outer and root over InMemory and TCP, including index
+and memory failures reached only after newer real undo brackets have committed.
+
 ## Savepoint adapter conformance (#1726, XT-5)
 
 SavepointAdapterWireTests runs real Blob mutations on InMemory and TCP under the server
 session's host-owned transaction and kernel savepoint, following the existing transaction-failure
 corpus. The Blob protocol retains its existing lack of transaction-control messages. The shared
 failure schedule exercises index erase/clear, memory restoration before/after mutation and
-three physical undo brackets; target retry or whole rollback must permit an exact subsequent
+three physical undo brackets; target/outer retry or whole rollback must permit an exact subsequent
 commit. Test-only accessors reach the existing coordinator/context; shipped boundaries do not change.
 
 ## Terminal TCP conformance (#1087)

@@ -41,6 +41,11 @@ session, including the error/Ready E exchange.
 | CK04013 | The named savepoint does not exist |
 | CS04074 | SET TRANSACTION inside an active savepoint |
 
+The shared eleven-stage schedule includes four late index/memory adapter failures after real
+undo brackets have committed. Each requires a separate physical-progress observation before
+adapter failure, followed by exact target, outer and root recovery. The Transactions design
+records the covered cells and transport-specific exclusions.
+
 ## Savepoint conformance (#1726, XT-5)
 
 SavepointMatrixTests applies the shared undo-failure schedule to real Sql mutations,

@@ -49,6 +49,10 @@ public sealed class SavepointMatrixTests
         await Execute("SAVEPOINT child");
         var context = session.CurrentTransaction!.Context;
         using var fault = new SavepointUndoFault(database.Coordinator, context, stage);
+        if (stage >= 7)
+        {
+            for (int i = 0; i < 100; i++) { await Execute("UPDATE items SET n = n + 1 WHERE n >= 4"); }
+        }
 
         // Act
         try
@@ -56,7 +60,7 @@ public sealed class SavepointMatrixTests
             var failure = await Should.ThrowAsync<DatabaseException>(() => Execute("ROLLBACK TO target"));
             failure.Diagnostics.ShouldContain(item => item.Code == "CK04009");
             fault.IsCauseOf(failure).ShouldBeTrue("translation must retain the injected exception object");
-            fault.Calls.ShouldBe(stage < 4 ? 1 : stage - 3);
+            fault.Calls.ShouldBe(fault.ExpectedCalls);
             TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
             foreach (string statement in new[] { "SELECT n FROM items ORDER BY n", "COMMIT", "SAVEPOINT refused", "RELEASE target", "ROLLBACK TO child" })
             {
@@ -69,7 +73,8 @@ public sealed class SavepointMatrixTests
         // Assert: the suffix's unique values/identities can be reused after repair.
         await Execute(recovery == 2 ? "ROLLBACK" : recovery == 1 ? "ROLLBACK TO outer_scope" : "ROLLBACK TO target");
         TransactionCoordinator.IsPartialUndoPending(context).ShouldBeFalse();
-        if (stage is 2 or 3) { fault.Value.ShouldBe(7); }
+        if (stage is 2 or 3 or 9 or 10) { fault.Value.ShouldBe(7); }
+        if (stage is < 4 or >= 7) { fault.Calls.ShouldBe(2); }
         if (recovery == 2) { await Execute("BEGIN"); }
         else { await Execute(recovery == 1 ? "ROLLBACK TO outer_scope" : "ROLLBACK TO target"); }
         await Execute("INSERT INTO items (KEY, VALUE) VALUES ('k4', {'n': 4})");
@@ -116,6 +121,7 @@ public sealed class SavepointMatrixTests
         var wire = channel is null ? null : new SavepointWireControl(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute, (ProtocolMessageType)DocumentProtocolMessageType.Failure,
             text => DocumentProtocolExecuteMessage.Create(text).Encode(), frame => DocumentProtocolFailureMessage.Decode(frame.Payload.Span).Message, token);
         if (wire is not null) { await wire.StartAsync("source"); }
+        ProtocolTransactionStatus expectedStatus = ProtocolTransactionStatus.Idle;
 
         await Execute("CREATE COLLECTION items");
         await Execute("INSERT INTO items (KEY, VALUE) VALUES ('k1', {'n': 1})");
@@ -145,7 +151,7 @@ public sealed class SavepointMatrixTests
                 { (await Should.ThrowAsync<DatabaseException>(() => Execute("ROLLBACK TO target"))).Diagnostics.ShouldContain(item => item.Code == "CK04009"); }
                 else
                 {
-                    (await wire.ExecuteAsync("ROLLBACK TO target")).ShouldBeFalse();
+                    (await wire.ExecuteAsync("ROLLBACK TO target", ProtocolTransactionStatus.Failed)).ShouldBeFalse();
                     wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CK04009:", Case.Sensitive);
                 }
             }
@@ -180,8 +186,10 @@ public sealed class SavepointMatrixTests
         }
         async Task Execute(string text)
         {
+            if (text == "BEGIN") { expectedStatus = ProtocolTransactionStatus.Active; }
+            if (text is "COMMIT" or "ROLLBACK") { expectedStatus = ProtocolTransactionStatus.Idle; }
             if (wire is null) { (await session.ExecuteAsync(text, cancellationToken: token)).Status.ShouldBe(DatabaseResultStatus.Success); }
-            else { (await wire.ExecuteAsync(text)).ShouldBeTrue(wire.LastFailure); }
+            else { (await wire.ExecuteAsync(text, expectedStatus)).ShouldBeTrue(wire.LastFailure); }
         }
     }
 
@@ -331,6 +339,7 @@ public sealed class SavepointMatrixTests
         var wire = channel is null ? null : new SavepointWireControl(channel, (ProtocolMessageType)DocumentProtocolMessageType.Execute, (ProtocolMessageType)DocumentProtocolMessageType.Failure,
             text => DocumentProtocolExecuteMessage.Create(text).Encode(), frame => DocumentProtocolFailureMessage.Decode(frame.Payload.Span).Message, token);
         if (wire is not null) { await wire.StartAsync("source"); }
+        ProtocolTransactionStatus expectedStatus = ProtocolTransactionStatus.Idle;
         await Execute("CREATE COLLECTION items");
         await Execute("INSERT INTO items (KEY, VALUE) VALUES ('k1', {'n': 1})");
         await using var snapshotReader = await database.CreateSessionAsync(token);
@@ -381,8 +390,10 @@ public sealed class SavepointMatrixTests
         }
         async Task Execute(string text)
         {
+            if (text == "BEGIN") { expectedStatus = ProtocolTransactionStatus.Active; }
+            if (text is "COMMIT" or "ROLLBACK") { expectedStatus = ProtocolTransactionStatus.Idle; }
             if (wire is null) { (await session.ExecuteAsync(text, cancellationToken: token)).Status.ShouldBe(DatabaseResultStatus.Success); }
-            else { (await wire.ExecuteAsync(text)).ShouldBeTrue(wire.LastFailure); }
+            else { (await wire.ExecuteAsync(text, expectedStatus)).ShouldBeTrue(wire.LastFailure); }
         }
     }
 }

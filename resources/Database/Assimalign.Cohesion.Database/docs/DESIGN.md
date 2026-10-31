@@ -1543,3 +1543,9 @@ publishes and runs its five-model handshake/Ping guard with compiler and trimmin
 The installed-SDK acceptance fixture compiles without explicit model or transport references and
 serves KeyValuePair, Graph and Blob through the framework-public Listen(Uri) extension. Public
 signatures, option defaults, coded refusals, protocol layouts and storage formats remain unchanged.
+
+## Savepoint conformance assertions (#1726)
+
+The shared test support requires an explicit expected Ready status per wire exchange and adds
+late adapter fault stages reached after real undo brackets commit. The Transactions design lists
+covered cells and justified transport exclusions. Test-only accessors keep shipped boundaries intact.

@@ -34,41 +34,48 @@ Graph uses it for MERGE bookkeeping. Physical statements retain their existing a
 
 ## Cross-model conformance (#1726, XT-5)
 
-The shared test-only SavepointUndoFault schedule runs through SQL, Documents and Graph
-sessions and their InMemory/TCP Execute exchanges, and through KeyValuePair and Blob kernel
-savepoint tokens over real model writes, including their existing host-owned wire transaction
-corpus. It fails index erase, index deleter restoration,
-memory restoration both before and after mutation, and each of the first three physical undo
-brackets. Every injected failure must be observed; recovery by the retained target, an outer
-scope or whole rollback is followed by an exact commit and a fresh observer. Memory restoration
-is idempotent after a callback throws. Exception identity is retained in-process; SQL/OQL/GQL retain CK04009
-plus Ready E on the wire.
+The shared test-only SavepointUndoFault schedule runs through real model mutations. Its eleven
+stages cover index erase/clear, memory restoration before/after mutation, failure in the first three
+physical undo brackets, and four index/memory adapter failures after real undo brackets have
+committed. Late-adapter cases record the adapter before additional real mutations; a distinct batch
+counter must prove physical progress before that adapter fails. Target, outer and whole rollback
+recovery each permit an exact subsequent commit. In-process exceptions retain their identity;
+SQL/OQL/GQL wire exchanges assert the exact expected Ready letter (I, T or E), session state,
+root state and kernel state. Every command family is refused while CK04009 is pending except the
+permitted target/outer/root recovery controls. Pool reset uses a before-restoration memory fault
+and requires its second callback to restore the retained value.
 
-| Contract | In-process conformance | InMemory and TCP conformance |
+| Contract | In-process | InMemory and TCP |
 |---|---|---|
-| Nested names, duplicates, release/rollback scope, repeated rollback | NamedSavepointTests | NamedSavepointWireTests |
-| Ordinary statement and failed-control policies | NamedSavepointTests, SavepointMatrixTests | NamedSavepointWireTests, SavepointFailureWireTests |
-| Undo failures, fences, target/outer/root recovery and exact commit | SavepointFixTests, SavepointMatrixTests | SavepointFailureWireTests, SavepointAdapterWireTests |
-| Pre-admission cancellation, admitted completion, root ends and session/database close | NamedSavepointTests, SavepointFixTests, SavepointMatrixTests | SavepointFailureWireTests (pre-dispatch cancellation, admitted return/drop and session/database close) |
-| Disposal/offline/corruption precedence | SavepointFixTests | SavepointFailureWireTests (offline over CK04009), model lifecycle/wire suites |
-| Crash after rollback-to, within the second undo bracket, after root commit | SavepointAdapterTests, SavepointMatrixTests in all five models | SavepointMatrixTests drives SQL/OQL/GQL controls through both transports before copying the live image |
-| Snapshot and fresh READ COMMITTED readers, released lock waiters | SavepointAdapterTests, NamedSavepointTests | SavepointMatrixTests drives undo through both transports while both reader isolations progress and scoped lock waiters wake |
-| Documents/Blob stream refusal and saturation; key/value adapters; Graph MERGE accounting | SavepointAdapterTests, SavepointMatrixTests, SavepointMergeLockTests | SavepointAdapterWireTests covers KeyValuePair/Blob mutations without adding control messages |
+| Nested names, duplicates, release/rollback scope, repeated rollback | Covered: NamedSavepointTests | Covered: NamedSavepointWireTests |
+| Ordinary statement and failed-control policies | Covered: NamedSavepointTests, SavepointMatrixTests | Covered: NamedSavepointWireTests, SavepointFailureWireTests |
+| Eleven undo stages, target/outer/root recovery, exact subsequent commit | Covered: SavepointMatrixTests in all five models | Covered: SavepointFailureWireTests (SQL/OQL/GQL), SavepointAdapterWireTests (Blob/key/value host controls) |
+| Every command family fenced by CK04009 | Covered: SavepointFixTests, SavepointMatrixTests | Covered: SavepointFailureWireTests (SQL/OQL/GQL) |
+| Pre-admission cancellation, admitted completion, root ends, session/database close | Covered: NamedSavepointTests, SavepointFixTests, SavepointMatrixTests | Covered: SavepointFailureWireTests |
+| Disposed/offline precedence with an existing undo fence | Covered: SavepointFixTests | Covered: SavepointFailureWireTests; OQL's existing disposed preflight is terminal, SQL/GQL return coded error and Ready E |
+| Corruption during undo aborts instead of retaining CK04009 | Covered: SavepointFixTests | Covered: SavepointFailureWireTests (SQL/OQL/GQL) |
+| Crash after rollback-to, within undo, after root commit | Covered: SavepointAdapterTests, SavepointMatrixTests | Covered: SavepointMatrixTests drives SQL/OQL/GQL on both transports before copying live bytes |
+| Snapshot/fresh READ COMMITTED readers and released lock waiters | Covered: SavepointAdapterTests, NamedSavepointTests | Covered: SavepointMatrixTests on both transports |
+| SQL/OQL/GQL connection drop and pooling/reset | Not applicable: no connection or pool | Covered: SavepointFailureWireTests; reset certifies the same server session |
+| Documents stream refusal/saturation | Covered at kernel level: SavepointMatrixTests | Excluded: the wire serializes its one active stream; kernel registration/saturation is the applicable limit proof |
+| Blob upload failure, stream-control refusal and borrowed download version/hold lifetime | Covered: SavepointAdapterTests, SavepointMatrixTests | Covered: SavepointAdapterWireTests, BorrowedTransferWireTests, BlobTransactionFailureWireTests |
+| Blob write-stream counter saturation | Covered at kernel level: SavepointMatrixTests | Excluded: one serialized wire transfer cannot saturate the kernel counter |
+| Matched Graph MERGE memory-only tracking, unchanged journal and no durability wait | Covered: SavepointMergeLockTests | Covered: SavepointMergeLockTests on both transports |
 
 Connection-return/drop stress runs in a non-parallel collection for at least 250 ms and eight
-rounds, then until admission and completion counters match, with a 45-second ceiling and a
-60-second cancellation guard. The physical-batch callback establishes the overlap; cleanup
-always releases it, joins the exchange and returns/discards the connector before the next lease.
-A returned fenced connector is rented as the exact same server session and must have no names,
-uncommitted rows or retained memory. Existing engine reader/end stress uses the same
-progress-based discipline. The root lock order remains session operation flag, transaction end
-gate, root state reservation, manager registration/context admission, then ledger/model/storage
-work with the earlier monitors released. Ends and teardown join the admitted control.
+rounds, continuing until at least eight overlaps have been recorded, with a 45-second ceiling and
+60-second cancellation guard. Admission counts physical callbacks; the independent overlap counter
+records server lifetime cancellation while undo is still blocked. Each round asserts that observation
+before releasing undo. Completion counts exact restored contents and a successful new lease after
+teardown. Blob's transfer stress similarly records server cancellation or session close while its
+sender remains blocked after an acknowledged chunk. Durations decide neither overlap nor success.
 
 Crash images are copied from live storage before source cleanup, including a committed first
-undo bracket and an uncommitted second bracket. Reopen must scrub the whole uncommitted root
-writer; after root commit it must retain only the prefix. These checks add no persisted marker,
-wire frame, diagnostic identity, public API or ordinary-path allocation. Storage stays format 4.
+undo bracket and an uncommitted second bracket. Reopen scrubs the uncommitted root writer;
+root commit retains only the prefix. The root lock order remains session operation flag, transaction
+end gate, root reservation, kernel admission, then ledger/model/storage work. Ends and teardown
+drain admitted undo. No public testing API, persisted marker, wire frame or diagnostic identity is
+added; transactions without savepoints retain their ordinary allocation path and storage stays 4.
 
 ## Isolation configuration (#1012)
 

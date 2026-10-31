@@ -28,16 +28,15 @@ public sealed class SavepointFailureWireTests
         {
             foreach (var fault in SavepointUndoFault.Cases())
             {
-                if ((int)fault[1] == 1) { continue; }
-                yield return [false, fault[0], (int)fault[1] == 2];
-                yield return [true, fault[0], (int)fault[1] == 2];
+                yield return [false, fault[0], (int)fault[1]];
+                yield return [true, fault[0], (int)fault[1]];
             }
         }
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Every undo stage reports CK04009 and Ready E, then recovers exactly on both transports (#1726)")]
     [MemberData(nameof(UndoFailures))]
-    public async Task ExecuteAsync_UndoFailure_ShouldKeepReadyAndRecover(bool tcp, int stage, bool wholeRollback)
+    public async Task ExecuteAsync_UndoFailure_ShouldKeepReadyAndRecover(bool tcp, int stage, int recovery)
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -57,14 +56,21 @@ public sealed class SavepointFailureWireTests
         var startup = await Read();
         startup.Type.ShouldBe(ProtocolMessageType.Ready);
         channel.SetAgreement(ProtocolReadyMessage.Decode(startup.Payload.Span));
-        await Execute("BEGIN");
-        await Execute("INSERT (:Item {id: 2, n: 2})");
-        await Execute("SAVEPOINT scope");
-        await Execute("INSERT (:Item {id: 3, n: 3})");
-        for (int i = 0; i < 100; i++) { await Execute("MATCH (n:Item) WHERE n.id = 3 SET n.n = n.n + 1"); }
+        await Execute("BEGIN", ProtocolTransactionStatus.Active);
+        await Execute("INSERT (:Item {id: 0, n: 0})", ProtocolTransactionStatus.Active);
+        await Execute("SAVEPOINT outer_scope", ProtocolTransactionStatus.Active);
+        await Execute("INSERT (:Item {id: 2, n: 2})", ProtocolTransactionStatus.Active);
+        await Execute("SAVEPOINT scope", ProtocolTransactionStatus.Active);
+        await Execute("INSERT (:Item {id: 3, n: 3})", ProtocolTransactionStatus.Active);
+        for (int i = 0; i < 100; i++) { await Execute("MATCH (n:Item) WHERE n.id = 3 SET n.n = n.n + 1", ProtocolTransactionStatus.Active); }
+        await Execute("SAVEPOINT child", ProtocolTransactionStatus.Active);
         var session = (GraphDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
         var coordinator = Coordinator(database);
         using var fault = new SavepointUndoFault(coordinator, Context(session.CurrentTransaction!), stage);
+        if (stage >= 7)
+        {
+            for (int i = 0; i < 100; i++) { await Execute("MATCH (n:Item) WHERE n.id = 3 SET n.n = n.n + 1", ProtocolTransactionStatus.Active); }
+        }
 
         // Act
         try
@@ -82,31 +88,58 @@ public sealed class SavepointFailureWireTests
         }
         finally { fault.Disarm(); }
 
+        var retained = session.CurrentTransaction.ShouldNotBeNull();
+        foreach (string refused in new[] { "MATCH (n:Item) RETURN n.n", "COMMIT", "BEGIN", "SAVEPOINT refused", "RELEASE scope", "ROLLBACK TO child", "INSERT (:Item {id: 9, n: 9})", "MATCH (n:Item) SET n.n = 9", "MATCH (n:Item) DELETE n", "MERGE (:Item {id: 9, n: 9})", "SHOW INDEXES" })
+        {
+            await Send((ProtocolMessageType)GraphProtocolMessageType.Execute, GraphProtocolExecuteMessage.Create(refused).Encode());
+            var rejected = await Read();
+            if (rejected.Type == ProtocolMessageType.Diagnostics) { rejected = await Read(); }
+            rejected.Type.ShouldBe(ProtocolMessageType.Error);
+            ProtocolErrorMessage.Decode(rejected.Payload.Span).Message.ShouldStartWith("CK04009:", Case.Sensitive);
+            var fencedReady = await Read();
+            fencedReady.Type.ShouldBe(ProtocolMessageType.Ready);
+            ProtocolTransactionStatusMessage.Decode(fencedReady.Payload.Span).Status.ShouldBe(ProtocolTransactionStatus.Failed);
+            session.State.ShouldBe(SessionState.Open);
+            session.CurrentTransaction.ShouldBeSameAs(retained);
+            retained.State.ShouldBe(TransactionState.Faulted);
+            Context(retained).State.ShouldBe(TransactionState.Active);
+        }
+
         // Assert
-        fault.Calls.ShouldBe(stage < 4 ? 1 : stage - 3);
-        await Execute(wholeRollback ? "ROLLBACK" : "ROLLBACK TO scope");
-        if (stage is 2 or 3) { fault.Value.ShouldBe(7); }
-        if (wholeRollback) { await Execute("BEGIN"); }
-        await Execute("INSERT (:Item {id: 4, n: 4})");
-        await Execute("COMMIT");
+        fault.Calls.ShouldBe(fault.ExpectedCalls);
+        await Execute(recovery == 2 ? "ROLLBACK" : recovery == 1 ? "ROLLBACK TO outer_scope" : "ROLLBACK TO scope", recovery == 2 ? ProtocolTransactionStatus.Idle : ProtocolTransactionStatus.Active);
+        if (stage is 2 or 3 or 9 or 10) { fault.Value.ShouldBe(7); }
+        if (stage is < 4 or >= 7) { fault.Calls.ShouldBe(2); }
+        if (recovery == 2) { await Execute("BEGIN", ProtocolTransactionStatus.Active); }
+        await Execute("INSERT (:Item {id: 4, n: 4})", ProtocolTransactionStatus.Active);
+        await Execute("COMMIT", ProtocolTransactionStatus.Idle);
         session.State.ShouldBe(SessionState.Open);
         session.CurrentTransaction.ShouldBeNull();
         await using var observer = await database.CreateSessionAsync(token);
         await using var result = (await observer.ExecuteAsync("MATCH (n:Item) RETURN n.n ORDER BY n.id", cancellationToken: token)).ShouldBeAssignableTo<DatabaseResultSet>();
         var values = new List<long>();
         await foreach (var row in result.GetRowsAsync(token)) { values.Add(Convert.ToInt64(row.GetValue(0))); }
-        values.ShouldBe(wholeRollback ? new long[] { 1, 4 } : new long[] { 1, 2, 4 });
+        values.ShouldBe(recovery == 2 ? new long[] { 1, 4 } : recovery == 1 ? new long[] { 0, 1, 4 } : new long[] { 0, 1, 2, 4 });
 
         async Task Send(ProtocolMessageType type, ReadOnlyMemory<byte> payload)
         { await channel.Writer.WriteFrameAsync(new(type, payload), token); await channel.Writer.FlushAsync(token); }
         async Task<ProtocolFrame> Read() => (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
-        async Task Execute(string statement)
+        async Task Execute(string statement, ProtocolTransactionStatus expectedStatus)
         {
             await Send((ProtocolMessageType)GraphProtocolMessageType.Execute, GraphProtocolExecuteMessage.Create(statement).Encode());
             ProtocolFrame frame;
             do { frame = await Read(); frame.Type.ShouldNotBe(ProtocolMessageType.Error); }
             while (frame.Type != ProtocolMessageType.Ready);
-            ProtocolTransactionStatusMessage.Decode(frame.Payload.Span).Status.ShouldNotBe(ProtocolTransactionStatus.Failed);
+            ProtocolTransactionStatusMessage.Decode(frame.Payload.Span).Status.ShouldBe(expectedStatus);
+            var currentSession = (GraphDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+            currentSession.State.ShouldBe(SessionState.Open);
+            if (expectedStatus == ProtocolTransactionStatus.Idle) { currentSession.CurrentTransaction.ShouldBeNull(); }
+            else
+            {
+                var current = currentSession.CurrentTransaction.ShouldNotBeNull();
+                current.State.ShouldBe(expectedStatus == ProtocolTransactionStatus.Failed ? TransactionState.Faulted : TransactionState.Active);
+                Context(current).State.ShouldBe(TransactionState.Active);
+            }
         }
     }
 
@@ -129,7 +162,7 @@ public sealed class SavepointFailureWireTests
         await writer.ExecuteAsync("INSERT (:Item {id: 3, n: 3})", cancellationToken: token);
         var server = harness.Server.Sessions.Single(item => item.DatabaseSession!.CurrentTransaction is not null);
         var session = (GraphDatabaseSession)server.DatabaseSession!;
-        using var fault = new SavepointUndoFault(Coordinator(database), Context(session.CurrentTransaction!), 3);
+        using var fault = new SavepointUndoFault(Coordinator(database), Context(session.CurrentTransaction!), 2);
         try
         {
             (await Should.ThrowAsync<GraphClientException>(async () => await writer.ExecuteAsync("ROLLBACK TO pooled", cancellationToken: token)))
@@ -141,6 +174,7 @@ public sealed class SavepointFailureWireTests
         await writer.DisposeAsync();
         session.CurrentTransaction.ShouldBeNull();
         fault.Value.ShouldBe(7);
+        fault.Calls.ShouldBe(2);
         await using var next = await harness.Client.ConnectAsync(token);
         await next.ExecuteAsync("BEGIN", cancellationToken: token);
         harness.Server.Sessions.Single(item => item.DatabaseSession!.CurrentTransaction is not null).Id.ShouldBe(server.Id);
@@ -166,7 +200,7 @@ public sealed class SavepointFailureWireTests
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         var token = timeout.Token;
-        int rounds = 0, admitted = 0, completed = 0;
+        int rounds = 0, admitted = 0, completed = 0, overlapped = 0;
         var elapsed = System.Diagnostics.Stopwatch.StartNew();
         do
         {
@@ -198,7 +232,19 @@ public sealed class SavepointFailureWireTests
             {
                 await entered.Task.WaitAsync(token);
                 if (ending == 2) { caller.Cancel(); }
+                var serverSession = harness.Server.Sessions.Single(item => ReferenceEquals(item.DatabaseSession, session));
+                var lifetime = Lifetime(serverSession).Token;
+                var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                using var registration = lifetime.Register(() =>
+                {
+                    if (!release.IsSet) { Interlocked.Increment(ref overlapped); }
+                    canceled.TrySetResult();
+                });
                 returning = ending == 1 ? writer.AbortAsync().AsTask() : writer.DisposeAsync().AsTask();
+                await canceled.Task.WaitAsync(token);
+                overlapped.ShouldBe(rounds + 1);
+                release.IsSet.ShouldBeFalse();
+                context.State.ShouldBe(TransactionState.Active);
             }
             finally
             {
@@ -219,11 +265,12 @@ public sealed class SavepointFailureWireTests
             completed++;
             rounds++;
         }
-        while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 8 || admitted < 8 || completed < 8)
+        while ((elapsed.Elapsed < TimeSpan.FromMilliseconds(250) || rounds < 8 || overlapped < 8)
             && elapsed.Elapsed < TimeSpan.FromSeconds(45));
         rounds.ShouldBeGreaterThanOrEqualTo(8);
         admitted.ShouldBe(rounds);
         completed.ShouldBe(rounds);
+        overlapped.ShouldBe(rounds);
     }
 
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Failed savepoint controls keep the ordinary model failure rule over both transports (#1726)")]
@@ -319,14 +366,14 @@ public sealed class SavepointFailureWireTests
             frame => ProtocolErrorMessage.Decode(frame.Payload.Span).Message, token);
         await wire.StartAsync("graph");
 
-        (await wire.ExecuteAsync("BEGIN")).ShouldBeTrue();
-        (await wire.ExecuteAsync("SAVEPOINT retained")).ShouldBeTrue();
-        (await wire.ExecuteAsync("INSERT (:Item {n: 4})")).ShouldBeTrue();
+        (await wire.ExecuteAsync("BEGIN", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        (await wire.ExecuteAsync("SAVEPOINT retained", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        (await wire.ExecuteAsync("INSERT (:Item {n: 4})", ProtocolTransactionStatus.Active)).ShouldBeTrue();
         var session = (GraphDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
         var coordinator = Coordinator(database);
         var context = Context(session.CurrentTransaction!);
         using var fault = new SavepointUndoFault(coordinator, context, 3);
-        try { (await wire.ExecuteAsync("ROLLBACK TO retained")).ShouldBeFalse(); }
+        try { (await wire.ExecuteAsync("ROLLBACK TO retained", ProtocolTransactionStatus.Failed)).ShouldBeFalse(); }
         finally { fault.Disarm(); }
         wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CK04009:", Case.Sensitive);
         TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
@@ -334,10 +381,99 @@ public sealed class SavepointFailureWireTests
         // Act
         Storage(coordinator).TakeOffline(StorageOfflineCause.VersionPurgeFailures,
             "Injected offline storage with pending undo", new IOException("Offline"));
-        (await wire.ExecuteAsync("ROLLBACK TO retained")).ShouldBeFalse();
+        (await wire.ExecuteAsync("ROLLBACK TO retained", ProtocolTransactionStatus.Failed)).ShouldBeFalse();
 
         // Assert: a complete failure/Ready E exchange, with the lifecycle cause first.
         wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CG06012:", Case.Sensitive);
+        session.State.ShouldBe(SessionState.Open);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Disposed database outranks an existing undo fence over both transports (#1726)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_DisposedFencedDatabase_ShouldKeepCodedReady(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp: tcp);
+        var database = harness.Database;
+        var factory = harness.ConnectionFactory;
+        await using var transport = await factory.ConnectAsync(harness.Listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(transport.AsStream(), GraphProtocol.Family, true);
+        var wire = new SavepointWireControl(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute, ProtocolMessageType.Error,
+            statement => GraphProtocolExecuteMessage.Create(statement).Encode(),
+            frame => ProtocolErrorMessage.Decode(frame.Payload.Span).Message, token);
+        await wire.StartAsync("graph");
+
+        (await wire.ExecuteAsync("BEGIN", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        (await wire.ExecuteAsync("SAVEPOINT retained", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        (await wire.ExecuteAsync("INSERT (:Item {n: 4})", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        var session = (GraphDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+        var coordinator = Coordinator(database);
+        var context = Context(session.CurrentTransaction!);
+        using var fault = new SavepointUndoFault(coordinator, context, 3);
+        try { (await wire.ExecuteAsync("ROLLBACK TO retained", ProtocolTransactionStatus.Failed)).ShouldBeFalse(); }
+        finally { fault.Disarm(); }
+        wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CK04009:", Case.Sensitive);
+        TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
+
+        // Act / Assert: the fence exists before disposal and two complete exchanges keep it.
+        Interlocked.Exchange(ref Disposed(database), 1).ShouldBe(0);
+        try
+        {
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                (await wire.ExecuteAsync("ROLLBACK TO retained", ProtocolTransactionStatus.Failed)).ShouldBeFalse();
+                wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CG09019:", Case.Sensitive);
+                session.State.ShouldBe(SessionState.Open);
+                TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
+                session.CurrentTransaction.ShouldNotBeNull().State.ShouldBe(TransactionState.Faulted);
+            }
+        }
+        finally { Volatile.Write(ref Disposed(database), 0); }
+        (await wire.ExecuteAsync("ROLLBACK", ProtocolTransactionStatus.Idle)).ShouldBeTrue();
+        session.State.ShouldBe(SessionState.Open);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Corruption during undo aborts the writer over both transports (#1726)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_CorruptUndo_ShouldAbortWriter(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp: tcp);
+        var database = harness.Database;
+        var factory = harness.ConnectionFactory;
+        await using var transport = await factory.ConnectAsync(harness.Listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(transport.AsStream(), GraphProtocol.Family, true);
+        var wire = new SavepointWireControl(channel, (ProtocolMessageType)GraphProtocolMessageType.Execute, ProtocolMessageType.Error,
+            statement => GraphProtocolExecuteMessage.Create(statement).Encode(),
+            frame => ProtocolErrorMessage.Decode(frame.Payload.Span).Message, token);
+        await wire.StartAsync("graph");
+
+        (await wire.ExecuteAsync("BEGIN", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        (await wire.ExecuteAsync("SAVEPOINT retained", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        (await wire.ExecuteAsync("INSERT (:Item {n: 4})", ProtocolTransactionStatus.Active)).ShouldBeTrue();
+        var session = (GraphDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+        var coordinator = Coordinator(database);
+        var context = Context(session.CurrentTransaction!);
+        int visits = 0;
+        Observe(coordinator.VersionStore, () => { visits++; throw new StorageCorruptionException((PageId)42, "Injected corrupt undo"); });
+
+        // Act
+        try { (await wire.ExecuteAsync("ROLLBACK TO retained", ProtocolTransactionStatus.Failed)).ShouldBeFalse(); }
+        finally { Observe(coordinator.VersionStore, null); }
+
+        // Assert
+        visits.ShouldBe(1);
+        wire.LastFailure.ShouldNotBeNull().ShouldStartWith("CK06003:", Case.Sensitive);
+        context.State.ShouldNotBe(TransactionState.Active);
+        TransactionCoordinator.IsPartialUndoPending(context).ShouldBeFalse();
+        session.CurrentTransaction.ShouldNotBeNull().State.ShouldBe(TransactionState.Faulted);
+        (await wire.ExecuteAsync("ROLLBACK", ProtocolTransactionStatus.Idle)).ShouldBeTrue();
         session.State.ShouldBe(SessionState.Open);
     }
 
@@ -412,6 +548,13 @@ public sealed class SavepointFailureWireTests
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_storage")]
     private static extern ref Assimalign.Cohesion.Database.Storage.Storage Storage(TransactionCoordinator coordinator);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_disposed")]
+    private static extern ref int Disposed(DatabaseInstance database);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_lifetimeSource")]
+    private static extern ref CancellationTokenSource Lifetime(
+        [UnsafeAccessorType("Assimalign.Cohesion.Database.Graph.Internal.GraphDatabaseServerSession, Assimalign.Cohesion.Database.Graph")] object session);
 
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Coordinator")]
     private static extern TransactionCoordinator Coordinator(GraphDatabase database);

@@ -27,6 +27,15 @@ internal sealed class SavepointUndoFault : RecordVersionIndex, IDisposable
     internal readonly IOException Failure = new("Injected savepoint conformance failure");
     internal int Calls;
     internal int Value = 7;
+    internal int PrefixBatches;
+    internal int ExpectedCalls
+    {
+        get
+        {
+            if (_stage >= 7) { PrefixBatches.ShouldBeGreaterThan(0, "real undo brackets must commit before the adapter fails"); }
+            return _stage is >= 4 and <= 6 ? _stage - 3 : 1;
+        }
+    }
 
     internal SavepointUndoFault(TransactionCoordinator coordinator, TransactionContext context, int stage)
     {
@@ -34,12 +43,16 @@ internal sealed class SavepointUndoFault : RecordVersionIndex, IDisposable
         _stage = stage;
         switch (stage)
         {
+            case 7:
             case 0:
                 coordinator.VersionStore.RecordIndexEntryCreated(context.Sequence, this, ReadOnlyMemory<byte>.Empty, 0);
                 break;
+            case 8:
             case 1:
                 coordinator.VersionStore.RecordIndexEntryTombstoned(context.Sequence, this, ReadOnlyMemory<byte>.Empty, 0);
                 break;
+            case 9:
+            case 10:
             case 2:
             case 3:
                 coordinator.ApplyMemoryChange(context, this, () => Value = 42);
@@ -52,13 +65,15 @@ internal sealed class SavepointUndoFault : RecordVersionIndex, IDisposable
                 });
                 break;
         }
+        if (stage >= 7) { ObserveBatch(coordinator.VersionStore, () => PrefixBatches++); }
     }
 
     internal static IEnumerable<object[]> Cases()
     {
         // Index erase, index clear, memory before/after restoration, physical
-        // first/second/third bracket. Recovery uses the target, its parent or root.
-        for (int stage = 0; stage < 7; stage++)
+        // first/second/third bracket, then late index/memory faults after committed brackets.
+        // Recovery uses the target, its parent or root.
+        for (int stage = 0; stage < 11; stage++)
         { for (int recovery = 0; recovery < 3; recovery++) { yield return [stage, recovery]; } }
     }
 
@@ -79,9 +94,9 @@ internal sealed class SavepointUndoFault : RecordVersionIndex, IDisposable
     protected override void OnStatementRolledBackCore()
     {
         Calls++;
-        if (_armed && _stage == 2) { throw Failure; }
+        if (_armed && _stage is 2 or 9) { throw Failure; }
         Value = 7; // Repeated restoration after a callback fault must be idempotent.
-        if (_armed && _stage == 3) { throw Failure; }
+        if (_armed && _stage is 3 or 10) { throw Failure; }
     }
 
     protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key,
@@ -141,7 +156,7 @@ internal sealed class SavepointWireControl
         _channel.SetAgreement(ProtocolReadyMessage.Decode(ready.Payload.Span));
     }
 
-    internal async Task<bool> ExecuteAsync(string statement)
+    internal async Task<bool> ExecuteAsync(string statement, ProtocolTransactionStatus expectedStatus)
     {
         LastFailure = null;
         await SendAsync(_execute, _encode(statement));
@@ -151,8 +166,7 @@ internal sealed class SavepointWireControl
             if (frame.Type == _failure) { LastFailure = _decodeFailure(frame); }
             if (frame.Type != ProtocolMessageType.Ready) { continue; }
             var status = ProtocolTransactionStatusMessage.Decode(frame.Payload.Span).Status;
-            if (LastFailure is not null) { status.ShouldBe(ProtocolTransactionStatus.Failed); }
-            else { status.ShouldNotBe(ProtocolTransactionStatus.Failed); }
+            status.ShouldBe(expectedStatus);
             return LastFailure is null;
         }
     }

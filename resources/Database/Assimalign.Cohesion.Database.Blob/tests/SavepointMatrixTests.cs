@@ -39,6 +39,10 @@ public sealed class SavepointMatrixTests
         var target = await coordinator.CreateSavepointAsync(context, token);
         for (int i = 0; i < 100; i++) { await Write((byte)(i + 2)); }
         using var fault = new SavepointUndoFault(coordinator, context, stage);
+        if (stage >= 7)
+        {
+            for (int i = 0; i < 100; i++) { await Write((byte)(i + 2)); }
+        }
 
         // Act
         try
@@ -47,7 +51,7 @@ public sealed class SavepointMatrixTests
             failure.ShouldNotBeNull();
             fault.IsCauseOf(failure).ShouldBeTrue();
             TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
-            fault.Calls.ShouldBe(stage < 4 ? 1 : stage - 3);
+            fault.Calls.ShouldBe(fault.ExpectedCalls);
             var refusal = await Should.ThrowAsync<DatabaseException>(async () => await container.OpenReadAsync("one", cancellationToken: token));
             refusal.Diagnostics.ShouldContain(item => item.Code == "CK04009");
         }
@@ -61,7 +65,8 @@ public sealed class SavepointMatrixTests
             await coordinator.RollbackToSavepointAsync(context, recovery == 1 ? outer : target, token);
         }
         TransactionCoordinator.IsPartialUndoPending(context).ShouldBeFalse();
-        if (stage is 2 or 3) { fault.Value.ShouldBe(7); }
+        if (stage is 2 or 3 or 9 or 10) { fault.Value.ShouldBe(7); }
+        if (stage is < 4 or >= 7) { fault.Calls.ShouldBe(2); }
         byte expected = recovery == 0 ? (byte)1 : (byte)0;
         if (recovery != 2) { await transaction.CommitAsync(token); }
         await using var observer = await database.CreateSessionAsync(token);

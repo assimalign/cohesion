@@ -31,6 +31,11 @@ model's ordinary statement policy.
 The central advertised-clause execution matrix also proves each savepoint AST command and
 its row visibility/effects through a live session; the unmapped-clause guard remains intact.
 
+The shared eleven-stage schedule includes four late index/memory adapter failures after real
+undo brackets have committed. Each requires a separate physical-progress observation before
+adapter failure, followed by exact target, outer and root recovery. The Transactions design
+records the covered cells and transport-specific exclusions.
+
 ## Savepoint conformance (#1726, XT-5)
 
 SavepointMatrixTests applies the shared undo-failure schedule to real Documents mutations,

@@ -14,6 +14,11 @@ same authenticated session's names and effects. Progress-counted, non-parallel s
 or drops/cancels a connection inside an admitted undo and verifies root rollback, pool-slot release
 and exact next-lease contents. Failed unknown-name controls retain the ordinary model policy.
 
+Wire conformance also checks outer recovery at every stage, every fenced command family,
+corruption during undo, and disposed/offline precedence. Ready checks require the exact expected
+letter; teardown stress keeps undo blocked until the server lifetime cancellation is recorded.
+Pool reset fails before memory restoration and must invoke restoration again before re-leasing.
+
 ## Named savepoint failure recovery (#1726)
 
 Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.

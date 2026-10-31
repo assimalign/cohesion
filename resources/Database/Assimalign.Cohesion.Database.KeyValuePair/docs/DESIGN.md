@@ -22,6 +22,11 @@ model's ordinary statement policy.
 | CK04012 | A savepoint command requires an explicit bound transaction |
 | CK04013 | The named savepoint does not exist |
 
+The shared eleven-stage schedule includes four late index/memory adapter failures after real
+undo brackets have committed. Each requires a separate physical-progress observation before
+adapter failure, followed by exact target, outer and root recovery. The Transactions design
+records the covered cells and transport-specific exclusions.
+
 ## Savepoint conformance (#1726, XT-5)
 
 SavepointMatrixTests applies the shared undo-failure schedule to real KeyValuePair mutations,
