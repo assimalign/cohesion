@@ -19,9 +19,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Configuration.CommandLine" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Telemetry" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Logging" />
 	</ItemGroup>
 	<ItemGroup>

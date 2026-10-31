@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.Testing</RootNamespace>
-		<Description>Integration testing for Cohesion database resource programs. DatabaseApplicationTestFactory invokes the resource's real Program entry point under an isolated ResourceContext, waits for the generated Database control plane to become ready, and stops it through the same graceful control-plane path used by gateways. NativeAOT-safe with no assembly loading or runtime code generation.</Description>
+		<Description>Integration testing for Cohesion database programs. DatabaseApplicationTestFactory invokes the program's real Program entry point inside an AppEnvironmentScope of its own and stops it through that scope's shutdown signal. NativeAOT-safe with no assembly loading or runtime code generation.</Description>
 		<!-- Sanctioned exception to the resource hosting-isolation rule (COHRES001,
 		     .claude/rules/resource-areas.md): the test factory drives the concrete
 		     Database runtime, which cannot be done through the abstractions alone -
@@ -11,7 +11,6 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />

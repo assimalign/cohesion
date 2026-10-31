@@ -18,7 +18,9 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting.Health" />
+		<!-- The application context's health result is a Web.Health result, which Database.Hosting
+		     references privately. -->
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Health" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 		<!-- Composition acceptance: the host runs a real SQL engine fronted by the
 		     SQL model's server (SqlDatabaseServer, implemented inside Database.Sql)

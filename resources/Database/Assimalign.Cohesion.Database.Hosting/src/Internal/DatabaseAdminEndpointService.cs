@@ -1,23 +1,15 @@
 using System;
-using System.Collections.Generic;
 using System.Net;
-using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
 using Assimalign.Cohesion.Web.Health;
 using Assimalign.Cohesion.Web.Hosting;
-using Assimalign.Cohesion.Web.Hosting.Health;
-using Assimalign.Cohesion.Web.Hosting.Resources;
 
 using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 
@@ -27,24 +19,18 @@ namespace Assimalign.Cohesion.Database.Hosting.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.Internal.DatabaseAdminEndpointService.DebugView))]
 internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostService, IDisposable
 {
-    private X509Certificate2? _serverCertificate;
-    private X509Certificate2Collection _serverCertificateChain = new();
+    private static readonly string[] _databaseHealthTags = [HealthTags.Ready, HealthTags.Live];
+
     private readonly WebApplication _application;
     private readonly Uri _endpoint;
 
     internal DatabaseAdminEndpointService(
         Uri endpoint,
-        IResourceControlPlane controlPlane,
-        ResourceContext resourceContext,
-        DatabaseApplicationContext applicationContext,
-        IReadOnlyList<IHealthContributor> healthContributors)
+        DatabaseApplicationContext applicationContext)
     {
         Uri.ThrowIfNotEndpoint(endpoint);
         _endpoint = endpoint;
-        ArgumentNullException.ThrowIfNull(controlPlane);
-        ArgumentNullException.ThrowIfNull(resourceContext);
         ArgumentNullException.ThrowIfNull(applicationContext);
-        ArgumentNullException.ThrowIfNull(healthContributors);
 
         if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
@@ -53,60 +39,56 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAdminEndpointServiceFailure, endpoint.Scheme));
         }
 
-        IPAddress address = ResolveBindAddress(endpoint.IdnHost);
-        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        // An https endpoint's certificate came from the retired resource context (#1759). With no
+        // source left for it, an https endpoint is refused rather than served without one.
         if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
         {
-            if (ResourceRuntime.Current is not ResourceContext certificateContext ||
-                !certificateContext.TryGetEndpointCertificate("admin", out _serverCertificate, out _serverCertificateChain))
-            {
-                throw new InvalidOperationException(ErrorMessages.DatabaseAdminEndpointServiceFailure2);
-            }
-            SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(_serverCertificate, _serverCertificateChain, offline: true);
-            builder.Server.UseServer(options => options.UseHttp1s(
-                tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
-                new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
+            throw new InvalidOperationException(ErrorMessages.DatabaseAdminEndpointServiceFailure2);
         }
-        else
-        {
-            builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
-        }
+
+        IPAddress address = ResolveBindAddress(endpoint.IdnHost);
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
 
         _application = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _application;
-        IHealthCheckService health = CreateHealthService(
-            applicationContext,
-            healthContributors);
+        IHealthCheckService health = CreateHealthService(applicationContext);
         pipeline.MapHealthChecks(
             new HttpPath("/healthz"),
             health);
         pipeline.MapReadinessCheck(health, new HttpPath("/readyz"));
         pipeline.MapLivenessCheck(health, new HttpPath("/livez"));
-        // Database health aliases run before the shared terminal to retain the database-specific
-        // report and readiness gate. Apply standalone locality before those aliases can short-circuit.
-        if (resourceContext.GatewayName is null)
+        // Database health aliases run before the closing guard to retain the database-specific
+        // report and readiness gate. Apply locality before those aliases can short-circuit.
+        pipeline.Use(next => context =>
         {
-            pipeline.Use(next => context =>
+            if (IsNamespaced(context) && !IsLoopbackPeer(context))
             {
-                string path = context.Request.Path.Value;
-                bool namespaced = path == "/cohesion/v1" || path.StartsWith("/cohesion/v1/", StringComparison.Ordinal);
-                if (namespaced && !IsLoopbackPeer(context))
-                {
-                    context.Response.StatusCode = HttpStatusCode.Forbidden;
-                    return Task.CompletedTask;
-                }
+                context.Response.StatusCode = HttpStatusCode.Forbidden;
+                return Task.CompletedTask;
+            }
 
-                return next(context);
-            });
-        }
+            return next(context);
+        });
 
         pipeline.MapHealthChecks(
             new HttpPath("/cohesion/v1/healthz"),
             health);
         pipeline.MapReadinessCheck(health, new HttpPath("/cohesion/v1/readyz"));
         pipeline.MapLivenessCheck(health, new HttpPath("/cohesion/v1/livez"));
-        pipeline.Use(next => context => ResourceControlPlaneMiddleware.InvokeAsync(
-            controlPlane, resourceContext, isApplicationReady: true, endpoint.Port, context, next));
+        // The rest of /cohesion/v1 was the resource control plane, which authenticated its callers
+        // only with the retired resource bootstrap credential (#1759). Nothing can authorize those
+        // calls any more, so they fail closed.
+        pipeline.Use(next => context =>
+        {
+            if (IsNamespaced(context))
+            {
+                context.Response.StatusCode = HttpStatusCode.Forbidden;
+                return Task.CompletedTask;
+            }
+
+            return next(context);
+        });
     }
 
     internal IWebApplicationPipelineBuilder Pipeline => _application;
@@ -117,11 +99,6 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         {
             base.Dispose();
             ((IDisposable)_application).Dispose();
-            _serverCertificate?.Dispose();
-            foreach (X509Certificate2 certificate in _serverCertificateChain)
-            {
-                certificate.Dispose();
-            }
         }
         catch (Exception exception)
         {
@@ -184,15 +161,13 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
         }
     }
 
-    private static IHealthCheckService CreateHealthService(
-        DatabaseApplicationContext applicationContext,
-        IReadOnlyList<IHealthContributor> contributors)
+    private static IHealthCheckService CreateHealthService(DatabaseApplicationContext applicationContext)
     {
         IHealthChecksBuilder builder = new HealthChecksBuilder();
-        foreach (IHealthContributor contributor in contributors)
-        {
-            builder.AddContributor(contributor);
-        }
+        builder.AddCheck(
+            DatabaseApplicationContext.HealthCheckName,
+            (_, cancellationToken) => applicationContext.CheckAsync(cancellationToken),
+            tags: _databaseHealthTags);
 
         // The private admin web host starts before the wire-protocol servers so it can report
         // startup progress. Readiness must therefore carry an explicit outer-host gate: it does
@@ -207,6 +182,12 @@ internal sealed class DatabaseAdminEndpointService : BackgroundService, IHostSer
             tags: [HealthTags.Ready]);
 
         return builder.Build();
+    }
+
+    private static bool IsNamespaced(IHttpContext context)
+    {
+        string path = context.Request.Path.Value;
+        return path == "/cohesion/v1" || path.StartsWith("/cohesion/v1/", StringComparison.Ordinal);
     }
 
     private static bool IsLoopbackPeer(IHttpContext context)
