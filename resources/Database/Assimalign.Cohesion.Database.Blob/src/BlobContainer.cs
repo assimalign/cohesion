@@ -162,10 +162,7 @@ public sealed class BlobContainer
         var operation = await _database.BeginOperationAsync(_session, cancellationToken).ConfigureAwait(false);
         try
         {
-            EnsureContainer(operation.Context);
-            var entry = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot)
-                ?? throw DatabaseException.CreateBlobFailure("CB01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, name));
-            return new BlobGuardedStream(_database.DataStorage.OpenRead(BlobDatabase.Content(entry), operation.CompleteAsync), operation);
+            return OpenReadCore(name, operation, out _);
         }
         catch (Exception error)
         {
@@ -174,6 +171,36 @@ public sealed class BlobContainer
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
         }
+    }
+
+    // Wire metadata and content share one catalog record and operation snapshot, including
+    // a host READ COMMITTED transaction whose successive operations refresh their snapshots.
+    internal async ValueTask<(Stream Content, BlobProperties Properties)> OpenReadWithPropertiesAsync(
+        string name, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var operation = await _database.BeginOperationAsync(_session, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var content = OpenReadCore(name, operation, out var properties);
+            return (content, properties);
+        }
+        catch (Exception error)
+        {
+            var reported = _database.TranslateFailure(error);
+            await operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+    }
+
+    private Stream OpenReadCore(string name, BlobOperation operation, out BlobProperties properties)
+    {
+        EnsureContainer(operation.Context);
+        var entry = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot)
+            ?? throw DatabaseException.CreateBlobFailure("CB01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, name));
+        properties = BlobDatabase.Properties(entry);
+        return new BlobGuardedStream(_database.DataStorage.OpenRead(BlobDatabase.Content(entry), operation.CompleteAsync), operation);
     }
 
     /// <summary>

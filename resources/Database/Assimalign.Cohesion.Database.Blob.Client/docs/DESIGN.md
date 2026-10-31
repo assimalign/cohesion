@@ -1,5 +1,29 @@
 # Blob client design
 
+## Borrowed wire transaction scopes (#1726, XT-5)
+
+The matrix found that upload/download envelopes unconditionally began a transaction and
+refused host-opened scopes with CK04004. They now borrow the session's existing transaction;
+only an automatically created envelope is committed/disposed by the server. Interrupted borrowed
+uploads abort their exact host transaction before disposing buffered content, retaining CB04001
+for later host commit and Blob's terminal wire rule. Downloads select properties and content
+from one catalog record under one operation snapshot, including a borrowed READ COMMITTED
+scope. The internal container read helper changes no public member or stream layout.
+The pump holds no session/model monitor
+across transport awaits; existing operation and kernel admission retain their lock order.
+Tests cover both transports, read-after-upload inside the scope, seven undo stages, cancellation,
+connection drop/return and session disposal after an acknowledged chunk, and CK04010 while open.
+No API, diagnostic identity or format changes are needed.
+
+## Savepoint adapter conformance (#1726, XT-5)
+
+SavepointAdapterWireTests runs real Blob mutations on InMemory and TCP under the server
+session's host-owned transaction and kernel savepoint, following the existing transaction-failure
+corpus. The Blob protocol retains its existing lack of transaction-control messages. The shared
+failure schedule exercises index erase/clear, memory restoration before/after mutation and
+three physical undo brackets; target retry or whole rollback must permit an exact subsequent
+commit. Test-only accessors reach the existing coordinator/context; shipped boundaries do not change.
+
 ## Terminal TCP conformance (#1087)
 
 The real BlobClient and model server run missing-database handshakes on InMemory and
@@ -316,9 +340,9 @@ standard .NET argument guards retain their own contracts.
 
 ## Host transaction refusal evidence
 
-An upload refused because the host already opened a transaction sends `CK04004: message` in
+An upload refused because its container is absent sends `CB01001: message` in
 the existing Error frame. The host transaction retains the original unprefixed, structured
-`CK04004` abort cause; its later commit reports `CB04001`, preserves that cause instance and
+`CB01001` abort cause; its later commit reports `CB04001`, preserves that cause instance and
 commits nothing. Repeated commit after terminal session cleanup retains the same cause.
 `BlobClientException.Diagnostics` remains empty under the existing Blob wire contract.
 

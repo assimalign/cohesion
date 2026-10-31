@@ -22,6 +22,29 @@ model's ordinary statement policy.
 | CK04012 | A savepoint command requires an explicit bound transaction |
 | CK04013 | The named savepoint does not exist |
 
+## Borrowed wire transaction scopes (#1726, XT-5)
+
+The matrix found that upload/download envelopes unconditionally began a transaction and
+refused host-opened scopes with CK04004. They now borrow the session's existing transaction;
+only an automatically created envelope is committed/disposed by the server. Interrupted borrowed
+uploads abort their exact host transaction before disposing buffered content, retaining CB04001
+for later host commit and Blob's terminal wire rule. Downloads select properties and content
+from one catalog record under one operation snapshot, including a borrowed READ COMMITTED
+scope. The internal container read helper changes no public member or stream layout.
+The pump holds no session/model monitor
+across transport awaits; existing operation and kernel admission retain their lock order.
+Tests cover both transports, read-after-upload inside the scope, seven undo stages, cancellation,
+connection drop/return and session disposal after an acknowledged chunk, and CK04010 while open.
+No API, diagnostic identity or format changes are needed.
+
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real Blob mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
+Stream saturation also proves CK04011, CK04010 and complete registration drain.
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog publication retains earlier same-writer metadata while markers are live. Undo

@@ -553,7 +553,12 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
             throw new ProtocolException(ErrorMessages.ServerSessionUploadAsyncProtocol);
         }
         BlobTransferStartMessage metadata = BlobTransferStartMessage.Decode(start.Value.Payload.Span);
-        await using BlobDatabaseTransaction transaction = await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        // The pump serializes exchanges; model operation admission takes the session flag,
+        // then transaction/context admission, releasing their monitors before transport awaits.
+        // Borrow a host scope without ending it. Only an automatic upload owns its envelope.
+        BlobDatabaseTransaction? borrowed = session.CurrentTransaction;
+        await using BlobDatabaseTransaction? owned = borrowed is null
+            ? await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false) : null;
         Stream? destination = null;
         try
         {
@@ -567,20 +572,23 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
                 _reader, _writer!, destination, metadata, cancellationToken).ConfigureAwait(false);
             await destination.DisposeAsync().ConfigureAwait(false);
             destination = null;
-            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            if (owned is not null) { await owned.CommitAsync(cancellationToken).ConfigureAwait(false); }
             await WriteFrameAsync((ProtocolMessageType)BlobProtocolMessageType.TransferComplete,
                 new BlobTransferCompleteMessage(received.Length).Encode(), cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception cause)
         {
             // Roll back BEFORE successful disposal can finalize the storage stream. Explicit
             // transactions keep even successfully disposed destinations invisible until commit.
             // A failed operation leaves the transaction Faulted until it is rolled back (#1225);
             // only a committed transaction refuses the rollback.
-            if (transaction.State is TransactionState.Active or TransactionState.Faulted)
+            if (owned is { State: TransactionState.Active or TransactionState.Faulted })
             {
-                await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                await owned.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }
+            // A borrowed stream must become inactive before its disposal can publish buffered
+            // content. Retain the failure for the host's later commit, as other wire failures do.
+            else if (borrowed is not null) { await borrowed.AbortForFailedOperationAsync(cause).ConfigureAwait(false); }
             throw;
         }
         finally
@@ -595,13 +603,14 @@ internal sealed class BlobDatabaseServerSession : DatabaseServerSession
 
     private async Task DownloadAsync(BlobDatabaseSession session, BlobReadMessage request, CancellationToken cancellationToken)
     {
-        // Metadata and content must refer to the same immutable version even when replaced
-        // concurrently. The read-only transaction keeps its snapshot until stream disposal.
-        await using BlobDatabaseTransaction transaction = await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+        // Metadata and content share one immutable catalog record and operation snapshot,
+        // including a borrowed READ COMMITTED scope that refreshes between operations.
+        await using BlobDatabaseTransaction? owned = session.CurrentTransaction is null
+            ? await session.BeginTransactionAsync(cancellationToken).ConfigureAwait(false) : null;
         BlobContainer container = await session.GetContainerAsync(request.Container, cancellationToken).ConfigureAwait(false);
-        BlobProperties properties = await container.GetPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false)
-            ?? throw DatabaseException.CreateBlobFailure("CB01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, request.Name));
-        await using Stream source = await container.OpenReadAsync(request.Name, cancellationToken).ConfigureAwait(false);
+        var opened = await container.OpenReadWithPropertiesAsync(request.Name, cancellationToken).ConfigureAwait(false);
+        await using Stream source = opened.Content;
+        BlobProperties properties = opened.Properties;
         await BlobProtocolTransfer.SendAsync(_reader!, _writer!, source,
             new BlobTransferStartMessage(properties.Length, properties.ContentType ?? ""), cancellationToken).ConfigureAwait(false);
     }

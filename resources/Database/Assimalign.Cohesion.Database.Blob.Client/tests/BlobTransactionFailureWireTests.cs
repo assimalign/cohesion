@@ -84,14 +84,14 @@ public sealed class BlobTransactionFailureWireTests
     }
 
     /// <summary>
-    /// A wire request refused before its operation starts still ends a host-opened transaction,
+    /// An upload refused before its destination stream opens still ends a host-opened transaction,
     /// because a Blob wire failure is terminal: the server aborts the transaction before it reports
     /// the failure, then closes the connection. The host's COMMIT fails with CB04001 naming the
     /// refusal before and after the teardown, its earlier wire write is undone, and a fresh
     /// connection works.
     /// </summary>
-    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: a refused wire request ends the host transaction and COMMIT fails with CB04001")]
-    public async Task UploadAsync_RefusedBeforeItStarts_ShouldEndHostTransactionAndFailCommitWithCode()
+    [Fact(DisplayName = "Cohesion Test [Blob.Client] - Transaction: upload refused before stream creation ends the host scope and COMMIT fails with CB04001")]
+    public async Task UploadAsync_MissingContainerBeforeStreamStarts_ShouldEndHostTransactionAndFailCommitWithCode()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -102,27 +102,25 @@ public sealed class BlobTransactionFailureWireTests
         var transaction = await serverSession.DatabaseSession.ShouldNotBeNull().BeginTransactionAsync(timeout.Token);
         (await connection.DeleteAsync("files", "keep", timeout.Token)).ShouldBeTrue();
 
-        // Act: an upload begins its own transaction, so BEGIN refuses it on a session that has one.
+        // Act: container lookup refuses the upload before it can open its destination stream.
         var failure = await Should.ThrowAsync<BlobClientException>(async () =>
-            await connection.UploadAsync("files", "other", new MemoryStream(new byte[10]), cancellationToken: timeout.Token));
+            await connection.UploadAsync("missing", "other", new MemoryStream(new byte[10]), cancellationToken: timeout.Token));
         var commit = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
         await WaitUntilAsync(() => harness.Server.Sessions.Count == 0, timeout.Token);
         var repeated = await Should.ThrowAsync<DatabaseException>(async () => await transaction.CommitAsync(timeout.Token));
         await transaction.RollbackAsync(timeout.Token);
         await connection.DisposeAsync();
 
-        // Assert: the refusal is the root session base's one "already active" message
-        // (concrete-types plan §6.4), for the model's former "A transaction or stream is already
-        // active on this session.".
-        const string refusalDetail = "A transaction or operation is already active on this session.";
+        // Assert: the lookup cause survives both the abort and the connection teardown.
+        const string refusalDetail = "Container 'missing' does not exist.";
         failure.Code.ShouldBe(ProtocolErrorCode.ExecutionFailure);
-        failure.Message.ShouldBe("CK04004: " + refusalDetail);
+        failure.Message.ShouldBe("CB01001: " + refusalDetail);
         failure.Diagnostics.ShouldBeEmpty(); // Blob's Error frame carries the formatted message only.
         commit.ShouldBeOfType<DatabaseException>();
         var cause = commit.InnerException.ShouldBeOfType<DatabaseException>();
         cause.Message.ShouldBe(refusalDetail);
         var causeDiagnostic = cause.Diagnostics.ShouldHaveSingleItem();
-        causeDiagnostic.Code.ShouldBe("CK04004");
+        causeDiagnostic.Code.ShouldBe("CB01001");
         causeDiagnostic.Message.ShouldBe(refusalDetail);
         causeDiagnostic.Severity.ShouldBe(Types.DiagnosticSeverity.Error);
         causeDiagnostic.Start.ShouldBeNull();
