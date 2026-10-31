@@ -105,6 +105,72 @@ public sealed class SavepointFailureWireTests
         }
     }
 
+    [Theory(DisplayName = "Cohesion Test [Sql.Client] - A disposed database with a live fence returns CS04005 and keeps the wire session open (#1726)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_DisposedFencedDatabase_ShouldKeepCodedReady(bool tcp)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var token = timeout.Token;
+        await using var harness = await SqlClientTestHarness.StartAsync(tcp: tcp);
+        harness.Engine.TryGetDatabase("app", out var database).ShouldBeTrue();
+        await using var seed = await database!.CreateSessionAsync(token);
+        await seed.ExecuteAsync("CREATE TABLE items (id INT)", cancellationToken: token);
+        var factory = tcp ? (IDuplexConnectionFactory)new Assimalign.Cohesion.Connections.Tcp.TcpConnectionFactory()
+            : ((Assimalign.Cohesion.Connections.InMemory.InMemoryConnectionListener)harness.Listener).CreateFactory();
+        await using var transport = await factory.ConnectAsync(harness.Listener.EndPoint, token);
+        await using var channel = new ProtocolChannel(transport.AsStream(), SqlProtocol.Family, true);
+        await Send(ProtocolMessageType.Startup, new ProtocolStartupMessage(ProtocolVersion.Current, "app", "tester")
+            { Capabilities = [ProtocolCapability.TransactionStatus.Name, ProtocolCapability.Diagnostics.Name] }.Encode());
+        (await Read()).Type.ShouldBe(ProtocolMessageType.Authenticate);
+        await Send(ProtocolMessageType.AuthenticateResponse, ReadOnlyMemory<byte>.Empty);
+        channel.SetAgreement(ProtocolReadyMessage.Decode((await Read()).Payload.Span));
+        await Execute("BEGIN");
+        await Execute("SAVEPOINT scope");
+        await Execute("INSERT INTO items VALUES (1)");
+        var session = (SqlDatabaseSession)harness.Server.Sessions.Single().DatabaseSession!;
+        var coordinator = Coordinator(database);
+        Observe(coordinator.VersionStore, () => throw new IOException("Injected undo failure"));
+        try { await Execute("ROLLBACK TO scope"); }
+        finally { Observe(coordinator.VersionStore, null); }
+        TransactionCoordinator.IsPartialUndoPending(Context(session.CurrentTransaction!)).ShouldBeTrue();
+        Interlocked.Exchange(ref Disposed(database), 1).ShouldBe(0);
+
+        // Act / Assert: two complete error/Ready exchanges prove the pump stays alive.
+        try
+        {
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                await Send(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create("SELECT 1").Encode());
+                var error = await Read();
+                if (error.Type == ProtocolMessageType.Diagnostics) { error = await Read(); }
+                error.Type.ShouldBe(ProtocolMessageType.Error);
+                ProtocolErrorMessage.Decode(error.Payload.Span).Message.ShouldStartWith("CS04005:", Case.Sensitive);
+                var ready = await Read();
+                ready.Type.ShouldBe(ProtocolMessageType.Ready);
+                ProtocolTransactionStatusMessage.Decode(ready.Payload.Span).Status.ShouldBe(ProtocolTransactionStatus.Failed);
+                session.State.ShouldBe(SessionState.Open);
+            }
+        }
+        finally { Volatile.Write(ref Disposed(database), 0); }
+        await Execute("ROLLBACK");
+        session.State.ShouldBe(SessionState.Open);
+
+        async Task Send(ProtocolMessageType type, ReadOnlyMemory<byte> payload)
+        { await channel.Writer.WriteFrameAsync(new(type, payload), token); await channel.Writer.FlushAsync(token); }
+        async Task<ProtocolFrame> Read() => (await channel.Reader.ReadFrameAsync(token)).ShouldNotBeNull();
+        async Task Execute(string statement)
+        {
+            await Send(ProtocolMessageType.Execute, ProtocolExecuteMessage.Create(statement).Encode());
+            ProtocolFrame frame;
+            do { frame = await Read(); } while (frame.Type != ProtocolMessageType.Ready);
+        }
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_disposed")]
+    private static extern ref int Disposed(DatabaseInstance database);
+
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Coordinator")]
     private static extern TransactionCoordinator Coordinator(SqlDatabase database);
     [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "get_Context")]

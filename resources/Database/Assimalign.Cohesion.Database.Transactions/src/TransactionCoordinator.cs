@@ -582,30 +582,19 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="context">The current lifecycle context.</param>
     /// <param name="savepoint">The owned target; after incomplete undo only this or an outer scope is admitted.</param>
     /// <param name="cancellationToken">Observed before admission; admitted undo completes.</param>
+    /// <param name="scopesDiscarded">Optional attempt-local notification after descendants are discarded.
+    /// It must not throw or call back into the coordinator. It runs once for an admitted attempt,
+    /// including an attempt whose undo later fails, and never for a refused attempt.</param>
     /// <returns>A task representing completion.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
     /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
-    public async ValueTask RollbackToSavepointAsync(TransactionContext context, TransactionSavepoint savepoint, CancellationToken cancellationToken = default)
+    public async ValueTask RollbackToSavepointAsync(TransactionContext context, TransactionSavepoint savepoint,
+        CancellationToken cancellationToken = default, Action? scopesDiscarded = null)
     {
         var marker = RequireSavepoint(context, savepoint);
-        bool scopeDiscarded = false;
-        try
-        {
-            await RunUndoControlAsync(context, marker, rollback: true, release: false, cancellationToken,
-                () => scopeDiscarded = true).ConfigureAwait(false);
-        }
-        catch (Exception failure)
-        {
-            // Error-only cross-layer lifetime evidence, keyed by the opaque owned token.
-            // Always overwrite it: a hook/adapter can reuse the same exception on a later
-            // pre-admission failure. No new public member or per-unmarked-transaction state.
-            // Admission/apply/ledger locks have all been released before exception-data sync.
-            // This lock only edits metadata: no callback or kernel/root call can reverse it.
-            var data = failure.Data;
-            lock (data.SyncRoot) { data[savepoint] = scopeDiscarded; }
-            throw;
-        }
+        await RunUndoControlAsync(context, marker, rollback: true, release: false, cancellationToken,
+            scopesDiscarded).ConfigureAwait(false);
     }
 
     /// <summary>Classifies a kernel undo refusal without parsing message text.</summary>
@@ -717,7 +706,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
             if (!_versionStore.BuildRollbackLookup(context.Sequence, marker!))
             {
-                // Exclusive writer admission makes an empty suffix independent of the gate.
+                // Exclusive writer admission makes a memory-only or empty suffix independent of the gate.
                 await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
                 _lockManager.RollbackToUndoMarker(context.Sequence, marker!);
                 undoOwner.CompletePartialUndo();
@@ -748,6 +737,40 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             }
         }
         finally { undoOwner.ExitApply(undoControl: true); }
+    }
+
+    /// <summary>Applies reversible transaction-owned memory without enrolling a durable writer.</summary>
+    /// <typeparam name="T">The change result.</typeparam>
+    /// <param name="context">The transaction or its statement view; callers serialize its operations.</param>
+    /// <param name="undo">An idempotent memory before-image restored through its statement-rollback hook.</param>
+    /// <param name="change">The memory change. It must not perform storage I/O or wait for lock-table grants.</param>
+    /// <param name="cancellationToken">Observed before admission.</param>
+    /// <returns>The change result.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction is ending or ended.</exception>
+    /// <exception cref="TransactionUndoException">Incomplete undo fences the transaction.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <remarks>The before-image is recorded before mutation and retained until scope or whole undo.
+    /// No storage bracket, journal record or durability wait is created.</remarks>
+    public T ApplyMemoryChange<T>(TransactionContext context, RecordVersionIndex undo, Func<T> change,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(undo);
+        ArgumentNullException.ThrowIfNull(change);
+        if (!ReferenceEquals(context.Manager, _manager))
+        { throw new TransactionUndoException("CK04008", ErrorMessages.UndoContextInvalid); }
+        cancellationToken.ThrowIfCancellationRequested();
+        // Lock order: manager/context admission (released) -> ledger (released) -> model.
+        // No ledger monitor spans a model callback, and no model monitor spans admission.
+        // The apply count makes ends drain this memory change.
+        var owner = _manager.EnterApply(context, cancellationToken, enrollWriter: false);
+        try
+        {
+            _versionStore.RecordMemoryUndo(context.Sequence, undo);
+            return change();
+        }
+        finally { owner.ExitApply(); }
     }
 
     /// <summary>

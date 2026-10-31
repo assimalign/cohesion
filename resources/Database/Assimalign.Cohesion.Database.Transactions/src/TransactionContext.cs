@@ -80,7 +80,10 @@ public sealed class TransactionContext
     // Reuse the former end boolean's byte. A second boolean grows every statement pin
     // by eight aligned bytes; lifecycle and pending-undo bits share this existing storage.
     private byte _admission;
-    private TaskCompletionSource? _drained;
+    // Reuse the drain reference for the latest isolation replacement while no end waits.
+    // A drain signal carries that reference in its Task.AsyncState and restores it on exit.
+    // Ordinary contexts retain exactly the same field and allocation shape.
+    private object? _drained;
 
     internal TransactionContext(
         TransactionManager manager,
@@ -250,6 +253,20 @@ public sealed class TransactionContext
         lock (_endSync) { _admission = (byte)(_admission & ~partialUndoFlag); }
     }
 
+    /// <summary>Gets the exact current lifecycle handle issued for this transaction, or null for a snapshot pin.</summary>
+    /// <remarks>Earlier isolation handles and statement views resolve to the same current handle.
+    /// Identity is independent of transaction state; this property acquires no monitor.</remarks>
+    public TransactionContext? Current
+    {
+        get
+        {
+            if (IsSnapshotPin) { return null; }
+            var owner = _transaction ?? this;
+            var state = Volatile.Read(ref owner._drained);
+            return state as TransactionContext ?? (state as TaskCompletionSource)?.Task.AsyncState as TransactionContext ?? owner;
+        }
+    }
+
     /// <summary>
     /// Gets the external identity of the transaction.
     /// </summary>
@@ -332,7 +349,10 @@ public sealed class TransactionContext
             // this same latch. A replacement sees either that count or the live scope.
             if ((owner._admission & liveScopesFlag) != 0)
             { throw new ArgumentException(ErrorMessages.IsolationSavepointActive, "context"); }
-            return new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
+            var replacement = new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
+            // Existing manager -> context latch order publishes the exact current reference.
+            Volatile.Write(ref owner._drained, replacement);
+            return replacement;
         }
     }
 
@@ -447,10 +467,10 @@ public sealed class TransactionContext
                 _admission = (byte)(_admission & ~undoControlFlag);
                 Monitor.PulseAll(_endSync);
             }
-            if ((Interlocked.Decrement(ref _applying) & applyMask) == 0 && _drained is not null)
+            if ((Interlocked.Decrement(ref _applying) & applyMask) == 0 && _drained is TaskCompletionSource signal)
             {
-                drained = _drained;
-                _drained = null;
+                drained = signal;
+                Volatile.Write(ref _drained, signal.Task.AsyncState);
             }
         }
 
@@ -482,8 +502,12 @@ public sealed class TransactionContext
                 return Task.CompletedTask;
             }
 
-            _drained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            return _drained.Task;
+            if (_drained is not TaskCompletionSource signal)
+            {
+                signal = new TaskCompletionSource(_drained, TaskCreationOptions.RunContinuationsAsynchronously);
+                Volatile.Write(ref _drained, signal);
+            }
+            return signal.Task;
         }
     }
 

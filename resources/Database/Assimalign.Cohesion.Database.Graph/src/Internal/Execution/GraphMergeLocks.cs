@@ -37,8 +37,8 @@ internal sealed class GraphMergeLocks : IDisposable
         Func<ValueTask>? beforeParentCheck = null)
         // Dispatch before constructing either async state machine. The ordinary path retains
         // its existing locals/fields even when a contended lock request suspends it.
-        => database.Store.ScopeLedger(operation.Context.Sequence) is { } ledger
-            ? AcquireMarkedAsync(database, operation, resource, ledger, token, beforePatternGrant, beforeParentCheck)
+        => database.Store.ScopeLedger(operation.Context.Sequence) is not null
+            ? AcquireMarkedAsync(database, operation, resource, token, beforePatternGrant, beforeParentCheck)
             : AcquireUnmarkedAsync(database, operation, resource, token, beforePatternGrant, beforeParentCheck);
 
     private async ValueTask AcquireUnmarkedAsync(GraphDatabase database, GraphOperation operation,
@@ -95,67 +95,61 @@ internal sealed class GraphMergeLocks : IDisposable
     }
 
     private async ValueTask AcquireMarkedAsync(GraphDatabase database, GraphOperation operation, LockResource resource,
-        RecordSpaceVersionStore ledger, CancellationToken token, Func<ValueTask>? beforePatternGrant, Func<ValueTask>? beforeParentCheck)
+        CancellationToken token, Func<ValueTask>? beforePatternGrant, Func<ValueTask>? beforeParentCheck)
     {
         var manager = database.Coordinator.LockManager;
         var owner = operation.Context.Sequence;
         var parent = LockResource.Object(GraphLockNamespaces.MergePatterns);
-        if (await ChangeTrackedAsync(database, operation, resource, ledger, TrackedChange.Parent, token).ConfigureAwait(false) != 0)
+        if (await ChangeTrackedAsync(database, operation, resource, TrackedChange.Parent, token).ConfigureAwait(false) != 0)
         {
             await manager.AcquireAsync(owner, parent, LockMode.IntentExclusive, token).ConfigureAwait(false);
             if (beforeParentCheck is not null) { await beforeParentCheck().ConfigureAwait(false); }
             operation.EnsureMergeActive();
         }
-        int change = await ChangeTrackedAsync(database, operation, resource, ledger, TrackedChange.Entry, token).ConfigureAwait(false);
+        int change = await ChangeTrackedAsync(database, operation, resource, TrackedChange.Entry, token).ConfigureAwait(false);
         if (change == 0) { return; }
         if (change == 2)
         {
             await manager.AcquireAsync(owner, parent, LockMode.Exclusive, token).ConfigureAwait(false);
-            await ChangeTrackedAsync(database, operation, resource, ledger, TrackedChange.Escalation, token).ConfigureAwait(false);
+            await ChangeTrackedAsync(database, operation, resource, TrackedChange.Escalation, token).ConfigureAwait(false);
             return;
         }
         if (beforePatternGrant is not null) { await beforePatternGrant().ConfigureAwait(false); }
         await manager.AcquireAsync(owner, resource, LockMode.Exclusive, token).ConfigureAwait(false);
     }
 
-    // A marked tracker journals through ordinary apply admission, so an end drains it before
-    // removing the writer's ledger. Lock order: manager/context admission (released) -> apply
-    // gate -> tracker -> ledger monitor. No tracker monitor spans admission, a gate wait,
-    // lock-table request or await. Undo releases the ledger monitor before Restore takes ours.
-    // The existing immutable scope directory keeps the unmarked path free of new monitors,
-    // allocations and fields; repeated marked holdings also need no empty apply bracket.
+    // Lock order: admission (released) -> ledger (released) -> tracker. No tracker monitor
+    // spans admission, lock-table requests or awaits. Undo releases the ledger before Restore.
+    // Memory admission drains before ends without enrolling a durable writer or opening WAL.
     private ValueTask<int> ChangeTrackedAsync(GraphDatabase database, GraphOperation operation, LockResource resource,
-        RecordSpaceVersionStore ledger, TrackedChange change, CancellationToken token)
+        TrackedChange change, CancellationToken token)
     {
+        LockUndo undo;
         lock (_sync)
         {
             if (_disposed) { throw GraphOperation.Ended(); }
             if (change == TrackedChange.Parent && _parent || change == TrackedChange.Escalation && _escalated ||
                 change == TrackedChange.Entry && (_escalated || _entries.Contains(resource))) { return ValueTask.FromResult(0); }
             if (change == TrackedChange.Entry && _entries.Count == EntryLimit) { return ValueTask.FromResult(2); }
+            undo = new LockUndo(this, change == TrackedChange.Entry ? resource : null, _parent, _escalated);
         }
-        return ApplyTrackedChangeAsync(database, operation, resource, ledger, change, token);
-    }
-
-    private ValueTask<int> ApplyTrackedChangeAsync(GraphDatabase database, GraphOperation operation, LockResource resource,
-        RecordSpaceVersionStore ledger, TrackedChange change, CancellationToken token)
-        => database.Coordinator.ApplyStatementAsync(operation.Context, _ =>
+        return ValueTask.FromResult(database.Coordinator.ApplyMemoryChange(operation.Context, undo, () =>
         {
             lock (_sync)
             {
                 if (_disposed) { throw GraphOperation.Ended(); }
-                if (change == TrackedChange.Parent && _parent || change == TrackedChange.Escalation && _escalated ||
-                    change == TrackedChange.Entry && (_escalated || _entries.Contains(resource))) { return 0; }
-                if (change == TrackedChange.Entry && _entries.Count == EntryLimit) { return 2; }
+                BeforeTrackedChange?.Invoke();
                 if (change != TrackedChange.Escalation) { operation.Merge.ChargeLock(); }
-                ledger.RecordIndexEntryCreated(operation.Context.Sequence,
-                    new LockUndo(this, change == TrackedChange.Entry ? resource : null, _parent, _escalated), ReadOnlyMemory<byte>.Empty, 0);
                 if (change == TrackedChange.Parent) { _parent = true; }
                 else if (change == TrackedChange.Escalation) { _escalated = true; }
                 else { _entries.Add(resource); }
                 return 1;
             }
-        }, token);
+        }, token));
+    }
+
+    // Test-only progress seam while a marked memory change owns lifecycle admission.
+    internal static Action? BeforeTrackedChange { get; set; }
 
     private enum TrackedChange
     {

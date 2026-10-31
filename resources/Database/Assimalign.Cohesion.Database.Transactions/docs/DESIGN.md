@@ -17,6 +17,21 @@ Named SQL/OQL/GQL tests cover duplicate lookup, descendant lifetime, retry, root
 races, lock waiter wakeup and cancellation. The copied-live crash-image/reader-progress scenarios
 now execute named controls. Root end releases every marker through the existing lifecycle.
 
+The optional rollback scope-discard notification updates attempt-owned state exactly once after
+kernel revalidation; refused attempts do not notify. No exception metadata is used. Consumers
+must keep this notification nonthrowing and nonreentrant. TransactionContext.Current resolves
+the latest kernel-issued replacement so consumers can compare reference identity. Its reference shares the existing
+drain slot; an in-flight drain retains it in Task.AsyncState and restores it before notification.
+No unmarked context gains a field, lock or allocation.
+
+ApplyMemoryChange admits reversible memory changes without writer-log enrollment or a storage
+bracket. It records an existing RecordVersionIndex before-image before mutation and restores its
+memory hook in reverse ledger order. Memory entries split physical undo batches so callbacks run
+outside brackets. A memory-only suffix requires neither the apply gate nor any physical undo
+bracket, while lifecycle admission still makes ends drain it. The source establishes admission,
+ledger and model-monitor order. This kernel seam is shared by scope-aware memory consumers;
+Graph uses it for MERGE bookkeeping. Physical statements retain their existing allocation shape.
+
 ## Isolation configuration (#1012)
 
 Isolation replacement refuses a context with live savepoint tokens, even at the same level, with ArgumentException. Releasing the final scope permits replacement again. Registration precedes the context latch. Marker completion updates a live-scope bit in the existing admission byte under that latch before dropping its apply count, so replacement sees either the running control or its live scopes. Ledger and lock-table monitors are released before taking the latch. A refused replacement leaves every token usable (#1726).

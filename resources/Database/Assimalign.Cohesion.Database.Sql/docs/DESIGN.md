@@ -26,6 +26,14 @@ format changes are needed (storage 4); rollback-on-pool-return discards every na
 
 Named controls dispatch before async frame creation; their translation locals never grow ordinary control frames. Every named control uses the ordinary statement failure translator before reporting CK04009 for an incomplete kernel undo. The translated failure is retained as its cause. Offline, disposed and corruption failures take precedence; corruption aborts the writer (#1364). The server handles a recoverable failure as a statement error followed by Ready E, so retry or whole rollback uses the same connection.
 
+A direct transaction refusal or commit probes disposal/offline state outside root state before
+reporting a live partial-undo fence. Memory-only create/release allocation faults retain the
+model's ordinary statement policy.
+Named-control parameter/preparation I/O uses CS06041 and aborts the explicit transaction under #1364;
+recoverable partial undo remains CK04009. Every named CK04009 carries its statement span and
+translated cause. A closed database with a live fence uses CS04005 over SQL and retains its wire
+session, including the error/Ready E exchange.
+
 | Code | Savepoint condition |
 |---|---|
 | CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |

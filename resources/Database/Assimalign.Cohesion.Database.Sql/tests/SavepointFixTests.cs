@@ -10,6 +10,7 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Sql.Tests.TestObjects;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
@@ -45,7 +46,7 @@ public sealed class SavepointFixTests
         visits.ShouldBe(1);
         failure.Diagnostics[0].Code.ShouldBe("CK04009");
         var cause = failure.InnerException.ShouldBeOfType<OperationCanceledException>()!;
-        cause.InnerException.ShouldBeSameAs(injected);
+        cause.ShouldBeSameAs(injected);
         cause.Data.Contains(typeof(TransactionSavepoint)).ShouldBeFalse();
         TransactionCoordinator.IsPartialUndoPending(context).ShouldBeTrue();
         await session.ExecuteAsync("ROLLBACK TO scope", cancellationToken: timeout.Token);
@@ -146,28 +147,32 @@ public sealed class SavepointFixTests
         values.ShouldBe(new long[] { 1 });
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Create and release failures use the statement translator (#1726)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Memory-only create and release allocation faults preserve identity and transaction outcome (#1726)")]
     [InlineData("SAVEPOINT other")]
     [InlineData("RELEASE scope")]
-    public async Task ExecuteAsync_ControlIoFailure_ShouldUseStatementCode(string control)
+    public async Task ExecuteAsync_ControlAllocationFailure_ShouldKeepStatementPolicy(string control)
     {
-        // Arrange
-        await using var engine = SqlDatabaseEngine.Create("control-translation", new());
+        // Arrange: marker/lock/scope registration allocates; it performs no production I/O.
+        await using var engine = SqlDatabaseEngine.Create("control-allocation", new());
         var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("BEGIN");
         await session.ExecuteAsync("SAVEPOINT scope");
+        var transaction = session.CurrentTransaction!;
+        var injected = new OutOfMemoryException("Injected marker allocation failure");
         int admissions = 0;
-        SetAdmissionObserver(database.Coordinator, () => { admissions++; throw new IOException("Injected admitted control failure"); });
+        SetAdmissionObserver(database.Coordinator, () => { admissions++; throw injected; });
 
         // Act
-        DatabaseException failure;
-        try { failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(control)); }
+        Exception? failure;
+        try { failure = await Record.ExceptionAsync(() => session.ExecuteAsync(control).AsTask()); }
         finally { SetAdmissionObserver(database.Coordinator, null); }
 
-        // Assert
-        failure.Diagnostics[0].Code.ShouldBe("CS06041");
+        // Assert: SQL preserves an allocation-failed memory control; storage failures abort under #1364.
+        failure.ShouldBeSameAs(injected);
         admissions.ShouldBe(1);
+        transaction.State.ShouldBe(TransactionState.Active);
+        transaction.Context.State.ShouldBe(TransactionState.Active);
         await session.ExecuteAsync("ROLLBACK");
     }
 
@@ -202,7 +207,11 @@ public sealed class SavepointFixTests
         {
             // Observe the disposed admission boundary before teardown drains the fenced kernel.
             Interlocked.Exchange(ref Disposed(database), 1).ShouldBe(0);
-            try { await Should.ThrowAsync<ObjectDisposedException>(async () => await session.ExecuteAsync(SqlQueryRequest.FromSql("SELECT 1"))); }
+            try
+            {
+                var closedDatabase = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(SqlQueryRequest.FromSql("SELECT 1")));
+                closedDatabase.Diagnostics[0].Code.ShouldBe("CS04005");
+            }
             finally { Volatile.Write(ref Disposed(database), 0); }
             // A close after the model precheck must retain the root session's own code.
             int closures = 0;
@@ -256,6 +265,63 @@ public sealed class SavepointFixTests
         var wrapped = new DatabaseException("Pending undo", [new Types.Diagnostic
         { Code = "CK04009", Message = "Pending undo", Severity = Types.DiagnosticSeverity.Error }], failure);
         Assimalign.Cohesion.Database.Internal.DatabaseFailure.IsStorageFailure(wrapped).ShouldBeTrue("corruption aborts even below a CK04009 wrapper (#1364)");
+        await session.ExecuteAsync("ROLLBACK");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Named control parameter I/O follows #1364 and aborts the explicit transaction (#1726)")]
+    [InlineData("SAVEPOINT other")]
+    [InlineData("RELEASE scope")]
+    public async Task ExecuteAsync_ControlParameterIoFailure_ShouldAbortWithStatementCode(string control)
+    {
+        // Arrange: an application-supplied parameter map can fail while it reads its values.
+        await using var engine = SqlDatabaseEngine.Create("control-parameters", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("BEGIN");
+        await session.ExecuteAsync("SAVEPOINT scope");
+        var transaction = session.CurrentTransaction!;
+        var injected = new IOException("Injected parameter-source I/O failure");
+        var parameters = new FailingSavepointParameters(injected);
+
+        // Act
+        DatabaseException failure;
+        failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(control, parameters));
+
+        // Assert: #1364 applies to named controls, including parameter reads before admission.
+        parameters.Reads.ShouldBe(1);
+        failure.Diagnostics[0].Code.ShouldBe("CS06041");
+        failure.InnerException.ShouldBeSameAs(injected);
+        transaction.State.ShouldBe(TransactionState.Faulted);
+        transaction.Context.State.ShouldBe(TransactionState.RolledBack);
+        await session.ExecuteAsync("ROLLBACK");
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Every named CK04009 refusal keeps its complete statement location (#1726)")]
+    [InlineData("SAVEPOINT next")]
+    [InlineData("RELEASE scope")]
+    [InlineData("ROLLBACK TO scope")]
+    public async Task ExecuteAsync_NamedFence_ShouldKeepLocation(string control)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("control-location", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE items (id INT)");
+        await session.ExecuteAsync("BEGIN");
+        await session.ExecuteAsync("SAVEPOINT scope");
+        await session.ExecuteAsync("INSERT INTO items VALUES (1)");
+        SetBatchObserver(database.Coordinator.VersionStore, () => throw new IOException("Injected undo failure"));
+        try
+        {
+            await Record.ExceptionAsync(() => session.ExecuteAsync("ROLLBACK TO scope").AsTask());
+            // Act
+            var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(control));
+            // Assert
+            failure.Diagnostics[0].Code.ShouldBe("CK04009");
+            failure.Diagnostics[0].Start.ShouldBe(0);
+            failure.Diagnostics[0].End.ShouldBe(control.Length);
+        }
+        finally { SetBatchObserver(database.Coordinator.VersionStore, null); }
         await session.ExecuteAsync("ROLLBACK");
     }
 

@@ -646,7 +646,7 @@ public sealed class TransactionManager : IAsyncDisposable
     /// <exception cref="TransactionUndoException">CK04009: partial undo is running or incomplete.</exception>
     /// <exception cref="OperationCanceledException">A wait for a memory-only undo control was canceled.</exception>
     /// <remarks>Waits for an admitted marker create or release; waiting statements block new controls.</remarks>
-    internal TransactionContext EnterApply(TransactionContext context, CancellationToken cancellationToken = default)
+    internal TransactionContext EnterApply(TransactionContext context, CancellationToken cancellationToken = default, bool enrollWriter = true)
     {
         ArgumentNullException.ThrowIfNull(context);
 
@@ -672,7 +672,7 @@ public sealed class TransactionManager : IAsyncDisposable
 
         try
         {
-            _log.EnterWriter(owned.Sequence);
+            if (enrollWriter) { _log.EnterWriter(owned.Sequence); }
             return owned;
         }
         catch
@@ -692,7 +692,7 @@ public sealed class TransactionManager : IAsyncDisposable
         lock (_sync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (!ReferenceEquals(context.Manager, this) || context.IsStatementView || context.IsSnapshotPin ||
+            if (!ReferenceEquals(context.Manager, this) || !ReferenceEquals(context, context.Current) ||
                 !_active.TryGetValue(context.Sequence.Value, out var owned) || !ReferenceEquals(context, owned))
             {
                 throw new TransactionUndoException("CK04008", ErrorMessages.UndoContextInvalid);

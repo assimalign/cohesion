@@ -12,6 +12,10 @@ root reports Faulted while the kernel remains Active and retryable. Pre-canceled
 no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
 format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
 
+A direct transaction refusal or commit probes disposal/offline state outside root state before
+reporting a live partial-undo fence. Memory-only create/release allocation faults retain the
+model's ordinary statement policy.
+
 | Code | Savepoint condition |
 |---|---|
 | CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |

@@ -55,6 +55,10 @@ format changes are needed (storage 4); rollback-on-pool-return discards every na
 
 Named controls dispatch before async frame creation; their translation locals never grow ordinary control frames. Every named control uses the ordinary statement failure translator before reporting CK04009 for an incomplete kernel undo. The translated failure is retained as its cause. Offline, disposed and corruption failures take precedence; corruption aborts the writer (#1364). The server handles a recoverable failure as a statement error followed by Ready E, so retry or whole rollback uses the same connection.
 
+A direct transaction refusal or commit probes disposal/offline state outside root state before
+reporting a live partial-undo fence. Memory-only create/release allocation faults retain the
+model's ordinary statement policy.
+
 | Code | Savepoint condition |
 |---|---|
 | CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
@@ -760,8 +764,10 @@ cannot grow with distinct input rows; the executor accounts evaluated operands a
 
 GraphMergeLocks is lazy and transaction-owned, including across statements. For marked writers,
 tracker parent/entry/escalation before-images join the existing ordered undo ledger through
-ordinary apply admission. Root ends drain those memory-only brackets before removing the ledger,
-so a late tracker publication cannot orphan undo after rollback. No tracker monitor spans
+memory-only admission without durable writer enrollment. Root ends drain those changes before removing the ledger,
+so a late tracker publication cannot orphan undo after rollback. A matching MERGE that writes no
+data appends no journal record, waits for no durability and opens no undo bracket, even when an
+fsync failure is armed. No tracker monitor spans
 admission, an apply-gate wait or a lock request. ROLLBACK TO restores the pre-marker tracker and
 its retained memory charge before releasing scoped grants; RELEASE transfers those effects to
 the enclosing scope. Repeated undo and later MERGE therefore reacquire released grants without

@@ -322,7 +322,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // Preserve the existing CS04005 outcome for a transaction the kernel already ended.
         // During the earlier disposed-admission window, a live retry fence cannot hide disposal.
         if (CurrentTransaction is { } transaction && TransactionCoordinator.IsPartialUndoPending(transaction.Context))
-        { throw new ObjectDisposedException(nameof(SqlDatabase)); }
+        { throw transaction.CreateStatementRefusal(); }
     }
 
     private async ValueTask<DatabaseResult> ExecuteTimedRequestAsync(SqlQueryRequest request, TimeSpan statementTimeout,
@@ -428,10 +428,6 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     // or allocations. Preserve concrete exception contracts and any more specific expression span.
     private static void ThrowLocatedFailure(DatabaseException failure, SqlQueryExpression expression)
     {
-        // A named fence retains the model-translated cause directly. Ordinary statement
-        // compensation errors keep their existing location and exception-chain contracts.
-        if (expression is SqlTransactionExpression { SavepointName: not null } &&
-            failure.Diagnostics is [{ Code: "CK04009" }, ..]) { return; }
         var original = failure;
         var location = expression.Location;
         if (expression.Text is { } text)
@@ -447,11 +443,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 failure = SqlExecutionException.FromPersisted(failure);
             }
         }
-        var located = LocateFailure(failure, location);
+        var located = LocateFailure(failure, location, expression is SqlTransactionExpression { SavepointName: not null });
         if (!ReferenceEquals(located, original)) { throw located; }
     }
 
-    private static DatabaseException LocateFailure(DatabaseException failure, Location? location)
+    private static DatabaseException LocateFailure(DatabaseException failure, Location? location, bool namedControl)
     {
         // The abort path retains this exact coded cause (#1364). Location attachment must not
         // substitute another exception for a storage failure already recorded on the transaction.
@@ -478,7 +474,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         { return new DatabaseObjectLockedException(ownership.ObjectName, ownership.OwningSchema, ownership.Operation, ownership.Message, located[0]); }
         if (failure is SqlCatalogException)
         { return new SqlCatalogException(located[0].Code!, failure.Message, failure, located[0]); }
-        return new DatabaseException(failure.Message, located, failure);
+        return new DatabaseException(failure.Message, located,
+            namedControl && failure.Diagnostics is [{ Code: "CK04009" }, ..] ? failure.InnerException : failure);
     }
 
     private void TraceStatementCompletion(SqlQueryRequest request, SqlStatementMetrics? previousMetrics)
@@ -609,14 +606,14 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         if (request.Statement.SqlExpression is SqlTransactionExpression control)
         {
             // Control requests bypass the executor, but their maps obey the same contract.
-            _ = SqlQueryExecutor.NormalizeParameters(request.Parameters);
+            if (control.SavepointName is null) { _ = SqlQueryExecutor.NormalizeParameters(request.Parameters); }
             _lastStatementMetrics = null;
             // Control commands have a fixed, zero-count completion, including COMMIT.
-            if (ResultPreparation is { } preparation)
+            if (control.SavepointName is null && ResultPreparation is { } preparation)
             {
                 await preparation.PrepareAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
             }
-            return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
+            return await ExecuteTransactionControlAsync(control, request.Parameters, cancellationToken).ConfigureAwait(false);
         }
 
         // Inside an explicit transaction, the statement rides its context. A statement is
@@ -942,16 +939,19 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     // Dispatch before creating either async state machine: named failure translation must
     // add no fields or allocations to an ordinary BEGIN/COMMIT/ROLLBACK control frame.
     private ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
-        SqlTransactionExpression control, CancellationToken cancellationToken)
+        SqlTransactionExpression control, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
         => control.SavepointName is { } name
-            ? ExecuteSavepointControlAsync(control, name, cancellationToken)
+            ? ExecuteSavepointControlAsync(control, name, parameters, cancellationToken)
             : ExecuteWholeTransactionControlAsync(control, cancellationToken);
 
     private async ValueTask<DatabaseResult> ExecuteSavepointControlAsync(
-        SqlTransactionExpression control, string name, CancellationToken cancellationToken)
+        SqlTransactionExpression control, string name, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
     {
         try
         {
+            _ = SqlQueryExecutor.NormalizeParameters(parameters);
+            if (ResultPreparation is { } preparation)
+            { await preparation.PrepareAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false); }
             if (control.CommandType == SqlQueryCommandType.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
             else if (control.CommandType == SqlQueryCommandType.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
             else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
@@ -959,7 +959,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         catch (Exception error)
         {
             var reported = DatabaseFailure.TranslateSavepointFailure(_database.TranslateFailure(error), CurrentTransaction?.Context);
-            if (DatabaseFailure.IsCorruption(reported) && CurrentTransaction is { } failed)
+            if (DatabaseFailure.IsStorageFailure(reported) && CurrentTransaction is { } failed)
             {
                 failed.RecordStorageFailure(reported);
                 await failed.AbortStorageFailureAsync().ConfigureAwait(false);
