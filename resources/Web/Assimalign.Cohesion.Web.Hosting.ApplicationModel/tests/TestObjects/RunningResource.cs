@@ -120,7 +120,7 @@ internal sealed class RunningResource : IAsyncDisposable
             });
         }
         beforeResource?.Invoke(builder);
-        builder.AddResource("orders-api", configure);
+        builder.Services.AddResource("orders-api", configure);
 
         WebApplication application = builder.Build();
         application.UseCors();

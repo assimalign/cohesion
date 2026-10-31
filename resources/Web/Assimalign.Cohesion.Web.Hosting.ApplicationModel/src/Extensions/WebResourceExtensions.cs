@@ -1,29 +1,35 @@
 using System;
+using System.Collections.Generic;
 
 using Assimalign.Cohesion.ApplicationModel;
 using Assimalign.Cohesion.ApplicationModel.Hosting;
+using Assimalign.Cohesion.DependencyInjection;
+using Assimalign.Cohesion.Hosting;
 using Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 
 namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel;
 
 /// <summary>
-/// Runs a Web application as a managed resource instance.
+/// Registers a Web application as a managed resource instance.
 /// </summary>
 public static class WebResourceExtensions
 {
-    extension(WebApplicationBuilder builder)
+    extension(IServiceProviderBuilder services)
     {
         /// <summary>
-        /// Makes the application a Web resource instance, exposing the settings its features
+        /// Registers the application as a Web resource instance, exposing the settings its features
         /// registered as the resource's actions.
         /// </summary>
         /// <remarks>
         /// <para>
-        /// The application keeps its own composition: a feature registers its setting the way it
-        /// always does, and the resource exposes each setting it knows. The <c>cors</c> setting that
-        /// <c>builder.Services.AddCors(...)</c> registers becomes the <c>cors</c> action, whose writes
-        /// change the default policy the middleware <c>UseCors()</c> placed applies. Actions the
-        /// application defines are added with <see cref="WebResourceOptions.AddAction(IApplicationInstanceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
+        /// The resource is a registration like every other input the application composes, made on the
+        /// Web application's <c>builder.Services</c>: a lifecycle service the container creates once,
+        /// when the application is built. The application keeps its own composition: a feature registers
+        /// its setting the way it always does, and the resource exposes each setting it knows. The
+        /// <c>cors</c> setting that <c>builder.Services.AddCors(...)</c> registers becomes the <c>cors</c>
+        /// action, whose writes change the default policy the middleware <c>UseCors()</c> placed applies.
+        /// Actions the application defines are added with
+        /// <see cref="WebResourceOptions.AddAction(IApplicationInstanceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
         /// </para>
         /// <para>
         /// The resource opts into each platform it runs on through that platform's hosting package,
@@ -37,20 +43,21 @@ public static class WebResourceExtensions
         /// arrive is the platform's.
         /// </para>
         /// <para>
-        /// Without a named platform the application runs unmanaged, with the settings its code defines.
+        /// Without a named platform the application runs unmanaged, with the settings its code defines,
+        /// and nothing is registered.
         /// </para>
         /// </remarks>
         /// <param name="name">The resource's name, such as <c>orders-api</c>.</param>
         /// <param name="configure">Opts the resource into its platforms and adds the application's own actions.</param>
-        /// <returns>The same builder for chaining.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
+        /// <returns>The same registrations for chaining.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="services"/> is <see langword="null"/>.</exception>
         /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
         /// <exception cref="InvalidOperationException">
         /// The instance's environment names a platform the resource uses no client for.
         /// </exception>
-        public WebApplicationBuilder AddResource(ResourceName name, Action<WebResourceOptions>? configure = null)
+        public IServiceProviderBuilder AddResource(ResourceName name, Action<WebResourceOptions>? configure = null)
         {
-            ArgumentNullException.ThrowIfNull(builder);
+            ArgumentNullException.ThrowIfNull(services);
 
             if (name.Value is null)
             {
@@ -62,7 +69,7 @@ public static class WebResourceExtensions
 
             if (options.GetGatewayClient() is not { } client)
             {
-                return builder;
+                return services;
             }
 
             // Control-plane content is JSON. The resource's own actions write their types through its
@@ -74,22 +81,24 @@ public static class WebResourceExtensions
             // StartingAsync, which the host completes for every lifecycle service before it starts any
             // service or server, and opens the control plane to the gateway's calls in StartAsync; the
             // Web host stops it only after the application's servers have drained.
-            Func<WebApplicationContext, IApplicationInstanceAction>[] addedActions = [.. options.Actions];
+            Func<IServiceProvider, IApplicationInstanceAction>[] addedActions = [.. options.Actions];
             DeploymentId? deployment = options.Deployment;
-            builder.AddService(context => ApplicationInstanceService.Create(
-                ApplicationInstanceControlPlane.Create(new WebResource(name, deployment, context.Settings, CreateAddedActions(addedActions, context)), serializer),
+            services.AddSingleton<IHostService>(provider => ApplicationInstanceService.Create(
+                ApplicationInstanceControlPlane.Create(
+                    new WebResource(name, deployment, provider.GetRequiredService<IEnumerable<IWebApplicationSetting>>(), CreateAddedActions(addedActions, provider)),
+                    serializer),
                 client));
 
-            return builder;
+            return services;
         }
     }
 
-    private static IApplicationInstanceAction[] CreateAddedActions(Func<WebApplicationContext, IApplicationInstanceAction>[] factories, WebApplicationContext context)
+    private static IApplicationInstanceAction[] CreateAddedActions(Func<IServiceProvider, IApplicationInstanceAction>[] factories, IServiceProvider provider)
     {
         var actions = new IApplicationInstanceAction[factories.Length];
         for (int i = 0; i < factories.Length; i++)
         {
-            actions[i] = factories[i].Invoke(context)
+            actions[i] = factories[i].Invoke(provider)
                 ?? throw new InvalidOperationException(ErrorMessages.ResourceActionFactoryResultNull);
         }
 

@@ -3,11 +3,13 @@
 > **Status (2026-10-30):** the first resource area on the restarted Application Model. The
 > instance-side contracts are [ApplicationModel.Hosting](../../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md);
 > this package is their Web implementation. Since 2026-10-30 it carries no transport: the platform
-> a resource opts into publishes for it and carries the gateway's calls in (W9).
+> a resource opts into publishes for it and carries the gateway's calls in (W9). Since 2026-10-31 a
+> resource is a registration in `builder.Services` (W10).
 
 ## Purpose
 
-`builder.AddResource(name, resource => ...)` makes a Web application a managed resource instance.
+`builder.Services.AddResource(name, resource => ...)` registers a Web application as a managed
+resource instance.
 The resource opts into each platform it runs on, such as `resource.UseInProcess()`. When the
 instance's gateway names one of them, the instance publishes its manifest and restores the state the
 gateway kept before the application serves, through that platform's client, and the gateway runs
@@ -18,17 +20,20 @@ with the state its code defines.
 
 ## References
 
-The package references the ApplicationModel.Hosting contracts, the Web.Hosting builder it extends,
-and Web.Cors for the `cors` action. It references no platform: the application references the
-platforms it opts into. Arrows mean "references".
+The package references the ApplicationModel.Hosting contracts, Web.Hosting, DependencyInjection,
+whose service registrations (`builder.Services`) it adds the resource to, and Web.Cors for the
+`cors` action. It references no platform: the application references the platforms it opts into.
+Arrows mean "references".
 
 ```mermaid
 flowchart LR
     WHR["Web.Hosting.ApplicationModel"] --> HR["ApplicationModel.Hosting"]
     WHR --> WH["Web.Hosting"]
+    WHR --> DI["DependencyInjection"]
     WHR --> Cors["Web.Cors"]
     HR --> Hosting["Hosting"]
     WH --> Hosting
+    WH --> DI
     App["The application's Program.cs"] --> WHR
     App --> Platform["ApplicationModel.Hosting.InProcess"]
     Platform --> HR
@@ -36,9 +41,12 @@ flowchart LR
 
 ## Composition
 
-`AddResource` adds nothing to the application's own composition: the application registers its
+`AddResource` changes nothing in the application's own composition: the application registers its
 features the way it always does, and the resource exposes the settings they registered. For a
-managed instance, `AddResource` builds these pieces and registers the service as a host service:
+managed instance, `AddResource` makes one registration in `builder.Services`, a singleton
+`IHostService` factory. The container runs it once, when the application is built: it resolves the
+registered settings (`IEnumerable<IWebApplicationSetting>`), creates the added actions from the
+application's `IServiceProvider`, and builds these pieces:
 
 | Piece | Role |
 | --- | --- |
@@ -117,8 +125,9 @@ does, ApplicationModel.Hosting D19), and a platform's client reads its own varia
 That reads the program's `AppEnvironmentScope` when a gateway runs the application in its own process
 (Gateway.InProcess). The resource repeats the deployment in its manifest, which is what makes its
 gateway count the deployment ready (ApplicationModel.Gateway G34). With Web.Hosting binding the
-platform's `http` endpoint, the same `Program.cs` (`CreateBuilder(args)`, `AddResource(name,
-resource => resource.UseInProcess())`) runs in process and on any other platform it opts into. The
+platform's `http` endpoint, the same `Program.cs` (`CreateBuilder(args)`,
+`builder.Services.AddResource(name, resource => resource.UseInProcess())`) runs in process and on
+any other platform it opts into. The
 in-process end-to-end test runs two such programs, one calling the other at the address its setting
 received.
 
@@ -140,6 +149,17 @@ registers nothing else: no server, no listener, no HTTP client. `ManifestEndpoin
 base. A platform the resource did not opt into fails the application's build, naming the platform.
 *Rejected:* keeping Web's HTTP server as the transport every area reuses; every area would carry a
 transport, and a platform could not choose push or pull.
+
+**W10 — A resource is a registration (owner, 2026-10-31).** `AddResource` extends
+`IServiceProviderBuilder`, so an application writes `builder.Services.AddResource("orders-api",
+resource => ...)` beside its features' registrations. A managed resource is one singleton
+`IHostService` factory registration, which the container runs when the application is built; it
+resolves the registered settings itself, and an added action's factory receives the application's
+`IServiceProvider`. An unmanaged resource registers nothing. The package references Web.Hosting and
+the container directly, so the verb is an ordinary extension member, not a generated component
+integration. *Rejected:* the `WebApplicationBuilder` extension, the previous version; the resource
+was the one input an application composed outside `builder.Services`, and its action factories
+took the concrete Web context only to reach the provider.
 
 ## Open questions
 

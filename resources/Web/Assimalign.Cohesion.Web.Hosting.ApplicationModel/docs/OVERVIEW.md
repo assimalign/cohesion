@@ -20,14 +20,14 @@ which expose the settings the application's features registered. The design reco
 
 ## Dependencies
 
-Web, Web.Hosting, Web.Cors, Http, Hosting, and ApplicationModel.Hosting.
+Web, Web.Hosting, Web.Cors, Http, DependencyInjection, Hosting, and ApplicationModel.Hosting.
 
 ## Usage
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins("https://shop.example")));
-builder.AddResource("orders-api", resource => resource.UseInProcess());   // a resource on the in-process platform
+builder.Services.AddResource("orders-api", resource => resource.UseInProcess());   // a resource on the in-process platform
 
 var app = builder.Build();
 app.UseCors();                       // the policy the gateway's writes change
@@ -42,8 +42,8 @@ An application adds an action of its own with its JSON context, which declares t
 content types:
 
 ```csharp
-builder.AddResource("orders-api", resource => resource
+builder.Services.AddResource("orders-api", resource => resource
     .UseInProcess()
-    .AddAction(context => new FlushCacheAction(context.ServiceProvider.GetRequiredService<OrderCache>()))
+    .AddAction(services => new FlushCacheAction(services.GetRequiredService<OrderCache>()))
     .AddAction(new LogLevelAction(), OrdersJsonContext.Default));
 ```

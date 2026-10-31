@@ -609,9 +609,9 @@ currently captures only the design decisions that are settled.
 
 ## Resources
 
-This module knows nothing of resources. `Web.Hosting.Resources` makes a Web application a managed
-resource with `builder.AddResource(name)`: it registers the resource service and the control-plane
-server as host services, and exposes the application's settings as actions. Until the application
+This module knows nothing of resources. `Web.Hosting.ApplicationModel` makes a Web application a managed
+resource with `builder.Services.AddResource(name, ...)`: it registers the resource service as a host
+service, and exposes the application's settings as actions. Until the application
 model restarted on 2026-10-27, this module carried the resource integration itself: an ambient
 `ResourceRuntime` registration, a control-plane terminal with health probes, and a Hosting.Health
 adapter. The restart removed the integration, and the adapter left with Hosting.Health on

@@ -3,7 +3,7 @@
 The instance half of the in-process platform. A resource opts into it in its area's builder:
 
 ```csharp
-builder.AddResource("orders-api", resource => resource.UseInProcess());
+builder.Services.AddResource("orders-api", resource => resource.UseInProcess());
 ```
 
 When a gateway runs the resource inside the gateway's own process

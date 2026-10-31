@@ -28,7 +28,7 @@ A resource opts in when it is configured, beside any other platform it runs on:
 
 ```csharp
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-builder.AddResource("orders-api", resource => resource.UseInProcess());
+builder.Services.AddResource("orders-api", resource => resource.UseInProcess());
 ```
 
 `UseInProcess()` extends every area's options (`ApplicationInstanceOptions`) and returns them, so

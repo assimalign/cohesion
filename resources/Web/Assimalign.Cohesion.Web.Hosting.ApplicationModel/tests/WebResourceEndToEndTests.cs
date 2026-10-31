@@ -122,7 +122,7 @@ public sealed class WebResourceEndToEndTests
         var gateway = new TestGatewayClient();
         await using RunningResource instance = await RunningResource.StartAsync(gateway, cors: null,
             resource => resource.AddAction(
-                context => new GreetingAction(context.ServiceProvider.GetRequiredService<Greeting>().Text),
+                services => new GreetingAction(services.GetRequiredService<Greeting>().Text),
                 GreetingJsonContext.Default),
             beforeResource: builder => builder.Services.AddSingleton(new Greeting("from the application")));
 

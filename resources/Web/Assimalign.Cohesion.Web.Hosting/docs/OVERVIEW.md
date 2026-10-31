@@ -182,6 +182,6 @@ forwarders at final teardown; a factory obtained from its service provider canno
 
 ## Resources
 
-A Web application becomes a managed resource through `Web.Hosting.Resources`, with
-`builder.AddResource("orders-api")`. That package references this module; this module knows nothing
+A Web application becomes a managed resource through `Web.Hosting.ApplicationModel`, with
+`builder.Services.AddResource("orders-api", ...)`. That package references this module; this module knows nothing
 of resources. Health endpoints come from Web.Health, which an application maps itself.

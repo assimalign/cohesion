@@ -37,7 +37,7 @@ public sealed class AreaResourceOptions : ApplicationInstanceOptions
 }
 
 // In the application's Program.cs: the resource opts into every platform it runs on.
-builder.AddResource("orders-api", resource => resource.UseInProcess());
+builder.Services.AddResource("orders-api", resource => resource.UseInProcess());
 ```
 
 The area defines its actions, hands the instance to a control plane, and registers the service with
