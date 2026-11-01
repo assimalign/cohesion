@@ -35,18 +35,16 @@ public sealed class WebResourceManagementTests
         await using var infrastructure = new InProcessInfrastructure();
         infrastructure.AddProgram("Web", "orders-api", CorsProgram.MainAsync);
 
-        ApplicationBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
+        ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
         builder.StartupTimeout = TimeSpan.FromSeconds(30);
         builder.AddResource("Web", "orders-api");
         ApplicationGateway gateway = builder.Build();
-        using var stop = new CancellationTokenSource();
 
-        Task run = gateway.RunAsync(stop.Token);
         RunningResource? second = null;
         try
         {
-            await gateway.Started.WaitAsync(TimeSpan.FromSeconds(30));
-            IApplicationResourceDeployment resource = gateway.Resources.Single();
+            await gateway.StartAsync().WaitAsync(TimeSpan.FromSeconds(30));
+            IApplicationGatewayDeployment resource = gateway.Resources.Single();
             var program = new Uri(resource.Outputs[OutputName.Endpoint]);
             (await GetAllowedOriginAsync(program, CorsProgram.Shop)).ShouldBe(CorsProgram.Shop);
 
@@ -55,7 +53,7 @@ public sealed class WebResourceManagementTests
 
             // Act
             ApplicationActionResult result = await gateway.ExecuteAsync("Web", "orders-api", "cors", ApplicationActionContext.Create(
-                ApplicationActionKind.Write,
+                ApplicationActionOperation.Write,
                 JsonApplicationContentSerializer.Create(),
                 Encoding.UTF8.GetBytes($$"""{"origins":["{{Partner}}"]}""")));
 
@@ -82,8 +80,8 @@ public sealed class WebResourceManagementTests
                 await second.DisposeAsync();
             }
 
-            await stop.CancelAsync();
-            await run;
+            await gateway.StopAsync();
+            await gateway.Completion;
         }
     }
 

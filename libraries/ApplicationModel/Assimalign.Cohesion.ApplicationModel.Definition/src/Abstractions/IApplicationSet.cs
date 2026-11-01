@@ -53,5 +53,5 @@ public interface IApplicationSet
     /// Projects the set as manifest data.
     /// </summary>
     /// <returns>The manifest, in declaration order.</returns>
-    ApplicationManifest GetManifest();
+    ApplicationModelManifest GetManifest();
 }

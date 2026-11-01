@@ -73,7 +73,7 @@ public sealed class WebResourceRegistrationTests
             .GetRequiredService<IEnumerable<IHostService>>()
             .OfType<IApplicationInstanceService>()
             .ShouldHaveSingleItem();
-        instance.ControlPlane.Resource.Name.Value.ShouldBe("orders-api");
+        instance.ControlPlane.Instance.Name.Value.ShouldBe("orders-api");
     }
 
     [Fact(DisplayName = DisplayPrefix + "A platform the resource has no client for fails the registration")]

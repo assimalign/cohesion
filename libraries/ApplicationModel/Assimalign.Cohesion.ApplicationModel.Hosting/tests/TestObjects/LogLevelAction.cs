@@ -9,11 +9,11 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting.Tests;
 /// </summary>
 internal sealed class LogLevelAction : IApplicationInstanceAction
 {
-    private readonly ApplicationActionState<LogLevelSetting> _state;
+    private readonly ApplicationInstanceActionState<LogLevelSetting> _state;
 
     public LogLevelAction(string initialLevel = "Information")
     {
-        _state = ApplicationActionState<LogLevelSetting>.Create(new LogLevelSetting(initialLevel), setting => Applied.Add(setting));
+        _state = ApplicationInstanceActionState<LogLevelSetting>.Create(new LogLevelSetting(initialLevel), setting => Applied.Add(setting));
     }
 
     public List<LogLevelSetting> Applied { get; } = [];
@@ -28,7 +28,7 @@ internal sealed class LogLevelAction : IApplicationInstanceAction
 
     public async ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
-        if (context.Operation == ApplicationActionKind.Read)
+        if (context.Operation == ApplicationActionOperation.Read)
         {
             return ApplicationActionResult.Success(_state.Value, context.Serializer);
         }

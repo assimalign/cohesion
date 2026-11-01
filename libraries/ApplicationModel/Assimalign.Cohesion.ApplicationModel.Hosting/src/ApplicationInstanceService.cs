@@ -37,7 +37,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// A host may start the service again once it has stopped; each start publishes again.
 /// </para>
 /// </remarks>
-[DebuggerDisplay("{ControlPlane.Resource.Provider}/{ControlPlane.Resource.Name} {ControlPlane.Resource.Key}")]
+[DebuggerDisplay("{ControlPlane.Manifest.Provider}/{ControlPlane.Manifest.Name} {ControlPlane.Manifest.Key}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ApplicationInstanceService : IApplicationInstanceService
 {
@@ -50,14 +50,14 @@ public sealed class ApplicationInstanceService : IApplicationInstanceService
 
     private static readonly TimeSpan _minimumRenewalInterval = TimeSpan.FromMilliseconds(10);
 
-    private readonly IApplicationResourceInstanceGatewayClient _client;
+    private readonly IApplicationInstanceGatewayClient _client;
     private readonly Lock _lifecycleLock = new();
     private CancellationTokenSource? _renewal;
     private Task _renewing = Task.CompletedTask;
     private int _lifecycle;
     private bool _serving;
 
-    private ApplicationInstanceService(IApplicationInstanceControlPlane controlPlane, IApplicationResourceInstanceGatewayClient client)
+    private ApplicationInstanceService(IApplicationInstanceControlPlane controlPlane, IApplicationInstanceGatewayClient client)
     {
         ControlPlane = controlPlane;
         _client = client;
@@ -79,7 +79,7 @@ public sealed class ApplicationInstanceService : IApplicationInstanceService
     /// </param>
     /// <returns>The service.</returns>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
-    public static ApplicationInstanceService Create(IApplicationInstanceControlPlane controlPlane, IApplicationResourceInstanceGatewayClient client)
+    public static ApplicationInstanceService Create(IApplicationInstanceControlPlane controlPlane, IApplicationInstanceGatewayClient client)
     {
         ArgumentNullException.ThrowIfNull(controlPlane);
         ArgumentNullException.ThrowIfNull(client);

@@ -24,11 +24,6 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 public interface IApplicationInstanceService : IHostLifecycleService
 {
     /// <summary>
-    /// Gets the platform whose gateway the client reaches.
-    /// </summary>
-    PlatformName Platform { get; }
-
-    /// <summary>
     /// Gets the control plane of the resource instance the service runs.
     /// </summary>
     IApplicationInstanceControlPlane ControlPlane { get; }

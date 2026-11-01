@@ -163,7 +163,7 @@ public class ApplicationInstanceServiceTests
 
         // Act
         await Eventually.WaitUntilAsync(() => client.Renewals >= 3);
-        ApplicationActionResult read = await service.ControlPlane.ExecuteAsync(_logLevel, ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json), CancellationToken.None);
+        ApplicationActionResult read = await service.ControlPlane.ExecuteAsync(_logLevel, ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json), CancellationToken.None);
         await service.StopAsync(CancellationToken.None);
 
         // Assert

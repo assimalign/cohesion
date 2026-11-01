@@ -28,8 +28,8 @@ public class ApplicationGatewayTests
         using var stop = new CancellationTokenSource();
 
         // Act
-        Task run = gateway.RunAsync(stop.Token);
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
         stop.Cancel();
         await run;
 
@@ -66,7 +66,7 @@ public class ApplicationGatewayTests
         infrastructure.TornDown.Select(name => name.Value).ShouldBe(["customers-api"]);
         lateInstance.ShouldNotBeNull().ErrorCode.ShouldBe(ApplicationGatewayErrorCode.ResourceTornDown);
         gateway.Resources.Single(resource => resource.Manifest.Name.Value == "customers-api").Instances.ShouldBeEmpty();
-        await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.Started);
+        await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.Completion);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Cancelling during startup stops the gateway without tearing anything down")]
@@ -80,11 +80,11 @@ public class ApplicationGatewayTests
         using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
 
         // Act
-        await gateway.RunAsync(stop.Token);
+        await gateway.RunAsync(stop.Token, out Task gatewayStarted);
 
         // Assert
         infrastructure.TornDown.ShouldBeEmpty();
-        gateway.Started.IsCanceled.ShouldBeTrue();
+        gatewayStarted.IsCanceled.ShouldBeTrue();
     }
 
     [Fact(DisplayName = DisplayPrefix + "Publications are refused before the gateway runs and after it stops")]
@@ -97,8 +97,8 @@ public class ApplicationGatewayTests
         var manifest = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), null, null, []);
         ApplicationGatewayException before = Should.Throw<ApplicationGatewayException>(() => gateway.PublishAsync(manifest));
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(stop.Token);
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
         stop.Cancel();
         await run;
 
@@ -118,8 +118,8 @@ public class ApplicationGatewayTests
         builder.AddResource("IdentityHub", "identity");
         (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(stop.Token);
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Act
         ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(
@@ -139,8 +139,8 @@ public class ApplicationGatewayTests
         builder.AddResource("Web", "orders-api");
         (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(stop.Token);
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
         TestInstance second = await infrastructure.StartInstanceAsync("Web", "orders-api");
         IApplicationGatewayDeployment ordersApi = gateway.Resources.Single();
         (TestInstance first, ApplicationInstanceService firstService) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
@@ -148,7 +148,7 @@ public class ApplicationGatewayTests
         // Act: the write runs once; the gateway records it and restores it on the others.
         ApplicationActionResult write = await firstService.ControlPlane.ExecuteAsync(
             "log-level",
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
         foreach (InstanceKey target in ordersApi.Record(first.Key, write.State!))
         {
             await infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
@@ -172,15 +172,15 @@ public class ApplicationGatewayTests
         builder.AddResource("Web", "orders-api");
         (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(stop.Token);
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
         IApplicationGatewayDeployment ordersApi = gateway.Resources.Single();
 
         // Act
-        ApplicationActionResult scaled = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));
-        ApplicationActionResult read = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json));
-        ApplicationActionResult unknown = await ordersApi.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json));
-        ApplicationActionResult rejected = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, "not json"u8.ToArray()));
+        ApplicationActionResult scaled = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));
+        ApplicationActionResult read = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json));
+        ApplicationActionResult unknown = await ordersApi.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json));
+        ApplicationActionResult rejected = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, "not json"u8.ToArray()));
         stop.Cancel();
         await run;
 

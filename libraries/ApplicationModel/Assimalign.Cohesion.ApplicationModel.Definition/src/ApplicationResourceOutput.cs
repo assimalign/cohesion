@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <remarks>
 /// A definition creates it for its own resource (<see cref="IApplicationResourceDefinition.Output"/>,
 /// <see cref="IApplicationResourceDefinition.Endpoint"/>), and a parent reference for one of the
-/// parent's resources (<see cref="IApplicationParent.Output"/>, <see cref="IApplicationParent.Endpoint"/>).
+/// parent's resources (<see cref="IApplicationModelParent.Output"/>, <see cref="IApplicationModelParent.Endpoint"/>).
 /// The gateway that runs the resource records the value its infrastructure provider reports, fills
 /// it in where one of its resources refers to it, and hands it to a child gateway that joins.
 /// </remarks>

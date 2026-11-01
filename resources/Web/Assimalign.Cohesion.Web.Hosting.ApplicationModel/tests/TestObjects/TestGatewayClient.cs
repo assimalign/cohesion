@@ -15,7 +15,7 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Tests;
 /// instance publishes, answers with the snapshots and lease a test scripts, counts renewals, and
 /// calls the instance's control plane as a gateway would once the instance opens it.
 /// </summary>
-internal sealed class TestGatewayClient : IApplicationGatewayClient
+internal sealed class TestGatewayClient : IApplicationInstanceGatewayClient
 {
     private readonly ConcurrentQueue<ApplicationInstanceManifest> _manifests = new();
     private ApplicationActionSnapshot[] _answer = [];
@@ -89,7 +89,7 @@ internal sealed class TestGatewayClient : IApplicationGatewayClient
     /// control plane reads with its own serializer.
     /// </summary>
     /// <exception cref="InvalidOperationException">The instance's control plane is not open to the gateway.</exception>
-    public ValueTask<ApplicationActionResult> ExecuteAsync(ActionName action, ApplicationActionKind operation, string? input = null)
+    public ValueTask<ApplicationActionResult> ExecuteAsync(ActionName action, ApplicationActionOperation operation, string? input = null)
     {
         IApplicationInstanceControlPlane controlPlane = _serving
             ?? throw new InvalidOperationException("The instance's control plane is not open to the gateway.");

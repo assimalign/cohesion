@@ -54,7 +54,7 @@ public class ApplicationResourceOutputTests
     public void ParentOutput_WithNames_ShouldReferenceTheParentsResource()
     {
         // Arrange
-        IApplicationParent root = ApplicationModel.CreateBuilder("east").UseParent("root");
+        IApplicationModelParent root = ApplicationModel.CreateBuilder("east").UseParent("root");
 
         // Act
         ApplicationResourceOutput endpoint = root.Endpoint("IdentityHub", "identity");
@@ -69,7 +69,7 @@ public class ApplicationResourceOutputTests
     public void ParentOutput_WithDefaultNames_ShouldThrow()
     {
         // Arrange
-        IApplicationParent root = ApplicationModel.CreateBuilder("east").UseParent("root");
+        IApplicationModelParent root = ApplicationModel.CreateBuilder("east").UseParent("root");
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => root.Output(default, "identity", OutputName.Endpoint));

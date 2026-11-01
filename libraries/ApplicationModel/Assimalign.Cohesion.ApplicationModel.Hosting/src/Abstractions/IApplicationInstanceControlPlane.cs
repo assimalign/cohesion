@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// <see cref="IApplicationInstanceService"/> that runs it.
 /// </para>
 /// <para>
-/// The control plane is transport-neutral. The platform's <see cref="IApplicationResourceInstanceGatewayClient"/>
+/// The control plane is transport-neutral. The platform's <see cref="IApplicationInstanceGatewayClient"/>
 /// carries the gateway's calls to <see cref="ExecuteAsync"/> and <see cref="RestoreAsync"/>, and
 /// reads their content with <see cref="Serializer"/>.
 /// </para>
@@ -24,7 +24,7 @@ public interface IApplicationInstanceControlPlane
     /// <summary>
     /// Gets the resource instance this control plane serves.
     /// </summary>
-    IApplicationInstance Resource { get; }
+    IApplicationInstance Instance { get; }
 
     /// <summary>
     /// Gets the instance's manifest: its identity and its actions. The gateway client that publishes

@@ -9,10 +9,10 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// against an instance.
 /// </summary>
 /// <remarks>
-/// An instance's controls (<see cref="IApplicationInstanceAction"/>) change the process; an infrastructure
-/// action changes the platform. It has no state for the gateway to replay: the platform keeps what
-/// the action set until the resource is next deployed. The invocation and its result use the same
-/// types as a control.
+/// An instance's controls (<c>IApplicationInstanceAction</c>, which the instance runtime
+/// declares) change the process; an infrastructure action changes the platform. It has no state for
+/// the gateway to replay: the platform keeps what the action set until the resource is next
+/// deployed. The invocation and its result use the same types as a control.
 /// </remarks>
 public interface IApplicationGatewayDeploymentAction
 {

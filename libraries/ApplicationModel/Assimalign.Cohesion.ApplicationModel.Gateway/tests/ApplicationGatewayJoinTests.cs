@@ -66,14 +66,14 @@ public sealed class ApplicationGatewayJoinTests : IDisposable
         ApplicationGateway root = RunningGateway.Create(_root, _store, CreateRoot());
         ApplicationGateway east = RunningGateway.Create(_east, _store, CreateEast(), parent: root);
         using var stop = new CancellationTokenSource();
-        Task rootRun = root.RunAsync(stop.Token);
-        Task eastRun = east.RunAsync(stop.Token);
+        Task rootRun = root.RunAsync(stop.Token, out Task rootStarted);
+        Task eastRun = east.RunAsync(stop.Token, out Task eastStarted);
 
         // Act
         await Eventually.WaitUntilAsync(() => root.Children.Count == 1);
         string[] beforeRelease = _east.Events();
         release.SetResult();
-        await east.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await eastStarted.WaitAsync(TimeSpan.FromSeconds(10));
         stop.Cancel();
         await Task.WhenAll(rootRun, eastRun);
 
@@ -122,8 +122,8 @@ public sealed class ApplicationGatewayJoinTests : IDisposable
     {
         // Arrange
         await using RunningGateway root = await StartRootAsync();
-        var elsewhere = new ApplicationManifest("west", "elsewhere", []);
-        var orphan = new ApplicationManifest("west", null, []);
+        var elsewhere = new ApplicationModelManifest("west", "elsewhere", []);
+        var orphan = new ApplicationModelManifest("west", null, []);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => { _ = root.Gateway.JoinAsync(elsewhere); }).Message.ShouldContain("names 'elsewhere' as its parent, not 'root'", Case.Sensitive);
@@ -196,7 +196,7 @@ public sealed class ApplicationGatewayJoinTests : IDisposable
     private static IApplicationModel CreateEast()
     {
         IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("east");
-        IApplicationParent root = builder.UseParent("root");
+        IApplicationModelParent root = builder.UseParent("root");
         IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "orders-db");
         builder.AddResource("Web", "orders-api")
             .WithSetting("Identity:Authority", root.Endpoint("IdentityHub", "identity"))

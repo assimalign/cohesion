@@ -7,8 +7,8 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// <remarks>
 /// A resource appears in three forms that share its identity: its definition, which a model
 /// declares (<c>IApplicationResourceDefinition</c>); its deployment, a gateway's view of it across
-/// its instances (<c>IApplicationResourceDeployment</c>); and each instance, one running copy
-/// (<c>IApplicationResourceInstance</c>).
+/// its instances (<c>IApplicationGatewayDeployment</c>); and each instance, one running copy
+/// (<c>IApplicationInstance</c>).
 /// </remarks>
 public interface IApplicationResource
 {

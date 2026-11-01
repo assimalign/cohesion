@@ -95,13 +95,17 @@ public sealed class ApplicationGatewayLeaseTests : IDisposable
         }
 
         // Act: the second gateway starts without the first one's record.
+        // The instance keeps renewing against whichever gateway runs, so how many instances the second
+        // gateway holds right after startup depends on timing; what it starts from is its empty store.
         using var otherDirectory = new TemporaryDirectory();
-        await using RunningGateway second = await StartAsync(JsonFileApplicationGatewayStore.Create(otherDirectory.FullPath));
-        int adopted = second.Gateway.Resources.Single().Instances.Count;
+        JsonFileApplicationGatewayStore otherStore = JsonFileApplicationGatewayStore.Create(otherDirectory.FullPath);
+        ApplicationGatewayRecord? known = await otherStore.LoadAsync("root");
+        await using RunningGateway second = await StartAsync(otherStore);
         await Eventually.WaitUntilAsync(() => second.Gateway.Resources.Single().Instances.Count == 1);
 
-        // Assert
-        adopted.ShouldBe(0);
+        // Assert: the instance registered again, and the registration reached the second record.
+        known.ShouldBeNull();
+        await Eventually.WaitUntilAsync(() => otherStore.LoadAsync("root").AsTask().Result!.Resources.Single().Instances.Count == 1);
         _infrastructure.Deployed.ShouldHaveSingleItem();
     }
 

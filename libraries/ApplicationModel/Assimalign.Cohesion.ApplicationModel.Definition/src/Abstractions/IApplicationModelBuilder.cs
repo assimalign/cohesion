@@ -13,7 +13,7 @@ public interface IApplicationModelBuilder : IApplicationSet
     /// <summary>
     /// Gets the parent gateway this gateway joins, or <see langword="null"/> for a root gateway.
     /// </summary>
-    IApplicationParent? Parent { get; }
+    IApplicationModelParent? Parent { get; }
 
     /// <summary>
     /// Names the parent gateway this gateway joins.
@@ -26,14 +26,14 @@ public interface IApplicationModelBuilder : IApplicationSet
     /// <exception cref="System.InvalidOperationException">
     /// The gateway already names a parent, or the model is built.
     /// </exception>
-    IApplicationParent UseParent(GatewayName name);
+    IApplicationModelParent UseParent(GatewayName name);
 
     /// <summary>
     /// Validates the declarations and builds the model. The builder accepts no changes afterward.
     /// </summary>
     /// <returns>The model.</returns>
     /// <exception cref="System.ArgumentException">
-    /// A declaration breaks a rule of <see cref="ApplicationModel.Create(ApplicationManifest)"/>, such
+    /// A declaration breaks a rule of <see cref="ApplicationModel.Create(ApplicationModelManifest)"/>, such
     /// as a setting that uses an output of a gateway that is neither this one nor its parent.
     /// </exception>
     /// <exception cref="System.InvalidOperationException">The model is already built.</exception>

@@ -84,9 +84,9 @@ public class ApplicationResourceExtensionTests
         // Arrange
         var autoscaler = new ApplicationResourceExtension("kubernetes", "autoscaler", Json("""{"maxReplicas":5}"""));
 
-        ApplicationManifest With(params ApplicationResourceExtension[] extensions)
+        ApplicationModelManifest With(params ApplicationResourceExtension[] extensions)
         {
-            return new ApplicationManifest("root", null, [new("Web", "orders-api", [], [], extensions)]);
+            return new ApplicationModelManifest("root", null, [new("Web", "orders-api", [], [], extensions)]);
         }
 
         // Act & Assert

@@ -17,19 +17,19 @@ public class ApplicationModelTests
     {
         // Arrange
         IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("east");
-        IApplicationParent root = builder.UseParent("root");
+        IApplicationModelParent root = builder.UseParent("root");
         IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "orders-db");
         builder.AddResource("Web", "orders-api")
             .DependsOn(database, "data.read", "data.write")
             .WithSetting("Identity:Endpoint", root.Endpoint("IdentityHub", "identity"));
         IApplicationModel built = builder.Build();
-        string json = JsonSerializer.Serialize(built.Manifest, ManifestJsonContext.Default.ApplicationManifest);
+        string json = JsonSerializer.Serialize(built.Manifest, ManifestJsonContext.Default.ApplicationModelManifest);
 
         // Act
-        ApplicationModel received = ApplicationModel.Create(JsonSerializer.Deserialize(json, ManifestJsonContext.Default.ApplicationManifest)!);
+        ApplicationModel received = ApplicationModel.Create(JsonSerializer.Deserialize(json, ManifestJsonContext.Default.ApplicationModelManifest)!);
 
         // Assert
-        JsonSerializer.Serialize(received.Manifest, ManifestJsonContext.Default.ApplicationManifest).ShouldBe(json);
+        JsonSerializer.Serialize(received.Manifest, ManifestJsonContext.Default.ApplicationModelManifest).ShouldBe(json);
         received.Parent.ShouldBe(new GatewayName("root"));
         ApplicationResourceManifest ordersApi = received.Manifest.Resources[1];
         ordersApi.Dependencies.ShouldHaveSingleItem().Permissions.Select(permission => permission.Value).ShouldBe(["data.read", "data.write"]);
@@ -41,7 +41,7 @@ public class ApplicationModelTests
     {
         // Arrange
         var resources = new List<ApplicationResourceManifest> { new("Web", "orders-api", [], [], []) };
-        var manifest = new ApplicationManifest("root", null, resources);
+        var manifest = new ApplicationModelManifest("root", null, resources);
 
         // Act
         ApplicationModel model = ApplicationModel.Create(manifest);
@@ -56,14 +56,14 @@ public class ApplicationModelTests
     public void Create_WithParentNamingItself_ShouldThrow()
     {
         // Act & Assert
-        Should.Throw<ArgumentException>(() => ApplicationModel.Create(new ApplicationManifest("east", "east", [])));
+        Should.Throw<ArgumentException>(() => ApplicationModel.Create(new ApplicationModelManifest("east", "east", [])));
     }
 
     [Fact(DisplayName = DisplayPrefix + "A gateway declaring one resource twice is refused")]
     public void Create_WithRepeatedResource_ShouldThrow()
     {
         // Arrange
-        var manifest = new ApplicationManifest("root", null, [new("Web", "orders-api", [], [], []), new("web", "orders-api", [], [], [])]);
+        var manifest = new ApplicationModelManifest("root", null, [new("Web", "orders-api", [], [], []), new("web", "orders-api", [], [], [])]);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
@@ -73,9 +73,9 @@ public class ApplicationModelTests
     public void Create_WithUnknownDependency_ShouldThrow()
     {
         // Arrange: a gateway orders only its own resources, so even its parent's are refused.
-        var undeclared = new ApplicationManifest("root", null, [
+        var undeclared = new ApplicationModelManifest("root", null, [
             new("Web", "orders-api", [new ApplicationResourceDependency("root", "Database.Sql", "orders-db", [])], [], [])]);
-        var parents = new ApplicationManifest("east", "root", [
+        var parents = new ApplicationModelManifest("east", "root", [
             new("Web", "orders-api", [new ApplicationResourceDependency("root", "IdentityHub", "identity", [])], [], [])]);
 
         // Act & Assert
@@ -88,7 +88,7 @@ public class ApplicationModelTests
     {
         // Arrange
         var dependency = new ApplicationResourceDependency("root", "Web", "orders-api", []);
-        var manifest = new ApplicationManifest("root", null, [new("Web", "orders-api", [dependency], [], [])]);
+        var manifest = new ApplicationModelManifest("root", null, [new("Web", "orders-api", [dependency], [], [])]);
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));
@@ -98,7 +98,7 @@ public class ApplicationModelTests
     public void Create_WithDependencyCycle_ShouldThrowNamingTheCycle()
     {
         // Arrange: orders-api and orders-db depend on each other.
-        var manifest = new ApplicationManifest(
+        var manifest = new ApplicationModelManifest(
             "east",
             null,
             [
@@ -118,10 +118,10 @@ public class ApplicationModelTests
     {
         // Arrange
         ApplicationResourceManifest database = new("Database.Sql", "orders-db", [], [], []);
-        var repeatedDependency = new ApplicationManifest("root", null, [database, new("Web", "orders-api", [
+        var repeatedDependency = new ApplicationModelManifest("root", null, [database, new("Web", "orders-api", [
             new ApplicationResourceDependency("root", "Database.Sql", "orders-db", []),
             new ApplicationResourceDependency("root", "Database.Sql", "orders-db", ["data.read"])], [], [])]);
-        var repeatedPermission = new ApplicationManifest("root", null, [database, new("Web", "orders-api", [
+        var repeatedPermission = new ApplicationModelManifest("root", null, [database, new("Web", "orders-api", [
             new ApplicationResourceDependency("root", "Database.Sql", "orders-db", ["data.read", "data.read"])], [], [])]);
 
         // Act & Assert
@@ -134,7 +134,7 @@ public class ApplicationModelTests
     {
         // Arrange
         var output = new ApplicationResourceOutput("root", "IdentityHub", "identity", OutputName.Endpoint);
-        var manifest = new ApplicationManifest("east", "root", [new("Web", "orders-api", [], [new ApplicationResourceSetting("Identity:Endpoint", null, output)], [])]);
+        var manifest = new ApplicationModelManifest("east", "root", [new("Web", "orders-api", [], [new ApplicationResourceSetting("Identity:Endpoint", null, output)], [])]);
 
         // Act
         ApplicationModel model = ApplicationModel.Create(manifest);
@@ -153,7 +153,7 @@ public class ApplicationModelTests
     {
         // Arrange
         var output = new ApplicationResourceOutput("root", "IdentityHub", "identity", OutputName.Endpoint);
-        var manifest = new ApplicationManifest(
+        var manifest = new ApplicationModelManifest(
             "east",
             parent is null ? (GatewayName?)null : new GatewayName(parent),
             [new("Web", "orders-api", [], [new ApplicationResourceSetting("Identity:Endpoint", null, output)], [])]);
@@ -169,7 +169,7 @@ public class ApplicationModelTests
     public void Create_WithNullListsFromJson_ShouldThrow()
     {
         // Arrange
-        ApplicationManifest manifest = JsonSerializer.Deserialize("""{"Name":"root","Parent":null,"Resources":null}""", ManifestJsonContext.Default.ApplicationManifest)!;
+        ApplicationModelManifest manifest = JsonSerializer.Deserialize("""{"Name":"root","Parent":null,"Resources":null}""", ManifestJsonContext.Default.ApplicationModelManifest)!;
 
         // Act & Assert
         Should.Throw<ArgumentException>(() => ApplicationModel.Create(manifest));

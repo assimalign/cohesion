@@ -45,7 +45,7 @@ public sealed class JsonFileApplicationGatewayStoreTests : IDisposable
         var outputs = new Dictionary<OutputName, string> { [OutputName.Endpoint] = "http://orders-api.root.svc" };
         var saved = new ApplicationGatewayRecord(
             "root",
-            [new ApplicationResourceRecord("Web", "orders-api", "abc:1", [ApplicationActionSnapshot.Create("cors", binary)], [instance], outputs)])
+            [new ApplicationGatewayDeploymentRecord("Web", "orders-api", "abc:1", [ApplicationActionSnapshot.Create("cors", binary)], [instance], outputs)])
         {
             Epoch = 3,
         };
@@ -59,7 +59,7 @@ public sealed class JsonFileApplicationGatewayStoreTests : IDisposable
         loaded.ShouldNotBeNull();
         loaded.Gateway.ShouldBe(saved.Gateway);
         loaded.Epoch.ShouldBe(3);
-        ApplicationResourceRecord resource = loaded.Resources.ShouldHaveSingleItem();
+        ApplicationGatewayDeploymentRecord resource = loaded.Resources.ShouldHaveSingleItem();
         resource.Revision.ShouldBe("abc:1");
         resource.State.ShouldHaveSingleItem().Value.ToArray().ShouldBe(binary);
         resource.Instances.ShouldHaveSingleItem().ShouldBe(instance with { Actions = resource.Instances[0].Actions });
@@ -74,7 +74,7 @@ public sealed class JsonFileApplicationGatewayStoreTests : IDisposable
         JsonFileApplicationGatewayStore store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
 
         // Act
-        await store.SaveAsync(new ApplicationGatewayRecord("root", [new ApplicationResourceRecord("Web", "orders-api", "abc:1", [], [], new Dictionary<OutputName, string>())]));
+        await store.SaveAsync(new ApplicationGatewayRecord("root", [new ApplicationGatewayDeploymentRecord("Web", "orders-api", "abc:1", [], [], new Dictionary<OutputName, string>())]));
         await store.SaveAsync(new ApplicationGatewayRecord("root", []));
 
         // Assert
@@ -88,7 +88,7 @@ public sealed class JsonFileApplicationGatewayStoreTests : IDisposable
     {
         // Arrange
         JsonFileApplicationGatewayStore store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
-        var resource = new ApplicationResourceRecord("Web", "orders-api", "abc:1", [], [], new Dictionary<OutputName, string>());
+        var resource = new ApplicationGatewayDeploymentRecord("Web", "orders-api", "abc:1", [], [], new Dictionary<OutputName, string>());
 
         // Act
         ApplicationGatewayRecord first = await store.AcquireAsync("root");
@@ -109,7 +109,7 @@ public sealed class JsonFileApplicationGatewayStoreTests : IDisposable
     {
         // Arrange
         JsonFileApplicationGatewayStore store = JsonFileApplicationGatewayStore.Create(_directory.FullPath);
-        var resource = new ApplicationResourceRecord("Web", "orders-api", "abc:1", [], [], new Dictionary<OutputName, string>());
+        var resource = new ApplicationGatewayDeploymentRecord("Web", "orders-api", "abc:1", [], [], new Dictionary<OutputName, string>());
         ApplicationGatewayRecord earlier = await store.AcquireAsync("root");
         ApplicationGatewayRecord later = await store.AcquireAsync("root");
 

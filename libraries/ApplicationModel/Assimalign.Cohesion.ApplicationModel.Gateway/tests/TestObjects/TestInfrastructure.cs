@@ -11,13 +11,16 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// <summary>
 /// An in-memory platform: deploying a resource starts one instance whose control plane publishes to
 /// the gateway, unless the resource is silent; every call is recorded. Its workloads outlive the
-/// gateway that deployed them, so a second gateway over the same platform finds them running.
+/// gateway that deployed them, so a second gateway over the same platform finds them running. Its
+/// channel hands its instances' publications to the gateway that started it.
 /// </summary>
 internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProvider
 {
     private readonly Lock _calls = new();
     private readonly List<string> _events = [];
     private TestInstanceClient? _client;
+    private int _starts;
+    private int _stops;
 
     public IApplicationInstancePublisher? Gateway { get; set; }
 
@@ -73,6 +76,46 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
     /// <summary>The platform's name; a resource's extensions for it apply here.</summary>
     public PlatformName Platform => "test";
 
+    /// <summary>How many times a gateway started the platform's channel.</summary>
+    public int Starts => Volatile.Read(ref _starts);
+
+    /// <summary>How many times a gateway stopped the platform's channel.</summary>
+    public int Stops => Volatile.Read(ref _stops);
+
+    /// <summary>The platform's calls made before its channel last started.</summary>
+    public string[] EventsAtStart { get; private set; } = [];
+
+    /// <summary>An exception starting the channel throws, as a channel that cannot listen would.</summary>
+    public Exception? StartFailure { get; set; }
+
+    /// <summary>An exception stopping the channel throws.</summary>
+    public Exception? StopFailure { get; set; }
+
+    public ValueTask StartAsync(IApplicationGatewayContext context, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (StartFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        EventsAtStart = Events();
+        Gateway = context.Publisher;
+        Interlocked.Increment(ref _starts);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask StopAsync(CancellationToken cancellationToken = default)
+    {
+        Interlocked.Increment(ref _stops);
+        if (StopFailure is { } failure)
+        {
+            throw failure;
+        }
+
+        return ValueTask.CompletedTask;
+    }
+
     public ConcurrentDictionary<InstanceKey, (TestInstance Instance, ApplicationInstanceService Service)> Instances { get; } = new();
 
     /// <summary>
@@ -97,7 +140,7 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         return [Scale];
     }
 
-    public ValueTask<InfrastructurePlan> PlanResourceAsync(
+    public ValueTask<ApplicationGatewayDeploymentPlan> PlanResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
@@ -110,13 +153,13 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         // A workload that runs other settings or extensions needs an update; the revision leaves
         // both out.
         string revision = Revisions.GetValueOrDefault(resource.Name, "1");
-        InfrastructureChange change = !Running.TryGetValue(resource.Name, out string? running) ? InfrastructureChange.Create
+        ApplicationGatewayDeploymentChange change = !Running.TryGetValue(resource.Name, out string? running) ? ApplicationGatewayDeploymentChange.Create
             : running == revision
                 && SameSettings(RunningSettings.GetValueOrDefault(resource.Name), settings)
-                && RunningExtensions.GetValueOrDefault(resource.Name, string.Empty) == Describe(resource.Extensions) ? InfrastructureChange.None
-            : InfrastructureChange.Update;
+                && RunningExtensions.GetValueOrDefault(resource.Name, string.Empty) == Describe(resource.Extensions) ? ApplicationGatewayDeploymentChange.None
+            : ApplicationGatewayDeploymentChange.Update;
 
-        return ValueTask.FromResult(new InfrastructurePlan(change, revision));
+        return ValueTask.FromResult(new ApplicationGatewayDeploymentPlan(change, revision));
     }
 
     public async ValueTask DeployResourceAsync(

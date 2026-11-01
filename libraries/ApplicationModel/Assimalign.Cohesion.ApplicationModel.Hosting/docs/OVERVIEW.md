@@ -9,12 +9,13 @@ record is [DESIGN.md](DESIGN.md).
 
 ## Scope
 
-- In scope: `IApplicationResourceInstance`, actions and their replayable state, health
+- In scope: `IApplicationInstance`, actions and their replayable state, health
   contributions, the generic `ApplicationInstanceControlPlane`, the `ApplicationInstanceService`
-  that joins it to its host and gateway, the instance half's seam `IApplicationGatewayClient`, and
+  that joins it to its host and gateway, the instance half's seam `IApplicationInstanceGatewayClient`, and
   `ApplicationInstanceOptions`, the base of every area's resource options through which a resource
   opts into each platform it runs on. The identity value objects, the manifest, invocation results,
-  the content serializer, and the publication seam are the shared contracts in
+  the content serializer, and the publication seam are the protocol in
+  `Assimalign.Cohesion.ApplicationModel.Protocol`, over the identity in
   `Assimalign.Cohesion.ApplicationModel`.
 - Out of scope: every transport. A platform's instance half implements the client, such as
   `Assimalign.Cohesion.ApplicationModel.Hosting.InProcess`; gateways and the logical model
@@ -22,8 +23,8 @@ record is [DESIGN.md](DESIGN.md).
 
 ## Dependencies
 
-`Assimalign.Cohesion.Core`, `Assimalign.Cohesion.Hosting`, and the shared contracts in
-`Assimalign.Cohesion.ApplicationModel`. Nothing else, because the library is in the closure of every
+`Assimalign.Cohesion.Core`, `Assimalign.Cohesion.Hosting`, and the protocol in
+`Assimalign.Cohesion.ApplicationModel.Protocol` (with the identity root behind it). Nothing else, because the library is in the closure of every
 resource; the logical model stays out of it.
 
 ## Usage
@@ -45,7 +46,7 @@ the client the options select:
 
 ```csharp
 // A stateful control: a read reports the level, a write sets it.
-ApplicationActionState<LogLevelSetting> state = ApplicationActionState<LogLevelSetting>.Create(
+ApplicationInstanceActionState<LogLevelSetting> state = ApplicationInstanceActionState<LogLevelSetting>.Create(
     new LogLevelSetting("Information"),          // the level the application's code configured
     setting => logging.SetMinimumLevel(setting.Level));
 

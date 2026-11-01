@@ -27,7 +27,7 @@ public class InProcessInfrastructureTests
         await using var infrastructure = new InProcessInfrastructure();
         var orders = new TestProgram("Web", "orders-api");
         infrastructure.AddProgram("Web", "orders-api", orders.MainAsync);
-        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
         builder.AddResource("Web", "orders-api");
 
         // Act
@@ -57,14 +57,14 @@ public class InProcessInfrastructureTests
         await using var infrastructure = new InProcessInfrastructure();
         var orders = new TestProgram("Web", "orders-api");
         infrastructure.AddProgram("Web", "orders-api", orders.MainAsync);
-        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
         builder.AddResource("Web", "orders-api");
         await using GatewayRun run = await GatewayRun.StartAsync(builder.Build());
         await orders.Runs.ShouldHaveSingleItem().Serving.WaitAsync(TimeSpan.FromSeconds(10));
         JsonApplicationContentSerializer json = JsonApplicationContentSerializer.Create(TestJsonContext.Default);
 
         // Act
-        ApplicationActionResult result = await run.Gateway.ExecuteAsync("Web", "orders-api", "environment", ApplicationActionContext.Create(ApplicationActionKind.Read, json));
+        ApplicationActionResult result = await run.Gateway.ExecuteAsync("Web", "orders-api", "environment", ApplicationActionContext.Create(ApplicationActionOperation.Read, json));
 
         // Assert: the action read the program's own variables, not the test's.
         result.Status.ShouldBe(ApplicationActionStatus.Succeeded);
@@ -76,12 +76,12 @@ public class InProcessInfrastructureTests
     {
         // Arrange
         await using var infrastructure = new InProcessInfrastructure();
-        IApplicationInstanceClient client = infrastructure;
+        IApplicationGatewayInstanceClient client = infrastructure;
         ApplicationInstanceManifest manifest = ApplicationInstanceControlPlane.Create(new TestResource("Web", "orders-api", null), JsonApplicationContentSerializer.Create()).Manifest
             with { ControlPlaneEndpoint = infrastructure.Endpoint };
 
         // Act & Assert
-        await Should.ThrowAsync<InvalidOperationException>(() => client.ExecuteAsync(manifest, "environment", ApplicationActionContext.Create(ApplicationActionKind.Read, JsonApplicationContentSerializer.Create())).AsTask());
+        await Should.ThrowAsync<InvalidOperationException>(() => client.ExecuteAsync(manifest, "environment", ApplicationActionContext.Create(ApplicationActionOperation.Read, JsonApplicationContentSerializer.Create())).AsTask());
         await Should.ThrowAsync<InvalidOperationException>(() => client.RestoreAsync(manifest, ApplicationActionSnapshot.Create("environment", "{}"u8.ToArray())).AsTask());
     }
 
@@ -95,7 +95,7 @@ public class InProcessInfrastructureTests
         infrastructure
             .AddProgram("Web", "orders-api", orders.MainAsync)
             .AddProgram("Web", "storefront", storefront.MainAsync);
-        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
         IApplicationResourceDefinition ordersApi = builder.AddResource("Web", "orders-api");
         builder.AddResource("Web", "storefront")
             .WithSetting("Orders:Url", ordersApi.Endpoint)
@@ -125,7 +125,7 @@ public class InProcessInfrastructureTests
         infrastructure
             .AddProgram("Web", "orders-api", orders.MainAsync)
             .AddProgram("Web", "storefront", storefront.MainAsync);
-        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
         IApplicationResourceDefinition ordersApi = builder.AddResource("Web", "orders-api");
         builder.AddResource("Web", "storefront").DependsOn(ordersApi);
         await using (await GatewayRun.StartAsync(builder.Build()))
@@ -165,7 +165,7 @@ public class InProcessInfrastructureTests
 
         static ApplicationGateway CreateGateway(InProcessInfrastructure infrastructure, TestStore store)
         {
-            ApplicationBuilder builder = CreateBuilder(infrastructure);
+            ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
             builder.LeaseDuration = TimeSpan.FromMilliseconds(300);
             builder.UseStore(store).AddResource("Web", "orders-api");
             return builder.Build();
@@ -197,7 +197,7 @@ public class InProcessInfrastructureTests
 
         static ApplicationGateway CreateGateway(InProcessInfrastructure infrastructure, TestStore store, string greeting)
         {
-            ApplicationBuilder builder = CreateBuilder(infrastructure);
+            ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
             builder.UseStore(store).AddResource("Web", "orders-api").WithSetting("Greeting", greeting);
             return builder.Build();
         }
@@ -214,14 +214,14 @@ public class InProcessInfrastructureTests
             .AddProgram("Web", "orders-api", orders.MainAsync)
             .AddProgram("Web", "storefront", storefront.MainAsync);
         var store = new TestStore();
-        ApplicationBuilder first = CreateBuilder(infrastructure).UseStore(store);
+        ApplicationGatewayBuilder first = CreateBuilder(infrastructure).UseStore(store);
         first.AddResource("Web", "orders-api");
         first.AddResource("Web", "storefront");
         await using (await GatewayRun.StartAsync(first.Build()))
         {
         }
 
-        ApplicationBuilder second = CreateBuilder(infrastructure).UseStore(store);
+        ApplicationGatewayBuilder second = CreateBuilder(infrastructure).UseStore(store);
         second.AddResource("Web", "orders-api");
 
         // Act
@@ -240,7 +240,7 @@ public class InProcessInfrastructureTests
         var failure = new InvalidOperationException("The orders database is not configured.");
         var orders = new TestProgram("Web", "orders-api") { Failure = failure };
         infrastructure.AddProgram("Web", "orders-api", orders.MainAsync);
-        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
         builder.AddResource("Web", "orders-api");
         long started = Stopwatch.GetTimestamp();
 
@@ -259,7 +259,7 @@ public class InProcessInfrastructureTests
     {
         // Arrange
         await using var infrastructure = new InProcessInfrastructure();
-        ApplicationBuilder builder = CreateBuilder(infrastructure);
+        ApplicationGatewayBuilder builder = CreateBuilder(infrastructure);
         builder.AddResource("Web", "orders-api");
 
         // Act & Assert
@@ -272,7 +272,7 @@ public class InProcessInfrastructureTests
     {
         // Arrange: an instance opted into the platform, in an environment that names the endpoint.
         await using var infrastructure = new InProcessInfrastructure();
-        IApplicationResourceInstanceGatewayClient client;
+        IApplicationInstanceGatewayClient client;
         using (AppEnvironment.Enter(AppEnvironmentScope.Create(
             new Dictionary<string, string>
             {
@@ -301,9 +301,9 @@ public class InProcessInfrastructureTests
         Should.Throw<ArgumentException>(() => infrastructure.AddProgram("Web", "orders-api", static _ => Task.CompletedTask));
     }
 
-    private static ApplicationBuilder CreateBuilder(InProcessInfrastructure infrastructure)
+    private static ApplicationGatewayBuilder CreateBuilder(InProcessInfrastructure infrastructure)
     {
-        ApplicationBuilder builder = ApplicationGateway.CreateBuilder("local");
+        ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local");
         builder.StartupTimeout = TimeSpan.FromSeconds(10);
         return builder.UseInProcess(infrastructure);
     }

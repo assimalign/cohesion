@@ -9,7 +9,7 @@ immutable model. The design record is [DESIGN.md](DESIGN.md).
 ## Scope
 
 - In scope: `IApplicationModelBuilder` and `IApplicationModel` with their implementations;
-  `IApplicationSet`; `IApplicationParent`; `IApplicationResourceDefinition` with `DependsOn`,
+  `IApplicationSet`; `IApplicationModelParent`; `IApplicationResourceDefinition` with `DependsOn`,
   `WithSetting`, `WithExtension`, and its output placeholders; and the manifest records.
 - Out of scope: gateways, their deployments of resources, platforms, and infrastructure actions
   (ApplicationModel.Gateway); running instances (ApplicationModel.Hosting); the identity provider;
@@ -17,8 +17,9 @@ immutable model. The design record is [DESIGN.md](DESIGN.md).
 
 ## Dependencies
 
-`Assimalign.Cohesion.Core` and `Assimalign.Cohesion.ApplicationModel`, the contracts it shares with
-running instances.
+`Assimalign.Cohesion.Core` and `Assimalign.Cohesion.ApplicationModel`, the resource identity it
+shares with gateways and running instances. It never references the gateway-to-instance protocol
+(ApplicationModel.Protocol).
 
 ## Usage
 
@@ -26,7 +27,7 @@ Declare one gateway's model. A child gateway names its parent and reads the pare
 
 ```csharp
 IApplicationModelBuilder east = ApplicationModel.CreateBuilder("east");
-IApplicationParent root = east.UseParent("root");
+IApplicationModelParent root = east.UseParent("root");
 
 IApplicationResourceDefinition database = east.AddResource("Database.Sql", "orders-db");
 IApplicationResourceDefinition ordersApi = east.AddResource("Web", "orders-api")
@@ -41,10 +42,10 @@ IApplicationResourceDefinition ordersApi = east.AddResource("Web", "orders-api")
 ordersApi.ConfigureHpa(hpa => hpa.MaxReplicas = 10);
 
 IApplicationModel model = east.Build();          // composition closes here
-ApplicationManifest manifest = model.Manifest;   // what east sends the root when it joins
+ApplicationModelManifest manifest = model.Manifest;   // what east sends the root when it joins
 ```
 
-A gateway program uses ApplicationModel.Gateway's `ApplicationBuilder`, which declares the model this
+A gateway program uses ApplicationModel.Gateway's `ApplicationGatewayBuilder`, which declares the model this
 way and builds the gateway that runs it. Manifest data, such as the manifest a child sends its
 parent, becomes the same model:
 

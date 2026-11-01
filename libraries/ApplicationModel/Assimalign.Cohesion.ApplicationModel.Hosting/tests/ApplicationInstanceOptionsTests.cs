@@ -55,7 +55,7 @@ public class ApplicationInstanceOptionsTests
 
         // Act
         options.Platform = "kubernetes";
-        IApplicationResourceInstanceGatewayClient? selected = options.GetGatewayClient();
+        IApplicationInstanceGatewayClient? selected = options.GetGatewayClient();
 
         // Assert
         selected.ShouldBeSameAs(kubernetes);

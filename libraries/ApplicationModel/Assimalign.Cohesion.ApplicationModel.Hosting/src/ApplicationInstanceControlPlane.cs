@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// action, is reported as <see cref="ApplicationActionStatus.Rejected"/> and changes nothing.
 /// </para>
 /// </remarks>
-[DebuggerDisplay("{Resource.Provider}/{Resource.Name} {Resource.Key}")]
+[DebuggerDisplay("{Manifest.Provider}/{Manifest.Name} {Manifest.Key}")]
 [DebuggerTypeProxy(typeof(DebugView))]
 public sealed class ApplicationInstanceControlPlane : IApplicationInstanceControlPlane
 {
@@ -40,14 +40,14 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
         FrozenDictionary<ActionName, IApplicationInstanceAction> actions,
         ApplicationInstanceManifest manifest)
     {
-        Resource = resource;
+        Instance = resource;
         Manifest = manifest;
         Serializer = serializer;
         _actions = actions;
     }
 
     /// <inheritdoc/>
-    public IApplicationInstance Resource { get; }
+    public IApplicationInstance Instance { get; }
 
     /// <inheritdoc/>
     public ApplicationInstanceManifest Manifest { get; }
@@ -165,12 +165,13 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
             return ApplicationActionResult.NotFound();
         }
 
-        if ((target.Kind & context.Operation) == ApplicationActionKind.None)
+        // Each operation has the value of the kind of the same name.
+        if (!target.Kind.HasFlag((ApplicationActionKind)context.Operation))
         {
             return ApplicationActionResult.NotSupported();
         }
 
-        if (context.Operation == ApplicationActionKind.Read)
+        if (context.Operation == ApplicationActionOperation.Read)
         {
             return await InvokeAsync(target, context, cancellationToken).ConfigureAwait(false);
         }
@@ -255,7 +256,7 @@ public sealed class ApplicationInstanceControlPlane : IApplicationInstanceContro
             _controlPlane = controlPlane;
         }
 
-        public IApplicationInstance Resource => _controlPlane.Resource;
+        public IApplicationInstance Instance => _controlPlane.Instance;
 
         public ApplicationInstanceManifest Manifest => _controlPlane.Manifest;
 

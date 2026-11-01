@@ -134,7 +134,7 @@ public sealed class ApplicationGatewayEventSourceTests
 
         // Act
         await running.Gateway.ExecuteAsync("Web", "api", TestManifests.LogLevel, ApplicationActionContext.Create(
-            ApplicationActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
+            ApplicationActionOperation.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
 
         // Assert
         string[] events = Describe(recorder, "events-action");

@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// An instance listed as unreachable throws, as one that stopped answering would, and one listed as
 /// refusing rejects every restore. Every call is recorded.
 /// </summary>
-internal sealed class TestInstanceClient : IApplicationInstanceClient
+internal sealed class TestInstanceClient : IApplicationGatewayInstanceClient
 {
     private readonly TestInfrastructure _infrastructure;
 

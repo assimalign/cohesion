@@ -40,7 +40,7 @@ internal sealed class GatewayResource
     private readonly Lock _leases = new();
     private readonly Dictionary<InstanceKey, long> _renewed = new();
     private readonly HashSet<InstanceKey> _carried = [];
-    private InfrastructureChange _change;
+    private ApplicationGatewayDeploymentChange _change;
     private string? _revision;
     private DeploymentId? _deployment;
     private Exception? _stopCause;
@@ -49,7 +49,7 @@ internal sealed class GatewayResource
     private int _current;
     private int _tornDown;
 
-    public GatewayResource(ApplicationResourceDeployment aggregate, ApplicationResourceManifest declared, ApplicationResourceRecord? previous)
+    public GatewayResource(ApplicationGatewayDeployment aggregate, ApplicationResourceManifest declared, ApplicationGatewayDeploymentRecord? previous)
     {
         Aggregate = aggregate;
         Declared = declared;
@@ -63,7 +63,7 @@ internal sealed class GatewayResource
         }
     }
 
-    public ApplicationResourceDeployment Aggregate { get; }
+    public ApplicationGatewayDeployment Aggregate { get; }
 
     // Held by an operator's write from the call to the instance until every restore has ended.
     public SemaphoreSlim Writes { get; } = new(1, 1);
@@ -73,10 +73,10 @@ internal sealed class GatewayResource
     public ApplicationResourceManifest Declared { get; }
 
     // The resource's entry in the record the run started from, or null when it had none.
-    public ApplicationResourceRecord? Previous { get; }
+    public ApplicationGatewayDeploymentRecord? Previous { get; }
 
     // What the plan changes; meaningful once the resource is current.
-    public InfrastructureChange Change => _change;
+    public ApplicationGatewayDeploymentChange Change => _change;
 
     // The revision the plan runs, or null until the resource is planned.
     public string? Revision => Volatile.Read(ref _revision);
@@ -111,7 +111,7 @@ internal sealed class GatewayResource
     // Applies the plan the resource's step made, with the deployment it makes unless the plan is None.
     // Call it before the provider deploys the resource, because an in-process provider's instances
     // publish before the call returns.
-    public void Plan(InfrastructureChange change, string revision, DeploymentId? deployment)
+    public void Plan(ApplicationGatewayDeploymentChange change, string revision, DeploymentId? deployment)
     {
         bool sameDefinition = Previous is not null && Previous.Revision == revision;
         lock (_leases)
@@ -121,7 +121,7 @@ internal sealed class GatewayResource
                 Aggregate.ClearState();
             }
 
-            if (!sameDefinition || change != InfrastructureChange.None)
+            if (!sameDefinition || change != ApplicationGatewayDeploymentChange.None)
             {
                 // The platform replaces the workload, so what the record held for it is gone; an
                 // instance that renewed or published since still runs and stays registered.
@@ -140,7 +140,7 @@ internal sealed class GatewayResource
             Volatile.Write(ref _current, 1);
         }
 
-        if (change == InfrastructureChange.None)
+        if (change == ApplicationGatewayDeploymentChange.None)
         {
             Volatile.Write(ref _state, registered);
             _registered.TrySetResult();
@@ -266,9 +266,9 @@ internal sealed class GatewayResource
             _resource = resource;
         }
 
-        public ApplicationResourceDeployment Aggregate => _resource.Aggregate;
+        public ApplicationGatewayDeployment Aggregate => _resource.Aggregate;
 
-        public InfrastructureChange Change => _resource.Change;
+        public ApplicationGatewayDeploymentChange Change => _resource.Change;
 
         public string? Revision => _resource.Revision;
 

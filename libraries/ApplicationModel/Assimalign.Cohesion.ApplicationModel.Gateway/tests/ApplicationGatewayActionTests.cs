@@ -96,7 +96,7 @@ public sealed class ApplicationGatewayActionTests
             "Web",
             "orders-api",
             TestManifests.LogLevel,
-            ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json));
+            ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json));
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.Succeeded);
@@ -117,7 +117,7 @@ public sealed class ApplicationGatewayActionTests
             "Web",
             "orders-api",
             TestManifests.LogLevel,
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, "not json"u8.ToArray()));
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, "not json"u8.ToArray()));
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.Rejected);
@@ -239,7 +239,7 @@ public sealed class ApplicationGatewayActionTests
 
     private static ApplicationActionContext Write(string level)
     {
-        return ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}"""));
+        return ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}"""));
     }
 
     private static IApplicationModel CreateModel()

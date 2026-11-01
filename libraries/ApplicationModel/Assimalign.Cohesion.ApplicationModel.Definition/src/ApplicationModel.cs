@@ -18,7 +18,7 @@ public sealed class ApplicationModel : IApplicationModel
     // The parameter of Create that every validation failure blames.
     private const string manifestParameter = "manifest";
 
-    private ApplicationModel(ApplicationManifest manifest)
+    private ApplicationModel(ApplicationModelManifest manifest)
     {
         Manifest = manifest;
     }
@@ -33,7 +33,7 @@ public sealed class ApplicationModel : IApplicationModel
     public ApplicationGatewayRole Role => Parent is null ? ApplicationGatewayRole.Root : ApplicationGatewayRole.Composite;
 
     /// <inheritdoc/>
-    public ApplicationManifest Manifest { get; }
+    public ApplicationModelManifest Manifest { get; }
 
     /// <summary>
     /// Creates a builder that declares the application a gateway runs.
@@ -69,7 +69,7 @@ public sealed class ApplicationModel : IApplicationModel
     /// <returns>The model.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="manifest"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The manifest breaks a rule; the message names the entry.</exception>
-    public static ApplicationModel Create(ApplicationManifest manifest)
+    public static ApplicationModel Create(ApplicationModelManifest manifest)
     {
         ArgumentNullException.ThrowIfNull(manifest);
 
@@ -128,13 +128,13 @@ public sealed class ApplicationModel : IApplicationModel
             copied[index] = Copy(manifest, manifest.Resources[index], resources);
         }
 
-        var copy = new ApplicationManifest(manifest.Name, manifest.Parent, Array.AsReadOnly(copied));
+        var copy = new ApplicationModelManifest(manifest.Name, manifest.Parent, Array.AsReadOnly(copied));
         ThrowIfCyclic(copy);
         return new ApplicationModel(copy);
     }
 
     private static ApplicationResourceManifest Copy(
-        ApplicationManifest manifest,
+        ApplicationModelManifest manifest,
         ApplicationResourceManifest resource,
         HashSet<(ProviderName Provider, ResourceName Name)> resources)
     {
@@ -282,7 +282,7 @@ public sealed class ApplicationModel : IApplicationModel
     // first only when it is a dependency; one of the parent's resources the parent reports when the
     // gateway joins it. A gateway gets no other gateway's outputs.
     private static void ThrowIfUnresolvable(
-        ApplicationManifest manifest,
+        ApplicationModelManifest manifest,
         ApplicationResourceManifest resource,
         ApplicationResourceSetting setting,
         ApplicationResourceOutput output,
@@ -338,7 +338,7 @@ public sealed class ApplicationModel : IApplicationModel
 
     // Dependencies order deployment, so they may not form a cycle. A depth-first walk that meets a
     // resource still on its path has found one.
-    private static void ThrowIfCyclic(ApplicationManifest manifest)
+    private static void ThrowIfCyclic(ApplicationModelManifest manifest)
     {
         var dependencies = new Dictionary<(ProviderName Provider, ResourceName Name), IReadOnlyList<ApplicationResourceDependency>>();
         foreach (ApplicationResourceManifest resource in manifest.Resources)

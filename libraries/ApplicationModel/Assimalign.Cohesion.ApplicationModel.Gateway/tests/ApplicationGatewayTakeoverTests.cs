@@ -61,14 +61,14 @@ public sealed class ApplicationGatewayTakeoverTests : IDisposable
         IApplicationModel model = CreateModel();
         ApplicationGateway earlier = RunningGateway.Create(_infrastructure, _store, model);
         using var stopEarlier = new CancellationTokenSource();
-        Task earlierRun = earlier.RunAsync(stopEarlier.Token);
-        await earlier.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Task earlierRun = earlier.RunAsync(stopEarlier.Token, out Task earlierStarted);
+        await earlierStarted.WaitAsync(TimeSpan.FromSeconds(10));
         InstanceKey instance = _infrastructure.Instances.Keys.Single();
 
         ApplicationGateway later = RunningGateway.Create(_infrastructure, _store, model);
         using var stopLater = new CancellationTokenSource();
-        Task laterRun = later.RunAsync(stopLater.Token);
-        await later.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Task laterRun = later.RunAsync(stopLater.Token, out Task laterStarted);
+        await laterStarted.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Act: an operator's write reaches the old gateway, which has to save it.
         ApplicationGatewayException refused = await Should.ThrowAsync<ApplicationGatewayException>(

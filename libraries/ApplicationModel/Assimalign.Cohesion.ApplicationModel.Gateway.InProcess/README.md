@@ -1,9 +1,9 @@
 # ApplicationModel.Gateway.InProcess
 
 Runs a gateway's resources inside the gateway's own process. `InProcessInfrastructure` is the
-gateway half of the in-process platform: the `inprocess` infrastructure provider, the transport the
+gateway half of the in-process platform: the `inprocess` infrastructure provider, whose channel the
 programs publish through, and the instance client the gateway calls them with.
-`builder.UseInProcess(infrastructure)` sets all three on an `ApplicationBuilder`; each program opts
+`builder.UseInProcess(infrastructure)` sets both on an `ApplicationGatewayBuilder`; each program opts
 into the platform with `UseInProcess()` from ApplicationModel.Hosting.InProcess.
 
 Bind each resource to its program's entry point with `AddProgram(provider, name, main)`. Deploying

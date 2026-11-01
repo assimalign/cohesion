@@ -29,7 +29,7 @@ public class ApplicationInstanceControlPlaneTests
     public void Create_WithStatefulReadOnlyAction_ShouldThrow()
     {
         // Arrange
-        var state = ApplicationActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
+        var state = ApplicationInstanceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
         var resource = new TestResource(new TestAction { Kind = ApplicationActionKind.Read, State = state });
 
         // Act & Assert
@@ -124,7 +124,7 @@ public class ApplicationInstanceControlPlaneTests
         ApplicationInstanceControlPlane controlPlane = ApplicationInstanceControlPlane.Create(new TestResource(action), TestSerializer.Json);
 
         // Act
-        ApplicationActionResult read = await controlPlane.ExecuteAsync(_logLevel, ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json), CancellationToken.None);
+        ApplicationActionResult read = await controlPlane.ExecuteAsync(_logLevel, ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json), CancellationToken.None);
         ApplicationActionResult restore = await controlPlane.RestoreAsync(ApplicationActionSnapshot.Create(_logLevel, """{"Level":"Warning"}"""u8.ToArray()), CancellationToken.None);
 
         // Assert
@@ -140,7 +140,7 @@ public class ApplicationInstanceControlPlaneTests
         ApplicationInstanceControlPlane controlPlane = Create(new TestResource(new TestAction()));
 
         // Act
-        ApplicationActionResult result = await controlPlane.ExecuteAsync("cors", ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json), CancellationToken.None);
+        ApplicationActionResult result = await controlPlane.ExecuteAsync("cors", ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json), CancellationToken.None);
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.NotFound);
@@ -154,7 +154,7 @@ public class ApplicationInstanceControlPlaneTests
         ApplicationInstanceControlPlane controlPlane = Create(new TestResource(action));
 
         // Act
-        ApplicationActionResult result = await controlPlane.ExecuteAsync(_flushCache, ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json), CancellationToken.None);
+        ApplicationActionResult result = await controlPlane.ExecuteAsync(_flushCache, ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json), CancellationToken.None);
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.NotSupported);
@@ -171,7 +171,7 @@ public class ApplicationInstanceControlPlaneTests
         // Act
         ApplicationActionResult result = await controlPlane.ExecuteAsync(
             _logLevel,
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
             CancellationToken.None);
 
         // Assert
@@ -190,8 +190,8 @@ public class ApplicationInstanceControlPlaneTests
         ApplicationInstanceControlPlane controlPlane = Create(new TestResource(new LogLevelAction(), new TestAction()));
 
         // Act
-        ApplicationActionResult read = await controlPlane.ExecuteAsync(_logLevel, ApplicationActionContext.Create(ApplicationActionKind.Read, TestSerializer.Json), CancellationToken.None);
-        ApplicationActionResult flush = await controlPlane.ExecuteAsync(_flushCache, ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json), CancellationToken.None);
+        ApplicationActionResult read = await controlPlane.ExecuteAsync(_logLevel, ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json), CancellationToken.None);
+        ApplicationActionResult flush = await controlPlane.ExecuteAsync(_flushCache, ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json), CancellationToken.None);
 
         // Assert
         read.Status.ShouldBe(ApplicationActionStatus.Succeeded);
@@ -213,7 +213,7 @@ public class ApplicationInstanceControlPlaneTests
         // Act
         ApplicationActionResult result = await controlPlane.ExecuteAsync(
             _logLevel,
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes(input)),
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, Encoding.UTF8.GetBytes(input)),
             CancellationToken.None);
 
         // Assert
@@ -234,7 +234,7 @@ public class ApplicationInstanceControlPlaneTests
         ApplicationInstanceControlPlane controlPlane = Create(new TestResource(action));
 
         // Act
-        ApplicationActionResult result = await controlPlane.ExecuteAsync(_flushCache, ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json), CancellationToken.None);
+        ApplicationActionResult result = await controlPlane.ExecuteAsync(_flushCache, ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json), CancellationToken.None);
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.Rejected);
@@ -264,7 +264,7 @@ public class ApplicationInstanceControlPlaneTests
         ApplicationInstanceControlPlane secondInstance = Create(new TestResource(second));
         ApplicationActionResult write = await firstInstance.ExecuteAsync(
             _logLevel,
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
             CancellationToken.None);
 
         // Act: the gateway restores the write's snapshot instead of repeating the write.
@@ -273,8 +273,8 @@ public class ApplicationInstanceControlPlaneTests
         // Assert
         restore.Status.ShouldBe(ApplicationActionStatus.Succeeded);
         second.Current.ShouldBe(first.Current);
-        secondInstance.Resource.Key.ShouldNotBe(firstInstance.Resource.Key);
-        secondInstance.Resource.Id.ShouldBe(firstInstance.Resource.Id);
+        secondInstance.Instance.Key.ShouldNotBe(firstInstance.Instance.Key);
+        secondInstance.Instance.Id.ShouldBe(firstInstance.Instance.Id);
     }
 
     [Fact(DisplayName = DisplayPrefix + "A snapshot that is not a value of the state's type is rejected")]

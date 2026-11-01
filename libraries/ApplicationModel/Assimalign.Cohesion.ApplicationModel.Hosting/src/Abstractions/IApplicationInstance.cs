@@ -20,7 +20,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// </para>
 /// <para>
 /// An instance knows nothing of how its gateway reaches it: the platform's
-/// <see cref="IApplicationResourceInstanceGatewayClient"/> carries its manifest out and the gateway's calls in.
+/// <see cref="IApplicationInstanceGatewayClient"/> carries its manifest out and the gateway's calls in.
 /// </para>
 /// </remarks>
 public interface IApplicationInstance : IApplicationResource

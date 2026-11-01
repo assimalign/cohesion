@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 /// each setting the application registered that the resource knows how to expose, followed by the
 /// actions the application added.
 /// </summary>
-internal sealed class WebResource : IApplicationResourceInstance
+internal sealed class WebResource : IApplicationInstance
 {
     public WebResource(ResourceName name, DeploymentId? deployment, IEnumerable<IWebApplicationSetting> settings, IEnumerable<IApplicationInstanceAction> addedActions)
     {
@@ -31,7 +31,7 @@ internal sealed class WebResource : IApplicationResourceInstance
 
     public IReadOnlyCollection<IApplicationInstanceAction> Actions { get; }
 
-    public IReadOnlyCollection<IApplicationHealthContributor> HealthContributors { get; } = [];
+    public IReadOnlyCollection<IApplicationInstanceHealthContributor> HealthContributors { get; } = [];
 
     // The last registration of a name is the one its feature uses, as UseCors does. A setting the
     // resource has no action for stays out of the manifest.

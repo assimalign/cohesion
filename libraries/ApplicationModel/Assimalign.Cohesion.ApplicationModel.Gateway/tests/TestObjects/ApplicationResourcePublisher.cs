@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// would: the registration answer is the state the instance restores. Registrations do not expire,
 /// and the test calls the control planes itself.
 /// </summary>
-internal sealed class ApplicationResourcePublisher : IApplicationResourceInstanceGatewayClient
+internal sealed class ApplicationResourcePublisher : IApplicationInstanceGatewayClient
 {
     private readonly IApplicationGatewayDeployment _resource;
 

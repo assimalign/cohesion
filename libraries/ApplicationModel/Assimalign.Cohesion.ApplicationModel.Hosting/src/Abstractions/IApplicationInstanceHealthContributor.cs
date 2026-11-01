@@ -18,5 +18,5 @@ public interface IApplicationInstanceHealthContributor
     /// </summary>
     /// <param name="cancellationToken">Signals that the evaluation should be abandoned.</param>
     /// <returns>The component's current health.</returns>
-    ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default);
+    ValueTask<ApplicationInstanceHealthContribution> CheckAsync(CancellationToken cancellationToken = default);
 }

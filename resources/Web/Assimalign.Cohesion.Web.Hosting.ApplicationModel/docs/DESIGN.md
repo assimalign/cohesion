@@ -4,7 +4,10 @@
 > instance-side contracts are [ApplicationModel.Hosting](../../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md);
 > this package is their Web implementation. Since 2026-10-30 it carries no transport: the platform
 > a resource opts into publishes for it and carries the gateway's calls in (W9). Since 2026-10-31 a
-> resource is a registration in `builder.Services` (W10).
+> resource is a registration in `builder.Services` (W10), and it follows the model's renames of that
+> day: it implements `IApplicationInstance`, `IApplicationInstanceAction`, and
+> `IApplicationInstanceActionState`, and its instance client is the platform's
+> `IApplicationInstanceGatewayClient`. Its public surface keeps the user's word, resource.
 
 ## Purpose
 
@@ -51,7 +54,7 @@ application's `IServiceProvider`, and builds these pieces:
 | Piece | Role |
 | --- | --- |
 | `WebResourceOptions` | Derives from `ApplicationInstanceOptions`, so every platform's verb applies to it; its `GetGatewayClient()` selects the client of the platform the environment names, and its `Deployment` is the deployment that started the instance. |
-| `WebResource` (internal) | The `IApplicationResourceInstance`: provider `Web`, the resource's name, a new instance key, the deployment its environment names, one action for each registered setting the resource knows, then the actions the application added, built when the application is built. |
+| `WebResource` (internal) | The `IApplicationInstance`: provider `Web`, the resource's name, a new instance key, the deployment its environment names, one action for each registered setting the resource knows, then the actions the application added, built when the application is built. |
 | `ApplicationInstanceControlPlane` | ApplicationModel.Hosting's control plane over the resource, writing JSON through the resource's own context and the contexts the added actions came with. |
 | `ApplicationInstanceService` | Publishes and restores in `StartingAsync` through the selected client, opens the control plane to the gateway's calls in `StartAsync`, and closes it and stops renewing in `StopAsync`. |
 

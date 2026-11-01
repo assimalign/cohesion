@@ -30,12 +30,13 @@ public sealed class ApplicationGatewayShutdownTests
         AppEnvironmentScope scope = AppEnvironmentScope.Create(new Dictionary<string, string>(), shutdown.Token);
 
         Task run;
+        Task started;
         using (AppEnvironment.Enter(scope))
         {
-            run = gateway.RunAsync();
+            run = gateway.RunAsync(CancellationToken.None, out started);
         }
 
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await started.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Act
         await shutdown.CancelAsync();

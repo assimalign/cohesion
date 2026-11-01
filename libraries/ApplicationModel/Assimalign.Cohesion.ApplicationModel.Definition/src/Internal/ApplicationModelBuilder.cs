@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Internal;
 internal sealed class ApplicationModelBuilder : IApplicationModelBuilder
 {
     private readonly ApplicationSetComposition _composition;
-    private ApplicationParent? _parent;
+    private ApplicationModelParent? _parent;
 
     public ApplicationModelBuilder(GatewayName name)
     {
@@ -20,7 +20,7 @@ internal sealed class ApplicationModelBuilder : IApplicationModelBuilder
 
     public GatewayName Name { get; }
 
-    public IApplicationParent? Parent => _parent;
+    public IApplicationModelParent? Parent => _parent;
 
     public IReadOnlyCollection<IApplicationResourceDefinition> Resources => _composition.Resources;
 
@@ -29,7 +29,7 @@ internal sealed class ApplicationModelBuilder : IApplicationModelBuilder
         return _composition.AddResource(provider, name);
     }
 
-    public IApplicationParent UseParent(GatewayName name)
+    public IApplicationModelParent UseParent(GatewayName name)
     {
         if (name.Value is null)
         {
@@ -48,12 +48,12 @@ internal sealed class ApplicationModelBuilder : IApplicationModelBuilder
             throw new InvalidOperationException(Format(ErrorMessages.ApplicationParentAlreadySet, Name, _parent.Name));
         }
 
-        _parent = new ApplicationParent(name);
+        _parent = new ApplicationModelParent(name);
         _composition.Parent = name;
         return _parent;
     }
 
-    public ApplicationManifest GetManifest()
+    public ApplicationModelManifest GetManifest()
     {
         return _composition.GetManifest();
     }
@@ -88,7 +88,7 @@ internal sealed class ApplicationModelBuilder : IApplicationModelBuilder
 
         public GatewayName Name => _builder.Name;
 
-        public IApplicationParent? Parent => _builder.Parent;
+        public IApplicationModelParent? Parent => _builder.Parent;
 
         public IReadOnlyCollection<IApplicationResourceDefinition> Resources => _builder.Resources;
     }

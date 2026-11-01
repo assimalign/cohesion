@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Shouldly;
 using Xunit;
 
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
@@ -20,7 +21,7 @@ public class ApplicationResourceReplicationTests
         IApplicationModelBuilder root = ApplicationModel.CreateBuilder("root");
         root.AddResource("Web", "orders-api");
         IApplicationModel model = root.Build();
-        ApplicationResourceDeployment resource = ApplicationResourceDeployment.Create(model.Manifest.Resources[0]);
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(model.Manifest.Resources[0]);
         var publisher = new ApplicationResourcePublisher(resource);
         var instances = new Dictionary<InstanceKey, (TestResource Resource, ApplicationInstanceControlPlane ControlPlane)>();
 
@@ -40,7 +41,7 @@ public class ApplicationResourceReplicationTests
         // snapshot and restores it on the instances the aggregate names.
         ApplicationActionResult write = await instances[first.Key].ControlPlane.ExecuteAsync(
             "log-level",
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()),
             CancellationToken.None);
         foreach (InstanceKey target in resource.Record(first.Key, write.State!))
         {

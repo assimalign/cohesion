@@ -44,6 +44,7 @@ public sealed class FrameworkManifestTests
             "Assimalign.Cohesion.App",
             "Assimalign.Cohesion.ApplicationModel",
             "Assimalign.Cohesion.ApplicationModel.Hosting",
+            "Assimalign.Cohesion.ApplicationModel.Protocol",
             "Assimalign.Cohesion.Configuration",
             "Assimalign.Cohesion.Configuration.CommandLine",
             "Assimalign.Cohesion.Configuration.EnvironmentVariables",

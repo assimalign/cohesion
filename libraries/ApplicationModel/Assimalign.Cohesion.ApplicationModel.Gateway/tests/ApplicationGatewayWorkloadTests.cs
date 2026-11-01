@@ -100,7 +100,7 @@ public sealed class ApplicationGatewayWorkloadTests
             Array.IndexOf(events, $"watch:{resource}").ShouldBeGreaterThan(Array.IndexOf(events, $"deploy:{resource}"));
         }
 
-        running.Gateway.Started.IsCompletedSuccessfully.ShouldBeTrue();
+        running.Started.IsCompletedSuccessfully.ShouldBeTrue();
     }
 
     private static IApplicationModel CreateModel()

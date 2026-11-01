@@ -37,11 +37,11 @@ public interface IApplicationGatewayParent
     /// </returns>
     /// <exception cref="System.ArgumentNullException"><paramref name="child"/> is <see langword="null"/>.</exception>
     /// <exception cref="System.ArgumentException">
-    /// The manifest breaks a rule of <see cref="ApplicationModel.Create(ApplicationManifest)"/>, or
+    /// The manifest breaks a rule of <see cref="ApplicationModel.Create(ApplicationModelManifest)"/>, or
     /// names another gateway as its parent.
     /// </exception>
     /// <exception cref="ApplicationGatewayException">
     /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>).
     /// </exception>
-    ValueTask<ApplicationGatewayMembership> JoinAsync(ApplicationManifest child, CancellationToken cancellationToken = default);
+    ValueTask<ApplicationGatewayMembership> JoinAsync(ApplicationModelManifest child, CancellationToken cancellationToken = default);
 }

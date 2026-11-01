@@ -12,23 +12,23 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Tests;
 /// </summary>
 internal sealed class GreetingAction : IApplicationInstanceAction
 {
-    private readonly ApplicationActionState<Greeting> _state;
+    private readonly ApplicationInstanceActionState<Greeting> _state;
 
     public GreetingAction(string text = "hello", string name = "greeting")
     {
         Name = name;
-        _state = ApplicationActionState<Greeting>.Create(new Greeting(text), static _ => { });
+        _state = ApplicationInstanceActionState<Greeting>.Create(new Greeting(text), static _ => { });
     }
 
     public ActionName Name { get; }
 
     public ApplicationActionKind Kind => ApplicationActionKind.ReadWrite;
 
-    public IApplicationActionState? State => _state;
+    public IApplicationInstanceActionState? State => _state;
 
     public async ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
-        if (context.Operation == ApplicationActionKind.Read)
+        if (context.Operation == ApplicationActionOperation.Read)
         {
             return ApplicationActionResult.Success(_state.Value, context.Serializer);
         }

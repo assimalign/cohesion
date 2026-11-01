@@ -16,7 +16,6 @@
   <data name="GatewayResourceOutputsNull" xml:space="preserve"><value>The infrastructure provider returned no outputs for resource '{0}/{1}'.</value></data>
   <data name="GatewayResourcePlanNull" xml:space="preserve"><value>The infrastructure provider returned no plan, or a plan without a revision, for resource '{0}/{1}'.</value></data>
   <data name="GatewayPlatformMissing" xml:space="preserve"><value>The infrastructure provider names no platform.</value></data>
-  <data name="GatewayTransportDuplicate" xml:space="preserve"><value>The transport is already added to the gateway.</value></data>
   <data name="GatewaySettingOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}', which its infrastructure provider did not report.</value></data>
   <data name="ApplicationGatewayStoreDirectoryInvalid" xml:space="preserve"><value>A gateway store directory is a non-empty path.</value></data>
   <data name="ApplicationGatewayRecordNull" xml:space="preserve"><value>The gateway record file '{0}' holds the JSON literal null.</value></data>

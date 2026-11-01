@@ -7,7 +7,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// where it keeps its record, the parent gateway it joins, and its time limits.
 /// </summary>
 /// <remarks>
-/// <see cref="ApplicationBuilder"/> implements it beside <see cref="IApplicationModelBuilder"/>, so a
+/// <see cref="ApplicationGatewayBuilder"/> implements it beside <see cref="IApplicationModelBuilder"/>, so a
 /// gateway program declares its model and configures its gateway on one object, the way an area's
 /// application builder implements its area's builder beside the host's.
 /// </remarks>
@@ -29,7 +29,8 @@ public interface IApplicationGatewayBuilder
     TimeSpan LeaseDuration { get; set; }
 
     /// <summary>
-    /// Sets the infrastructure the gateway deploys onto.
+    /// Sets the infrastructure the gateway deploys onto, which is also the channel its instances
+    /// reach it through.
     /// </summary>
     /// <param name="infrastructure">The infrastructure provider.</param>
     /// <returns>This builder.</returns>
@@ -37,17 +38,6 @@ public interface IApplicationGatewayBuilder
     /// <exception cref="ArgumentException"><paramref name="infrastructure"/> names no platform.</exception>
     /// <exception cref="InvalidOperationException">The gateway is built.</exception>
     IApplicationGatewayBuilder UseInfrastructure(IApplicationGatewayInfrastructureProvider infrastructure);
-
-    /// <summary>
-    /// Adds a transport the gateway's instances reach it through. A gateway may have several, and
-    /// it starts each when it runs.
-    /// </summary>
-    /// <param name="transport">The transport.</param>
-    /// <returns>This builder.</returns>
-    /// <exception cref="ArgumentNullException"><paramref name="transport"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException">The transport is already added.</exception>
-    /// <exception cref="InvalidOperationException">The gateway is built.</exception>
-    IApplicationGatewayBuilder UseTransport(IApplicationGatewayTransport transport);
 
     /// <summary>
     /// Sets how the gateway calls its instances' control planes: the instance client of the
@@ -58,7 +48,7 @@ public interface IApplicationGatewayBuilder
     /// <returns>This builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="client"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidOperationException">The gateway is built.</exception>
-    IApplicationGatewayBuilder UseInstanceClient(IApplicationInstanceClient client);
+    IApplicationGatewayBuilder UseInstanceClient(IApplicationGatewayInstanceClient client);
 
     /// <summary>
     /// Sets where the gateway keeps its record, so a restarted gateway reconciles against it; the

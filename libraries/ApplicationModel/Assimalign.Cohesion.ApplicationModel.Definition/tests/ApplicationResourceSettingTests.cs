@@ -137,7 +137,7 @@ public class ApplicationResourceSettingTests
     {
         // Arrange
         IApplicationModelBuilder east = ApplicationModel.CreateBuilder("east");
-        IApplicationParent root = east.UseParent("root");
+        IApplicationModelParent root = east.UseParent("root");
         IApplicationResourceDefinition api = east.AddResource("Web", "orders-api");
 
         // Act
@@ -183,7 +183,7 @@ public class ApplicationResourceSettingTests
     {
         // Arrange
         var output = new ApplicationResourceOutput("root", "Database.Sql", "orders-db", OutputName.Endpoint);
-        var manifest = new ApplicationManifest(
+        var manifest = new ApplicationModelManifest(
             "root",
             null,
             [new("Database.Sql", "orders-db", [], [], []), new("Web", "orders-api", [], [new ApplicationResourceSetting("Database:Endpoint", null, output)], [])]);
@@ -203,9 +203,9 @@ public class ApplicationResourceSettingTests
         var dependency = new ApplicationResourceDependency("root", "Database.Sql", "orders-db", []);
         ApplicationResourceManifest database = new("Database.Sql", "orders-db", [], [], []);
 
-        ApplicationManifest With(params ApplicationResourceSetting[] settings)
+        ApplicationModelManifest With(params ApplicationResourceSetting[] settings)
         {
-            return new ApplicationManifest("root", null, [database, new("Web", "orders-api", [dependency], settings, [])]);
+            return new ApplicationModelManifest("root", null, [database, new("Web", "orders-api", [dependency], settings, [])]);
         }
 
         // Act & Assert

@@ -2,7 +2,7 @@
 
 `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` runs a gateway's resources inside the
 gateway's own process. Its `InProcessInfrastructure` is the gateway half of the in-process platform: the
-infrastructure provider (`inprocess`), the transport its programs publish through, and the client
+infrastructure provider (`inprocess`), whose channel its programs publish through, and the client
 the gateway calls their control planes with. Each resource is a program the gateway
 program references. Deploying a resource calls the program's entry point on a thread of its own, in
 an environment of its own.
@@ -13,7 +13,7 @@ infrastructure
     .AddProgram("Web", "orders-api", Orders.Program.MainAsync)
     .AddProgram("Web", "storefront", Storefront.Program.MainAsync);
 
-ApplicationBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
 IApplicationResourceDefinition orders = builder.AddResource("Web", "orders-api");
 builder.AddResource("Web", "storefront").WithSetting("Orders:Url", orders.Endpoint);
 
@@ -31,8 +31,8 @@ The gateway deploys in dependency order, so `storefront` starts only once `order
 published, with `Orders:Url` set to the address `orders-api` serves. Programs outlive the gateway's
 run: disposing the infrastructure stops them, the last deployed first.
 
-**Depends on:** ApplicationModel.Gateway (`IInfrastructureProvider`, `IApplicationGatewayTransport`,
-`ApplicationBuilder`), ApplicationModel.Hosting (the control plane it calls), and
+**Depends on:** ApplicationModel.Gateway (`IApplicationGatewayInfrastructureProvider`, `IApplicationGatewayInstanceClient`,
+`ApplicationGatewayBuilder`), ApplicationModel.Hosting (the control plane it calls), and
 ApplicationModel.Hosting.InProcess (the endpoints both halves meet at). It references no resource
 area.
 

@@ -10,8 +10,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// </summary>
 internal sealed class LogLevelAction : IApplicationInstanceAction
 {
-    private readonly ApplicationActionState<LogLevelSetting> _state =
-        ApplicationActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
+    private readonly ApplicationInstanceActionState<LogLevelSetting> _state =
+        ApplicationInstanceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
 
     public LogLevelSetting Current => _state.Value;
 
@@ -23,7 +23,7 @@ internal sealed class LogLevelAction : IApplicationInstanceAction
 
     public async ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
-        if (context.Operation == ApplicationActionKind.Read)
+        if (context.Operation == ApplicationActionOperation.Read)
         {
             return ApplicationActionResult.Success(_state.Value, context.Serializer);
         }

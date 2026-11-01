@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Web.Hosting.ApplicationModel.Internal;
 /// The action keeps no copy: its state is the setting, read and written through. The middleware
 /// <c>UseCors()</c> placed reads the setting on each request, so a change applies from the next one.
 /// </remarks>
-internal sealed class WebCorsAction : IApplicationInstanceAction, IApplicationActionState
+internal sealed class WebCorsAction : IApplicationInstanceAction, IApplicationInstanceActionState
 {
     private readonly IWebApplicationSetting<CorsPolicy?> _setting;
 
@@ -30,7 +30,7 @@ internal sealed class WebCorsAction : IApplicationInstanceAction, IApplicationAc
 
     public ApplicationActionKind Kind => ApplicationActionKind.ReadWrite;
 
-    public IApplicationActionState? State => this;
+    public IApplicationInstanceActionState? State => this;
 
     /// <summary>
     /// Gets the default policy in effect.
@@ -39,7 +39,7 @@ internal sealed class WebCorsAction : IApplicationInstanceAction, IApplicationAc
 
     public ValueTask<ApplicationActionResult> ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken = default)
     {
-        if (context.Operation == ApplicationActionKind.Read)
+        if (context.Operation == ApplicationActionOperation.Read)
         {
             return ValueTask.FromResult(ApplicationActionResult.Success(Current, context.Serializer));
         }

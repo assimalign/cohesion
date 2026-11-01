@@ -1,99 +1,268 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
-/// <summary>
-/// A deployment's id: the gateway derives it from what it deploys, the platform hands it to every
-/// instance the deployment starts, and only an instance that repeats it makes the resource ready.
-/// </summary>
-public sealed class ApplicationGatewayDeploymentTests
+public class ApplicationGatewayDeploymentTests
 {
-    private const string DisplayPrefix = "Cohesion Test [ApplicationModel] - ApplicationGateway deployment: ";
+    private const string DisplayPrefix = "Cohesion Test [ApplicationModel] - ApplicationGatewayDeployment: ";
 
-    [Fact(DisplayName = DisplayPrefix + "An instance of an earlier deployment that publishes during an update does not make the resource ready")]
-    public async Task PublishAsync_FromAnEarlierDeployment_ShouldNotMakeTheUpdateReady()
+    [Fact(DisplayName = DisplayPrefix + "An instance of a new deployment restores nothing")]
+    public void Register_BeforeAnyWrite_ShouldReturnNoState()
     {
-        // Arrange: a first run deploys revision 1; the second updates to revision 2, whose instance
-        // starts only when the test lets it.
-        var infrastructure = new TestInfrastructure();
-        var store = new InMemoryApplicationGatewayStore();
-        IApplicationModel model = CreateModel("hello");
-        await using (await RunningGateway.StartAsync(infrastructure, store, model))
-        {
-        }
-
-        DeploymentId earlier = infrastructure.RunningDeployments["orders-api"];
-        infrastructure.Revisions["orders-api"] = "2";
-        var release = new TaskCompletionSource();
-        infrastructure.Delayed["orders-api"] = () => release.Task;
-        ApplicationGateway gateway = RunningGateway.Create(infrastructure, store, model);
-        using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(stop.Token);
-
-        // Act: while the update rolls out, an instance of the earlier deployment restarts and
-        // publishes, as a pod of the previous rollout does.
-        await Eventually.WaitUntilAsync(() => infrastructure.Deployments.Count == 2);
-        TestInstance restarted = await infrastructure.StartInstanceAsync("Web", "orders-api", earlier);
-        await Task.Delay(TimeSpan.FromMilliseconds(300));
-        int outputsBeforeRelease = infrastructure.Events().Count(call => call == "outputs:orders-api");
-        bool startedBeforeRelease = gateway.Started.IsCompleted;
-        release.SetResult();
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
-        IApplicationGatewayDeployment resource = gateway.Resources.ShouldHaveSingleItem();
-        ApplicationInstanceManifest[] instances = [.. resource.Instances];
-        await stop.CancelAsync();
-        await run;
-
-        // Assert: the restarted instance registered, but only the update's own instance made the
-        // resource ready.
-        startedBeforeRelease.ShouldBeFalse();
-        outputsBeforeRelease.ShouldBe(1);
-        DeploymentId current = infrastructure.RunningDeployments["orders-api"];
-        current.ShouldNotBe(earlier);
-        instances.ShouldContain(instance => instance.Key == restarted.Key && instance.Deployment == earlier);
-        instances.ShouldContain(instance => instance.Deployment == current);
-    }
-
-    [Fact(DisplayName = DisplayPrefix + "Deploying the same inputs gives the same deployment, and another setting value another")]
-    public async Task DeployResourceAsync_WithSameInputs_ShouldReceiveTheSameDeployment()
-    {
-        // Arrange: three platforms each run one model; the third's setting differs.
-        var first = new TestInfrastructure();
-        var second = new TestInfrastructure();
-        var third = new TestInfrastructure();
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
 
         // Act
-        await using (await RunningGateway.StartAsync(first, new InMemoryApplicationGatewayStore(), CreateModel("hello")))
+        var restore = resource.Register(TestManifests.Instance());
+
+        // Assert
+        restore.ShouldBeEmpty();
+        resource.Instances.Count.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance of another resource is refused")]
+    public void Register_WithInstanceOfAnotherResource_ShouldThrow()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+        var instance = new ApplicationInstanceManifest("Web", "customers-api", InstanceKey.New(), null, null, []);
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => resource.Register(instance));
+        resource.Instances.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance that starts after a write restores the write's snapshot")]
+    public void Register_AfterRecord_ShouldReturnRecordedSnapshot()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+        ApplicationInstanceManifest first = TestManifests.Instance();
+        resource.Register(first);
+        ApplicationActionSnapshot snapshot = TestManifests.LogLevelSnapshot("Debug");
+        resource.Record(first.Key, snapshot);
+
+        // Act
+        var restore = resource.Register(TestManifests.Instance());
+
+        // Assert
+        restore.ShouldHaveSingleItem().ShouldBeSameAs(snapshot);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance whose manifest lacks the stateful action receives no snapshot for it")]
+    public void Register_WithInstanceWithoutStatefulAction_ShouldFilterSnapshots()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi, [TestManifests.LogLevelSnapshot("Debug")]);
+        ApplicationInstanceManifest stateless = TestManifests.Instance(new ApplicationActionDescriptor(TestManifests.LogLevel, ApplicationActionKind.Read, false));
+
+        // Act
+        var restore = resource.Register(stateless);
+
+        // Assert
+        restore.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Registering an instance again replaces its manifest")]
+    public void Register_WithSameKeyTwice_ShouldKeepOneInstance()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+        ApplicationInstanceManifest instance = TestManifests.Instance();
+
+        // Act
+        resource.Register(instance);
+        resource.Register(instance);
+
+        // Assert
+        resource.Instances.ShouldHaveSingleItem().ShouldBeSameAs(instance);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Persisted state answers the registrations of a restarted gateway")]
+    public void Create_WithPersistedState_ShouldAnswerRegistrationWithIt()
+    {
+        // Arrange
+        ApplicationActionSnapshot persisted = TestManifests.LogLevelSnapshot("Warning");
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi, [persisted]);
+
+        // Act
+        var restore = resource.Register(TestManifests.Instance());
+
+        // Assert
+        restore.ShouldHaveSingleItem().ShouldBeSameAs(persisted);
+        resource.State.ShouldHaveSingleItem().ShouldBeSameAs(persisted);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Two persisted snapshots for one action are refused")]
+    public void Create_WithDuplicateState_ShouldThrow()
+    {
+        // Arrange, Act & Assert
+        Should.Throw<ArgumentException>(() => ApplicationGatewayDeployment.Create(
+            TestManifests.OrdersApi,
+            [TestManifests.LogLevelSnapshot("Debug"), TestManifests.LogLevelSnapshot("Warning")]));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A recorded write names every other instance that must restore it")]
+    public void Record_WithRunningInstances_ShouldReturnTheOthers()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+        ApplicationInstanceManifest source = TestManifests.Instance();
+        ApplicationInstanceManifest second = TestManifests.Instance();
+        ApplicationInstanceManifest third = TestManifests.Instance();
+        ApplicationInstanceManifest stateless = TestManifests.Instance(new ApplicationActionDescriptor(TestManifests.FlushCache, ApplicationActionKind.Write, false));
+        foreach (ApplicationInstanceManifest instance in new[] { source, second, third, stateless })
         {
+            resource.Register(instance);
         }
 
-        await using (await RunningGateway.StartAsync(second, new InMemoryApplicationGatewayStore(), CreateModel("hello")))
-        {
-        }
+        // Act
+        var targets = resource.Record(source.Key, TestManifests.LogLevelSnapshot("Debug"));
 
-        await using (await RunningGateway.StartAsync(third, new InMemoryApplicationGatewayStore(), CreateModel("welcome")))
+        // Assert
+        targets.ShouldBe([second.Key, third.Key], ignoreOrder: true);
+        resource.State.ShouldHaveSingleItem().Action.ShouldBe(TestManifests.LogLevel);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A stopped instance no longer receives restores")]
+    public void Unregister_WithRegisteredInstance_ShouldRemoveItFromTargets()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+        ApplicationInstanceManifest source = TestManifests.Instance();
+        ApplicationInstanceManifest stopped = TestManifests.Instance();
+        resource.Register(source);
+        resource.Register(stopped);
+
+        // Act
+        bool removed = resource.Unregister(stopped.Key);
+        var targets = resource.Record(source.Key, TestManifests.LogLevelSnapshot("Debug"));
+
+        // Assert
+        removed.ShouldBeTrue();
+        targets.ShouldBeEmpty();
+        resource.Unregister(stopped.Key).ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A write is recorded only from a registered instance that declares the action stateful")]
+    public void Record_WithUnknownSourceOrStatelessAction_ShouldThrow()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+        ApplicationInstanceManifest instance = TestManifests.Instance();
+        resource.Register(instance);
+
+        // Act & Assert
+        Should.Throw<InvalidOperationException>(() => resource.Record(InstanceKey.New(), TestManifests.LogLevelSnapshot("Debug")));
+        Should.Throw<ArgumentException>(() => resource.Record(instance.Key, ApplicationActionSnapshot.Create(TestManifests.FlushCache, "{}"u8.ToArray())));
+        resource.State.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Two infrastructure actions with one name are refused")]
+    public void Create_WithDuplicateActionNames_ShouldThrow()
+    {
+        // Arrange
+        IApplicationGatewayDeploymentAction[] actions = [new TestInfrastructureAction("scale"), new TestInfrastructureAction("scale")];
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => ApplicationGatewayDeployment.Create(TestManifests.OrdersApi, actions: actions));
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Infrastructure actions are dispatched by name and operation")]
+    public async Task ExecuteAsync_WithInfrastructureActions_ShouldDispatch()
+    {
+        // Arrange
+        var restart = new TestInfrastructureAction("restart");
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi, actions: [new TestInfrastructureAction("scale"), restart]);
+
+        // Act
+        ApplicationActionResult executed = await resource.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json));
+        ApplicationActionResult unsupported = await resource.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json));
+        ApplicationActionResult missing = await resource.ExecuteAsync("delete", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json));
+
+        // Assert
+        resource.Actions.Select(action => action.Name.Value).ShouldBe(["restart", "scale"]);
+        executed.Status.ShouldBe(ApplicationActionStatus.Succeeded);
+        restart.Invocations.ShouldBe(1);
+        unsupported.Status.ShouldBe(ApplicationActionStatus.NotSupported);
+        missing.Status.ShouldBe(ApplicationActionStatus.NotFound);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Instances are ordered by key, and so by start time")]
+    public void Instances_AfterRegistrations_ShouldBeOrderedByKey()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+        ApplicationInstanceManifest[] instances = [TestManifests.Instance(), TestManifests.Instance(), TestManifests.Instance()];
+
+        // Act
+        foreach (ApplicationInstanceManifest instance in instances.Reverse())
         {
+            resource.Register(instance);
         }
 
         // Assert
-        DeploymentId deployment = first.Deployments.ShouldHaveSingleItem().Deployment;
-        second.Deployments.ShouldHaveSingleItem().Deployment.ShouldBe(deployment);
-        third.Deployments.ShouldHaveSingleItem().Deployment.ShouldNotBe(deployment);
-        first.Instances.Values.ShouldHaveSingleItem().Instance.Deployment.ShouldBe(deployment);
+        resource.Instances.Select(instance => instance.Key).ShouldBe(instances.Select(instance => instance.Key).Order());
     }
 
-    private static IApplicationModel CreateModel(string greeting)
+    [Fact(DisplayName = DisplayPrefix + "Setting outputs reports whether any was added, changed, or removed")]
+    public void SetOutputs_ShouldReportChanges()
     {
-        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
-        builder.AddResource("Web", "orders-api").WithSetting("Greeting", greeting);
-        return builder.Build();
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi);
+
+        // Act
+        bool added = resource.SetOutputs(Endpoint("http://orders-api.root.svc"));
+        bool same = resource.SetOutputs(Endpoint("http://orders-api.root.svc"));
+        bool moved = resource.SetOutputs(Endpoint("http://10.0.0.7:8080"));
+        string current = resource.Outputs[OutputName.Endpoint];
+        bool removed = resource.SetOutputs(new Dictionary<OutputName, string>());
+
+        // Assert
+        added.ShouldBeTrue();
+        same.ShouldBeFalse();
+        moved.ShouldBeTrue();
+        current.ShouldBe("http://10.0.0.7:8080");
+        removed.ShouldBeTrue();
+        resource.Outputs.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An output without a value is refused and changes nothing")]
+    public void SetOutputs_WithoutValue_ShouldThrow()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi, outputs: Endpoint("http://orders-api.root.svc"));
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => resource.SetOutputs(Endpoint(null!)));
+        resource.Outputs[OutputName.Endpoint].ShouldBe("http://orders-api.root.svc");
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Clearing a resource's state drops its snapshots, so a new instance restores none")]
+    public void ClearState_ShouldDropRecordedSnapshots()
+    {
+        // Arrange
+        ApplicationGatewayDeployment resource = ApplicationGatewayDeployment.Create(TestManifests.OrdersApi, [TestManifests.LogLevelSnapshot("Debug")]);
+
+        // Act
+        resource.ClearState();
+
+        // Assert
+        resource.State.ShouldBeEmpty();
+        resource.Register(TestManifests.Instance()).ShouldBeEmpty();
+    }
+
+    private static Dictionary<OutputName, string> Endpoint(string value)
+    {
+        return new Dictionary<OutputName, string> { [OutputName.Endpoint] = value };
     }
 }

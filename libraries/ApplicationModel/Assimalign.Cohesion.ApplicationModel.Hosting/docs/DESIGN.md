@@ -4,11 +4,13 @@
 > `Assimalign.Cohesion.Hosting.Resources`. On 2026-10-29 it became the physical side of the model
 > (ApplicationModel.Definition D20): the types it shares with the logical side moved to
 > [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md), and `IResource`
-> became `IApplicationResourceInstance`. The library was restarted from scratch on 2026-10-27; the
+> became `IApplicationInstance`. The library was restarted from scratch on 2026-10-27; the
 > previous implementation (deployment records, the ambient `ResourceRuntime`, commands, mounts,
 > credentials) is retired, and its source is at commit `6576e7c64`. On 2026-10-30 its transports left
 > for the platform packages (D19): it holds only the abstractions for hosting an instance, and the
-> options through which a resource takes each platform's client.
+> options through which a resource takes each platform's client. Since D20 (2026-10-31) it
+> references [ApplicationModel.Protocol](../../Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md)
+> instead of the root, and its instance seams carry the `IApplicationInstance` names.
 
 ## Purpose
 
@@ -16,10 +18,10 @@ This library defines what a **resource instance** is: the identity it starts wit
 control plane exposes and the state those actions leave, its health contributors, the manifest it
 publishes, the generic control plane that runs all of it, and the host service that joins it to its
 gateway through a platform's client. It knows no transport and no gateway: a platform's instance half
-supplies the client (`IApplicationGatewayClient`), and a resource opts into it through
-`ApplicationInstanceOptions`. It references Core, Hosting, and the shared contracts in
-ApplicationModel only, because it sits in the closure of every resource. A gateway references the
-contracts but not this library.
+supplies the client (`IApplicationInstanceGatewayClient`), and a resource opts into it through
+`ApplicationInstanceOptions`. It references Core, Hosting, and ApplicationModel.Protocol (with
+the identity root behind it) only, because it sits in the closure of every resource; never
+Definition or Gateway. A gateway references the protocol but not this library.
 
 ## Where it sits
 
@@ -28,7 +30,7 @@ infrastructure platform, and the gateways that join them. A gateway manages prov
 resource); a provider manages application resources (logical services); each application resource
 runs one or more instances. Only the instances belong to this library. The links below are
 management, not references, so they carry no arrows; the library itself references only Core,
-Hosting, and the shared contracts.
+Hosting, and the protocol.
 
 ```mermaid
 flowchart TB
@@ -45,17 +47,17 @@ flowchart TB
     orders ---|runs| b
     customers ---|runs| c
     subgraph hr["ApplicationModel.Hosting: one instance each, with its own control plane"]
-        a["IApplicationResourceInstance orders-api<br/>key 01JB...A"]
-        b["IApplicationResourceInstance orders-api<br/>key 01JB...B"]
-        c["IApplicationResourceInstance customers-api<br/>key 01JB...C"]
+        a["IApplicationInstance orders-api<br/>key 01JB...A"]
+        b["IApplicationInstance orders-api<br/>key 01JB...B"]
+        c["IApplicationInstance customers-api<br/>key 01JB...C"]
     end
 ```
 
 ## The model
 
-The instance's own types live here. The types it exchanges with its gateway live in the shared
-contracts, ApplicationModel (D16): `IApplicationResource`, the identity value objects and
-`PlatformName`, `ApplicationActionContext` and `ApplicationActionResult`,
+The instance's own types live here. The types it exchanges with its gateway live in
+ApplicationModel.Protocol (D20), and the identity in the root: `IApplicationResource`, the identity
+value objects and `PlatformName`, `ApplicationActionContext` and `ApplicationActionResult`,
 `IApplicationContentSerializer`, `JsonApplicationContentSerializer` and `ApplicationContentException`,
 `ApplicationActionSnapshot`, `ApplicationInstanceManifest` and `ApplicationActionDescriptor`, and
 `IApplicationInstancePublisher` with `ApplicationInstancePublication`. The table lists both, because
@@ -63,21 +65,21 @@ an area builds against both.
 
 | Type | Role |
 | --- | --- |
-| `IApplicationResourceInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), `Deployment` (the deployment that started it, which its environment names and its manifest repeats; ApplicationModel.Gateway G34), its actions and health contributors. `Id` derives from provider and name. It names no address (D19). |
+| `IApplicationInstance` | One running instance: `Provider` + `Name` (shared by every instance), `Key` (this instance), `Deployment` (the deployment that started it, which its environment names and its manifest repeats; ApplicationModel.Gateway G34), its actions and health contributors. `Id` derives from provider and name. It names no address (D19). |
 | `IApplicationInstanceAction` | A named operation. `Kind` says which operations it accepts (`Read`, `Write`, or both); `State`, when present, is what its writes change. |
-| `IApplicationActionState`, `ApplicationActionState<TState>` | The state a stateful action's writes change. A snapshot is the whole value, written by the content serializer; restoring one applies it. |
+| `IApplicationInstanceActionState`, `ApplicationInstanceActionState<TState>` | The state a stateful action's writes change. A snapshot is the whole value, written by the content serializer; restoring one applies it. |
 | `ApplicationActionContext`, `ApplicationActionResult` | One invocation and its outcome. The context carries the control plane's content serializer, which reads the input and writes the output. |
 | `IApplicationContentSerializer`, `JsonApplicationContentSerializer`, `ApplicationContentException` | The format of everything an instance exchanges (D12), from the contracts. JSON over source-generated contexts is the default; content the instance refuses is an `ApplicationContentException`. |
 | `ApplicationActionSnapshot` | One action's state, as a gateway keeps it until the next deployment. |
 | `ApplicationInstanceManifest`, `ApplicationActionDescriptor` | What an instance publishes about itself when its host starts. The control plane's manifest names no control-plane address; the client that publishes it does (D19). |
 | `IApplicationInstanceControlPlane`, `ApplicationInstanceControlPlane` | The instance's actions and state: a plain object with no lifecycle that executes actions and restores snapshots from the moment it is created (D15). |
 | `IApplicationInstanceService`, `ApplicationInstanceService` | The `IHostLifecycleService` an area registers with the platform's client: it publishes the manifest and restores the answer in `StartingAsync`, renews the lease, opens the control plane to the gateway's calls in `StartAsync`, and closes it and stops renewing in `StopAsync` (D15, D19). |
-| `IApplicationGatewayClient` | The instance half of a platform: publishes and renews (`IApplicationInstancePublisher`), names where the gateway reaches the control plane, and carries the gateway's calls in between `StartAsync` and `StopAsync` (D19). |
+| `IApplicationInstanceGatewayClient` | The instance half of a platform: publishes and renews (`IApplicationInstancePublisher`), names where the gateway reaches the control plane, and carries the gateway's calls in between `StartAsync` and `StopAsync` (D19). |
 | `ApplicationInstanceOptions` | The base of every area's resource options: the clients a resource opts into, one per platform; the platform its environment names, which selects one; and the deployment that started it (D19). |
-| `IApplicationHealthContributor`, `HealthContribution` | Health, contributed per component. A default contribution is `Unhealthy`, so unset health fails closed. |
+| `IApplicationInstanceHealthContributor`, `ApplicationInstanceHealthContribution` | Health, contributed per component. A default contribution is `Unhealthy`, so unset health fails closed. |
 
-Value objects carry the identity: `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
-`InstanceKey`, `ActionName`, `DeploymentId`.
+Value objects carry the identity: `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId` from the
+root, and `InstanceKey`, `ActionName`, `DeploymentId` from the protocol.
 
 ## Lifecycle
 
@@ -138,7 +140,7 @@ a gateway that runs it in process enters for it), but that is the environment, n
 control planes: this library still creates nothing ambiently.
 
 **D2 — The provider is a name on the resource, not an object.** The scaffold's `IResourceProvider`
-held one `IApplicationResourceInstance` and published it. In process, such a provider is one per instance, because its
+held one `IApplicationInstance` and published it. In process, such a provider is one per instance, because its
 actions bind to that instance's runtime, so it would duplicate the resource's identity and lifetime.
 The provider that manages many application resources (orders-api and customers-api under Web) is the
 gateway's object, built in a later chunk. This library keeps `ProviderName` and `ProviderId` as the
@@ -180,7 +182,7 @@ a Service name. A provider name is dot-separated segments compared case-insensit
 name is hyphen-separated lowercase words, at most 64 characters, so it fits one route segment.
 "Orders API" is a display name, not a resource name.
 
-**D9 — No identity on `IApplicationResourceInstance` yet.** The scaffold's `IResourceIdentity` was empty. The identity
+**D9 — No identity on `IApplicationInstance` yet.** The scaffold's `IResourceIdentity` was empty. The identity
 provider belongs to the tenant and just-in-time credentials to `DependsOn`, both ApplicationModel
 concerns, and a local gateway is anonymous, so this chunk works without one. Identity returns when
 the identity-provider chunk defines what an instance presents and verifies.
@@ -192,7 +194,7 @@ platform removes it, so no action can destroy what it manages.
 
 **D11 — State is an interface plus a sealed generic.** The scaffold's abstract
 `ApplicationActionState` exposed `object? State { get; set; }`, which boxed and had no serialization
-contract. `IApplicationActionState` is the contract the control plane uses; `ApplicationActionState<TState>`
+contract. `IApplicationInstanceActionState` is the contract the control plane uses; `ApplicationInstanceActionState<TState>`
 is the typed implementation areas construct, with an apply callback. It is written and read by the
 control plane's content serializer (D12).
 
@@ -256,7 +258,7 @@ library was `Assimalign.Cohesion.Hosting.Resources`, and ApplicationModel refere
 identity, manifest, and snapshot types a deployment shares with its instances. The model is now
 three projects (ApplicationModel.Definition D20): the shared contracts in ApplicationModel, the
 logical side in ApplicationModel.Definition, and this one. The types both sides exchange moved to the
-contracts, `IResource` became `IApplicationResourceInstance` on the shared `IApplicationResource`
+contracts, `IResource` became `IApplicationInstance` on the shared `IApplicationResource`
 base, and the namespace is `Assimalign.Cohesion.ApplicationModel.Hosting`. The instance runtime
 therefore loads neither the builder nor the validated model, and the gateway loads none of this
 library. `ApplicationActionResult.WithState` became public on the way, because the control plane that
@@ -277,7 +279,7 @@ it registered: an operator's action, and a restore of a write made on another in
 (ApplicationModel.Gateway G38). An instance whose manifest names none cannot be called; its gateway
 unregisters it after a write, and it restores the write when it publishes again. Since D19 the
 platform's client names the address, in its own terms, as it publishes; the resource and the control
-plane name none, and `IApplicationResourceInstance.ControlPlaneEndpoint` is gone. *Rejected:* the
+plane name none, and `IApplicationInstance.ControlPlaneEndpoint` is gone. *Rejected:* the
 platform reporting each instance's address to the gateway. A provider does not know instance keys, and
 an in-process provider would report what it had just assigned.
 
@@ -286,7 +288,7 @@ an in-process provider would report what it had just assigned.
 carry transports, and the gateway's HTTP client needed a Web reference no library may take
 (COHLIB001). The owner moved all of it to the platforms. This library keeps only what hosting an
 instance needs:
-- **`IApplicationGatewayClient`** is a platform's instance half. It publishes and renews
+- **`IApplicationInstanceGatewayClient`** is a platform's instance half. It publishes and renews
   (`IApplicationInstancePublisher`), names where the gateway reaches the control plane in the
   manifest it publishes, and between `StartAsync` and `StopAsync` carries the gateway's calls to the
   control plane. `ApplicationInstanceService.Create(controlPlane, client)` drives it: publish and
@@ -308,10 +310,30 @@ model into every resource's closure; selecting the transport by the endpoint's s
 cannot tell two platforms with the same scheme apart and keeps transports here; and an HTTP binding
 every area serves (ApplicationModel C5, superseded), which made each area a transport.
 
+**D20 — The instance runtime references the protocol, and its seams say `Instance` (owner,
+2026-10-31).** The root was split into the identity and ApplicationModel.Protocol (ApplicationModel
+C1), and this library references Protocol and `Assimalign.Cohesion.Hosting` only:
+- **Renames.** `IApplicationResourceInstance` is `IApplicationInstance`;
+  `IApplicationActionState` is `IApplicationInstanceActionState`, and its implementation
+  `ApplicationActionState<TState>` is `ApplicationInstanceActionState<TState>`; the health trio is
+  `IApplicationInstanceHealthContributor`, `ApplicationInstanceHealthStatus`, and
+  `ApplicationInstanceHealthContribution`. The control plane's `Resource` property is `Instance`.
+- **The client is `IApplicationInstanceGatewayClient : IApplicationInstancePublisher`** (was
+  `IApplicationGatewayClient`), with `Platform`, `StartAsync(IApplicationInstanceControlPlane, ct)`,
+  and `StopAsync(ct)`. The name reads holder then target, the instance's client to its gateway,
+  as the gateway's client to an instance is `IApplicationGatewayInstanceClient`.
+- **No `Platform` on the service.** A `PlatformName Platform` on `IApplicationInstanceService`
+  was removed before it shipped: it would have been the third copy, after
+  `ApplicationInstanceOptions.Platform` and the client's own.
+- **The control plane stays here** for now; whether it moves to Protocol, where a platform's
+  gateway half could call it without referencing this library, is a later chunk.
+- **Invocations carry `ApplicationActionOperation`** (Protocol P2); the control plane dispatches with
+  `Kind.HasFlag((ApplicationActionKind)operation)`.
+
 ## Concurrency
 
 Reads run concurrently. Writes and restores run one at a time per resource, under one gate, so the
-snapshot a write returns is the state that write left. `ApplicationActionState<TState>` holds no lock of
+snapshot a write returns is the state that write left. `ApplicationInstanceActionState<TState>` holds no lock of
 its own: change it only from an action. Use an immutable `TState` so a concurrent read is never torn.
 
 ## Tiers and area implementations

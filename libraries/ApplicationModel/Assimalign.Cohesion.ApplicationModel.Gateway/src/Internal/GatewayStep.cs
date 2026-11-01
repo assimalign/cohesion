@@ -50,7 +50,7 @@ internal sealed class GatewayStep
 
     // The steps of a gateway, each after every step it waits for; independent steps keep their
     // declaration order.
-    public static GatewayStep[] Order(ApplicationManifest gateway)
+    public static GatewayStep[] Order(ApplicationModelManifest gateway)
     {
         var steps = new List<GatewayStep>();
         var owners = new Dictionary<(ProviderName Provider, ResourceName Name), GatewayStep>();
@@ -83,7 +83,7 @@ internal sealed class GatewayStep
     // Places every step whose dependencies are placed, in declaration order, until none is left. A
     // step that never becomes free waits, through its dependencies, for itself. A model refuses such
     // a cycle, so this guards a model that was not validated.
-    private static GatewayStep[] Sort(ApplicationManifest gateway, List<GatewayStep> steps)
+    private static GatewayStep[] Sort(ApplicationModelManifest gateway, List<GatewayStep> steps)
     {
         var placed = new HashSet<GatewayStep>();
         var order = new List<GatewayStep>(steps.Count);

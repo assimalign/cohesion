@@ -38,7 +38,7 @@ internal sealed class RunningResource : IAsyncDisposable
     /// <summary>
     /// Gets the resource instance the managed application's control plane serves.
     /// </summary>
-    public IApplicationResourceInstance Resource => InstanceServices.Single().ControlPlane.Resource;
+    public IApplicationInstance Resource => InstanceServices.Single().ControlPlane.Instance;
 
     /// <summary>
     /// Gets the default CORS policy in effect, as the <c>cors</c> action reports it.

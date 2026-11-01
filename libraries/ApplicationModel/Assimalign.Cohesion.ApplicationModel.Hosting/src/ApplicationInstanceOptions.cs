@@ -27,7 +27,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Hosting;
 /// </remarks>
 public abstract class ApplicationInstanceOptions
 {
-    private readonly List<IApplicationResourceInstanceGatewayClient> _clients = [];
+    private readonly List<IApplicationInstanceGatewayClient> _clients = [];
 
     /// <summary>
     /// Initializes the options from the instance's environment.
@@ -67,7 +67,7 @@ public abstract class ApplicationInstanceOptions
     /// Gets the gateway clients the resource uses, at most one per platform, in the order they were
     /// added.
     /// </summary>
-    public IReadOnlyList<IApplicationResourceInstanceGatewayClient> GatewayClients => _clients;
+    public IReadOnlyList<IApplicationInstanceGatewayClient> GatewayClients => _clients;
 
     /// <summary>
     /// Opts the resource into a platform: adds the client its instances reach that platform's gateway
@@ -83,7 +83,7 @@ public abstract class ApplicationInstanceOptions
     /// <exception cref="ArgumentException">
     /// The client names no platform, or the resource already uses a client for its platform.
     /// </exception>
-    public ApplicationInstanceOptions UseGatewayClient(IApplicationResourceInstanceGatewayClient client)
+    public ApplicationInstanceOptions UseGatewayClient(IApplicationInstanceGatewayClient client)
     {
         ArgumentNullException.ThrowIfNull(client);
 
@@ -93,7 +93,7 @@ public abstract class ApplicationInstanceOptions
             throw new ArgumentException(ErrorMessages.GatewayClientPlatformMissing, nameof(client));
         }
 
-        foreach (IApplicationResourceInstanceGatewayClient used in _clients)
+        foreach (IApplicationInstanceGatewayClient used in _clients)
         {
             if (used.Platform == platform)
             {
@@ -111,14 +111,14 @@ public abstract class ApplicationInstanceOptions
     /// </summary>
     /// <returns>The client, or <see langword="null"/> when no platform is named and the instance runs unmanaged.</returns>
     /// <exception cref="InvalidOperationException">The resource uses no client for the named platform.</exception>
-    public IApplicationResourceInstanceGatewayClient? GetGatewayClient()
+    public IApplicationInstanceGatewayClient? GetGatewayClient()
     {
         if (Platform is not { } platform)
         {
             return null;
         }
 
-        foreach (IApplicationResourceInstanceGatewayClient client in _clients)
+        foreach (IApplicationInstanceGatewayClient client in _clients)
         {
             if (client.Platform == platform)
             {

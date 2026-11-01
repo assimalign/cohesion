@@ -9,7 +9,7 @@
   <data name="ProgramDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' already has a program.</value></data>
   <data name="ProgramMissing" xml:space="preserve"><value>Resource '{0}/{1}' has no program to run in process; bind one with AddProgram.</value></data>
   <data name="ProgramStopTimedOut" xml:space="preserve"><value>The program of resource '{0}/{1}' did not stop within {2}.</value></data>
-  <data name="TransportAlreadyStarted" xml:space="preserve"><value>A gateway already receives the in-process publications.</value></data>
-  <data name="TransportNotReceiving" xml:space="preserve"><value>No gateway receives publications at the in-process endpoint '{0}'.</value></data>
+  <data name="ChannelAlreadyStarted" xml:space="preserve"><value>A gateway already receives the in-process publications.</value></data>
+  <data name="ChannelNotReceiving" xml:space="preserve"><value>No gateway receives publications at the in-process endpoint '{0}'.</value></data>
   <data name="InstanceNotAttached" xml:space="preserve"><value>Instance {0} of {1}/{2} has no control plane attached at the in-process endpoint '{3}': its program has not finished starting, or has stopped.</value></data>
 </root>

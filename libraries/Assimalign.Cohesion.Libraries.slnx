@@ -69,6 +69,19 @@
 	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/">
 		<Project Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel/tests/Assimalign.Cohesion.ApplicationModel.Tests.csproj" />
 	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/README.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/docs/">
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md" />
+		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/src/">
+		<Project Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/src/Assimalign.Cohesion.ApplicationModel.Protocol.csproj" />
+	</Folder>
+	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/tests/">
+		<Project Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/tests/Assimalign.Cohesion.ApplicationModel.Protocol.Tests.csproj" />
+	</Folder>
 	<Folder Name="/libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/">
 		<File Path="ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/README.md" />
 	</Folder>

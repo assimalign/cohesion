@@ -2,13 +2,15 @@
 
 > **Status (2026-10-27):** chunk 3 of the Application Model rebuild, built on
 > [ApplicationModel.Definition](../../Assimalign.Cohesion.ApplicationModel.Definition/docs/DESIGN.md)
-> (chunk 2) and the shared contracts of
-> [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md). The instance side,
+> (chunk 2) and the gateway-to-instance protocol of
+> [ApplicationModel.Protocol](../../Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md). The instance side,
 > [ApplicationModel.Hosting](../../Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md)
 > (chunk 1, formerly Hosting.Resources), is not a dependency. Since 2026-10-29 (G26, G27) each
 > gateway runs a model of its own and a child joins its parent; the deployment view and the gateway
 > seam moved here from ApplicationModel.Definition. The previous implementation (Local gateway,
-> records, credentials, certificates) is retired; its source is at commit `6576e7c64`.
+> records, credentials, certificates) is retired; its source is at commit `6576e7c64`. Since
+> 2026-10-31 the provider is also the gateway's inbound channel (G39), and the gateway starts, stops,
+> and reports its run through `StartAsync`, `StopAsync`, and `Completion` (G40).
 
 ## Purpose
 
@@ -19,28 +21,31 @@ and exposes each resource's infrastructure actions. An operator manages a resour
 gateway runs the action on one instance's control plane and keeps a write on every instance. A child
 gateway joins its parent and fills its settings in from the parent's outputs; the parent knows
 nothing of a child before it joins. The library is transport-neutral and platform-neutral: a
-platform's gateway half supplies the infrastructure provider, the transport its instances publish
-through, and the instance client the gateway calls them with (G9). It carries no transport of its own.
+platform's gateway half supplies the infrastructure provider, which is also the channel its
+instances publish through (G39), and the instance client the gateway calls them with (G9). It
+carries no transport of its own.
 
 The arrow below means "references". A platform package, such as a Kubernetes provider, references
-the gateway; the gateway references the definitions, which reference the shared contracts. The
-instance side references only the contracts, so a gateway and an instance speak through the same
-manifest and action types without either loading the other's code.
+the gateway; the gateway references the definitions and the protocol, and both reference the
+identity root. The instance side references only the protocol, so a gateway and an instance speak
+through the same manifest and action types without either loading the other's code.
 
 ```mermaid
 flowchart LR
     Platform["Platform provider, such as Kubernetes"] --> Gateway["Assimalign.Cohesion.ApplicationModel.Gateway"]
     Gateway --> Definition["Assimalign.Cohesion.ApplicationModel.Definition"]
-    Definition --> Contracts["Assimalign.Cohesion.ApplicationModel"]
-    Hosting["Assimalign.Cohesion.ApplicationModel.Hosting"] --> Contracts
+    Gateway --> Protocol["Assimalign.Cohesion.ApplicationModel.Protocol"]
+    Definition --> Identity["Assimalign.Cohesion.ApplicationModel"]
+    Protocol --> Identity
+    Hosting["Assimalign.Cohesion.ApplicationModel.Hosting"] --> Protocol
 ```
 
 ## Startup: reconcile, then run
 
-`RunAsync` orders the gateway's resources (G17), takes its record over from its
+`StartAsync` orders the gateway's resources (G17), takes its record over from its
 `IApplicationGatewayStore` with a new epoch, which fences off any earlier run still going (G35),
 creates one aggregate per resource as the previous run left it (G23),
-and opens publications and joins, starting the transports its instances publish through (G33). A
+and opens publications and joins, starting the provider's channel its instances publish through (G39). A
 gateway whose model names a parent then joins it, and waits
 within the startup window until the parent reports every output of its resources that the
 gateway's settings use (G26). It then deploys in dependency order: each resource is a step that runs
@@ -49,7 +54,8 @@ fills in its settings from the outputs of what it depends on or from the parent'
 with the infrastructure provider, keeps what the plan leaves in place (G12), deploys it only when the
 plan creates or updates it, waits for an instance of that deployment to publish within the startup
 window, and reads its outputs (G18). After startup it tears down what the record holds but the model
-no longer declares, renews its membership with its parent, and runs until cancelled. A gateway
+no longer declares, and `StartAsync` completes; the run then renews its membership with its parent
+and goes on until `StopAsync`, a shutdown signal, or a failure that `Completion` reports (G40). A gateway
 restarted with the same model and the same outputs plans no change, so it deploys nothing and waits
 for no publication: it adopts what runs.
 
@@ -61,10 +67,11 @@ sequenceDiagram
     participant Store as Gateway store
     participant Infra as Infrastructure provider
     participant Inst as Resource instance
-    Caller->>GW: RunAsync()
+    Caller->>GW: StartAsync()
     GW->>GW: order the resources
     GW->>Store: AcquireAsync(gateway), a new epoch
-    GW->>GW: seed aggregates from the record, open publications and joins, start the transports
+    GW->>Infra: StartAsync(context), the provider's channel
+    GW->>GW: seed aggregates from the record, open publications and joins
     opt the model names a parent
         GW->>Parent: JoinAsync(manifest), again until every output it uses is reported
         Parent-->>GW: the outputs' values, and a lease
@@ -83,11 +90,11 @@ sequenceDiagram
     end
     alt every created or updated resource published within its window
         GW->>Infra: TeardownResourceAsync for what the model dropped
-        GW-->>Caller: Started completes, the gateway runs until cancelled
+        GW-->>Caller: StartAsync completes, the gateway runs until StopAsync
         GW->>Parent: JoinAsync again three times per lease
     else a resource published nothing
         GW->>Infra: TeardownResourceAsync, for a created resource only
-        GW-->>Caller: RunAsync fails with StartupTimedOut, naming what it did not deploy
+        GW-->>Caller: StartAsync and Completion fail with StartupTimedOut, naming what it did not deploy
     end
 ```
 
@@ -153,25 +160,25 @@ sequenceDiagram
 
 | Type | Role |
 | --- | --- |
-| `ApplicationGateway` | The orchestrator. Implements `IApplicationGateway` (`Model`, `RunAsync`), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationParentGateway` (`JoinAsync`, a child's join). `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Resources` (the aggregates), `Children`, `StartupTimeout`, `LeaseDuration`, and `Started`. `CreateBuilder(name)` creates its builder. |
-| `ApplicationBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure (`UseInfrastructure`), the record store (`UseStore`), the parent (`UseParent`), the transports (`UseTransport`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
-| `IApplicationParentGateway`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
-| `IApplicationInstanceClient` | From the shared contracts: how the gateway calls its instances' control planes, where each manifest says, for an action and a restore (G38). The platform's gateway half supplies it through `UseInstanceClient`; a gateway without one runs no operator action (G9). |
-| `IInfrastructureProvider` | The platform, named by `Platform`: plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), watches the deployment's workload until an instance publishes and reports one that stops first (`WatchResourceAsync`, G36), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
-| `InfrastructurePlan`, `InfrastructureChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
-| `IApplicationResourceDeployment`, `ApplicationResourceDeployment`, `IApplicationResourceAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
-| `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationResourceRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read, plus the epoch of the run that holds it. `AcquireAsync` takes the record over with a higher epoch, `SaveAsync` refuses a save from an earlier one, and `LoadAsync` reads without taking anything over (G35). Children are not recorded. |
+| `ApplicationGateway`, `IApplicationGateway`, `IApplicationGatewayContext` | The orchestrator. Implements `IApplicationGateway` (`Context`, `Resources`, `StartAsync`, `StopAsync`, `Completion`, G40), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationGatewayParent` (`JoinAsync`, a child's join). `Context` is what the provider's channel receives: the `Model` and the gateway as `Publisher`. `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Model`, `Children`, `StartupTimeout`, and `LeaseDuration`. `CreateBuilder(name)` creates its builder; `RunAsync(ct)`, an extension member in `ApplicationGatewayExtensions`, starts it, waits for its run, and stops it on cancellation. |
+| `ApplicationGatewayBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure, which is also the inbound channel (`UseInfrastructure`, G39), the record store (`UseStore`), the parent (`UseParent`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
+| `IApplicationGatewayParent`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
+| `IApplicationGatewayInstanceClient` | The gateway's client to an instance (formerly the root's `IApplicationInstanceClient`): how the gateway calls its instances' control planes, where each manifest says, for an action and a restore (G38). The platform's gateway half supplies it through `UseInstanceClient`; a gateway without one runs no operator action (G9). |
+| `IApplicationGatewayInfrastructureProvider` | The platform, named by `Platform`: runs the gateway's inbound channel between `StartAsync(context)` and `StopAsync` (G39), plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), watches the deployment's workload until an instance publishes and reports one that stops first (`WatchResourceAsync`, G36), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
+| `ApplicationGatewayDeploymentPlan`, `ApplicationGatewayDeploymentChange` | What deploying a resource would change (`None`, `Create`, `Update`) and the revision the provider would run, which leaves the settings' values out. |
+| `IApplicationGatewayDeployment`, `ApplicationGatewayDeployment` (internal), `IApplicationGatewayDeploymentAction` | The gateway's deployment of one resource: `Register` an instance's published manifest, `Record` a stateful write's snapshot, `Unregister` a stopped instance, and `ExecuteAsync` one of its infrastructure `Actions`, such as `scale`. The gateway also sets its `Outputs` and clears its state when a run redefines it (G28–G32). |
+| `IApplicationGatewayStore`, `ApplicationGatewayRecord`, `ApplicationGatewayDeploymentRecord` | The gateway's persisted record: per resource, the revision deployed, the state recorded, the instances registered, and the outputs read, plus the epoch of the run that holds it. `AcquireAsync` takes the record over with a higher epoch, `SaveAsync` refuses a save from an earlier one, and `LoadAsync` reads without taking anything over (G35). Children are not recorded. |
 | `JsonFileApplicationGatewayStore` | One indented JSON file per gateway, replaced atomically on each save; snapshot values as base64. Every read and write holds an exclusive lock on the gateway's lock file, so taking over and saving are atomic across processes. The local default; a platform package backs the store with durable storage of its own. |
 | `ApplicationGatewayException`, `ApplicationGatewayErrorCode` | Refused publications (`PublicationsClosed`, `ResourceUnknown`, `ResourceTornDown`), a failed startup (`StartupTimedOut`, also for a parent that never accepted the join; `ResourceFailed` for a workload that stopped before an instance published, with its failure as the inner exception; `OutputMissing` for a setting whose output the provider or the parent did not report), a run a later one superseded (`RecordSuperseded`), and an operator's action no instance could run (`InstanceUnavailable`). |
 
 In ApplicationModel.Definition: `IApplicationModel.Role` and `ApplicationGatewayRole` say whether a
-gateway joins a parent, and `IApplicationParent` names the parent's outputs a model's settings use.
+gateway joins a parent, and `IApplicationModelParent` names the parent's outputs a model's settings use.
 
 ## Decisions
 
 **G1 — The platform is a provider, not a subclass.** The brief names the infrastructure provider as
 one of the three layers an application brings together, so the gateway composes an
-`IInfrastructureProvider` instead of each platform deriving its own gateway. Orchestration
+`IApplicationGatewayInfrastructureProvider` instead of each platform deriving its own gateway. Orchestration
 (aggregates, the startup window, publications) then exists once, and a provider can be tested
 without a gateway. The retired design had a platform-specific gateway per platform.
 
@@ -200,7 +207,7 @@ before its resource is planned, such as a restarted instance of the previous def
 resource waits for its dependencies, is registered with the state the previous run recorded (G23)
 but does not make the resource ready (G18).
 
-**G6 — Cancellation is not teardown.** Cancelling `RunAsync` stops the gateway, during startup or
+**G6 — Cancellation is not teardown.** Stopping the run (`StopAsync`, or cancelling `RunAsync`) stops the gateway, during startup or
 after, and leaves what it deployed running. Teardown happens only to a resource that missed its
 startup window.
 
@@ -363,7 +370,7 @@ that: a child that names a parent needs the parent running to start, and in retu
 own.
 
 **G25 — A provider sees only its own platform's extensions (owner direction, 2026-10-28; built
-2026-10-29).** `IInfrastructureProvider.Platform` names the platform a provider deploys onto, and
+2026-10-29).** `IApplicationGatewayInfrastructureProvider.Platform` names the platform a provider deploys onto, and
 `Create` refuses a provider that names none. A resource's platform extensions (ApplicationModel D19)
 apply only on their platform, so the gateway passes every provider method the resource as declared
 for that platform: the model's manifest without any other platform's extensions. The Kubernetes
@@ -381,7 +388,7 @@ definition would change when another platform's extension did.
 **G26 — Children join their parent (owner decision, 2026-10-29).** Each gateway runs a model of
 its own and is deployed by its own pipeline. A child's model names its parent
 (ApplicationModel.Definition D21), and its builder connects to the parent (`UseParent`). The parent
-is an `IApplicationParentGateway`:
+is an `IApplicationGatewayParent`:
 - **Join.** Once its aggregates exist, a child calls `JoinAsync` with its manifest. The parent
   validates it, refuses one that names another parent, records the child under its name with a
   lease, and answers with the value of every output of its own resources that the child's settings
@@ -405,7 +412,7 @@ replaces G3, G19, and G24, and their refusals of parts that could not be ordered
 and the parent needed every child's infrastructure and credentials. *Open:* a child applying a
 changed value while it runs (question 13), and the transport for joins (G9).
 
-**G27 — A gateway is built with its model (owner decision, 2026-10-29).** `ApplicationBuilder`
+**G27 — A gateway is built with its model (owner decision, 2026-10-29).** `ApplicationGatewayBuilder`
 implements ApplicationModel.Definition's `IApplicationModelBuilder` and this library's
 `IApplicationGatewayBuilder` side by side: one object declares the model and configures the gateway,
 the way an area's application builder implements its area's builder beside the host's.
@@ -434,7 +441,7 @@ instance of another version neither receives nor reports state it does not under
 
 **G30 — Durability belongs to the gateway (formerly ApplicationModel.Definition D7).** The aggregate
 keeps its state in memory for the life of one deployment. A gateway that restarts within the same
-deployment seeds a new aggregate through `ApplicationResourceDeployment.Create(manifest, state)`. A
+deployment seeds a new aggregate through `ApplicationGatewayDeployment.Create(manifest, state)`. A
 gateway should persist a recorded snapshot before it acknowledges the write, or a restart can lose a
 write that running instances already apply. A gateway seeds the aggregate before it knows whether
 the run redefines the resource, and calls `ClearState()` when it does; instances already registered
@@ -446,7 +453,7 @@ registration, and a debugger never deadlocks on a held lock.
 
 **G32 — Infrastructure actions sit on the aggregate (formerly ApplicationModel.Definition D15).** A
 gateway's provider supplies each resource's infrastructure actions to
-`ApplicationResourceDeployment.Create`, and `ExecuteAsync` dispatches them with the statuses a
+`ApplicationGatewayDeployment.Create`, and `ExecuteAsync` dispatches them with the statuses a
 control plane uses (`NotFound`, `NotSupported`, `Rejected` for input that does not bind). Until
 2026-10-29 the contract lived in ApplicationModel.Definition, so a transport could expose the
 actions without referencing a gateway package; it moved here once the definitions held only
@@ -465,6 +472,10 @@ programs publish through. Every other platform brings its own (G9). *Rejected:* 
 gateway to the provider on each call (`DeployResourceAsync(gateway, …)`). It would tie how
 instances reach the gateway to the platform that starts them, which differs on every platform but
 in-process.
+
+*Superseded by G39 (2026-10-31):* the separate transport seam and "any number per gateway". The
+provider now owns the channel's start and stop, and the rejection above is reversed for the reason
+G9 gives: every gateway half implements its channel on the provider object anyway.
 
 **G34 — A deployment has an id its instances repeat (2026-10-29).** Readiness counted any
 publication after the plan (G18), and an instance manifest did not say which deployment started it.
@@ -494,7 +505,7 @@ eventually runs two gateways of one name at once: the old and the new gateway of
 or a pipeline run again while the previous one still runs. The store loaded and saved whole records
 with nothing to tell the runs apart, so every save overwrote the other run's. If the older run saved
 last, the next run read its revisions as a new definition and dropped the operator's state.
-- **Take over.** `RunAsync` starts with `AcquireAsync`, which stores and returns the record with an
+- **Take over.** `StartAsync` starts the run with `AcquireAsync`, which stores and returns the record with an
   epoch higher than any run took before (`ApplicationGatewayRecord.Epoch`), in one atomic step.
 - **Fence.** Every save carries the run's epoch, and `SaveAsync` refuses one lower than the stored
   epoch, again in one atomic step, answering `false` instead of writing.
@@ -542,7 +553,7 @@ program is an entry point like any resource, but its run registered no shutdown 
 platform's SIGTERM ended the process mid-save unless the program wired up its own cancellation. And
 the run said nothing until it ended, so a deployment could be followed only through its final
 exception.
-- **Signals.** `RunAsync` registers Core's `AppEnvironment.RegisterShutdown` for the run's duration,
+- **Signals.** The run registers Core's `AppEnvironment.RegisterShutdown` for the run's duration,
   the registration every host's `RunAsync` uses too (Hosting's now delegates to it). SIGINT, SIGQUIT
   and SIGTERM stop the run as cancelling its token does: it drains, returns, and leaves what it
   deployed running. Inside an in-process program's `AppEnvironmentScope`, the scope's shutdown
@@ -562,7 +573,7 @@ had to restore it, but nothing called an instance: an operator wrote to one inst
 directly, and the restores were the caller's. `ExecuteAsync` closes the loop.
 - **Reach.** Each manifest names where the gateway reaches the instance's control plane, in its
   platform's terms (ApplicationModel C5), and the gateway calls it through the platform's
-  `IApplicationInstanceClient` (`UseInstanceClient`). In process that is a direct call. A gateway
+  `IApplicationGatewayInstanceClient` (`UseInstanceClient`). In process that is a direct call. A gateway
   built without a client fails the call with `InstanceUnavailable` before it reaches any instance
   (G9).
 - **Run.** The action runs on one registered instance that declares it and names a control plane,
@@ -600,7 +611,7 @@ health check after each
 **G9 — No transport here; a platform's gateway half brings it (owner, 2026-10-30).** A platform is a
 pair of packages (ApplicationModel C5). Its gateway half gives the builder three things:
 - the infrastructure provider (`UseInfrastructure`);
-- the transport its instances publish through (`UseTransport`, G33);
+- the channel its instances publish through, which since G39 is the provider itself (`StartAsync`/`StopAsync`; formerly `UseTransport`, G33);
 - the instance client the gateway calls them with (`UseInstanceClient`, G38).
 
 Gateway.InProcess's `UseInProcess(infrastructure)` sets all three from one object. The gateway
@@ -614,6 +625,74 @@ platform defines its transport, push or pull, and its authentication. The retire
 2026-10-29: everything it served (the export document, application sets, declarative commands,
 trusted-issuer grants) was retired with the old model. Joins have no transport either: a child joins
 a parent in the same process directly (G26).
+
+**G39 — The provider is the gateway's inbound channel (owner, 2026-10-31).** The owner deleted
+`IApplicationGatewayTransport`, and its lifecycle moved onto the provider:
+`IApplicationGatewayInfrastructureProvider.StartAsync(IApplicationGatewayContext, ct)` and
+`StopAsync(ct)`. The gateway starts the channel where it started transports, once the run has
+loaded its record and created the resources and before it joins or deploys, and stops it when the
+run ends. A channel that cannot start fails the run before anything is joined or deployed, and is
+not stopped; a channel that fails to stop faults `Completion` unless the run had failed already.
+The builder loses `UseTransport`. `IApplicationGatewayContext` is `{ Model, Publisher }`: the owner's
+draft also carried the store, which is dropped, because a holder could save the record past the
+epoch fence (G35). This supersedes G33's separate seam and its "any number of transports": one
+gateway has one channel. *Open:* a gateway on more than one platform would need the context handed
+to each provider (open question 15). *Unchanged:* each provider method still takes the model;
+whether those parameters go now that the context carries it is a follow-up.
+
+**G40 — Start, stop, and completion instead of one run call (owner, 2026-10-31).**
+`IApplicationGateway` is `{ Context, Resources, Completion, StartAsync, StopAsync }`:
+- **`StartAsync`** starts the run in the background and completes when startup completes (what
+  `Started` reported, which is removed). It throws what `RunAsync` threw for a startup failure,
+  and is cancelled when the run stops first; its token cancels startup, which stops the run.
+- **`Completion`** completes when the run ends, successfully when it was stopped, cancelled, or
+  signalled, and faults with what `RunAsync` threw: a startup failure, `RecordSuperseded` when a
+  later run took the record over, or a loop failure. Without it a supersession after startup would
+  have no awaiter.
+- **`StopAsync`** cancels the run and waits for it to end; it does not throw the run's failure,
+  which `Completion` carries. A gateway that never started has nothing to stop.
+- **Signals stay inside.** The run still registers `AppEnvironment.RegisterShutdown`, so Ctrl+C, a
+  platform's SIGTERM, or an in-process scope's shutdown stops it as `StopAsync` does (G37).
+- **`RunAsync(ct)` is an extension member** in `Extensions/ApplicationGatewayExtensions.cs`:
+  `StartAsync`, then await `Completion`, calling `StopAsync` on cancellation. Cancellation during
+  startup ends it without an exception, as before, so a gateway `Program.cs` stays one line.
+- **No write of a run outlives its `Completion`.** A publication that passed the lifecycle check
+  just before the run stopped may still be saving the record. Before `Completion` completes, the
+  run waits for the save in flight and closes the record: a save that was still waiting fails
+  with `PublicationsClosed` instead of writing. A save that finds the record taken over after the
+  run ended fails its caller, but the ended run is not reported superseded after the fact.
+- **A startup failure is reported once.** It faults both `StartAsync` and `Completion`; the gateway
+  marks `Completion`'s exception observed, so a caller that awaits only `StartAsync` leaves no
+  unobserved task exception behind. A loop failure after startup faults only `Completion`, which
+  the caller awaits.
+- **A cancelled startup carries the caller's token.** When the caller's token stopped startup,
+  `StartAsync` is cancelled with that token, as `Started` was, so the caller can tell its own
+  cancellation from a stop or a signal.
+- **The signal registration fails startup, not a lost task.** `RegisterShutdown` runs inside the
+  run's error handling, so a registration that throws faults `StartAsync` and `Completion`.
+
+This records G35's supersession behavior against the new surface: the superseded run's
+`Completion` faults with `RecordSuperseded`.
+
+**G41 — Renames, and what they did not change (2026-10-31).** `ApplicationBuilder` is
+`ApplicationGatewayBuilder`, pairing with `IApplicationGatewayBuilder` and `ApplicationGateway`;
+`ApplicationResourceRecord` is `ApplicationGatewayDeploymentRecord`; `ApplicationResourceDeployment`
+is the internal `ApplicationGatewayDeployment` (no consumer outside this assembly names it);
+`InfrastructurePlan` and `InfrastructureChange` are `ApplicationGatewayDeploymentPlan` and
+`ApplicationGatewayDeploymentChange`; `ApplicationResourceOutputValue` moved here from Definition as
+`ApplicationGatewayOutputValue`, in this assembly's `Assimalign.Cohesion.ApplicationModel.Gateway` namespace; the root's `IApplicationInstanceClient` is
+`IApplicationGatewayInstanceClient`. "Infrastructure" now names only the platform seam and the
+platform's class; everything about one resource's rollout says "Deployment".
+- **The record file keeps its keys.** No renamed type changed a persisted property name, so no
+  `[JsonPropertyName]` was needed: `gateway`, `resources`, `provider`, `name`, `revision`,
+  `state`, `instances`, `outputs`, `epoch`. `ApplicationGatewayCompatibilityTests` pins a record file
+  byte for byte against what the gateway wrote at commit `607b27a53`.
+- **The fingerprint did not move.** A resource's revision hashes its manifest's JSON through this
+  assembly's own context, renamed `ApplicationGatewayManifestJsonContext` (from `GatewayJsonContext`)
+  with byte-identical options (camel case, no string enums). Moving it to Definition, whose contexts
+  use other options, would have changed every revision and deployment id and redeployed every
+  resource after an upgrade. The same test class pins two resources' revisions and deployment ids
+  as captured at `607b27a53`.
 
 ## AOT
 
@@ -694,3 +773,6 @@ event carries an action's input, output, or state.
     which Windows refuses while another handle has the file open. Reads and writes through the store
     now hold the gateway's lock, so they never overlap; a reader outside the store can still block a
     save.
+15. **More than one platform per gateway (2026-10-31, open).** Folding the transport into the provider
+    (G39) gives a gateway one inbound channel. Is a gateway that deploys onto several providers on
+    the roadmap? If so, the context goes to every provider and the builder takes several.

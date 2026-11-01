@@ -36,6 +36,15 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// and <see cref="DeployResourceAsync"/>; the provider delivers them to the instances, for example as
 /// environment variables.
 /// </para>
+/// <para>
+/// The provider is also the gateway's inbound channel: the way the instances it starts reach the
+/// gateway. <see cref="StartAsync"/> receives the gateway's context, and from then on the provider
+/// hands what its instances publish and renew to the context's
+/// <see cref="IApplicationGatewayContext.Publisher"/>, until <see cref="StopAsync"/>. The instance
+/// half of the same platform, the client each instance publishes through, carries them to it, and the
+/// gateway calls back through the platform's <see cref="IApplicationGatewayInstanceClient"/>, which
+/// the same object usually implements.
+/// </para>
 /// </remarks>
 public interface IApplicationGatewayInfrastructureProvider
 {
@@ -49,6 +58,33 @@ public interface IApplicationGatewayInfrastructureProvider
     /// reads its own with its own JSON contract and never sees another platform's.
     /// </remarks>
     PlatformName Platform { get; }
+
+    /// <summary>
+    /// Starts the provider's channel: from here it hands the publications and renewals its instances
+    /// send to the gateway.
+    /// </summary>
+    /// <remarks>
+    /// The gateway calls it once per run, when the run has loaded its record and before it joins its
+    /// parent or plans anything, so an instance the previous run left running can publish again. A
+    /// provider whose channel fails to start fails the run, and the gateway does not call
+    /// <see cref="StopAsync"/> for it.
+    /// </remarks>
+    /// <param name="context">The running gateway's model and its publisher.</param>
+    /// <param name="cancellationToken">Cancels starting.</param>
+    /// <returns>A task that completes when the channel receives.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="context"/> is <see langword="null"/>.</exception>
+    ValueTask StartAsync(IApplicationGatewayContext context, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops the provider's channel: a publication or renewal received from here is refused.
+    /// </summary>
+    /// <remarks>
+    /// The gateway calls it when its run ends, after a successful <see cref="StartAsync"/>. Stopping
+    /// the channel does not stop what the provider deployed.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancels waiting for a publication in flight.</param>
+    /// <returns>A task that completes when the channel has stopped.</returns>
+    ValueTask StopAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the infrastructure actions the provider exposes on a resource, such as scaling it.
@@ -93,7 +129,7 @@ public interface IApplicationGatewayInfrastructureProvider
     /// </param>
     /// <param name="cancellationToken">Cancels the plan.</param>
     /// <returns>What deploying the resource would change, and the revision it would run.</returns>
-    ValueTask<InfrastructurePlan> PlanResourceAsync(
+    ValueTask<ApplicationGatewayDeploymentPlan> PlanResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
@@ -105,8 +141,8 @@ public interface IApplicationGatewayInfrastructureProvider
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The gateway calls it only when the plan's change is <see cref="InfrastructureChange.Create"/>
-    /// or <see cref="InfrastructureChange.Update"/>, right after the plan, once every resource the
+    /// The gateway calls it only when the plan's change is <see cref="ApplicationGatewayDeploymentChange.Create"/>
+    /// or <see cref="ApplicationGatewayDeploymentChange.Update"/>, right after the plan, once every resource the
     /// resource depends on is ready: an instance of it has published and its outputs are read. How an
     /// update replaces running instances, all at once or a few at a time, is the platform's rollout.
     /// </para>

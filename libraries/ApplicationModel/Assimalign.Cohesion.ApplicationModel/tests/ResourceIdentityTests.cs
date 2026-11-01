@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Tests;
 
 public class ResourceIdentityTests
 {
-    private const string DisplayPrefix = "Cohesion Test [Hosting] - Resource identity: ";
+    private const string DisplayPrefix = "Cohesion Test [ApplicationModel] - Resource identity: ";
 
     [Theory(DisplayName = DisplayPrefix + "Resource names are RFC 1035 labels")]
     [InlineData("a")]
@@ -89,31 +89,30 @@ public class ResourceIdentityTests
         declared.GetHashCode().ShouldBe(requested.GetHashCode());
     }
 
-    [Theory(DisplayName = DisplayPrefix + "Action names are hyphen-separated lowercase words")]
-    [InlineData("a")]
-    [InlineData("log-level")]
-    [InlineData("flush-cache-2")]
-    public void ActionName_TryCreate_WithWords_ShouldSucceed(string value)
+    [Theory(DisplayName = DisplayPrefix + "Platform names are hyphen-separated lowercase words")]
+    [InlineData("inprocess")]
+    [InlineData("kubernetes")]
+    [InlineData("azure-container-apps")]
+    public void PlatformName_TryCreate_WithWords_ShouldSucceed(string value)
     {
         // Arrange & Act
-        bool created = ActionName.TryCreate(value, out _);
+        bool created = PlatformName.TryCreate(value, out _);
 
         // Assert
         created.ShouldBeTrue();
     }
 
-    [Theory(DisplayName = DisplayPrefix + "Action names reject empty words and other characters")]
+    [Theory(DisplayName = DisplayPrefix + "Platform names reject empty words and other characters")]
     [InlineData("")]
-    [InlineData("Log")]
-    [InlineData("-log")]
-    [InlineData("log-")]
-    [InlineData("log--level")]
-    [InlineData("log_level")]
-    [InlineData("log/level")]
-    public void ActionName_TryCreate_WithMalformedWord_ShouldFail(string value)
+    [InlineData("Kubernetes")]
+    [InlineData("-k8s")]
+    [InlineData("k8s-")]
+    [InlineData("in--process")]
+    [InlineData("in_process")]
+    public void PlatformName_TryCreate_WithMalformedWord_ShouldFail(string value)
     {
         // Arrange & Act
-        bool created = ActionName.TryCreate(value, out _);
+        bool created = PlatformName.TryCreate(value, out _);
 
         // Assert
         created.ShouldBeFalse();

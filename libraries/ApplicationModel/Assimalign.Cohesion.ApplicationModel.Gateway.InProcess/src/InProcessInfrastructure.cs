@@ -30,8 +30,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// the process's signals, which stay with the gateway program.
 /// </para>
 /// <para>
-/// The infrastructure is also the gateway's transport and its instance client:
-/// <see cref="InProcessApplicationBuilderExtensions.UseInProcess"/> sets it as all three. A program
+/// The infrastructure is also the gateway's channel and its instance client:
+/// <see cref="InProcessApplicationGatewayBuilderExtensions.UseInProcess"/> sets it as both. A program
 /// opts into the platform with the instance half's <c>UseInProcess()</c> on its resource, so it
 /// publishes to <see cref="Endpoint"/>, a channel inside the process that the gateway drains on its
 /// own flow while it runs: the gateway handles each publication outside the program's environment,
@@ -49,7 +49,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 /// </remarks>
 [DebuggerDisplay("{Endpoint}")]
 [DebuggerTypeProxy(typeof(DebugView))]
-public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureProvider, IApplicationGatewayTransport, IApplicationInstanceClient, IAsyncDisposable
+public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureProvider, IApplicationGatewayInstanceClient, IAsyncDisposable
 {
     // The program's code is part of the gateway program's own build, so the infrastructure tells no
     // versions apart: a resource is a new definition only when its model changes.
@@ -193,7 +193,7 @@ public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureP
         return [];
     }
 
-    ValueTask<InfrastructurePlan> IApplicationGatewayInfrastructureProvider.PlanResourceAsync(
+    ValueTask<ApplicationGatewayDeploymentPlan> IApplicationGatewayInfrastructureProvider.PlanResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
@@ -202,11 +202,11 @@ public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureP
         GetProgram(resource);
 
         // A program that ended runs no more, so it is started again.
-        InfrastructureChange change = !_workloads.TryGetValue((resource.Provider, resource.Name), out InProcessWorkload? workload) || workload.HasExited
-            ? InfrastructureChange.Create
-            : workload.Runs(settings) ? InfrastructureChange.None : InfrastructureChange.Update;
+        ApplicationGatewayDeploymentChange change = !_workloads.TryGetValue((resource.Provider, resource.Name), out InProcessWorkload? workload) || workload.HasExited
+            ? ApplicationGatewayDeploymentChange.Create
+            : workload.Runs(settings) ? ApplicationGatewayDeploymentChange.None : ApplicationGatewayDeploymentChange.Update;
 
-        return ValueTask.FromResult(new InfrastructurePlan(change, revision));
+        return ValueTask.FromResult(new ApplicationGatewayDeploymentPlan(change, revision));
     }
 
     async ValueTask IApplicationGatewayInfrastructureProvider.DeployResourceAsync(
@@ -268,23 +268,25 @@ public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureP
         _ports.TryRemove(key, out _);
     }
 
-    ValueTask IApplicationGatewayTransport.StartAsync(IApplicationInstancePublisher gateway, CancellationToken cancellationToken)
+    // The channel hands what the programs publish to the gateway that started it, on the gateway's
+    // own flow, until the gateway's run ends.
+    ValueTask IApplicationGatewayInfrastructureProvider.StartAsync(IApplicationGatewayContext context, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(gateway);
+        ArgumentNullException.ThrowIfNull(context);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
 
-        _channel.Start(gateway);
+        _channel.Start(context.Publisher);
         return ValueTask.CompletedTask;
     }
 
-    async ValueTask IApplicationGatewayTransport.StopAsync(CancellationToken cancellationToken)
+    async ValueTask IApplicationGatewayInfrastructureProvider.StopAsync(CancellationToken cancellationToken)
     {
         await _channel.StopAsync().ConfigureAwait(false);
     }
 
     // The gateway calls a program's control plane where the program attached it. The content crosses
     // as bytes, as it would between processes, and the control plane reads it with its own serializer.
-    ValueTask<ApplicationActionResult> IApplicationInstanceClient.ExecuteAsync(ApplicationInstanceManifest instance, ActionName action, ApplicationActionContext context, CancellationToken cancellationToken)
+    ValueTask<ApplicationActionResult> IApplicationGatewayInstanceClient.ExecuteAsync(ApplicationInstanceManifest instance, ActionName action, ApplicationActionContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentNullException.ThrowIfNull(context);
@@ -293,7 +295,7 @@ public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureP
         return controlPlane.ExecuteAsync(action, ApplicationActionContext.Create(context.Operation, controlPlane.Serializer, context.Input), cancellationToken);
     }
 
-    ValueTask<ApplicationActionResult> IApplicationInstanceClient.RestoreAsync(ApplicationInstanceManifest instance, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
+    ValueTask<ApplicationActionResult> IApplicationGatewayInstanceClient.RestoreAsync(ApplicationInstanceManifest instance, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentNullException.ThrowIfNull(snapshot);

@@ -101,7 +101,7 @@ public interface IApplicationResourceDefinition : IApplicationResource
     /// For an output of the set's own resources, the resource depends on the output's resource, with
     /// no permissions unless <see cref="DependsOn"/> grants them, so the gateway deploys it once that
     /// resource runs and its outputs are known, then fills the value in. For an output of the parent
-    /// gateway's resources (<see cref="IApplicationParent.Output"/>), the parent hands the value over
+    /// gateway's resources (<see cref="IApplicationModelParent.Output"/>), the parent hands the value over
     /// when the gateway joins it, and the model checks that the output's gateway is the parent. Setting
     /// a name again replaces its value.
     /// </remarks>

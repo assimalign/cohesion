@@ -10,28 +10,30 @@ record is [DESIGN.md](DESIGN.md).
 
 ## Scope
 
-- In scope: `ApplicationGateway` and its `ApplicationBuilder`; the `IApplicationGateway`,
-  `IApplicationGatewayBuilder`, `IApplicationParentGateway`, `IApplicationGatewayTransport`, and
-  `IInfrastructureProvider` seams, and the use of the contracts' `IApplicationInstanceClient`; an
+- In scope: `ApplicationGateway` and its `ApplicationGatewayBuilder`; the `IApplicationGateway`
+  (start, stop, and `Completion`, with the `RunAsync` extension), `IApplicationGatewayContext`,
+  `IApplicationGatewayBuilder`, `IApplicationGatewayParent`, `IApplicationGatewayInfrastructureProvider`
+  (which is also the inbound channel), and `IApplicationGatewayInstanceClient` seams; an
   operator's actions on a resource's instances (`ApplicationGateway.ExecuteAsync`); the deployment
-  of a resource (`IApplicationResourceDeployment`, `ApplicationResourceDeployment`,
-  `IApplicationResourceAction`); the `IApplicationGatewayStore` record with its JSON file store; and
+  of a resource (`IApplicationGatewayDeployment`, `ApplicationGatewayDeployment`,
+  `IApplicationGatewayDeploymentAction`); the `IApplicationGatewayStore` record with its JSON file store; and
   `ApplicationGatewayException`.
-- Out of scope: every transport. A platform's gateway half supplies the infrastructure, the transport
-  instances publish through, and the instance client the gateway calls them with, such as
+- Out of scope: every transport. A platform's gateway half supplies the infrastructure, whose
+  channel instances publish through, and the instance client the gateway calls them with, such as
   `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`. Also out of scope: identity and
   authentication.
 
 ## Dependencies
 
-`Assimalign.Cohesion.ApplicationModel.Definition`, and through it the contracts in `Assimalign.Cohesion.ApplicationModel`.
+`Assimalign.Cohesion.ApplicationModel.Definition` and `Assimalign.Cohesion.ApplicationModel.Protocol`,
+and through both the identity in `Assimalign.Cohesion.ApplicationModel`.
 
 ## Usage
 
 The root gateway declares its model and runs it through a provider for its platform:
 
 ```csharp
-ApplicationBuilder builder = ApplicationGateway.CreateBuilder("root");
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("root");
 builder.AddResource("IdentityHub", "identity");
 
 ApplicationGateway root = builder.UseInfrastructure(infrastructure).Build();
@@ -43,8 +45,8 @@ the parent before it deploys anything, and its `orders-api` deploys once `orders
 both endpoints in its configuration:
 
 ```csharp
-ApplicationBuilder builder = ApplicationGateway.CreateBuilder("east");
-IApplicationParent root = builder.UseParent(rootGateway);
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("east");
+IApplicationModelParent root = builder.UseParent(rootGateway);
 
 IApplicationResourceDefinition database = builder.AddResource("Database.Sql", "orders-db");
 builder.AddResource("Web", "orders-api")
@@ -56,12 +58,15 @@ ApplicationGateway east = builder.UseInfrastructure(infrastructure).Build();
 await east.RunAsync(cancellationToken);
 ```
 
-A transport (`builder.UseTransport(transport)`) hands each publication to
-`gateway.PublishAsync(manifest)` and returns its snapshots; the gateway starts its transports when it
-runs and stops them when the run ends. A child gateway in the same process joins through
-`gateway.JoinAsync(manifest)`, using the gateway as its `IApplicationParentGateway`. To run every
+The infrastructure provider is also the gateway's inbound channel: the gateway starts it with its
+context (`provider.StartAsync(gateway.Context)`) when the run begins, the channel hands each
+publication to `context.Publisher.PublishAsync(manifest)` and returns its snapshots, and the gateway
+stops it when the run ends. A host that drives the run itself calls `StartAsync` and `StopAsync` and
+watches `Completion`, which faults when the run fails after startup. A child gateway in the same process joins through
+`gateway.JoinAsync(manifest)`, using the gateway as its `IApplicationGatewayParent`. To run every
 resource inside the gateway program's own process, use Gateway.InProcess:
-`builder.UseInProcess(infrastructure)` sets its infrastructure, which is also its transport.
+`builder.UseInProcess(infrastructure)` sets its infrastructure, which is also its channel and its
+instance client.
 
 An operator manages a resource through the gateway. The action runs on one instance's control plane,
 and a write's state is recorded and restored on every other instance; an instance that starts later
@@ -72,5 +77,5 @@ ApplicationActionResult result = await gateway.ExecuteAsync(
     "Web",
     "orders-api",
     "cors",
-    ApplicationActionContext.Create(ApplicationActionKind.Write, serializer, """{"origins":["https://partner.example"]}"""u8.ToArray()));
+    ApplicationActionContext.Create(ApplicationActionOperation.Write, serializer, """{"origins":["https://partner.example"]}"""u8.ToArray()));
 ```

@@ -48,7 +48,7 @@ public class ApplicationSetTests
             .DependsOn(cache);
 
         // Act
-        ApplicationManifest manifest = set.GetManifest();
+        ApplicationModelManifest manifest = set.GetManifest();
 
         // Assert
         manifest.Name.ShouldBe(new GatewayName("east"));

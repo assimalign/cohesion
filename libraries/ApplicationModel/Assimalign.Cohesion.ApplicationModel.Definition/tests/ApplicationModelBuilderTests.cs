@@ -56,7 +56,7 @@ public class ApplicationModelBuilderTests
         IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("east");
 
         // Act
-        IApplicationParent parent = builder.UseParent("root");
+        IApplicationModelParent parent = builder.UseParent("root");
         IApplicationModel model = builder.Build();
 
         // Assert

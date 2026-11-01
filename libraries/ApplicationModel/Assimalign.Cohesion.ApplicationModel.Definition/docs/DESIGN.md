@@ -8,6 +8,9 @@
 > Since D21 and D22 (2026-10-29) it holds the definition only: a model covers one gateway, a child
 > gateway names the parent it joins, and the deployment view and the gateway seam live in
 > [ApplicationModel.Gateway](../../Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md).
+> Since D23 (2026-10-31) it references the identity root only, never the gateway-to-instance
+> protocol, which moved from the root to
+> [ApplicationModel.Protocol](../../Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md).
 > The previous implementation (plans and planners, providers and stores, commands, externals) is
 > retired; its source is at commit `6576e7c64`.
 
@@ -18,28 +21,30 @@ The library declares what one gateway runs, and nothing it does at run time:
 1. **The builder.** `ApplicationModel.CreateBuilder(name)` returns an `IApplicationModelBuilder`,
    the gateway's set. `UseParent(name)` names the parent gateway it joins, and `Build()` closes
    composition and returns the immutable `IApplicationModel`. ApplicationModel.Gateway's
-   `ApplicationBuilder` implements the same interface beside its gateway builder, wrapping this one.
+   `ApplicationGatewayBuilder` implements the same interface beside its gateway builder, wrapping this one.
 2. **The declarations.** An `IApplicationSet` is one gateway's scope: the application resources it
    runs. An `IApplicationResourceDefinition` declares one resource: through `DependsOn`, the
    resources of the set it needs and the permissions it needs on each; through `WithSetting`, the
    configuration values its instances receive with their deployment, given in the model, filled in
-   from another of the set's resources' outputs, or from one of the parent's (`IApplicationParent`).
-   `GetManifest()` projects the set as `ApplicationManifest` data.
+   from another of the set's resources' outputs, or from one of the parent's (`IApplicationModelParent`).
+   `GetManifest()` projects the set as `ApplicationModelManifest` data.
 3. **The model.** `IApplicationModel` is the validated manifest, built in code or from data by
    `ApplicationModel.Create(manifest)`, such as the manifest a child sends when it joins its parent.
 
 A resource's definition, a gateway's deployment of it (ApplicationModel.Gateway's
-`IApplicationResourceDeployment`), and each of its instances (ApplicationModel.Hosting's
-`IApplicationResourceInstance`) are three forms of one `IApplicationResource`, which the shared
-contracts declare. The library references Core and those contracts, never the gateway or the
-instance side. The arrow below means "references".
+`IApplicationGatewayDeployment`), and each of its instances (ApplicationModel.Hosting's
+`IApplicationInstance`) are three forms of one `IApplicationResource`, which the identity
+root declares. The library references Core and that root, never the protocol, the gateway, or the
+instance side (D23). The arrow below means "references".
 
 ```mermaid
 flowchart LR
-    Gateway["ApplicationModel.Gateway, chunk 3"] --> Definition["Assimalign.Cohesion.ApplicationModel.Definition"]
-    Definition --> Contracts["Assimalign.Cohesion.ApplicationModel"]
-    Hosting["Assimalign.Cohesion.ApplicationModel.Hosting"] --> Contracts
-    Contracts --> Core["Assimalign.Cohesion.Core"]
+    Gateway["ApplicationModel.Gateway"] --> Definition["Assimalign.Cohesion.ApplicationModel.Definition"]
+    Gateway --> Protocol["ApplicationModel.Protocol"]
+    Definition --> Identity["Assimalign.Cohesion.ApplicationModel"]
+    Protocol --> Identity
+    Hosting["Assimalign.Cohesion.ApplicationModel.Hosting"] --> Protocol
+    Identity --> Core["Assimalign.Cohesion.Core"]
     Definition --> Core
 ```
 
@@ -81,14 +86,14 @@ child's join with its value, which orders the child after the parent's resource 
 | Type | Role |
 | --- | --- |
 | `IApplicationModelBuilder` | The gateway's set, plus `Parent`, `UseParent`, and `Build`. `ApplicationModel.CreateBuilder(name)` creates one. |
-| `IApplicationParent` | The parent a gateway joins, as its model refers to it: `Name`, and `Endpoint(provider, name)` and `Output(provider, name, output)` for placeholders of the parent's resources' outputs. |
+| `IApplicationModelParent` | The parent a gateway joins, as its model refers to it: `Name`, and `Endpoint(provider, name)` and `Output(provider, name, output)` for placeholders of the parent's resources' outputs. |
 | `IApplicationModel`, `ApplicationModel` | The immutable model of one gateway: `Manifest` (validated and read-only), `Name`, `Parent`, and `Role`. `ApplicationModel.Create(manifest)` builds one from data. |
 | `ApplicationGatewayRole` | `Root` for a gateway that joins no parent, `Composite` for one that does. |
 | `IApplicationSet` | One gateway's scope: `AddResource` declares a resource. |
 | `IApplicationResourceDefinition` | One declared resource. `DependsOn(resource, permissions)` records a dependency on another of the set's resources, which also orders deployment; declaring it again adds the new permissions, and one that would close a cycle is refused. `WithSetting(name, value)` and `WithSetting(name, output)` give its instances a configuration value; an output of the set depends on its resource, one of the parent's does not. `WithExtension(platform, name, json)` configures how one platform deploys it. `Endpoint` and `Output(name)` hand out its own output placeholders. |
-| `ApplicationManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting`, `ApplicationResourceExtension`, `ApplicationResourceOutputValue` | The gateway's application as data: its name, its parent, and its resources. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. An extension has a platform, a name, and a JSON value. An output value is an output with the value a parent hands a child that joins. |
+| `ApplicationModelManifest`, `ApplicationResourceManifest`, `ApplicationResourceDependency`, `ApplicationResourceSetting`, `ApplicationResourceExtension` | The gateway's application as data: its name, its parent, and its resources. A dependency names its target by gateway, provider, and name. A setting has a name and either a value or an `ApplicationResourceOutput`. An extension has a platform, a name, and a JSON value. The resolved value a parent hands a child that joins is the gateway's `ApplicationGatewayOutputValue` (D23). |
 | `IApplicationResource` (in ApplicationModel) | The base all three forms share: provider, name, and id. |
-| `GatewayName`, `GatewayId`, `Permission`, `OutputName`, `SettingName`, `PlatformName`, `ExtensionName` | Value objects. `GatewayId` is a version 5 UUID of the name, like chunk 1's ids. `SettingName` is a configuration key and compares case-insensitively. `PlatformName` names an infrastructure provider's platform, such as `kubernetes`. |
+| `GatewayName`, `GatewayId`, `Permission`, `OutputName`, `SettingName`, `ExtensionName` | Value objects. `GatewayId` is a version 5 UUID of the name, like the root's ids. `SettingName` is a configuration key and compares case-insensitively. `OutputName` and `ExtensionName` validate with the root's shared hyphenated-words grammar (D23). `PlatformName`, which names an infrastructure provider's platform such as `kubernetes`, is the root's. |
 
 ## Decisions
 
@@ -122,7 +127,7 @@ version of this decision, which recorded access only and accepted mutual depende
 
 **D5–D8 — moved to ApplicationModel.Gateway with the deployment (D22).** Atomic `Register` and
 `Record`, filtered version skew, durability in the gateway, and lock-free reads are decisions of
-`ApplicationResourceDeployment`, which now lives in the gateway; they are its G28–G31.
+`ApplicationGatewayDeployment`, which now lives in the gateway; they are its G28–G31.
 
 **D9 — One set of identity, manifest, and snapshot types — superseded by D20.** A deployment
 aggregates the instances that publish to it, so the model and the instance side use the same
@@ -161,7 +166,7 @@ resource has values only once it is deployed, such as the endpoint of the load b
 its instances. A definition hands out an `ApplicationResourceOutput` for one (`Endpoint`, or
 `Output(name)`), which names its gateway, resource, and output, and carries no value. The gateway
 that runs the resource records what its infrastructure provider reports on the aggregate
-(`IApplicationResourceDeployment.Outputs`, `ApplicationResourceDeployment.SetOutputs`) and fills the value in where a
+(`IApplicationGatewayDeployment.Outputs`, `ApplicationGatewayDeployment.SetOutputs`) and fills the value in where a
 dependent refers to it. Output names follow the action-name grammar; the provider decides which
 outputs a resource has. Values are strings, as configuration and environment variables carry them.
 Outputs belong to the logical resource, not to an instance: an instance's own address is a separate
@@ -228,8 +233,8 @@ of it across its instances; and each instance, one running copy. They share an
 | Project | Holds | References |
 | --- | --- | --- |
 | `ApplicationModel` | What both sides exchange: `IApplicationResource`, the identity value objects, the instance manifest, snapshots, the action context and result, and the content-serializer and publisher seams | Core |
-| `ApplicationModel.Definition` | The logical side: `IApplicationResourceDefinition`, sets, the builder, manifests, the validated model, and, until D22, `IApplicationResourceDeployment` | ApplicationModel |
-| `ApplicationModel.Hosting` | The physical side: `IApplicationResourceInstance`, health contributors, the control plane, `ApplicationInstanceService`, and the publishers | ApplicationModel, Hosting |
+| `ApplicationModel.Definition` | The logical side: `IApplicationResourceDefinition`, sets, the builder, manifests, the validated model, and, until D22, `IApplicationGatewayDeployment` | ApplicationModel |
+| `ApplicationModel.Hosting` | The physical side: `IApplicationInstance`, health contributors, the control plane, `ApplicationInstanceService`, and the publishers | ApplicationModel, Hosting |
 
 The instance side never loads the logical model, and the logical side never loads the instance
 runtime: each references only the contracts, which is the line between the logical and the physical
@@ -247,7 +252,7 @@ the definition only.
 
 **D21 — Each gateway has its own model, and a child joins its parent (owner decision, 2026-10-29).**
 A model covers one gateway: its set, and the name of the parent it joins, or none for a root. A
-child names its parent with `UseParent`, which returns an `IApplicationParent` for the outputs of the
+child names its parent with `UseParent`, which returns an `IApplicationModelParent` for the outputs of the
 parent's resources that its settings use. The manifest records the parent, so the parent learns from
 the manifest a child sends when it joins which of its outputs that child reads.
 - **A dependency stays within its gateway.** A dependency orders deployment, and a gateway orders
@@ -267,17 +272,34 @@ and dependencies on a parent's resources for their permissions (open questions 3
 
 **D22 — Two builders, and the definition only (owner decision, 2026-10-29).**
 `IApplicationModelBuilder` builds the model and nothing else. ApplicationModel.Gateway's
-`IApplicationGatewayBuilder` builds the gateway, and its `ApplicationBuilder` implements both side by
+`IApplicationGatewayBuilder` builds the gateway, and its `ApplicationGatewayBuilder` implements both side by
 side, wrapping a builder of `ApplicationModel.CreateBuilder`, the way an area's application builder
 implements its area's builder beside the host's.
 - `IApplication`, `Application`, and the old `IApplicationBuilder` are removed: they only paired a
   model with a gateway. `IApplicationBuilder.Args`, which nothing read, goes with them.
-- The gateway seam (`IApplicationGateway`), the deployment view (`IApplicationResourceDeployment`,
-  `ApplicationResourceDeployment`), and infrastructure actions (`IApplicationResourceAction`) moved to
+- The gateway seam (`IApplicationGateway`), the deployment view (`IApplicationGatewayDeployment`,
+  `ApplicationGatewayDeployment`), and infrastructure actions (`IApplicationGatewayDeploymentAction`) moved to
   ApplicationModel.Gateway, which alone uses them. Each form of a resource now lives with its owner:
   the definition here, the deployment in the gateway, the instance in ApplicationModel.Hosting.
 
 This replaces D20's placement of the deployment.
+
+**D23 — The logical model references the identity only (owner decision, 2026-10-31).** When the
+root was split into identity and Protocol (root C1), this project kept its one reference, the root,
+and gained none: no wire type reaches the logical model. What follows:
+- **Renames.** `ApplicationManifest` is `ApplicationModelManifest` and `IApplicationParent` is
+  `IApplicationModelParent`, so the model's manifest and parent are never confused with the
+  instance's manifest (`ApplicationInstanceManifest`) or the gateway's runtime parent
+  (`IApplicationGatewayParent`). JSON property names are unchanged.
+- **Output values left.** `ApplicationResourceOutputValue` moved to the gateway as
+  `ApplicationGatewayOutputValue`: it is a resolved run-time value, and nothing here used it.
+- **One grammar.** Output and extension names validate with the root's `shared/Names/` module,
+  compiled in with `CohesionSharedSource`; this project's private copy is deleted.
+- **No JSON context.** The model manifest crosses `JoinAsync` as a C# object today, and the
+  gateway's deployment fingerprint keeps its own context, so this project adds none. A
+  Definition-owned context waits until the join goes out of process.
+- **Kept.** `IApplicationSet`, `ApplicationGatewayRole`, and `GatewayId` stay while their
+  removal is an open owner question (13).
 
 ## Threading
 
@@ -343,3 +365,8 @@ None. The library raises no events and has no event source.
     gateway holds, not operator state. The gateway that runs the target restores claims with its
     state when an instance publishes, and across gateways they travel with the join, which also
     answers question 10.
+13. **Leftovers of the set hierarchy (2026-10-31, awaiting the owner).** `IApplicationSet` is what
+    the builder already is (D10), `ApplicationGatewayRole` is only `Parent` being null, and nothing
+    outside this project's tests reads `GatewayId`. Fold `IApplicationSet` into
+    `IApplicationModelBuilder` and delete the other two (recording `GatewayId`'s UUIDv5 namespace),
+    or keep them?

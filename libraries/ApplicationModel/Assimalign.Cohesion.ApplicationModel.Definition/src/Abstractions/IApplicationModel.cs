@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.ApplicationModel;
 /// </summary>
 /// <remarks>
 /// A model is built from code, by <see cref="IApplicationModelBuilder.Build"/>, or from manifest
-/// data, by <see cref="ApplicationModel.Create(ApplicationManifest)"/>. Both paths enforce the same
+/// data, by <see cref="ApplicationModel.Create(ApplicationModelManifest)"/>. Both paths enforce the same
 /// rules, so a gateway treats the two alike. A model covers one gateway: a child gateway has a model
 /// of its own, built by its own program.
 /// </remarks>
@@ -36,5 +36,5 @@ public interface IApplicationModel
     /// <summary>
     /// Gets the gateway's manifest: its name, its parent, and the resources it runs.
     /// </summary>
-    ApplicationManifest Manifest { get; }
+    ApplicationModelManifest Manifest { get; }
 }

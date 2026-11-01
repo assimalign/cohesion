@@ -11,8 +11,9 @@ on each resource.
 Each gateway is deployed by its own pipeline. A child gateway joins its parent, registers with it
 under a lease, and fills its settings in from the parent's outputs; the parent knows nothing of a
 child before it joins. A gateway program declares its model and configures its gateway on one
-`ApplicationBuilder`. The instances' publications reach the gateway through its transports, such as
-the in-process channel of Gateway.InProcess.
+`ApplicationGatewayBuilder`. The instances' publications reach the gateway through its provider's
+channel, such as the in-process channel of Gateway.InProcess. The gateway starts and stops its run,
+and `Completion` reports how it ended; `RunAsync` does all three in one call.
 
 - [Overview](docs/OVERVIEW.md)
 - [Design](docs/DESIGN.md)

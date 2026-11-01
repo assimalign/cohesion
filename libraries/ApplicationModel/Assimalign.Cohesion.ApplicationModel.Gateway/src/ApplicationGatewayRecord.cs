@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// <param name="Resources">The resources the gateway deployed, in deployment order.</param>
 public sealed record ApplicationGatewayRecord(
     GatewayName Gateway,
-    IReadOnlyList<ApplicationResourceRecord> Resources)
+    IReadOnlyList<ApplicationGatewayDeploymentRecord> Resources)
 {
     /// <summary>
     /// Gets the epoch of the run that holds the record.

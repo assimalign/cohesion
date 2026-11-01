@@ -15,10 +15,14 @@ internal sealed class RunningGateway : IAsyncDisposable
     private RunningGateway(ApplicationGateway gateway)
     {
         Gateway = gateway;
-        _run = gateway.RunAsync(_stop.Token);
+        _run = gateway.RunAsync(_stop.Token, out Task started);
+        Started = started;
     }
 
     public ApplicationGateway Gateway { get; }
+
+    /// <summary>The gateway's startup, as its <see cref="ApplicationGateway.StartAsync"/> returned it.</summary>
+    public Task Started { get; }
 
     /// <summary>
     /// Creates a gateway over the platform with a model built elsewhere, as its builder would, without
@@ -37,7 +41,6 @@ internal sealed class RunningGateway : IAsyncDisposable
             infrastructure,
             store,
             parent,
-            [],
             infrastructure.Client,
             startupTimeout ?? TimeSpan.FromSeconds(10),
             leaseDuration ?? TimeSpan.FromSeconds(30));
@@ -55,7 +58,7 @@ internal sealed class RunningGateway : IAsyncDisposable
         IApplicationGatewayParent? parent = null)
     {
         var running = new RunningGateway(Create(infrastructure, store, model, startupTimeout, leaseDuration, parent));
-        await running.Gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await running.Started.WaitAsync(TimeSpan.FromSeconds(10));
         return running;
     }
 

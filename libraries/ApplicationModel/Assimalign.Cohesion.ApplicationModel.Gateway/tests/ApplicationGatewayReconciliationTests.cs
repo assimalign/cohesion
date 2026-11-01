@@ -173,7 +173,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
 
         // Assert
         ApplicationGatewayRecord record = (await _store.LoadAsync("root")).ShouldNotBeNull();
-        ApplicationResourceRecord ordersApi = record.Resources.ShouldHaveSingleItem();
+        ApplicationGatewayDeploymentRecord ordersApi = record.Resources.ShouldHaveSingleItem();
         ordersApi.Revision.ShouldEndWith(":1");
         ordersApi.Instances.ShouldHaveSingleItem();
         Encoding.UTF8.GetString(ordersApi.State.ShouldHaveSingleItem().Value.Span).ShouldBe("""{"Level":"Warning"}""");
@@ -191,7 +191,7 @@ public sealed class ApplicationGatewayReconciliationTests : IDisposable
         (TestInstance instance, ApplicationInstanceService service) = _infrastructure.Instances.Values.First();
         ApplicationActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
         foreach (InstanceKey target in await gateway.RecordAsync("Web", "orders-api", instance.Key, write.State!))
         {

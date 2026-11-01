@@ -13,4 +13,4 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// absent, and the child joins again.
 /// </param>
 /// <param name="Lease">How long the parent keeps the child registered without another join.</param>
-public sealed record ApplicationGatewayMembership(IReadOnlyList<ApplicationResourceOutputValue> Outputs, TimeSpan Lease);
+public sealed record ApplicationGatewayMembership(IReadOnlyList<ApplicationGatewayOutputValue> Outputs, TimeSpan Lease);

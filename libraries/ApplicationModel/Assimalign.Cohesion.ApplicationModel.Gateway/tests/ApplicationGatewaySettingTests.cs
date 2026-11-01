@@ -129,14 +129,14 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         _infrastructure.Delayed["db"] = () => release.Task;
         ApplicationGateway gateway = CreateGateway(model);
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(stop.Token);
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
 
         // Act: an instance of the api the platform runs restarts while api waits.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
         TestInstance restarted = await _infrastructure.StartInstanceAsync("Web", "api");
         int plans = _infrastructure.Events().Count(call => call == "plan:api");
         release.SetResult();
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
         stop.Cancel();
         await run;
 
@@ -166,7 +166,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         _infrastructure.Delayed["db"] = () => release.Task;
         ApplicationGateway gateway = CreateGateway(model);
         using var stop = new CancellationTokenSource();
-        Task run = gateway.RunAsync(stop.Token);
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
 
         // Act: while api waits, one of its recorded instances renews.
         await Eventually.WaitUntilAsync(() => _infrastructure.Events().Count(call => call == "deploy:db") == 2);
@@ -174,7 +174,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         ApplicationInstanceManifest renewing = api.Instances.Single(instance => instance.Key == recorded[0]);
         bool renewed = await gateway.RenewAsync(renewing);
         release.SetResult();
-        await gateway.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
         stop.Cancel();
         await run;
 
@@ -228,7 +228,7 @@ public sealed class ApplicationGatewaySettingTests : IDisposable
         (TestInstance instance, ApplicationInstanceService service) = _infrastructure.Instances.Values.First(entry => entry.Instance.Name.Value == resource);
         ApplicationActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
         foreach (InstanceKey target in await gateway.RecordAsync(instance.Provider, instance.Name, instance.Key, write.State!))
         {

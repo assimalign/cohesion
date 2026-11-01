@@ -1,12 +1,13 @@
 # Assimalign.Cohesion.ApplicationModel
 
-The contracts of the Cohesion application model: what a resource's definition, its deployment by a
-gateway, and its running instances share. That is the resource's identity, the manifest an instance
-publishes, its actions' invocation and result types, the snapshots of their state, and the seam an
-instance publishes through.
+The identity of the Cohesion application model: the names a resource's definition, its deployment
+by a gateway, and its running instances all share. That is the resource's provider and name, the
+ids derived from them, and the name of the platform it runs on.
 
-The logical side builds on it in `Assimalign.Cohesion.ApplicationModel.Definition`, and the physical
-side in `Assimalign.Cohesion.ApplicationModel.Hosting`. Neither references the other.
+What a gateway and an instance exchange builds on it in `Assimalign.Cohesion.ApplicationModel.Protocol`.
+The logical side builds on it in `Assimalign.Cohesion.ApplicationModel.Definition`, and the instance
+runtime on Protocol in `Assimalign.Cohesion.ApplicationModel.Hosting`. Definition and Hosting never
+reference each other.
 
 - [Overview](docs/OVERVIEW.md)
 - [Design](docs/DESIGN.md)

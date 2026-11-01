@@ -2,48 +2,29 @@
 
 ## Purpose
 
-Declares what both sides of the application model exchange, so a gateway and the instances it runs
-speak through the same types without either loading the other's code. The design record is
-[DESIGN.md](DESIGN.md).
+Declares the identity every plane of the application model shares: what a resource is (its
+provider), which one it is (its name), the ids derived from them, and the platform it runs on. The
+logical model, the gateway, and every instance carry the same names without loading each other's
+code. The design record is [DESIGN.md](DESIGN.md).
 
 ## Scope
 
 - In scope: `IApplicationResource`, the base of a resource's definition, deployment, and instances;
-  the identity value objects (`ProviderName`, `ProviderId`, `ResourceName`, `ResourceId`,
-  `InstanceKey`, `ActionName`, `DeploymentId`); the instance manifest (`ApplicationInstanceManifest`,
-  `ApplicationActionDescriptor`, `ApplicationActionKind`); invocation (`ApplicationActionContext`,
-  `ApplicationActionResult`, `ApplicationActionStatus`); state (`ApplicationActionSnapshot`); content
-  (`IApplicationContentSerializer`, `ApplicationContentException`, and the default
-  `JsonApplicationContentSerializer`); the platform name (`PlatformName`); and the two client seams a
-  platform implements: publication (`IApplicationInstancePublisher`, `ApplicationInstancePublication`)
-  and the gateway's calls to an instance (`IApplicationInstanceClient`).
-- Out of scope: the logical model (ApplicationModel.Definition), the instance runtime
-  (ApplicationModel.Hosting), gateways (ApplicationModel.Gateway), and every transport, which belongs
-  to the platform packages (ApplicationModel.Hosting.InProcess and ApplicationModel.Gateway.InProcess
-  for the in-process platform).
+  `ProviderName`, `ResourceName`, `ProviderId`, `ResourceId`; and `PlatformName`.
+- Out of scope: what a gateway and an instance exchange (ApplicationModel.Protocol), the logical
+  model (ApplicationModel.Definition), the instance runtime (ApplicationModel.Hosting), gateways
+  (ApplicationModel.Gateway), and every transport, which belongs to the platform packages.
 
 ## Dependencies
 
-`Assimalign.Cohesion.Core` only.
+`Assimalign.Cohesion.Core` only. Its `shared/Names/` module, the hyphenated-words name grammar, is
+compiled into this assembly, Protocol, and Definition.
 
 ## Usage
-
-An instance publishes its manifest through its platform's client, and its gateway answers with the
-snapshots to restore; the client names where the gateway reaches the control plane:
-
-```csharp
-ApplicationInstanceManifest manifest = new(
-    "Web",
-    "orders-api",
-    InstanceKey.New(),
-    Deployment: null,
-    ControlPlaneEndpoint: null,
-    actions);
-ApplicationInstancePublication publication = await publisher.PublishAsync(manifest, cancellationToken);
-```
 
 Every form of a resource derives the same id from its provider and name:
 
 ```csharp
 ResourceId id = ResourceId.FromName("Web", "orders-api");
+PlatformName platform = "kubernetes";
 ```

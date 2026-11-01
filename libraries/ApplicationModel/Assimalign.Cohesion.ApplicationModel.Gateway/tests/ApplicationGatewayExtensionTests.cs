@@ -106,7 +106,7 @@ public sealed class ApplicationGatewayExtensionTests : IDisposable
         (TestInstance instance, ApplicationInstanceService service) = _infrastructure.Instances.Values.Single();
         ApplicationActionResult write = await service.ControlPlane.ExecuteAsync(
             "log-level",
-            ApplicationActionContext.Create(ApplicationActionKind.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, Encoding.UTF8.GetBytes($$"""{"Level":"{{level}}"}""")));
 
         await gateway.RecordAsync(instance.Provider, instance.Name, instance.Key, write.State!);
     }

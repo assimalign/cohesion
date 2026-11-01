@@ -31,18 +31,16 @@ public sealed class WebResourceInProcessTests
             .AddProgram("Web", "orders-api", OrdersProgram.MainAsync)
             .AddProgram("Web", "storefront", StorefrontProgram.MainAsync);
 
-        ApplicationBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
+        ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
         builder.StartupTimeout = TimeSpan.FromSeconds(30);
         IApplicationResourceDefinition orders = builder.AddResource("Web", "orders-api");
         builder.AddResource("Web", "storefront").WithSetting("Orders:Url", orders.Endpoint);
         ApplicationGateway gateway = builder.Build();
-        using var stop = new CancellationTokenSource();
 
         // Act
-        Task run = gateway.RunAsync(stop.Token);
         try
         {
-            await gateway.Started.WaitAsync(TimeSpan.FromSeconds(30));
+            await gateway.StartAsync().WaitAsync(TimeSpan.FromSeconds(30));
             string storefront = gateway.Resources.Single(resource => resource.Name == "storefront").Outputs[OutputName.Endpoint];
             string answer = await GetAsync(new Uri(storefront));
 
@@ -55,8 +53,8 @@ public sealed class WebResourceInProcessTests
         }
         finally
         {
-            await stop.CancelAsync();
-            await run;
+            await gateway.StopAsync();
+            await gateway.Completion;
         }
     }
 

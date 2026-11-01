@@ -12,7 +12,7 @@ using Assimalign.Cohesion.ApplicationModel.Hosting.InProcess;
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.Internal;
 
 /// <summary>
-/// The transport between the programs a process runs and their gateway, in both directions: their
+/// The channel between the programs a process runs and their gateway, in both directions: their
 /// publications and renewals queue on a channel the gateway's own flow drains while the gateway
 /// runs, and their control planes are attached to it for the gateway to call.
 /// </summary>
@@ -93,7 +93,7 @@ internal sealed class InProcessChannel : IInProcessGateway
         {
             if (_isReceiving)
             {
-                throw new InvalidOperationException(ErrorMessages.TransportAlreadyStarted);
+                throw new InvalidOperationException(ErrorMessages.ChannelAlreadyStarted);
             }
 
             var draining = new CancellationTokenSource();
@@ -170,7 +170,7 @@ internal sealed class InProcessChannel : IInProcessGateway
 
     private InvalidOperationException Unreachable()
     {
-        return new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.TransportNotReceiving, _endpoint.AbsoluteUri));
+        return new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ChannelNotReceiving, _endpoint.AbsoluteUri));
     }
 
     private sealed class Attachment : IDisposable

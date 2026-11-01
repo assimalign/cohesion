@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="RunAsync"/> loads the gateway's record from its <see cref="IApplicationGatewayStore"/>.
+/// <see cref="StartAsync"/> loads the gateway's record from its <see cref="IApplicationGatewayStore"/>.
 /// A gateway whose model names a parent then joins it and waits, within <see cref="StartupTimeout"/>,
 /// until the parent reports every output of its resources that the gateway's settings use. The
 /// gateway then deploys in dependency order: a resource deploys once everything it depends on is
@@ -38,8 +38,10 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// instance publish within <see cref="StartupTimeout"/> of its deployment: a new one that does not is
 /// torn down, an updated one is left to the platform, what depends on it is not deployed, and the run
 /// fails with <see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>. After startup the gateway
-/// tears down the resources its record holds but the model no longer declares, then runs until
-/// cancelled. Cancellation stops the gateway; it does not tear down what the gateway deployed.
+/// tears down the resources its record holds but the model no longer declares, and
+/// <see cref="StartAsync"/> completes. The run then goes on until <see cref="StopAsync"/>, a shutdown
+/// signal, or a failure, which <see cref="Completion"/> reports. Stopping does not tear down what the
+/// gateway deployed.
 /// </para>
 /// <para>
 /// The gateway saves its record after every change, so a gateway restarted with the same model
@@ -47,11 +49,12 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// <see cref="LeaseDuration"/>: an instance renews it (<see cref="RenewAsync"/>), and one that stops
 /// renewing is unregistered once it lapses. After startup every registered instance, the adopted
 /// ones included, has one full lease to renew, so an instance that died while the gateway was down
-/// leaves within one lease. The gateway is transport-neutral: a transport hands each publication to
-/// <see cref="PublishAsync"/> and each renewal to <see cref="RenewAsync"/>, as the
-/// <see cref="IApplicationInstancePublisher"/> it is. The transports the gateway was built with
-/// (<see cref="ApplicationBuilder.UseTransport"/>) start once <see cref="RunAsync"/> has loaded the
-/// record, before anything is joined or deployed, and stop when the run ends.
+/// leaves within one lease. The gateway is channel-neutral: its infrastructure provider hands each
+/// publication to <see cref="PublishAsync"/> and each renewal to <see cref="RenewAsync"/>, as the
+/// <see cref="IApplicationInstancePublisher"/> the gateway's <see cref="Context"/> carries. The
+/// provider's channel starts once the run has loaded the record, before anything is joined or
+/// deployed (<see cref="IApplicationGatewayInfrastructureProvider.StartAsync"/>), and stops when
+/// the run ends.
 /// </para>
 /// <para>
 /// A child gateway joins through <see cref="JoinAsync"/>, which this gateway implements as an
@@ -61,7 +64,7 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// </para>
 /// <para>
 /// An operator manages a resource through <see cref="ExecuteAsync"/>: the gateway runs the action on
-/// one instance's control plane, through its <see cref="IApplicationInstanceClient"/>, and keeps a
+/// one instance's control plane, through its <see cref="IApplicationGatewayInstanceClient"/>, and keeps a
 /// write: it records the state the write left and restores it on the other instances, and later
 /// instances restore it when they publish.
 /// </para>
@@ -85,29 +88,33 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private readonly IApplicationGatewayInfrastructureProvider _infrastructure;
     private readonly IApplicationGatewayStore _store;
     private readonly IApplicationGatewayParent? _parent;
-    private readonly IApplicationGatewayTransport[] _transports;
-    private readonly IApplicationInstanceClient? _client;
+    private readonly IApplicationGatewayInstanceClient? _client;
+    private readonly ApplicationGatewayContext _context;
     private readonly SemaphoreSlim _saves = new(1, 1);
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private readonly Dictionary<GatewayName, (ApplicationManifest Manifest, long Renewed)> _children = [];
+    private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource _run = new();
+    private readonly Dictionary<GatewayName, (ApplicationModelManifest Manifest, long Renewed)> _children = [];
     private FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? _resources;
     private FrozenDictionary<ApplicationResourceOutput, string> _received = FrozenDictionary<ApplicationResourceOutput, string>.Empty;
     private GatewayResource[] _ordered = [];
-    private ApplicationResourceRecord[] _retiredResources = [];
+    private ApplicationGatewayDeploymentRecord[] _retiredResources = [];
     private ReadOnlyCollection<IApplicationGatewayDeployment> _aggregates = ReadOnlyCollection<IApplicationGatewayDeployment>.Empty;
     private long _epoch;
-    private CancellationTokenSource? _run;
     private ApplicationGatewayException? _superseded;
-    private int _signalled;
+    private int _stopRequested;
     private int _lifecycle;
+    private int _ended;
+
+    // Guarded by _saves: once the run drains its saves, no later save writes the record.
+    private bool _savesClosed;
 
     internal ApplicationGateway(
         IApplicationModel model,
         IApplicationGatewayInfrastructureProvider infrastructure,
         IApplicationGatewayStore store,
         IApplicationGatewayParent? parent,
-        IApplicationGatewayTransport[] transports,
-        IApplicationInstanceClient? client,
+        IApplicationGatewayInstanceClient? client,
         TimeSpan startupTimeout,
         TimeSpan leaseDuration)
     {
@@ -115,8 +122,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         _infrastructure = infrastructure;
         _store = store;
         _parent = parent;
-        _transports = transports;
         _client = client;
+        _context = new ApplicationGatewayContext(model, this);
         StartupTimeout = startupTimeout;
         LeaseDuration = leaseDuration;
     }
@@ -131,6 +138,9 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// </summary>
     public IApplicationModel Model => _model;
 
+    /// <inheritdoc/>
+    public IApplicationGatewayContext Context => _context;
+
     /// <summary>
     /// Gets how long every created or updated resource has to publish its first manifest once its
     /// deployment starts, and how long the gateway waits for its parent's outputs.
@@ -142,24 +152,21 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// </summary>
     public TimeSpan LeaseDuration { get; }
 
-    /// <summary>
-    /// Gets the aggregates of the resources the gateway runs, in dependency order, each after the
-    /// resources it depends on; empty before <see cref="RunAsync"/>.
-    /// </summary>
+    /// <inheritdoc/>
     public IReadOnlyCollection<IApplicationGatewayDeployment> Resources => Volatile.Read(ref _aggregates);
 
     /// <summary>
     /// Gets the manifests of the child gateways that joined this one and whose leases have not
     /// lapsed.
     /// </summary>
-    public IReadOnlyCollection<ApplicationManifest> Children
+    public IReadOnlyCollection<ApplicationModelManifest> Children
     {
         get
         {
             lock (_children)
             {
-                var children = new List<ApplicationManifest>(_children.Count);
-                foreach ((ApplicationManifest Manifest, long Renewed) child in _children.Values)
+                var children = new List<ApplicationModelManifest>(_children.Count);
+                foreach ((ApplicationModelManifest Manifest, long Renewed) child in _children.Values)
                 {
                     children.Add(child.Manifest);
                 }
@@ -169,12 +176,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
     }
 
-    /// <summary>
-    /// Gets a task that completes when every created or updated resource has published and the
-    /// resources the model no longer declares are torn down, faults when startup fails, and is
-    /// canceled when the run is cancelled before startup completes.
-    /// </summary>
-    public Task Started => _started.Task;
+    /// <inheritdoc/>
+    public Task Completion => _completion.Task;
 
     /// <summary>
     /// Creates a builder that declares a gateway's application and configures the gateway.
@@ -182,52 +185,114 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// <param name="name">The gateway's name.</param>
     /// <returns>The builder.</returns>
     /// <exception cref="ArgumentException"><paramref name="name"/> is <see langword="default"/>.</exception>
-    public static ApplicationBuilder CreateBuilder(GatewayName name)
+    public static ApplicationGatewayBuilder CreateBuilder(GatewayName name)
     {
-        return new ApplicationBuilder(name);
+        return new ApplicationGatewayBuilder(name);
     }
 
     /// <summary>
-    /// Reconciles the model with the infrastructure and runs the gateway until cancellation.
+    /// Starts the gateway's run: reconciles the model with the infrastructure, then keeps managing it
+    /// until <see cref="StopAsync"/>, a shutdown signal, or a failure.
     /// </summary>
-    /// <param name="cancellationToken">Signals that the gateway should stop.</param>
-    /// <returns>A task that completes when the gateway stops.</returns>
-    /// <exception cref="ArgumentException">The parent refuses this gateway's manifest. Nothing has been deployed.</exception>
-    /// <exception cref="InvalidOperationException">
-    /// The gateway has already run, or the infrastructure provider returned no action list, no plan,
-    /// or no outputs.
+    /// <remarks>
+    /// A shutdown signal, such as Ctrl+C at a console or a platform's SIGTERM, stops the run as
+    /// <see cref="StopAsync"/> does; inside an in-process program's scope, the scope's shutdown stands
+    /// in for the signals.
+    /// </remarks>
+    /// <param name="cancellationToken">Cancels startup, which stops the run.</param>
+    /// <returns>
+    /// A task that completes when every created or updated resource has published and the resources
+    /// the model no longer declares are torn down, and is cancelled when the run stops first.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">The gateway has already run.</exception>
+    /// <exception cref="ArgumentException">
+    /// Through the returned task: the parent refuses this gateway's manifest. Nothing has been deployed.
     /// </exception>
     /// <exception cref="ApplicationGatewayException">
-    /// The parent did not accept this gateway, or did not report an output its settings use, within
-    /// <see cref="StartupTimeout"/> (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/> or
+    /// Through the returned task: the parent did not accept this gateway, or did not report an output
+    /// its settings use, within <see cref="StartupTimeout"/>
+    /// (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/> or
     /// <see cref="ApplicationGatewayErrorCode.OutputMissing"/>); a created or updated resource
     /// published no manifest within <see cref="StartupTimeout"/> of its deployment
     /// (<see cref="ApplicationGatewayErrorCode.StartupTimedOut"/>); a created or updated resource's
     /// workload stopped before an instance published, with the workload's failure as the inner
     /// exception (<see cref="ApplicationGatewayErrorCode.ResourceFailed"/>); a setting uses an output
     /// its resource's provider did not report (<see cref="ApplicationGatewayErrorCode.OutputMissing"/>);
-    /// or a later run of this gateway took its record over, so this run stopped
-    /// (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>).
+    /// or a later run of this gateway took its record over
+    /// (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>). The infrastructure provider
+    /// returning no action list, no plan, or no outputs fails it with
+    /// <see cref="InvalidOperationException"/>.
     /// </exception>
-    public async Task RunAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(CancellationToken cancellationToken = default)
     {
         if (Interlocked.CompareExchange(ref _lifecycle, running, idle) != idle)
         {
             throw new InvalidOperationException(ErrorMessages.ApplicationGatewayAlreadyRun);
         }
 
-        // The run's own token stops it when the caller cancels, a shutdown signal arrives, or a later
-        // run takes the record over. A signal stops the run as cancelling it does: Ctrl+C at a console
-        // or a platform's SIGTERM drains the gateway instead of ending the process mid-save. Inside an
-        // in-process program's scope, the scope's shutdown stands in for the signals.
-        using var run = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        using IDisposable signals = AppEnvironment.RegisterShutdown(() => RequestShutdown(run));
-        Volatile.Write(ref _run, run);
-        CancellationToken token = run.Token;
-        int transportsStarted = 0;
-        bool failed = false;
+        _ = RunCoreAsync();
+        return WaitForStartupAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Stops the gateway's run and waits for it to end; what the gateway deployed keeps running.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels waiting for the run to end; the run still stops.</param>
+    /// <returns>
+    /// A task that completes when the run has ended, whatever its outcome; <see cref="Completion"/>
+    /// reports a failure.
+    /// </returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled before the run ended.</exception>
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        if (Volatile.Read(ref _lifecycle) == idle)
+        {
+            // A gateway that never started has nothing to stop.
+            return;
+        }
+
+        RequestStop();
+        await Completion.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    // Startup is the run's first phase. A caller who cancels it stops the run, as StopAsync does.
+    private async Task WaitForStartupAsync(CancellationToken cancellationToken)
+    {
+        using CancellationTokenRegistration registration = cancellationToken.Register(static state => ((ApplicationGateway)state!).RequestStop(), this);
         try
         {
+            await _started.Task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller's own cancellation stopped startup: report it with the caller's token, so the
+            // caller can tell it from a stop or a shutdown signal.
+            throw new TaskCanceledException(null, null, cancellationToken);
+        }
+    }
+
+    // The whole run, in the background: startup, then the loops that keep its registrations, until
+    // the run's token is cancelled. Its outcome goes to Completion; startup's to StartAsync.
+    private async Task RunCoreAsync()
+    {
+        // The run's token stops it when StopAsync is called, a shutdown signal arrives, startup is
+        // cancelled, or a later run takes the record over. A signal drains the gateway instead of
+        // ending the process mid-save.
+        CancellationToken token = _run.Token;
+        IDisposable? signals = null;
+        bool channelStarted = false;
+        bool startupFailed = false;
+        Exception? failure = null;
+        try
+        {
+            // Inside the try: a registration that fails fails startup and Completion, rather than a
+            // task nobody awaits.
+            signals = AppEnvironment.RegisterShutdown(RequestStop);
+
+            // Let StartAsync return to its caller before the first await of the run.
+            await Task.Yield();
+
             IApplicationModel model = _model;
             GatewayStep[] steps = GatewayStep.Order(model.Manifest);
 
@@ -239,13 +304,10 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             ApplicationGatewayEventSource.Log.RunStarting(model.Name, record.Epoch);
             CreateResources(model, record, steps);
 
-            // The gateway receives publications from here, so its transports start before it joins
-            // its parent or deploys: an instance the previous run left can publish meanwhile.
-            foreach (IApplicationGatewayTransport transport in _transports)
-            {
-                await transport.StartAsync(this, token).ConfigureAwait(false);
-                transportsStarted++;
-            }
+            // The gateway receives publications from here, so the provider's channel starts before it
+            // joins its parent or deploys: an instance the previous run left can publish meanwhile.
+            await _infrastructure.StartAsync(_context, token).ConfigureAwait(false);
+            channelStarted = true;
 
             // A child fills its settings in from its parent's outputs, so it joins before anything
             // deploys; its restarted instances can publish meanwhile.
@@ -276,27 +338,63 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
                 : RenewMembershipAsync(model, _parent!, membership.Lease, token);
             await Task.WhenAll(ExpireAsync(token), renewals).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (Volatile.Read(ref _superseded) is null && (cancellationToken.IsCancellationRequested || Volatile.Read(ref _signalled) != 0))
+        catch (OperationCanceledException) when (Volatile.Read(ref _superseded) is null && Volatile.Read(ref _stopRequested) != 0)
         {
-            // Cancellation or a shutdown signal stops the gateway; what it deployed keeps running.
-            _started.TrySetCanceled(cancellationToken.IsCancellationRequested ? cancellationToken : token);
+            // A stop, a cancelled startup, or a shutdown signal ends the run; what it deployed keeps
+            // running.
+            _started.TrySetCanceled(token);
             ApplicationGatewayEventSource.Log.RunStopped(Name);
         }
         catch (Exception exception)
         {
-            // Every other failure ends the run; Started reports it before the caller sees it. A run a
-            // later one superseded reports that, whatever the supersession interrupted.
-            failed = true;
-            Exception reported = Volatile.Read(ref _superseded) ?? exception;
-            _started.TrySetException(reported);
-            ApplicationGatewayEventSource.Log.RunFailed(Name, reported);
-            ExceptionDispatchInfo.Throw(reported);
+            // Every other failure ends the run; StartAsync reports it before the channel stops. A run
+            // a later one superseded reports that, whatever the supersession interrupted.
+            failure = Volatile.Read(ref _superseded) ?? exception;
+            startupFailed = _started.TrySetException(failure);
+            ApplicationGatewayEventSource.Log.RunFailed(Name, failure);
         }
         finally
         {
             Volatile.Write(ref _lifecycle, stopped);
-            Volatile.Write(ref _run, null);
-            await StopTransportsAsync(transportsStarted, failed).ConfigureAwait(false);
+            Volatile.Write(ref _ended, 1);
+            signals?.Dispose();
+        }
+
+        // The channel's failure to stop is the run's unless the run already failed, whose own failure
+        // it would hide.
+        if (channelStarted)
+        {
+            try
+            {
+                await _infrastructure.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception)
+            {
+                // Deliberately broad: each provider fails to stop its channel in its own terms.
+                failure ??= exception;
+            }
+        }
+
+        // A publication that passed the lifecycle check before the run stopped may still be saving.
+        // Wait for it, and close the record to every later save, so no write of this run outlives
+        // Completion.
+        await _saves.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        _savesClosed = true;
+        _saves.Release();
+
+        if (failure is null)
+        {
+            _completion.TrySetResult();
+        }
+        else
+        {
+            _completion.TrySetException(failure);
+            if (startupFailed)
+            {
+                // StartAsync already reported this failure to its caller, who need not await
+                // Completion too; reading it keeps it from surfacing as unobserved.
+                _ = _completion.Task.Exception;
+            }
         }
     }
 
@@ -307,6 +405,13 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         var superseded = new ApplicationGatewayException(
             ApplicationGatewayErrorCode.RecordSuperseded,
             Format(ErrorMessages.GatewayRecordSuperseded, Name, Volatile.Read(ref _epoch)));
+        if (Volatile.Read(ref _ended) != 0)
+        {
+            // The run already ended: the save that found the record taken over fails, but the ended
+            // run is not reported superseded after the fact.
+            return superseded;
+        }
+
         if (Interlocked.CompareExchange(ref _superseded, superseded, null) is { } earlier)
         {
             return earlier;
@@ -314,57 +419,19 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
         ApplicationGatewayEventSource.Log.RunSuperseded(Name, Volatile.Read(ref _epoch));
         Volatile.Write(ref _lifecycle, stopped);
-        try
-        {
-            // Asynchronously: whatever waits on the run's token continues on the thread pool, not
-            // on the publication or write that found the record taken over.
-            _ = Volatile.Read(ref _run)?.CancelAsync();
-        }
-        catch (ObjectDisposedException)
-        {
-            // The run already ended.
-        }
 
+        // Asynchronously: whatever waits on the run's token continues on the thread pool, not on the
+        // publication or write that found the record taken over.
+        _ = _run.CancelAsync();
         return superseded;
     }
 
-    // A shutdown signal, or in process the scope's shutdown, stops the run as cancelling it does. It
-    // never throws: a signal handler that throws ends the process.
-    private void RequestShutdown(CancellationTokenSource run)
+    // StopAsync, a cancelled startup, a shutdown signal, or in process the scope's shutdown stops the
+    // run. It never throws: a signal handler that throws ends the process.
+    private void RequestStop()
     {
-        Volatile.Write(ref _signalled, 1);
-        try
-        {
-            _ = run.CancelAsync();
-        }
-        catch (ObjectDisposedException)
-        {
-            // The run already ended.
-        }
-    }
-
-    // Stops the transports that started, last first. One that fails to stop does not keep the others
-    // running. Its failure is the run's unless the run already failed, whose own failure it would hide.
-    private async Task StopTransportsAsync(int started, bool failed)
-    {
-        List<Exception>? failures = null;
-        for (int i = started - 1; i >= 0; i--)
-        {
-            try
-            {
-                await _transports[i].StopAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                // Deliberately broad: each transport fails to stop in its own terms.
-                (failures ??= []).Add(exception);
-            }
-        }
-
-        if (failures is not null && !failed)
-        {
-            throw failures.Count == 1 ? failures[0] : new AggregateException(failures);
-        }
+        Volatile.Write(ref _stopRequested, 1);
+        _ = _run.CancelAsync();
     }
 
     /// <summary>
@@ -446,13 +513,13 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// <returns>The values the child uses, and a lease of <see cref="LeaseDuration"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="child"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
-    /// The manifest breaks a rule of <see cref="ApplicationModel.Create(ApplicationManifest)"/>, or
+    /// The manifest breaks a rule of <see cref="ApplicationModel.Create(ApplicationModelManifest)"/>, or
     /// names another gateway as its parent.
     /// </exception>
     /// <exception cref="ApplicationGatewayException">
     /// The gateway is not running (<see cref="ApplicationGatewayErrorCode.PublicationsClosed"/>).
     /// </exception>
-    public ValueTask<ApplicationGatewayMembership> JoinAsync(ApplicationManifest child, CancellationToken cancellationToken = default)
+    public ValueTask<ApplicationGatewayMembership> JoinAsync(ApplicationModelManifest child, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(child);
 
@@ -472,7 +539,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             _children[joined.Name] = (joined.Manifest, Stopwatch.GetTimestamp());
         }
 
-        var values = new List<ApplicationResourceOutputValue>();
+        var values = new List<ApplicationGatewayOutputValue>();
         var named = new HashSet<ApplicationResourceOutput>();
         foreach (ApplicationResourceManifest resource in joined.Manifest.Resources)
         {
@@ -480,7 +547,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             {
                 if (setting.Output is { } output && output.Gateway == Name && named.Add(output) && TryGetOutput(output, out string? value))
                 {
-                    values.Add(new ApplicationResourceOutputValue(output, value));
+                    values.Add(new ApplicationGatewayOutputValue(output, value));
                 }
             }
         }
@@ -532,7 +599,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// <para>
     /// The action runs on one registered instance whose manifest declares it and names a control
     /// plane, the earliest started first, since one that registered a moment ago may not serve its
-    /// control plane yet. The gateway calls it through its <see cref="IApplicationInstanceClient"/>.
+    /// control plane yet. The gateway calls it through its <see cref="IApplicationGatewayInstanceClient"/>.
     /// An instance the client gets no answer from is unregistered, and the action runs on the next
     /// one; an instance that still runs finds itself unknown when it next renews, and publishes again.
     /// </para>
@@ -588,14 +655,14 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
 
         // The platform owns the call to an instance; a gateway built without its client has none.
-        IApplicationInstanceClient client = _client ?? throw new ApplicationGatewayException(
+        IApplicationGatewayInstanceClient client = _client ?? throw new ApplicationGatewayException(
             ApplicationGatewayErrorCode.InstanceUnavailable,
             Format(ErrorMessages.GatewayInstanceClientMissing, Name, provider, name, action),
             null);
 
         // Writes run one at a time, from the call to the instance to the last restore, so a restore of
         // an earlier write never lands on an instance after a later write's.
-        if (context.Operation != ApplicationActionKind.Write)
+        if (context.Operation != ApplicationActionOperation.Write)
         {
             return await RunActionAsync(resource, client, provider, name, action, context, cancellationToken).ConfigureAwait(false);
         }
@@ -613,7 +680,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     private async Task<ApplicationActionResult> RunActionAsync(
         GatewayResource resource,
-        IApplicationInstanceClient client,
+        IApplicationGatewayInstanceClient client,
         ProviderName provider,
         ResourceName name,
         ActionName action,
@@ -666,7 +733,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             }
 
             ApplicationGatewayEventSource.Log.ActionExecuted(Name, provider, name, action, context.Operation, instance.Key, result.Status);
-            if (context.Operation == ApplicationActionKind.Write && result.Status == ApplicationActionStatus.Succeeded && result.State is { } snapshot)
+            if (context.Operation == ApplicationActionOperation.Write && result.Status == ApplicationActionStatus.Succeeded && result.State is { } snapshot)
             {
                 IReadOnlyList<InstanceKey> targets = resource.Aggregate.Record(instance.Key, snapshot);
                 ApplicationGatewayEventSource.Log.StateRecorded(Name, provider, name, snapshot.Action, instance.Key, targets.Count);
@@ -754,7 +821,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     // Restores a write's snapshot on the instances the aggregate named, all at once, and returns
     // whether any was unregistered because the restore did not reach it.
-    private async Task<bool> RestoreAsync(GatewayResource resource, IApplicationInstanceClient client, IReadOnlyList<InstanceKey> targets, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
+    private async Task<bool> RestoreAsync(GatewayResource resource, IApplicationGatewayInstanceClient client, IReadOnlyList<InstanceKey> targets, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
     {
         if (targets.Count == 0)
         {
@@ -785,7 +852,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     // no control plane is unregistered: when it next renews it publishes again, and the answer carries
     // the recorded state. That includes a restore the caller cancelled, so no instance stays
     // registered without the write.
-    private async Task<bool> RestoreAsync(GatewayResource resource, IApplicationInstanceClient client, ApplicationInstanceManifest instance, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
+    private async Task<bool> RestoreAsync(GatewayResource resource, IApplicationGatewayInstanceClient client, ApplicationInstanceManifest instance, ApplicationActionSnapshot snapshot, CancellationToken cancellationToken)
     {
         Exception? failure = null;
         ApplicationActionStatus? refusal = null;
@@ -914,7 +981,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
 
         var reported = new HashSet<ApplicationResourceOutput>();
-        foreach (ApplicationResourceOutputValue? value in membership.Outputs)
+        foreach (ApplicationGatewayOutputValue? value in membership.Outputs)
         {
             if (value?.Output is not null && value.Value is not null)
             {
@@ -937,7 +1004,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private static FrozenDictionary<ApplicationResourceOutput, string> Receive(ApplicationGatewayMembership membership)
     {
         var received = new Dictionary<ApplicationResourceOutput, string>();
-        foreach (ApplicationResourceOutputValue? value in membership.Outputs ?? [])
+        foreach (ApplicationGatewayOutputValue? value in membership.Outputs ?? [])
         {
             if (value?.Output is not null && value.Value is not null)
             {
@@ -968,7 +1035,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
             }
             catch (Exception) when (!cancellationToken.IsCancellationRequested)
             {
-                // Deliberately broad: each transport reports an unreachable or refusing parent in its
+                // Deliberately broad: each parent connection reports an unreachable or refusing parent in its
                 // own terms. The gateway keeps running and joins again on the next tick.
             }
         }
@@ -1008,7 +1075,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         lock (_children)
         {
             var lapsed = new List<GatewayName>();
-            foreach (KeyValuePair<GatewayName, (ApplicationManifest Manifest, long Renewed)> child in _children)
+            foreach (KeyValuePair<GatewayName, (ApplicationModelManifest Manifest, long Renewed)> child in _children)
             {
                 if (Stopwatch.GetElapsedTime(child.Value.Renewed) >= LeaseDuration)
                 {
@@ -1043,8 +1110,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     private void CreateResources(IApplicationModel model, ApplicationGatewayRecord? record, GatewayStep[] steps)
     {
-        var recorded = new Dictionary<(ProviderName Provider, ResourceName Name), ApplicationResourceRecord>();
-        foreach (ApplicationResourceRecord entry in record?.Resources ?? [])
+        var recorded = new Dictionary<(ProviderName Provider, ResourceName Name), ApplicationGatewayDeploymentRecord>();
+        foreach (ApplicationGatewayDeploymentRecord entry in record?.Resources ?? [])
         {
             recorded[(entry.Provider, entry.Name)] = entry;
         }
@@ -1060,8 +1127,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
             // Until its step plans it, a resource runs as the previous run left it: its recorded
             // state, outputs, and instances. The plan then keeps what still applies.
-            recorded.Remove((manifest.Provider, manifest.Name), out ApplicationResourceRecord? previous);
-            ApplicationResourceDeployment aggregate = ApplicationResourceDeployment.Create(manifest, previous?.State, actions, previous?.Outputs);
+            recorded.Remove((manifest.Provider, manifest.Name), out ApplicationGatewayDeploymentRecord? previous);
+            ApplicationGatewayDeployment aggregate = ApplicationGatewayDeployment.Create(manifest, previous?.State, actions, previous?.Outputs);
             lookup.Add((manifest.Provider, manifest.Name), new GatewayResource(aggregate, declared, previous));
         }
 
@@ -1076,8 +1143,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         }
 
         // What the record holds and the model no longer declares is retired after startup.
-        var retiredResources = new List<ApplicationResourceRecord>();
-        foreach (ApplicationResourceRecord entry in record?.Resources ?? [])
+        var retiredResources = new List<ApplicationGatewayDeploymentRecord>();
+        foreach (ApplicationGatewayDeploymentRecord entry in record?.Resources ?? [])
         {
             if (recorded.ContainsKey((entry.Provider, entry.Name)))
             {
@@ -1219,7 +1286,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     {
         ApplicationResourceManifest manifest = resource.Declared;
         IReadOnlyDictionary<SettingName, string> settings = ResolveSettings(manifest);
-        InfrastructurePlan? plan = await _infrastructure.PlanResourceAsync(model, manifest, settings, cancellationToken).ConfigureAwait(false);
+        ApplicationGatewayDeploymentPlan? plan = await _infrastructure.PlanResourceAsync(model, manifest, settings, cancellationToken).ConfigureAwait(false);
         if (plan?.Revision is null)
         {
             throw new InvalidOperationException(Format(ErrorMessages.GatewayResourcePlanNull, manifest.Provider, manifest.Name));
@@ -1232,7 +1299,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         // deployment adds the values: only an instance that repeats its id makes the resource ready.
         // Planned before the call: an in-process provider's instances publish before it returns.
         string revision = string.Concat(Fingerprint(manifest), ":", plan.Revision);
-        DeploymentId? deployment = plan.Change == InfrastructureChange.None ? null : DeploymentOf(revision, manifest, settings);
+        DeploymentId? deployment = plan.Change == ApplicationGatewayDeploymentChange.None ? null : DeploymentOf(revision, manifest, settings);
         resource.Plan(plan.Change, revision, deployment);
         ApplicationGatewayEventSource.Log.ResourcePlanned(Name, manifest, plan.Change);
         if (deployment is { } id)
@@ -1254,7 +1321,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
                 // A new resource that never started is removed; an update's previous instances are
                 // the platform's to keep or replace.
-                if (resource.Change == InfrastructureChange.Create)
+                if (resource.Change == ApplicationGatewayDeploymentChange.Create)
                 {
                     await _infrastructure.TeardownResourceAsync(model, manifest, cancellationToken).ConfigureAwait(false);
                     resource.MarkTornDown();
@@ -1357,7 +1424,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     private async Task RetireAsync(IApplicationModel model, CancellationToken cancellationToken)
     {
-        foreach (ApplicationResourceRecord retired in Volatile.Read(ref _retiredResources))
+        foreach (ApplicationGatewayDeploymentRecord retired in Volatile.Read(ref _retiredResources))
         {
             await _infrastructure.TeardownResourceAsync(model, new ApplicationResourceManifest(retired.Provider, retired.Name, [], [], []), cancellationToken).ConfigureAwait(false);
             ApplicationGatewayEventSource.Log.ResourceRetired(Name, retired.Provider, retired.Name);
@@ -1375,7 +1442,13 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         await _saves.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            saved = await _store.SaveAsync(CreateRecord(), cancellationToken).ConfigureAwait(false);
+            if (_savesClosed)
+            {
+                // The run ended and drained its saves while this one waited.
+                throw new ApplicationGatewayException(ApplicationGatewayErrorCode.PublicationsClosed, ErrorMessages.GatewayPublicationsClosed);
+            }
+
+            saved =await _store.SaveAsync(CreateRecord(), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -1390,7 +1463,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     private ApplicationGatewayRecord CreateRecord()
     {
-        var resources = new List<ApplicationResourceRecord>();
+        var resources = new List<ApplicationGatewayDeploymentRecord>();
         foreach (GatewayResource resource in _ordered)
         {
             if (resource.IsTornDown)
@@ -1410,8 +1483,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
                 continue;
             }
 
-            ApplicationResourceDeployment aggregate = resource.Aggregate;
-            resources.Add(new ApplicationResourceRecord(
+            ApplicationGatewayDeployment aggregate = resource.Aggregate;
+            resources.Add(new ApplicationGatewayDeploymentRecord(
                 aggregate.Manifest.Provider,
                 aggregate.Manifest.Name,
                 resource.Revision!,
@@ -1430,7 +1503,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     // platform: provider, name, dependencies, settings, and this platform's extensions.
     private static string Fingerprint(ApplicationResourceManifest manifest)
     {
-        byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, GatewayJsonContext.Default.ApplicationResourceManifest);
+        byte[] json = JsonSerializer.SerializeToUtf8Bytes(manifest, ApplicationGatewayManifestJsonContext.Default.ApplicationResourceManifest);
         return Convert.ToHexStringLower(SHA256.HashData(json));
     }
 
@@ -1477,7 +1550,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private ApplicationGatewayException Closed(GatewayResource resource)
     {
         ApplicationResourceManifest manifest = resource.Aggregate.Manifest;
-        string format = resource.Change == InfrastructureChange.Create
+        string format = resource.Change == ApplicationGatewayDeploymentChange.Create
             ? ErrorMessages.GatewayResourceTornDown
             : ErrorMessages.GatewayResourceUpdateMissed;
 
@@ -1506,6 +1579,6 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
         public IReadOnlyCollection<IApplicationGatewayDeployment> Resources => _gateway.Resources;
 
-        public IReadOnlyCollection<ApplicationManifest> Children => _gateway.Children;
+        public IReadOnlyCollection<ApplicationModelManifest> Children => _gateway.Children;
     }
 }

@@ -70,7 +70,7 @@ internal sealed class ApplicationSetComposition
         return definition;
     }
 
-    public ApplicationManifest GetManifest()
+    public ApplicationModelManifest GetManifest()
     {
         var resources = new ApplicationResourceManifest[_resources.Count];
         for (int index = 0; index < resources.Length; index++)
@@ -78,7 +78,7 @@ internal sealed class ApplicationSetComposition
             resources[index] = _resources[index].ToManifest();
         }
 
-        return new ApplicationManifest(Owner.Name, Parent, Array.AsReadOnly(resources));
+        return new ApplicationModelManifest(Owner.Name, Parent, Array.AsReadOnly(resources));
     }
 
     private static string Format(string format, params object?[] arguments)

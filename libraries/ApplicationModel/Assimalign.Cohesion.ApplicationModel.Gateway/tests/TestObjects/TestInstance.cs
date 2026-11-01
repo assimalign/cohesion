@@ -12,8 +12,8 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 /// </summary>
 internal sealed class TestInstance : IApplicationInstance, IApplicationInstanceAction
 {
-    private readonly ApplicationActionState<LogLevelSetting> _state =
-        ApplicationActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
+    private readonly ApplicationInstanceActionState<LogLevelSetting> _state =
+        ApplicationInstanceActionState<LogLevelSetting>.Create(new LogLevelSetting("Information"), _ => { });
 
     public TestInstance(ProviderName provider, ResourceName name, IReadOnlyDictionary<SettingName, string> settings, DeploymentId? deployment)
     {
@@ -49,7 +49,7 @@ internal sealed class TestInstance : IApplicationInstance, IApplicationInstanceA
 
     async ValueTask<ApplicationActionResult> IApplicationInstanceAction.ExecuteAsync(ApplicationActionContext context, CancellationToken cancellationToken)
     {
-        if (context.Operation == ApplicationActionKind.Read)
+        if (context.Operation == ApplicationActionOperation.Read)
         {
             return ApplicationActionResult.Success(_state.Value, context.Serializer);
         }

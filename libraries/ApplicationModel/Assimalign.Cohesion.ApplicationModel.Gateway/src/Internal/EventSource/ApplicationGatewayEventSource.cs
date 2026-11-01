@@ -32,7 +32,7 @@ internal sealed class ApplicationGatewayEventSource : EventSource
     }
 
     [NonEvent]
-    public void ResourcePlanned(GatewayName gateway, ApplicationResourceManifest resource, InfrastructureChange change)
+    public void ResourcePlanned(GatewayName gateway, ApplicationResourceManifest resource, ApplicationGatewayDeploymentChange change)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {
@@ -131,7 +131,7 @@ internal sealed class ApplicationGatewayEventSource : EventSource
     }
 
     [NonEvent]
-    public void ActionExecuted(GatewayName gateway, ProviderName provider, ResourceName name, ActionName action, ApplicationActionKind operation, InstanceKey instance, ApplicationActionStatus status)
+    public void ActionExecuted(GatewayName gateway, ProviderName provider, ResourceName name, ActionName action, ApplicationActionOperation operation, InstanceKey instance, ApplicationActionStatus status)
     {
         if (IsEnabled(EventLevel.Informational, EventKeywords.None))
         {

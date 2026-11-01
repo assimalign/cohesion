@@ -66,7 +66,7 @@ public sealed class WebResourceEndToEndTests
 
         // Assert
         IApplicationInstanceService service = instance.InstanceServices.ShouldHaveSingleItem();
-        service.ControlPlane.Resource.ShouldBeSameAs(instance.Resource);
+        service.ControlPlane.Instance.ShouldBeSameAs(instance.Resource);
         service.ControlPlane.Manifest.Key.ShouldBe(gateway.Manifests.ShouldHaveSingleItem().Key);
         gateway.Serving.ShouldBeSameAs(service.ControlPlane);
     }
@@ -103,7 +103,7 @@ public sealed class WebResourceEndToEndTests
             resource => resource.AddAction(new GreetingAction("hello"), GreetingJsonContext.Default));
 
         // Act
-        ApplicationActionResult result = await gateway.ExecuteAsync("greeting", ApplicationActionKind.Write, """{"text":"welcome"}""");
+        ApplicationActionResult result = await gateway.ExecuteAsync("greeting", ApplicationActionOperation.Write, """{"text":"welcome"}""");
 
         // Assert
         gateway.Manifests.ShouldHaveSingleItem().Actions.Select(static action => action.Name)
@@ -127,7 +127,7 @@ public sealed class WebResourceEndToEndTests
             beforeResource: builder => builder.Services.AddSingleton(new Greeting("from the application")));
 
         // Act
-        ApplicationActionResult result = await gateway.ExecuteAsync("greeting", ApplicationActionKind.Read);
+        ApplicationActionResult result = await gateway.ExecuteAsync("greeting", ApplicationActionOperation.Read);
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.Succeeded);
@@ -147,7 +147,7 @@ public sealed class WebResourceEndToEndTests
             resource => resource.AddAction(new GreetingAction("hello"), GreetingJsonContext.Default));
 
         // Assert
-        ApplicationActionResult result = await gateway.ExecuteAsync("greeting", ApplicationActionKind.Read);
+        ApplicationActionResult result = await gateway.ExecuteAsync("greeting", ApplicationActionOperation.Read);
         using JsonDocument output = JsonDocument.Parse(result.Output);
         output.RootElement.GetProperty("text").GetString().ShouldBe("restored");
     }
@@ -208,7 +208,7 @@ public sealed class WebResourceEndToEndTests
         await using RunningResource instance = await RunningResource.StartAsync(gateway, new WebCorsPolicy { Origins = [shop] });
 
         // Act
-        ApplicationActionResult result = await gateway.ExecuteAsync("cors", ApplicationActionKind.Read);
+        ApplicationActionResult result = await gateway.ExecuteAsync("cors", ApplicationActionOperation.Read);
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.Succeeded);
@@ -226,7 +226,7 @@ public sealed class WebResourceEndToEndTests
         (await instance.GetAllowedOriginAsync(partner)).ShouldBeNull();
 
         // Act
-        ApplicationActionResult result = await gateway.ExecuteAsync("cors", ApplicationActionKind.Write, $$"""{"origins":["{{partner}}"]}""");
+        ApplicationActionResult result = await gateway.ExecuteAsync("cors", ApplicationActionOperation.Write, $$"""{"origins":["{{partner}}"]}""");
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.Succeeded);
@@ -249,7 +249,7 @@ public sealed class WebResourceEndToEndTests
         await using RunningResource instance = await RunningResource.StartAsync(gateway, new WebCorsPolicy { Origins = [shop] });
 
         // Act
-        ApplicationActionResult result = await gateway.ExecuteAsync("cors", ApplicationActionKind.Write, policy);
+        ApplicationActionResult result = await gateway.ExecuteAsync("cors", ApplicationActionOperation.Write, policy);
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.Rejected);
@@ -298,7 +298,7 @@ public sealed class WebResourceEndToEndTests
         ApplicationActionSnapshot snapshot;
         await using (RunningResource first = await RunningResource.StartAsync(gateway, new WebCorsPolicy { Origins = [shop] }))
         {
-            ApplicationActionResult write = await gateway.ExecuteAsync("cors", ApplicationActionKind.Write, $$"""{"origins":["{{partner}}"]}""");
+            ApplicationActionResult write = await gateway.ExecuteAsync("cors", ApplicationActionOperation.Write, $$"""{"origins":["{{partner}}"]}""");
             snapshot = write.State.ShouldNotBeNull();
         }
 
@@ -336,7 +336,7 @@ public sealed class WebResourceEndToEndTests
         await using RunningResource instance = await RunningResource.StartAsync(gateway, new WebCorsPolicy { Origins = [shop] });
 
         // Act
-        ApplicationActionResult result = await gateway.ExecuteAsync("log-level", ApplicationActionKind.Read);
+        ApplicationActionResult result = await gateway.ExecuteAsync("log-level", ApplicationActionOperation.Read);
 
         // Assert
         result.Status.ShouldBe(ApplicationActionStatus.NotFound);
