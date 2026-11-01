@@ -10,6 +10,8 @@
 > seam moved here from ApplicationModel.Definition.
 > Since 2026-10-31 the provider is also the gateway's inbound channel (G39), and the gateway starts, stops,
 > and reports its run through `StartAsync`, `StopAsync`, and `Completion` (G40).
+> Since 2026-11-01 a builder can create its platform from a factory the gateway then owns, and the
+> gateway is `IAsyncDisposable` (G42).
 
 ## Purpose
 
@@ -159,8 +161,8 @@ sequenceDiagram
 
 | Type | Role |
 | --- | --- |
-| `ApplicationGateway`, `IApplicationGateway`, `IApplicationGatewayContext` | The orchestrator. Implements `IApplicationGateway` (`Context`, `Resources`, `StartAsync`, `StopAsync`, `Completion`, G40), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationGatewayParent` (`JoinAsync`, a child's join). `Context` is what the provider's channel receives: the `Model` and the gateway as `Publisher`. `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Model`, `Children`, `StartupTimeout`, and `LeaseDuration`. `CreateBuilder(name)` creates its builder; `RunAsync(ct)`, an extension member in `ApplicationGatewayExtensions`, starts it, waits for its run, and stops it on cancellation. |
-| `ApplicationGatewayBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure, which is also the inbound channel (`UseInfrastructure`, G39), the record store (`UseStore`), the parent (`UseParent`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
+| `ApplicationGateway`, `IApplicationGateway`, `IApplicationGatewayContext` | The orchestrator. Implements `IApplicationGateway` (`Context`, `Resources`, `StartAsync`, `StopAsync`, `Completion`, G40, and `DisposeAsync`, which stops the run and disposes the platform the gateway owns, G42), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationGatewayParent` (`JoinAsync`, a child's join). `Context` is what the provider's channel receives: the `Model` and the gateway as `Publisher`. `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Model`, `Children`, `StartupTimeout`, and `LeaseDuration`. `CreateBuilder(name)` creates its builder; `RunAsync(ct)`, an extension member in `ApplicationGatewayExtensions`, starts it, waits for its run, and stops it on cancellation. |
+| `ApplicationGatewayBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure, which is also the inbound channel (`UseInfrastructure`, G39), the record store (`UseStore`), the parent (`UseParent`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `UsePlatform(factory)` sets both of a platform's roles from one object the build creates and the gateway owns (G42); `Build()` builds the model and the gateway that runs it. |
 | `IApplicationGatewayParent`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
 | `IApplicationGatewayInstanceClient` | The gateway's client to an instance (formerly the root's `IApplicationInstanceClient`): how the gateway calls its instances' control planes, where each manifest says, for an action and a restore (G38). The platform's gateway half supplies it through `UseInstanceClient`; a gateway without one runs no operator action (G9). |
 | `IApplicationGatewayInfrastructureProvider` | The platform, named by `Platform`: runs the gateway's inbound channel between `StartAsync(context)` and `StopAsync` (G39), plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), watches the deployment's workload until an instance publishes and reports one that stops first (`WatchResourceAsync`, G36), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
@@ -613,7 +615,9 @@ pair of packages (ApplicationModel C5). Its gateway half gives the builder three
 - the channel its instances publish through, which since G39 is the provider itself (`StartAsync`/`StopAsync`; formerly `UseTransport`, G33);
 - the instance client the gateway calls them with (`UseInstanceClient`, G38).
 
-Gateway.InProcess's `UseInProcess(infrastructure)` sets all three from one object. The gateway
+Gateway.InProcess's `UseInProcess(infrastructure)` sets all three from one object; since G42 a
+platform's verb can instead hand the builder a factory (`UsePlatform`), and the gateway owns what it
+creates. The gateway
 therefore has no default client: one built without a client deploys and receives publications, but
 an operator's action fails with `InstanceUnavailable` and names the missing client.
 *Superseded:* the HTTP instance client this library carried on the BCL's `HttpClient` (the 2026-10-30
@@ -689,6 +693,55 @@ platform's class; everything about one resource's rollout says "Deployment".
   use other options, would have changed every revision and deployment id and redeployed every
   resource after an upgrade. The same test class pins two resources' revisions and deployment ids
   as captured at `607b27a53`.
+
+**G42 — A platform from a factory, owned by the gateway (owner, 2026-11-01).** A platform's gateway
+half is one object that is both the infrastructure and the instance client (G9), and before G42 the
+gateway program created it, handed it to `UseInfrastructure` and `UseInstanceClient`, and disposed
+it after the gateway stopped. A platform's verb could not configure it in place
+(`UseKubernetes(kubernetes => ...)`), because nothing would own what the verb created. The builder
+now takes a factory, and ownership follows the rule the repository's DI uses: what a factory
+creates is owned, an instance is borrowed.
+
+```csharp
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("shop").UseInProcess(inProcess =>
+{
+    inProcess.AddProgram("Web", "orders-api", Orders.Program.RunAsync);
+});
+builder.AddResource("Web", "orders-api");
+
+await using ApplicationGateway gateway = builder.Build();
+await gateway.RunAsync(cancellationToken);
+```
+
+- **`UsePlatform<TPlatform>(Func<TPlatform> factory)`**, on `ApplicationGatewayBuilder` and
+  `IApplicationGatewayBuilder`, where `TPlatform` is both an `IApplicationGatewayInfrastructureProvider`
+  and an `IApplicationGatewayInstanceClient`. A platform's verb (`UseInProcess(configure)`,
+  `UseKubernetes(configure)`, `UseDocker(configure)`) calls it with a lambda that runs the
+  platform's builder.
+- **The factory runs last, in `Build()`.** It runs once every other check has passed, the model's
+  rules included, so a builder that is never built, or whose build fails first, creates nothing. A
+  factory that returns `null`, or a platform that names no platform, fails the build; the build
+  disposes a platform it created before it throws. A factory that throws fails the build with its
+  own exception, and the builder stays open.
+- **Each call sets the roles it names; the last call for a role wins.** `UsePlatform` fills both
+  roles and replaces what `UseInfrastructure` and `UseInstanceClient` set earlier; either of those,
+  called later, replaces the platform in its role only. A platform that no longer fills a role is
+  never created, so `UsePlatform(...).UseInfrastructure(a).UseInstanceClient(b)` calls no factory.
+  *Rejected:* replacing the whole platform on a later `UseInstanceClient`, which would leave
+  `UseKubernetes(...).UseInstanceClient(custom)` without infrastructure, and refusing the
+  combination, which forbids a test client over a real platform.
+- **`IApplicationGateway : IAsyncDisposable`.** `DisposeAsync` stops the run through `StopAsync`,
+  so it is the stop path G40 describes, and only once the run has ended, the provider's channel
+  stopped included, disposes the owned platform: asynchronously when it implements
+  `IAsyncDisposable`, otherwise through `IDisposable`. A failed build disposes synchronously first,
+  because `Build()` is synchronous. Borrowed objects are never disposed. Disposing again, or at the
+  same time, waits for the first disposal and does nothing more.
+- **A gateway disposed before it started never runs.** Its `Completion` completes successfully, so
+  nothing waits on it forever, `StartAsync` throws `ObjectDisposedException`, and `StopAsync` has
+  nothing to stop. Disposing does not tear down what the gateway deployed (G6).
+- **The instance overloads stay.** `UseInfrastructure`, `UseInstanceClient`, and each platform's
+  instance overload (`UseInProcess(infrastructure)`) still borrow what they are given, for a
+  program or a test that shares one platform object between gateways or keeps it past the gateway.
 
 ## AOT
 

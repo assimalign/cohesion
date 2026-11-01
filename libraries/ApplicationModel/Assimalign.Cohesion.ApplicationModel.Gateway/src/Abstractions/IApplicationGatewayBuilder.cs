@@ -51,6 +51,26 @@ public interface IApplicationGatewayBuilder
     IApplicationGatewayBuilder UseInstanceClient(IApplicationGatewayInstanceClient client);
 
     /// <summary>
+    /// Sets the platform the gateway runs on, which <paramref name="factory"/> creates when the gateway
+    /// is built: it is both the infrastructure the gateway deploys onto and the instance client it
+    /// calls its instances with. The gateway owns it and disposes it when the gateway is disposed.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Build"/> calls the factory once, after everything else it checks has passed, and
+    /// disposes the platform when the build fails after that. An infrastructure and an instance client
+    /// set earlier are replaced; a later <see cref="UseInfrastructure"/> or
+    /// <see cref="UseInstanceClient"/> replaces the platform in that role only. Objects given to those
+    /// two methods are borrowed: the gateway never disposes them.
+    /// </remarks>
+    /// <typeparam name="TPlatform">The gateway half of the platform.</typeparam>
+    /// <param name="factory">Creates the platform.</param>
+    /// <returns>This builder.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">The gateway is built.</exception>
+    IApplicationGatewayBuilder UsePlatform<TPlatform>(Func<TPlatform> factory)
+        where TPlatform : IApplicationGatewayInfrastructureProvider, IApplicationGatewayInstanceClient;
+
+    /// <summary>
     /// Sets where the gateway keeps its record, so a restarted gateway reconciles against it; the
     /// record stays in memory unless set.
     /// </summary>
@@ -76,8 +96,9 @@ public interface IApplicationGatewayBuilder
     /// <returns>The gateway.</returns>
     /// <exception cref="ArgumentException">The model breaks a rule; the message names the entry.</exception>
     /// <exception cref="InvalidOperationException">
-    /// No infrastructure provider is set; the model names a parent the gateway has no connection to;
-    /// or the gateway is already built.
+    /// No infrastructure provider or platform is set; the model names a parent the gateway has no
+    /// connection to; the platform's factory returned <see langword="null"/>, or a platform that names
+    /// no platform; or the gateway is already built.
     /// </exception>
     IApplicationGateway Build();
 }

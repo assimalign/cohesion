@@ -1,9 +1,15 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
-  <!-- An in-process gateway references the resource programs it runs. -->
+  <!--
+    An in-process gateway references the resource programs it runs and names each resource on its
+    reference; the build binds the program, so the gateway's code calls no AddProgram.
+  -->
   <PropertyGroup>
     <RootNamespace>GatewayInProcessConsumer</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\GatewayWebResource\GatewayWebResource.csproj" />
+    <PackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GatewayWebResource\GatewayWebResource.csproj" CohesionResource="smoke-api" />
   </ItemGroup>
 </Project>

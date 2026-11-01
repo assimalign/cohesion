@@ -68,6 +68,12 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// write: it records the state the write left and restores it on the other instances, and later
 /// instances restore it when they publish.
 /// </para>
+/// <para>
+/// <see cref="DisposeAsync"/> stops the run, as <see cref="StopAsync"/> does, and then disposes the
+/// platform the gateway owns, the one its builder's <see cref="ApplicationGatewayBuilder.UsePlatform{TPlatform}"/>
+/// created. The infrastructure provider and instance client the builder was given are borrowed: the
+/// caller disposes them once the gateway has stopped.
+/// </para>
 /// </remarks>
 [DebuggerDisplay("{Name}")]
 [DebuggerTypeProxy(typeof(DebugView))]
@@ -89,11 +95,16 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private readonly IApplicationGatewayStore _store;
     private readonly IApplicationGatewayParent? _parent;
     private readonly IApplicationGatewayInstanceClient? _client;
+
+    // The platform the builder's factory created, which the gateway disposes; null when every role is
+    // filled by a borrowed object.
+    private readonly object? _owned;
     private readonly ApplicationGatewayContext _context;
     private readonly SemaphoreSlim _saves = new(1, 1);
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly CancellationTokenSource _run = new();
+    private readonly TaskCompletionSource _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Dictionary<GatewayName, (ApplicationModelManifest Manifest, long Renewed)> _children = [];
     private FrozenDictionary<(ProviderName Provider, ResourceName Name), GatewayResource>? _resources;
     private FrozenDictionary<ApplicationResourceOutput, string> _received = FrozenDictionary<ApplicationResourceOutput, string>.Empty;
@@ -105,6 +116,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     private int _stopRequested;
     private int _lifecycle;
     private int _ended;
+    private int _disposing;
 
     // Guarded by _saves: once the run drains its saves, no later save writes the record.
     private bool _savesClosed;
@@ -115,6 +127,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         IApplicationGatewayStore store,
         IApplicationGatewayParent? parent,
         IApplicationGatewayInstanceClient? client,
+        object? owned,
         TimeSpan startupTimeout,
         TimeSpan leaseDuration)
     {
@@ -123,6 +136,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         _store = store;
         _parent = parent;
         _client = client;
+        _owned = owned;
         _context = new ApplicationGatewayContext(model, this);
         StartupTimeout = startupTimeout;
         LeaseDuration = leaseDuration;
@@ -205,6 +219,7 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     /// the model no longer declares are torn down, and is cancelled when the run stops first.
     /// </returns>
     /// <exception cref="InvalidOperationException">The gateway has already run.</exception>
+    /// <exception cref="ObjectDisposedException">The gateway is disposed.</exception>
     /// <exception cref="ArgumentException">
     /// Through the returned task: the parent refuses this gateway's manifest. Nothing has been deployed.
     /// </exception>
@@ -227,6 +242,8 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
     {
         if (Interlocked.CompareExchange(ref _lifecycle, running, idle) != idle)
         {
+            // Disposal of a gateway that never started ends its lifecycle too.
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposing) != 0, this);
             throw new InvalidOperationException(ErrorMessages.ApplicationGatewayAlreadyRun);
         }
 
@@ -254,6 +271,58 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         RequestStop();
         await Completion.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>
+    /// Stops the gateway's run, as <see cref="StopAsync"/> does, and waits for it to end, then disposes
+    /// the platform the gateway owns.
+    /// </summary>
+    /// <remarks>
+    /// The gateway owns only the platform its builder created through
+    /// <see cref="ApplicationGatewayBuilder.UsePlatform{TPlatform}"/>; it disposes it asynchronously
+    /// when it can. Whether what the gateway deployed keeps running depends on that platform: a
+    /// platform that runs workloads apart from the gateway, such as a cluster, leaves them running,
+    /// while in-process infrastructure stops every program it runs when it is disposed. An
+    /// infrastructure provider or instance client the builder was given is borrowed and left to its
+    /// caller, and the gateway's disposal leaves its workloads as they are. A gateway disposed before it started never runs: <see cref="Completion"/>
+    /// completes, and <see cref="StartAsync"/> throws. Disposing again waits for the first disposal and
+    /// does nothing more.
+    /// </remarks>
+    /// <returns>A task that completes when the run has ended and the owned platform is disposed.</returns>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposing, 1) != 0)
+        {
+            await _disposed.Task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            return;
+        }
+
+        try
+        {
+            if (Interlocked.CompareExchange(ref _lifecycle, stopped, idle) == idle)
+            {
+                // It never ran, and now never will: its run is over before it began.
+                _completion.TrySetResult();
+            }
+            else
+            {
+                await StopAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            // Only once the run has ended, its channel included: the platform is the channel.
+            if (_owned is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            }
+            else if (_owned is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+        finally
+        {
+            _disposed.TrySetResult();
+        }
     }
 
     // Startup is the run's first phase. A caller who cancels it stops the run, as StopAsync does.

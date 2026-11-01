@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,8 +22,15 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway;
 /// and stops it on cancellation. The gateway stops by itself on a shutdown signal, such as Ctrl+C or
 /// a platform's SIGTERM.
 /// </para>
+/// <para>
+/// Disposing the gateway stops its run, as <see cref="StopAsync"/> does, then disposes the platform
+/// the gateway owns: the one its builder created through
+/// <see cref="IApplicationGatewayBuilder.UsePlatform{TPlatform}"/>. An infrastructure provider or
+/// instance client the builder was given is borrowed, and disposing the gateway leaves it to its
+/// caller.
+/// </para>
 /// </remarks>
-public interface IApplicationGateway
+public interface IApplicationGateway : IAsyncDisposable
 {
     /// <summary>
     /// Gets what the gateway hands its platform: the model it runs and the publisher its instances
@@ -45,7 +53,8 @@ public interface IApplicationGateway
     /// too; a later run of the gateway taking its record over
     /// (<see cref="ApplicationGatewayErrorCode.RecordSuperseded"/>); a failure of the loops that keep
     /// the run's registrations; or a failure of the provider's channel to stop. Before
-    /// <see cref="StartAsync"/> it has not completed.
+    /// <see cref="StartAsync"/> it has not completed, unless the gateway was disposed first: a gateway
+    /// disposed before it started never runs, and its completion succeeds.
     /// </remarks>
     Task Completion { get; }
 
@@ -60,7 +69,8 @@ public interface IApplicationGateway
     /// failure, as <see cref="Completion"/> does, and is cancelled when the run stops before startup
     /// completes.
     /// </returns>
-    /// <exception cref="System.InvalidOperationException">The gateway has already run.</exception>
+    /// <exception cref="InvalidOperationException">The gateway has already run.</exception>
+    /// <exception cref="ObjectDisposedException">The gateway is disposed.</exception>
     Task StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>

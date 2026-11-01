@@ -166,3 +166,83 @@ execution, placeholders, schema errors, and independent overload declarations. I
 every declared feature overload against the real DI seam. The shared-source regression script checks
 module isolation, recursive files, multiple modules per owner, duplicate imports, missing metadata,
 unknown owners/modules, traversal, and wildcards under Core and Visual Studio MSBuild.
+
+## In-process program bindings
+
+A gateway that runs its resources in process calls each resource program's entry point
+(ApplicationModel.Gateway.InProcess I15). A top-level program compiles to an internal `Program` with a
+private `<Main>$`, which nothing outside its assembly can name, so the binding takes two builds: the
+resource's exposes its entry point, and the gateway's registers it. Two generators in
+`src/ApplicationModel/` do that. They live in this project, not in an ApplicationModel generator
+project, because this one already reaches both compilations with no wiring of their own: Core's
+package carries it to every Cohesion package consumer, and the App targeting pack to every SDK
+consumer. An `Sdk.Web` resource gets it from both; the .NET SDK's analyzer conflict resolution
+(`ResolvePackageFileConflicts`, which takes `@(Analyzer)`) keeps one copy of the same-named
+assembly, so the generators run once.
+
+```mermaid
+flowchart LR
+    subgraph ResourceBuild["Resource executable (references Hosting.InProcess)"]
+        Bridge["InProcessEntryPoint.RunAsync (generated)"] --> Main["Entry point, such as the top-level &lt;Main&gt;$"]
+    end
+    subgraph GatewayBuild["Gateway executable (references Gateway.InProcess)"]
+        Init["Module initializer (generated)"] --> Catalog["InProcessProgramCatalog"]
+    end
+    Init --> Bridge
+```
+
+**Bridge (`InProcessProgramBridgeGenerator`).** It runs on an executable (`ConsoleApplication` or
+`WindowsApplication`) that references `Assimalign.Cohesion.ApplicationModel.Hosting.InProcess`, can
+see its `InProcessProgramAttribute`, and does not reference `Assimalign.Cohesion.ApplicationModel.Gateway`:
+a gateway is never a resource. The checks read only the output kind and the referenced assembly
+names before the compilation's entry point is bound. It emits:
+
+- a public, `[EditorBrowsable(Never)]` static class `InProcessEntryPoint` in
+  `Assimalign.Cohesion.Generated.<assembly name>`, each segment made a valid identifier. The
+  namespace comes from the assembly name, not the root namespace, so two resources whose code
+  declares the same namespace still get distinct bridges in one gateway.
+- `public static Task RunAsync(string[] args)`, which calls `Compilation.GetEntryPoint`. An entry
+  point the bridge can name (not private, in types that are not private or file-local) is called
+  directly. Otherwise an `[UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "<Main>$")]` extern
+  reaches it, typed by its declaring type, or, for a static class (which cannot be a parameter type)
+  or a file-local one (which only its own file can name), by that type's runtime name with .NET 10's
+  `[UnsafeAccessorType]`. The runtime name is built from metadata names, never display strings: a
+  display string keeps keyword escapes (`@class`), which the runtime would look for literally, and a
+  file-local type's metadata name carries its mangling. The runtime binds both without
+  reflection, so the bridge works under NativeAOT and trimming. `void`, `int`, `Task` and
+  `Task<int>` entry points, with or without `string[] args`, are supported; a nonzero exit code
+  faults the returned task with an `InvalidOperationException`.
+- `[assembly: InProcessProgram(typeof(InProcessEntryPoint), "<provider>")]`. The provider is the
+  area segment of the one referenced `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel` assembly
+  (every area's resources take the area as their provider). With none or several, the attribute
+  records no provider and the gateway's reference must supply one.
+
+**Catalog (`InProcessProgramCatalogGenerator`).** Sdk.Gateway turns each project reference with
+`CohesionResource` metadata into an additional file (the referenced project file) carrying
+`CohesionResource`, the optional `CohesionProvider`, and `CohesionResourceAssembly`, the referenced
+assembly's name, as compiler-visible metadata (Sdk.Gateway Tasks DESIGN). A reference that resolved
+no assembly, such as one with `ReferenceOutputAssembly="false"`, arrives with no assembly name. In a compilation that can
+see `InProcessProgramCatalog` (it references Gateway.InProcess), the generator finds each named
+assembly's `InProcessProgramAttribute` and emits one internal `[ModuleInitializer]` that calls
+`InProcessProgramCatalog.Register(provider, name, <bridge>.RunAsync)` per resource, so every
+binding is in place before the gateway program's first statement. `CohesionProvider` overrides the
+recorded provider. A reference is skipped, with a diagnostic, when it resolved no assembly or its
+assembly records no program, when no provider is known, or when an earlier reference (in
+assembly-name order) already bound the same provider and name. Providers are compared without
+regard to case and resource names ordinally, as `ProviderName`, `ResourceName` and the catalog
+compare them, so a pair the catalog would take for one fails the build instead of throwing in the
+gateway's module initializer. Each diagnostic is reported at the referenced project file.
+
+| Id | Severity | Meaning |
+| --- | --- | --- |
+| COHAPM0001 | Warning | A `CohesionResource` reference has no in-process program: its assembly is not an executable or does not reference ApplicationModel.Hosting.InProcess, or the gateway does not reference the assembly at all (`ReferenceOutputAssembly="false"`) |
+| COHAPM0002 | Warning | The program records no provider and the reference sets no `CohesionProvider` |
+| COHAPM0003 | Error | Two references bind the same provider (ignoring case) and resource name |
+
+The tests (`InProcessProgramGeneratorTests`) compile against stand-ins with the packages' assembly
+names and shapes. They cover each entry-point shape and accessor path, the gating cases (a library,
+an executable without the hosting package, a gateway), provider detection, colliding root
+namespaces, every diagnostic, and the provider override. They emit the generated code and run it:
+the bridges call their entry points through the accessors, and a loaded gateway assembly's module
+initializer registers a program that runs the resource's top-level statements. The Sdk.Gateway
+package-boundary test runs the whole path with packed SDKs and packages.

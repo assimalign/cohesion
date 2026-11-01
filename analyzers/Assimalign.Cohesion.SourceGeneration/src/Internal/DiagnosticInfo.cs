@@ -29,9 +29,15 @@ internal readonly struct DiagnosticInfo : IEquatable<DiagnosticInfo>
     internal static DiagnosticInfo Create(DiagnosticDescriptor descriptor, Location? location, string messageArgument)
     {
         var span = location?.GetLineSpan() ?? default;
+
+        // An external location, such as a project file named by an additional file's metadata, has
+        // no syntax tree; its path is in its line span.
+        string filePath = location?.SourceTree?.FilePath
+            ?? (location is { Kind: LocationKind.ExternalFile } ? span.Path : null)
+            ?? string.Empty;
         return new DiagnosticInfo(
             descriptor.Id,
-            location?.SourceTree?.FilePath ?? string.Empty,
+            filePath,
             location?.SourceSpan ?? default,
             span.Span,
             messageArgument);
