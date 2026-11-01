@@ -161,7 +161,48 @@ internal sealed partial class SqlSchemaProvisioner
             }
 
             LastPlan = plan;
-            SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(plan, current);
+            bool jointRewrite = RequiresJointMigration(plan);
+            // Joint preparation consumes complete target table descriptions, including
+            // reorder/key changes that have no single-statement DDL lowering. Keep the
+            // public, executable per-step generator's refusal unchanged for such plans.
+            var renderedPlan = jointRewrite ? new SqlSchemaMigrationPlan(plan.SourceHash, plan.TargetHash,
+                plan.Operations.Where(operation => operation.Kind != SqlSchemaMigrationOperationKind.AlterTable).ToArray()) : plan;
+            SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(renderedPlan, current);
+            if (jointRewrite)
+            {
+                var preparation = BeginJointPreparation(cancellationToken);
+                try
+                {
+                    script = new SqlMigrationScript(plan, script.Steps);
+                    TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
+                    var joint = await PrepareJointMigrationAsync(schema, script, preparation.Stop.Token).ConfigureAwait(false);
+                    Volatile.Write(ref _deferred, joint);
+                    transferred = true;
+                    try
+                    {
+                        JointStage?.Invoke("Handoff");
+                        if (deferDataScalingSteps && joint.JointPlan!.Touched.Any(table => _database.DataStorage.HasOwnerPages(table.ObjectId)))
+                        {
+                            PublishProgress(joint.Intent.Steps[0], joint.Intent.StepCount, running: false);
+                            TraceOutcome("Deferred");
+                            return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, 0, WasAlreadyApplied: false);
+                        }
+                    }
+                    catch (Exception failure)
+                    {
+                        // Reservation succeeded, but no execution/handoff was accepted.
+                        // Do not let the outer finally enqueue work after this failure.
+                        try { await joint.StopAsync().ConfigureAwait(false); }
+                        catch (Exception cleanup) { throw JointFailure(new AggregateException(failure, cleanup)); }
+                        if (failure is OperationCanceledException or OutOfMemoryException) { throw; }
+                        throw JointFailure(failure);
+                    }
+                    await joint.RunInlineAsync(preparation.Stop.Token).ConfigureAwait(false);
+                    TraceOutcome("Applied");
+                    return new SqlSchemaMigrationResult(plan.SourceHash, schema.Hash, plan.Operations.Count, WasAlreadyApplied: false);
+                }
+                finally { EndJointPreparation(preparation); }
+            }
             TraceStage("Prepare", SqlProvisioningCodes.StepFailed, stepCount: script.Steps.Count);
             var applied = new List<SqlMigrationScriptStep>(script.Steps.Count);
             var deferred = deferDataScalingSteps ? FindDeferredSteps(script) : [];
@@ -300,11 +341,18 @@ internal sealed partial class SqlSchemaProvisioner
             {
                 ddl?.Dispose();
                 EndTrace();
-                if (transferred)
+                if (transferred && Deferred is { } pending)
                 {
-                    _database.Engine.ScheduleProvisioning(Deferred!);
+                    try { _database.Engine.ScheduleProvisioning(pending); }
+                    catch
+                    {
+                        // A rejected enqueue still owns the reservation and apply gate.
+                        // Run its cancelled cleanup before propagating the producer failure.
+                        await pending.StopAsync().ConfigureAwait(false);
+                        throw;
+                    }
                 }
-                else
+                else if (!transferred)
                 {
                     _applyGate.Release();
                 }

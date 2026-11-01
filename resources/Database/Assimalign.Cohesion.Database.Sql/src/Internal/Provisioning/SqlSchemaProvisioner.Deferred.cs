@@ -169,8 +169,27 @@ internal sealed partial class SqlSchemaProvisioner
         }
     }
 
-    internal async Task RunDeferredAsync(SqlDeferredMigration migration, CancellationToken cancellationToken)
+    internal async Task RunDeferredAsync(SqlDeferredMigration migration, CancellationToken cancellationToken, bool propagateJointFailure = false)
     {
+        if (migration.JointPlan is not null)
+        {
+            try { await RunJointMigrationAsync(migration, cancellationToken).ConfigureAwait(false); }
+            catch (Exception) when (!propagateJointFailure)
+            {
+                // The joint boundary already recorded the coded failure, including OOM
+                // and cancellation. The engine pump must continue with another database.
+            }
+            finally
+            {
+                try { await RollbackRewriteAsync(migration.Locks).ConfigureAwait(false); }
+                finally
+                {
+                    Volatile.Write(ref _deferred, null);
+                    _applyGate.Release();
+                }
+            }
+            return;
+        }
         int index = 0;
         try
         {
@@ -266,6 +285,7 @@ internal sealed partial class SqlSchemaProvisioner
     internal async ValueTask StopDeferredAsync()
     {
         await StopRewriteAsync().ConfigureAwait(false);
+        await StopJointPreparationAsync().ConfigureAwait(false);
         if (Deferred is { } pending)
         {
             await pending.StopAsync().ConfigureAwait(false);

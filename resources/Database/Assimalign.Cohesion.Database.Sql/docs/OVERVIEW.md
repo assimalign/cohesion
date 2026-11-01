@@ -2,6 +2,10 @@
 
 SqlDatabaseSession.CopyToAsync and its negotiated SQL outbound stream export physical tables as snapshot-consistent UTF-8 text/CSV (#1724).
 
+Typed migrations containing TYPE rewrites prepare the entire target unpublished and publish
+it in one catalog commit. Failed preparation leaves the old schema online and available to
+a rolled-back application; potentially lossy reversals require destructive opt-in (#1447).
+
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
 Conservative implication also supports ON CONFLICT target-WHERE inference; EXPLAIN reports the
 selected index and proof. Unproven cases use the existing complete access paths (#1630).
@@ -25,7 +29,8 @@ aggregates use inverse transitions or monotonic queues; NULL treatment is suppor
 
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
-(#1447). This run executes inline; populated-table provisioning handoff follows in SQ-A3.
+(#1447). Typed migrations use joint unpublished preparation and one-commit publication,
+deferred on populated tables and inline for explicit ApplySchemaAsync or RunMigrationsInline.
 
 TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
@@ -83,8 +88,9 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   `ApplySchemaAsync(SqlCompiledSchema)` remains inline. Both paths use the same DDL planner and
   B2's complete catalog snapshot, typed defaults and crash convergence. Format 9 adds ordered
   pending intent to the generation-stamped applied document. An unchanged applied hash/generation
-  with no pending intent still skips in constant time. Deferred failure takes only that database
-  offline with `CS03104`, retaining intent for the next open. Inline failures retain compensation;
+  with no pending intent still skips in constant time. Decision 49a's non-TYPE deferred failure takes only that database
+  offline with `CS03104`, retaining intent for the next open. Non-TYPE inline failures retain compensation;
+  joint TYPE failure reports `CS03402`, discards its intent and keeps the old schema online.
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
 - **Bounded DDL workspace** — validation streams rows; uniqueness compares adjacent live keys

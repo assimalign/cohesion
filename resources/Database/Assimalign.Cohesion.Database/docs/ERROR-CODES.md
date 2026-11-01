@@ -244,6 +244,7 @@ structured-carrier messages remain unprefixed.
 | COHSQLP003 | CS03103 | Schema/constraints |
 | COHSQLP004 | CS03104 | Schema/constraints |
 | COHSQLP005 | CS03105 | Schema/constraints |
+| New (#1447, SQ-A3) | CS03402 | Unpublished joint migration failed; old applied schema retained, retry allowed |
 | COHSQLS001 | CS03201 | Schema/constraints |
 | COHSQLS002 | CS03202 | Schema/constraints |
 | COHSQLS003 | CS03203 | Schema/constraints |

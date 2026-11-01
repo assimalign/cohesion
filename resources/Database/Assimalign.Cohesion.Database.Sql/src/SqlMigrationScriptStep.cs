@@ -1,3 +1,4 @@
+using Assimalign.Cohesion.Database.Sql.Language;
 using Assimalign.Cohesion.Database.Sql.Schema;
 
 namespace Assimalign.Cohesion.Database.Sql;
@@ -37,4 +38,12 @@ public sealed class SqlMigrationScriptStep
 
     /// <summary>Gets the parsed compensating SQL request, when the step is reversible.</summary>
     public SqlQueryRequest? RollbackRequest { get; }
+    // Stable kind-9 identities distinguish the lowered actions of one portable change.
+    internal string Kind => Request.Statement.SqlExpression is SqlAlterTableExpression alter ? alter.Action switch
+    {
+        SqlAlterColumnTypeAction => "AlterColumnType",
+        SqlAlterSetDefaultAction => "AlterColumnDefault",
+        SqlAlterDropDefaultAction => "DropColumnDefault",
+        _ => Operation.Kind.ToString(),
+    } : Operation.Kind.ToString();
 }

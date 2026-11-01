@@ -39,20 +39,24 @@ public sealed class SqlSchemaModifierMigrationTests
         step.RollbackRequest.ShouldNotBeNull();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Migration: scale and domain rewrites remain refused")]
-    [InlineData("DECIMAL(18,2)", "DECIMAL(18,3)", true)]
-    [InlineData("email", "VARCHAR(10)", false)]
-    [InlineData("email", "other_email", false)]
-    public void Generate_CodeFirstRewrite_ShouldRefuseBeforeExecution(string previousType, string desiredType, bool numeric)
+    [Theory(DisplayName = "Cohesion Test [Database.Sql] - Migration: scale and domain rewrites render TYPE without compensation")]
+    [InlineData("DECIMAL(18,2)", "DECIMAL(18,3)", true, "DECIMAL(18, 3)")]
+    [InlineData("email", "VARCHAR(10)", false, "VARCHAR(10)")]
+    [InlineData("email", "other_email", false, "other_email")]
+    public void Generate_CodeFirstRewrite_ShouldRenderType(string previousType, string desiredType, bool numeric, string expectedType)
     {
         // Arrange
         var previous = Declare(previousType, numeric).Compile();
         var desired = Declare(desiredType, numeric).Compile();
         var plan = SqlSchemaMigrationPlanner.Plan(previous, desired);
 
-        // Act / Assert
-        Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan, previous))
-            .Message.ShouldContain("storage-type, domain, scale or default rewrite");
+        // Act
+        var script = SqlMigrationScriptGenerator.Generate(plan, previous);
+
+        // Assert
+        var step = script.Steps.ShouldHaveSingleItem();
+        step.StatementText.ShouldBe($"ALTER TABLE dbo.items ALTER COLUMN Value TYPE {expectedType};");
+        step.RollbackRequest.ShouldBeNull();
     }
 
     [Fact(DisplayName = "Cohesion Test [Database.Sql] - Migration: an unchanged engine domain permits nullability tightening")]

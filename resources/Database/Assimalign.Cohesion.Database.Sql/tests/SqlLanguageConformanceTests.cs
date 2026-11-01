@@ -10,6 +10,7 @@ using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -23,6 +24,38 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: typed TYPE publishes complete rows and retains dependent-view refusal (#1447)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplySchemaAsync_TypedTypeCorpus_ShouldUseJointPublication(bool dependentView)
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var engine = SqlDatabaseEngine.Create("typed-type-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", timeout.Token);
+        SqlCompiledSchema Declare(DatabaseType type) => new(SqlCompiledSchema.CurrentFormat, "db", false, [],
+            [new("items", "row", [new("v", type, true)], null, [], [])], []);
+        await database.ApplySchemaAsync(Declare(DatabaseType.Int32), timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await ExecuteAsync(session, "INSERT INTO items VALUES(7)");
+        if (dependentView) { await ExecuteAsync(session, "CREATE VIEW values_view AS SELECT v FROM items"); }
+
+        // Act / Assert
+        if (dependentView)
+        {
+            var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+                await database.ApplySchemaAsync(Declare(DatabaseType.Int64), timeout.Token));
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03302");
+            await ExpectRowsAsync(session, "SELECT v FROM items", [[7]]);
+        }
+        else
+        {
+            await database.ApplySchemaAsync(Declare(DatabaseType.Int64), timeout.Token);
+            await ExpectRowsAsync(session, "SELECT v FROM items", [[7L]]);
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(Declare(DatabaseType.Int64).Hash);
+        }
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: exact join search retains written output ordinals and ordering (#1629)")]
     [InlineData("a JOIN b ON a.id=b.id JOIN c ON b.id=c.id")]
     [InlineData("a CROSS JOIN b CROSS JOIN c WHERE a.id=b.id AND b.id=c.id")]

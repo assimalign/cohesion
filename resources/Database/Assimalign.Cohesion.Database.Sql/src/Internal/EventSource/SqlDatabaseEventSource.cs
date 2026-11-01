@@ -409,7 +409,7 @@ internal sealed class SqlDatabaseEventSource : EventSource
         {
             DeferredStepFailed(database.Engine.Name, database.Name.ToString(), Bound(trace.Table, maxNameLength), Bound(trace.ObjectName, maxNameLength),
                 trace.Kind, trace.Position, trace.StepCount, trace.RowsProcessed, trace.TotalRows,
-                SqlProvisioningCodes.StepFailed, failure.GetType().FullName ?? failure.GetType().Name);
+                database.Provisioning?.FailureCode ?? SqlProvisioningCodes.StepFailed, failure.GetType().FullName ?? failure.GetType().Name);
         }
     }
 

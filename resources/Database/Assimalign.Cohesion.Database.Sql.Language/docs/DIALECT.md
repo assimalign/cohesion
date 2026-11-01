@@ -1865,9 +1865,22 @@ length, while non-space overflow refuses. Each rewrite chunk
 evaluates USING, domains and CHECKs before entering the database-wide physical apply gate.
 Failed builds expose their abandoned owner through pending reclamations until its pages are freed.
 Full-definition identity-type changes retain their refusal; use explicit TYPE for integer identity conversion.
-Populated-table provisioning handoff and expanded crash/wire coverage follow in SQ-A3.
+Typed-schema plans containing a TYPE rewrite prepare their complete target unpublished, using
+the same assignment conversion/copy path, then publish every table, index, constraint and applied
+marker in one commit (#1447, SQ-A3). Build defers populated work to the provisioning worker;
+empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same joint executor inline.
+Before publication users on touched tables wait through the lock manager; other tables proceed.
+Conversion, FK, CHECK, NOT NULL, unique and domain failures discard preparation and the pending
+intent with CS03402, leaving the old schema online. There is no compensation or automatic retry.
+An old/no-target application opens the old schema after interrupted preparation; a matching new
+Build may replan it. After successful publication an older application plans a reverse migration.
+Narrowing length, precision or scale, rounding and every conversion not proven lossless require
+destructive opt-in (CS03105 before any step); exact widening can run without it. Dependent-view
+refusals, old snapshots and retryable CS04006 writers retain the single-statement contract.
+No new durable record or layout is added; SQL format 33 and compiled-schema v11 remain current.
 SQL format 27 introduced the per-column TYPE default-assignment flag in table extension 7; older files
 refuse without an upgrade reader. Compiled-schema v8 was unchanged by SQ-A.
+The current compiled-schema v11 remains unchanged by SQ-A3.
 CS02064 names a missing assignment pathway for the value, USING result or default (42804).
 Reference anchors: PostgreSQL tablecmds.c:14949-14998,15142-15199,15269-15304,15612-15624 and
 utils/adt/varchar.c:620-648 in the local clone.
@@ -4327,11 +4340,11 @@ lengths can compare equal under the index's collation.
   before either: `CAST('a' AS CHAR(3)) IN ('a ', CAST('b' AS TEXT))` returns TRUE. Common coercion
   applies no operand's declared length (`parse_coerce.c:1583-1585`); CHAR equality ignores trailing
   spaces on both sides (`varchar.c:746-776`), while TEXT equality retains them (`varlena.c:1429-1480`).
-  ALTER COLUMN validates every CHAR length change, widening included, and refuses changes that
+  Full-definition ALTER COLUMN validates every CHAR length change, widening included, and refuses changes that
   would repad existing non-null values. An unchanged length can change nullability when existing
-  values satisfy it. Empty or all-null columns can change length. Table rewrites remain deferred
-  to #1447; both rewrite refusals name the column and direct callers to an explicit table-copy
-  migration. Code-first validation on populated tables runs on the provisioning worker.
+  values satisfy it. Empty or all-null columns can change length. Explicit TYPE and typed
+  migrations repad through #1447's shared rewrite; typed plans prepare and publish jointly.
+  Code-first validation and rewrites on populated tables run on the provisioning worker.
   Branch string literals retain this dialect's TEXT identity, unlike PostgreSQL's unknown literals.
   CHARACTER VARYING is accepted as VARCHAR; bpchar and character typed-string prefixes
   remain excluded. See [Type names](#type-names-the-sqltypenames-table) and [Literals](#literals).

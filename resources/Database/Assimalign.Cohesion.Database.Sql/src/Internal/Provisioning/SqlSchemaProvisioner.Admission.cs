@@ -13,7 +13,8 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlSchemaProvisioner
 {
-    internal async ValueTask WaitForTablesAsync(SqlQueryRequest request, CancellationToken cancellationToken)
+    internal async ValueTask WaitForTablesAsync(SqlQueryRequest request, CancellationToken cancellationToken,
+        TransactionContext? transaction = null)
     {
         if (Deferred is not { } migration)
         {
@@ -62,7 +63,7 @@ internal sealed partial class SqlSchemaProvisioner
 
         // Wait before binding a plan or capturing the auto-commit snapshot. Readers
         // ordinarily need no table lock, but must not bind the old schema here.
-        var waiter = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
+        var waiter = transaction ?? await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
         try
         {
             foreach (ulong table in tables)
@@ -71,9 +72,10 @@ internal sealed partial class SqlSchemaProvisioner
                     LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
             }
         }
+        catch (TransactionDeadlockException failure) { throw SqlExecutionException.Deadlock(failure); }
         finally
         {
-            if (!_database.IsOffline)
+            if (transaction is null && !_database.IsOffline)
             {
                 await _database.Coordinator.RollbackAsync(waiter, CancellationToken.None).ConfigureAwait(false);
             }

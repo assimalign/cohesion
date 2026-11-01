@@ -32,6 +32,9 @@ internal static class SqlProvisioningCodes
     /// </summary>
     internal const string StepFailed = "CS03104";
 
+    /// <summary>Unpublished joint preparation failed; the old applied schema remains usable.</summary>
+    internal const string JointFailed = "CS03402";
+
     /// <summary>
     /// An apply refused before any step runs: its plan needs a destructive step the schema does
     /// not allow or a change the planner cannot make, or the schema would adopt a table or index it

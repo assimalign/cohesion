@@ -3307,8 +3307,8 @@ database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
 `SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
-steps are table, column, and secondary-index add/drop, plus validation-only column changes;
-operations requiring a rewrite and advanced objects (principals/grants) fail before execution rather than
+steps are table, column, and secondary-index add/drop, column changes and joint TYPE rewrites;
+advanced objects (principals/grants) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
@@ -3359,9 +3359,9 @@ DDL forces this path; a zero-step plan refreshes the marker. Verify mode reports
 without writing it. After all statements, the live catalog is checked once more against the
 declaration, so a concurrent name collision cannot be recorded as convergence. The marker is
 saved last with the generation captured before that check, which the catalog checks
-under its metadata lock. A failed or crashed multi-statement apply leaves earlier committed steps
+under its metadata lock. For plans without a TYPE rewrite, a failed or crashed multi-statement apply leaves earlier committed steps
 visible; recovery restores their counter atomically with their DDL, and the next Build plans only
-the uncommitted tail. There is no multi-statement atomicity claim.
+the uncommitted tail. That per-step path makes no multi-statement atomicity claim.
 
 The snapshot covers ordered columns, storage types and bounds, named SQL types/domains, effective
 primary-key nullability, literal DEFAULTs, composite primary keys, ordinary and unique indexes,
@@ -3370,7 +3370,7 @@ the desired spelling so the planner does not invent changes. The desired CLR row
 primary-key name are retained when the catalog's corresponding structure matches; neither is SQL
 catalog metadata. E3 domains are engine registrations made before provisioning, so registered
 declared domains are included in the snapshot even when no table exists; their planner operations
-emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain explicitly refused.
+emit no DDL. Principals/grants remain explicitly refused. TYPE plans use the joint boundary below.
 
 `table.Default(selector, value)` renders a typed C# value through the schema package's shared
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
@@ -8542,7 +8542,7 @@ leaving the durable intent publicly pending until reclamation frees its pages. T
 TYPE and the maintenance RewriteTableAsync path. The shared copier publishes the logical description,
 indexes, generation and optional script receipt in one transaction. Older snapshots retain the
 old owner; stale writers retry with CS04006. Cancellation after publication cannot undo it.
-The populated-table worker handoff and expanded crash/wire convergence coverage remain SQ-A3.
+Typed-schema worker handoff and joint crash/wire convergence are described in SQ-A3 below.
 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
@@ -8558,6 +8558,73 @@ race, and inject failure/cancellation at each preparation stage to verify owners
 TYPE crash-image tests reopen success and cancellation images under all three durability policies,
 checking complete old/new definitions, rows, unique-index seeks and abandoned-owner reclamation
 through copy checkpoints and cleanup.
+
+#### Typed TYPE migrations: unpublished preparation and joint publication (#1447, SQ-A3)
+
+Every compiled-schema apply containing a physical TYPE rewrite uses one joint executor:
+empty-table Build, RunMigrationsInline, ApplySchemaAsync and populated-table worker work.
+Other migrations retain decision 49a's per-step executor; single-statement TYPE retains SQ-A2.
+Length/precision changes that only validate stored values keep 49a's existing path unless
+another operation in the same migration requires TYPE; CHAR repadding requires a rewrite.
+The generator lowers type, default and nullability changes separately and never advertises
+a reverse TYPE statement as compensation. Same-name compiled domains are diffed through their
+effective storage facets so their referring columns cannot be skipped.
+
+Build binds only metadata and probes Storage.HasOwnerPages. Neither Build nor open scans data.
+One read-committed transaction reserves owned sequences, then every touched old table in ascending
+identity order, bounded by LockTimeout, before queueing. The closure includes both sides of old
+and final FKs, including a removed/re-pointed old parent. Worker metadata admission is fail-fast;
+all migration and user object waits use the lock manager with their actual transaction owner.
+The provisioning queue monitor never spans work or a lock wait. The code at reservation records
+the complete lock/latch order. Untouched tables remain available throughout preparation.
+
+The final table shapes, new tables and all their indexes are unpublished. Changed CHECKs and
+defaults bind against those shapes before any row is read. SQ-A1's bounded 64-row copier and
+SQ-A2's assignment conversions populate fresh owners. NOT NULL, domains, CHECKs and unique
+indexes validate while copying; incoming, outgoing and self FKs validate against the complete
+prepared state. Ad-hoc indexes survive unless their dependencies would be invalidated, which
+refuses before preparation. Views depending on changed/dropped columns retain their refusal.
+
+Publication reuses SQ-T1's snapshot gate, coordinator snapshot pin and catalog storage bracket.
+One commit writes table/index/constraint descriptions, registrations, dependent view identities,
+retirement/drop reclamation records, the applied kind-6 marker, removal of prepared kind-14
+records and deletion of the kind-9 intent. Directory allocations precede that commit. Old
+snapshots retain old owners/layouts; stale writers abort retryably with CS04006.
+
+Every failure before publication discards the kind-9 intent while leaving each unpublished
+owner's durable kind-14 record eligible for reclamation. No step is compensated, no old object
+or committed row is removed, all reservations are released and the old applied marker remains
+trusted. CS03402 reports this failure through Provisioning, Hosting health and DeferredStepFailed.
+The database remains online at its old schema; this deliberately differs from 49a's CS03104
+step failure/offline contract. It does not retry automatically. Explicit apply or a subsequent
+Build declaring the new target may try again. Late cancellation cannot reverse a publication.
+
+An underlying unsafe-storage latch (for example, a failed durable fsync) retains the kernel's
+existing fail-closed policy. Joint cleanup never clears that latch; safe reopen still resolves
+the publication boundary and discards unpublished work for an old or absent target.
+
+After a crash, recovery reclaims abandoned owners. A matching Build retains the kind-9 target
+and replans preparation from the old marker. An old/different/no-target Build or plain open
+discards the intent and opens the old schema without fencing. After publication it opens the
+new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
+length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
+before any step otherwise. The planner's conservative exact whitelist includes integer widening,
+exact integer-to-float widening, REAL to DOUBLE and non-narrowing same-type facets. All
+domain conversions require opt-in because application casts are unknown to the schema planner;
+existing metadata-only gating stays unchanged.
+
+No new durable record or serialized layout is introduced: kind 9 identifies joint jobs with
+Joint/ step kinds; kind 6 and kind 14 keep their existing encodings. SQL format 33 and compiled
+schema v11 therefore remain current. There is no new public interface, reference or wire message.
+Deterministic row-decoding counters prove zero Build visits with 1 and 1,024 stored rows.
+Crash images, counter-driven nonparallel admission stress, rollback Builds, all six data refusal
+categories, lifecycle/fault injection, old snapshots and both wire transports cover the boundary.
+Reference anchors: PostgreSQL src/backend/commands/tablecmds.c:4667-4691 takes exclusive
+rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference code is copied.
+
+| Code | Condition |
+|---|---|
+| CS03402 | Unpublished joint schema preparation failed; old schema remains online |
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
@@ -8614,7 +8681,7 @@ or the complete compact layout/index set, and abandoned/retired owners converge 
 existing reclamation worker. Interrupted preparation is abandoned; the caller retries explicitly.
 
 The shared copier accepts an internal replacement-definition function, row transform and final
-validation callback for #1447. TYPE uses these hooks; its deferred schema intent is a later run.
+validation callback for #1447. TYPE and joint typed migrations use these hooks.
 There is no second type-only copier. Physical maintenance adds no SQL syntax, wire
 message, public interface, visibility grant or project reference. The maintenance API uses a
 generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive

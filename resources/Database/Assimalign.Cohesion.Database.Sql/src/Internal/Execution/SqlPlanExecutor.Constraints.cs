@@ -1210,11 +1210,13 @@ internal sealed partial class SqlPlanExecutor
         => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
 
     private IReadOnlyList<SqlCatalogConstraint> BindConstraints(SqlCatalogTable table, IReadOnlyList<SqlConstraintDefinition> definitions,
-        SortedDictionary<ulong, SqlCatalogTable>? parents = null)
+        SortedDictionary<ulong, SqlCatalogTable>? parents = null,
+        IReadOnlyList<SqlCatalogTable>? preparedTables = null, IReadOnlyList<SqlCatalogIndex>? preparedIndexes = null)
     {
         var result = new List<SqlCatalogConstraint>();
         var names = new HashSet<string>(table.Constraints.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
-        foreach (var index in _catalog.GetIndexes(table.ObjectId))
+        foreach (var index in preparedIndexes is null ? _catalog.GetIndexes(table.ObjectId)
+            : preparedIndexes.Where(index => index.TableObjectId == table.ObjectId && !index.IsPrimaryKey))
         {
             names.Add(index.Name);
         }
@@ -1268,7 +1270,9 @@ internal sealed partial class SqlPlanExecutor
             {
                 parent = table;
             }
-            else if (!_catalog.TryGetTable(schema, referenced.TableName, out parent!))
+            else if ((parent = preparedTables?.FirstOrDefault(value => value.Schema.Equals(schema, StringComparison.OrdinalIgnoreCase) &&
+                value.Name.Equals(referenced.TableName, StringComparison.OrdinalIgnoreCase))!) is null &&
+                (preparedTables is not null || !_catalog.TryGetTable(schema, referenced.TableName, out parent!)))
             {
                 throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ForeignKeyTableMissing, schema, referenced.TableName));
             }
@@ -1297,7 +1301,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             bool unique = (self && SameConstraintColumns(parent.PrimaryKeyColumns, definition.ReferencedColumns)) ||
-                _catalog.GetIndexes(parent.ObjectId).Any(index => index.IsUnique && index.Predicate is null && SameConstraintColumns(index.ColumnNames, definition.ReferencedColumns)) ||
+                (preparedIndexes is null ? _catalog.GetIndexes(parent.ObjectId) : preparedIndexes.Where(index => index.TableObjectId == parent.ObjectId)).Any(index => index.IsUnique && index.Predicate is null && SameConstraintColumns(index.ColumnNames, definition.ReferencedColumns)) ||
                 (self && definitions.Any(d => d.Kind is SqlConstraintKind.Unique or SqlConstraintKind.PrimaryKey && SameConstraintColumns(d.Columns, definition.ReferencedColumns)));
             if (!unique)
             {

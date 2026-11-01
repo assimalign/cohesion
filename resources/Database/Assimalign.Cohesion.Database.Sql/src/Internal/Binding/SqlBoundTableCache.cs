@@ -7,6 +7,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -38,6 +39,7 @@ internal sealed class SqlBoundTableCache
     internal long StatementMemoryBudget { get; init; } = 64L * 1024 * 1024;
     private readonly SqlCatalog _catalog;
     private readonly SqlFunctionEnvironment _native;
+    private readonly SqlCompiledSchema? _appliedDeclaration;
     private readonly object _sync = new();
     private CacheState _state;
     private SqlBindingEntry<CacheState>? _pending;
@@ -58,6 +60,18 @@ internal sealed class SqlBoundTableCache
     {
         _catalog = catalog;
         _native = functions ?? SqlFunctionEnvironment.Standard;
+        if (catalog.SchemaState is { } applied)
+        {
+            try
+            {
+                var declaration = SqlCompiledSchemaSerializer.Deserialize(applied.CanonicalDocument);
+                if (declaration.Hash == applied.ContentHash) { _appliedDeclaration = declaration; }
+            }
+            catch (Exception failure) when (failure is DatabaseException or System.Text.Json.JsonException or ArgumentException)
+            {
+                // A malformed marker is never authority for an old domain definition.
+            }
+        }
         _state = Load(cancellationToken);
         PrepareDefinitions(_state, cancellationToken);
     }
@@ -454,6 +468,16 @@ internal sealed class SqlBoundTableCache
                 : null;
         if (reason is not null)
         {
+            // Compiled native domains carry no executable CHECK. Their applied
+            // declaration and persisted column facets retain the old write contract
+            // while a joint migration is unpublished (and after a failed attempt).
+            // External/SQL-defined domains still require their real registration.
+            var declared = table.Owner == DatabaseObjectOwner.Schema && _appliedDeclaration is { } applied &&
+                string.Equals(table.OwningSchema, applied.Name, StringComparison.OrdinalIgnoreCase)
+                ? applied.Types.FirstOrDefault(type => type.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) : null;
+            if (declared is not null && domain?.Check is null && declared.StorageType == column.Type.Type &&
+                declared.Precision == column.Type.Precision && declared.Scale == column.Type.Scale && column.Type.MaxLength is null)
+            { return new SqlBoundDomain(ordinal, name, null, null); }
             return new SqlBoundDomain(ordinal, name, null, new SqlUnresolvedDomain(tableName, column.Name, name, reason));
         }
 
