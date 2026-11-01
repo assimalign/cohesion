@@ -45,7 +45,10 @@ public sealed class SqlLanguageConformanceTests
         {
             var failure = await Should.ThrowAsync<DatabaseException>(async () =>
                 await database.ApplySchemaAsync(Declare(DatabaseType.Int64), timeout.Token));
-            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03302");
+            failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03105");
+            failure.InnerException!.InnerException.ShouldBeAssignableTo<DatabaseException>()!
+                .Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03302");
+            database.Provisioning!.FailureCode.ShouldBe("CS03105");
             await ExpectRowsAsync(session, "SELECT v FROM items", [[7]]);
         }
         else

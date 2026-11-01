@@ -40,6 +40,7 @@ internal sealed class SqlDeferredMigration
     internal IReadOnlySet<ulong> Tables { get; }
     internal SqlJointMigrationPlan? JointPlan { get; init; }
     internal DatabaseProvisioningProgress? JointFailureProgress { get; init; }
+    internal IDisposable? JointMetadata { get; init; }
 
     internal async Task RunInlineAsync(CancellationToken cancellationToken)
     {

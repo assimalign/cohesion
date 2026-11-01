@@ -20,6 +20,20 @@ internal sealed partial class SqlSchemaProvisioner
         {
             return;
         }
+        var created = request.Statement.SqlExpression switch
+        {
+            SqlCreateTableExpression create => create.Table,
+            SqlCreateTableAsExpression create => create.Table,
+            _ => null,
+        };
+        if (created is not null && migration.JointPlan is { } joint &&
+            joint.Tables.Any(table => table.Previous is null &&
+                table.Shape.Schema.Equals(created.SchemaName ?? SqlPlanner.DefaultSchema, System.StringComparison.OrdinalIgnoreCase) &&
+                table.Shape.Name.Equals(created.TableName, System.StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SqlCatalogException(SqlProvisioningCodes.JointNameReserved,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.JointTableNameReserved, created.TableName));
+        }
         var tables = new SortedSet<ulong>();
         string referenceSchema = request.Statement.SqlExpression switch
         {

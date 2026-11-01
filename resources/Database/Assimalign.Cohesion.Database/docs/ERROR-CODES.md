@@ -244,7 +244,9 @@ structured-carrier messages remain unprefixed.
 | COHSQLP003 | CS03103 | Schema/constraints |
 | COHSQLP004 | CS03104 | Schema/constraints |
 | COHSQLP005 | CS03105 | Schema/constraints |
-| New (#1447, SQ-A3) | CS03402 | Unpublished joint migration failed; old applied schema retained, retry allowed |
+| New (#1447, SQ-A3) | CS03402 | Joint preparation or space admission failed; old schema retained, unsafe-storage latches still apply |
+| New (#1447, SQ-A3 fix) | CS03403 | Joint publication commit unconfirmed; recovery determines old/new schema |
+| New (#1447, SQ-A3 fix) | CS03404 | Session CREATE TABLE/CTAS names an unpublished table reserved by a pending joint plan |
 | COHSQLS001 | CS03201 | Schema/constraints |
 | COHSQLS002 | CS03202 | Schema/constraints |
 | COHSQLS003 | CS03203 | Schema/constraints |

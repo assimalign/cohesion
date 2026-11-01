@@ -46,6 +46,9 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
     internal StorageCommitDurability Durability => _durability;
 
+    internal long MigrationAvailableBytes { get; set; } = long.MaxValue;
+    internal override long GetAvailableMigrationBytes(string databaseName) => MigrationAvailableBytes;
+
     internal int JournalFlushes(string databaseName)
     {
         lock (_sync) { return _live[Key(databaseName, false)].Journal.FlushCount; }

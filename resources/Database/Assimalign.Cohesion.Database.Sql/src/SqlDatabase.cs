@@ -81,6 +81,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
         }
         if (pending.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
         {
+            // SQL format 34 gates this new kind-9 meaning from earlier 49a-only readers.
             // Only the application that still declares this target may resume it.
             // Recovery reclaims abandoned kind-14 owners; matching Build replans their
             // preparation from the trusted old marker, retaining the durable intent.
@@ -192,6 +193,13 @@ public sealed partial class SqlDatabase : DatabaseInstance
         // the data set offline, whose hook ends the waits, so both paths end them.
         _storage.OnOffline = error =>
         {
+            // SQ-A3's metadata space admission cannot undo unsafe-storage failures.
+            // Journal append/drain/flush (including ENOSPC and zero-byte failures),
+            // unconfirmed commit, durable data flush, issued checkpoint header write,
+            // engine failure windows (write-back/checkpoint/WAL flush/version purge),
+            // failed-checkpoint journal limit, 49a failure and interrupted recovery
+            // retain the kernel latch. Reads and unpublished prepared-page write refusals
+            // stay online unless an independent kernel/worker latch was raised.
             _catalogStorage.TakeOffline(error);
             _coordinator.AbandonLockWaits(error);
         };
@@ -608,7 +616,9 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// imperative apply cannot add to the engine's frozen type catalog), would adopt an ad-hoc object
     /// (<c>CS03105</c>), needs a destructive step it does not allow (<c>CS03105</c>), or a step
     /// failed (<c>CS03104</c>, after the completed reversible steps were compensated), or unpublished
-    /// joint TYPE preparation failed (<c>CS03402</c>, with the old schema retained online).
+    /// joint TYPE preparation failed (<c>CS03402</c>, with the old schema retained online
+    /// unless a storage latch fired), or publication is unconfirmed (<c>CS03403</c>:
+    /// recovery determines the committed schema).
     /// </exception>
     /// <exception cref="SqlSchemaValidationException">A recorded schema document uses an unsupported format.</exception>
     /// <remarks>

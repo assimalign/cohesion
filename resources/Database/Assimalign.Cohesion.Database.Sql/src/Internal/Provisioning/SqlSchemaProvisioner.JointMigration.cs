@@ -5,6 +5,8 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
@@ -75,23 +77,36 @@ internal sealed partial class SqlSchemaProvisioner
         SqlMigrationScript script, CancellationToken cancellationToken)
     {
         var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
-        var plan = executor.PlanJointMigration(schema, script, cancellationToken);
+        SqlJointMigrationPlan plan;
+        try { plan = executor.PlanJointMigration(schema, script, cancellationToken); }
+        catch (Exception refusal) when (refusal is not (OperationCanceledException or OutOfMemoryException))
+        {
+            // Permanent metadata refusals are not transient admission contention.
+            // This is the complete data-independent planning boundary, including native
+            // binding callbacks. Lifecycle interruption retains its own exception contract.
+            // No intent or replacement owner exists yet.
+            throw PlanningRefusal(schema, script.Steps.Count, refusal);
+        }
         var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument,
             script.Steps.Select((step, index) => new SqlCatalogMigrationStep("Joint/" + step.Kind,
                 step.Operation.ParentName ?? step.Operation.ObjectName, step.Operation.ObjectName, index + 1)).ToArray(), script.Steps.Count);
         TransactionContext? locks = null;
+        IDisposable? metadata = null;
+        bool saved = false;
+        bool spaceRefused = false;
         var failed = new DatabaseProvisioningProgress("JointMigration", schema.Name, 1, intent.StepCount, false,
             failureCode: SqlProvisioningCodes.JointFailed);
         var failures = new System.Collections.Generic.List<Exception>(3);
         try
         {
-            await _catalog.SavePendingMigrationAsync(intent, cancellationToken).ConfigureAwait(false);
-            JointStage?.Invoke("IntentDurable");
+            // EnterApply excludes all session DDL here. Transfer this compatible
+            // metadata lease with the reservation; the worker must never reacquire it.
+            metadata = _database.DdlInterlock.EnterMetadata(_database.Name, definition: false);
             locks = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
             // Lock/latch order: fail-fast apply admission -> owned sequence X (ascending)
             // -> every old/touched table X (ascending) BEFORE queueing -> prepared owners X
             // -> coordinator apply gate -> tree/page latches. No queue monitor spans work.
-            // Metadata admission on the worker is fail-fast; publication takes snapshot gate
+            // Non-definition metadata admission is retained from Build; publication takes snapshot gate
             // -> coordinator snapshot pin -> catalog monitor -> catalog storage bracket.
             // No data apply gate or page/tree latch spans publication. All waiting uses this
             // one lock owner, including user admission with the user's live transaction owner.
@@ -108,22 +123,33 @@ internal sealed partial class SqlSchemaProvisioner
                 { throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog); }
             }
             if (locks.State != TransactionState.Active) { throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
+            // Count while touched writers are excluded, before even kind 9 is durable.
+            // A kept crash intent follows this exact admission again without rewriting it
+            // on a refusal. Read-only rollback and lease release make no durable changes.
+            try { AdmitJointSpace(plan); }
+            catch { spaceRefused = true; throw; }
+            await _catalog.SavePendingMigrationAsync(intent, cancellationToken).ConfigureAwait(false);
+            saved = true;
+            JointStage?.Invoke("IntentDurable");
             JointStage?.Invoke("LocksReserved");
             return new SqlDeferredMigration(this, schema, script.Steps, intent, locks,
                 plan.Touched.Select(table => table.ObjectId).ToHashSet(), cancellationToken)
-                { JointPlan = plan, JointFailureProgress = failed };
+                { JointPlan = plan, JointFailureProgress = failed, JointMetadata = metadata };
         }
         catch (Exception failure)
         {
             _database.ReportProvisioning(failed);
             failures.Add(failure);
-            try { await _catalog.DiscardJointIntentAsync(CancellationToken.None).ConfigureAwait(false); }
+            try
+            {
+                if (!spaceRefused && (saved || _catalog.PendingMigration is not null))
+                { await _catalog.DiscardJointIntentAsync(CancellationToken.None).ConfigureAwait(false); }
+            }
             catch (Exception cleanup) { failures.Add(cleanup); }
             try { await RollbackRewriteAsync(locks).ConfigureAwait(false); }
             catch (Exception cleanup) { failures.Add(cleanup); }
+            finally { metadata?.Dispose(); }
             Exception cause = failures.Count == 1 ? failure : new AggregateException(failures);
-            if (ReferenceEquals(cause, failure) && failure is TransactionLockTimeoutException) { throw SqlTimeoutException.Lock(failure, null); }
-            if (ReferenceEquals(cause, failure) && failure is TransactionDeadlockException deadlock) { throw SqlExecutionException.Deadlock(deadlock); }
             var coded = JointFailure(cause);
             EnsureFailureTrace(schema);
             TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: intent.StepCount);
@@ -142,7 +168,6 @@ internal sealed partial class SqlSchemaProvisioner
         {
             cancellationToken.ThrowIfCancellationRequested();
             epoch = _database.TableReclamation.EnterStatement();
-            using var metadata = _database.DdlInterlock.EnterMetadata(_database.Name, definition: false);
             BeginDeferredTrace(migration, 0);
             PublishProgress(migration.Intent.Steps[0], migration.Intent.StepCount, running: true, 0);
             var statement = new SqlStatementContext(migration.Locks, _database.Coordinator, migration.Schema.Name,
@@ -170,6 +195,18 @@ internal sealed partial class SqlSchemaProvisioner
         }
         catch (Exception failure)
         {
+            if (IsJointUnconfirmed(failure))
+            {
+                // Publication may already be durable. Leave trees and intent to recovery;
+                // neither discard nor reclamation may decide the commit's outcome here.
+                _database.ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", migration.Schema.Name,
+                    1, migration.Intent.StepCount, false, failureCode: SqlProvisioningCodes.JointUnconfirmed));
+                var unconfirmed = CodedMigrationFailure(SqlProvisioningCodes.JointUnconfirmed,
+                    ErrorMessages.JointPublicationUnconfirmed, failure);
+                FailDeferredTrace(migration, 0, unconfirmed);
+                EndDeferredTrace(migration, 0, "Unconfirmed");
+                throw unconfirmed;
+            }
             // No compensation: published objects and committed rows were never changed.
             // Remove the intent; retry/next Build replans from the old applied marker.
             _database.ReportProvisioning(failed);
@@ -191,8 +228,69 @@ internal sealed partial class SqlSchemaProvisioner
 
     private static SqlSchemaMigrationException JointFailure(Exception failure)
     {
-        string message = ErrorMessages.JointMigrationFailed;
-        return new SqlSchemaMigrationException(message, new DatabaseException(message,
-            [new Diagnostic { Code = SqlProvisioningCodes.JointFailed, Message = message, Severity = DiagnosticSeverity.Error }], failure));
+        // Preserve space admission's byte counts in the caller-visible report.
+        if (failure is SqlSchemaMigrationException migration && migration.Diagnostics.Any(diagnostic => diagnostic.Code == SqlProvisioningCodes.JointFailed))
+        { return migration; }
+        return CodedMigrationFailure(SqlProvisioningCodes.JointFailed, ErrorMessages.JointMigrationFailed, failure);
+    }
+
+    private SqlSchemaMigrationException PlanningRefusal(SqlCompiledSchema schema, int steps, Exception refusal, string? message = null)
+    {
+        message ??= string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.JointPlanningRefused, refusal.Message);
+        _database.ReportProvisioning(new DatabaseProvisioningProgress("Planning", schema.Name, 1, Math.Max(1, steps),
+            false, failureCode: SqlProvisioningCodes.PolicyRefused));
+        TraceStage("Planning", SqlProvisioningCodes.PolicyRefused, stepCount: steps);
+        return CodedMigrationFailure(SqlProvisioningCodes.PolicyRefused, message, refusal);
+    }
+
+    private static SqlSchemaMigrationException CodedMigrationFailure(string code, string message, Exception? cause = null)
+        => new(message, new DatabaseException(message,
+            [new Diagnostic { Code = code, Message = message, Severity = DiagnosticSeverity.Error }], cause));
+
+    internal static bool IsJointUnconfirmed(Exception failure)
+        => failure is DatabaseException coded && coded.Diagnostics.Any(diagnostic => diagnostic.Code == SqlProvisioningCodes.JointUnconfirmed) ||
+            failure is AggregateException aggregate && aggregate.InnerExceptions.Any(IsJointUnconfirmed) ||
+            failure.InnerException is { } inner && IsJointUnconfirmed(inner);
+
+    internal static bool IsCommitUnconfirmed(Exception failure)
+        => failure is StorageOfflineException { CommitRecordWritten: true } or TransactionCommitUnconfirmedException or DatabaseTransactionCommitUnconfirmedException ||
+            failure is AggregateException aggregate && aggregate.InnerExceptions.Any(IsCommitUnconfirmed) ||
+            failure.InnerException is { } inner && IsCommitUnconfirmed(inner);
+
+    private void AdmitJointSpace(SqlJointMigrationPlan plan)
+    {
+        // The public owner directory snapshots data-page ids, not index-page counts.
+        // O(P) metadata and allocation for P touched heap pages; never load a page or row.
+        // A bounds all allocated data-file pages (including indexes/retained owners),
+        // conservatively bounding the touched owners without widening Storage's API.
+        long heapPages = 0, treePages = 0;
+        checked
+        {
+            foreach (var table in plan.Touched)
+            { heapPages += _database.DataStorage.GetOwnerPages(table.ObjectId).Count; }
+            foreach (var table in plan.Tables)
+            {
+                long pages = table.Previous is null ? 0 : _database.DataStorage.GetOwnerPages(table.Previous.ObjectId).Count;
+                treePages += Math.Max(1, 2 * pages) * table.Indexes.Length;
+            }
+            // Sample free first, then the monotonic high-water count. Concurrent DML
+            // on untouched owners cannot make this underestimate the reserved owners.
+            long free = _database.DataStorage.PageManager.FreePageCount;
+            long allocated = Math.Max(heapPages, _database.DataStorage.PageManager.PageCount - free);
+            long replacement = (2 * allocated + treePages + plan.Tables.Length) * Page.Size;
+            // Two owner-sized allowances retain old snapshots and permit replacement.
+            // Journal headroom covers before/after page images plus frame/commit overhead;
+            // a 25% margin and 16 MiB catalog reserve cover small jobs and metadata growth.
+            long journal = Math.Max(64L * 1024 * 1024, 2 * replacement);
+            long need = replacement + journal;
+            need += (need + 3) / 4 + 16L * 1024 * 1024;
+            long available = _database.Engine.GetAvailableMigrationBytes(_database.Name);
+            if (available < need)
+            {
+                string message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    ErrorMessages.JointSpaceInsufficient, need, available);
+                throw CodedMigrationFailure(SqlProvisioningCodes.JointFailed, message);
+            }
+        }
     }
 }

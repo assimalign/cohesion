@@ -167,6 +167,7 @@ internal sealed partial class SqlPlanExecutor
         foreach (var index in oldIndexes)
         { if (_indexManager.TryGetIndex(index.TableObjectId, index.Name, out var tree)) { retiredIndexes.Add(index, tree); } }
         bool published = false;
+        bool unconfirmed = false;
         var failures = new List<Exception>(3);
         try
         {
@@ -251,9 +252,16 @@ internal sealed partial class SqlPlanExecutor
             {
                 marker = await statement.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
                 stage("Publishing");
-                await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions),
-                    retiredIndexes, false, marker.Sequence, string.Empty, null, cancellationToken, definitionChange: true,
-                    appliedSchema: new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, 0), dropped: plan.Dropped).ConfigureAwait(false);
+                try
+                {
+                    await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions),
+                        retiredIndexes, false, marker.Sequence, string.Empty, null, cancellationToken, definitionChange: true,
+                        appliedSchema: new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, 0), dropped: plan.Dropped).ConfigureAwait(false);
+                }
+                catch (Exception failure) when (SqlSchemaProvisioner.IsCommitUnconfirmed(failure))
+                {
+                    throw new SqlCatalogException(SqlProvisioningCodes.JointUnconfirmed, ErrorMessages.JointPublicationUnconfirmed, failure);
+                }
                 published = true;
                 statement.Metrics.RecordSelfCommit();
             }
@@ -273,6 +281,7 @@ internal sealed partial class SqlPlanExecutor
         }
         catch (Exception failure)
         {
+            unconfirmed = SqlSchemaProvisioner.IsJointUnconfirmed(failure);
             failures.Add(failure);
             throw;
         }
@@ -281,9 +290,9 @@ internal sealed partial class SqlPlanExecutor
             // Keep the original preparation error if either mandatory cleanup fails.
             // Capacity was reserved before work; abandonment itself allocates nothing.
             int before = failures.Count;
-            try { await RemoveDroppedIndexesAsync(statement, published ? oldIndexes : created, cancellationToken: CancellationToken.None).ConfigureAwait(false); }
+            try { if (!unconfirmed) { await RemoveDroppedIndexesAsync(statement, published ? oldIndexes : created, cancellationToken: CancellationToken.None).ConfigureAwait(false); } }
             catch (Exception cleanup) { failures.Add(cleanup); }
-            if (!published)
+            if (!published && !unconfirmed)
             {
                 try { await _catalog.DiscardJointIntentAsync(CancellationToken.None, prepared).ConfigureAwait(false); }
                 catch (Exception cleanup) { failures.Add(cleanup); }

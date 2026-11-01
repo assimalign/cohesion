@@ -1295,6 +1295,9 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
         }
         // Any medium exception can leave a partial frame, so even an unexpected provider
         // exception must fence subsequent writes before releasing the medium lock.
+        // This includes full-disk and zero-byte write failures: a provider exception
+        // does not prove the medium unchanged. SQL joint-migration space admission runs
+        // before its intent save; it deliberately does not weaken this latch (#1447).
         catch (Exception exception) when (!disposing || exception is not ObjectDisposedException)
         {
             // Keep the detached bytes readable after a partial write. Latch before another

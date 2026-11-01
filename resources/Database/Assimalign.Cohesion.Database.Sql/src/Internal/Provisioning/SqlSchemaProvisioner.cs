@@ -128,6 +128,7 @@ internal sealed partial class SqlSchemaProvisioner
         TransactionContext? locks = null;
         IDisposable? ddl = null;
         bool transferred = false;
+        bool planning = true;
         try
         {
             ddl = _database.DdlInterlock.EnterApply(schema.Name);
@@ -167,7 +168,14 @@ internal sealed partial class SqlSchemaProvisioner
             // public, executable per-step generator's refusal unchanged for such plans.
             var renderedPlan = jointRewrite ? new SqlSchemaMigrationPlan(plan.SourceHash, plan.TargetHash,
                 plan.Operations.Where(operation => operation.Kind != SqlSchemaMigrationOperationKind.AlterTable).ToArray()) : plan;
-            SqlMigrationScript script = SqlMigrationScriptGenerator.Generate(renderedPlan, current);
+            SqlMigrationScript script;
+            try
+            {
+                script = jointRewrite ? SqlMigrationScriptGenerator.GenerateJoint(renderedPlan, current)
+                    : SqlMigrationScriptGenerator.Generate(renderedPlan, current);
+            }
+            catch (DatabaseException refusal) { throw PlanningRefusal(schema, renderedPlan.Operations.Count, refusal); }
+            planning = false;
             if (jointRewrite)
             {
                 var preparation = BeginJointPreparation(cancellationToken);
@@ -322,6 +330,16 @@ internal sealed partial class SqlSchemaProvisioner
                 schema.Hash,
                 plan.Operations.Count,
                 WasAlreadyApplied: false);
+        }
+        catch (SqlSchemaMigrationException refusal) when (planning && refusal.Diagnostics.Count == 0)
+        {
+            // Preserve the base's policy message while making its identity available
+            // through the structured diagnostic and Provisioning too. Execution and
+            // 49a compensation failures have already left this planning boundary.
+            var coded = PlanningRefusal(schema, 0, refusal, refusal.Message);
+            EnsureFailureTrace(schema);
+            TraceFailure(coded);
+            throw coded;
         }
         catch (Exception failure) when (CaptureTraceFailure(schema, failure))
         {

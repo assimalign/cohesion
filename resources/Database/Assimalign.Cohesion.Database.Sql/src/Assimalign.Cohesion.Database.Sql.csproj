@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Database.Sql</RootNamespace>
+		<!-- Source-generated Win32 volume-space interop pins the UTF-16 directory. -->
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	</PropertyGroup>
 	<ItemGroup>
         <CohesionProjectReference Include="Assimalign.Cohesion.Database.Sql.Protocol" />

@@ -93,6 +93,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     private readonly SqlProvisioningWorker _provisioningWorker;
     private readonly int _bufferPoolPages;
     private readonly SqlStorageStrategy _strategy;
+
+    internal long GetAvailableMigrationBytes(string databaseName) => _strategy.GetAvailableMigrationBytes(databaseName);
     private readonly SqlQueryParserOptions _parserOptions;
 
     private SqlStorage[] _storageSnapshot = [];

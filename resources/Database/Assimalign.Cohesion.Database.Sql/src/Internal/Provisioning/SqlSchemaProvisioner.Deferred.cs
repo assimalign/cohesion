@@ -184,6 +184,7 @@ internal sealed partial class SqlSchemaProvisioner
                 try { await RollbackRewriteAsync(migration.Locks).ConfigureAwait(false); }
                 finally
                 {
+                    migration.JointMetadata?.Dispose();
                     Volatile.Write(ref _deferred, null);
                     _applyGate.Release();
                 }

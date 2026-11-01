@@ -46,7 +46,7 @@ public sealed class SqlDirectedIndexDurabilityTests
         await using var reader = await recovered.CreateSessionAsync(timeout.Token);
 
         // Assert
-        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(33);
+        recovered.Catalog.RecordSpaceFormatVersion.ShouldBe(34);
         recovered.Catalog.TryGetTable("dbo", "t", out var table).ShouldBeTrue();
         recovered.Catalog.TryGetIndex(table.ObjectId, "ix", out var index).ShouldBe(stage == 2);
         if (stage == 2)
@@ -81,7 +81,7 @@ public sealed class SqlDirectedIndexDurabilityTests
 
         // Assert
         failure.Diagnostics.ShouldContain(d => d.Code == "CS06041");
-        failure.Message.ShouldContain("supports only format 33", Case.Sensitive);
+        failure.Message.ShouldContain("supports only format 34", Case.Sensitive);
     }
 
     private static SqlDatabaseEngineBuilder Builder(CrashCaptureSqlStorageStrategy storage)

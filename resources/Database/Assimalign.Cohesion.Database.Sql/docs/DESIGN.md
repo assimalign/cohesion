@@ -243,7 +243,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 33 refuses all earlier files before data recovery;
+extension 3. Current catalog/record-space format 34 refuses all earlier files before data recovery;
 compiled-schema v11 adds CompiledSchemaIndex.Predicate and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -4616,7 +4616,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 33 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 34 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -8547,7 +8547,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 33); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 34); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8564,19 +8564,58 @@ through copy checkpoints and cleanup.
 Every compiled-schema apply containing a physical TYPE rewrite uses one joint executor:
 empty-table Build, RunMigrationsInline, ApplySchemaAsync and populated-table worker work.
 Other migrations retain decision 49a's per-step executor; single-statement TYPE retains SQ-A2.
-Length/precision changes that only validate stored values keep 49a's existing path unless
-another operation in the same migration requires TYPE; CHAR repadding requires a rewrite.
+Precision and widening length changes keep 49a's existing path unless another operation in
+the migration requires TYPE. Every VARCHAR narrowing can trim assignment values and uses
+TYPE, even if the current values already fit; CHAR width changes also require a rewrite.
+This classification reads metadata only. Without a TYPE rewrite anywhere in the plan, a
+changed default retains the base generator's CS03105 refusal before intent save. A joint
+plan carries every final default, including changes to columns with no TYPE change.
 The generator lowers type, default and nullability changes separately and never advertises
 a reverse TYPE statement as compensation. Same-name compiled domains are diffed through their
 effective storage facets so their referring columns cannot be skipped.
 
-Build binds only metadata and probes Storage.HasOwnerPages. Neither Build nor open scans data.
+Deferred Build binds metadata and probes Storage.HasOwnerPages; space admission snapshots
+owner-page allocation metadata without decoding rows. Open does not scan data for joint
+provisioning. Empty-table work runs inline. RunMigrationsInline and a declaration containing
+any script force the typed migration inline too: such a populated Build copies rows synchronously.
 One read-committed transaction reserves owned sequences, then every touched old table in ascending
 identity order, bounded by LockTimeout, before queueing. The closure includes both sides of old
-and final FKs, including a removed/re-pointed old parent. Worker metadata admission is fail-fast;
+and final FKs, including a removed/re-pointed old parent. Build takes the non-definition metadata
+lease while EnterApply excludes session DDL, then transfers it with the table reservation;
 all migration and user object waits use the lock manager with their actual transaction owner.
 The provisioning queue monitor never spans work or a lock wait. The code at reservation records
-the complete lock/latch order. Untouched tables remain available throughout preparation.
+the complete lock/latch order. DML on untouched tables remains available throughout preparation.
+Definition DDL (views, functions, domains and schemas) is refused database-wide while the
+joint lease is held. Session CREATE TABLE and CTAS cannot claim an unpublished target name
+(CS03404, case-insensitive schema/name matching); no second catalog publication path is added.
+Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 through both the thrown
+diagnostic and Provisioning before an intent is saved. A reservation timeout uses CS03402 in
+both places, retaining its lock-manager cause rather than throwing an unrelated timeout code.
+
+Before saving even the kind-9 intent, the reserved plan performs space admission against the
+database volume's available bytes.
+Windows queries the actual directory through source-generated GetDiskFreeSpaceExW interop,
+including mounted volumes and UNC shares; its generated UTF-16 pinning requires the SQL
+project's AllowUnsafeBlocks setting. Unix queries DriveInfo for that directory. No public
+storage API or project reference is added. Let P be the sum of touched heap pages,
+A = max(P, data-file PageCount - FreePageCount), and
+T = sum(max(1, 2 * previous heap pages) * final index count) over prepared tables.
+A deliberately bounds all allocated pages, including touched indexes and retained owners:
+Storage exposes heap-page snapshots but no per-owner index count, and this pass adds no
+public bridge. This may overestimate a migration in a database with large untouched objects.
+For page size B, R = (2*A + T + prepared table count)*B, journal headroom
+J = max(64 MiB, 2*R), and admission requires R + J + ceil((R+J)/4) + 16 MiB free.
+The doubled owners cover replacement while old owners await publication and snapshot release;
+the additional tree allowance, before/after journal image headroom, 25% margin and 16 MiB
+catalog reserve avoid consuming the volume to its limit. P and T use GetOwnerPages snapshots:
+O(allocated heap pages) metadata work/allocation per table, with zero data-page reads or row
+decodes; A is constant time and samples free count before the monotonic high-water count,
+so unrelated DML cannot undercount the reserved owners. Memory strategies report no volume limit. A kept Joint/ intent
+repeats admission when matching Build replans it after crash/offline recovery. CS03402 names
+bytes needed and available, makes no migration durable write, releases admission/locks and
+leaves any pre-existing intent unchanged. Available space is an admission estimate, not a
+volume reservation: other databases/processes or expansion by application casts can still
+exhaust it after admission. The storage fail-stop exception below remains necessary.
 
 The final table shapes, new tables and all their indexes are unpublished. Changed CHECKs and
 defaults bind against those shapes before any row is read. SQ-A1's bounded 64-row copier and
@@ -8599,9 +8638,24 @@ The database remains online at its old schema; this deliberately differs from 49
 step failure/offline contract. It does not retry automatically. Explicit apply or a subsequent
 Build declaring the new target may try again. Late cancellation cannot reverse a publication.
 
-An underlying unsafe-storage latch (for example, a failed durable fsync) retains the kernel's
-existing fail-closed policy. Joint cleanup never clears that latch; safe reopen still resolves
-the publication boundary and discards unpublished work for an old or absent target.
+Read errors, conversion/constraint failures, cancellation and prepared data-page write errors
+stay online when no independent kernel/worker latch fired. Storage policy is unchanged:
+unsafe journal append/frame/drain/flush failures (including ENOSPC, zero-byte failure and any
+possibly partial write), an unconfirmed commit/durability wait (JournalFlush), failed durable
+data-file flushes (DataFlush), and failures after issuing a checkpoint header-slot write
+(HeaderWrite) take the file sets offline. Engine-wide failure windows for page write-back,
+checkpoints, write-ahead flushing and version purge retain PageWriteBackFailures,
+CheckpointFailures, WriteAheadFlushFailures and VersionPurgeFailures. A second consecutive
+failed checkpoint at the journal size cap retains JournalSizeLimit. 49a step failure still
+uses ProvisioningFailure; interrupted open-time recovery still uses RecoveryInterrupted.
+These are the existing StorageOfflineCause conditions; the joint path never requests
+ProvisioningFailure. This is the explicit availability exception: an unknown WAL/commit outcome
+cannot be safely retried online (PostgreSQL src/backend/access/transam/xlog.c:2525-2532
+raises PANIC on WAL write failure). Admission reduces predictable space failures; it does
+not clear or weaken a latch. Other corruption/recovery fences retain their existing policy.
+An unconfirmed joint publication reports CS03403 and an unknown old/new outcome, through
+Provisioning and the thrown diagnostic. It leaves all new trees and directory records in
+place; recovery alone decides the schema. Joint cleanup never turns it into "schema unchanged".
 
 After a crash, recovery reclaims abandoned owners. A matching Build retains the kind-9 target
 and replans preparation from the old marker. An old/different/no-target Build or plain open
@@ -8613,9 +8667,10 @@ exact integer-to-float widening, REAL to DOUBLE and non-narrowing same-type face
 domain conversions require opt-in because application casts are unknown to the schema planner;
 existing metadata-only gating stays unchanged.
 
-No new durable record or serialized layout is introduced: kind 9 identifies joint jobs with
-Joint/ step kinds; kind 6 and kind 14 keep their existing encodings. SQL format 33 and compiled
-schema v11 therefore remain current. There is no new public interface, reference or wire message.
+Kind 9 identifies joint jobs with Joint/ step kinds; kind 6 and kind 14 keep their encodings.
+The changed kind-9 meaning requires SQL catalog/record-space format 34 (#1152): every earlier
+format, including 33, is refused by the existing read-only gate, with no upgrade reader.
+Compiled-schema v11 stays current. There is no new public interface, reference or wire message.
 Deterministic row-decoding counters prove zero Build visits with 1 and 1,024 stored rows.
 Crash images, counter-driven nonparallel admission stress, rollback Builds, all six data refusal
 categories, lifecycle/fault injection, old snapshots and both wire transports cover the boundary.
@@ -8624,7 +8679,10 @@ rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference cod
 
 | Code | Condition |
 |---|---|
-| CS03402 | Unpublished joint schema preparation failed; old schema remains online |
+| CS03105 | Permanent metadata/planning refusal before intent save |
+| CS03402 | Joint preparation/space admission failed; old schema retained unless a storage latch fired |
+| CS03403 | Joint publication commit unconfirmed; reopen/recovery decides old or new |
+| CS03404 | Session CREATE TABLE/CTAS names a table reserved by a pending joint plan |
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
@@ -8797,7 +8855,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 33 requires the complete table extension 8 record,
+after the existing constraints. Current format 34 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -8875,7 +8933,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 33 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 34 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).

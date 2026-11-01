@@ -30,7 +30,8 @@ aggregates use inverse transitions or monotonic queues; NULL treatment is suppor
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
 (#1447). Typed migrations use joint unpublished preparation and one-commit publication,
-deferred on populated tables and inline for explicit ApplySchemaAsync or RunMigrationsInline.
+deferred on populated tables and inline for explicit ApplySchemaAsync, RunMigrationsInline or
+a declaration containing any script. VARCHAR narrowing also uses this assignment rewrite.
 
 TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
@@ -90,7 +91,13 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   pending intent to the generation-stamped applied document. An unchanged applied hash/generation
   with no pending intent still skips in constant time. Decision 49a's non-TYPE deferred failure takes only that database
   offline with `CS03104`, retaining intent for the next open. Non-TYPE inline failures retain compensation;
-  joint TYPE failure reports `CS03402`, discards its intent and keeps the old schema online.
+  joint TYPE preparation failure reports `CS03402`, discards its intent and keeps the old schema
+  online unless an unsafe-storage latch fired. Metadata space admission precedes intent save;
+  a small volume refuses with needed/available bytes and leaves any kept crash intent unchanged.
+  Unconfirmed publication uses `CS03403`; recovery decides old/new and retains the new trees.
+  Definition DDL is excluded database-wide during joint work; DML on untouched tables proceeds.
+  Pending new-table names are reserved (`CS03404`). A default change without a TYPE rewrite
+  retains the base `CS03105` refusal before any intent or inline change.
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
 - **Bounded DDL workspace** — validation streams rows; uniqueness compares adjacent live keys
@@ -160,7 +167,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 33). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 34). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
