@@ -89,11 +89,15 @@ adds to the consumer.
 
   `CohesionProvider="Web"` on the reference overrides the provider the resource's build
   recorded. `CohesionAddInProcessResources` in `Targets/Sdk.Gateway.targets` runs after
-  `ResolveAssemblyReferences` and before `GenerateMSBuildEditorConfigFileShouldRun`. It turns
-  each resolved `ReferencePath` that carries `CohesionResource` into an `AdditionalFiles` item
-  (the referenced project file, so an analyzer that reads additional files never reads an
-  assembly) with `CohesionResource`, `CohesionProvider` and `CohesionResourceAssembly` (the
-  reference's file name), and the SDK declares the three as `CompilerVisibleItemMetadata`. The
+  `ResolveProjectReferences` and `ResolveAssemblyReferences` and before
+  `GenerateMSBuildEditorConfigFileShouldRun`. It turns each resolved `ReferencePath` that carries
+  `CohesionResource` into an `AdditionalFiles` item (the referenced project file, so an analyzer
+  that reads additional files never reads an assembly) with `CohesionResource`,
+  `CohesionProvider` and `CohesionResourceAssembly` (the reference's file name), and the SDK
+  declares the three as `CompilerVisibleItemMetadata`. A `ProjectReference` that carries
+  `CohesionResource` but resolved no `ReferencePath`, as with `ReferenceOutputAssembly="false"`,
+  is handed over too, with no assembly name, so the generator reports it (COHAPM0001) at build
+  time instead of the gateway failing to find the program when it runs. The
   Cohesion source generator, which reaches the gateway through the Core package, reads them when
   the gateway references `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` and emits a
   module initializer that registers each program in `InProcessProgramCatalog`, so a bare
@@ -119,7 +123,10 @@ top-level `Sdk.Web` resource (`TestProjects/GatewayWebResource`, which calls
 `CohesionResource="smoke-api"`, and builds its gateway with a bare `UseInProcess()`. The test
 asserts the build passes without NETSDK1151 or a `COHAPM` diagnostic, and that the built gateway
 starts the resource in its own process, reads its endpoint output, gets the resource's answer
-over HTTP, then stops and disposes with exit code 0. It needs the App and App.Web packs for the
+over HTTP, then stops and disposes with exit code 0. A third consumer
+(`TestProjects/GatewayUnloadedResourceConsumer`) names the same resource on a reference with
+`ReferenceOutputAssembly="false"`; the test asserts its build reports COHAPM0001 at the resource's
+project file. They need the App and App.Web packs for the
 host RID, the Core package (which carries the generator), and the ApplicationModel packages,
 Hosting.InProcess and Gateway.InProcess included, in the feed.
 `.github/workflows/sdk-smoke.yml` packs the closure and the frameworks and runs both on each

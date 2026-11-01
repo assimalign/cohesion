@@ -1,0 +1,15 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <!--
+    Names a resource on a reference whose assembly the gateway does not load. An in-process gateway
+    cannot run that program, so the build reports the reference instead of the run failing.
+  -->
+  <PropertyGroup>
+    <RootNamespace>GatewayUnloadedResourceConsumer</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GatewayWebResource\GatewayWebResource.csproj" CohesionResource="smoke-api" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>

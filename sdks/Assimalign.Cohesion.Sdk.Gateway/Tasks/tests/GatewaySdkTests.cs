@@ -90,4 +90,26 @@ public sealed class GatewaySdkTests
         process.ExitCode.ShouldBe(0, $"{output}{Environment.NewLine}{error}");
         output.ShouldContain("gateway=smoke;resource=smoke-api;instances=1;answer=smoke-api answered", Case.Sensitive);
     }
+
+    /// <summary>
+    /// A reference with <c>ReferenceOutputAssembly="false"</c> resolves no assembly, so the gateway
+    /// could never run the program it names. The build still hands the reference to the generator,
+    /// which reports it at the referenced project instead of the run failing to find the program.
+    /// </summary>
+    /// <returns>A task representing the build.</returns>
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - Build: a resource reference whose assembly the gateway does not load is reported")]
+    public async Task Build_ResourceReferenceWithoutOutputAssembly_ShouldReportItAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("GatewayUnloadedResourceConsumer", "GatewayWebResource");
+
+        // Act
+        DotNetBuildResult build = await workspace.BuildAsync("GatewayUnloadedResourceConsumer", timeout.Token);
+
+        // Assert
+        build.ExitCode.ShouldBe(0, build.Output);
+        build.Output.ShouldContain("GatewayWebResource.csproj(1,1): warning COHAPM0001", Case.Sensitive);
+        build.Output.ShouldContain("ReferenceOutputAssembly", Case.Sensitive);
+    }
 }

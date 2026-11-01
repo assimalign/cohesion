@@ -18,6 +18,10 @@
 		naming a text file keeps other analyzers that read additional files from reading an assembly.
 		It runs after the references resolve and before the compiler's analyzer configuration is
 		written, which is where the metadata reaches the generator.
+
+		A reference that carries CohesionResource but resolved no assembly, such as one with
+		ReferenceOutputAssembly="false", is handed over too, with no assembly name, so the generator
+		reports it (COHAPM0001) instead of the gateway failing to find the program when it runs.
 	-->
 	<ItemGroup>
 		<CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="CohesionResource" />
@@ -26,19 +30,27 @@
 	</ItemGroup>
 
 	<Target Name="CohesionAddInProcessResources"
-			DependsOnTargets="ResolveAssemblyReferences"
+			DependsOnTargets="ResolveProjectReferences;ResolveAssemblyReferences"
 			BeforeTargets="GenerateMSBuildEditorConfigFileShouldRun">
 		<ItemGroup>
-			<_CohesionInProcessResource Include="@(ReferencePath)"
+			<_CohesionInProcessResource Include="@(ReferencePath->'%(MSBuildSourceProjectFile)')"
 										Condition="'%(ReferencePath.CohesionResource)' != '' and '%(ReferencePath.MSBuildSourceProjectFile)' != ''"
 										CohesionResourceAssembly="%(ReferencePath.Filename)" />
 		</ItemGroup>
 		<ItemGroup>
-			<AdditionalFiles Include="@(_CohesionInProcessResource->'%(MSBuildSourceProjectFile)')"
+			<_CohesionUnresolvedResource Include="@(ProjectReference->'%(FullPath)')"
+										 Condition="'%(ProjectReference.CohesionResource)' != '' and Exists('%(ProjectReference.FullPath)')" />
+			<_CohesionUnresolvedResource Remove="@(_CohesionInProcessResource)" />
+		</ItemGroup>
+		<ItemGroup>
+			<AdditionalFiles Include="@(_CohesionInProcessResource);@(_CohesionUnresolvedResource)"
 							 KeepMetadata="CohesionResource;CohesionProvider;CohesionResourceAssembly" />
 		</ItemGroup>
 		<ItemGroup>
 			<_CohesionInProcessResource Remove="@(_CohesionInProcessResource)" />
+		</ItemGroup>
+		<ItemGroup>
+			<_CohesionUnresolvedResource Remove="@(_CohesionUnresolvedResource)" />
 		</ItemGroup>
 	</Target>
 </Project>
