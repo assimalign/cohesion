@@ -456,6 +456,17 @@ internal sealed class SqlDatabaseEventSource : EventSource
     private void TableReclamationCompleted(string engineName, string database, ulong objectId, long pages)
         => WriteEvent(24, engineName, database, objectId, pages);
 
+    [NonEvent]
+    internal void TableReclamationYielded(SqlDatabase database, ulong objectId)
+    {
+        if (IsEnabled(EventLevel.Verbose, EventKeywords.None))
+        { TableReclamationYielded(database.Engine.Name, database.Name.ToString(), objectId); }
+    }
+
+    [Event(27, Level = EventLevel.Verbose, Message = "Reclamation of table {2} in {0}/{1} yielded to a checkpoint.")]
+    private void TableReclamationYielded(string engineName, string database, ulong objectId)
+        => WriteEvent(27, engineName, database, objectId);
+
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Sessions, Message = "The server of engine {0} accepted session {1}; {2} session(s) active.")]
     private void SessionAccepted(string engineName, Guid sessionId, int activeSessions)
         => WriteEvent(1, engineName, sessionId, activeSessions);

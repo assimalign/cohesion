@@ -50,7 +50,16 @@ public sealed partial class SqlJointTypeMigrationTests
         {
             engine.UndoDeferredSignal.Set();
             engine.CheckpointNeededSignal.Set();
-            await Task.WhenAll(purgeEntered.Task, checkpointEntered.Task).WaitAsync(token);
+            var entered = Task.WhenAll(purgeEntered.Task, checkpointEntered.Task);
+            while (!entered.IsCompleted)
+            {
+                // A worker may still be completing a pass that consumes the first wake.
+                engine.UndoDeferredSignal.Set();
+                engine.CheckpointNeededSignal.Set();
+                await Task.WhenAny(entered, Task.Delay(1, token));
+                token.ThrowIfCancellationRequested();
+            }
+            await entered;
             engine.CheckpointNeededSignal.Reset();
             await action();
         }
@@ -122,6 +131,7 @@ public sealed partial class SqlJointTypeMigrationTests
                     if (database.DataStorage.JournalLength < threshold) { continue; }
                     long before = database.DataStorage.JournalLength;
                     int beforeBatches = batches;
+                    engine.CheckpointNeededSignal.Reset(); // Worker consumed the crossing wake.
                     // Repeated requests/polls cannot add even another owner's bracket.
                     for (int poll = 0; poll < 8; poll++)
                     {
@@ -195,7 +205,7 @@ public sealed partial class SqlJointTypeMigrationTests
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-        var storage = new CrashCaptureSqlStorageStrategy();
+        var storage = new CrashCaptureSqlStorageStrategy { UnixSparseGrowth = true };
         var builder = Builder(storage);
         builder.Options.CheckpointJournalSize = 0;
         await using var engine = await builder.BuildAsync(guard.Token);
@@ -341,7 +351,7 @@ public sealed partial class SqlJointTypeMigrationTests
                 {
                     // Exactly D + pending + E remains. Admit the next bracket
                     // at equality, then stop before the following one can write.
-                    long pending = Math.Min(pendingPages * Page.Size, builder.Options.BufferPoolCapacity);
+                    long pending = storage.UnixSparseGrowth ? Math.Min(pendingPages * Page.Size, builder.Options.BufferPoolCapacity) : 0;
                     remaining = SqlSchemaProvisioner.JointBracketBytes(128, 64) + pending + database.SchemaProvisioner.JointSpaceDiscardBytes;
                     storage.VolumeCapacityBytes = storage.AllocatedBytes + remaining;
                 }

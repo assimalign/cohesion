@@ -47,7 +47,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     internal StorageCommitDurability Durability => _durability;
 
     internal bool UnixSparseGrowth { get; set; }
-    internal override bool SparseDataGrowth => UnixSparseGrowth;
+    internal override bool SparseDataGrowth(string databaseName) => UnixSparseGrowth;
     internal long MigrationAvailableBytes { get; set; } = long.MaxValue;
     internal long VolumeCapacityBytes { get; set; } = long.MaxValue;
     internal long PeakAllocatedBytes { get; private set; }

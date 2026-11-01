@@ -119,7 +119,10 @@ internal sealed class SqlTableReclamation
                     // after the worker has consumed its wake signal.
                     if (_database.Engine.CheckpointNeededSignal.IsSet ||
                         _database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
-                    { return; }
+                    {
+                        SqlDatabaseEventSource.Log.TableReclamationYielded(_database, pending.ObjectId);
+                        return;
+                    }
                     int reclaimed;
                     // No coordinator apply gate or catalog/table lock covers the page walk.
                     // These identities can never acquire new writers or be reused by CREATE.
@@ -134,6 +137,11 @@ internal sealed class SqlTableReclamation
                             Interlocked.Add(ref _reclaimedPages, reclaimed);
                         }
                     }
+                    // The crossing append can wake a checkpoint while this bracket is
+                    // still active. Retry after it closes. Due persists until checkpoint,
+                    // so the next bracket check yields: exactly one retry wake per cycle.
+                    if (_database.DataStorage.IsCheckpointDue(_database.Engine.EngineOptions.CheckpointInterval))
+                    { _database.Engine.CheckpointNeededSignal.Set(); }
                     pending.Pages += reclaimed;
                     AfterBatch?.Invoke(pending.ObjectId, reclaimed);
 

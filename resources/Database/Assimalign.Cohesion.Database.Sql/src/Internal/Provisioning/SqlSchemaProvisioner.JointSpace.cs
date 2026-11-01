@@ -212,7 +212,7 @@ internal sealed partial class SqlSchemaProvisioner
             long overshoot = JointBracketBytes(SqlTableReclamation.BatchSize, 0);
             long threshold = _database.Engine.EngineOptions.CheckpointJournalSize;
             _jointReclamationLimit = threshold == 0 ? long.MaxValue : threshold + overshoot;
-            long dirtyPools = _database.Engine.SparseDataGrowth
+            long dirtyPools = _database.Engine.SparseDataGrowth(_database.Name)
                 ? _database.Engine.EngineOptions.BufferPoolCapacity + SqlDatabaseEngine.CatalogBufferPoolPages * Page.Size : 0;
             _jointReserveBase = JointSpaceFloor(intent) + dirtyPools;
         }

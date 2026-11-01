@@ -228,7 +228,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// </summary>
     internal ManualResetEventSlim CheckpointNeededSignal => _checkpointNeededSignal;
 
-    internal bool SparseDataGrowth => _strategy.SparseDataGrowth;
+    internal bool SparseDataGrowth(string databaseName) => _strategy.SparseDataGrowth(databaseName);
 
     /// <summary>
     /// Gets the signal a database's coordinator sets when it defers an undo; the version-purge

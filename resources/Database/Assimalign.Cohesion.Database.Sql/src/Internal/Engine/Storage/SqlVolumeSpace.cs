@@ -27,6 +27,23 @@ internal static partial class SqlVolumeSpace
             ? @"\\?\UNC\" + normalized[2..] : @"\\?\" + normalized;
     }
 
+    // Resolve the actual mount point rather than the drive-letter root. Unknown
+    // volumes conservatively retain the sparse reserve; this never mutates a file.
+    internal static unsafe DriveType GetDriveType(string dataPath)
+    {
+        const int capacity = 32768;
+        char* volume = stackalloc char[capacity];
+        if (!GetVolumePathName(dataPath, volume, capacity)) { return DriveType.Unknown; }
+        return (DriveType)GetVolumeDriveType(new string(volume));
+    }
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetVolumePathNameW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static unsafe partial bool GetVolumePathName(string path, char* volume, int capacity);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetDriveTypeW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial uint GetVolumeDriveType(string volume);
+
     [LibraryImport("kernel32.dll", EntryPoint = "GetDiskFreeSpaceExW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool GetDiskFreeSpaceEx(string directory, out ulong available, out ulong total, out ulong free);
