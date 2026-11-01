@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LoadBalancer" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel" />
 
-        <!-- LoadBalancer.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

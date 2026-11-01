@@ -333,10 +333,6 @@ Rules see the URL as the rules before them left it, so register redirects, the h
 internal rewrites. A redirect evaluated after a rewrite sends the client to the rewritten URL, exposing an
 internal path. This is the order mod_rewrite, IIS and ASP.NET Core rules follow too.
 
-With orchestration enabled, `Web.Hosting` answers the resource control plane (`/cohesion/v1/*`) and the
-Web.Health endpoints ahead of the application's pipeline, so the rules never see those requests and cannot
-rewrite, redirect or canonicalize them. With it disabled, the rules see every request.
-
 ## Telemetry and logging
 
 The server starts a request's span and records its `url.path` before the pipeline runs, from the context the
@@ -385,7 +381,6 @@ and a redirect rule with trim and AOT warnings as errors and exercises both over
   that is forwarded-header resolution's job.
 - **Asynchronous rules.** See "Why the rules are synchronous".
 - **A query-merging flag** (mod_rewrite's `[QSA]`). A delegate rule can merge queries in a line.
-- **Rewriting the requests the control plane answers.** See "Ordering".
 
 ## Extending
 

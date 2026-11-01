@@ -2,7 +2,7 @@
 
 EventHub is the L3 service platform intended to provide partitioned event streams, publishing and consumption, consumer groups, checkpoints, retention, and replay.
 
-The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.EventHub.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
+An EventHub application becomes a managed resource instance with `Assimalign.Cohesion.EventHub.Hosting.ApplicationModel`: `builder.Services.AddResource("events", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -13,11 +13,17 @@ An arrow means "references": `EventHub.Hosting --> EventHub` reads
 flowchart LR
     P0["EventHub — area root"]
     P2["EventHub.Hosting — runtime module"]
+    PAM["EventHub.Hosting.ApplicationModel — resource integration"]
+    AMH["Assimalign.Cohesion.ApplicationModel.Hosting — L2"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
     PRIV["other areas, referenced privately"]
     P2 --> P0
     P2 --> HOSTFAM
     P2 -->|"private"| PRIV
+    PAM --> P2
+    PAM --> P0
+    PAM --> AMH
+    AMH --> HOSTFAM
     P0 -.->|"COHRES001 ✗"| P2
 ```
 
@@ -26,6 +32,10 @@ rejects: **no library in the area may reference its own `EventHub.Hosting` runti
 module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
+The one exception is the resource integration, `EventHub.Hosting.ApplicationModel`, which joins
+the runtime module to the application model's hosting; `COHRES001` sanctions that
+reference by the integration's exact name, with no exemption property.
+
 The full reference graph for every Cohesion assembly, including the exact external dependencies
 collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
@@ -33,6 +43,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.EventHub` defines the public area-root application and builder contracts alongside the existing event-hub abstraction.
 - `Assimalign.Cohesion.EventHub.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
+- `Assimalign.Cohesion.EventHub.Hosting.ApplicationModel` registers the application as a managed resource instance (`builder.Services.AddResource(name, ...)`) on the platform its gateway names, with the actions the application adds.
 
 ## Layering and dependencies
 
@@ -44,6 +55,8 @@ As an L3 service platform, EventHub composes the L2 `Assimalign.Cohesion.Hosting
 - [Root design](./Assimalign.Cohesion.EventHub/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.EventHub.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.EventHub.Hosting/docs/DESIGN.md)
+- [Resource integration overview](./Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/docs/OVERVIEW.md)
+- [Resource integration design](./Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/docs/DESIGN.md)
 
 ## Application composition (O34)
 

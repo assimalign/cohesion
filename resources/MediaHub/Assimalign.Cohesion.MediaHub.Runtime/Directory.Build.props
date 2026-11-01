@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MediaHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MediaHub.Hosting.ApplicationModel" />
 
-        <!-- MediaHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

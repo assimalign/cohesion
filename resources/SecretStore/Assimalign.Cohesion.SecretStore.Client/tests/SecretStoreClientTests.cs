@@ -2,7 +2,6 @@ using System;
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,34 +14,6 @@ namespace Assimalign.Cohesion.SecretStore.Client.Tests;
 
 public class SecretStoreClientTests
 {
-    [Fact(DisplayName = "Cohesion Test [SecretStore.Client] - CreateForControlPlane: Sends through the caller's transport at the exact manifest path")]
-    public async Task CreateForControlPlane_WithTransport_ShouldSendThroughIt()
-    {
-        // Arrange
-        string? observedUri = null;
-        string? observedMethod = null;
-        var handler = new FakeHttpMessageHandler((request, _) =>
-        {
-            observedUri = request.RequestUri!.AbsoluteUri;
-            observedMethod = request.Method.Method;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
-        });
-        using var transport = new HttpMessageInvoker(handler);
-        ISecretStoreClient client = SecretStoreClient.CreateForControlPlane(
-            new Uri("https://resource.test:8443/custom/control"), new ClientCredential("bootstrap-token"), transport);
-        var command = new ResourceCommand("id", "secretstore.add-secret", "appa", "key", ReadOnlyMemory<byte>.Empty);
-
-        // Act
-        await client.ObserveCommandAsync(command, CancellationToken.None);
-
-        // Assert
-        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
-        observedMethod.ShouldBe("POST");
-        await client.DeleteCommandAsync(command, CancellationToken.None);
-        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
-        observedMethod.ShouldBe("DELETE");
-    }
-
     [Fact(DisplayName = "Cohesion Test [SecretStore] - GetSecretAsync: Should send an authenticated request and return bytes")]
     public async Task GetSecretAsync_WhenEndpointReturnsBytes_ShouldReturnBytes()
     {
@@ -97,53 +68,6 @@ public class SecretStoreClientTests
 
         // Assert
         result.ShouldBe(pem);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [SecretStore] - SendCommandAsync: Should send the source-generated command envelope")]
-    public async Task SendCommandAsync_WhenEndpointAcceptsCommand_ShouldSendJsonEnvelope()
-    {
-        // Arrange
-        string? observedBody = null;
-        string? observedAccept = null;
-        string? observedContentType = null;
-        string? observedMethod = null;
-        string? observedUri = null;
-        var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
-        {
-            observedAccept = request.Headers.Accept.ToString();
-            observedUri = request.RequestUri?.AbsoluteUri;
-            observedMethod = request.Method.Method;
-            observedContentType = request.Content?.Headers.ContentType?.MediaType;
-            observedBody = await request.Content!.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.NoContent);
-        });
-        using var transport = new HttpMessageInvoker(handler);
-        ISecretStoreClient client = SecretStoreClient.Create(
-            new Uri("https://secrets.test:443"),
-            new ClientCredential("bootstrap-token"),
-            transport);
-        var command = new ResourceCommand(
-            "command-1",
-            "secretstore.add-secret",
-            "appa",
-            "apps/api/password",
-            Encoding.UTF8.GetBytes("{\"value\":\"classified\"}"));
-
-        // Act
-        await client.SendCommandAsync(command, CancellationToken.None);
-
-        // Assert
-        observedMethod.ShouldBe("POST");
-        observedUri.ShouldBe("https://secrets.test/cohesion/v1/commands");
-        observedAccept.ShouldBe("application/octet-stream");
-        observedContentType.ShouldBe("application/json");
-        using JsonDocument document = JsonDocument.Parse(observedBody!);
-        document.RootElement.GetProperty("id").GetString().ShouldBe("command-1");
-        document.RootElement.GetProperty("kind").GetString().ShouldBe("secretstore.add-secret");
-        document.RootElement.GetProperty("owner").GetString().ShouldBe("appa");
-        document.RootElement.GetProperty("key").GetString().ShouldBe("apps/api/password");
-        document.RootElement.GetProperty("payload").GetString().ShouldBe(
-            Convert.ToBase64String(Encoding.UTF8.GetBytes("{\"value\":\"classified\"}")));
     }
 
     [Fact(DisplayName = "Cohesion Test [SecretStore] - Create: Should reject a non-HTTP endpoint")]

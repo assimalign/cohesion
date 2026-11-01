@@ -2,7 +2,7 @@
 
 ApiManager is the L3 service platform intended to manage API backends, routes, products, subscriptions, contracts, and gateway policy execution.
 
-The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
+An ApiManager application becomes a managed resource instance with `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel`: `builder.Services.AddResource("apis", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -13,6 +13,8 @@ An arrow means "references": `ApiManager.Hosting --> ApiManager` reads
 flowchart LR
     P0["ApiManager — area root"]
     P2["ApiManager.Hosting — runtime module"]
+    PAM["ApiManager.Hosting.ApplicationModel — resource integration"]
+    AMH["Assimalign.Cohesion.ApplicationModel.Hosting — L2"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
     PRIV["other areas, referenced privately"]
@@ -20,6 +22,10 @@ flowchart LR
     P2 --> P0
     P2 --> HOSTFAM
     P2 -->|"private"| PRIV
+    PAM --> P2
+    PAM --> P0
+    PAM --> AMH
+    AMH --> HOSTFAM
     P0 -.->|"COHRES001 ✗"| P2
 ```
 
@@ -28,6 +34,10 @@ rejects: **no library in the area may reference its own `ApiManager.Hosting` run
 module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
+The one exception is the resource integration, `ApiManager.Hosting.ApplicationModel`, which joins
+the runtime module to the application model's hosting; `COHRES001` sanctions that
+reference by the integration's exact name, with no exemption property.
+
 The full reference graph for every Cohesion assembly, including the exact external dependencies
 collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
@@ -35,6 +45,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.ApiManager` defines the public area-root application and builder contracts.
 - `Assimalign.Cohesion.ApiManager.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
+- `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel` registers the application as a managed resource instance (`builder.Services.AddResource(name, ...)`) on the platform its gateway names, with the actions the application adds.
 
 ## Layering and dependencies
 
@@ -46,6 +57,8 @@ As an L3 service platform, ApiManager composes the L2 `Assimalign.Cohesion.Hosti
 - [Root design](./Assimalign.Cohesion.ApiManager/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.ApiManager.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.ApiManager.Hosting/docs/DESIGN.md)
+- [Resource integration overview](./Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/docs/OVERVIEW.md)
+- [Resource integration design](./Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/docs/DESIGN.md)
 
 ## Application composition (O34)
 

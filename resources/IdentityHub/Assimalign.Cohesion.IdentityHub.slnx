@@ -35,6 +35,17 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting/tests/Assimalign.Cohesion.IdentityHub.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/" />
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/src/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/tests/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/docs/">
 		<File Path="Assimalign.Cohesion.IdentityHub.Models/docs/DESIGN.md" />
@@ -74,5 +85,7 @@
 		<Project Path="../Web/Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
 		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj" />
 	</Folder>
 </Solution>

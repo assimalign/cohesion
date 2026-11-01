@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.VpnGateway.Hosting
 
-`VpnGatewayApplication.CreateBuilder(args)` returns the public concrete `VpnGatewayApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel`.
+`VpnGatewayApplication.CreateBuilder(args)` returns the public concrete `VpnGatewayApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 
 Domain service behavior and command kinds remain deferred.
 

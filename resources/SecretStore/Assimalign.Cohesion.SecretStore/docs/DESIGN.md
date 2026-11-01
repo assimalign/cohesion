@@ -63,7 +63,7 @@ application/resource identity as their subject.
 
 Background-work registration belongs to the concrete `SecretStoreApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<SecretStoreApplicationContext, IHostService>)`. The factory receives the same concrete context as Web's and Database's AddService, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Database's root-level AddServer keeps the interface context. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
 
-Enabled resources retain their ambient context and registered control-plane behavior; plain application defaults are described by the Hosting design.
+Application defaults are described by the Hosting design. A managed resource is opted into by the application with `builder.Services.AddResource(...)` from `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`.
 
 ## AOT posture
 
@@ -76,9 +76,8 @@ implementation while the public root remains trimming- and NativeAOT-safe.
 
 This project does not persist or encrypt secrets, generate or enroll certificates, contact the
 Platform service, verify bootstrap credentials, or expose a protocol endpoint. Those are runtime
-responsibilities. Cross-resource command verbs (`AddSecret`, `IssueCertificate`, and `Enroll` on a
-SecretStore resource descriptor) are a separate ApplicationModel surface and are not builder-time
-seed declarations.
+responsibilities. Seed declarations are builder-time only; changing a running store is the
+resource integration's, through the actions its application adds.
 
 ## Hosting-free application contract (O34)
 

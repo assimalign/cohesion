@@ -1,6 +1,6 @@
 # LogSpace Hosting overview
 
-The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel`.
+The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 
 POST /v1/logs requires application/json. Query accepts resource, since (ISO-8601), limit (default 100/max 1000), and cursor, returning application/x-ndjson and X-Cohesion-Next-Cursor when more scanning is possible. Query pages are bounded to four million characters (plus at most one bounded record).
 

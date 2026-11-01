@@ -14,7 +14,7 @@ composition surface into every consumer — and this package references two
 Web feature libraries: `Web.Routing` and `Web.Server` (#1379). It references the root `Assimalign.Cohesion.Web` abstractions, those packages, and
 non-Web infrastructure. The rule as adopted forbade this module's references to Web features too;
 since its relaxation (COHRES002, owner decision 32 of 2026-10-09) the module may reference any Web
-library except `Web.Testing`, `Web.ApplicationModel`, the `App.Web` producers, and harnesses, and
+library except `Web.Testing`, `Web.Hosting.ApplicationModel`, the `App.Web` producers, and harnesses, and
 takes such a reference only for runtime machinery it composes itself, because each one ships in all
 18 area frameworks. Routing and Server supply the terminal and server engine, whose contracts left the Web root
 under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicationTerminal`) and the
@@ -25,8 +25,10 @@ verbs ship with their features: feature registration is a component integration 
 package declares and the application's compilation projects onto `builder.Services`
 (`builder.Services.AddAuthentication(auth => auth.AddCookie())`, owner decision 34), and pipeline
 verbs extend the root `IWebApplicationPipelineBuilder` seam, so this module needs no reference to a
-feature to host it. The one sanctioned
-exception is `Web.Testing`, the harness that drives this concrete runtime.
+feature to host it. The two sanctioned
+exceptions are `Web.Testing`, the harness that drives this concrete runtime, and
+`Web.Hosting.ApplicationModel`, the application-model integration that joins it to
+`ApplicationModel.Hosting`.
 
 This document records hosting composition. The engine implementation and lifecycle are documented
 in [Web.Server](../../Assimalign.Cohesion.Web.Server/docs/DESIGN.md).
@@ -44,8 +46,9 @@ flowchart LR
 ```
 
 The runtime references the root, `Web.Routing`, and `Web.Server`. These feature packages reference
-the root within the area; Web.Server also references Web.Routing. The resource integration lives in
-`Web.Hosting.Resources`, which references this module.
+the root within the area; Web.Server also references Web.Routing. The application-model integration
+lives in [`Web.Hosting.ApplicationModel`](../../Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md),
+which references this module; this module references no application-model package.
 
 ## Design intent
 
@@ -149,8 +152,7 @@ implements the two interfaces separately. `Servers` still contains original obje
 still disappears from both snapshots when no default listener was configured.
 
 Hosting keeps configuration binding, the HTTP policy defaults (request limits, protocol upgrade
-and extended CONNECT), TCP/TLS/QUIC helper composition, pipelines, control-plane and health
-integration. The builder supplies the composed pipeline and listener options to the public engine.
+and extended CONNECT), TCP/TLS/QUIC helper composition, and pipelines. The builder supplies the composed pipeline and listener options to the public engine.
 Application services still start before servers and stop after their drain.
 
 **Compatibility with 10.0.0-preview.1 (decision 15).** Making the engine/options public
@@ -171,77 +173,12 @@ that list removes HTTP policy defaults but cannot remove the engine's required f
 
 ## Diagnostics
 
-The assembly owns one internal sealed `WebHostingEventSource`, named
-`Assimalign.Cohesion.Web.Hosting`. It reports the integrated resource control plane only.
-The engine's separate `WebServerEventSource`, Meter and ActivitySource belong to Web.Server.
-Both sources are covered by the default `Assimalign.Cohesion.Web.` forwarding prefix.
-Neither source's ids shipped, so each starts at 1 without gaps.
-
-| Id | Event | Level | Payload |
-| --- | --- | --- | --- |
-| 1 | ControlPlaneDisabled | Warning | resourceName, observedEndpoints |
-| 2 | CredentialRejected | Warning | resourceName, requestId, status, reason, route, remoteEndPoint, suppressedCount:int |
-| 3 | CommandMalformed | Warning | resourceName, requestId, httpMethod, phase, exceptionType, suppressedCount:int |
-| 4 | StopAccepted | Informational | resourceName, requestId, deferred:bool |
-
-The lazy `rejected-credentials` PollingCounter counts every refusal, including disabled or
-throttled events. This assembly owns its own `EventThrottle` instances; nothing is shared with
-Web.Server. No spans or HTTP request metrics originate here. Every area composing the shared
-control plane reports through this provider, identified by `resourceName`; nested hosts need
-their own forwarding registration or an external diagnostic listener.
-
-Credential rejection includes the standalone non-loopback refusal introduced by #1431, with
-`reason=non-loopback-peer` and `status=Forbidden`. Other reasons are `missing-credential`,
-`unsupported-scheme`, `invalid-token`, `audience-mismatch`, `caller-mismatch` and `verifier-rejected`.
-A registered verifier's private reason is never copied. `route` is a fixed category (stop, commands,
-endpoints, healthz, readyz, livez or unknown), never a path. Among control-plane events, the
-transport peer appears only in CredentialRejected and is personal data in the diagnostic sink; forwarded client addresses are not
-used. Request identifiers come from `IWebRequestIdFeature`, never an ambient Activity.
-
-CredentialRejected and CommandMalformed each emit at most once per second across the merged provider.
-Their next emission includes the number of suppressed enabled-listener occurrences (saturating at
-`Int32.MaxValue`). The `rejected-credentials` PollingCounter remains exact, including refusals when
-disabled or throttled. It is created on first enable, and its backing total uses Interlocked.
-No request-total counter or Meter instrument is added. StopAccepted is the scope's unthrottled
-management lifecycle acknowledgement, with `deferred` indicating response-completion scheduling.
-
-Malformed JSON/base64/argument faults retain HTTP 400. `phase=Envelope` covers parsing and command
-construction; it changes to `Handler` immediately before command dispatch. A handler failure
-already reported by the shared control plane is omitted from this source (#1434); custom control
-planes still report `Handler` when they throw a JSON, format or argument exception. Successful response
-status, headers and body are written after these catches. A response adapter failure propagates to the
-owning HTTP error boundary and never emits CommandMalformed or changes the applied command outcome.
-Only the exception type is written: JSON and handler messages can contain command input. No event
-contains an Authorization value, credential, claim, caller identity, command key or command payload.
-Command execution outcomes
-belong to Hosting.Resources, not this HTTP source.
-
-Web.Hosting and Hosting.Resources compile one stateless internal `CommandFailureDiagnostics` helper. It uses the
-existing exception metadata carrier to associate a reported failure with its original command
-invocation. The BCL weak table stored there keys by reference identity and is consumed by this
-middleware: repeated or concurrent reuse of an exception cannot suppress another command, and no
-command payload is retained by the metadata. Registered control-plane wrappers pass the same
-invocation through. No shared static state, reflection, public diagnostic API or shipped visibility
-grant is involved. Marking happens even when the producer is disabled or throttled, so enabling
-only the Web source never moves execution events into it. An application-defined exception whose
-`Data` is read-only or throws cannot carry the marker; diagnostics preserve the original failure
-and HTTP status, and the HTTP source may also report that unusual handler fault. Exact de-duplication
-for such custom carriers needs a producer-owned public dispatch seam and remains an escalation.
-
-**Contributor ownership adjustment (#1400).** A throwing contributor is caught and sanitized inside
-Hosting.Resources. Existing contracts cannot carry its exception into this assembly without adding
-a public exception member or a diagnostics forwarding API. The smallest internal hand-off is from
-that catch to Hosting.Resources' own `HostingResourceEventSource.ContributorFailed`; this Web source
-does not duplicate it. Health contributions and probe responses keep their fixed safe descriptions.
-The producer's DESIGN documents the event, counter and exception-message policy. This departs from
-the scope's requested Web-source ownership and is recorded for owner review, with no public API,
-shipped visibility grant, or reverse dependency added.
-
-These diagnostics add operator visibility relative to 10.0.0-preview.1; token acceptance and probe
-serialization are unchanged. **Breaking behavior change from 10.0.0-preview.1 (#1400, decision 15's
-preview terms):** failures while writing a successful command response now propagate instead of
-being converted into a command-level 400, 501 or 409 after the command has already succeeded.
-Envelope and handler failures retain their existing HTTP mappings.
+The assembly owns no `EventSource`. Its former `WebHostingEventSource` reported only the resource
+control plane, which the application-model restart removed (2026-10-27/28); a managed resource's
+instance side is ApplicationModel.Hosting's, through `Web.Hosting.ApplicationModel`. The server's
+`EventSource`, Meter and ActivitySource are named `Assimalign.Cohesion.Web.Server` and belong to
+Web.Server; the default `Assimalign.Cohesion.Web.` forwarding prefix covers them. No spans or HTTP
+request metrics originate here.
 
 ## AOT posture
 
@@ -611,11 +548,9 @@ currently captures only the design decisions that are settled.
 
 This module knows nothing of resources. `Web.Hosting.ApplicationModel` makes a Web application a managed
 resource with `builder.Services.AddResource(name, ...)`: it registers the resource service as a host
-service, and exposes the application's settings as actions. Until the application
-model restarted on 2026-10-27, this module carried the resource integration itself: an ambient
-`ResourceRuntime` registration, a control-plane terminal with health probes, and a Hosting.Health
-adapter. The restart removed the integration, and the adapter left with Hosting.Health on
-2026-10-28.
+service, and exposes the application's settings as actions. Until the application-model
+restart of 2026-10-27, this module carried a resource integration and a health adapter of its own;
+both were removed.
 
 ## Default application configuration
 
@@ -634,8 +569,7 @@ machine; `Development` denotes a deployable environment. Neither file is an alia
 the other, and the unset environment default remains `Production`.
 
 The JSON files resolve from the content root: `WebApplicationOptions.ContentRootPath` when
-set, otherwise the ambient `Hosting.Resources` `ResourceContext.ContentRootPath` for an
-enabled resource, otherwise `AppContext.BaseDirectory`. The same content root is published on
+set, otherwise `AppContext.BaseDirectory`. The same content root is published on
 `HostEnvironment.ContentRootPath` and `IWebApplicationContext.ContentRootPath`.
 
 The **web root** — the directory `UseStaticFiles()` serves — is resolved against the content
@@ -643,12 +577,12 @@ root: `WebApplicationOptions.WebRootPath` when set (a relative path is combined 
 root, and the value is kept even before the directory exists), otherwise `wwwroot` under the
 content root when that directory exists, otherwise none. It is published on
 `IWebApplicationContext.WebRootPath`. The content root itself is never a web root, because it
-holds `appsettings*.json` and the application's binaries. An in-process
-gateway supplies settings directly on that ambient `ResourceContext`, rather than
-mutating process-wide environment variables. The builder folds those settings into
-the deployment-setting layer before the caller's command-line arguments, so the
-same keys work in process and out of process while explicit arguments retain the
-highest precedence. The implementation uses only Cohesion's JSON, environment, and
+holds `appsettings*.json` and the application's binaries. A gateway supplies settings as
+`COHESION_CONFIG__` variables: out of process in the process environment, and in process
+through the `AppEnvironmentScope` (Core) the in-process gateway enters for each program, which the
+environment-variable source reads instead of mutating process-wide variables. Those settings sit
+before the caller's command-line arguments, so the same keys work in process and out of process
+while explicit arguments retain the highest precedence. The implementation uses only Cohesion's JSON, environment, and
 command-line configuration providers; it adds no reflection binder or
 `Microsoft.Extensions.*` dependency.
 
@@ -859,8 +793,7 @@ validation callback. The minimum request-body and response data rates are bound
 
 ### Entry-point defaults (#1047)
 
-A **plain entry-point application** — `WebApplication.CreateBuilder(args)` with no generated
-control plane — that configured no listener of its own gets one when it is built:
+A **plain entry-point application** — `WebApplication.CreateBuilder(args)` — that configured no listener of its own gets one when it is built:
 
 - the endpoints under `Http:Endpoints`, bound exactly as `UseConfiguration` binds them, from every
   configuration source the entry point composes (appsettings, `COHESION_CONFIG__*`, command line);
@@ -882,8 +815,8 @@ configuration is read when the default server is created at host start, so sourc
 Before 2026-09 the default server was silently inactive in that case, so `dotnet new cohesion-web
 && dotnet run` started and listened on nothing. Explicit compositions keep that behavior on purpose:
 `CreateBuilder(options)`, a custom-only composition, and tests that build an application without a
-server are left exactly as composed. An orchestrated resource binds its ambient endpoint instead
-(below), and never the development endpoint.
+server are left exactly as composed. An application whose platform assigned an endpoint binds
+that endpoint (above), and never the development endpoint.
 
 ### AOT posture
 
@@ -1371,16 +1304,23 @@ delegate wiring; the ALPN/TLS defaults are list/enum assignments; awaited transp
 binding uses ordinary `ValueTask` APIs. `IsAotCompatible=true` holds with no special
 handling.
 
-## HTTPS endpoint certificate contract (31t)
+## HTTPS endpoint certificates
 
-The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged. Ambient binding tries http and then https by endpoint name, admitting both URI schemes. An ambient `https` endpoint is registered through `UseHttps`, so it offers `h2` and `http/1.1` and serves each connection the protocol it negotiated; until #1063 it served HTTP/1.1 only. Manual Http:Endpoints configuration also accepts Protocol Https/Http1s/Http2s/Http3, with Certificate either a mount name or a file section (`Path`, `KeyPath`, `Password`; see "Configuration-bound server limits and endpoints"). Server.UseConfiguration stays opt-in for explicit compositions; a plain entry-point application with no listener of its own binds `Http:Endpoints` by default (see "Entry-point defaults").
+A TLS endpoint's certificate is a file the application or its platform supplies. `Http:Endpoints`
+accepts Protocol Https/Http1s/Http2s/Http3, with a `Certificate` section naming the file (`Path`,
+`KeyPath`, `Password`; see "Configuration-bound server limits and endpoints"). A scalar
+`Certificate`, which named a Secret mount of the resource runtime the application-model restart
+retired, is refused with `EndpointCertificateRequired`. The platform's own endpoint is bound only
+when it is plain `http` (see "Entry-point defaults"): an `https` endpoint needs a certificate the
+application configures itself. `Server.UseConfiguration` stays opt-in for explicit compositions; a
+plain entry-point application with no listener of its own binds `Http:Endpoints` by default.
 
 ## Hosting integrations
 
 The root contracts and feature libraries reference no `Assimalign.Cohesion.Hosting*` library. This
-module references plain Hosting only. The resource integration is `Web.Hosting.Resources`, a separate
-package that references this module, so the module stays free of resource contracts; `App.Web`
-delivers both.
+module references plain Hosting only and no application-model package. The application-model
+integration is `Web.Hosting.ApplicationModel`, a separate package that references this module, so
+the module stays free of resource contracts; `App.Web` delivers both.
 
 ## Default EventSource forwarding
 
@@ -1392,8 +1332,8 @@ application forwarder registration takes precedence. Explicit/options-based buil
 Web hosts register no automatic forwarder.
 
 Listeners observe the entire process. Concurrent entry-point applications can forward the same event;
-use `serverId` payloads for server identity and `resourceName` for the shared control plane, and opt
-out in secondary hosts that share sinks. Control-plane events use Web.Hosting; server events use Web.Server. Forwarding
+use `serverId` payloads for server identity, and opt out in secondary hosts that share sinks.
+Server events use Web.Server. Forwarding
 ends when the application disposes its logger factory, after shutdown diagnostics. HTTP access logs
 remain Information-level ILogger entries from Web.Diagnostics, independent of this forwarding.
 

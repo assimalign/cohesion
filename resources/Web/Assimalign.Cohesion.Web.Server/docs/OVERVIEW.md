@@ -21,7 +21,6 @@ public engine through `UseServer` or `AddServer`, with an internal, non-owning
   Optional `preservedHeaders` keys also retain policy fields accepted unchanged by the callbacks.
 - **Response completion** — `IWebResponseCompletionFeature.Register` queues callbacks that run in
   order after the response is written to the transport. Registration after completion throws.
-  `Web.Hosting` defers a control-plane stop until its `202` is written this way.
 - **Drain signal** — `IWebServerDrainFeature.Draining` is cancelled when the server begins its
   lame-duck drain, so a long-lived exchange can end itself within the stop's budget. It cancels
   nothing. `Web.WebSockets` closes open sockets with `1001 Going Away` on it.

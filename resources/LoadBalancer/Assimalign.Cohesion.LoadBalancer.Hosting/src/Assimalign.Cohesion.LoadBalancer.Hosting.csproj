@@ -6,7 +6,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.LoadBalancer" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionPrivateProjectReference Include="Assimalign.Cohesion.Web" />

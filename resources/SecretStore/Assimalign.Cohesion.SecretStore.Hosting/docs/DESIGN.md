@@ -6,8 +6,8 @@ The hosting module is the SecretStore runtime and protocol boundary. `SecretStor
 
 The retired resource integration (control plane, declarative commands, bootstrap-token
 authentication, trust store, endpoint certificates, telemetry) was removed on 2026-10-31 with the
-application-model restart (assimalign/cohesion#1759), and the area's resource integration returns
-as `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`.
+application-model restart (assimalign/cohesion#1759), and the area's resource integration is
+`Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 
 ## Composition and endpoint selection
 

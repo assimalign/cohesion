@@ -32,10 +32,9 @@ and shutdown on `IWebApplicationServer`; a separate `IHostService` implementatio
 used for the server phase. This is a behavioral break from 10.0.0-preview.1. Instance registrations
 remain caller-owned, and factory registrations remain provider-owned.
 
-The control-plane middleware registers its retained bootstrap verification handle directly with
-WebApplicationContext's internal disposal owner (#1412, decision 57). Final application disposal
-releases registered resources after the service provider, in reverse registration order;
-a stop followed by restart keeps them alive.
+Resources that pipeline composition registers with WebApplicationContext's internal disposal owner
+are released at final application disposal, after the service provider, in reverse registration
+order; a stop followed by restart keeps them alive.
 
 Register middleware with `Use` before starting the application or explicitly building its
 pipeline. A later `Use` throws `InvalidOperationException` because the pipeline is already built.
@@ -137,12 +136,11 @@ what is deliberately not emitted.
 Within its area the module references the Web root, `Web.Routing`, and `Web.Server`. Routing
 supplies the pipeline terminal; Server supplies the engine, telemetry and exchange features,
 including request id, completion and drain. COHRES002 permits Web libraries except Web.Testing,
-Web.ApplicationModel, Web.ApplicationModel.Orchestration, the App.Web producers, and harnesses. The
-two ApplicationModel packages also stay outside its resolved closure. Every reference ships in each
+Web.Hosting.ApplicationModel, the App.Web producers, and harnesses. Every reference ships in each
 area framework that carries this module.
 
 The module also references Cohesion hosting, configuration, DI, logging, and transport
-infrastructure: plain Hosting, never Hosting.Resources. The Web root references no hosting library.
+infrastructure: plain Hosting, and no application-model package. The Web root references no hosting library.
 All public composition is explicit and AOT-compatible. See [Design](DESIGN.md) for listener
 ownership, cancellation, and failure isolation.
 
@@ -167,8 +165,8 @@ application forwarder registration takes precedence. Explicit/options-based buil
 Web hosts register no automatic forwarder.
 
 Listeners observe the entire process. Concurrent entry-point applications can forward the same event;
-use `serverId` payloads for server identity and `resourceName` for control-plane identity, and opt
-out in secondary hosts that share sinks. Both use the Web.Hosting provider. Forwarding
+use `serverId` payloads for server identity, and opt out in secondary hosts that share sinks.
+Forwarding
 ends when the application disposes its logger factory, after shutdown diagnostics. HTTP access logs
 remain Information-level ILogger entries from Web.Diagnostics, independent of this forwarding.
 

@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.NatGateway" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.NatGateway.Hosting.ApplicationModel" />
 
-        <!-- NatGateway.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

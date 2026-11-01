@@ -18,9 +18,9 @@ An ephemeral self-signed certificate is allowed only on loopback in Local; every
 
 Issued access tokens contain `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `client_id`, and token-use metadata. The configured lifetime is capped at 24 hours.
 
-## Resource control plane
+## Resource integration
 
-The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`.
+The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 
 ## AOT and dependency boundary
 

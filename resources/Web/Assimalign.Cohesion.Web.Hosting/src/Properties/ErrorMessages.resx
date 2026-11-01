@@ -117,15 +117,6 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="AmbientEndpointHostInvalid" xml:space="preserve">
-    <value>The ambient Web endpoint host &apos;{0}&apos; is not a bindable IP address.</value>
-  </data>
-  <data name="AmbientEndpointSchemeInvalid" xml:space="preserve">
-    <value>The ambient Web endpoint &apos;{0}&apos; must use http or https, not &apos;{1}&apos;.</value>
-  </data>
-  <data name="AmbientHttpsCertificateRequired" xml:space="preserve">
-    <value>The ambient Web https endpoint &apos;{0}&apos; requires its certificate Secret mount (default &apos;tls&apos;).</value>
-  </data>
   <data name="ApplicationFeatureDisposable" xml:space="preserve">
     <value>The application feature &apos;{0}&apos; ({1}) is disposable. The host stamps the same feature instance onto every exchange, and an exchange disposes the disposable features it carries when it ends, so this instance would be disposed after its first request. Keep disposable per-request state in a feature that middleware installs on each exchange.</value>
   </data>
@@ -150,17 +141,8 @@
   <data name="ApplicationTeardownFailed" xml:space="preserve">
     <value>One or more application teardown operations failed.</value>
   </data>
-  <data name="ApplicationTrustKeyInvalid" xml:space="preserve">
-    <value>The application trust key is not a valid EC P-256 JWK. {0}</value>
-  </data>
   <data name="ClientCertificateTlsRequired" xml:space="preserve">
     <value>The HTTP endpoint &apos;{0}&apos; declares a &apos;ClientCertificateMode&apos;, but client certificates need TLS: use Protocol Https, Http1s, Http2s, or Http3.</value>
-  </data>
-  <data name="CommandPayloadEncodingInvalid" xml:space="preserve">
-    <value>The command payload must be a base64 string.</value>
-  </data>
-  <data name="CommandPropertyRequired" xml:space="preserve">
-    <value>The command property &apos;{0}&apos; is required.</value>
   </data>
   <data name="ConcurrentConnectionCountInvalid" xml:space="preserve">
     <value>The maximum concurrent connection count must be greater than zero.</value>
@@ -188,9 +170,6 @@
   </data>
   <data name="ConfiguredTimeoutInvalid" xml:space="preserve">
     <value>The configured timeout at &apos;{0}&apos; (&apos;{1}&apos;) is not a valid TimeSpan, a whole number of seconds, or &apos;infinite&apos;.</value>
-  </data>
-  <data name="ControlPlaneFactoryResultNull" xml:space="preserve">
-    <value>The registered Web resource control-plane factory returned null.</value>
   </data>
   <data name="EndpointCertificateInvalid" xml:space="preserve">
     <value>The HTTPS endpoint &apos;{0}&apos; certificate &apos;{1}&apos; requires a currently valid leaf and its private key.</value>
@@ -222,21 +201,6 @@
   <data name="Http3QuicRequired" xml:space="preserve">
     <value>The HTTP endpoint &apos;{0}&apos; declares &apos;Protocol&apos; Http3, which requires QUIC (Windows, Linux, or macOS).</value>
   </data>
-  <data name="ControlPlaneHostingContextRequired" xml:space="preserve">
-    <value>Managed control-plane middleware requires a Web.Hosting application context. Manual hosts can own ResourceControlPlaneMiddleware.CreateLifetime and compose InvokeAsync.</value>
-  </data>
-  <data name="ManagedResourceApplicationNameRequired" xml:space="preserve">
-    <value>A gateway-managed resource requires an application name.</value>
-  </data>
-  <data name="ManagedResourceGatewayNameRequired" xml:space="preserve">
-    <value>A gateway-managed resource requires a gateway name.</value>
-  </data>
-  <data name="ManagedResourceNameRequired" xml:space="preserve">
-    <value>A gateway-managed resource requires an ambient resource name.</value>
-  </data>
-  <data name="ManagedResourceTrustKeyRequired" xml:space="preserve">
-    <value>A gateway-managed resource requires a public application trust key.</value>
-  </data>
   <data name="Pkcs12PrivateKeyRequired" xml:space="preserve">
     <value>The PKCS#12 file contains no certificate with a private key.</value>
   </data>
@@ -248,9 +212,6 @@
   </data>
   <data name="RequestFeatureServiceTypeInvalid" xml:space="preserve">
     <value>The registration {0} uses the service type {1}, which derives from IHttpFeature but is not IHttpFeature. The host stamps only IHttpFeature registrations onto exchanges, so this feature would never reach a request. Register it as IHttpFeature, with AddSingleton&lt;IHttpFeature&gt; or IWebApplicationBuilder.AddFeature.</value>
-  </data>
-  <data name="ResourceCommandTypeInvalid" xml:space="preserve">
-    <value>A resource command must be a JSON object.</value>
   </data>
   <data name="ServiceProviderNotCreated" xml:space="preserve">
     <value>The service provider is created when the web application is built.</value>

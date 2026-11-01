@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.IdentityHub.ApplicationModel.Tests</RootNamespace>
+		<RootNamespace>Assimalign.Cohesion.IdentityHub.Client.Tests</RootNamespace>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 	<ItemGroup>
@@ -9,8 +9,5 @@
 		<CohesionPackageReference Include="xunit" />
 		<CohesionPackageReference Include="xunit.runner.visualstudio" />
 		<CohesionPackageReference Include="Shouldly" />
-	</ItemGroup>
-	<ItemGroup>
-		<None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
 	</ItemGroup>
 </Project>

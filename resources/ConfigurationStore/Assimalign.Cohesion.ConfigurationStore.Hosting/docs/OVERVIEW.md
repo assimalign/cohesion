@@ -22,8 +22,8 @@ The protocol listener starts after user services and drains before them. The hos
 or IPv4-mapped `127.0.0.1`; other peers receive 403, regardless of forwarded headers.
 Bare `/healthz`, `/readyz`, and `/livez` stay open. The retired resource integration (control
 plane, declarative commands, bootstrap-token trust, telemetry) was removed on 2026-10-31 with the
-application-model restart (assimalign/cohesion#1759), and the area's resource integration returns
-as `Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`.
+application-model restart (assimalign/cohesion#1759), and the area's resource integration is
+`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 
 ## Public types
 

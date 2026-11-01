@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.ApiManager" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApiManager" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApiManager.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel" />
 
-        <!-- ApiManager.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

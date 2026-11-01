@@ -12,7 +12,6 @@
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityHub.Hosting" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.IdentityModel" />

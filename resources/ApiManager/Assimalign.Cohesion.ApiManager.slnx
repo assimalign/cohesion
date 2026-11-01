@@ -30,9 +30,23 @@
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.ApiManager.Hosting/tests/Assimalign.Cohesion.ApiManager.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/" />
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/src/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel/tests/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/ApiManager/refs/" >
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/Assimalign.Cohesion.ApplicationModel.Hosting.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj" />
 	</Folder>
 	<Folder Name="/ApiManager/Assimalign.Cohesion.ApiManager.Refs/">
 		<File Path="Assimalign.Cohesion.ApiManager.Refs/Directory.Build.props" />

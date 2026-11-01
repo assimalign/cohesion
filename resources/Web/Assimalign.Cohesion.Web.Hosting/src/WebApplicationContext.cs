@@ -56,8 +56,7 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
     /// Gets the application's content root: the directory configuration files are read from.
     /// </summary>
     /// <remarks>
-    /// <see cref="WebApplicationOptions.ContentRootPath"/> when set; otherwise the ambient resource
-    /// context's content root for an orchestrated resource; otherwise
+    /// <see cref="WebApplicationOptions.ContentRootPath"/> when set; otherwise
     /// <see cref="AppContext.BaseDirectory"/>.
     /// </remarks>
     public FileSystemPath? ContentRootPath { get; init; }

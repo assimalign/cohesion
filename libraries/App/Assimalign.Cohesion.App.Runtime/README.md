@@ -11,12 +11,13 @@ executable adds its own explicit `FrameworkReference`.
 
 ## Derived kernel
 
-`@(CohesionAppKernelRoot)` is the only curated input. It names Hosting and its
-Health, Resources, and Telemetry siblings; the CommandLine,
-EnvironmentVariables, FileSystem, and Json configuration providers;
-Logging.Console; OpenTelemetry; DependencyInjection; FileSystem.Physical; and
-Connections. Connections belongs in the kernel because generated resource
-accessors and every area hosting module depend on it.
+`@(CohesionAppKernelRoot)` is the only curated input. It names Hosting;
+ApplicationModel.Hosting, which every area's `<Area>.Hosting.ApplicationModel`
+integration builds on; Connections and its StreamAbort, StreamLimits, and Tls
+siblings; the CommandLine, EnvironmentVariables, FileSystem, and Json
+configuration providers; Logging.Console; Logging.EventSource; OpenTelemetry;
+DependencyInjection; and FileSystem.Physical. Connections belongs in the kernel
+because every area hosting module depends on it.
 The runtime project references those roots, and the pack target derives their
 transitive `Assimalign.Cohesion.*` project-reference closure before writing
 `RuntimeList.xml` and `FrameworkList.xml`. The App umbrella assembly is added to

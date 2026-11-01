@@ -12,11 +12,11 @@ Each build creates a new context, invokes every registered service factory exact
 
 ## Boundaries
 
-The module references the area root, DependencyInjection, and Hosting publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
+The module references the area root, DependencyInjection, and Hosting publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. It references no application-model library: the resource integration, `Rezolvr.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
 ## Enabled resource lifecycle
 
-The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel`.
+The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 
 ## Declarative commands (item 31c)
 
@@ -32,8 +32,7 @@ Typed verbs validate argument shape and use source-generated JSON metadata. Buil
 advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
 
 A-record declarations use a BCL IPv4 IPAddress serialized as a string. CNAME declarations
-carry a DNS target string; TTL is a positive integer in seconds, defaulting to 300. COHAM001 keeps
-Dns assemblies outside the ApplicationModel dependency closure.
+carry a DNS target string; TTL is a positive integer in seconds, defaulting to 300.
 
 Hosting stores records atomically in `records.json`. No CohesionMount or CohesionWorkloadKind change
 is made: GenericPlanner requires StatefulSet for a Volume while RezolvrPlanner requires Deployment.

@@ -17,10 +17,10 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IdentityHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Models" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
 
-        <!-- IdentityHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />

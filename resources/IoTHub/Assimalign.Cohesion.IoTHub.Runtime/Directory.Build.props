@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IoTHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel" />
 
-        <!-- IoTHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EventHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EventHub.Hosting.ApplicationModel" />
 
-        <!-- EventHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

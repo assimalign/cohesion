@@ -46,7 +46,7 @@ flowchart LR
 | Package | Role | Reference to `Web.Server` |
 |---|---|---|
 | `Assimalign.Cohesion.Web.Server` | implements the engine and declares its seven exchange contracts | — |
-| `Assimalign.Cohesion.Web.Hosting` | runtime module: composes the engine, HTTP defaults and non-owning host-service wrapper; its control plane defers stop until the `202` is written | project reference (COHRES002) |
+| `Assimalign.Cohesion.Web.Hosting` | runtime module: composes the engine, HTTP defaults and non-owning host-service wrapper | project reference (COHRES002) |
 | `Assimalign.Cohesion.Web.WebSockets` | closes open sockets with `1001 Going Away` when `Draining` fires | project reference |
 | `Assimalign.Cohesion.Web.Caching` | stores the final response only after successful completion | project reference |
 | `Assimalign.Cohesion.Web.Diagnostics` | reads the request id and server activity for correlation; logs a client fault at the configured level with the status sent | project reference |
@@ -98,8 +98,8 @@ it never disposes the server. Direct usage is shown in [OVERVIEW.md](OVERVIEW.md
 **Compatibility with 10.0.0-preview.1 (decision 15).** Making the formerly internal server public is
 additive, and `UseServer<TServer>` relaxes its constraint from `IWebApplicationServer, IHostService`
 to `IWebApplicationServer`. Server EventSource, Meter and ActivitySource now use
-`Assimalign.Cohesion.Web.Server`; none of their former names shipped in preview.1. The Web.Hosting
-provider retains only host/control-plane signals. Existing feature contracts keep their namespaces.
+`Assimalign.Cohesion.Web.Server`; none of their former names shipped in preview.1. Web.Hosting raises no
+events of its own. Existing feature contracts keep their namespaces.
 
 ## Why the contracts share one package
 
@@ -174,8 +174,8 @@ it on every exchange and invokes callbacks in registration order after writing t
 transport. Callback failures are isolated: every callback runs even if a preceding one throws,
 and the default server retains and reports each failure (#1410). This changes the preview.1
 behavior, which skipped later callbacks after the first failure. Registration after completion throws `InvalidOperationException`. This lets a terminal
-defer lifecycle signals until its acknowledgement has been sent: the resource control plane's stop
-route answers `202` and stops the application only once the `202` is on the wire.
+defer lifecycle signals until its acknowledgement has been sent: a route that answers `202` and
+then stops the application can wait until the `202` is on the wire.
 Output caching also uses this seam so starting-callback policy changes and transmission failure govern
 storage. A custom server without completion notification can serve existing hits but stores no misses.
 
@@ -240,7 +240,7 @@ reclamation arrived later in #1384. The generic default member on the transport 
 public-interface addition sanctioned by #1432; no Web-root contract or dependency is added.
 
 **A custom server chooses which contracts it supports.** A custom `IWebApplicationServer` may omit any of them, so each
-reader handles an absent feature (SecurityHeaders and CORS require starting and throw without it): the control plane falls back to a direct stop, WebSockets has
+reader handles an absent feature (SecurityHeaders and CORS require starting and throw without it): a deferred action falls back to running at once, WebSockets has
 no drain-time close, so a socket ends by its own close or by the exchange's cancellation, and a
 reader of the client fault treats an absent feature as no fault reported. HTTP logging omits
 trace correlation when the request-id feature is absent and omits the span id when there is no
@@ -260,7 +260,7 @@ the types now live in another assembly. Every in-repository reader was rebuilt w
 ## Framework membership
 
 `App.Web` carries the package publicly, so applications compile against the contracts. Every other
-area framework carries `Web.Hosting` privately (the area's control plane runs on it), and so carries
+area framework carries `Web.Hosting` privately (its area hosting module serves HTTP on it), and so carries
 `Web.Server`, with `Web.Routing` and its `Http.Forwarded` dependency, privately too. The App.Runtime
 framework-closure tests prove each list covers the project graph.
 
@@ -280,7 +280,7 @@ runtime reads stays internal to `Web.Hosting`. Each addition lands in every fram
 
 ## Non-goals
 
-- **Hosting composition.** DI, configuration binding, control plane, health integration and TCP/QUIC
+- **Hosting composition.** DI, configuration binding, health integration and TCP/QUIC
   convenience helpers stay in Web.Hosting; a direct application supplies its pipeline and listeners.
 - **Feature-published contracts.** The endpoint and the path base are `Web.Routing`'s, and a feature
   package owns any contract it publishes.
@@ -502,7 +502,7 @@ once, in one of three ways, chosen by how its pipeline ended:
   (#1410). Completion collects all failures in an `AggregateException`; the server reports each
   callback's exception separately through its event source, without changing the sent response.
   This is a behavioral break from 10.0.0-preview.1, which skipped the remaining callbacks; in
-  particular, an earlier failure can no longer suppress the control plane's deferred stop.
+  particular, an earlier failure can no longer suppress a later callback such as a deferred stop.
 - **The connection-level catch remains** for what is left: a receive-side failure the
   transport surfaced and an HTTP/1.1 send failure. Either way the connection cannot
   carry another request, so it is logged (see "Diagnostics"), `Abort`-ed, and the
@@ -640,9 +640,7 @@ connection's streams before it disposes the context.
 `StopAsync(cancellationToken)` is a lame-duck drain: the server accepts nothing new,
 lets the exchanges in flight finish within the caller's budget, and cancels only what
 outlives it. The token is the budget. `Host<TContext>.StopAsync` passes a token that
-fires when its `ShutdownTimeout` elapses, which an orchestrated resource derives from
-its stop grace (`ResourceHostOptions.DeriveShutdownTimeout`: grace − 5 s, floor 5 s), so
-a Web app drains for at most that long.
+fires when its `ShutdownTimeout` elapses, so a Web app drains for at most that long.
 
 The server holds two signals (`Internal/WebApplicationServerDrain`). Each live
 connection registers on both once its context is open, so a connection accepted just
@@ -716,7 +714,7 @@ The stop runs in order:
 The stop completes normally when the budget runs out, as Kestrel's does: the server
 is stopped and its endpoint released; only the graceful part was cut short, which the
 caller knows from its own token and which the host already reports as `DrainAborted`
-(exit 130/143 for an orchestrated resource). Every later `StopAsync` call shares the
+. Every later `StopAsync` call shares the
 first call's task. Cancelling before starting, or stopping twice, is safe.
 
 The server's states through a stop:
@@ -1122,10 +1120,11 @@ a proxy it is the proxy. Pipeline failures belong to
 [ErrorHandling](../../Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics), while
 pre-dispatch rejections and protocol/client-fault classifications belong to Http.Connections.
 
-Web.Hosting owns its separate `WebHostingEventSource` for control-plane events and its
-`rejected-credentials` counter. Each assembly has a local `EventThrottle`; no throttle
-instance, source provider or shipped visibility grant crosses this boundary. The entry-point
-host's default `Assimalign.Cohesion.Web.` forwarding prefix covers both providers, while
+Web.Hosting raises no events of its own (its control-plane source, `WebHostingEventSource`, and
+its `rejected-credentials` counter left with the resource control plane on 2026-10-31). Each
+assembly keeps a local `EventThrottle`; no throttle instance, source provider or shipped visibility
+grant crosses an assembly boundary. The entry-point host's default `Assimalign.Cohesion.Web.`
+forwarding prefix covers this provider, while
 an application constructing this server directly chooses its own diagnostics listeners.
 
 **Compatibility:** preview.1 had no server EventSource. Compared with the interim #147 logger,

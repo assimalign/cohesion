@@ -2,7 +2,7 @@
 
 Assimalign.Cohesion.Scheduler.Hosting supplies SchedulerApplication.CreateBuilder. The concrete application executes all schedules supplied through registered providers while preserving caller-added host services.
 
-The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel`. The runtime drains active occurrences during stop.
+The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel`, which references this module; this module references no application-model library. The runtime drains active occurrences during stop.
 
 ## Concrete composition (T10 / O34)
 

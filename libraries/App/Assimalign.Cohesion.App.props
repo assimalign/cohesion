@@ -35,7 +35,7 @@
         SDK policy:
             Sdk          -> no implicit framework (library SDK)
             Sdk.<Area>   -> App + App.<Area> (resource SDK)
-            Sdk.Gateway  -> no framework unless in-process composition is active
+            Sdk.Gateway  -> no framework (it references the gateway package only)
         CohesionAutoIncludeAppFramework=false suppresses both resource-SDK
         references. The base SDK still registers every framework so direct
         consumers can add an explicit FrameworkReference.
@@ -137,7 +137,7 @@
              every transitive Assimalign.Cohesion dependency from these roots. -->
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Hosting" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
-        <!-- Generated resource accessors and every area hosting module depend on Connections. -->
+        <!-- Every area hosting module depends on Connections, so App carries it once. -->
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections.StreamAbort" />
         <CohesionAppKernelRoot Include="Assimalign.Cohesion.Connections.StreamLimits" />

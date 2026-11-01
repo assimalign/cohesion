@@ -108,10 +108,9 @@ the pipeline is built (#1078). Register middleware before starting the applicati
 building its pipeline. Web.Hosting enforces this boundary; compared with 10.0.0-preview.1, late
 registration now throws instead of accepting middleware that never executes.
 
-Disposable control-plane resources are owned internally by Web.Hosting's concrete application
-context (owner decision 57, 2026-10-13). The former `IWebApplicationLifetime` seam did not ship
-and is removed: the control plane now lives in the hosting module and needs no Web-root
-disposal contract. Existing root interfaces remain unchanged.
+Disposable resources that pipeline composition creates are owned internally by Web.Hosting's
+concrete application context (owner decision 57, 2026-10-13). The former `IWebApplicationLifetime`
+seam did not ship and is removed, so the root carries no disposal contract. Existing root interfaces remain unchanged.
 ## Segments and terminal middleware (#1056)
 
 | Verb | Runs when | Rejoins the main pipeline |
@@ -152,8 +151,8 @@ on `IWebApplicationContext.Settings`.
 A pipeline verb only reads a setting: it finds the one its feature registered when the pipeline is built,
 and its middleware reads `Value` on each request. An operator surface finds the same setting on the context
 and replaces its value, which applies from the next request without rebuilding the pipeline. Web.Cors is the
-first feature with one: the `cors` setting holds the default policy, and Web.Hosting.Resources exposes it as
-a resource action.
+first feature with one: the `cors` setting holds the default policy, and Web.Hosting.ApplicationModel exposes it as
+the `cors` resource action.
 
 *Rejected:* a dynamic-middleware interface, a middleware that exposes its state and reconfigures itself.
 Middleware instances are not discoverable once composed (`Use` keeps delegates), state also lives outside

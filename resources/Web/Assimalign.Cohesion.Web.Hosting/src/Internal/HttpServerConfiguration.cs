@@ -60,9 +60,8 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// <c>Protocol</c> names the registration verb it binds to: <c>Http1</c> (the default) and
 /// <c>Http2</c> are cleartext; <c>Http1s</c> and <c>Http2s</c> serve one protocol over TLS;
 /// <c>Https</c> serves HTTP/2 and HTTP/1.1 over TLS, chosen per connection through ALPN; and
-/// <c>Http3</c> serves HTTP/3 over QUIC. A TLS endpoint's <c>Certificate</c> is either a scalar
-/// naming the Secret mount that carries a PEM bundle (the default mount is <c>tls</c>) or a section
-/// naming a file: <c>Path</c> to a PEM or PKCS#12 (PFX) file, with an optional <c>KeyPath</c> for a
+/// <c>Http3</c> serves HTTP/3 over QUIC. A TLS endpoint's <c>Certificate</c> is a section naming a
+/// file (a scalar value is refused): <c>Path</c> to a PEM or PKCS#12 (PFX) file, with an optional <c>KeyPath</c> for a
 /// separate PEM key and an optional <c>Password</c> for an encrypted key or a protected PFX. A
 /// relative path resolves against the content root. A TLS endpoint's <c>ClientCertificateMode</c>
 /// (<c>NoCertificate</c>, the default; <c>AllowCertificate</c>; <c>RequireCertificate</c>) requests
@@ -708,7 +707,7 @@ internal static class HttpServerConfiguration
             : X509Certificate2.CreateFromEncryptedPemFile(path, password, keyPath))
         {
             // A PEM key is ephemeral; the PKCS#12 import gives SslStream a key association Windows
-            // Schannel accepts for server authentication (the same import the Secret-mount loader does).
+            // Schannel accepts for server authentication.
             byte[] pkcs12 = pem.Export(X509ContentType.Pkcs12);
             try
             {

@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.EmailHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel" />
 
-        <!-- EmailHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

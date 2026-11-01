@@ -1054,8 +1054,8 @@ internal sealed class CertificateAuthorityManager : IDisposable
         return leafName;
     }
 
-    // The leaf-name and alternative-name rules formerly shared with the retired command grammar
-    // (SecretStore.ApplicationModel's Commands module), kept unchanged.
+    // The leaf-name and alternative-name rules formerly shared with the retired command grammar,
+    // kept unchanged.
     private static bool IsValidCertificateName(string? value) =>
         !string.IsNullOrWhiteSpace(value) && value is not "." and not ".." &&
         value.IndexOfAny(['/', '\\']) < 0;

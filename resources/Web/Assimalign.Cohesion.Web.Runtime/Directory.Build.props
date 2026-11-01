@@ -19,15 +19,13 @@
 
          The framework is what delivers the Web family to applications:
          the hosting/runtime module (Assimalign.Cohesion.Web.Hosting)
-         references the feature packages its runtime and integrations need
-         (Web.Routing, Web.Server and Web.Health, owner decisions 33 and 57),
+         references the Web packages its runtime needs (Web.Routing and
+         Web.Server, owner decision 33),
          and the feature libraries never reference the hosting module -
          apps see the whole family because Sdk.Web pulls this framework
          (Web-area dependency rule: resources/Web/README.md).
 
-         Exclusions: Web.Testing (test harness, not runtime),
-         Web.ApplicationModel (NuGet-only; Sdk.Web injects it only for an
-         orchestration-enabled executable), and Web.OpenApi (NuGet-only, #152:
+         Exclusions: Web.Testing (test harness, not runtime) and Web.OpenApi (NuGet-only, #152:
          an application that documents its API references it, so one that does
          not carries none of the OpenApi family; the description verbs it reads
          ship in Web.Api, which is a member).

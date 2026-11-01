@@ -1,9 +1,8 @@
 # Assimalign.Cohesion.ConfigurationStore.Client
 
-Thin, AOT-compatible protocol client for reading configuration namespaces and submitting
-configuration-store commands without referencing the ConfigurationStore hosting runtime. Gateways
-reach it only through `Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration`
-(`UseConfigurationStore(...)`); other infrastructure may reference it directly.
+Thin, AOT-compatible protocol client for reading configuration namespaces without referencing the
+ConfigurationStore hosting runtime. Any program that reads the store's namespaces may reference it
+directly.
 
 ## Usage
 
@@ -30,8 +29,6 @@ are not forwarded to a different authority.
 - `GET /cohesion/v1/namespaces` returns a direct JSON array of namespace-name strings.
 - `GET /cohesion/v1/namespaces?name=<escaped-name>` returns a direct JSON object whose property
   values are strings or `null`.
-- `POST /cohesion/v1/commands` sends a camel-case JSON `ResourceCommand` envelope whose payload
-  bytes are base64 encoded.
 
 An endpoint base path is preserved and prepended to every route. Non-success HTTP responses raise
 `HttpRequestException`; malformed namespace-list or namespace-value JSON raises `JsonException`.

@@ -54,9 +54,8 @@ The stop-begun marker belongs to the run, so a later run starts with fresh seman
 | Package | Owns |
 | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Plain host lifetime and service execution |
-| `Assimalign.Cohesion.Hosting.Resources` | Resource instances, their control plane, and the resource service that joins one to its gateway |
+| `Assimalign.Cohesion.ApplicationModel.Hosting` | Resource instances, their control plane, and the host service that joins one to its gateway (`libraries/ApplicationModel/`; builds on this package) |
 
-The base `Assimalign.Cohesion.App` framework delivers Resources beside Hosting. Its presence does
-not activate resource behavior:
-an application becomes a managed resource only when its area's Hosting.Resources package
-registers a resource service.
+The base `Assimalign.Cohesion.App` framework delivers both. Its presence does not activate resource
+behavior: an application becomes a managed resource only when it calls its area's
+`builder.Services.AddResource(...)`.

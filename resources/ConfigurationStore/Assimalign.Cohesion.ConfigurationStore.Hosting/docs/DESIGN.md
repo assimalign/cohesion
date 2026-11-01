@@ -10,8 +10,8 @@ The builder captures code-first namespace declarations, materializes explicit se
 appends the ConfigurationStore HTTP endpoint. Explicit services therefore start before the listener
 and stop after it. The retired resource integration (control plane, declarative commands,
 bootstrap-token trust, endpoint certificates, telemetry) was removed on 2026-10-31 with the
-application-model restart (assimalign/cohesion#1759), and the area's resource integration returns
-as `Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`. The host accepts `--endpoint`
+application-model restart (assimalign/cohesion#1759), and the area's resource integration is
+`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library. The host accepts `--endpoint`
 and `--data` overrides (defaulting to `http://127.0.0.1:8080` and `data` under the content root).
 
 ## Persistence and protocol
@@ -24,7 +24,7 @@ secret material and are intentionally stored unencrypted. A mutation is committe
 snapshot only after its durable replacement succeeds, so a failed write cannot create restart drift.
 
 `GET /cohesion/v1/namespaces` lists names and `?name=` reads one direct key/value object. Health,
-readiness, liveness, and the endpoint listing share the standard `/cohesion/v1` surface.
+readiness, liveness, and the endpoint listing are also served under `/cohesion/v1`.
 
 ## Trust
 
@@ -33,13 +33,13 @@ The host accepts requests under
 `127.0.0.1`. Other peers, including absent or non-IP endpoints, receive 403. The explicit refusal
 makes the development-only access rule clear; forwarded headers never establish locality.
 Bare `/healthz`, `/readyz`, and `/livez` remain open for orchestrators and load balancers; their
-namespaced aliases follow the control-plane rule. These routes are relative to the configured
+namespaced aliases follow the `/cohesion/v1` loopback rule. These routes are relative to the configured
 endpoint base path.
 
 This is a behavior break from 10.0.0-preview.1 (#1431, owner decision 46, accepted on
 decision 15's preview terms): a reachable
-standalone listener previously accepted remote control-plane reads, commands, and stop requests
-without credentials.
+standalone listener previously accepted remote reads, commands, and stop requests
+without credentials. The command and stop routes left with the old resource control plane (2026-10-31).
 
 ## Boundaries
 

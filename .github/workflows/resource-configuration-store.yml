@@ -2,7 +2,7 @@ name: Configuration Store
 on:
   push:
     paths:
-      # The area's Hosting module builds on ApplicationModel.Hosting, so a change to the
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a change to the
       # application model or Core reruns the area.
       - 'resources/ConfigurationStore/**'
       - '!resources/ConfigurationStore/**/*.slnx'
@@ -56,7 +56,8 @@ jobs:
         projects: [[
             'Assimalign.Cohesion.ConfigurationStore',
             'Assimalign.Cohesion.ConfigurationStore.Client',
-            'Assimalign.Cohesion.ConfigurationStore.Hosting'
+            'Assimalign.Cohesion.ConfigurationStore.Hosting',
+            'Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel'
         ]]
     steps:
       - uses: actions/checkout@v7

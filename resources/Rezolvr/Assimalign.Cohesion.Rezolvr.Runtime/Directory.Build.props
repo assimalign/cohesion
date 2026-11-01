@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.Rezolvr" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Rezolvr" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Rezolvr.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel" />
 
-        <!-- Rezolvr.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

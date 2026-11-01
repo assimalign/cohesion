@@ -17,8 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.MessageHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MessageHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MessageHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.MessageHub.Hosting.ApplicationModel" />
 
-        <!-- MessageHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />

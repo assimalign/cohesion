@@ -10,30 +10,6 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client;
 /// </summary>
 public static class ConfigurationStoreClient
 {
-    /// <summary>Creates a client whose command observation methods use the manifest's exact control-plane path.</summary>
-    /// <param name="controlPlaneAddress">The full HTTP(S) control-plane address, including its manifest path.</param>
-    /// <param name="credential">The opaque bootstrap credential.</param>
-    /// <returns>A command client bound to the supplied control-plane address.</returns>
-    /// <exception cref="ArgumentException">The address is not a valid HTTP(S) endpoint.</exception>
-    /// <exception cref="ArgumentNullException">The address or credential is null.</exception>
-    public static IConfigurationStoreClient CreateForControlPlane(Uri controlPlaneAddress, ClientCredential credential)
-        => CreateForControlPlane(controlPlaneAddress, credential, _sharedTransport);
-
-    /// <summary>Creates a control-plane client with a caller-owned transport, including its TLS trust policy.</summary>
-    /// <param name="controlPlaneAddress">The HTTP(S) address including the manifest control-plane path.</param>
-    /// <param name="credential">The opaque bootstrap credential.</param>
-    /// <param name="transport">The transport, owned and disposed by the caller after requests finish.</param>
-    /// <returns>A client using the supplied transport and control-plane path.</returns>
-    /// <exception cref="ArgumentNullException">A required argument is null.</exception>
-    /// <exception cref="ArgumentException">The address is not a valid HTTP(S) endpoint.</exception>
-    public static IConfigurationStoreClient CreateForControlPlane(
-        Uri controlPlaneAddress, ClientCredential credential, HttpMessageInvoker transport)
-    {
-        // Reuse the ordinary factory's validation before enabling the explicit path mode.
-        _ = Create(controlPlaneAddress, credential, transport);
-        return new HttpConfigurationStoreClient(controlPlaneAddress, credential, transport, commandControlPlanePath: true);
-    }
-
     private static readonly HttpMessageInvoker _sharedTransport = new(
         new SocketsHttpHandler
         {

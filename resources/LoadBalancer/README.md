@@ -2,7 +2,7 @@
 
 LoadBalancer is the L3 networking service platform intended to manage backend pools, health probes, routing and affinity policy, draining, failover, and load-balancing decisions.
 
-The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel`. Domain services remain fillers pending the area program.
+A LoadBalancer application becomes a managed resource instance with `Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel`: `builder.Services.AddResource("ingress", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into. Domain services remain fillers pending the area program.
 
 ## Project map
 
@@ -13,11 +13,17 @@ An arrow means "references": `LoadBalancer.Hosting --> LoadBalancer` reads
 flowchart LR
     P0["LoadBalancer — area root"]
     P2["LoadBalancer.Hosting — runtime module"]
+    PAM["LoadBalancer.Hosting.ApplicationModel — resource integration"]
+    AMH["Assimalign.Cohesion.ApplicationModel.Hosting — L2"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
     PRIV["other areas, referenced privately"]
     P2 --> HOSTFAM
     P2 --> P0
     P2 -->|"private"| PRIV
+    PAM --> P2
+    PAM --> P0
+    PAM --> AMH
+    AMH --> HOSTFAM
     P0 -.->|"COHRES001 ✗"| P2
 ```
 
@@ -26,6 +32,10 @@ rejects: **no library in the area may reference its own `LoadBalancer.Hosting` r
 module**. The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
+The one exception is the resource integration, `LoadBalancer.Hosting.ApplicationModel`, which joins
+the runtime module to the application model's hosting; `COHRES001` sanctions that
+reference by the integration's exact name, with no exemption property.
+
 The full reference graph for every Cohesion assembly, including the exact external dependencies
 collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
@@ -33,6 +43,7 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 - `Assimalign.Cohesion.LoadBalancer` defines the public area-root application and builder contracts.
 - `Assimalign.Cohesion.LoadBalancer.Hosting` provides the concrete creation entry point and host lifecycle with explicit `IHostService` registration.
+- `Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel` registers the application as a managed resource instance (`builder.Services.AddResource(name, ...)`) on the platform its gateway names, with the actions the application adds.
 
 ## Layering and dependencies
 
@@ -44,6 +55,8 @@ As an L3 service platform, LoadBalancer composes the L2 `Assimalign.Cohesion.Hos
 - [Root design](./Assimalign.Cohesion.LoadBalancer/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.LoadBalancer.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.LoadBalancer.Hosting/docs/DESIGN.md)
+- [Resource integration overview](./Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel/docs/OVERVIEW.md)
+- [Resource integration design](./Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel/docs/DESIGN.md)
 
 ## Application composition (O34)
 
@@ -60,4 +73,4 @@ await using LoadBalancerApplication application = builder.Build();
 await application.RunAsync();
 ```
 
-The unused public `IHostBuilder.AddLoadBalancer()` shim was removed by O34. The ApplicationModel descriptor verb is unchanged.
+The unused public `IHostBuilder.AddLoadBalancer()` shim was removed by O34.

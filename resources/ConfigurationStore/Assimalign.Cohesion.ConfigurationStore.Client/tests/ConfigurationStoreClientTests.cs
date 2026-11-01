@@ -16,34 +16,6 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client.Tests;
 
 public class ConfigurationStoreClientTests
 {
-    [Fact(DisplayName = "Cohesion Test [ConfigurationStore.Client] - CreateForControlPlane: Sends through the caller's transport at the exact manifest path")]
-    public async Task CreateForControlPlane_WithTransport_ShouldSendThroughIt()
-    {
-        // Arrange
-        string? observedUri = null;
-        string? observedMethod = null;
-        var handler = new FakeHttpMessageHandler((request, _) =>
-        {
-            observedUri = request.RequestUri!.AbsoluteUri;
-            observedMethod = request.Method.Method;
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
-        });
-        using var transport = new HttpMessageInvoker(handler);
-        IConfigurationStoreClient client = ConfigurationStoreClient.CreateForControlPlane(
-            new Uri("https://resource.test:8443/custom/control"), new ClientCredential("bootstrap-token"), transport);
-        var command = new ResourceCommand("id", "configurationstore.set-value", "appa", "key", ReadOnlyMemory<byte>.Empty);
-
-        // Act
-        await client.ObserveCommandAsync(command, CancellationToken.None);
-
-        // Assert
-        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
-        observedMethod.ShouldBe("POST");
-        await client.DeleteCommandAsync(command, CancellationToken.None);
-        observedUri.ShouldBe("https://resource.test:8443/custom/control/commands");
-        observedMethod.ShouldBe("DELETE");
-    }
-
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - ListNamespacesAsync: Should send an authenticated request and return names")]
     public async Task ListNamespacesAsync_WhenEndpointReturnsArray_ShouldReturnNames()
     {
@@ -151,54 +123,6 @@ public class ConfigurationStoreClientTests
         observedUri.ShouldBe(
             "https://configuration.test:8443/api/cohesion/v1/namespaces?name=apps%2Fapi");
         observedAuthorization.ShouldBe("Bearer bootstrap-token");
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - SendCommandAsync: Should send the source-generated command envelope")]
-    public async Task SendCommandAsync_WhenEndpointAcceptsCommand_ShouldSendJsonEnvelope()
-    {
-        // Arrange
-        string? observedBody = null;
-        string? observedAccept = null;
-        string? observedMethod = null;
-        string? observedUri = null;
-        string? observedContentType = null;
-        var handler = new FakeHttpMessageHandler(async (request, cancellationToken) =>
-        {
-            observedAccept = request.Headers.Accept.ToString();
-            observedMethod = request.Method.Method;
-            observedUri = request.RequestUri?.AbsoluteUri;
-            observedContentType = request.Content?.Headers.ContentType?.MediaType;
-            observedBody = await request.Content!.ReadAsStringAsync(cancellationToken);
-            return new HttpResponseMessage(HttpStatusCode.NoContent);
-        });
-        using var transport = new HttpMessageInvoker(handler);
-        IConfigurationStoreClient client = ConfigurationStoreClient.Create(
-            new Uri("https://configuration.test:8443"),
-            new ClientCredential("bootstrap-token"),
-            transport);
-        var command = new ResourceCommand(
-            "command-1",
-            "configurationstore.set-value",
-            "appa",
-            "apps/api/mode",
-            Encoding.UTF8.GetBytes("{\"value\":\"production\"}"));
-
-        // Act
-        await client.SendCommandAsync(command, CancellationToken.None);
-
-        // Assert
-        observedMethod.ShouldBe("POST");
-        observedUri.ShouldBe(
-            "https://configuration.test:8443/cohesion/v1/commands");
-        observedAccept.ShouldBe("application/octet-stream");
-        observedContentType.ShouldBe("application/json");
-        using JsonDocument document = JsonDocument.Parse(observedBody!);
-        document.RootElement.GetProperty("id").GetString().ShouldBe("command-1");
-        document.RootElement.GetProperty("kind").GetString().ShouldBe("configurationstore.set-value");
-        document.RootElement.GetProperty("owner").GetString().ShouldBe("appa");
-        document.RootElement.GetProperty("key").GetString().ShouldBe("apps/api/mode");
-        document.RootElement.GetProperty("payload").GetString().ShouldBe(
-            Convert.ToBase64String(Encoding.UTF8.GetBytes("{\"value\":\"production\"}")));
     }
 
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - GetNamespaceAsync: Should reject a redirect response")]

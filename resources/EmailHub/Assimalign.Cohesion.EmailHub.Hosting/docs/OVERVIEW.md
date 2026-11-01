@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.EmailHub.Hosting
 
-`EmailHubApplication.CreateBuilder(args)` returns the public concrete `EmailHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel`.
+`EmailHubApplication.CreateBuilder(args)` returns the public concrete `EmailHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 
 Domain service behavior remains deferred.
 

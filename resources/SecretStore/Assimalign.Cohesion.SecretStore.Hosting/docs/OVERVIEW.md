@@ -11,7 +11,7 @@ protocol served on the resource's `api` endpoint.
 - The retired resource integration (control plane, declarative commands, bootstrap-token
   authentication, trust store, endpoint certificates, telemetry) was removed on 2026-10-31 with the
   application-model restart (assimalign/cohesion#1759), and the area's resource integration
-  returns as `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`.
+  is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
 - Always appends an HTTP/1 endpoint service after caller-registered host services, so the endpoint
   starts last and drains first.
 - Interoperates with `SecretStore.Client` for secret reads and durable leaf-certificate reads.

@@ -4,8 +4,8 @@
 
 The plain Hosting package coordinates a host lifetime without assuming how an application is
 supervised, how health is transported, or whether the process represents a Cohesion resource.
-Those policies live in other packages and integrate as ordinary host services: Hosting.Resources
-registers its resource service as an `IHostLifecycleService`.
+Those policies live in other packages and integrate as ordinary host services:
+ApplicationModel.Hosting's `ApplicationInstanceService` is an `IHostLifecycleService`.
 
 ## Lifecycle coordinator
 
@@ -203,18 +203,19 @@ join the same work.
 | Package | Direct dependencies | Policy boundary |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Core | Plain lifecycle only |
-| `Assimalign.Cohesion.Hosting.Resources` | Core, Hosting | Resource instances, their control plane, and the resource service that joins one to its gateway |
+| `Assimalign.Cohesion.ApplicationModel.Hosting` | Core, Hosting, ApplicationModel.Protocol | Resource instances, their control plane, and the host service that joins one to its gateway (`libraries/ApplicationModel/`) |
 
-Hosting does not reference Resources. Resources is the opt-in composition layer: an area registers its `ResourceService`, an `IHostLifecycleService`, with
-the application's host.
+Hosting does not reference ApplicationModel.Hosting. ApplicationModel.Hosting is the opt-in
+composition layer: an area's `<Area>.Hosting.ApplicationModel` registers its
+`ApplicationInstanceService`, an `IHostLifecycleService`, with the application's host.
 
-Resources still ships in the base `Assimalign.Cohesion.App` framework. Framework presence is not
-activation: an application becomes a managed resource only when its area's Hosting.Resources
-package registers a resource service.
+Both ship in the base `Assimalign.Cohesion.App` framework. Framework presence is not activation: an
+application becomes a managed resource only when it calls its area's
+`builder.Services.AddResource(...)`.
 
 ## Non-goals
 
-- Resource behavior belongs to `Assimalign.Cohesion.Hosting.Resources`. Stdout readiness messages
+- Resource behavior belongs to `Assimalign.Cohesion.ApplicationModel.Hosting`. Stdout readiness messages
   and exit-code classification belong to no package: a resource reports readiness to its gateway,
   and a platform restarts a process on any failed exit.
 - Other signals, and shutdown signals outside a run: Hosting registers SIGINT, SIGQUIT and SIGTERM
