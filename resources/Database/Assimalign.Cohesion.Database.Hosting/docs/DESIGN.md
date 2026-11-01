@@ -1,5 +1,12 @@
 # Assimalign.Cohesion.Database.Hosting — Design
 
+## Joint SQL migration health (#1447, SQ-A3)
+
+Hosting keeps its model-neutral Provisioning observation: unpublished SQL TYPE work is Degraded
+while pending/running; CS03402 leaves health Degraded with the database online at its old schema.
+Successful explicit retry restores Healthy. This differs from decision 49a's CS03104 offline
+step failure and adds no Hosting model reference or automatic retry.
+
 ## Composition
 
 Phase 29 implements the owner-approved [Database hosting design](../../../../docs/programs/DATABASE_HOSTING_DESIGN.md), including its nested-engine corrections. The public path is `DatabaseApplication.CreateBuilder(args)` → Add intent → one-shot `Build()` → engine access / `RunAsync()`. There is no composition `Use` method or application-builder `AddServer`.
