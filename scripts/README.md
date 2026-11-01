@@ -17,7 +17,7 @@ from CI or an agent skill.
 | `Get-ReleaseMatrix.ps1` | Emit the release validation matrix from the release inventory. |
 | `Update-CohesionSolutions.ps1` | Update solution project entries and dependency closures; replaces root `setup.ps1` and the compiled DevScripts module. Preserves existing folder groupings. Supports `-Check`, `-WhatIf`, and `-SolutionPath`. |
 | `Update-CohesionDependencyGraph.ps1` | Regenerate `docs/DEPENDENCIES.md`; `-Check` detects drift. |
-| `New-CohesionDomainScaffold.ps1` | Scaffold an SDK, framework producers, and ApplicationModel project. |
+| `New-CohesionDomainScaffold.ps1` | Scaffold an SDK and framework producers for a resource area. |
 | `New-CohesionWorkItem.ps1` | Search, audit, or create work items using the cohesion-work-items skill's contract. |
 | `build/Test-CohesionSharedSource.ps1` | Exercise shared-source module selection and rejection cases. |
 | `resources/Database/Generate-CollationUnicodeData.ps1` | Regenerate collation tables from checksum-pinned Unicode inputs. |

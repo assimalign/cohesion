@@ -1,8 +1,0 @@
-<Project Sdk="Assimalign.Cohesion.Sdk">
-
-  <PropertyGroup>
-    <RootNamespace>GatewaySmokeSupport</RootNamespace>
-    <CohesionApplicationModel>disabled</CohesionApplicationModel>
-  </PropertyGroup>
-
-</Project>

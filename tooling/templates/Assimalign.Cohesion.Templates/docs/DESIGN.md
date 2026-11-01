@@ -2,75 +2,94 @@
 
 ## Direction and scope
 
-The authority is [developer-experience design §4, §8, O20 and O26](../../../../docs/DEVELOPER_EXPERIENCE_DESIGN.md).
 The package implements design item 39 and replaces the retired `extensions/dotnet` scaffold.
-It owns eleven short names: `cohesion-app`, `cohesion-landing-zone`, `cohesion-gateway`,
-`cohesion-composite`, `cohesion-web`, `cohesion-spa`, `cohesion-database`, `cohesion-secretstore`,
-`cohesion-configurationstore`, `cohesion-identityhub` and `cohesion-rezolvr`.
+It owns nine short names: `cohesion-app`, `cohesion-gateway`, `cohesion-web`, `cohesion-spa`,
+`cohesion-database`, `cohesion-secretstore`, `cohesion-configurationstore`, `cohesion-identityhub`
+and `cohesion-rezolvr`. The application-model design every scaffold follows is
+[docs/libraries/ApplicationModel/DESIGN.md](../../../../docs/libraries/ApplicationModel/DESIGN.md).
 
 There is no runtime API or assembly reference surface for this package.
 The package is L1 tooling; its output consumes the corresponding resource-area SDKs and frameworks.
 The CLI wrapper belongs to item 40, and further resource-area templates are deferred until their
 SDKs mature. The retired generic resource and zone template names are not aliases.
 
-## Content and topology
+```mermaid
+flowchart LR
+    Api["Acme.Api on Sdk.Web"] --> HostingInProcess["ApplicationModel.Hosting.InProcess"]
+    Gateway["Acme.Gateway on Sdk.Gateway"] --> GatewayInProcess["ApplicationModel.Gateway.InProcess"]
+    Database["Acme.Database on Sdk.Database"]
+```
+
+The diagram is `cohesion-app`'s package references: the API references the in-process
+platform's instance half, the gateway its gateway half, and the database neither. No project
+references another.
+
+## Retired templates
+
+`cohesion-landing-zone` and `cohesion-composite` were removed on 2026-10-31 with the generated
+application model they were built on. A composite was a gateway whose generated manifest made it a
+`Composite` resource that an outer gateway or application set could reference; the landing zone was
+six domain gateways federated by a root application set over generated `Applications` members,
+cross-application `Externals`, store-provider (`ApplicationModel.Orchestration`) packages, and the
+gateway's parameter files. In the new design a gateway is a plain program, a child gateway joins its
+parent through a platform's channel (`UseParent`), and no platform with a cross-process parent join
+ships from this repository, so a federated landing zone cannot be expressed until one does. A landing
+zone on the new design belongs with the first out-of-process platform pair, in `cohesion-platforms`
+or `cohesion-examples`.
+
+## Content
 
 `src/content/<shortName>/.template.config/template.json` is the template engine entry point.
 Each identity is unique and each template supports `-n`. The only framework choice is `net10.0`.
 The package project disables default item discovery, so embedded executable programs never compile
 into the packaging assembly. NuGet's default exclusions are disabled to retain `.gitignore`.
-
-The application and landing-zone trees follow the tracked `cohesion-examples` scaffolds at `f43e6fa`,
-except for the gateway programs and store mounts described under *Gateway composition and providers*,
-which moved ahead of that snapshot. The application tree is flattened to the repository root. The landing-zone source has 25 projects;
-`--topology federated` removes the root application-set gateway and substitutes only the solution,
-six gateway configuration files and README from `.topologies/federated`. This keeps the shared
-programs and project references identical. The package contains exactly 37 content project files.
-Each of those projects includes `Properties/launchSettings.json`: exactly one profile named
-after the project, with `commandName: Project` and `COHESION_ENVIRONMENT: Local`. Template
-name substitution updates the profile name together with the csproj filename. Both topology
-outputs carry the profiles for their emitted projects; federated output also removes the root
-gateway's profile. The three landing-zone APIs use `appsettings.Local.json`.
+The package contains exactly 11 content project files: three for `cohesion-app`, one per other
+template. Each includes `Properties/launchSettings.json` with exactly one profile named after the
+project and `commandName: Project`; a resource's profile sets `COHESION_ENVIRONMENT: Local`, a
+gateway's sets nothing, so an explicit caller environment survives. Template name substitution
+updates the profile name together with the csproj filename.
 
 Local is the developer-machine environment. Development is an ordinary deployed environment
-with strict security behavior, and the framework's unset default stays Production. These
-profiles select Local for `dotnet run` and IDE launch. An explicit command-line environment
-overrides the profile; use `dotnet run --no-launch-profile` when selecting an environment
-through inherited shell variables because launch profiles override inherited variables.
-The CLI handles that switch when a shell environment variable is supplied. The root landing-zone
-application set also appends Local only when its existing explicit-argument and variable checks
-find no environment, preserving direct executable launch convenience.
-The root application's set uses the generated `Applications.AppA`, `AppB` and `AppC` members;
-the landed example's `Appa`, `Appb` and `Appc` spellings do not compile against the current SDK.
+with strict security behavior, and the framework's unset default stays Production. Use
+`dotnet run --no-launch-profile` when selecting an environment through inherited shell variables,
+because launch profiles override inherited variables; the CLI does so when a shell environment
+variable is supplied.
 
-The landing-zone domains each import their ancestor `Directory.Build.props` and explicitly set
-`identity`, `networking`, `platform`, `appa`, `appb` or `appc`. Every template also writes root
-application identity. Single-project templates derive the default from the lowercased first name
-segment through template symbols; `--applicationName` overrides it. Project filenames and C#
-namespaces use the original `-n` casing. Resource-name symbols normalize punctuation to hyphens.
+Project filenames and C# namespaces use the original `-n` casing. `cohesion-app` lowercases the
+name for its gateway (`ApplicationGateway.CreateBuilder("acme")`) and resource (`acme-api`).
+`cohesion-gateway` names its gateway from `--applicationName`, or the lowercased first name segment.
+Resource-name symbols normalize punctuation to hyphens.
 
-## SDK ownership and opt-in
+## SDK ownership and the application model
 
 The base SDK owns `OutputType`, `TargetFramework`, `LangVersion`, `EnablePreviewFeatures`,
-`ImplicitUsings`, `Nullable` and `IsAotCompatible`. None is emitted in projects or identity props.
-SDK-owned defaults supersede the older consumer example in `.claude/rules/build-system.md`.
-The template package and test harness inherit repository configuration and remain AOT-compatible.
+`ImplicitUsings`, `Nullable` and `IsAotCompatible`. None is emitted in projects or root props, and
+root `Directory.Build.props` carries only `VersionPrefix`. The template package and test harness
+inherit repository configuration and remain AOT-compatible.
 
-O26 enables every application/landing-zone resource because it is referenced. Standalone resource
-templates explicitly set `disabled`, with an area-specific comment naming the ApplicationModel
-package and its three generated outputs. Their programs use no generated `Resource` surface.
-The plain database owns a local data directory and SQL schema; the plain SPA serves copied static
-content. Both can compile before orchestration is enabled.
+No project sets an application-model property or item: the SDKs have none. A resource makes
+itself managed in its `Program.cs`, and only where that reads as part of the scaffold's story:
+`Acme.Api` calls `builder.Services.AddResource("acme-api", resource => resource.UseInProcess())`
+and references `Assimalign.Cohesion.ApplicationModel.Hosting.InProcess`. The standalone resource
+templates are plain applications; their READMEs show the one call that makes them managed. The
+Database area has no integration yet, so the database programs say so and stay unmanaged.
 
-Gateways declare neither `CohesionApplicationModel` nor `CohesionResourceReferencesAreRuntime`:
-both were redundant in the landed examples, and the SDK controls their effective values. Composites
-use `Sdk.Gateway`, a resource name, `Local;InProcess` and the explicit InProcess flag. Landing-zone
-root and Networking gateways select only Local; the others select Local and InProcess. This differs
-from §4.5(a)'s target Docker selection because the container providers are not released.
+## Gateway composition and platforms
 
-Programs retain the landed composition scope. Zone gateways currently realize their Database/API/SPA
-subset while retaining the other references. Generic area configuration and full provider-backed
-production realization remain separate work; builds here do not claim runtime readiness of every domain.
+A gateway project is `Sdk.Gateway` plus one platform package, pinned to `$(CohesionVersion)`. Its
+`Program.cs` declares the model with `ApplicationGateway.CreateBuilder(name)` and
+`AddResource(provider, name)`, registers the platform, and runs the gateway until Ctrl+C.
+
+Both gateway scaffolds reference the in-process platform
+(`Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`), because it is the only platform that
+ships from this repository and a scaffold must compile on its own. The in-process platform runs
+each resource's program by delegate (`infrastructure.AddProgram(provider, name, MainAsync)`), which
+needs the gateway to reference the resource's project and the resource to expose a public entry
+point. A template cannot write that wiring across two generated projects without also changing the
+resource's entry point, so the scaffolds register no program and say how in a comment and the
+README; until a program is registered, deploying its resource fails. The READMEs describe the other
+choice, the Kubernetes pair from `cohesion-platforms`, which replaces the in-process package and
+registration and leaves the model unchanged.
 
 ## Standalone SPA routing (#1092)
 
@@ -91,49 +110,6 @@ The packed-SDK SPA run test starts the generated apphost and checks the page con
 links, HEAD semantics and 404 responses for missing file paths. Its process is stopped in a
 `finally` block, including when an assertion fails.
 
-## Gateway composition and providers
-
-`Sdk.Gateway` generates `Manifests`, `Externals`, `Applications`, the provider catalog, `UseGateway`
-and `Gateway.CreateBuilder`, but no per-resource `Add<Member>()` verb. Every gateway program composes
-its resources with the area's hand-written verb over the generated manifest, for example
-`builder.AddWeb(Manifests.AppAApi)` or `builder.AddDatabase(Manifests.AcmeDatabase)`, and would use
-`builder.AddResource(Manifests.X)` for a kind without an ApplicationModel package. The programs pass
-no options because the landed scaffolds configured none; an options instance such as
-`new WebResourceOptions { Replicas = 2 }` replaces the retired `Action<TOptions>` callback.
-
-Nothing is registered by convention. Before the provider seams, a gateway silently used its
-application's own SecretStore as the certificate authority and trust store, resolved every
-`<store>:<key>` mount against a SecretStore or ConfigurationStore resource, and sent telemetry to its
-application's own LogSpace. The templates now reproduce that behavior explicitly, in the two places that
-compose the Platform application:
-
-| Gateway | Package references | Registrations |
-| --- | --- | --- |
-| `Example.Platform.Gateway` | SecretStore and ConfigurationStore `ApplicationModel.Orchestration` | `UseSecretStore(secrets).AsCertificateAuthority().AsTrustStore()`, `UseConfigurationStore(configuration)`, `Providers.Telemetry = ResourceTelemetrySink.FromResource(logs)` |
-| `Example.Gateway` (application set) | the same two packages | the same three registrations, by resource name, in the `AddApplication(Applications.Platform, platform => ...)` callback, because a member's describe output carries no providers |
-
-Each package is a `CohesionPackageReference` pinned to `$(CohesionVersion)`, the version the SDK itself
-was packed at, so a scaffold never names a package version. No other gateway composes a store:
-Identity and Networking hold no SecretStore, and the zone gateways leave their SecretStore referenced
-but unrealized.
-
-Cross-application store sources are a documented follow-up (owner decision 4): `Build()` rejects a
-mount whose `<source>:<key>` names another application's store. The landed IdentityHub read its TLS
-bundle and signing keys, and the VPN gateway its keys, from `platform-secretstore`; those mounts are
-now the parameters `identity-hub-tls`, `identity-signing-keys` and `networking-vpn-keys`, supplied with
-`cohesion parameter set <name> --stdin --project <gateway>` (plus `--app identity` or `--app networking`
-for the root application set) or `--parameter name=value`. The TLS source stays explicit rather than
-falling back to the gateway development authority, so the IdentityHub endpoint behaves the same in
-every environment; an unset parameter leaves the resource unrealized with an error naming it. The
-Platform SecretStore references stay, so the identity and networking gateways still bind
-`Externals.PlatformSecretStore`. No mount reads that store now; the reference remains a declared
-dependency only.
-
-Feed-free assertions keep this true without a package feed: no gateway program calls a parameterless
-`Add<Member>()` verb, a gateway references an Orchestration package exactly when its program calls
-that package's `Use<Area>` verb, every package reference is pinned to `$(CohesionVersion)`, and every
-`<source>:<key>` mount names a store of the consuming resource's own application.
-
 ## Packing and versioning
 
 `PrepareCohesionTemplates` copies tracked content into the intermediate output before NuGet gathers
@@ -146,7 +122,7 @@ The centralized branding import adds the standard NuGet icon.
 Every template includes nuget.org mapped to Cohesion packages and `*`, plus a placeholder organization
 feed mapped to the generated name prefix. It contains no machine feed or authentication material.
 The generated guard uses split regular-expression spellings so it also passes the repository guard
-that scans this template source. `.cohesion/` and `parameters.json` remain ignored in every scaffold.
+that scans this template source.
 
 ## Acceptance lifecycle
 
@@ -157,21 +133,23 @@ under `_out/verify-39/w` to stay within the repository and limit Windows path de
 `Directory.Build.targets` at the workspace boundary prevents repository targets leaking into consumer
 builds; it sets no project defaults. Logs and generated projects remain available for inspection.
 
-Feed-free assertions cover every installed template and both topology choices, complete inventory pins,
-explicit identity and opt-in, seven-property absence, authored programs, source hygiene and root files.
-They also cover all 37 source launch profiles, profile-name substitution, emitted Local settings
-filenames and the root gateway profile's removal from federated output.
-Name replacement and explicit gateway identity receive separate coverage. Feed-backed tests first
-repeat those assertions, then substitute only the SDK pin values and the isolated smoke feed config.
-They build the generated tree and check manifest presence for enabled projects and absence for disabled
-ones. Package requirements are derived per template from the actual content SDKs and their area owner
-props, framework packs for the host RID, the existing Gateway consumer closure (the `_requiredPackageIds`
-list in the Gateway SDK's `ConsumerWorkspace.cs`), and each `CohesionPackageReference` in the content
-together with its repository project's `CohesionProjectReference` closure.
-The .NET SDK's `ProcessFrameworkReferences` also downloads targeting packs for every registered
-Cohesion framework to support transitive references. Gateway builds additionally request all
-registered runtime packs for the host RID. Discovery reads the base SDK's actual registrations
-for this additional closure; no consumer properties are injected to suppress those downloads.
+Feed-free assertions cover every installed template, complete inventory pins, authored programs,
+source hygiene, root files and every source launch profile. They reject every retired element
+(`CohesionApplicationModel`, `CohesionResourceReference`, `CohesionEndpoint`, `CohesionGateways`
+and the rest) and the retired generated surface in content (`Manifests.`, `Resource.Endpoints`,
+`UseGateway(`), and check that a gateway program builds its gateway under the expected name, that
+a resource calling `AddResource` opts into a platform it references, and that every package is
+pinned to `$(CohesionVersion)`. Name replacement and the explicit gateway name receive separate
+coverage.
+
+Feed-backed tests first repeat those assertions, then substitute only the SDK pin values and the
+isolated feed config, build the generated tree, and check that no manifest or generated resource
+or gateway source appears. Package requirements are derived per template from the content SDKs,
+the App framework packs for the host RID, the gateway package closure for a `Sdk.Gateway` project,
+and each `CohesionPackageReference` in the content together with its repository project's
+`CohesionProjectReference` closure. The .NET SDK's `ProcessFrameworkReferences` also downloads
+targeting packs for every registered Cohesion framework; discovery reads the base SDK's actual
+registrations for this closure.
 
 A discovery-time Fact subclass reports two permitted skips: absent exact-version packages and a base
 SDK package lacking `Targets/Assimalign.Cohesion.Sdk.Defaults.props`. This keeps feed-free release
@@ -179,37 +157,26 @@ validation useful. A complete feed turns consumer build errors into failures, ne
 
 ## CI and inventory integration
 
-`tooling-templates.yml` prepares 28 library packages: the 23-package Gateway consumer closure, the
-VpnGateway ApplicationModel, and the two store Orchestration packages with their SecretStore and
-ConfigurationStore clients. Web, Web.Routing and the Database.Client closure left the list when
-Sdk.Gateway stopped injecting area clients. The workflow then uses the shared build action to pack
-canonical SDK/framework packages for the runner's RID and build/test this package. The action's `SkipLibraries` bootstrap preserves the prepared libraries.
-Package publication remains exclusively in the repository release workflow. Besides the template,
-SDK, build and framework-producer paths, the workflow triggers on `libraries/ApplicationModel/**` and
-the area `ApplicationModel` and `ApplicationModel.Orchestration` packages, because the gateway programs
-call those APIs directly.
+`tooling-templates.yml` prepares the nine library packages the app and gateway scaffolds restore:
+the in-process platform's two halves and their closure (Gateway, Definition, Protocol,
+ApplicationModel.Hosting, the identity package, Hosting and Core). The workflow then uses the shared
+build action to pack canonical SDK/framework packages for the runner's RID and build/test this
+package. Package publication remains exclusively in the repository release workflow. The workflow
+triggers on `libraries/ApplicationModel/**` because the gateway programs and `Acme.Api` call those
+APIs directly.
 
-The shared release module must add this package and exact-path exclusions for all 37 template content
-projects, removing the two obsolete legacy exclusions. Those shared edits are handed to the orchestrator
-and rehearsed in a scratch module. The root solution and README updates follow the same protocol.
-
-## Concrete resource composition (T10 / O34)
-
-Filler resource programs hold the concrete Hosting builder, apply area verbs before Build(),
-and retain the concrete application with await using before calling RunAsync. This keeps host
-execution and disposal available while the root interfaces carry only area contracts.
-
+The shared release module lists this package and exact-path exclusions for all 11 template content
+projects.
 
 ## Database composition
 
-All five programs import `Assimalign.Cohesion.Database` for the shared `Listen(Uri)` extension in
+Both programs import `Assimalign.Cohesion.Database` for the shared `Listen(Uri)` extension in
 `Database.Tcp`, alongside their model and Hosting imports. The `App.Database` framework already
 supplies that assembly, so no explicit package reference is needed. This import keeps the
-standalone, app and three zone scaffolds compiling against the shared listener without changing
+standalone and app scaffolds compiling against the shared listener without changing
 endpoints, schemas or application defaults.
 
-The five Database programs (the standalone `cohesion-database`, the app's `Acme.Database` and the
-landing zone's three) use the three composition levels of the engine extensibility design (B1,
+The two Database programs (the standalone `cohesion-database` and the app's `Acme.Database`) use the three composition levels of the engine extensibility design (B1,
 owner decisions 49 to 59 and 72 of 2026-10-09). `builder.AddSql("<engine>", sql => ...)` names the
 engine once; inside it, `sql.Options` holds the engine's values, `sql.AddServer(server =>
 server.Listen(...))` lets the model create the server (no cast to `SqlDatabaseEngine`), and
@@ -221,13 +188,11 @@ principals at build (`COHSQLP001`) until principal and grant DDL exists (decisio
 the earlier templates failed on their first start. Every record member a table stores is
 declared: `Key`, `Column`, `Index` and `References` each add the member they select as a column and
 nothing else does, so a member left out of the declaration is no column, and the first write that
-names it fails. The standalone template reads
-`Database:DataPath` and `Database:Endpoint` from configuration, with its local data directory and
-`cohesion-db://localhost:5740` as defaults; the enabled programs read the mount and endpoint from
-their generated `Resource` accessors.
+names it fails. Both programs read
+`Database:DataPath` and `Database:Endpoint` from configuration, with a local data directory and
+`cohesion-db://localhost:5740` as defaults.
 
-This changes composition only; it adds no ApplicationModel declarations, manifests or resource
-control planes. Template acceptance explicitly builds all five emitted Database programs (the
+This changes composition only. Template acceptance explicitly builds both emitted Database programs (the
 Templates workflow runs when Database.Hosting, Database.Sql, Database.Sql.Schema, Database.Client,
 Database.Sql.Client or libraries/Connections change, so an API change those programs compose
 reaches template CI), and it starts the generated

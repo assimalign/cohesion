@@ -22,7 +22,6 @@ public sealed class SdkPinValidationTests
         pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Web");
         pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Database");
         pins.Keys.ShouldContain("Assimalign.Cohesion.Sdk.Gateway");
-        pins.Keys.ShouldNotContain("Assimalign.Cohesion.Sdk.ApplicationModel");
         foreach (string version in pins.Values)
         {
             version.ShouldBe(ConsumerWorkspace.SdkPackageVersion);

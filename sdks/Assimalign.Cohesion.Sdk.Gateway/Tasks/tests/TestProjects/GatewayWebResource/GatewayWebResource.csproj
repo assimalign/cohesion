@@ -1,0 +1,6 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Web">
+  <!-- A resource executable: Sdk.Web makes it self-contained for the host RID and adds App + App.Web. -->
+  <PropertyGroup>
+    <RootNamespace>GatewayWebResource</RootNamespace>
+  </PropertyGroup>
+</Project>

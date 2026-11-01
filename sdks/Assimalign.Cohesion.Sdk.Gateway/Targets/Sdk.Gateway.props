@@ -1,62 +1,21 @@
 <Project>
-	<UsingTask
-		TaskName="Assimalign.Cohesion.Sdk.Gateway.Tasks.CohesionCreateResourceVerbs"
-		AssemblyFile="..\Tasks\Assimalign.Cohesion.Sdk.Gateway.Tasks.dll"
-		Runtime="NET" />
+	<!--
+		The gateway's one implicit reference: the gateway package at $(CohesionVersion). That
+		property comes from the base Assimalign.Cohesion.Sdk's frozen Build.Version.props, which
+		Sdk.props imports first, not from this SDK's own copy; a consumer pins both SDKs to the
+		same version in global.json, so the two agree. The package brings the model definitions,
+		the protocol and the shared identity with it. The gateway's Program.cs declares its model
+		and builds the gateway with ApplicationGateway.CreateBuilder(name); nothing is generated.
 
-	<PropertyGroup>
-		<!-- Gateway targets force OutputType to Exe after the consumer project body. -->
-		<IsAotCompatible>true</IsAotCompatible>
-		<CohesionApplicationModel>enabled</CohesionApplicationModel>
-		<CohesionResourceKind>Composite</CohesionResourceKind>
-		<CohesionResourceComposable>true</CohesionResourceComposable>
-		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
-		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>
-		<CohesionGatewayAdminPort Condition="'$(CohesionGatewayAdminPort)' == ''">8082</CohesionGatewayAdminPort>
-		<CohesionWorkloadKind Condition="'$(CohesionWorkloadKind)' == ''">Deployment</CohesionWorkloadKind>
-		<CohesionGateways Condition="'$(CohesionGateways)' == ''">Local</CohesionGateways>
-		<CohesionPlatformsVersion Condition="'$(CohesionPlatformsVersion)' == ''">$(CohesionVersion)</CohesionPlatformsVersion>
-		<CohesionGatewayAot Condition="'$(CohesionGatewayAot)' == ''">auto</CohesionGatewayAot>
-		<CohesionGatewayInProcess Condition="'$(CohesionGatewayInProcess)' == ''">false</CohesionGatewayInProcess>
-		<CohesionSkipResourceApplicationModelReference>true</CohesionSkipResourceApplicationModelReference>
-	</PropertyGroup>
+		Platforms are explicit: the project references the gateway half of each platform it runs
+		on (Assimalign.Cohesion.ApplicationModel.Gateway.InProcess, or a cohesion-platforms package
+		such as Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes) and registers it on the
+		builder.
 
-	<ItemGroup>
-		<CohesionEndpoint Include="admin" Scheme="http" ContainerPort="$(CohesionGatewayAdminPort)" Public="false" />
-		<CohesionProbe Include="readiness" Endpoint="admin" Http="/readyz" />
-		<CohesionProbe Include="liveness" Endpoint="admin" Http="/livez" />
-
-		<!--
-			No resource-kind or client-package table: the gateway's Program.cs declares each
-			resource itself (builder.AddResource(provider, name)); areas ship no ApplicationModel
-			package since 2026-10-30.
-		-->
-
-		<!-- Provider-name to package-id map. Only the selected names are restored. -->
-		<CohesionGatewayPackage Include="Local" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" />
-		<CohesionGatewayPackage Include="InProcess" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
-		<CohesionGatewayPackage Include="Docker" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway.Docker" Version="$(CohesionPlatformsVersion)" />
-		<CohesionGatewayPackage Include="Kubernetes" PackageId="Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes" Version="$(CohesionPlatformsVersion)" />
+		CohesionGatewayImplicitReference=false turns the reference off, for a project that pins the
+		gateway package itself.
+	-->
+	<ItemGroup Condition="'$(CohesionGatewayImplicitReference)' != 'false'">
+		<PackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" IsImplicitlyDefined="true" />
 	</ItemGroup>
-
-	<!-- Core orchestration packages are always present. -->
-	<ItemGroup>
-		<_CohesionGatewayApplicationModelProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Definition\src\Assimalign.Cohesion.ApplicationModel.Definition.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Definition\src\Assimalign.Cohesion.ApplicationModel.Definition.csproj')" />
-		<_CohesionGatewayRuntimeProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\src\Assimalign.Cohesion.ApplicationModel.Gateway.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\src\Assimalign.Cohesion.ApplicationModel.Gateway.csproj')" />
-		<_CohesionGatewayResourceHostingProject Include="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Hosting\src\Assimalign.Cohesion.ApplicationModel.Hosting.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Hosting\src\Assimalign.Cohesion.ApplicationModel.Hosting.csproj')" />
-		<_CohesionGatewayConnectionsProject Include="$(CohesionRepositoryDirectory)libraries\Connections\Assimalign.Cohesion.Connections\src\Assimalign.Cohesion.Connections.csproj" Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\Connections\Assimalign.Cohesion.Connections\src\Assimalign.Cohesion.Connections.csproj')" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" ProjectPath="@(_CohesionGatewayApplicationModelProject)" Condition="'@(_CohesionGatewayApplicationModelProject)' != ''" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" ProjectPath="@(_CohesionGatewayRuntimeProject)" Condition="'@(_CohesionGatewayRuntimeProject)' != ''" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" ProjectPath="@(_CohesionGatewayResourceHostingProject)" Condition="'@(_CohesionGatewayResourceHostingProject)' != ''" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.Connections" ProjectPath="@(_CohesionGatewayConnectionsProject)" Condition="'@(_CohesionGatewayConnectionsProject)' != ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Definition" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayApplicationModelProject)' == ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayRuntimeProject)' == ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayResourceHostingProject)' == ''" />
-		<CohesionPackageReference Include="Assimalign.Cohesion.Connections" Version="$(CohesionVersion)" Condition="'@(_CohesionGatewayConnectionsProject)' == ''" />
-	</ItemGroup>
-
-	<!-- Repository builds consume Local's provider contribution through the same file the package ships. -->
-	<Import
-		Project="$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props"
-		Condition="'$(CohesionRepositoryDirectory)' != '' and Exists('$(CohesionRepositoryDirectory)libraries\ApplicationModel\Assimalign.Cohesion.ApplicationModel.Gateway\buildTransitive\Assimalign.Cohesion.ApplicationModel.Gateway.props')" />
 </Project>

@@ -9,12 +9,10 @@ on:
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
-      # The E2E job packs the SDK chain the SampleHost builds on (base, ApplicationModel and
-      # Database SDKs) through Install-Local.ps1 and the packaging module beside it, and derives
-      # the SampleHost's SDK pins from the root global.json (listed below); a change to any of
-      # them must re-run it.
+      # The E2E job packs the SDK chain the SampleHost builds on (base and Database SDKs) through
+      # Install-Local.ps1 and the packaging module beside it, and derives the SampleHost's SDK pins
+      # from the root global.json (listed below); a change to any of them must re-run it.
       - 'sdks/Assimalign.Cohesion.Sdk/**'
-      - 'sdks/Assimalign.Cohesion.Sdk.ApplicationModel/**'
       - 'sdks/Assimalign.Cohesion.Sdk.Database/**'
       - 'scripts/**'
       # The framework-closure job reads App.Database's member list against the project graph.

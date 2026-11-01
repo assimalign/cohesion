@@ -24,7 +24,7 @@ internal static partial class TemplateRepository
 
     internal static readonly string[] Roster =
     [
-        "cohesion-app", "cohesion-landing-zone", "cohesion-gateway", "cohesion-composite",
+        "cohesion-app", "cohesion-gateway",
         "cohesion-web", "cohesion-spa", "cohesion-database", "cohesion-secretstore",
         "cohesion-configurationstore", "cohesion-identityhub", "cohesion-rezolvr"
     ];
@@ -41,22 +41,20 @@ internal static partial class TemplateRepository
         string block = InventoryBlock().Match(module).Groups[1].Value;
         return QuotedId().Matches(block)
             .Select(match => match.Groups[1].Value)
-            .Where(id => id != "Assimalign.Cohesion.Sdk.ApplicationModel")
             .ToArray();
     }
 
     internal static IEnumerable<string> RequiredPackages(string template)
     {
         var required = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Assimalign.Cohesion.Sdk" };
-        var families = new HashSet<string>(StringComparer.Ordinal) { "Assimalign.Cohesion.App" };
-        bool gateway = false;
+        var families = new HashSet<string>(StringComparer.Ordinal);
         foreach (string project in Directory.EnumerateFiles(Path.Combine(ContentRoot, template), "*.csproj", SearchOption.AllDirectories))
         {
             XDocument document = XDocument.Load(project);
             string sdk = document.Root!.Attribute("Sdk")!.Value;
             required.Add(sdk);
-            // A package the content references explicitly, such as an opt-in store Orchestration
-            // package, restores together with its own dependency closure.
+            // A package the content references explicitly, such as a platform package, restores
+            // together with its own dependency closure.
             foreach (XElement reference in document.Descendants("CohesionPackageReference"))
             {
                 AddPackageClosure(reference.Attribute("Include")!.Value, required);
@@ -65,35 +63,13 @@ internal static partial class TemplateRepository
             string area = sdk["Assimalign.Cohesion.Sdk.".Length..];
             if (area == "Gateway")
             {
-                gateway = true;
-                if (document.Descendants("CohesionGatewayInProcess").SingleOrDefault()?.Value == "true")
-                {
-                    // Sdk.Gateway adds these framework references when InProcess is active,
-                    // including for an otherwise empty gateway/composite template.
-                    families.Add("Assimalign.Cohesion.App.Web");
-                    families.Add("Assimalign.Cohesion.App.Database");
-                }
+                // Sdk.Gateway adds the gateway package and no framework.
+                AddPackageClosure("Assimalign.Cohesion.ApplicationModel.Gateway", required);
                 continue;
             }
 
+            families.Add("Assimalign.Cohesion.App");
             families.Add("Assimalign.Cohesion.App." + area);
-            if (document.Descendants("CohesionApplicationModel").Single().Value == "enabled")
-            {
-                // Read the SDK's owner rather than assuming a package name from the area.
-                XDocument props = XDocument.Load(Path.Combine(Root, "sdks", sdk, "Targets", $"Sdk.{area}.props"));
-                required.Add(props.Descendants("CohesionResourceApplicationModel").Single().Value);
-            }
-        }
-
-        if (gateway)
-        {
-            // The SDK suite is the reference package closure; its SDK-only list is not needed here.
-            string consumer = File.ReadAllText(Path.Combine(Root, "sdks", "Assimalign.Cohesion.Sdk.Gateway", "Tasks", "tests", "ConsumerWorkspace.cs"));
-            string block = GatewayClosure().Match(consumer).Groups[1].Value;
-            foreach (Match match in LibraryId().Matches(block))
-            {
-                required.Add(match.Groups[1].Value);
-            }
         }
 
         foreach (string family in families)
@@ -103,19 +79,13 @@ internal static partial class TemplateRepository
         }
 
         // ProcessFrameworkReferences also downloads registered targeting packs to allow
-        // transitive framework references. Gateway builds supply a RID, so their restore
-        // requests the registered runtime packs too. Keep this aligned with the shipped
+        // transitive framework references. Keep this aligned with the shipped
         // registrations instead of treating an incomplete feed as a template failure.
         XDocument registrations = XDocument.Load(Path.Combine(Root, "sdks", "Assimalign.Cohesion.Sdk",
             "Targets", "Assimalign.Cohesion.Sdk.FrameworkReference.props"));
         foreach (XElement framework in registrations.Descendants("KnownFrameworkReference"))
         {
             required.Add(framework.Attribute("TargetingPackName")!.Value);
-            if (gateway)
-            {
-                required.Add(framework.Attribute("RuntimePackNamePatterns")!.Value
-                    .Replace("**RID**", RuntimeInformation.RuntimeIdentifier, StringComparison.Ordinal));
-            }
         }
 
         return required.Order(StringComparer.Ordinal);
@@ -207,10 +177,4 @@ internal static partial class TemplateRepository
     [GeneratedRegex("'([^']+)'")]
     private static partial Regex QuotedId();
 
-    // ConsumerWorkspace's library closure field; its SDK ids live in a separate field.
-    [GeneratedRegex(@"_requiredPackageIds\s*=\s*\[([\s\S]*?)\];")]
-    private static partial Regex GatewayClosure();
-
-    [GeneratedRegex("\"(Assimalign.Cohesion.[^\"]+)\"")]
-    private static partial Regex LibraryId();
 }

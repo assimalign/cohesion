@@ -91,7 +91,7 @@
     <Target Name="PackCohesionProjects" BeforeTargets="GenerateNuspec" Condition="'$(PackCohesionProjects)' == 'true'">
         <ItemGroup>
             <CohesionSdkPackProject Include="$(CohesionRepositoryDirectory)libraries\**\src\*.csproj"
-                Exclude="**\bin\**;**\obj\**;**\tests\**;**\examples\**;**\*.Tests.csproj;**\*Tests.csproj;$(CohesionRepositoryDirectory)libraries\ApplicationModel\_old_ideas_synthara\**\*.csproj" />
+                Exclude="**\bin\**;**\obj\**;**\tests\**;**\examples\**;**\*.Tests.csproj;**\*Tests.csproj" />
             <CohesionSdkPackProject Include="$(CohesionRepositoryDirectory)resources\**\src\*.csproj"
                 Exclude="**\bin\**;**\obj\**;**\tests\**;**\examples\**;**\*.Tests.csproj;**\*Tests.csproj" />
             <CohesionSdkPackProject Include="$(CohesionRepositoryDirectory)extensions\dotnet\src\**\*.csproj"
@@ -107,7 +107,11 @@
             ContinueOnError="WarnAndContinue" />
     </Target>
 
-    <Target Name="CollectSdkTaskFiles">
+    <!--
+        CohesionSdkPackTasks=false marks a props/targets-only SDK (Sdk.Gateway): its project
+        compiles nothing, so the package carries no Tasks/ folder.
+    -->
+    <Target Name="CollectSdkTaskFiles" Condition="'$(CohesionSdkPackTasks)' != 'false'">
         <ItemGroup>
             <TfmSpecificPackageFile Include="$(OutDir)**\*" Exclude="$(OutDir)**\*.nupkg;$(OutDir)**\*.snupkg;$(OutDir)**\*.nuspec">
                 <PackagePath>Tasks\%(RecursiveDir)%(Filename)%(Extension)</PackagePath>

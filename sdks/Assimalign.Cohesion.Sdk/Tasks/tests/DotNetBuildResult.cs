@@ -1,5 +1,5 @@
-#if COHESION_APPLICATION_MODEL_TESTS
-namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tests;
+#if COHESION_GATEWAY_SDK_TESTS
+namespace Assimalign.Cohesion.Sdk.Gateway.Tests;
 #else
 namespace Assimalign.Cohesion.Sdk.Tests;
 #endif

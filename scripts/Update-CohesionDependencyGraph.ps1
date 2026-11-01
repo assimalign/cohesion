@@ -13,7 +13,7 @@
     This is a *static* read of the project files, deliberately: it does not restore, evaluate
     MSBuild, or build anything, so it runs in seconds on a clean tree and cannot be perturbed by
     package state. It therefore reports what the csprojs declare, which is the thing the
-    dependency rules (COHRES001-004, COHAM001) are written against.
+    dependency rules (COHRES001-004, COHLIB001) are written against.
 
     Run it whenever a dependency is added or removed — see .claude/rules/documentation.md.
 

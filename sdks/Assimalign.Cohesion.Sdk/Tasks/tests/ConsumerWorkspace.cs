@@ -10,8 +10,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 
-#if COHESION_APPLICATION_MODEL_TESTS
-namespace Assimalign.Cohesion.Sdk.ApplicationModel.Tests;
+#if COHESION_GATEWAY_SDK_TESTS
+namespace Assimalign.Cohesion.Sdk.Gateway.Tests;
 #else
 namespace Assimalign.Cohesion.Sdk.Tests;
 #endif
@@ -19,21 +19,15 @@ namespace Assimalign.Cohesion.Sdk.Tests;
 internal sealed class ConsumerWorkspace : IDisposable
 {
     private const string BaseSdkPackageId = "Assimalign.Cohesion.Sdk";
-#if COHESION_APPLICATION_MODEL_TESTS
-    private const string TestSdkPackageId = "Assimalign.Cohesion.Sdk.ApplicationModel";
+#if COHESION_GATEWAY_SDK_TESTS
+    private const string TestSdkPackageId = "Assimalign.Cohesion.Sdk.Gateway";
 #else
     private const string TestSdkPackageId = BaseSdkPackageId;
 #endif
     private const string TestFeedEnvironmentVariable = "COHESION_SDK_TEST_FEED";
     private const string TestPackageVersionEnvironmentVariable = "COHESION_SDK_TEST_PACKAGE_VERSION";
-    private static readonly string[] _requiredSdkPackageIds =
-    [
-        BaseSdkPackageId,
-        "Assimalign.Cohesion.Sdk.ApplicationModel",
-        "Assimalign.Cohesion.Sdk.Web",
-        "Assimalign.Cohesion.Sdk.ConfigurationStore",
-        "Assimalign.Cohesion.Sdk.Database"
-    ];
+    // The SDK archives the fixtures resolve: the SDK under test and the base SDK it chains to.
+    private static readonly string[] _requiredSdkPackageIds = [BaseSdkPackageId, TestSdkPackageId];
     private static readonly string _repositoryRoot = FindRepositoryRoot();
     private static readonly string _packageVersion = ResolvePackageVersion();
     // The SDK family layout is sdks/<family>/Tasks/{src,tests,docs}; the fixtures sit beside
@@ -58,17 +52,12 @@ internal sealed class ConsumerWorkspace : IDisposable
 
     internal static string SdkPackageVersion => _packageVersion;
 
-    public static string ResourceSchemaPath => Path.Combine(
-        _repositoryRoot,
-        "assets",
-        "schemas",
-        "cohesion.resource.schema.json");
-
     public static ConsumerWorkspace Create(params string[] fixtureNames)
     {
         string feedDirectory = Path.Combine(_repositoryRoot, "_out", "packages");
         string sdkFeedDirectory = ResolveSdkFeedDirectory(feedDirectory);
         string[] missingSdkPackages = _requiredSdkPackageIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(packageId => Path.Combine(sdkFeedDirectory, $"{packageId}.{_packageVersion}.nupkg"))
             .Where(packagePath => !File.Exists(packagePath))
             .ToArray();
@@ -146,14 +135,11 @@ internal sealed class ConsumerWorkspace : IDisposable
     internal static Dictionary<string, string> CreateMatchingSdkPins()
     {
         // Root global.json selects the .NET SDK; isolated consumers own their Cohesion pins.
-        // ApplicationModel is imported by its owning SDK at that SDK's version, without a pin.
         return Directory.EnumerateDirectories(
                 Path.Combine(_repositoryRoot, "sdks"),
                 $"{BaseSdkPackageId}*",
                 SearchOption.TopDirectoryOnly)
             .Select(directory => Path.GetFileName(directory))
-            .Where(packageId => !string.Equals(
-                packageId, "Assimalign.Cohesion.Sdk.ApplicationModel", StringComparison.OrdinalIgnoreCase))
             .ToDictionary(
                 packageId => packageId,
                 _ => _packageVersion,
@@ -213,16 +199,6 @@ internal sealed class ConsumerWorkspace : IDisposable
         CancellationToken cancellationToken = default)
     {
         return RunDotNetAsync("pack", fixtureName, properties ?? [], cancellationToken);
-    }
-
-    public Task<DotNetBuildResult> PublishAsync(
-        string fixtureName,
-        IEnumerable<string>? properties = null,
-        string configuration = "Debug",
-        string target = "CohesionPublishImage",
-        CancellationToken cancellationToken = default)
-    {
-        return RunDotNetAsync("msbuild", fixtureName, (properties ?? []).Append("Configuration=" + configuration), cancellationToken, configuration, target);
     }
 
     private async Task<DotNetBuildResult> RunDotNetAsync(
@@ -402,7 +378,7 @@ internal sealed class ConsumerWorkspace : IDisposable
             new XElement(
                 "packageSource",
                 new XAttribute("key", "cohesion-sdk-test"),
-                new XElement("package", new XAttribute("pattern", "EnabledWeb.Manifest"))));
+                new XElement("package", new XAttribute("pattern", "CohesionSdkTest.*"))));
 
         if (!string.Equals(feedDirectory, sdkFeedDirectory, StringComparison.OrdinalIgnoreCase))
         {

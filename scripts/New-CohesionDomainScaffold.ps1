@@ -1,12 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Scaffolds a Cohesion domain (SDK + Framework family + ApplicationModel)
+    Scaffolds a Cohesion domain (SDK + Framework family)
     for one or more resource categories under the resources/ folder.
 
 .DESCRIPTION
     For each resource name (e.g. "Scheduler", "IdentityHub", ...), creates
-    twelve files following the existing Web / Database conventions:
+    ten files following the existing Web / Database conventions:
 
         sdks/Assimalign.Cohesion.Sdk.<Name>/
             Sdk/Sdk.props
@@ -25,10 +25,6 @@
             Directory.Build.props
             src/Assimalign.Cohesion.<Name>.Runtime.csproj
 
-        resources/<Name>/Assimalign.Cohesion.<Name>.ApplicationModel/
-            src/Assimalign.Cohesion.<Name>.ApplicationModel.csproj
-            src/<Name>ResourceControlPlane.cs
-
     The two framework producers follow the naming convention in
     .claude/rules/build-system.md ("Framework producer projects"): the
     project is named for its area, while the assembly, package, and
@@ -43,6 +39,12 @@
     <CohesionFrameworkPrivateAssembly> for a runtime-only implementation
     detail. That file imports the area's own Directory.Build.props, which
     the scaffold writes too when the area has none.
+
+    The area's application-model integration,
+    Assimalign.Cohesion.<Name>.Hosting.ApplicationModel, is not scaffolded: it
+    references the area's runtime module, so it is written once
+    Assimalign.Cohesion.<Name>.Hosting exists (precedent:
+    resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel).
 
     Existing files are not overwritten unless -Force is passed.
 
@@ -106,44 +108,42 @@ $TasksCsprojTemplate = @'
 
 $SdkPropsTemplate = @'
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+	<!-- This marker must precede the base Sdk.props import so its pre-.NET defaults select Exe. -->
+	<PropertyGroup>
+		<_CohesionResourceSdk>true</_CohesionResourceSdk>
+	</PropertyGroup>
 	<!--
-		Chain to the base Cohesion SDK (registers all three+ Cohesion
-		KnownFrameworkReferences and auto-includes the App framework).
+		Chain to the base Cohesion SDK, which registers the complete Cohesion
+		framework family but auto-includes no framework itself.
 	-->
 	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
 
 	<!--
-		Layer the {NAME}-specific framework on top. Consumer gets
-		App + App.{NAME}.
+		A {NAME} resource receives the hosting kernel and its area framework.
 
 		Note: <Import Sdk> doesn't honor inline-version syntax; consumers
 		of Sdk.{NAME} must pin Assimalign.Cohesion.Sdk in their global.json
 		alongside Sdk.{NAME}.
 	-->
 	<ItemGroup Condition="'$(CohesionAutoIncludeAppFramework)' != 'false'">
+		<FrameworkReference Include="Assimalign.Cohesion.App" />
 		<FrameworkReference Include="Assimalign.Cohesion.App.{NAME}" />
 	</ItemGroup>
+
+	<Import Project="..\Targets\Sdk.{NAME}.props" />
 </Project>
 '@
 
 $SdkTargetsTemplate = @'
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-	<!-- The sibling ApplicationModel SDK resolves at this area's exact frozen version. -->
-	<Import Project="Sdk.targets" Sdk="Assimalign.Cohesion.Sdk.ApplicationModel" Version="$(CohesionVersion)" Condition="'$(CohesionApplicationModel)' == 'enabled'" />
-	<!-- Enabled projects receive the base targets through ApplicationModel; disabled projects import them here. -->
-	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" Condition="'$(_CohesionApplicationModelSdkImported)' != 'true'" />
+	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.targets" />
+	<Import Project="..\Targets\Sdk.{NAME}.targets" />
 </Project>
 '@
 
-# The area SDK identifies the declarative package and default control-plane
-# factory used by enabled resource projects. Endpoint, lifecycle, and other
-# kind-specific defaults remain explicit per-domain build conventions.
 $DomainPropsTemplate = @'
 <Project>
-	<PropertyGroup>
-		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.{NAME}.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.{NAME}.ApplicationModel.{NAME}ResourceControlPlane</CohesionResourceControlPlaneType>
-	</PropertyGroup>
+	<!-- Area build hooks for Sdk.{NAME} consumers. The resource's composition lives in its Program.cs. -->
 </Project>
 '@
 
@@ -258,40 +258,6 @@ $RefsPropsTemplate = @'
 </Project>
 '@
 
-$ApplicationModelCsprojTemplate = @'
-<Project Sdk="Microsoft.NET.Sdk">
-	<PropertyGroup>
-		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
-		<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>
-	</PropertyGroup>
-	<ItemGroup>
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Definition" />
-		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
-	</ItemGroup>
-</Project>
-'@
-
-$ResourceControlPlaneTemplate = @'
-using Assimalign.Cohesion.ApplicationModel.Hosting;
-
-namespace Assimalign.Cohesion.{NAME}.ApplicationModel;
-
-/// <summary>
-/// Creates the default control plane shared by enabled {NAME} resources.
-/// </summary>
-public static class {NAME}ResourceControlPlane
-{
-    /// <summary>
-    /// Creates a new isolated {NAME} resource control plane.
-    /// </summary>
-    /// <returns>The {NAME} area's default resource control plane.</returns>
-    public static IResourceControlPlane Create()
-    {
-        return ResourceControlPlane.Create();
-    }
-}
-'@
-
 function Write-IfNotExists {
     # -NeverOverwrite keeps an existing file even under -Force.
     param([string]$Path, [string]$Content, [switch]$NeverOverwrite)
@@ -318,7 +284,6 @@ foreach ($n in $Name) {
 
     $sdkRoot       = Join-Path $repoRoot "sdks\Assimalign.Cohesion.Sdk.$n"
     $areaRoot      = Join-Path $repoRoot "resources\$n"
-    $applicationModelRoot = Join-Path $areaRoot "Assimalign.Cohesion.$n.ApplicationModel"
 
     # SDK ---------------------------------------------------------------
     Write-IfNotExists -Path (Join-Path $sdkRoot "Tasks\src\Assimalign.Cohesion.Sdk.$n.Tasks.csproj") `
@@ -351,13 +316,6 @@ foreach ($n in $Name) {
 
     Write-IfNotExists -Path (Join-Path $areaRoot "Assimalign.Cohesion.$n.Refs\src\Assimalign.Cohesion.$n.Refs.csproj") `
                      -Content $RefsCsprojTemplate.Replace('{NAME}', $n)
-
-    # ApplicationModel -------------------------------------------------
-    Write-IfNotExists -Path (Join-Path $applicationModelRoot "src\Assimalign.Cohesion.$n.ApplicationModel.csproj") `
-                     -Content $ApplicationModelCsprojTemplate.Replace('{NAME}', $n)
-
-    Write-IfNotExists -Path (Join-Path $applicationModelRoot "src\${n}ResourceControlPlane.cs") `
-                     -Content $ResourceControlPlaneTemplate.Replace('{NAME}', $n)
 }
 
 Write-Host ""
@@ -373,4 +331,5 @@ Write-Host "     scripts/modules/CohesionPackaging.psm1" -ForegroundColor DarkGr
 Write-Host "  4. Add each new producer pair and the new Directory.Build.props files to" -ForegroundColor DarkGray
 Write-Host "     resources/<Name>/Assimalign.Cohesion.<Name>.slnx, resources/Assimalign.Cohesion.Resources.slnx," -ForegroundColor DarkGray
 Write-Host "     and the root Assimalign.Cohesion.slnx" -ForegroundColor DarkGray
-Write-Host "  5. Add each new ApplicationModel project to the resource solutions and release inventory" -ForegroundColor DarkGray
+Write-Host "  5. Once resources/<Name>/Assimalign.Cohesion.<Name>.Hosting exists, add the area's" -ForegroundColor DarkGray
+Write-Host "     Assimalign.Cohesion.<Name>.Hosting.ApplicationModel integration (EmailHub is the precedent)" -ForegroundColor DarkGray
