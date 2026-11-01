@@ -124,6 +124,10 @@ public sealed class SqlIsolationReviewTests
             // the gate is held. Publication completes before BEGIN captures its context.
             truncating = writer.ExecuteAsync("TRUNCATE t", cancellationToken: ceiling.Token).AsTask();
             prepared.ShouldBe(1);
+            // Discovery briefly registers its own snapshot pin for the prepared
+            // owner. Finish that work before counting the two application contexts.
+            database.TableReclamation.Request();
+            database.TableReclamation.RunBatch(ceiling.Token);
             beginning = reader.BeginTransactionAsync(IsolationLevel.ReadCommitted, ceiling.Token).AsTask();
             database.Coordinator.GetOpenContexts().Count.ShouldBe(2);
         }

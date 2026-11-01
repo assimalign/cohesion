@@ -1890,11 +1890,17 @@ the base generator's CS03105 refusal before saving anything. The joint plan publ
 Metadata planning refusals report CS03105; joint reservation failures agree on CS03402 in the
 exception and provisioning report. Before intent save, Build checks only the metadata space floor, without owner snapshots or row
 decodes. The worker measures actual rewritten record/key bytes and conversion growth before prepared writes.
-A volume watchdog checks each copy/index bracket plus its discard reserve, stopping CS03402
-online when an application cast expands unexpectedly or other writers consume space. Copy-owned
-WAL triggers checkpoints at 16 MiB; a busy reclamation bracket retries with cancellation.
-A 25% margin and catalog reserve complete the upfront estimate;
-Sql DESIGN defines the formula. Untouched tables never change the need.
+A volume watchdog checks each copy/index bracket and the catalog publication bracket after
+validation. An engine reserve covers discard, old/prepared-owner reclamation WAL up to the
+configured checkpoint bound and poll overshoot, dirty buffer-pool capacity and a margin.
+Copy-owned unflushed allocations remain charged until the forced checkpoint, including Unix
+sparse growth. Measured tree heights bound brackets; reusable free pages reduce allocation
+terms. A refusal stops CS03402 online with the old objects usable. Copy-owned WAL triggers
+checkpoints at 16 MiB; a busy reclamation bracket retries with cancellation. A 25% estimate
+margin and declaration-derived publication allowance complete admission; Sql DESIGN defines
+the formulas. Untouched tables never change the admission need. The executable FourthPass
+corpus retains the volume limit through reclamation and flushing after both stop and success.
+The residual risk is other writers consuming space faster than one bracket while the migration runs, and the engine-wide disk-full behaviour that applies to every workload.
 Insufficient space reports CS03402 with needed/available bytes online, including resumed intents.
 WAL write/flush, unconfirmed commit and existing engine-wide failure policies still take storage
 offline. An unconfirmed publication uses CS03403 and leaves recovery to decide old/new.

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -82,13 +83,35 @@ internal readonly struct SqlStatementContext
     // sizes and allocation budgets stay unchanged, including nonzero lock timeouts.
     internal bool CheckpointCopy => _names is JointProvisioningNames;
 
-    internal void ConfigureCopySpace(Action<long> check)
-        => ((JointProvisioningNames)_names).CheckSpace = check;
+    internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long, long> allocations)
+    {
+        var joint = (JointProvisioningNames)_names;
+        joint.CheckSpace = check;
+        joint.CheckPublication = publication;
+        joint.CountAllocations = allocations;
+    }
 
     internal void CheckCopySpace(long touches, long? allocations = null)
     {
         if (_names is JointProvisioningNames joint)
-        { joint.CheckSpace!(SqlSchemaProvisioner.JointBracketBytes(touches, allocations ?? touches)); }
+        {
+            long pages = allocations ?? touches;
+            joint.CheckSpace!(touches, pages, joint.UnflushedPages, checked(joint.PreparedPages + pages));
+        }
+    }
+
+    internal void CheckPublicationSpace()
+    {
+        var joint = (JointProvisioningNames)_names;
+        joint.CheckPublication!(checked(joint.UnflushedPages * Page.Size));
+    }
+
+    internal void AddCopyAllocations(long allocatedChange)
+    {
+        if (_names is not JointProvisioningNames joint) { return; }
+        long pages = joint.CountAllocations!(allocatedChange);
+        joint.PreparedPages = checked(joint.PreparedPages + pages);
+        joint.UnflushedPages = checked(joint.UnflushedPages + pages);
     }
 
     internal long AddCopyJournalBytes(long bytes)
@@ -97,7 +120,12 @@ internal readonly struct SqlStatementContext
         return joint.JournalBytes = checked(joint.JournalBytes + Math.Max(0, bytes));
     }
 
-    internal void ResetCopyJournalBytes() => ((JointProvisioningNames)_names).JournalBytes = 0;
+    internal void ResetCopyJournalBytes()
+    {
+        var joint = (JointProvisioningNames)_names;
+        joint.JournalBytes = 0;
+        joint.UnflushedPages = 0;
+    }
 
     /// <summary>
     /// Gets the database's transaction coordinator.
@@ -163,8 +191,12 @@ internal readonly struct SqlStatementContext
 
     private sealed class JointProvisioningNames : ProvisioningNames
     {
-        internal Action<long>? CheckSpace { get; set; }
+        internal Action<long, long, long, long>? CheckSpace { get; set; }
+        internal Action<long>? CheckPublication { get; set; }
+        internal Func<long, long>? CountAllocations { get; set; }
         internal long JournalBytes { get; set; }
+        internal long UnflushedPages { get; set; }
+        internal long PreparedPages { get; set; }
         internal JointProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
             : base(schema, database, lockTimeout)
         {

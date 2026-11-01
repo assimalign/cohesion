@@ -8636,27 +8636,32 @@ widths (DECIMAL uses its 33-byte maximum component). Encoded NULL tags are count
 NULL remains one byte and never invokes a cast. Growth bounds apply only to potentially
 non-NULL values. CHAR(n) adds only possible ASCII padding: max(0, n-m) for CHAR(m), n for
 TEXT; successful built-in scalar/hex output pads to n (longer output refuses assignment).
-CHAR keys exclude that padding. Added literal defaults contribute their actual encoded value; added NULLs
-cost one byte. Application casts and other conversions without a knowable bound contribute 1x
+CHAR keys exclude that padding. Added literal defaults contribute their actual encoded value; expression defaults contribute the fixed
+encoded width of their result type (or one byte when variable width is opaque). Added NULLs
+cost one byte. JSONB to TEXT or JSON includes the extra collation byte. Application casts and other conversions without a knowable bound contribute 1x
 upfront, while retaining known minimum CHAR padding. No target's declared VARCHAR/TEXT/JSON
 maximum is treated as stored data, and there is no whole-row cap that can hide another
 column's growth.
 
-Let H be measured heap pages, E the measured record/slot bytes and E' the sum of projected
+Let H be measured heap pages, M the measured record/slot bytes and M' the sum of projected
 components plus 29 bytes per row for stamps, owner and slot. Prepared heap pages are
-ceil(H * max(E,E')/E). Retained indexes scale measured pages by max(1, projected/actual leaf
+ceil(H * max(M,M')/M). Retained indexes scale measured pages by max(1, projected/actual leaf
 entry bytes), applying only converted-column growth to the measured key bytes. New indexes
 use projected key bytes plus 28 bytes per entry, 50% leaf occupancy, and internal levels at
 minimum fanout three. Empty tables allocate no heap and one page per index root. R is the
-prepared page count times B=8192. The 25% margin below covers packing estimation. Regression
+prepared page count, less reusable FreePageCount capped at that count, times B=8192. The 25% margin below covers packing estimation. Regression
 fixtures require R within 3x the measured copy allocation, independently of the explicit WAL
 and catalog reserves; those fixed reserves dominate tiny tables and are not row-width factors.
 
 Every 64-row bracket can append one pre-image (including spill) and one committed delta/image
 per page: each payload is at most B+8 and each frame adds 38 bytes, giving 2(B+46).
 A row touches at most two heap pages plus 4h+3 pages per index, including split children and
-sibling links. For the watchdog, h is a conservative maximum over all source versions at
-minimum fanout three; unknown cast growth cannot invalidate it. C is the maximum 64-row
+sibling links. For the watchdog, h is each prepared tree's actual height, read along its leftmost path
+before each bracket, plus the maximum growth that bracket can cause. Root identities never
+change on splits. The largest key encoded so far bounds separator width and minimum split
+fanout; a root with room for all of the bracket's separators cannot grow. Heap touches and
+allocations use the batch's encoded record/slot sizes and a next-fit packing bound. Retained
+trees use their measured heights in the admission WAL estimate. C is the maximum 64-row
 page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, and K the
 number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
 its brackets, including their begin/commit frames; existing WAL and writes between brackets
@@ -8671,29 +8676,45 @@ Peak-WAL tests sample at durable commit, before truncation, and assert the state
 a checkpoint-disabled negative control must violate the bound. Reclamation-backlog tests hold
 a real bracket open before inline apply, including a retry after failed preparation.
 
-For P prepared owners and T roots, the discard reserve is
-S = F + (4+2P+2T)*(B+2(B+46)). Kind-14 records are already durable before copying;
-this also covers kind-9 removal, kind-14/directory changes and their journal frames. Admission
-requires N = R + J + ceil((R+J)/4) + 16 MiB + S. The separate 16 MiB
-publication/preparation allowance may be consumed before copying; it is not required to
-remain free by the watchdog. Old owners are already allocated and cost no new bytes.
-Before every root-build and copy bracket, the watchdog probes the real directory volume for
-D = A*B + touches*2(B+46)+152 plus S. A is min(64, remaining rows)*(1+2h*index count)
-for a copy bracket: one new heap page per row and two index allocations per level bound
-sibling splits and root growth. For root creation, A=touches=T. Every touched page gets
-two full WAL frames, with four metadata frames per bracket. Copy A is at most half the
-touch count, so the 25% WAL margin also covers this maximum bracket allocation. It rechecks under the apply gate before
-page writes, after any queued writer. A refusal discards the intent online with CS03402 and
-needed/available bytes, leaves the old schema usable and allows an explicit retry. Unknown
-application expansion and other writers' consumption are therefore handled during copying,
-instead of pretending the upfront estimate reserves a volume. The final residual risk is other
-writers racing between a probe and completion of that one bounded bracket; their writes can
-still exhaust the volume and invoke the existing unsafe-storage offline policy.
+One engine reserve E survives copying, discard and successful publication. Let P be the
+larger of the old owners' measured page count and the prepared page bound (initially the
+replacement estimate, increased by copy-owned allocated pages and the next bracket's allocation bound),
+O the larger retiring/prepared owner count, B=8192 and C=CheckpointJournalSize.
+One reclamation bracket frees at most 32 pages per owner. The engine checks busy checkpoints
+at most once per second; reclamation polls every 25 ms. Thus one checkpointer poll's
+overshoot is U=40*max(1,O)*(32*(B+46)+152). Define
+W=min(P*(B+46)+152*(ceil(P/32)+O), C+U), or the whole first term if C=0.
+Let K=BufferPoolCapacity+1 MiB include the data and catalog pools' possible unflushed
+dirty pages. E0=F+W+K and E=E0+max(1 MiB,ceil(E0/4)). F covers discard itself;
+W covers reclamation until the engine truncates its WAL; K covers engine dirty-page
+capacity; the margin covers cleared-page deltas, headers and metadata. This is engine
+headroom derived from engine parameters, without predicting each reclamation write.
+Reclamation, write-back, truncation and allocation behavior remain unchanged.
+
+The publication bound V is F plus (old/new kind-6 chunks + catalog record bound)*(5B+168).
+The record bound includes table/index descriptions, registrations, dependent views, old and
+new owned sequences, retirement intents and catalog counters. Declaration and metadata
+supply these counts, with one full page per record. Admission requires
+N=R+J+ceil((R+J)/4)+V+E. Before every root/copy bracket the watchdog requires
+D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
+unflushed allocation bytes, capped at the data pool capacity because eviction or an engine
+checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
+Copy-owned allocation counts accumulate until a successful forced checkpoint flushes them;
+that checkpoint resets both the pending allocation and WAL counters. PageCount/FreePageCount
+deltas are sampled inside the copy bracket; the reclamation page counter corrects concurrent
+frees, carrying late completions into the next sample. One completing 32-page batch fits the
+minimum margin. Split bounds are never accumulated as actual lifetime allocations. Unix sparse file
+extensions are therefore charged even when the volume probe cannot see the unwritten holes.
+Immediately before the catalog storage bracket, after uniqueness/FK validation, snapshot
+admission and record encoding, a final probe requires V+E plus those pending bytes.
+A refusal discards online with CS03402 and needed/available bytes. Reclamation after both
+a watchdog stop and successful publication retains the same headroom. The final residual
+risk is other writers consuming space faster than one bracket while the migration runs, and the engine-wide disk-full behaviour that applies to every workload.
 The watchdog and WAL counters live in the existing provisioning-only context slot, leaving
 ordinary statement context/metrics sizes and allocation budgets unchanged.
 
 An admission CS03402 includes N and available bytes; no prepared write precedes that check.
-A watchdog CS03402 includes D+S and available bytes. Either refusal discards kind 9 and every
+A watchdog CS03402 includes its bracket/publication bound, pending allocation bytes, E and available bytes. Either refusal discards kind 9 and every
 prepared object, releases reservations and leaves the old schema online.
 A later successful apply or matching/rollback Build clears an earlier Provisioning failure,
 including an already-applied schema skip. Disposed, offline, corrupt and canceled planning

@@ -308,7 +308,7 @@ narrowing rewrites and persisted CHECK rules; the engine's live conformance corp
 Joint typed migrations share the catalog's table/view/sequence namespace. The live conformance
 corpus covers planning refusals, deferred name reservations and locked publication checks;
 these are engine admission rules and add no grammar or AST variant. The metadata lease includes
-engine-wide queue time. Precise copy-space accounting belongs to the worker, while Build checks
+engine-wide queue time. Stored-byte estimation, copy/publication probes and the engine reserve belong to the worker, while Build checks
 only its metadata floor, as SQL DESIGN and DIALECT.md specify.
 
 ## TRUNCATE (#1716, SQ-T1)

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Storage;
+using Assimalign.Cohesion.Database.Storage.Units;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -163,7 +164,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task CopyReplacementRowsAsync(SqlCatalogTable previous, SqlCatalogTable replacement,
         SqlCatalogIndex[] descriptions, SqlStatementContext statement, Func<object?[], object?[]>? transform,
-        CancellationToken cancellationToken, long copyRows = 0)
+        CancellationToken cancellationToken)
     {
         var indexes = descriptions.Select(description =>
         {
@@ -171,6 +172,12 @@ internal sealed partial class SqlPlanExecutor
             if (description.Predicate is not null) { _definitions.GetIndexPredicate(replacement, description, cancellationToken); }
             return (Metadata: description, Index: index, Ordinals: description.ColumnNames.Select(name => FindColumnOrdinal(replacement, name)).ToArray());
         }).ToArray();
+        // Root identities are stable through splits. Read each prepared tree's
+        // leftmost path per bracket; never infer its height from source rows.
+        var copyRoots = statement.CheckpointCopy ? _indexManager.ExportRegistrations()
+            .Where(registration => registration.ObjectId == replacement.ObjectId)
+            .ToDictionary(registration => registration.Definition.Name, registration => registration.RootPageId, StringComparer.OrdinalIgnoreCase) : null;
+        var maximumKeys = statement.CheckpointCopy ? new int[indexes.Length] : null;
         var snapshot = ConstraintCurrentSnapshot(statement);
         long processed = 0;
         statement.ProvisioningProgress?.Invoke(0, null);
@@ -207,21 +214,58 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var index in indexes) { MatchesIndex(replacement, index.Metadata, converted[i], cancellationToken: cancellationToken); }
             }
             long journalStart = 0;
-            statement.CheckCopySpace(SqlSchemaProvisioner.JointCopyTouches(batch.Count, copyRows, indexes.Length),
-                SqlSchemaProvisioner.JointCopyAllocations(batch.Count, copyRows, indexes.Length));
+            long touches = 0, allocations = 0;
+            byte[][]? records = null;
+            if (statement.CheckpointCopy)
+            {
+                memory.Reserve(24L + 8L * batch.Count);
+                records = new byte[batch.Count][];
+                long encodedBytes = 0;
+                for (int row = 0; row < batch.Count; row++)
+                {
+                    records[row] = SqlRowCodec.Encode(replacement, converted[row], batch[row].Writer);
+                    memory.Reserve((24L + records[row].Length + 7) & ~7L);
+                    encodedBytes += records[row].Length + 4;
+                }
+                // Next-fit packing: each pair of closed pages holds more than a
+                // page's body. Include a partially filled starting page; at most
+                // one allocation per record. No prepared heap has dead slots.
+                allocations = Math.Min(batch.Count, 1 + encodedBytes / ((SlottedPage.BodySize - 16) / 2));
+                touches = 2 * allocations;
+                for (int tree = 0; tree < indexes.Length; tree++)
+                {
+                    var index = indexes[tree];
+                    for (int row = 0; row < batch.Count; row++)
+                    {
+                        if (MatchesIndex(replacement, index.Metadata, converted[row], prepared: true))
+                        {
+                            maximumKeys![tree] = Math.Max(maximumKeys[tree],
+                                BuildIndexKey(replacement, index.Ordinals, converted[row], index.Metadata.KeyOrders).Length);
+                        }
+                    }
+                    int height = SqlSchemaProvisioner.JointTreeHeight(_storage, copyRoots![index.Metadata.Name], replacement.ObjectId, out int free);
+                    int entryBytes = maximumKeys![tree] + 28; // key, slot, length, both ties, child
+                    int growth = free >= batch.Count * entryBytes ? 0 : SqlSchemaProvisioner.JointTreeGrowth(batch.Count, entryBytes);
+                    height += growth;
+                    touches += batch.Count * (4L * height + 3);
+                    allocations += batch.Count * 2L * height;
+                }
+                statement.CheckCopySpace(touches, allocations);
+            }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
-                statement.CheckCopySpace(SqlSchemaProvisioner.JointCopyTouches(batch.Count, copyRows, indexes.Length),
-                    SqlSchemaProvisioner.JointCopyAllocations(batch.Count, copyRows, indexes.Length));
+                statement.CheckCopySpace(touches, allocations);
+                long pageStart = statement.CheckpointCopy ? _storage.PageManager.PageCount : 0;
+                long freeStart = statement.CheckpointCopy ? _storage.PageManager.FreePageCount : 0;
                 journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 for (int i = 0; i < batch.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var version = batch[i];
                     var values = converted[i];
-                    byte[] record = SqlRowCodec.Encode(replacement, values, version.Writer);
+                    byte[] record = records is null ? SqlRowCodec.Encode(replacement, values, version.Writer) : records[i];
                     long recordBytes = (24L + record.Length + 7) & ~7L;
-                    memory.Reserve(recordBytes);
+                    if (records is null) { memory.Reserve(recordBytes); }
                     try
                     {
                         var location = _storage.InsertRow(bracket, replacement.ObjectId, record);
@@ -233,7 +277,12 @@ internal sealed partial class SqlPlanExecutor
                                 TransactionSequence.None, cancellationToken).ConfigureAwait(false);
                         }
                     }
-                    finally { memory.Release(recordBytes); }
+                    finally { if (records is null) { memory.Release(recordBytes); } }
+                }
+                if (statement.CheckpointCopy)
+                {
+                    long growth = _storage.PageManager.PageCount - pageStart;
+                    statement.AddCopyAllocations(growth + freeStart - _storage.PageManager.FreePageCount);
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);

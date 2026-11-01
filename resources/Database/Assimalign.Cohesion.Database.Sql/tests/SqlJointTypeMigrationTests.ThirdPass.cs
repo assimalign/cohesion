@@ -165,6 +165,7 @@ public sealed partial class SqlJointTypeMigrationTests
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         var storage = new CrashCaptureSqlStorageStrategy();
         var builder = Builder(storage);
+        builder.Options.BufferPoolCapacity = 1024 * 1024;
         var domain = SqlType.CreateDomain("expanded", SqlType.Text);
         builder.Types.Add(domain);
         builder.Types.AddCast(SqlCast.Create<int, string>(SqlType.Integer, domain, _ => new string('x', 7000), SqlCastContext.Assignment));
@@ -173,33 +174,44 @@ public sealed partial class SqlJointTypeMigrationTests
         var source = Compiled(new CompiledSchemaTable("items", "row", [new("Code", DatabaseType.Int32, false)], null, [], []));
         var target = Compiled(new CompiledSchemaTable("items", "row", [new("Code", DatabaseType.String, false, CustomType: "expanded")], null, [], []));
         await database.ApplySchemaAsync(source, guard.Token);
-        SeedRaw(database, [1], 4096);
+        SeedRaw(database, [1], 16384);
         database.Coordinator.Checkpoint(guard.Token);
         database.SchemaProvisioner.JointStage = stage =>
         {
             if (stage == "OwnersDurable")
-            { storage.VolumeCapacityBytes = storage.AllocatedBytes + database.SchemaProvisioner.JointSpaceNeed; }
+            { storage.VolumeCapacityBytes = storage.AllocatedBytes + database.SchemaProvisioner.JointSpaceNeed + 64L * 1024 * 1024; }
         };
 
-        // Act
-        var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(target, guard.Token));
+        int checkpoints = 0;
+        SqlPlanExecutor.RewriteStage = (phase, _) => { if (phase == "CopyCheckpointed") { checkpoints++; } };
+        try
+        {
+            // Act
+            var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(target, guard.Token));
 
-        // Assert
-        failure.Diagnostics.ShouldContain(d => d.Code == "CS03402");
-        failure.Message.ShouldContain("bytes needed");
-        storage.CapacityFailures.ShouldBe(0);
-        storage.PeakAllocatedBytes.ShouldBeLessThan(storage.VolumeCapacityBytes);
-        database.Catalog.SchemaState!.ContentHash.ShouldBe(source.Hash);
-        database.Catalog.PendingMigration.ShouldBeNull();
-        database.IsOffline.ShouldBeFalse();
-        await using var reader = await database.CreateSessionAsync(guard.Token);
-        (await RowsAsync(reader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe(4096L);
-        _output.WriteLine($"opaque cast: N={database.SchemaProvisioner.JointSpaceNeed}; capacity={storage.VolumeCapacityBytes}; peak={storage.PeakAllocatedBytes}; actual={storage.AllocatedBytes}; code={failure.Diagnostics[0].Code}");
-        storage.VolumeCapacityBytes = long.MaxValue;
-        database.SchemaProvisioner.JointStage = null;
-        await database.ApplySchemaAsync(target, guard.Token);
-        database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
-        database.Provisioning.ShouldBeNull();
+            // Assert
+            failure.Diagnostics.ShouldContain(d => d.Code == "CS03402");
+            failure.Message.ShouldContain("bytes needed");
+            storage.CapacityFailures.ShouldBe(0);
+            storage.PeakAllocatedBytes.ShouldBeLessThan(storage.VolumeCapacityBytes);
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(source.Hash);
+            database.Catalog.PendingMigration.ShouldBeNull();
+            database.IsOffline.ShouldBeFalse();
+            await using var reader = await database.CreateSessionAsync(guard.Token);
+            (await RowsAsync(reader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe(16384L);
+            _output.WriteLine($"opaque cast: N={database.SchemaProvisioner.JointSpaceNeed}; capacity={storage.VolumeCapacityBytes}; peak={storage.PeakAllocatedBytes}; actual={storage.AllocatedBytes}; code={failure.Diagnostics[0].Code}");
+            await DrainReclamationAsync(database, guard.Token);
+            database.Coordinator.Checkpoint(guard.Token);
+            checkpoints.ShouldBeGreaterThan(0);
+            storage.CapacityFailures.ShouldBe(0);
+            database.IsOffline.ShouldBeFalse();
+            storage.VolumeCapacityBytes = long.MaxValue;
+            database.SchemaProvisioner.JointStage = null;
+            await database.ApplySchemaAsync(target, guard.Token);
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
+            database.Provisioning.ShouldBeNull();
+        }
+        finally { SqlPlanExecutor.RewriteStage = null; storage.VolumeCapacityBytes = long.MaxValue; }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint identity: implicit CREATE/ADD identity candidates skip pending table names")]

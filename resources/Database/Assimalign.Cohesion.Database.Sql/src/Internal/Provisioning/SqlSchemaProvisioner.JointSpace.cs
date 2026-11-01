@@ -16,6 +16,10 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlSchemaProvisioner
 {
     internal const long JointCopyCheckpointBytes = 16L * 1024 * 1024;
+    private long _jointMinimumPages;
+    private long _jointReserveBase;
+    private long _jointReclamationLimit;
+    private long _jointReclamationOwners;
 
     // One new page per 3 KiB kind-9 chunk, plus image/delta frames for both
     // deleting the old intent and writing its replacement. Old pages are already
@@ -41,7 +45,7 @@ internal sealed partial class SqlSchemaProvisioner
     private void AdmitJointSpace(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, CancellationToken token)
     {
         JointSpaceCounting?.Invoke();
-        long replacementPages = 0, actualIndexPages = 0, maximumChunkTouches = 0, totalTouches = 0, chunks = 1, roots = 0;
+        long replacementPages = 0, actualIndexPages = 0, oldPages = 0, maximumChunkTouches = 0, totalTouches = 0, chunks = 1, roots = 0;
         var registrations = _database.IndexManager.ExportRegistrations();
         checked
         {
@@ -63,6 +67,7 @@ internal sealed partial class SqlSchemaProvisioner
                         return writer.ToArray().Length;
                     }).ToArray();
                     heapPages = _database.DataStorage.GetOwnerPages(previous.ObjectId).Count;
+                    oldPages += heapPages;
                     using var units = _database.DataStorage.GetUnitIterator(previous.ObjectId);
                     while (units.Next(out var unit))
                     {
@@ -80,6 +85,7 @@ internal sealed partial class SqlSchemaProvisioner
                         var size = CountJointIndexPages(registration.RootPageId, previous.ObjectId, token);
                         trees.Add(registration.Definition.Name, size);
                         actualIndexPages += size.Pages;
+                        oldPages += size.Pages;
                     }
                     long newBytes = 29 * rows;
                     for (int column = 0; column < item.Shape.Columns.Count; column++)
@@ -105,7 +111,6 @@ internal sealed partial class SqlSchemaProvisioner
                         });
                         pages = size.Bytes == 0 ? size.Pages : DivideUp(size.Pages * Math.Max(size.Bytes, newBytes), size.Bytes);
                         height = size.Height;
-                        for (long growth = DivideUp(pages, size.Pages); growth > 1; growth = DivideUp(growth, 3)) { height++; }
                     }
                     else
                     {
@@ -119,15 +124,21 @@ internal sealed partial class SqlSchemaProvisioner
                     }
                     replacementPages += pages;
                     roots++;
-                    // Tree pages and heights were measured without decoding keys.
+                    // Retained trees use their measured height, independent of row count.
+                    touchesPerRow += 4L * height + 3;
                 }
-                item.CopyRows = rows;
-                touchesPerRow = JointCopyTouches(1, rows, item.Indexes.Length);
                 maximumChunkTouches = Math.Max(maximumChunkTouches, Math.Min(64, rows) * touchesPerRow);
                 totalTouches += rows * touchesPerRow;
                 chunks += DivideUp(rows, 64);
             }
-            long replacement = replacementPages * Page.Size;
+            foreach (var table in plan.Dropped)
+            {
+                oldPages += _database.DataStorage.GetOwnerPages(table.ObjectId).Count;
+                foreach (var registration in registrations.Where(value => value.ObjectId == table.ObjectId))
+                { oldPages += CountJointIndexPages(registration.RootPageId, table.ObjectId, token).Pages; }
+            }
+            ConfigureJointEngineReserve(plan, intent, Math.Max(oldPages, replacementPages));
+            long replacement = Math.Max(0, replacementPages - _database.DataStorage.PageManager.FreePageCount) * Page.Size;
             JointSpaceReplacementBytes = replacement;
             // RegisterTouch may log a full pre-image (including spill); commit logs
             // a delta/committed image. Each payload <= B+8; each frame is 38 bytes.
@@ -137,45 +148,102 @@ internal sealed partial class SqlSchemaProvisioner
             long journal = Math.Min((totalTouches + roots) * pageFrames + chunks * 4 * 38,
                 JointCopyCheckpointBytes + Math.Max(maximumChunkTouches, roots) * pageFrames + 4 * 38);
             long subtotal = replacement + journal;
-            // 25% for occupancy/width estimation, plus 16 MiB catalog publication
-            // and reclamation reserve. Old owners are already allocated: no charge.
-            JointSpaceDiscardBytes = JointDiscardReserve(plan, intent);
-            long need = subtotal + DivideUp(subtotal, 4) + 16L * 1024 * 1024 + JointSpaceDiscardBytes;
+            JointSpaceDiscardBytes = JointEngineReserve(replacementPages);
+            JointSpacePublicationBytes = JointPublicationBound(plan, intent);
+            long need = subtotal + DivideUp(subtotal, 4) + JointSpacePublicationBytes + JointSpaceDiscardBytes;
             JointSpaceNeed = need;
             JointSpaceIndexPages = actualIndexPages;
             CheckJointSpace(need);
         }
     }
 
-    internal static long JointCopyTouches(long count, long totalRows, int indexes)
-    {
-        // Even maximum-size keys split at fanout >= 3. All source versions count;
-        // deletion/pruning can only reduce the prepared tree's maximum height.
-        int height = 1;
-        for (long entries = totalRows; entries > 3; entries = DivideUp(entries, 3)) { height++; }
-        return checked(count * (2 + indexes * (4L * height + 3)));
-    }
-
-    internal static long JointCopyAllocations(long count, long totalRows, int indexes)
-    {
-        int height = 1;
-        for (long entries = totalRows; entries > 3; entries = DivideUp(entries, 3)) { height++; }
-        // One new heap page per row; a split allocates one sibling per level,
-        // except root growth which allocates two. Two per level bounds both.
-        return checked(count * (1 + indexes * 2L * height));
-    }
-
     internal static long JointBracketBytes(long touches, long allocations)
         => checked(allocations * Page.Size + touches * 2 * (Page.Size + 46) + 152);
 
+    internal static int JointTreeGrowth(int inserts, int entryBytes)
+    {
+        int capacity = (SlottedPage.BodySize - 32) / entryBytes;
+        int children = Math.Max(3, (capacity - 1) / 2);
+        int growth = 1; // An already full root can split on the first insert.
+        // A grown root has one separator. Growing it again consumes its remaining
+        // separator slots, then at least `children` new separators per level.
+        for (int events = inserts; events >= capacity - 1; events = (events - (capacity - 1)) / children) { growth++; }
+        return growth;
+    }
+
+    internal static int JointTreeHeight(global::Assimalign.Cohesion.Database.Storage.Storage storage, long root, ulong owner, out int rootFree)
+    {
+        rootFree = 0;
+        for (int height = 1; height <= 64; height++)
+        {
+            if (root <= 0 || root >= storage.PageManager.PageCount)
+            { throw new StorageCorruptionException((PageId)root, ErrorMessages.JointIndexShapeInvalid); }
+            using var handle = storage.PageManager.GetPage((PageId)root);
+            var body = handle.Page.AsBodySpan();
+            if (handle.Page.Type != PageType.Index || handle.Page.OwnerId != owner ||
+                BinaryPrimitives.ReadUInt16LittleEndian(body) != 0x5442 || body[2] != 2 || body[3] is not (1 or 2))
+            { throw new StorageCorruptionException(handle.Id, ErrorMessages.JointIndexShapeInvalid); }
+            if (height == 1)
+            {
+                rootFree = BinaryPrimitives.ReadUInt16LittleEndian(body[6..]) - 32 - 2 * BinaryPrimitives.ReadUInt16LittleEndian(body[4..]);
+                if (rootFree < 0 || rootFree > body.Length - 32)
+                { throw new StorageCorruptionException(handle.Id, ErrorMessages.JointIndexShapeInvalid); }
+            }
+            if (body[3] == 1) { return height; }
+            root = BinaryPrimitives.ReadInt64LittleEndian(body[24..]);
+        }
+        throw new StorageCorruptionException((PageId)root, ErrorMessages.JointIndexShapeInvalid);
+    }
+
     private static long DivideUp(long value, long divisor) => checked(value / divisor + (value % divisor == 0 ? 0 : 1));
 
-    // Kind 14 already exists for every prepared owner. Cover kind-9 deletion,
-    // directory removal per tree/owner and their WAL, without a heap walk.
-    private static long JointDiscardReserve(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent)
-        => checked(JointSpaceFloor(intent) +
-            (4 + 2L * plan.Tables.Length + 2L * plan.Tables.Sum(table => table.Indexes.Length)) *
-            (Page.Size + 2 * (Page.Size + 46)));
+    // Engine headroom, not a prediction of individual reclamation writes. A
+    // checkpoint-disabled engine needs the whole owner's WAL. Otherwise allow a
+    // full checkpointer poll of reclamation (32 pages/owner every 25 ms), in
+    // addition to the configured threshold. The 25% margin covers cleared-page
+    // deltas and engine metadata; both pools can contain dirty sparse pages.
+    private void ConfigureJointEngineReserve(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, long minimumPages)
+    {
+        checked
+        {
+            _jointMinimumPages = minimumPages;
+            _jointReclamationOwners = Math.Max(plan.Tables.Length, plan.Tables.Count(table => table.Previous is not null) + plan.Dropped.Length);
+            long polls = DivideUp(DatabaseCheckpointWorker<SqlDatabase>.PollInterval.Ticks, TimeSpan.FromMilliseconds(25).Ticks);
+            long overshoot = polls * Math.Max(1, _jointReclamationOwners) * (SqlTableReclamation.BatchSize * (Page.Size + 46L) + 152);
+            long threshold = _database.Engine.EngineOptions.CheckpointJournalSize;
+            _jointReclamationLimit = threshold == 0 ? long.MaxValue : threshold + overshoot;
+            _jointReserveBase = JointSpaceFloor(intent) + _database.Engine.EngineOptions.BufferPoolCapacity +
+                SqlDatabaseEngine.CatalogBufferPoolPages * Page.Size;
+        }
+    }
+
+    private long JointEngineReserve(long preparedPages)
+    {
+        checked
+        {
+            long pages = Math.Max(_jointMinimumPages, preparedPages);
+            long whole = pages * (Page.Size + 46) + (DivideUp(pages, SqlTableReclamation.BatchSize) + _jointReclamationOwners) * 152;
+            long components = _jointReserveBase + Math.Min(whole, _jointReclamationLimit);
+            return components + Math.Max(1024 * 1024, DivideUp(components, 4));
+        }
+    }
+
+    // Each catalog record/chunk can grow one page and touch its old and new
+    // page. Include old kind-6/kind-9 chunks and dependent descriptions; the
+    // declaration supplies the new kind-6 chunks. No stored rows are examined.
+    private long JointPublicationBound(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent)
+    {
+        long chunks = DivideUp(Encoding.UTF8.GetByteCount(intent.CanonicalDocument), 3 * 1024) +
+            DivideUp(Encoding.UTF8.GetByteCount(_catalog.SchemaState?.CanonicalDocument ?? string.Empty), 3 * 1024);
+        var image = _catalog.CaptureSnapshot();
+        var retiring = plan.Tables.Where(table => table.Previous is not null).Select(table => table.Previous!).Concat(plan.Dropped).ToArray();
+        long records = 8 + 3L * plan.Tables.Length + retiring.Length + 2L * plan.Tables.Sum(table => table.Indexes.Length) +
+            retiring.Sum(table => (long)image.GetIndexes(table.ObjectId).Count) +
+            4L * plan.Tables.Sum(table => table.Shape.Columns.Count(column => column.Identity is not null)) +
+            4L * retiring.Sum(table => table.Columns.Count(column => column.Identity is not null)) +
+            2L * image.Views.Count(view => view.TableDependencies.Any(id => retiring.Any(table => table.ObjectId == id)));
+        return checked(JointSpaceFloor(intent) + (chunks + records) * (5 * Page.Size + 168));
+    }
 
     private static long JointColumnBytes(SqlJointMigrationTable item, int ordinal, long[] measured, long[] nonNullRows, long rows, bool key = false)
     {
@@ -190,7 +258,8 @@ internal sealed partial class SqlSchemaProvisioner
                 else { SqlRowCodec.AppendValue(writer, column.Type.Type, constant.Value); }
                 return rows * writer.ToArray().Length;
             }
-            return rows; // NULL, or no knowable bound on an expression default.
+            int width = column.Type.Type == DatabaseType.Decimal ? 33 : FixedColumnWidth(column.Type.Type);
+            return checked(rows * (item.Values[ordinal] is null ? 1 : Math.Max(1, width)));
         }
         int oldOrdinal = item.Previous!.Columns.ToList().IndexOf(old);
         long actual = measured[oldOrdinal];
@@ -220,6 +289,8 @@ internal sealed partial class SqlSchemaProvisioner
             }
             return key ? actual : Math.Max(actual, checked(nulls + nonNull * (width + 4)));
         }
+        if (old.Type.Type == DatabaseType.JsonBinary && column.Type.Type is DatabaseType.String or DatabaseType.Json)
+        { return checked(actual + nonNull); }
         if (column.Type.Type == DatabaseType.String)
         {
             int rendered = RenderedWidth(old.Type.Type);
