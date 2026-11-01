@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -12,10 +13,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Security.DataProtection;
 
-using Assimalign.Cohesion.ApplicationModel.Internal;
 using Assimalign.Cohesion.SecretStore.Client.Internal;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Internal;
@@ -37,12 +36,9 @@ internal sealed class CertificateAuthorityManager : IDisposable
 
     private readonly string _authorityPath;
     private readonly string _leafDirectoryPath;
-    private readonly string _pendingPath;
     private readonly IDataProtector _authorityProtector;
     private readonly IDataProtector _leafProtector;
     private readonly CertificateAuthorityOptions _options;
-    private readonly string? _applicationName;
-    private readonly string? _resourceName;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private X509Certificate2? _issuer;
     private X509Certificate2[] _issuerChain = [];
@@ -51,9 +47,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
     internal CertificateAuthorityManager(
         string dataPath,
         IDataProtectionProvider protectionProvider,
-        CertificateAuthorityOptions options,
-        string? applicationName,
-        string? resourceName)
+        CertificateAuthorityOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataPath);
         ArgumentNullException.ThrowIfNull(protectionProvider);
@@ -61,16 +55,11 @@ internal sealed class CertificateAuthorityManager : IDisposable
 
         string authorityDirectory = Path.Combine(Path.GetFullPath(dataPath), "certificates");
         _authorityPath = Path.Combine(authorityDirectory, "authority.protected");
-        _pendingPath = Path.Combine(authorityDirectory, "enrollment.protected");
         _leafDirectoryPath = Path.Combine(authorityDirectory, "leaves");
         _authorityProtector = protectionProvider.CreateProtector("secret-store", "certificate-authority", "v1");
         _leafProtector = protectionProvider.CreateProtector("secret-store", "certificate-leaf", "v1");
         _options = options;
-        _applicationName = applicationName;
-        _resourceName = resourceName;
     }
-
-    internal bool IsEnrolled => _issuer is not null;
 
     internal async Task InitializeAsync(CancellationToken cancellationToken)
     {
@@ -114,23 +103,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                         throw;
                     }
                 }
-                else if (_options.PlatformEnrollmentEndpoint is not null)
-                {
-                    if (string.IsNullOrWhiteSpace(_applicationName) ||
-                        string.IsNullOrWhiteSpace(_resourceName))
-                    {
-                        throw new InvalidOperationException(
-                            "Platform enrollment requires ambient application and resource names.");
-                    }
-
-                    byte[] pending = await EnsurePendingEnrollmentAsync(
-                            _applicationName,
-                            _resourceName,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                    CryptographicOperations.ZeroMemory(pending);
-                }
-                else if (_options.SelfSeedWhenNoPlatform)
+                else if (_options.SelfSeed)
                 {
                     X509Certificate2 root = CreateRoot(_options.CommonName);
                     try
@@ -149,7 +122,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 else
                 {
                     throw new InvalidOperationException(
-                        "The SecretStore has no durable certificate authority, initial authority material, Platform enrollment, or standalone self-seeding configured.");
+                        "The SecretStore has no durable certificate authority, initial authority material, or self-seeding configured.");
                 }
             }
             finally
@@ -168,15 +141,8 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 
-    internal Task<string> GetCertificatePemAsync(
-        string name,
-        CancellationToken cancellationToken)
-        => GetCertificatePemAsync(name, null, null, cancellationToken);
-
     internal async Task<string> GetCertificatePemAsync(
         string name,
-        string? subject,
-        IReadOnlyList<string>? subjectAlternativeNames,
         CancellationToken cancellationToken)
     {
         if (!SecretStoreCertificateReferenceGrammar.IsValid(name))
@@ -194,9 +160,8 @@ internal sealed class CertificateAuthorityManager : IDisposable
             }
 
             string leafName = NormalizeLeafName(name);
-            X500DistinguishedName? effectiveSubject = subject is null ? null :
-                subject.Contains('=') ? new X500DistinguishedName(subject) : CreateSubject(subject);
-            X509Extension? effectiveNames = subjectAlternativeNames is null ? null : CreateAlternativeNames(subjectAlternativeNames);
+            X500DistinguishedName? effectiveSubject = null;
+            X509Extension? effectiveNames = null;
             string leafPath = GetLeafPath(leafName);
             byte[]? durable = await ProtectedFileStore.ReadAsync(
                     leafPath,
@@ -209,15 +174,10 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 {
                     string existingPem = Encoding.UTF8.GetString(durable);
                     using X509Certificate2 existing = LoadLeafBundle(existingPem);
-                    X509Extension? storedNames = existing.Extensions["2.5.29.17"];
-                    if ((effectiveSubject is not null && !effectiveSubject.RawData.AsSpan().SequenceEqual(existing.SubjectName.RawData)) ||
-                        (effectiveNames is not null && (storedNames is null || !effectiveNames.RawData.AsSpan().SequenceEqual(storedNames.RawData))))
-                    {
-                        throw new Assimalign.Cohesion.Hosting.Resources.ResourceCommandRejectedException(
-                            $"secretstore.issue-certificate certificate '{leafName}' already has a different subject or SAN set; delete its declaration before changing its identity.");
-                    }
-                    effectiveSubject ??= existing.SubjectName;
-                    effectiveNames ??= storedNames;
+
+                    // A renewal keeps the subject and alternative names the leaf was issued with.
+                    effectiveSubject = existing.SubjectName;
+                    effectiveNames = existing.Extensions["2.5.29.17"];
                     if (!RequiresRenewal(existing, DateTimeOffset.UtcNow))
                     {
                         return existingPem;
@@ -230,7 +190,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
             }
 
             using X509Certificate2 leaf = CreateLeaf(leafName,
-                subjectAlternativeNames ?? [leafName, "localhost", "127.0.0.1", "::1"], effectiveSubject, effectiveNames);
+                [leafName, "localhost", "127.0.0.1", "::1"], effectiveSubject, effectiveNames);
             string pem = ExportLeafBundle(leaf);
             byte[] encoded = Encoding.UTF8.GetBytes(pem);
             try
@@ -338,200 +298,6 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 
-    internal async Task<string> CreateEnrollmentRequestAsync(
-        string applicationName,
-        string resourceName,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(resourceName);
-
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_issuer is not null)
-            {
-                throw new InvalidOperationException("The SecretStore certificate authority is already initialized.");
-            }
-
-            byte[] pending = await EnsurePendingEnrollmentAsync(
-                    applicationName,
-                    resourceName,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            try
-            {
-                using JsonDocument document = JsonDocument.Parse(pending);
-                JsonElement root = document.RootElement;
-                if (!string.Equals(
-                        root.GetProperty("application").GetString(),
-                        applicationName,
-                        StringComparison.Ordinal) ||
-                    !string.Equals(
-                        root.GetProperty("resource").GetString(),
-                        resourceName,
-                        StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException(
-                        "The pending enrollment belongs to a different application resource.");
-                }
-
-                return document.RootElement.GetProperty("certificateSigningRequest").GetString()!;
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(pending);
-            }
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    internal async Task CompleteEnrollmentAsync(
-        string certificatePem,
-        IReadOnlyList<string> issuerChainPem,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(certificatePem);
-        ArgumentNullException.ThrowIfNull(issuerChainPem);
-
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_issuer is not null)
-            {
-                throw new InvalidOperationException("The SecretStore certificate authority is already initialized.");
-            }
-
-            byte[] pending = await ProtectedFileStore.ReadAsync(
-                    _pendingPath,
-                    _authorityProtector,
-                    cancellationToken)
-                .ConfigureAwait(false)
-                ?? throw new InvalidOperationException("No pending SecretStore enrollment exists.");
-            try
-            {
-                using JsonDocument document = JsonDocument.Parse(pending);
-                string applicationName = GetRequiredPendingString(
-                    document.RootElement,
-                    "application");
-                string resourceName = GetRequiredPendingString(
-                    document.RootElement,
-                    "resource");
-                string privateKeyPem = GetRequiredPendingString(
-                    document.RootElement,
-                    "privateKey");
-                X509Certificate2 enrolled = LoadCertificateWithKey(certificatePem, privateKeyPem);
-                X509Certificate2[] chain = LoadCertificates(issuerChainPem);
-                try
-                {
-                    ValidateAuthority(enrolled);
-                    X500DistinguishedName expectedSubject = CreateSubject(
-                        applicationName + "/" + resourceName);
-                    if (!enrolled.SubjectName.RawData.AsSpan().SequenceEqual(expectedSubject.RawData))
-                    {
-                        throw new InvalidDataException(
-                            "The enrolled authority subject does not match its pending application resource.");
-                    }
-
-                    ValidatePlatformPin(chain);
-                    ValidateIssuedChain(enrolled, chain);
-                    await PersistAuthorityAsync(enrolled, chain, cancellationToken)
-                        .ConfigureAwait(false);
-                    _issuer = enrolled;
-                    _issuerChain = chain;
-                }
-                catch
-                {
-                    enrolled.Dispose();
-                    DisposeCertificates(chain);
-                    throw;
-                }
-
-                File.Delete(_pendingPath);
-                _initialized = true;
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(pending);
-            }
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    internal async Task<CertificateEnrollmentResponse> IssueIntermediateAsync(
-        string applicationName,
-        string resourceName,
-        string certificateSigningRequest,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(resourceName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(certificateSigningRequest);
-
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureReady();
-            CertificateRequest incoming = CertificateRequest.LoadSigningRequestPem(
-                certificateSigningRequest,
-                HashAlgorithmName.SHA256,
-                CertificateRequestLoadOptions.Default,
-                null);
-            X500DistinguishedName expectedSubject = CreateSubject(applicationName + "/" + resourceName);
-            if (!incoming.SubjectName.RawData.AsSpan().SequenceEqual(expectedSubject.RawData))
-            {
-                throw new InvalidDataException(
-                    "The enrollment request subject does not match its application and resource identity.");
-            }
-
-            var request = new CertificateRequest(
-                incoming.SubjectName,
-                incoming.PublicKey,
-                HashAlgorithmName.SHA256);
-            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
-            request.CertificateExtensions.Add(new X509KeyUsageExtension(
-                X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
-                true));
-            request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
-
-            byte[] serial = CreateSerialNumber();
-            try
-            {
-                using X509Certificate2 certificate = request.Create(
-                    _issuer!,
-                    DateTimeOffset.UtcNow.AddMinutes(-5),
-                    ClampNotAfter(_issuer!, DateTimeOffset.UtcNow.AddYears(5)),
-                    serial);
-                var chain = new List<string>(_issuerChain.Length + 1)
-                {
-                    ExportCertificatePem(_issuer!),
-                };
-                for (int index = 0; index < _issuerChain.Length; index++)
-                {
-                    chain.Add(ExportCertificatePem(_issuerChain[index]));
-                }
-
-                return new CertificateEnrollmentResponse(
-                    ExportCertificatePem(certificate),
-                    chain);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(serial);
-            }
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
     public void Dispose()
     {
         _issuer?.Dispose();
@@ -541,56 +307,6 @@ internal sealed class CertificateAuthorityManager : IDisposable
 
     private X509Certificate2 RootCertificate =>
         _issuerChain.Length == 0 ? _issuer! : _issuerChain[^1];
-
-    private async Task<byte[]> EnsurePendingEnrollmentAsync(
-        string applicationName,
-        string resourceName,
-        CancellationToken cancellationToken)
-    {
-        byte[]? durable = await ProtectedFileStore.ReadAsync(
-                _pendingPath,
-                _authorityProtector,
-                cancellationToken)
-            .ConfigureAwait(false);
-        if (durable is not null)
-        {
-            return durable;
-        }
-
-        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var request = new CertificateRequest(
-            CreateSubject(applicationName + "/" + resourceName),
-            key,
-            HashAlgorithmName.SHA256);
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
-        request.CertificateExtensions.Add(new X509KeyUsageExtension(
-            X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
-            true));
-        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
-
-        string privateKeyPem = key.ExportPkcs8PrivateKeyPem();
-        string csrPem = request.CreateSigningRequestPem();
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            writer.WriteString("application", applicationName);
-            writer.WriteString("resource", resourceName);
-            writer.WriteString("certificateSigningRequest", csrPem);
-            writer.WriteString("privateKey", privateKeyPem);
-            writer.WriteEndObject();
-        }
-
-        byte[] payload = buffer.WrittenSpan.ToArray();
-        buffer.Clear();
-        await ProtectedFileStore.WriteAsync(
-                _pendingPath,
-                _authorityProtector,
-                payload,
-                cancellationToken)
-            .ConfigureAwait(false);
-        return payload;
-    }
 
     private static X509Certificate2 LoadInitialAuthority(
         ReadOnlySpan<byte> certificate,
@@ -740,27 +456,12 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 
-    internal async Task DeleteCertificateAsync(string name, CancellationToken cancellationToken = default)
-    {
-        string leafName = NormalizeLeafName("certs/" + name);
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureReady();
-            File.Delete(GetLeafPath(leafName));
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
     private static X509Extension CreateAlternativeNames(IReadOnlyList<string> values)
     {
         var names = new SubjectAlternativeNameBuilder();
         foreach (string value in values.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal))
         {
-            if (!SecretStoreCommandGrammar.IsValidSubjectAlternativeName(value))
+            if (!IsValidSubjectAlternativeName(value))
             {
                 throw new ArgumentException(ErrorMessages.AlternativeNameInvalid, nameof(values));
             }
@@ -854,25 +555,6 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 
-    private static X509Certificate2[] LoadCertificates(IReadOnlyList<string> certificatePem)
-    {
-        var certificates = new X509Certificate2[certificatePem.Count];
-        try
-        {
-            for (int index = 0; index < certificates.Length; index++)
-            {
-                certificates[index] = X509Certificate2.CreateFromPem(certificatePem[index]);
-            }
-
-            return certificates;
-        }
-        catch
-        {
-            DisposeCertificates(certificates);
-            throw;
-        }
-    }
-
     private static X509Certificate2 CreateRoot(string commonName)
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -955,32 +637,7 @@ internal sealed class CertificateAuthorityManager : IDisposable
 
         if (!chain.Build(certificate))
         {
-            throw new InvalidDataException("The enrolled certificate does not chain to its supplied root.");
-        }
-    }
-
-    private void ValidatePlatformPin(IReadOnlyList<X509Certificate2> issuerChain)
-    {
-        if (!_options.PlatformCertificate.HasValue)
-        {
-            return;
-        }
-
-        ReadOnlyMemory<byte> pinnedBytes = _options.PlatformCertificate.Value;
-        if (issuerChain.Count == 0)
-        {
-            throw new InvalidDataException(
-                "A Platform-enrolled authority requires the pinned Platform issuer chain.");
-        }
-
-        string pinnedPem = Encoding.UTF8.GetString(pinnedBytes.Span);
-        using X509Certificate2 pinned = X509Certificate2.CreateFromPem(pinnedPem);
-        if (!CryptographicOperations.FixedTimeEquals(
-                pinned.RawData,
-                issuerChain[^1].RawData))
-        {
-            throw new InvalidDataException(
-                "The enrollment response does not terminate at the configured Platform certificate.");
+            throw new InvalidDataException("The authority certificate does not chain to its supplied root.");
         }
     }
 
@@ -1009,38 +666,16 @@ internal sealed class CertificateAuthorityManager : IDisposable
         return builder.Build();
     }
 
-    private IReadOnlyList<string> GetServerSubjectAlternativeNames(
+    private static IReadOnlyList<string> GetServerSubjectAlternativeNames(
         string resourceName,
         string endpointHost)
     {
-        var names = new List<string>
-        {
+        return
+        [
             endpointHost,
             resourceName,
             resourceName + "-api",
-        };
-        if (!string.IsNullOrWhiteSpace(_applicationName))
-        {
-            names.Add(resourceName + "." + _applicationName + ".svc");
-            names.Add(resourceName + "." + _applicationName + ".svc.cluster.local");
-            names.Add(resourceName + "-api." + _applicationName + ".svc");
-            names.Add(resourceName + "-api." + _applicationName + ".svc.cluster.local");
-        }
-
-        return names;
-    }
-
-    private static string GetRequiredPendingString(JsonElement element, string name)
-    {
-        if (!element.TryGetProperty(name, out JsonElement property) ||
-            property.ValueKind is not JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(property.GetString()))
-        {
-            throw new InvalidDataException(
-                $"The pending enrollment requires string member '{name}'.");
-        }
-
-        return property.GetString()!;
+        ];
     }
 
     private string GetLeafPath(string leafName)
@@ -1075,12 +710,44 @@ internal sealed class CertificateAuthorityManager : IDisposable
                 "Certificate='public' uses ACME or another public CA and is not implemented by this design item.");
         }
 
-        if (!SecretStoreCommandGrammar.IsValidCertificateName(leafName))
+        if (!IsValidCertificateName(leafName))
         {
             throw new ArgumentException(ErrorMessages.CertificateNameInvalid, nameof(name));
         }
 
         return leafName;
+    }
+
+    // A leaf name is one path segment; an alternative name is an IP address or an IDN-encodable
+    // DNS name.
+    private static bool IsValidCertificateName(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value is not "." and not ".." &&
+        value.IndexOfAny(['/', '\\']) < 0;
+
+    private static bool IsValidSubjectAlternativeName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (IPAddress.TryParse(value, out _))
+        {
+            return true;
+        }
+
+        try
+        {
+            // SubjectAlternativeNameBuilder.AddDnsName uses default IdnMapping.GetAscii
+            // before IA5 encoding. Parse that grammar directly; do not construct a certificate.
+            // This preserves certificate wildcard/IDN acceptance rather than hostname rules.
+            string ascii = new IdnMapping().GetAscii(value);
+            return ascii.AsSpan().IndexOfAnyExceptInRange((char)0, (char)127) < 0;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static byte[] CreateSerialNumber()
@@ -1112,12 +779,6 @@ internal sealed class CertificateAuthorityManager : IDisposable
         {
             throw new InvalidOperationException("The certificate authority has not been initialized.");
         }
-
-        if (_issuer is null)
-        {
-            throw new InvalidOperationException(
-                "The certificate authority is awaiting gateway-mediated Platform enrollment.");
-        }
     }
 
     private sealed class DebugView
@@ -1127,7 +788,3 @@ internal sealed class CertificateAuthorityManager : IDisposable
         }
     }
 }
-
-internal sealed record CertificateEnrollmentResponse(
-    string Certificate,
-    IReadOnlyList<string> IssuerChain);

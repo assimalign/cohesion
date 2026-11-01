@@ -21,6 +21,11 @@ namespace Assimalign.Cohesion.Web.StaticFiles.Internal;
 /// construction — no request-time service location, no per-request allocation beyond the exchange
 /// itself.
 /// </summary>
+/// <remarks>
+/// A middleware built without a file system is the registration of the application's web root: it
+/// serves nothing until <c>UseStaticFiles()</c> mounts the web root over its snapshot
+/// (<see cref="WithFileSystem"/>), so placed any other way it passes every request on.
+/// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("StaticFilesMiddleware")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
@@ -33,7 +38,8 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         ("gzip", ".gz"),
     ];
 
-    private readonly IFileSystem _fileSystem;
+    private readonly IFileSystem? _fileSystem;
+    private readonly HttpPath _requestPath;
     private readonly string _prefix;
     private readonly FileName[] _defaultDocuments;
     private readonly string? _cacheControl;
@@ -47,9 +53,14 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     {
     }
 
-    public StaticFilesMiddleware(IFileSystem fileSystem, StaticFilesOptions options, FileName[] defaultDocuments)
+    /// <summary>
+    /// Snapshots validated <paramref name="options"/> over <paramref name="fileSystem"/>, or, when it is
+    /// <see langword="null"/>, over the web root <c>UseStaticFiles()</c> mounts later.
+    /// </summary>
+    public StaticFilesMiddleware(IFileSystem? fileSystem, StaticFilesOptions options, FileName[] defaultDocuments)
     {
         _fileSystem = fileSystem;
+        _requestPath = options.RequestPath;
         // "/" mounts at the site root (empty prefix); anything else is stored without a
         // trailing slash so segment-aligned matching stays uniform.
         _prefix = options.RequestPath.Value == "/" ? string.Empty : options.RequestPath.Value.TrimEnd('/');
@@ -62,6 +73,37 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
         _fallbackContentType = options.FallbackContentType;
         _servePrecompressedAssets = options.ServePrecompressedAssets;
     }
+
+    private StaticFilesMiddleware(StaticFilesMiddleware registration, IFileSystem fileSystem)
+    {
+        _fileSystem = fileSystem;
+        _requestPath = registration._requestPath;
+        _prefix = registration._prefix;
+        _defaultDocuments = registration._defaultDocuments;
+        _cacheControl = registration._cacheControl;
+        _contentTypes = registration._contentTypes;
+        _serveUnknownContentTypes = registration._serveUnknownContentTypes;
+        _fallbackContentType = registration._fallbackContentType;
+        _servePrecompressedAssets = registration._servePrecompressedAssets;
+    }
+
+    /// <summary>
+    /// Gets the request-path prefix the middleware was configured with.
+    /// </summary>
+    internal HttpPath RequestPath => _requestPath;
+
+    /// <summary>
+    /// Gets a value indicating whether the middleware was built without a file system, so it serves the
+    /// application's web root once <c>UseStaticFiles()</c> mounts it.
+    /// </summary>
+    internal bool MountsWebRoot => _fileSystem is null;
+
+    /// <summary>
+    /// Creates the middleware that serves <paramref name="fileSystem"/> with this middleware's snapshot.
+    /// </summary>
+    /// <param name="fileSystem">The mounted web root.</param>
+    /// <returns>The mounted middleware.</returns>
+    internal StaticFilesMiddleware WithFileSystem(IFileSystem fileSystem) => new(this, fileSystem);
 
     public async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
@@ -91,7 +133,8 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     /// <returns>A task that completes when the response (or <paramref name="next"/>) has completed.</returns>
     internal async Task ServeAsync(IHttpContext context, string path, WebApplicationMiddleware next)
     {
-        if (!StaticFilePath.TryGetRelativePath(path, _prefix, out string remainder))
+        // A web-root registration UseStaticFiles() has not mounted holds no URL space at all.
+        if (_fileSystem is null || !StaticFilePath.TryGetRelativePath(path, _prefix, out string remainder))
         {
             await next.Invoke(context);
             return;
@@ -216,7 +259,16 @@ internal sealed class StaticFilesMiddleware : IWebApplicationMiddleware
     }
 
     private bool TryGetInfo(FileSystemPath path, [NotNullWhen(true)] out IFileSystemInfo? info)
-        => StaticFilePath.TryGetInfo(_fileSystem, path, out info, _prefix);
+    {
+        // ServeAsync passes every request on before a lookup when nothing is mounted.
+        if (_fileSystem is null)
+        {
+            info = null;
+            return false;
+        }
+
+        return StaticFilePath.TryGetInfo(_fileSystem, path, out info, _prefix);
+    }
 
     private bool TryResolveDefaultDocument(string directory, [NotNullWhen(true)] out IFileSystemFile? document, out string documentName)
     {

@@ -9,7 +9,7 @@ namespace Assimalign.Cohesion.Web.Compression.Tests;
 
 public sealed class CompressionCompositionValidationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Web.Compression] - UseResponseCompression: Invalid media-type patterns fail during registration")]
+    [Theory(DisplayName = "Cohesion Test [Web.Compression] - AddResponseCompression: Invalid media-type patterns fail during registration")]
     [InlineData(null)]
     [InlineData("")]
     [InlineData(" ")]
@@ -23,17 +23,17 @@ public sealed class CompressionCompositionValidationTests
     [InlineData("text/html\r\n")]
     [InlineData("*")]
     [InlineData("*/json")]
-    public void UseResponseCompression_InvalidMediaTypePattern_ShouldThrowAtComposition(string? pattern)
+    public void AddResponseCompression_InvalidMediaTypePattern_ShouldThrowAtComposition(string? pattern)
     {
         // Arrange
         TestPipelineBuilder builder = new();
 
-        // Act and assert
-        Should.Throw<ArgumentException>(() => builder.UseResponseCompression(options => options.MimeTypes.Add(pattern!)));
-        builder.LastMiddleware.ShouldBeNull();
+        // Act and assert — the build that registration runs throws, so nothing is registered.
+        Should.Throw<ArgumentException>(() => builder.Registered.Add(BuildResponseCompression(options => options.MimeTypes.Add(pattern!))));
+        builder.Registered.ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.Compression] - UseResponseCompression: Exact, subtype and full wildcard patterns remain accepted")]
+    [Theory(DisplayName = "Cohesion Test [Web.Compression] - AddResponseCompression: Exact, subtype and full wildcard patterns remain accepted")]
     [InlineData("application/json")]
     [InlineData("APPLICATION/PROBLEM+JSON")]
     [InlineData("application/*+json")]
@@ -41,16 +41,18 @@ public sealed class CompressionCompositionValidationTests
     [InlineData(" text/plain\t")]
     [InlineData("text/*")]
     [InlineData("*/*")]
-    public void UseResponseCompression_ValidMediaTypePattern_ShouldRegister(string pattern)
+    public void AddResponseCompression_ValidMediaTypePattern_ShouldRegister(string pattern)
     {
         // Arrange
         TestPipelineBuilder builder = new();
 
         // Act
-        builder.UseResponseCompression(options => options.MimeTypes.Add(pattern));
+        builder.Registered.Add(BuildResponseCompression(options => options.MimeTypes.Add(pattern)));
+        builder.UseResponseCompression();
 
         // Assert
-        builder.LastMiddleware.ShouldNotBeNull();
+        builder.Registered.ShouldHaveSingleItem();
+        builder.LastComposed.ShouldNotBeNull();
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.Compression] - MinimumResponseSizeBytes: Negative thresholds fail on assignment")]
@@ -79,19 +81,52 @@ public sealed class CompressionCompositionValidationTests
         options.MaxDecompressedSizeBytes.ShouldBe(100L * 1024 * 1024);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Compression] - Use: Zero thresholds and limits remain accepted")]
-    public void Use_ZeroSizeOptions_ShouldRegister()
+    [Fact(DisplayName = "Cohesion Test [Web.Compression] - AddResponseCompression: Disabling both codings fails during registration")]
+    public void AddResponseCompression_NoCodingEnabled_ShouldThrowAtComposition()
+    {
+        // Arrange
+        TestPipelineBuilder builder = new();
+
+        // Act and assert
+        Should.Throw<ArgumentException>(() => builder.Registered.Add(BuildResponseCompression(options =>
+        {
+            options.EnableGzip = false;
+            options.EnableBrotli = false;
+        })));
+        builder.Registered.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Compression] - Add: Zero thresholds and limits remain accepted")]
+    public void Add_ZeroSizeOptions_ShouldRegister()
     {
         // Arrange
         TestPipelineBuilder response = new();
         TestPipelineBuilder request = new();
 
         // Act
-        response.UseResponseCompression(options => options.MinimumResponseSizeBytes = 0);
-        request.UseRequestDecompression(options => options.MaxDecompressedSizeBytes = 0);
+        response.Registered.Add(BuildResponseCompression(options => options.MinimumResponseSizeBytes = 0));
+        request.Registered.Add(BuildRequestDecompression(options => options.MaxDecompressedSizeBytes = 0));
+        response.UseResponseCompression();
+        request.UseRequestDecompression();
 
         // Assert
-        response.LastMiddleware.ShouldNotBeNull();
-        request.LastMiddleware.ShouldNotBeNull();
+        response.LastComposed.ShouldNotBeNull();
+        request.LastComposed.ShouldNotBeNull();
+    }
+
+    private static IWebApplicationMiddleware BuildResponseCompression(Action<ResponseCompressionOptions> configure)
+    {
+        ResponseCompressionBuilder compression = new();
+        configure.Invoke(compression.Options);
+
+        return compression.Build();
+    }
+
+    private static IWebApplicationMiddleware BuildRequestDecompression(Action<RequestDecompressionOptions> configure)
+    {
+        RequestDecompressionBuilder decompression = new();
+        configure.Invoke(decompression.Options);
+
+        return decompression.Build();
     }
 }

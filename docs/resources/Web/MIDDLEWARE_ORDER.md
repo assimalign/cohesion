@@ -80,9 +80,6 @@ its stored responses before the transport commits their headers.
 
 ## Outside this order
 
-- **The runtime's control plane.** For a resource with orchestration enabled, `Web.Hosting` runs
-  the resource control-plane middleware ahead of the application's pipeline and passes every
-  other request into it. It is not part of this order.
 - **Branches.** `Map`, `MapWhen` and `UseWhen` run after whatever is registered ahead of them. A
   branch registered ahead of `UseRouting` sees no endpoint, and its own pipeline registers any of
   these middleware it needs.

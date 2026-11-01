@@ -12,53 +12,16 @@ Each build creates a new context, invokes every registered service factory exact
 
 ## Boundaries
 
-The module references the area root, DependencyInjection, Hosting, Hosting.Health, and Hosting.Resources publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. Hosting never references its own ApplicationModel package. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
+The module references the area root, DependencyInjection, and Hosting publicly. It references no Web, HTTP, or transport library: none of its services opens a listener yet. It references no application-model library: the resource integration, `Rezolvr.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
-## Enabled resource lifecycle
+## Resource integration
 
-The builder discovers the entry assembly's registered default control plane through ResourceRuntime.TryCreateControlPlane. The host environment carries the ambient environment name and content root. Build adds the host health contributor and a private admin listener when its ambient endpoint exists, then calls ResourceRuntime.HostBuilt. RunAsync delegates to the base host runner seam introduced by 3a62edab (design R6). Without registration, the ordinary explicit-service host remains unchanged and opens no listener.
+The area's resource integration is `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
-Web.Hosting's resource control-plane middleware is installed first on the private listener. It serves the exact v1 resource routes and post-23b command envelopes. Readiness observes the owning area's HostState.Started; managed namespaced routes verify ES256 bootstrap tokens against ApplicationTrustKey. Standalone resources work without a gateway identity. A-record and CNAME handlers are registered for the advertised kinds; unsupported commands return 501 with a Rejected body. The DNS service stub remains dormant.
+## DNS serving
 
-## Declarative commands (item 31c)
-
-| Wire kind | Descriptor verb | Ownership key |
-|---|---|---|
-| `rezolvr.add-a-record` | `AddARecord` | record name |
-| `rezolvr.add-cname-record` | `AddCnameRecord` | record name |
-
-Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
-`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
-Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
-advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
-The default control plane handles id replay and owner isolation; each area handler also accepts
-an identical reapplication with a different id. Conflicts return named Rejected details.
-
-A-record declarations use a BCL IPv4 IPAddress serialized as a string. CNAME declarations
-carry a DNS target string; TTL is a positive integer in seconds, defaulting to 300. COHAM001 keeps
-Dns assemblies outside the ApplicationModel dependency closure.
-
-Hosting stores records atomically in `records.json` under `ResourceContext.GetMount("data",
-Path.GetFullPath(Path.Combine(ContentRootPath, "data")))`. Without a data mount, storage therefore
-lives in the content-root-derived data directory. No CohesionMount or CohesionWorkloadKind change
-is made: GenericPlanner requires StatefulSet for a Volume while RezolvrPlanner requires Deployment.
-The command registry survives restart and restores ownership before the listener starts.
-`RezolvrCommandProtocolTests` drives both kinds over the `commands` route of a real managed host:
-apply, replay under a new id, ownership restored after a restart, the foreign-owner refusal, and
-deletion. The gateway delivers the same envelope through its generic
-`ResourceControlPlaneCommandClient`; the area ships no client package.
-
-Records are stored, not served as DNS answers. ResolverEndpointService remains parked. DNS serving
-and reconciling a durable Volume with the Deployment contract are deferred area work.
-
-## HTTPS endpoint certificate contract (31t)
-
-The enabled resource's `admin` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged.
-
-## Optional telemetry (31b)
-
-The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
+The module stores no records and serves no DNS answers yet. `ResolverEndpointService` remains
+parked, and zones, records and DNS serving are deferred area work.
 
 ## Concrete composition (T10 / O34)
 
@@ -66,9 +29,7 @@ Background-work registration belongs to the concrete `RezolvrApplicationBuilder`
 
 ## Dependency injection composition
 
-`RezolvrApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<RezolvrApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: telemetry registers in the builder constructor, so it starts first and stops last; the private admin endpoint registers in `Build`, so it starts last and stops first.
+`RezolvrApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<RezolvrApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order.
 
 `Build` closes registration (the container becomes read-only, and a second `Build` throws), creates the provider once, and resolves `IEnumerable<IHostService>` once into the snapshot the host reuses for every start, stop, and rollback pass. The application owns the provider: disposal stops the host, then disposes the provider, which disposes every factory-created service in reverse creation order while instance registrations stay with their callers. A failed `Build` disposes the provider before rethrowing. The concrete context exposes the provider as `ServiceProvider` to hosting-layer factories; the area root and its features never see it.
-
-`RezolvrRecordRepository` is a singleton shared by the admin endpoint and the control-plane command handlers. Each accepted record command kind is an `IResourceCommandHandler` registration; `Build` resolves that aggregate once and hands it to the control plane after the lifecycle services resolve, so a failed service factory leaves the control plane untouched.
 

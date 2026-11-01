@@ -31,7 +31,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     // Execution Context Info
     private CancellationTokenSource? _cancellationTokenSource;
     private TaskCompletionSource<Host<TContext>>? _taskCompletionSource;
-    private HostRun<TContext>? _hostRun;
+    private HostRun? _hostRun;
     private Exception? _startFailureHookException;
 
     // State Flags
@@ -167,7 +167,6 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             // a transient or successful Started transition.
             cancellationToken.ThrowIfCancellationRequested();
 
-            Volatile.Read(ref _hostRun)?.HostStarted(shutdownCallback);
             SetState(HostState.Started);
 
             await OnStartedAsync(cancellationToken).ConfigureAwait(false);
@@ -297,14 +296,12 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         // host is a clean no-op rather than a second teardown. Starting/Stopping/Stopped
         // guard re-entrancy. Only a Started host proceeds, which also guarantees the
         // per-run state from Init exists.
-        HostRun<TContext>? hostRun = Volatile.Read(ref _hostRun);
+        HostRun? hostRun = Volatile.Read(ref _hostRun);
         Action? beginRunStop = hostRun is null ? null : hostRun.BeginStopping;
         if (!Context.TryBeginStop(beginRunStop))
         {
             return;
         }
-
-        hostRun?.Stopping();
 
         // A direct StopAsync wakes its parked RunAsync immediately. The run then joins this
         // HostRun's stop-completion signal so it observes the whole drain and the same failure
@@ -317,7 +314,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         Exception? stopException = null;
         try
         {
-            await StopCoreAsync(hostRun, cancellationToken).ConfigureAwait(false);
+            await StopCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
@@ -333,9 +330,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         }
     }
 
-    private async Task StopCoreAsync(
-        HostRun<TContext>? hostRun,
-        CancellationToken cancellationToken)
+    private async Task StopCoreAsync(CancellationToken cancellationToken)
     {
         using var cancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -345,13 +340,6 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         }
 
         cancellationToken = cancellationTokenSource.Token;
-
-        using CancellationTokenRegistration drainCancellationRegistration =
-            hostRun is null
-                ? default
-                : cancellationToken.Register(
-                    static state => ((HostRun<TContext>)state!).DrainAborted(),
-                    hostRun);
 
         await OnStoppingAsync(cancellationToken).ConfigureAwait(false);
 
@@ -399,11 +387,6 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
                 .ConfigureAwait(false);
         }
 
-        if (cancellationToken.IsCancellationRequested)
-        {
-            hostRun?.DrainAborted();
-        }
-
         SetState(HostState.Stopped);
 
         // Ensure an ordinary RunAsync that is waiting on the run signal is unparked, then
@@ -414,7 +397,6 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         Reset();
 
         await OnStoppedAsync(cancellationToken).ConfigureAwait(false);
-        hostRun?.Stopped();
 
         if (exceptions.Count > 0)
         {
@@ -449,11 +431,23 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     /// <returns>A task that represents the complete host run.</returns>
     /// <exception cref="ObjectDisposedException">The host has already been disposed.</exception>
     /// <remarks>
-    /// This compatibility member and the <see cref="IHost"/> extension share the same run
-    /// coordinator. When <see cref="HostContext.Runner"/> is set, both routes delegate the
-    /// complete lifetime to that pipeline.
+    /// <para>
+    /// This member and the <see cref="IHost"/> extension share the same run coordinator.
     /// A token already cancelled at entry starts the host with an uncancelled startup token,
     /// then immediately drains it with a fresh stop budget. Startup failures still propagate.
+    /// </para>
+    /// <para>
+    /// While the run is active, the process's shutdown signals (SIGINT, SIGQUIT and SIGTERM) request
+    /// a graceful shutdown instead of ending the process, exactly as cancelling
+    /// <paramref name="cancellationToken"/> does: the host drains within
+    /// <see cref="HostOptions{TContext}.ShutdownTimeout"/> and this method returns. A host started
+    /// with <c>StartAsync</c>, such as one nested in another host's services, handles no signals.
+    /// </para>
+    /// <para>
+    /// A run inside an <see cref="AppEnvironmentScope"/> shares its process with other programs, so
+    /// it stops on the scope's <see cref="AppEnvironmentScope.Shutdown"/> instead of the process's
+    /// signals, which belong to the host of programs that entered the scope.
+    /// </para>
     /// </remarks>
     public Task RunAsync(CancellationToken cancellationToken = default)
     {
@@ -469,18 +463,35 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        var run = new HostRun<TContext>(this, _options);
+        var run = new HostRun();
         if (Interlocked.CompareExchange(ref _hostRun, run, comparand: null) is not null)
         {
             return Task.FromException(new InvalidOperationException("A host run is already active."));
         }
 
-        IHostRunner? runner = Context.Runner;
-        return RunWithRunnerAsync(run, runner, cancellationToken);
+        return RunUntilShutdownAsync(run, cancellationToken);
     }
 
-    internal async Task RunCoreAsync(
-        HostRun<TContext> hostRun,
+    // A shutdown signal cancels the run's token, so it takes the caller's cancellation path: before
+    // the host has started it cancels the start, and afterward it drains the host.
+    private async Task RunUntilShutdownAsync(HostRun hostRun, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var shutdownSignal = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using (_options.ShutdownSignals(() => HostShutdownSignals.RequestShutdown(shutdownSignal)))
+            {
+                await RunCoreAsync(hostRun, shutdownSignal.Token).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            ClearRun(hostRun);
+        }
+    }
+
+    private async Task RunCoreAsync(
+        HostRun hostRun,
         CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
@@ -495,7 +506,6 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
             // StartAsyncCore owns Init and arms this run's shutdown callback. Passing None
             // prevents the linked run signal from being born cancelled before startup.
             await StartAsyncCore(CancellationToken.None).ConfigureAwait(false);
-            hostRun.Started();
             await StopRunAsync(hostRun).ConfigureAwait(false);
             return;
         }
@@ -506,12 +516,10 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         // fields while this method is parked on the run signal.
         TaskCompletionSource<Host<TContext>> runCompletionSource = _taskCompletionSource!;
 
-        // Preserve the runner's token as cancellation provenance. The per-run token also
+        // Preserve the run's token as cancellation provenance. The per-run token also
         // carries Context.Shutdown, but a startup timeout must not turn that internal signal
         // into an apparent caller cancellation.
         await StartAsyncCore(cancellationToken).ConfigureAwait(false);
-
-        hostRun.Started();
 
         await runCompletionSource.Task.ConfigureAwait(false);
 
@@ -520,7 +528,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
 
     // Stop with a fresh budget and join only an accepted stop: a stop that could not begin
     // has no completion to await.
-    private async Task StopRunAsync(HostRun<TContext> hostRun)
+    private async Task StopRunAsync(HostRun hostRun)
     {
         if (!hostRun.HasBegunStopping)
         {
@@ -530,35 +538,6 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         if (hostRun.HasBegunStopping)
         {
             await hostRun.WaitForStopAsync().ConfigureAwait(false);
-        }
-    }
-
-    internal bool TryShutdown(HostRun<TContext> hostRun, Action? onAccepted)
-    {
-        return Context.TryShutdown(
-            () => ReferenceEquals(Volatile.Read(ref _hostRun), hostRun),
-            onAccepted);
-    }
-
-    private async Task RunWithRunnerAsync(
-        HostRun<TContext> hostRun,
-        IHostRunner? runner,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (runner is null)
-            {
-                await hostRun.RunAsync(observer: null, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await runner.RunAsync(hostRun, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        finally
-        {
-            ClearRun(hostRun);
         }
     }
 
@@ -732,7 +711,7 @@ public abstract class Host<TContext> : IHost, IHostRunDispatcher where TContext 
         _isInit = false;
     }
 
-    private void ClearRun(HostRun<TContext> hostRun)
+    private void ClearRun(HostRun hostRun)
     {
         Interlocked.CompareExchange(ref _hostRun, value: null, hostRun);
     }

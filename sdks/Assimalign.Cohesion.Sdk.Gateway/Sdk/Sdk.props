@@ -1,8 +1,20 @@
 <Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-	<!-- Sdk.Gateway is the NuGet-only orchestration composition root. -->
+	<!--
+		A gateway is an executable. The default must precede Microsoft.NET.Sdk's props, which
+		default OutputType to Library; a consumer's OutputType in its project body still wins.
+		A gateway is not a resource-area application: it takes no App framework and stays
+		framework-dependent, so it does not set the resource-SDK marker.
+	-->
 	<PropertyGroup>
-		<CohesionAutoIncludeAppFramework>false</CohesionAutoIncludeAppFramework>
+		<OutputType Condition="'$(OutputType)' == ''">Exe</OutputType>
 	</PropertyGroup>
+
+	<!--
+		Chain to the base Cohesion SDK. <Import Sdk> does not honor inline-version syntax, so a
+		consumer pins both Assimalign.Cohesion.Sdk and Assimalign.Cohesion.Sdk.Gateway in its
+		global.json msbuild-sdks block.
+	-->
 	<Import Sdk="Assimalign.Cohesion.Sdk" Project="Sdk.props" />
+
 	<Import Project="..\Targets\Sdk.Gateway.props" />
 </Project>

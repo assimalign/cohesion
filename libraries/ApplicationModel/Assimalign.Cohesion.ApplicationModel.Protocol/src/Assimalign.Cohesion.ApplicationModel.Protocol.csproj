@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<!-- The protocol shares the ApplicationModel namespace with the identity it extends, so both
+		     halves of a platform compose it with one using. -->
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+		<Description>Cohesion application model protocol: what a gateway and the instances of its resources exchange, from the manifest an instance publishes and the publication its gateway answers with to the action invocations, results, and state snapshots between them, the publisher seam both sides use, and the JSON content serializer that writes it all.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+	</ItemGroup>
+	<ItemGroup>
+		<!-- The hyphenated-words grammar action names share with the root's platform names. -->
+		<CohesionSharedSource Include="Assimalign.Cohesion.ApplicationModel" Module="Names" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\InstanceKey.cs" ObjectRuntimeType="Ulid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\DeploymentId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\ActionName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+	</ItemGroup>
+</Project>

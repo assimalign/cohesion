@@ -20,7 +20,7 @@ public enum HealthStatus
     /// <summary>
     /// The component is functioning but in a degraded state (for example, slow or partially
     /// available). It is still considered available for traffic but the condition is worth
-    /// surfacing to operators. Mirrors <c>ResourceLifecycle.Degraded</c> in the orchestration plane.
+    /// surfacing to operators.
     /// </summary>
     Degraded = 1,
 

@@ -54,14 +54,17 @@ entry correlates via `ILoggerEntry.ParentId` — the Logging library's own corre
 
 ## Why-this-not-that
 
-- **Explicit logger at composition time, not DI.** `UseHttpLogging(ILogger | ILoggerFactory, ...)`
-  takes its dependency the way `MapHealthChecks(IHealthCheckService)` does: handed in when the
-  pipeline is composed. The alternative — resolving `ILoggerFactory` from a container at request
-  time — violates the repo's `*.Hosting`-only DI rule and is exactly the request-time service
-  location the Web composition model forbids.
-- **Options frozen into a snapshot at `Use` time.** `HttpLoggingOptions` is scratch space;
+- **Explicit logger at registration, not request-time DI.** `HttpLoggingBuilder.UseLogger(ILogger)`
+  and `UseLoggerFactory(ILoggerFactory)` take the dependency the way
+  `MapHealthChecks(IHealthCheckService)` does: handed in when the middleware is built. A Web.Hosting
+  application resolves its own `ILoggerFactory` once, in the generated provider overload of
+  `AddHttpLogging`, while the pipeline is composed; the package itself never sees a container. The
+  alternative — resolving `ILoggerFactory` from a container at request time — violates the repo's
+  `*.Hosting`-only DI rule and is exactly the request-time service location the Web composition
+  model forbids.
+- **Options frozen into a snapshot at `Build` time.** `HttpLoggingOptions` is scratch space;
   `HttpLoggingSnapshot` (frozen sets, validated limits) is what the middleware holds. Mutating
-  options after composition has no effect — the same parse-once discipline as the routing
+  options after `HttpLoggingBuilder.Build` has no effect — the same parse-once discipline as the routing
   metadata carriers. There is no request-time configuration surface to misuse.
 - **Allowlist redaction, not a denylist.** A denylist fails open: every new sensitive header
   leaks until someone remembers to add it. The allowlist fails closed — a header's value logs
@@ -249,16 +252,51 @@ rewrites the request — and leaves every trust decision to `Web.ForwardedHeader
   with application logging is safe by default; a `LoggerFilterRule` scoped to
   `typeof(W3CAccessLogProvider)` can additionally trim fan-out on high-volume factories.
 
+## Registration: `AddHttpLogging` configures, `UseHttpLogging` places (2026-10-28)
+
+`builder.Services.AddHttpLogging(logging => ...)` is a generated component integration over
+`HttpLoggingBuilder`. The builder holds the options (`logging.Options`) and the logger the entries are
+written to, which has no default: `logging.UseLogger(logger)` takes a composed logger as it is, and
+`logging.UseLoggerFactory(loggerFactory)` creates one for `Options.Category` when the middleware is
+built, as the former `ILoggerFactory` overload did. A later call replaces an earlier one. `Build`
+throws `InvalidOperationException` when neither was called, then validates the options and freezes
+them into the snapshot, so a bare `AddHttpLogging()` and every invalid option fail inside the
+`AddHttpLogging` call. The verb registers the middleware as a container-owned
+`IWebApplicationMiddleware` singleton.
+
+A Web.Hosting application registers its `ILoggerFactory` in the container when it builds, after the
+registration verbs have run. It hands the middleware that factory through the provider overload, which
+builds on first resolve, as the pipeline is composed, so an invalid option fails the start instead of
+the registration:
+
+```csharp
+builder.Services.AddHttpLogging((services, logging) =>
+{
+    logging.UseLoggerFactory(services.GetRequiredService<ILoggerFactory>());
+    logging.Options.Fields = HttpLoggingFields.Default | HttpLoggingFields.RequestQuery;
+});
+```
+
+The plain overload suits a logger or factory the application already holds when it registers.
+
+`UseHttpLogging()` takes no arguments: it places the last registration of the middleware it finds in
+`IWebApplicationContext.Middleware`. There is no default logger to place it over, so placing it without
+a registration fails the pipeline composition with an `InvalidOperationException` that names
+`AddHttpLogging`. *Rejected:* the former `UseHttpLogging(ILogger, Action<HttpLoggingOptions>?)` and
+`UseHttpLogging(ILoggerFactory, Action<HttpLoggingOptions>?)`; configuration on the pipeline verb split
+the feature's settings across two call sites and kept them out of the registrations the host
+enumerates.
+
 ## Ordering guidance
 
 `UseHttpLogging` belongs **first** in the pipeline — before authentication, CORS, host
 filtering, and routing — so rejected and unrouted exchanges are still logged. Behind a proxy,
-`UseForwardedHeaders` follows it, after `UseSecurityHeaders` when that is registered (the area's
+`UseForwardedHeaders` follows it, after `UseSecurityHeaders` when that is placed (the area's
 [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md)): the entry reads the effective identity after the
 pipeline unwinds (see "Behind a proxy"). Per-endpoint overrides are read at the same point, so
 they need no position relative to `UseRouting`. Two consequences to be aware of:
 
-- Anything registered *before* it is invisible to the access log.
+- Anything placed *before* it is invisible to the access log.
 - Captured bodies are whatever crosses the wire at its position: place it after a
   decompression middleware to capture decoded payloads, before it to capture the raw ones.
 

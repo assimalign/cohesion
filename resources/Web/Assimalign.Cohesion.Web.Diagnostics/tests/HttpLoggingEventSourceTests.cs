@@ -299,9 +299,9 @@ public class HttpLoggingEventSourceTests : IDisposable
 
     private static IWebApplicationMiddleware CreateLoggingMiddleware(ILoggerFactory factory, Action<HttpLoggingOptions> configure)
     {
-        var builder = new TestPipelineBuilder();
-        builder.UseHttpLogging(factory, configure);
-        return builder.LastMiddleware!;
+        var logging = new HttpLoggingBuilder().UseLoggerFactory(factory);
+        configure(logging.Options);
+        return logging.Build();
     }
 
     private static LoggingTestContext CreateFaultingContext(string message)

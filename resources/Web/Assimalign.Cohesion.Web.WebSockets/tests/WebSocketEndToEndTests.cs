@@ -392,6 +392,35 @@ public class WebSocketEndToEndTests
         response.StatusCode.ShouldBe(101);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.WebSockets] - End to end: An origin allowed through the provider overload of AddWebSockets opens a socket, and another is refused")]
+    public async Task AddWebSockets_ProviderCallback_ShouldAllowOnlyTheConfiguredOrigin()
+    {
+        // Arrange — the provider overload builds when the container first resolves the policy.
+        using CancellationTokenSource cancellation = new(_timeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        EchoEndpoint endpoint = new();
+        await using WebSocketTestServer server = await WebSocketTestServer.StartAsync(
+            WebSocketTestProtocol.Http1,
+            builder => builder.Services.AddWebSockets((services, webSockets) =>
+                webSockets.Options.AllowedOrigins.Add("https://chat.example")),
+            application =>
+            {
+                application.UseWebSockets();
+                application.Use((context, next) => endpoint.InvokeAsync(context));
+            },
+            cancellationToken);
+        await using RawWebSocketClient allowed = await RawWebSocketClient.ConnectAsync(server.Port, cancellationToken);
+        await using RawWebSocketClient refused = await RawWebSocketClient.ConnectAsync(server.Port, cancellationToken);
+
+        // Act
+        RawHandshakeResponse allowedResponse = await allowed.HandshakeAsync(cancellationToken, origin: "https://chat.example");
+        RawHandshakeResponse refusedResponse = await refused.HandshakeAsync(cancellationToken, origin: "https://attacker.example");
+
+        // Assert
+        allowedResponse.StatusCode.ShouldBe(101);
+        refusedResponse.StatusCode.ShouldBe(403);
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.WebSockets] - End to end: A same-origin handshake opens a socket")]
     public async Task Origin_SameOrigin_Answers101()
     {

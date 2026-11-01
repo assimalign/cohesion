@@ -48,7 +48,8 @@ internal sealed class CompressionBodyStream : Stream
 
     private readonly Stream _inner;
     private readonly IHttpResponse _response;
-    private readonly ResponseCompressionOptions _options;
+    private readonly int _minimumResponseSizeBytes;
+    private readonly CompressionLevel _level;
     private readonly CompressibleMimeMatcher _matcher;
     private readonly ResponseCompressionFeature _feature;
     private readonly string? _coding;
@@ -61,7 +62,8 @@ internal sealed class CompressionBodyStream : Stream
     public CompressionBodyStream(
         Stream inner,
         IHttpResponse response,
-        ResponseCompressionOptions options,
+        int minimumResponseSizeBytes,
+        CompressionLevel level,
         CompressibleMimeMatcher matcher,
         ResponseCompressionFeature feature,
         string? coding,
@@ -69,7 +71,8 @@ internal sealed class CompressionBodyStream : Stream
     {
         _inner = inner;
         _response = response;
-        _options = options;
+        _minimumResponseSizeBytes = minimumResponseSizeBytes;
+        _level = level;
         _matcher = matcher;
         _feature = feature;
         _coding = coding;
@@ -118,7 +121,7 @@ internal sealed class CompressionBodyStream : Stream
 
             default: // Buffering
                 _pending!.Write(buffer.Span);
-                if (_pending.Length > _options.MinimumResponseSizeBytes)
+                if (_pending.Length > _minimumResponseSizeBytes)
                 {
                     await EngageCompressionAsync(cancellationToken).ConfigureAwait(false);
                 }
@@ -249,7 +252,7 @@ internal sealed class CompressionBodyStream : Stream
         // re-synthesizes Content-Length from the compressed bytes (or streams it chunked).
         headers.Remove(HttpHeaderKey.ContentLength);
 
-        _encoder = CreateEncoder(_coding!, _inner, _options.Level);
+        _encoder = CreateEncoder(_coding!, _inner, _level);
         _mode = Mode.Compressing;
 
         await FlushPendingAsync(_encoder, cancellationToken).ConfigureAwait(false);

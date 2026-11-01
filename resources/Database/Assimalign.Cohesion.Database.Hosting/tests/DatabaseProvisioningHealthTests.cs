@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Web.Health;
 
 using Shouldly;
 using Xunit;
@@ -49,7 +49,7 @@ public sealed class DatabaseProvisioningHealthTests
             try
             {
                 await entered.Task.WaitAsync(timeout.Token);
-                HealthContribution degraded = await application.Context.CheckAsync(timeout.Token);
+                HealthCheckResult degraded = await application.Context.CheckAsync(timeout.Token);
 
                 // Assert: Hosting depends only on the root instance's general state.
                 degraded.Status.ShouldBe(HealthStatus.Degraded);

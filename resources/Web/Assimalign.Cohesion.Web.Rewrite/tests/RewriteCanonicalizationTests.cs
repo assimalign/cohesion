@@ -429,7 +429,7 @@ public class RewriteCanonicalizationTests
     {
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(configure);
+        builder.Use(TestRewriteMiddleware.Build(configure));
         builder.Run(probe.InvokeAsync);
         return (builder, probe);
     }
@@ -438,12 +438,11 @@ public class RewriteCanonicalizationTests
     {
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseForwardedHeaders(options =>
-        {
-            options.Headers = ForwardedHeaderNames.XForwarded;
-            options.KnownProxies.Add(_trustedProxy.Address);
-        });
-        builder.UseRewrite(configure);
+        ForwardedHeadersBuilder forwarded = new();
+        forwarded.Options.Headers = ForwardedHeaderNames.XForwarded;
+        forwarded.Options.KnownProxies.Add(_trustedProxy.Address);
+        builder.Use(forwarded.Build());
+        builder.Use(TestRewriteMiddleware.Build(configure));
         builder.Run(probe.InvokeAsync);
         return (builder, probe);
     }

@@ -1,8 +1,5 @@
 using System;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
+using System.Diagnostics.Tracing;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,59 +12,30 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Testing.Tests;
 
 /// <summary>
-/// Entry-point, ambient-context, and lifecycle coverage for
-/// <see cref="DatabaseApplicationTestFactory"/>.
+/// Entry-point and lifecycle coverage for <see cref="DatabaseApplicationTestFactory"/>.
 /// </summary>
 public class DatabaseApplicationTestFactoryTests
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(30);
 
-    [Fact(DisplayName = "Cohesion Test [Database.Testing] - FromProgram: drives the real entry point under an isolated resource context")]
-    public async Task FromProgram_WithDefaultContext_ShouldDriveEntryPointAndControlPlane()
+    [Fact(DisplayName = "Cohesion Test [Database.Testing] - FromProgram: runs the real entry point until its scope's shutdown stops its host")]
+    public async Task FromProgram_StartedAndStopped_ShouldRunEntryPointUntilScopeShutdown()
     {
-        // Arrange
+        // Arrange: the program's host reports its transitions on the Database hosting event source.
         using var cancellation = new CancellationTokenSource(_testTimeout);
+        using var lifecycle = new HostLifecycleListener();
         await using DatabaseApplicationTestFactory factory =
             DatabaseApplicationTestFactory.FromProgram<Program>();
 
         // Act
         await factory.StartAsync(cancellation.Token);
-
-        // Assert
-        factory.IsStarted.ShouldBeTrue();
-        factory.ResourceContext.ApplicationName.ShouldBe("tests");
-        factory.ResourceContext.GatewayName.ShouldBe("inprocess");
-        factory.ResourceContext.Endpoints.Keys.ShouldContain("db");
-        factory.ResourceContext.Endpoints.Keys.ShouldContain("admin");
-        factory.ResourceContext.Mounts["data"].Path.ShouldNotBeNull();
-        factory.ResourceContext.BootstrapCredential.IsEmpty.ShouldBeFalse();
-        factory.ResourceContext.ApplicationTrustKey.IsEmpty.ShouldBeFalse();
-        Encoding.UTF8.GetString(factory.ResourceContext.BootstrapCredential.Span).Split('.').Length.ShouldBe(3);
-
-        using var client = new HttpClient
-        {
-            BaseAddress = factory.ResourceContext.Endpoints["admin"],
-        };
-        using HttpResponseMessage response = await client.GetAsync("/healthz", cancellation.Token);
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-
-        using HttpResponseMessage anonymous = await client.GetAsync(
-            "/cohesion/v1/endpoints",
-            cancellation.Token);
-        anonymous.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-
-        using var authorizedRequest = new HttpRequestMessage(
-            HttpMethod.Get,
-            "/cohesion/v1/endpoints");
-        authorizedRequest.Headers.Authorization = new AuthenticationHeaderValue(
-            "Bearer",
-            Encoding.UTF8.GetString(factory.ResourceContext.BootstrapCredential.Span));
-        using HttpResponseMessage authorized = await client.SendAsync(
-            authorizedRequest,
-            cancellation.Token);
-        authorized.StatusCode.ShouldBe(HttpStatusCode.OK);
-
+        bool startedAfterStart = factory.IsStarted;
+        await lifecycle.Started.WaitAsync(cancellation.Token);
         await factory.StopAsync(cancellation.Token);
+
+        // Assert: the host stopped on the scope's shutdown, before the entry point returned.
+        startedAfterStart.ShouldBeTrue();
+        lifecycle.Stopped.IsCompletedSuccessfully.ShouldBeTrue();
         factory.IsStarted.ShouldBeFalse();
     }
 
@@ -95,5 +63,47 @@ public class DatabaseApplicationTestFactoryTests
 
         factory.IsStarted.ShouldBeFalse();
         await factory.StopAsync(CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Observes the Database hosting event source's application transitions: the program's host
+    /// started, and it stopped.
+    /// </summary>
+    private sealed class HostLifecycleListener : EventListener
+    {
+        private const string sourceName = "Assimalign.Cohesion.Database.Hosting";
+
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public Task Stopped => _stopped.Task;
+
+        protected override void OnEventSourceCreated(EventSource eventSource)
+        {
+            if (eventSource.Name == sourceName)
+            {
+                EnableEvents(eventSource, EventLevel.Informational);
+            }
+        }
+
+        protected override void OnEventWritten(EventWrittenEventArgs eventData)
+        {
+            if (eventData.EventSource.Name != sourceName)
+            {
+                return;
+            }
+
+            switch (eventData.EventName)
+            {
+                case "ApplicationStarted":
+                    _started.TrySetResult();
+                    break;
+                case "ApplicationStopped":
+                    _stopped.TrySetResult();
+                    break;
+            }
+        }
     }
 }

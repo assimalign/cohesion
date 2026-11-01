@@ -1,778 +1,215 @@
 using System;
-using System.Collections.Generic;
-using System.Text;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Shouldly;
 using Xunit;
 
-using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
+using Assimalign.Cohesion.ApplicationModel.Hosting;
 
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 public class ApplicationGatewayTests
 {
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Reconcile: names every failed resource and its latest detail")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task StartAsync_MultipleResourcesFail_IncludesLatestDetailsWithinEachApplication(bool multipleModels)
+    private const string DisplayPrefix = "Cohesion Test [ApplicationModel] - ApplicationGateway: ";
+
+    private static readonly TimeSpan _shortWindow = TimeSpan.FromMilliseconds(300);
+
+    [Fact(DisplayName = DisplayPrefix + "A gateway deploys the resources its model declares")]
+    public async Task RunAsync_WithModel_ShouldDeployItsResources()
     {
         // Arrange
-        var state = new InMemoryResourceStateManager();
-        var controller = new RecordingController(new List<string>(), new List<string>());
-        var gateway = new TestGateway(state, [controller]);
-        IApplicationBuilder first = Application.CreateBuilder(ApplicationName.Parse("first"), []).UseGateway(gateway);
-        first.AddResource(new TestResource("host"));
-        IApplicationBuilder second = multipleModels
-            ? Application.CreateBuilder(ApplicationName.Parse("second"), []).UseGateway(gateway)
-            : first;
-        IApplicationResourceDescriptor gated = second.AddResource(new TestResource(multipleModels ? "host" : "other"));
-        IApplicationResourceDescriptor dependent = second.AddResource(new TestResource("dependent"));
-        dependent.DependsOn(gated);
-        IApplicationModel[] models = multipleModels
-            ? [first.Build().Model, second.Build().Model]
-            : [first.Build().Model];
-        IResourceControlContext? previous = null;
-        controller.AfterReconcile = context =>
-        {
-            if (previous is null)
-            {
-                previous = context;
-                return;
-            }
-
-            previous.State.SetState(previous.Resource.Id, ResourceLifecycle.Failed, "First resource lost its process.");
-            context.State.SetState(context.Resource.Id, ResourceLifecycle.Failed, "Outdated failure detail.");
-            context.State.SetState(context.Resource.Id, ResourceLifecycle.Failed, "Second resource could not start.");
-            context.State.SetState(dependent.Resource.Id, ResourceLifecycle.Failed, "Dependent failed independently.");
-        };
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("IdentityHub", "identity");
+        IApplicationModel model = builder.Build();
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(model);
+        using var stop = new CancellationTokenSource();
 
         // Act
-        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(() =>
-            ((IMultiModelApplicationGateway)gateway).StartAsync(models, cancellation.Token));
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        stop.Cancel();
+        await run;
 
         // Assert
-        exception.Message.ShouldContain("Resource 'first/host' last state detail: First resource lost its process.", Case.Sensitive);
-        exception.Message.ShouldContain(
-            $"Resource '{(multipleModels ? "second/host" : "first/other")}' last state detail: Second resource could not start.",
-            Case.Sensitive);
-        exception.Message.ShouldNotContain("Outdated failure detail.", Case.Sensitive);
-        exception.Message.ShouldContain(
-            $"Resource '{(multipleModels ? "second" : "first")}/dependent' last state detail: Dependent failed independently.",
-            Case.Sensitive);
+        gateway.Name.ShouldBe(new GatewayName("root"));
+        gateway.Model.ShouldBeSameAs(model);
+        model.Role.ShouldBe(ApplicationGatewayRole.Root);
+        infrastructure.Deployed.ShouldBe(["root:IdentityHub/identity"]);
+        gateway.Resources.ShouldHaveSingleItem().Instances.Count.ShouldBe(1);
+        infrastructure.TornDown.ShouldBeEmpty();
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Source image identity is resolved during gather after validation")]
-    public async Task StartAsync_SourceManifestWithoutImage_ShouldReachGatherWithManifestAsync()
+    [Fact(DisplayName = DisplayPrefix + "A resource that misses the startup window is torn down and fails the run")]
+    public async Task RunAsync_WhenResourceMissesStartupWindow_ShouldTearItDownAndFail()
     {
-        // Arrange: the index belongs to the gateway; the source manifest has no image.
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        var images = new Dictionary<string, string>
+        // Arrange
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("Web", "orders-api");
+        builder.AddResource("Web", "customers-api");
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build(), _shortWindow);
+        infrastructure.Silent.Add("customers-api");
+        ApplicationGatewayException? lateInstance = null;
+        infrastructure.OnTeardown = async resource =>
         {
-            ["worker"] = "example/worker@sha256:" + new string('a', 64),
-        };
-        string? resolved = null;
-        var reconciled = new List<string>();
-        var gateway = new TestGateway(new InMemoryResourceStateManager(),
-            [new RecordingController(reconciled, new List<string>())])
-        {
-            OnGather = resource =>
-            {
-                ResourceManifest manifest = resource.ShouldBeAssignableTo<IManifestResource>().Manifest;
-                manifest.Artifact.Image.ShouldBeNull();
-                resolved = images[manifest.Name.ToString()];
-            },
+            // An instance that starts during teardown is refused, not registered.
+            lateInstance = await Should.ThrowAsync<ApplicationGatewayException>(() => infrastructure.StartInstanceAsync(resource.Provider, resource.Name));
         };
 
-        // Act: Build validates the model before StartAsync can gather anything.
-        IApplicationModel model = BuildWorkload(gateway, WorkloadKind.Deployment);
-        gateway.Gathered.ShouldBeEmpty();
-        model.Plans[0].Container.Artifact.ShouldBe(ArtifactRef.Self);
-        IApplicationGateway control = gateway;
-        try
-        {
-            await control.StartAsync(model, cancellation.Token);
-
-            // Assert: the unchanged public resource seam carries the lookup identity.
-            resolved.ShouldBe(images["worker"]);
-            gateway.Gathered.ShouldBe(new[] { "worker" });
-            reconciled.ShouldBe(new[] { "worker" });
-            model.Manifests[0].Artifact.Image.ShouldBeNull();
-        }
-        finally
-        {
-            await control.StopAsync(CancellationToken.None);
-        }
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should reconcile in dependency order")]
-    public async Task StartAsync_ProvisionsInDependencyOrder()
-    {
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var gateway = new TestGateway(state, new[] { new RecordingController(reconciled, deleted) });
-
-        IApplicationModel model = BuildChain(gateway);
-
-        await ((IApplicationGateway)gateway).StartAsync(model);
-
-        reconciled.ShouldBe(new[] { "a", "b", "c" });
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Stop and Uninstall: Should separate runtime stop from destructive teardown")]
-    public async Task StopAsync_ThenUninstallAsync_UsesDistinctControllerHooksInReverseOrder()
-    {
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var stopped = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var gateway = new TestGateway(
-            state,
-            new[] { new RecordingController(reconciled, deleted, stopped: stopped) });
-
-        IApplicationModel model = BuildChain(gateway);
-        IApplicationGateway control = gateway;
-
-        await control.StartAsync(model);
-        await control.StopAsync();
-
-        stopped.ShouldBe(new[] { "c", "b", "a" });
-        deleted.ShouldBeEmpty();
-
-        await control.UninstallAsync(model);
-
-        deleted.ShouldBe(new[] { "c", "b", "a" });
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should block dependents when readiness fails")]
-    public async Task StartAsync_WhenDependencyFails_BlocksDependentsAndThrows()
-    {
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var failing = new HashSet<string> { "b" };
-        var gateway = new TestGateway(state, new[] { new RecordingController(reconciled, deleted, failing) });
-
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor a = builder.AddResource(new TestResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new TestResource("b"));
-        b.DependsOn(a);
-        IApplicationResourceDescriptor c = builder.AddResource(new TestResource("c"));
-        c.DependsOn(b);
-        IApplicationModel model = builder.Build().Model;
-
-        await Should.ThrowAsync<InvalidOperationException>(
-            async () => await ((IApplicationGateway)gateway).StartAsync(model));
-
-        reconciled.ShouldBe(new[] { "a", "b" });   // c is never reconciled
-        state.GetState(c.Resource.Id).ShouldBe(ResourceLifecycle.Blocked);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should fail when a readiness budget expires")]
-    public async Task StartAsync_WhenResourceNeverBecomesReady_TimesOutAndThrows()
-    {
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var controller = new RecordingController(reconciled, deleted, leaveStarting: true);
-        var gateway = new TestGateway(state, new[] { controller }, readinessBudget: TimeSpan.FromMilliseconds(75));
-
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        builder.AddResource(new TestResource("a"));
-        IApplicationModel model = builder.Build().Model;
-
-        await Should.ThrowAsync<InvalidOperationException>(
-            async () => await ((IApplicationGateway)gateway).StartAsync(model));
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should fail when a resource stops before Running")]
-    public async Task StartAsync_WhenResourceStopsBeforeRunning_ShouldFailAndBlockDependents()
-    {
-        // Arrange
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var observedStates = new Dictionary<string, ResourceLifecycle>
-        {
-            ["a"] = ResourceLifecycle.Stopped,
-        };
-        var controller = new RecordingController(reconciled, deleted, observedStates: observedStates);
-        var gateway = new TestGateway(state, new[] { controller });
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor a = builder.AddResource(new TestResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new TestResource("b"));
-        b.DependsOn(a);
-        IApplicationModel model = builder.Build().Model;
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-
         // Act
-        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
-            async () => await ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token));
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.RunAsync());
 
         // Assert
-        exception.Message.ShouldContain("'Stopped'");
-        cancellation.IsCancellationRequested.ShouldBeFalse();
-        reconciled.ShouldBe(new[] { "a" });
-        state.GetState(b.Resource.Id).ShouldBe(ResourceLifecycle.Blocked);
+        exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.StartupTimedOut);
+        infrastructure.TornDown.Select(name => name.Value).ShouldBe(["customers-api"]);
+        lateInstance.ShouldNotBeNull().ErrorCode.ShouldBe(ApplicationGatewayErrorCode.ResourceTornDown);
+        gateway.Resources.Single(resource => resource.Manifest.Name.Value == "customers-api").Instances.ShouldBeEmpty();
+        await Should.ThrowAsync<ApplicationGatewayException>(() => gateway.Completion);
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should not re-gate a dependent after initial readiness degrades")]
-    public async Task StartAsync_WhenDependencyDegradesAfterRunning_ShouldNotRegateDependent()
+    [Fact(DisplayName = DisplayPrefix + "Cancelling during startup stops the gateway without tearing anything down")]
+    public async Task RunAsync_CancelledDuringStartup_ShouldStopWithoutTeardown()
     {
         // Arrange
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var observedStates = new Dictionary<string, ResourceLifecycle>
-        {
-            ["a"] = ResourceLifecycle.Degraded,
-        };
-        var controller = new RecordingController(reconciled, deleted, observedStates: observedStates);
-        var gateway = new TestGateway(state, new[] { controller });
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor a = builder.AddResource(new TestResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new TestResource("b"));
-        b.DependsOn(a);
-        IApplicationModel model = builder.Build().Model;
-        ResourceStateChangedEventArgs? degradation = null;
-        state.StateChanged += (_, args) =>
-        {
-            if (args.Resource == a.Resource.Id && args.Current == ResourceLifecycle.Degraded)
-            {
-                degradation = args;
-            }
-        };
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("Web", "orders-api");
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build(), TimeSpan.FromMinutes(5));
+        infrastructure.Silent.Add("orders-api");
+        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
 
         // Act
-        Task start = ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
-        ResourceLifecycle initial = await state.WaitForStateAsync(
-            a.Resource.Id,
-            new HashSet<ResourceLifecycle> { ResourceLifecycle.Degraded },
-            TimeSpan.FromSeconds(1),
-            cancellation.Token);
+        await gateway.RunAsync(stop.Token, out Task gatewayStarted);
 
         // Assert
-        initial.ShouldBe(ResourceLifecycle.Degraded);
-        reconciled.ShouldBe(new[] { "a" });
-
-        state.SetState(a.Resource.Id, ResourceLifecycle.Running);
-        await start.WaitAsync(TimeSpan.FromSeconds(1));
-        reconciled.ShouldBe(new[] { "a", "b" });
-
-        state.SetState(a.Resource.Id, ResourceLifecycle.Degraded, "Liveness probe failed.");
-        degradation.ShouldNotBeNull();
-        degradation!.Previous.ShouldBe(ResourceLifecycle.Running);
-        state.GetState(a.Resource.Id).ShouldBe(ResourceLifecycle.Degraded);
-        state.GetState(b.Resource.Id).ShouldBe(ResourceLifecycle.Running);
-
-        await ((IApplicationGateway)gateway).StopAsync(cancellation.Token);
+        infrastructure.TornDown.ShouldBeEmpty();
+        gatewayStarted.IsCanceled.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - StartAsync: Should propagate readiness cancellation")]
-    public async Task StartAsync_WhenReadinessWaitIsCanceled_ShouldPropagateOperationCanceledException()
+    [Fact(DisplayName = DisplayPrefix + "Publications are refused before the gateway runs and after it stops")]
+    public async Task PublishAsync_OutsideRun_ShouldThrowPublicationsClosed()
     {
         // Arrange
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var stopped = new List<string>();
-        var reconciledSignal = new TaskCompletionSource(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        var state = new InMemoryResourceStateManager();
-        var controller = new RecordingController(
-            reconciled,
-            deleted,
-            leaveStarting: true,
-            stopped: stopped,
-            reconciledSignal: reconciledSignal);
-        var gateway = new TestGateway(state, new[] { controller });
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        builder.AddResource(new TestResource("a"));
-        IApplicationModel model = builder.Build().Model;
-        using var cancellation = new CancellationTokenSource();
-        Task start = ((IApplicationGateway)gateway).StartAsync(model, cancellation.Token);
-        await reconciledSignal.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("Web", "orders-api");
+        (ApplicationGateway gateway, _) = CreateGateway(builder.Build());
+        var manifest = new ApplicationInstanceManifest("Web", "orders-api", InstanceKey.New(), null, null, []);
+        ApplicationGatewayException before = Should.Throw<ApplicationGatewayException>(() => gateway.PublishAsync(manifest));
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        stop.Cancel();
+        await run;
 
         // Act
-        cancellation.Cancel();
+        ApplicationGatewayException after = Should.Throw<ApplicationGatewayException>(() => gateway.PublishAsync(manifest));
 
         // Assert
-        OperationCanceledException exception = await Should.ThrowAsync<OperationCanceledException>(
-            async () => await start.WaitAsync(TimeSpan.FromSeconds(2)));
-        exception.CancellationToken.ShouldBe(cancellation.Token);
-        reconciled.ShouldBe(new[] { "a" });
-        stopped.ShouldBe(new[] { "a" });
-        deleted.ShouldBeEmpty();
+        before.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.PublicationsClosed);
+        after.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.PublicationsClosed);
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Cancellation: Should propagate caller tokens to every controller lifecycle hook")]
-    public async Task ControllerHooks_ShouldReceiveCallerCancellationTokens()
+    [Fact(DisplayName = DisplayPrefix + "A publication for a resource the gateway does not run is refused")]
+    public async Task PublishAsync_ForUnknownResource_ShouldThrowResourceUnknown()
     {
         // Arrange
-        var state = new InMemoryResourceStateManager();
-        var controller = new TokenRecordingController();
-        var gateway = new TestGateway(state, new[] { controller });
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        builder.AddResource(new TestResource("worker"));
-        IApplicationModel model = builder.Build().Model;
-        using var startCancellation = new CancellationTokenSource();
-        using var stopCancellation = new CancellationTokenSource();
-        using var uninstallCancellation = new CancellationTokenSource();
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("IdentityHub", "identity");
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Act
-        await ((IApplicationGateway)gateway).StartAsync(model, startCancellation.Token);
-        await ((IApplicationGateway)gateway).StopAsync(stopCancellation.Token);
-        await ((IApplicationGateway)gateway).UninstallAsync(model, uninstallCancellation.Token);
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(
+            () => infrastructure.StartInstanceAsync("Web", "orders-api"));
+        stop.Cancel();
+        await run;
 
-        // Assert
-        controller.ReconcileToken.ShouldBe(startCancellation.Token);
-        controller.StopToken.ShouldBe(stopCancellation.Token);
-        controller.DeleteToken.ShouldBe(uninstallCancellation.Token);
+        // Assert: the root gateway does not run orders-api.
+        exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.ResourceUnknown);
     }
 
-    [Theory(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Plan gate: Should satisfy each workload on its declared state")]
-    [InlineData(WorkloadKind.Deployment, ResourceLifecycle.Running)]
-    [InlineData(WorkloadKind.StatefulSet, ResourceLifecycle.Running)]
-    [InlineData(WorkloadKind.DaemonSet, ResourceLifecycle.Running)]
-    [InlineData(WorkloadKind.Job, ResourceLifecycle.Stopped)]
-    public async Task StartAsync_PlanGate_ShouldHonorWorkloadSatisfyingState(
-        WorkloadKind workload,
-        ResourceLifecycle satisfyingState)
+    [Fact(DisplayName = DisplayPrefix + "A write recorded on one instance reaches running instances and those started later")]
+    public async Task PublishAsync_AfterRecordedWrite_ShouldRestoreEveryInstance()
     {
         // Arrange
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var observedStates = new Dictionary<string, ResourceLifecycle>
-        {
-            ["worker"] = satisfyingState,
-        };
-        var gateway = new TestGateway(
-            state,
-            new[] { new RecordingController(reconciled, deleted, observedStates: observedStates) });
-        IApplicationModel model = BuildWorkload(gateway, workload);
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("Web", "orders-api");
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        TestInstance second = await infrastructure.StartInstanceAsync("Web", "orders-api");
+        IApplicationGatewayDeployment ordersApi = gateway.Resources.Single();
+        (TestInstance first, ApplicationInstanceService firstService) = infrastructure.Instances.Values.First(entry => entry.Instance.Key != second.Key);
 
-        // Act
-        await ((IApplicationGateway)gateway).StartAsync(model);
+        // Act: the write runs once; the gateway records it and restores it on the others.
+        ApplicationActionResult write = await firstService.ControlPlane.ExecuteAsync(
+            "log-level",
+            ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, """{"Level":"Debug"}"""u8.ToArray()));
+        foreach (InstanceKey target in ordersApi.Record(first.Key, write.State!))
+        {
+            await infrastructure.Instances[target].Service.ControlPlane.RestoreAsync(write.State!);
+        }
+
+        TestInstance scaledOut = await infrastructure.StartInstanceAsync("Web", "orders-api");
+        stop.Cancel();
+        await run;
 
         // Assert
-        reconciled.ShouldBe(new[] { "worker" });
-        state.GetState(model.Resources[0].Id).ShouldBe(satisfyingState);
-        model.Descriptors[0].Plan!.Workload.Gate.Satisfying.ShouldContain(satisfyingState);
-
-        await ((IApplicationGateway)gateway).StopAsync();
+        second.Level.Level.ShouldBe("Debug");
+        scaledOut.Level.Level.ShouldBe("Debug");
+        ordersApi.Instances.Count.ShouldBe(3);
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Validate: Should refuse an unrealizable plan before gathering")]
-    public void Build_WhenControllerCannotRealizePlan_ShouldNameResourceAndGatewayBeforeGathering()
+    [Fact(DisplayName = DisplayPrefix + "The infrastructure's actions are exposed on each resource")]
+    public async Task Resources_WithInfrastructureActions_ShouldDispatchThem()
     {
         // Arrange
-        var state = new InMemoryResourceStateManager();
-        var gateway = new TestGateway(
-            state,
-            new IApplicationResourceController[] { new RejectingController() });
-        IApplicationBuilder builder = Application.CreateBuilder(
-                ApplicationName.Parse("appa"),
-                [])
-            .UseGateway(gateway);
-        builder.AddResource(CreateManifest("worker", WorkloadKind.Deployment));
+        IApplicationModelBuilder builder = ApplicationModel.CreateBuilder("root");
+        builder.AddResource("Web", "orders-api");
+        (ApplicationGateway gateway, TestInfrastructure infrastructure) = CreateGateway(builder.Build());
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        IApplicationGatewayDeployment ordersApi = gateway.Resources.Single();
 
         // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(
-            () => builder.Build());
+        ApplicationActionResult scaled = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, """{"Replicas":3}"""u8.ToArray()));
+        ApplicationActionResult read = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionOperation.Read, TestSerializer.Json));
+        ApplicationActionResult unknown = await ordersApi.ExecuteAsync("restart", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json));
+        ApplicationActionResult rejected = await ordersApi.ExecuteAsync("scale", ApplicationActionContext.Create(ApplicationActionOperation.Write, TestSerializer.Json, "not json"u8.ToArray()));
+        stop.Cancel();
+        await run;
 
         // Assert
-        exception.Message.ShouldContain("worker");
-        exception.Message.ShouldContain("test");
-        exception.Message.ShouldContain("Kubernetes scheduling spec");
-        gateway.Gathered.ShouldBeEmpty();
+        ordersApi.Actions.ShouldHaveSingleItem().Name.ShouldBe(new ActionName("scale"));
+        scaled.Status.ShouldBe(ApplicationActionStatus.Succeeded);
+        infrastructure.Scale.Replicas.ShouldBe(3);
+        read.Status.ShouldBe(ApplicationActionStatus.NotSupported);
+        unknown.Status.ShouldBe(ApplicationActionStatus.NotFound);
+        rejected.Status.ShouldBe(ApplicationActionStatus.Rejected);
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Local validation: Should reject a plan outside the local compiler subset")]
-    public void Build_WhenLocalPlanRequestsMultipleReplicas_ShouldFailValidation()
+    [Fact(DisplayName = DisplayPrefix + "A gateway runs once")]
+    public async Task RunAsync_Twice_ShouldThrow()
     {
         // Arrange
-        var gateway = new LocalGateway();
-        IApplicationBuilder builder = Application.CreateBuilder(
-                ApplicationName.Parse("appa"),
-                [])
-            .UseGateway(gateway);
-        builder.AddResource(CreateManifest("worker", WorkloadKind.Deployment, replicas: 2));
+        (ApplicationGateway gateway, _) = CreateGateway(ApplicationModel.CreateBuilder("root").Build());
+        using var stop = new CancellationTokenSource();
+        stop.Cancel();
+        await gateway.RunAsync(stop.Token);
 
-        // Act
-        InvalidOperationException exception = Should.Throw<InvalidOperationException>(
-            () => builder.Build());
-
-        // Assert
-        exception.Message.ShouldContain("worker");
-        exception.Message.ShouldContain("local");
-        exception.Message.ShouldContain("exactly one process");
+        // Act & Assert
+        await Should.ThrowAsync<InvalidOperationException>(() => gateway.RunAsync(CancellationToken.None));
     }
 
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - ResolveInputsAsync: Should run after dependencies and on every reconcile")]
-    public async Task ReconcileAsync_ShouldResolveInputsAfterDependenciesOnEveryPass()
+    private static (ApplicationGateway Gateway, TestInfrastructure Infrastructure) CreateGateway(IApplicationModel model, TimeSpan? startupTimeout = null)
     {
-        // Arrange
-        var events = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var controller = new SequenceController(events);
-        var gateway = new TestGateway(
-            state,
-            new[] { controller },
-            inputResolver: (descriptor, context, _) =>
-            {
-                string dependencyState = descriptor.Dependencies.Count == 0
-                    ? "none"
-                    : context.State.GetState(descriptor.Dependencies[0].Resource.Id).ToString();
-                events.Add($"inputs:{descriptor.Resource.Name}:{dependencyState}");
-                return ValueTask.FromResult(ResourceInputs.Empty);
-            });
-        IApplicationModel model = BuildChain(gateway);
-        IApplicationGateway control = gateway;
-
-        // Act
-        await control.StartAsync(model);
-        await control.ReconcileAsync(model);
-
-        // Assert
-        events.ShouldBe(
-        [
-            "inputs:a:none",
-            "controller:a",
-            "inputs:b:Running",
-            "controller:b",
-            "inputs:c:Running",
-            "controller:c",
-            "inputs:a:none",
-            "controller:a",
-            "inputs:b:Running",
-            "controller:b",
-            "inputs:c:Running",
-            "controller:c",
-        ]);
-
-        await control.StopAsync();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - ResolveInputsAsync: Should resolve literal and parameter sources and type unresolved sources")]
-    public async Task StartAsync_DefaultInputResolver_ShouldReturnResolvedAndUnresolvedMountInputs()
-    {
-        // Arrange
-        IReadOnlyList<ResourceManifestMount> mounts =
-        [
-            new ResourceManifestMount
-            {
-                Name = "settings",
-                ContainerPath = "/inputs/settings",
-                Kind = ResourceMountKind.Configuration,
-                Source = "literal:hello",
-            },
-            new ResourceManifestMount
-            {
-                Name = "token",
-                ContainerPath = "/inputs/token",
-                Kind = ResourceMountKind.Secret,
-                Source = "parameter:api-token",
-            },
-            new ResourceManifestMount
-            {
-                Name = "external",
-                ContainerPath = "/inputs/external",
-                Kind = ResourceMountKind.Configuration,
-                Source = "configuration-store:feature",
-            },
-        ];
-        var options = new ApplicationGatewayOptions();
-        options.Parameters.Add("api-token", "s3cret");
-        var state = new InMemoryResourceStateManager();
-        var controller = new InputCapturingController();
-        var gateway = new TestGateway(state, new[] { controller }, options: options);
-        IApplicationBuilder builder = Application.CreateBuilder(
-                ApplicationName.Parse("appa"),
-                [])
-            .UseGateway(gateway);
-        // The store is registered and in the model, but the worker does not reference it. It is
-        // declared first so the capturing controller records the worker's inputs last.
-        builder.AddResource(CreateManifest("configuration-store", WorkloadKind.Deployment));
-        builder.AddResource(CreateManifest("worker", WorkloadKind.Deployment, mounts: mounts));
-        builder.Providers.Sources["configuration-store"] = new RecordingSourceProvider();
-        IApplicationModel model = builder.Build().Model;
-
-        // Act
-        await ((IApplicationGateway)gateway).StartAsync(model);
-
-        // Assert
-        ResourceInputs inputs = controller.Inputs.ShouldNotBeNull();
-        Encoding.UTF8.GetString(inputs.Mounts["settings"].Content.Span).ShouldBe("hello");
-        Encoding.UTF8.GetString(inputs.Mounts["token"].Content.Span).ShouldBe("s3cret");
-        inputs.Mounts["external"].IsResolved.ShouldBeFalse();
-        string unresolvedReason = inputs.Mounts["external"].UnresolvedReason.ShouldNotBeNull();
-        unresolvedReason.ShouldContain("declared dependency", Case.Insensitive);
-        inputs.BootstrapCredential.IsEmpty.ShouldBeFalse();
-        inputs.ApplicationTrustKey.IsEmpty.ShouldBeFalse();
-
-        await ((IApplicationGateway)gateway).StopAsync();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Controllers: Should prefer registered overrides to the platform controller")]
-    public async Task StartAsync_WithRegisteredController_ShouldUseRegisteredControllerFirst()
-    {
-        // Arrange
-        var registeredCalls = new List<string>();
-        var platformCalls = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var options = new ApplicationGatewayOptions();
-        options.Controllers.Add(new RecordingController(registeredCalls, deleted));
-        var gateway = new TestGateway(
-            state,
-            new[] { new RecordingController(platformCalls, deleted) },
-            options: options);
-        IApplicationModel model = BuildChain(gateway);
-
-        // Act
-        await ((IApplicationGateway)gateway).StartAsync(model);
-
-        // Assert
-        registeredCalls.ShouldBe(new[] { "a", "b", "c" });
-        platformCalls.ShouldBeEmpty();
-
-        await ((IApplicationGateway)gateway).StopAsync();
-    }
-
-    [Fact(DisplayName = "Cohesion Test [ApplicationModel.Gateway] - Reconcile: Should continue independent resources and mark skipped dependents")]
-    public async Task StartAsync_WhenControllerSkipsResource_ShouldSkipItsDependentsAndContinue()
-    {
-        // Arrange
-        var reconciled = new List<string>();
-        var deleted = new List<string>();
-        var state = new InMemoryResourceStateManager();
-        var observedStates = new Dictionary<string, ResourceLifecycle>
-        {
-            ["a"] = ResourceLifecycle.Skipped,
-            ["c"] = ResourceLifecycle.Running,
-        };
-        var gateway = new TestGateway(
-            state,
-            new[] { new RecordingController(reconciled, deleted, observedStates: observedStates) });
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor a = builder.AddResource(new TestResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new TestResource("b"));
-        b.DependsOn(a);
-        builder.AddResource(new TestResource("c"));
-        IApplicationModel model = builder.Build().Model;
-
-        // Act
-        await ((IApplicationGateway)gateway).StartAsync(model);
-
-        // Assert
-        reconciled.ShouldBe(new[] { "a", "c" });
-        state.GetState(b.Resource.Id).ShouldBe(ResourceLifecycle.Skipped);
-        state.GetState(model.Resources[2].Id).ShouldBe(ResourceLifecycle.Running);
-
-        await ((IApplicationGateway)gateway).StopAsync();
-    }
-
-    private static IApplicationModel BuildChain(IApplicationGateway gateway)
-    {
-        IApplicationBuilder builder = Application.CreateBuilder().UseGateway(gateway);
-        IApplicationResourceDescriptor a = builder.AddResource(new TestResource("a"));
-        IApplicationResourceDescriptor b = builder.AddResource(new TestResource("b"));
-        b.DependsOn(a);
-        IApplicationResourceDescriptor c = builder.AddResource(new TestResource("c"));
-        c.DependsOn(b);
-        return builder.Build().Model;
-    }
-
-    private static IApplicationModel BuildWorkload(
-        IApplicationGateway gateway,
-        WorkloadKind workload)
-    {
-        IReadOnlyList<ResourceManifestMount>? mounts = workload is WorkloadKind.StatefulSet
-            ?
-            [
-                new ResourceManifestMount
-                {
-                    Name = "data",
-                    ContainerPath = "/data",
-                    Kind = ResourceMountKind.Volume,
-                    Size = "1Gi",
-                },
-            ]
-            : null;
-        IApplicationBuilder builder = Application.CreateBuilder(
-                ApplicationName.Parse("appa"),
-                [])
-            .UseGateway(gateway);
-        builder.AddResource(CreateManifest("worker", workload, mounts: mounts));
-        return builder.Build().Model;
-    }
-
-    private static ResourceManifest CreateManifest(
-        string name,
-        WorkloadKind workload,
-        int replicas = 1,
-        IReadOnlyList<ResourceManifestMount>? mounts = null) =>
-        new()
-        {
-            Name = name,
-            Application = "appa",
-            Kind = "test",
-            ApplicationModel = "Assimalign.Cohesion.Test.ApplicationModel",
-            Artifact = new ResourceManifestArtifact
-            {
-                Assembly = "test.dll",
-                AppHost = "test",
-            },
-            Endpoints =
-            [
-                new ResourceManifestEndpoint
-                {
-                    Name = "http",
-                    Scheme = "http",
-                    Protocol = "tcp",
-                    ContainerPort = 8080,
-                },
-            ],
-            ControlPlane = new ResourceManifestControlPlane
-            {
-                Endpoint = "http",
-                Path = "/cohesion/v1",
-            },
-            Mounts = mounts ?? Array.Empty<ResourceManifestMount>(),
-            Lifecycle = new ResourceManifestLifecycle
-            {
-                Workload = workload,
-                Replicas = replicas,
-                RestartPolicy = "Never",
-            },
-        };
-
-    private sealed class SequenceController : IApplicationResourceController
-    {
-        private readonly ICollection<string> _events;
-
-        public SequenceController(ICollection<string> events)
-        {
-            _events = events;
-        }
-
-        public bool CanRealize(ResourcePlan plan, out string? reason)
-        {
-            reason = null;
-            return true;
-        }
-
-        public Task ReconcileAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            context.Inputs.ShouldNotBeNull();
-            _events.Add($"controller:{context.Resource.Name}");
-            context.State.SetState(context.Resource.Id, ResourceLifecycle.Running);
-            return Task.CompletedTask;
-        }
-
-        public Task StopAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task DeleteAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
-    }
-
-    private sealed class RejectingController : IApplicationResourceController
-    {
-        public bool CanRealize(ResourcePlan plan, out string? reason)
-        {
-            reason = "Kubernetes scheduling spec is required.";
-            return false;
-        }
-
-        public Task ReconcileAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Rejected plans must not be reconciled.");
-
-        public Task StopAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task DeleteAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
-    }
-
-    private sealed class InputCapturingController : IApplicationResourceController
-    {
-        public ResourceInputs? Inputs { get; private set; }
-
-        public bool CanRealize(ResourcePlan plan, out string? reason)
-        {
-            reason = null;
-            return true;
-        }
-
-        public Task ReconcileAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default)
-        {
-            Inputs = context.Inputs;
-            context.State.SetState(context.Resource.Id, ResourceLifecycle.Running);
-            return Task.CompletedTask;
-        }
-
-        public Task StopAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-        public Task DeleteAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default) => Task.CompletedTask;
-    }
-
-    private sealed class TokenRecordingController : IApplicationResourceController
-    {
-        public CancellationToken ReconcileToken { get; private set; }
-
-        public CancellationToken StopToken { get; private set; }
-
-        public CancellationToken DeleteToken { get; private set; }
-
-        public bool CanRealize(ResourcePlan plan, out string? reason)
-        {
-            reason = null;
-            return true;
-        }
-
-        public Task ReconcileAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default)
-        {
-            ReconcileToken = cancellationToken;
-            context.State.SetState(context.Resource.Id, ResourceLifecycle.Running);
-            return Task.CompletedTask;
-        }
-
-        public Task StopAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default)
-        {
-            StopToken = cancellationToken;
-            return Task.CompletedTask;
-        }
-
-        public Task DeleteAsync(
-            IResourceControlContext context,
-            CancellationToken cancellationToken = default)
-        {
-            DeleteToken = cancellationToken;
-            return Task.CompletedTask;
-        }
+        var infrastructure = new TestInfrastructure();
+        ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, startupTimeout);
+        return (gateway, infrastructure);
     }
 }

@@ -27,7 +27,7 @@ public class StaticFilesFileAccessTests
     private static IWebApplicationPipeline CreatePipeline(IFileSystem site)
     {
         var builder = new TestPipelineBuilder();
-        builder.UseStaticFiles(site);
+        builder.Use(StaticFilesMount.Build(site));
         return builder.Build();
     }
 

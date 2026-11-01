@@ -3,8 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
-using System.Net.Security;
-using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
@@ -12,20 +10,14 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Configuration.CommandLine;
 using Assimalign.Cohesion.Configuration.Json;
-using Assimalign.Cohesion.Connections.Tcp;
-using Assimalign.Cohesion.Connections.Security;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Internal;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Web.Hosting.Internal;
-using Assimalign.Cohesion.Web.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Web.Hosting;
 
@@ -33,8 +25,8 @@ namespace Assimalign.Cohesion.Web.Hosting;
 /// Composes a Web application. Every dependency the application runs with is a registration in
 /// <see cref="Services"/>: lifecycle services (<see cref="IHostService"/>), servers
 /// (<see cref="IWebApplicationServer"/>), request features (<see cref="IHttpFeature"/>), HTTP exchange
-/// interceptors (<see cref="IHttpExchangeInterceptor"/>), and health contributions
-/// (<see cref="IHealthContributor"/>).
+/// interceptors (<see cref="IHttpExchangeInterceptor"/>), middleware (<see cref="IWebApplicationMiddleware"/>),
+/// and settings (<see cref="IWebApplicationSetting"/>).
 /// </summary>
 /// <remarks>
 /// The root <see cref="IWebApplicationBuilder"/> verbs are implemented explicitly as shims over
@@ -51,8 +43,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 {
     private readonly WebApplicationOptions _options;
     private readonly WebApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
 
     private IWebApplicationPipeline? _pipeline;
 
@@ -77,35 +67,16 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     internal IPEndPoint DevelopmentEndPoint { get; set; } = HttpServerConfiguration.DevelopmentEndPoint;
 
     public WebApplicationBuilder(WebApplicationOptions options)
-        : this(options, resourceAssembly: null)
+        : this(options, args: null)
     {
     }
 
-    internal WebApplicationBuilder(WebApplicationOptions options, Assembly? resourceAssembly)
-        : this(options, resourceAssembly, args: null)
-    {
-    }
-
-    internal WebApplicationBuilder(
-        WebApplicationOptions options,
-        Assembly? resourceAssembly,
-        string[]? args)
+    internal WebApplicationBuilder(WebApplicationOptions options, string[]? args)
     {
         ArgumentNullException.ThrowIfNull(options);
 
         _options = options;
-        ResourceContext? resourceContext = null;
-        if (resourceAssembly is not null &&
-            ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException(
-                ErrorMessages.ControlPlaneFactoryResultNull);
-            resourceContext = ResourceRuntime.Current;
-            _resourceContext = resourceContext;
-            options.Environment = resourceContext.EnvironmentName;
-        }
-
-        string contentRootPath = ResolveContentRoot(options.ContentRootPath, resourceContext);
+        string contentRootPath = ResolveContentRoot(options.ContentRootPath);
         Environment = new HostEnvironment(options.Environment!)
         {
             ContentRootPath = FileSystemPath.Parse(contentRootPath),
@@ -114,7 +85,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         if (args is not null)
         {
             _isEntryPoint = true;
-            AddDefaultConfiguration(args, contentRootPath, resourceContext);
+            AddDefaultConfiguration(args, contentRootPath);
         }
 
         Logging = new LoggerFactoryBuilder();
@@ -131,18 +102,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             ContentRootPath = Environment.ContentRootPath,
             WebRootPath = ResolveWebRoot(contentRootPath, options.WebRootPath),
         };
-
-        if (_controlPlane is not null && resourceContext is not null)
-        {
-            if (ResourceTelemetry.Configure(resourceContext, Logging, out IHostService? telemetry))
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry!);
-            }
-            ResourceRuntime.RegisterConnectionFactoryResolver(CreateConnectionFactory);
-            Services.AddSingleton(_controlPlane);
-            BindAmbientHttpEndpoint(resourceContext, _controlPlane);
-        }
     }
 
     /// <summary>
@@ -186,27 +145,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
     /// concurrent entry-point applications can therefore forward the same event more than once.
     /// </remarks>
     public bool EnableEventSourceForwarding { get; set; } = true;
-
-    /// <summary>
-    /// Gets the generated resource control plane, or null when this is a plain application.
-    /// </summary>
-    internal IResourceControlPlane? ControlPlane => _controlPlane;
-
-    /// <summary>
-    /// Adds a named contribution to the enabled resource's aggregate health, readiness,
-    /// and liveness reports.
-    /// </summary>
-    /// <param name="name">The stable contribution name.</param>
-    /// <param name="check">The health evaluator.</param>
-    /// <returns>The same builder for chaining.</returns>
-    public WebApplicationBuilder AddHealthCheck(string name, ResourceHealthCheck check)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(check);
-
-        Services.AddSingleton<IHealthContributor>(new DelegateHealthContributor(name, check));
-        return this;
-    }
 
     /// <summary>
     /// Adds a lifecycle service to the application.
@@ -286,12 +224,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ValidateFeatureRegistrations();
         ValidateInterceptorRegistrations();
 
-        if (_controlPlane is not null && _resourceContext?.GatewayName is not null &&
-            (_controlPlane.ObservedEndpoints.ContainsKey("http") || _controlPlane.ObservedEndpoints.ContainsKey("https")))
-        {
-            ResourceControlPlaneMiddleware.Validate(_resourceContext);
-        }
-
         ApplyDefaultEndpoints();
 
         var applicationOptions = new WebApplicationOptions
@@ -320,24 +252,9 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             Services.AddSingleton<ILoggerFactory>(loggerFactory);
             Services.AddSingleton<IWebApplicationContext>(_context);
             Services.AddSingleton<IWebApplicationPipelineBuilder>(app);
-            Services.AddSingleton<IWebApplicationPipeline>(serviceProvider =>
-            {
-                IWebApplicationPipeline pipeline = _pipeline is null
-                    ? serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build()
-                    : new BorrowedWebApplicationPipeline(_pipeline);
-
-                if (_controlPlane is null)
-                {
-                    return pipeline;
-                }
-                int? port = (_controlPlane.ObservedEndpoints.TryGetValue("http", out Uri? endpoint) ||
-                    _controlPlane.ObservedEndpoints.TryGetValue("https", out endpoint)) ? endpoint.Port : null;
-                if (port is null)
-                {
-                    WebHostingEventSource.Log.ControlPlaneDisabled(_resourceContext!.ResourceName, _controlPlane);
-                }
-                return new EnabledResourcePipeline(_controlPlane, _resourceContext!, _context, port, pipeline);
-            });
+            Services.AddSingleton<IWebApplicationPipeline>(serviceProvider => _pipeline is null
+                ? serviceProvider.GetRequiredService<IWebApplicationPipelineBuilder>().Build()
+                : new BorrowedWebApplicationPipeline(_pipeline));
 
             _isBuilt = true;
 
@@ -352,17 +269,6 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             // Materializes the lifecycle services once, in registration order, against the final
             // context. Servers resolve later, at host start, after the pipeline is composed.
             _context.ResolveApplicationServices();
-
-            if (_controlPlane is not null)
-            {
-                foreach (IHealthContributor contributor in
-                    _context.ServiceProvider.GetRequiredService<IEnumerable<IHealthContributor>>())
-                {
-                    _controlPlane.AddHealthContributor(contributor);
-                }
-
-                ResourceRuntime.HostBuilt(app, _controlPlane);
-            }
         }
         catch (Exception exception)
         {
@@ -382,85 +288,15 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return app;
     }
 
-    private void BindAmbientHttpEndpoint(
-        ResourceContext resourceContext,
-        IResourceControlPlane controlPlane)
-    {
-        string endpointName = "http";
-        if (!controlPlane.ObservedEndpoints.TryGetValue(endpointName, out Uri? endpoint) &&
-            !resourceContext.Endpoints.TryGetValue(endpointName, out endpoint))
-        {
-            endpointName = "https";
-            if (!controlPlane.ObservedEndpoints.TryGetValue(endpointName, out endpoint) &&
-                !resourceContext.Endpoints.TryGetValue(endpointName, out endpoint))
-            {
-                return;
-            }
-        }
-
-        controlPlane.ObserveEndpoint(endpointName, endpoint);
-
-        if (!string.Equals(endpoint.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AmbientEndpointSchemeInvalid, endpointName, endpoint.Scheme));
-        }
-
-        IPAddress address = ResolveBindAddress(endpoint.IdnHost);
-        if (string.Equals(endpoint.Scheme, "https", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!resourceContext.TryGetEndpointCertificate(endpointName, out X509Certificate2? leaf, out X509Certificate2Collection chain))
-            {
-                throw new InvalidOperationException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.AmbientHttpsCertificateRequired, endpointName));
-            }
-            _context.EndpointCertificates.Add(leaf);
-            foreach (X509Certificate2 issuer in chain)
-            {
-                _context.EndpointCertificates.Add(issuer);
-            }
-            SslStreamCertificateContext certificate = SslStreamCertificateContext.Create(leaf, chain, offline: true);
-
-            // An https origin offers h2 and http/1.1 and serves each connection the protocol its TLS
-            // handshake negotiated (RFC 7301, RFC 9113 §3.2); a client that negotiates none gets HTTP/1.1.
-            Server.UseServer(options => options.UseHttps(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port),
-                new TlsServerOptions { AuthenticationOptions = new SslServerAuthenticationOptions { ServerCertificateContext = certificate } }));
-        }
-        else
-        {
-            Server.UseServer(options => options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(address, endpoint.Port)));
-        }
-    }
-
-    private static IPAddress ResolveBindAddress(string host)
-    {
-        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
-        {
-            return IPAddress.Loopback;
-        }
-
-        return IPAddress.TryParse(host, out IPAddress? address)
-            ? address
-            : throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.AmbientEndpointHostInvalid, host));
-    }
-
-    private static object? CreateConnectionFactory(string protocol)
-    {
-        return string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase)
-            ? new TcpConnectionFactory()
-            : null;
-    }
-
-    // A plain entry-point application (CreateBuilder(args), no generated control plane) that
-    // configured no listener and registered no custom server serves the Http:Endpoints section,
-    // or the loopback development endpoint when that section is empty, so `dotnet run` answers
+    // An entry-point application (CreateBuilder(args)) that configured no listener and registered
+    // no custom server serves the Http:Endpoints section, or, when that section is empty, the http
+    // endpoint its platform assigned it in the runtime contract (an in-process gateway assigns each
+    // resource its own port), else the loopback development endpoint, so `dotnet run` answers
     // instead of running without a listener. Explicit compositions (CreateBuilder(options), a
-    // UseServer/UseConfiguration call, a custom server) and orchestrated resources, whose
-    // endpoints come from the ambient resource context, are left exactly as composed.
+    // UseServer/UseConfiguration call, a custom server) are left exactly as composed.
     private void ApplyDefaultEndpoints()
     {
-        if (!_isEntryPoint || _controlPlane is not null || Server.HasListenerConfiguration)
+        if (!_isEntryPoint || Server.HasListenerConfiguration)
         {
             return;
         }
@@ -480,7 +316,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
             return;
         }
 
-        Server.UseDefaultEndpoints(Configuration, DevelopmentEndPoint);
+        Server.UseDefaultEndpoints(Configuration, HttpServerConfiguration.GetPlatformEndPoint() ?? DevelopmentEndPoint);
     }
 
     // Owner decision 35 (#1380): a request feature is an IHttpFeature singleton. The pipeline stamps
@@ -573,16 +409,16 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return $"builder.Services[{index}] ({descriptor.Lifetime} {descriptor.ServiceType.Name}, implementation {implementation})";
     }
 
-    // The explicit option wins, then the ambient resource context, then the application's base
-    // directory (where the SDK copies appsettings*.json and wwwroot).
-    private static string ResolveContentRoot(FileSystemPath? configured, ResourceContext? resourceContext)
+    // The explicit option wins, then the application's base directory (where the SDK copies
+    // appsettings*.json and wwwroot).
+    private static string ResolveContentRoot(FileSystemPath? configured)
     {
         if (configured is { IsEmpty: false } contentRoot)
         {
             return System.IO.Path.GetFullPath(contentRoot.ToString());
         }
 
-        return resourceContext?.ContentRootPath ?? AppContext.BaseDirectory;
+        return AppContext.BaseDirectory;
     }
 
     // A configured web root is resolved against the content root and kept even when it does not
@@ -610,7 +446,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         return FileSystemPath.Parse(defaultWebRoot);
     }
 
-    private void AddDefaultConfiguration(string[] args, string contentRootPath, ResourceContext? resourceContext)
+    private void AddDefaultConfiguration(string[] args, string contentRootPath)
     {
         var contentRoot = new PhysicalFileSystem(new PhysicalFileSystemOptions
         {
@@ -625,27 +461,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
                 $"appsettings.{Environment.Name}.json",
                 optional: true)
             .AddEnvironmentVariables("COHESION_CONFIG__")
-            .AddCommandLine(PrependAmbientSettings(args, resourceContext));
-    }
-
-    private static string[] PrependAmbientSettings(
-        string[] args,
-        ResourceContext? resourceContext)
-    {
-        if (resourceContext is null || resourceContext.Settings.Count == 0)
-        {
-            return args;
-        }
-
-        var combinedArgs = new string[resourceContext.Settings.Count + args.Length];
-        int index = 0;
-        foreach ((string key, string value) in resourceContext.Settings)
-        {
-            combinedArgs[index++] = $"--{key}={value}";
-        }
-
-        args.CopyTo(combinedArgs, index);
-        return combinedArgs;
+            .AddCommandLine(args);
     }
 
     IWebApplication IWebApplicationBuilder.Build()
@@ -678,7 +494,7 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
         ArgumentNullException.ThrowIfNull(pipeline);
 
         // A single replacement for the default pipeline, not a registration: the hosted
-        // IWebApplicationPipeline registered at Build wraps it with the resource terminals.
+        // IWebApplicationPipeline registered at Build serves it.
         _pipeline = pipeline;
         return this;
     }
@@ -697,6 +513,23 @@ public sealed class WebApplicationBuilder : IWebApplicationBuilder, IHostBuilder
 
         Services.AddSingleton<IHttpFeature>(_ => configure.Invoke(_context)
             ?? throw new InvalidOperationException(ErrorMessages.ApplicationFeatureFactoryResultNull));
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddSetting(IWebApplicationSetting setting)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+
+        Services.AddSingleton<IWebApplicationSetting>(setting);
+        return this;
+    }
+
+    IWebApplicationBuilder IWebApplicationBuilder.AddSetting(Func<IWebApplicationContext, IWebApplicationSetting> setting)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+
+        Services.AddSingleton<IWebApplicationSetting>(_ => setting.Invoke(_context)
+            ?? throw new InvalidOperationException(ErrorMessages.ApplicationSettingFactoryResultNull));
         return this;
     }
 

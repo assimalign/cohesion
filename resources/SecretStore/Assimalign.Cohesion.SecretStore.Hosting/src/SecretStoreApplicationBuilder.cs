@@ -1,14 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.SecretStore;
 using Assimalign.Cohesion.SecretStore.Hosting.Internal;
 using Assimalign.Cohesion.Security.DataProtection;
@@ -21,7 +17,7 @@ namespace Assimalign.Cohesion.SecretStore.Hosting;
 /// <remarks>
 /// Every dependency the application runs with is a registration in <see cref="Services"/>:
 /// declared secrets and certificate-authority options, the data-protection provider, the secret
-/// repository, the trust-grant store, the certificate authority, and the lifecycle services
+/// repository, the certificate authority, and the lifecycle services
 /// (<see cref="IHostService"/>). <see cref="Build"/> closes registration, creates the service
 /// provider once, and resolves the lifecycle services once, in registration order; the secrets
 /// endpoint is always the last of them. The application disposes every collaborator the provider
@@ -36,14 +32,11 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     private readonly string[] _args;
     private readonly string _environmentName;
     private readonly SecretStoreApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext _resourceContext;
     private bool _isBuilt;
 
-    internal SecretStoreApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal SecretStoreApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         _args = (string[])args.Clone();
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -52,28 +45,10 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        _resourceContext = ResourceRuntime.Current;
-        ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-        if (loggerFactory is not null)
-        {
-            Services.AddSingleton<ILoggerFactory>(loggerFactory);
-        }
-        if (telemetry is not null)
-        {
-            // Registered ahead of every AddService call, so telemetry starts first and stops last.
-            Services.AddSingleton<IHostService>(telemetry);
-        }
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException(
-                "The registered SecretStore control-plane factory returned null.");
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
-
-        _environmentName = _resourceContext.EnvironmentName;
+        _environmentName = AppEnvironment.GetEnvironmentName();
         _context = new SecretStoreApplicationContext(
             _environmentName,
-            System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
+            System.IO.FileSystemPath.Parse(AppContext.BaseDirectory));
     }
 
     /// <summary>
@@ -134,18 +109,16 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// </summary>
     /// <remarks>
     /// Durable certificate-authority state always wins over composition-time seed material. On a
-    /// first start, paired initial PEM material is used when supplied; otherwise a configured
-    /// Platform endpoint selects gateway-mediated intermediate enrollment. When neither is configured,
-    /// <see cref="CertificateAuthorityOptions.SelfSeedWhenNoPlatform"/> controls whether the store
-    /// creates a self-signed development root. A failed configured Platform enrollment never
-    /// silently falls back to an unrelated self-signed root. A snapshot of the options is
+    /// first start, paired initial PEM material is used when supplied; otherwise
+    /// <see cref="CertificateAuthorityOptions.SelfSeed"/> controls whether the store creates a
+    /// self-signed development root. A snapshot of the options is
     /// registered in <see cref="Services"/>.
     /// </remarks>
     /// <param name="configure">An optional callback that configures the certificate authority.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentException">
-    /// The common name is empty; the Platform enrollment endpoint is not absolute HTTPS; configured
-    /// PEM material is empty; or an initial certificate and private key are not supplied together.
+    /// The common name is empty, configured PEM material is empty, or an initial certificate and
+    /// private key are not supplied together.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A certificate authority has already been declared, or no first-start authority source is
@@ -211,7 +184,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// <returns>The configured secret store application.</returns>
     /// <exception cref="InvalidOperationException">
     /// The builder has already built an application, a registered service factory returns
-    /// <see langword="null"/>, or the ambient endpoint or data mount cannot host the store.
+    /// <see langword="null"/>, or the endpoint cannot host the store.
     /// </exception>
     /// <exception cref="ArgumentException">A command-line endpoint or data option is empty or missing its value.</exception>
     public SecretStoreApplication Build()
@@ -230,8 +203,8 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
             FileSystemKeyRepository.Create(keyRingPath),
             protectionOptions =>
             {
-                protectionOptions.ApplicationDiscriminator =
-                    $"SecretStore:{_resourceContext.ApplicationName ?? "standalone"}:{_resourceContext.ResourceName ?? "default"}";
+                // The discriminator a plain store has always used; changing it orphans protected data.
+                protectionOptions.ApplicationDiscriminator = "SecretStore:standalone:default";
                 protectionOptions.KeyLifetime = TimeSpan.FromDays(90);
                 protectionOptions.UnprotectGracePeriod = TimeSpan.FromDays(36500);
             }));
@@ -251,24 +224,16 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
                 serviceProvider.GetRequiredService<IDataProtectionProvider>().CreateProtector("secret-store", "secrets", "v1"),
                 seeds);
         });
-        Services.AddSingleton<TrustedIssuerStore>(serviceProvider => new TrustedIssuerStore(
-            dataPath,
-            serviceProvider.GetRequiredService<IDataProtectionProvider>().CreateProtector("secret-store", "trusted-issuers", "v1")));
         Services.AddSingleton<CertificateAuthorityManager>(serviceProvider => new CertificateAuthorityManager(
             dataPath,
             serviceProvider.GetRequiredService<IDataProtectionProvider>(),
-            serviceProvider.GetService<CertificateAuthorityOptions>() ?? new CertificateAuthorityOptions(),
-            _resourceContext.ApplicationName,
-            _resourceContext.ResourceName));
+            serviceProvider.GetService<CertificateAuthorityOptions>() ?? new CertificateAuthorityOptions()));
 
         // Registered after every AddService call, so the endpoint starts last and stops first.
         Services.AddSingleton<IHostService>(serviceProvider => new SecretsEndpointService(
             endpoint,
             serviceProvider.GetRequiredService<SecretStoreRepository>(),
-            serviceProvider.GetRequiredService<TrustedIssuerStore>(),
             serviceProvider.GetRequiredService<CertificateAuthorityManager>(),
-            _controlPlane,
-            _resourceContext,
             _context));
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<ISecretStoreApplicationContext>(_context);
@@ -287,15 +252,9 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         {
             _context.ResolveHostedServices();
 
-            var application = new SecretStoreApplication(
+            return new SecretStoreApplication(
                 new SecretStoreApplicationOptions { Environment = _environmentName },
                 _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
         }
         catch (Exception exception)
         {
@@ -324,16 +283,6 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
 
     private Uri ResolveEndpoint()
     {
-        if (_controlPlane?.ObservedEndpoints.TryGetValue("api", out Uri? observed) is true)
-        {
-            return observed;
-        }
-
-        if (_resourceContext.Endpoints.TryGetValue("api", out Uri? supplied))
-        {
-            return supplied;
-        }
-
         return ParseArgument("--endpoint") is string configured
             ? ParseEndpoint(configured)
             : new Uri(DefaultEndpoint, UriKind.Absolute);
@@ -341,19 +290,8 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
 
     private string ResolveDataPath()
     {
-        if (_resourceContext.Mounts.TryGetValue("data", out ResourceMount? mount))
-        {
-            if (string.IsNullOrWhiteSpace(mount.Path))
-            {
-                throw new InvalidOperationException(
-                    "The SecretStore 'data' volume must expose a file-system path.");
-            }
-
-            return Path.GetFullPath(mount.Path);
-        }
-
         string? configured = ParseArgument("--data");
-        string path = configured ?? Path.Combine(_resourceContext.ContentRootPath, "data");
+        string path = configured ?? Path.Combine(AppContext.BaseDirectory, "data");
         return Path.GetFullPath(path);
     }
 
@@ -410,17 +348,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     private static void ValidateCertificateAuthority(CertificateAuthorityOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.CommonName);
-        if (options.PlatformEnrollmentEndpoint is { } endpoint &&
-            (!endpoint.IsAbsoluteUri ||
-             !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new ArgumentException(
-                "The Platform enrollment endpoint must be an absolute HTTPS endpoint.",
-                nameof(options));
-        }
-
-        if ((options.PlatformCertificate.HasValue && options.PlatformCertificate.Value.IsEmpty) ||
-            (options.InitialCertificate.HasValue && options.InitialCertificate.Value.IsEmpty) ||
+        if ((options.InitialCertificate.HasValue && options.InitialCertificate.Value.IsEmpty) ||
             (options.InitialPrivateKey.HasValue && options.InitialPrivateKey.Value.IsEmpty))
         {
             throw new ArgumentException("Supplied certificate and private-key values must not be empty.", nameof(options));
@@ -434,11 +362,10 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         }
 
         if (!options.InitialCertificate.HasValue &&
-            options.PlatformEnrollmentEndpoint is null &&
-            !options.SelfSeedWhenNoPlatform)
+            !options.SelfSeed)
         {
             throw new InvalidOperationException(
-                "A certificate authority requires initial material, a Platform enrollment endpoint, or standalone self-seeding.");
+                "A certificate authority requires initial material or self-seeding.");
         }
     }
 
@@ -447,9 +374,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         return new CertificateAuthorityOptions
         {
             CommonName = source.CommonName,
-            SelfSeedWhenNoPlatform = source.SelfSeedWhenNoPlatform,
-            PlatformEnrollmentEndpoint = source.PlatformEnrollmentEndpoint,
-            PlatformCertificate = Copy(source.PlatformCertificate),
+            SelfSeed = source.SelfSeed,
             InitialCertificate = Copy(source.InitialCertificate),
             InitialPrivateKey = Copy(source.InitialPrivateKey),
         };

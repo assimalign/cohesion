@@ -124,6 +124,6 @@
     <value>A rate limiting policy named &apos;{0}&apos; is already registered.</value>
   </data>
   <data name="RateLimitingPolicyNotRegistered" xml:space="preserve">
-    <value>No rate limiting policy named &apos;{0}&apos; has been registered. Register it with options.AddPolicy(name, policy) in UseRateLimiting.</value>
+    <value>No rate limiting policy named &apos;{0}&apos; has been registered. Register it with rateLimiting.Options.AddPolicy(name, policy) in AddRateLimiting.</value>
   </data>
 </root>

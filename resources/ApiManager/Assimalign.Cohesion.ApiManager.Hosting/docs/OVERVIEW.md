@@ -1,8 +1,8 @@
 # Assimalign.Cohesion.ApiManager.Hosting
 
-`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `http` endpoint (http). The plain host opens no listener without registration.
+`ApiManagerApplication.CreateBuilder(args)` returns the public concrete `ApiManagerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
-Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Domain service behavior and command kinds remain deferred.
+Domain service behavior and command kinds remain deferred.
 
 See [DESIGN.md](DESIGN.md).
 

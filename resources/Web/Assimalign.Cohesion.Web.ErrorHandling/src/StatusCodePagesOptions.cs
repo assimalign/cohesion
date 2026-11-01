@@ -6,7 +6,9 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.ErrorHandling;
 
 /// <summary>
-/// Builder-time configuration for the status-code-pages middleware (<c>UseStatusCodePages</c>).
+/// Configuration of the status-code-pages middleware that
+/// <c>builder.Services.AddStatusCodePages(pages =&gt; ...)</c> registers
+/// (<see cref="StatusCodePagesBuilder.Options"/>) and <c>UseStatusCodePages()</c> places.
 /// </summary>
 public sealed class StatusCodePagesOptions
 {

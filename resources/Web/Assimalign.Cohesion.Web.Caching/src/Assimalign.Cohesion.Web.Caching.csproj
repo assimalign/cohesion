@@ -13,4 +13,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Caching.InMemory" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+	</ItemGroup>
 </Project>

@@ -11,7 +11,6 @@ and `/livez` pipeline endpoints.
 - **Model:** `IHealthCheck`, `HealthStatus`, `HealthCheckResult`, `HealthReport`,
   `HealthReportEntry`, and `HealthCheckRegistration`.
 - **Composition:** `new HealthChecksBuilder()`, `IHealthChecksBuilder`, inline and typed checks.
-  Web.Hosting supplies `AddContributor` for host contributors in its `.Hosting.Health` namespace.
 - **Filtering:** `HealthTags` and `HealthCheckPredicates` for aggregate, readiness, and liveness
   views.
 - **HTTP delivery:** `MapHealthChecks`, `MapReadinessCheck`, `MapLivenessCheck`,
@@ -20,16 +19,16 @@ and `/livez` pipeline endpoints.
 ## Dependencies
 
 The package references `Assimalign.Cohesion.Web` for pipeline and HTTP contracts. It references
-no hosting library or dependency-injection container. `Web.Hosting` references this package and
-`Hosting.Health` to supply its integrated contributor bridge (owner decision 57, 2026-10-13).
+no hosting library or dependency-injection container. `Web.Hosting` references this package, so
+the health model is part of its runtime closure.
 
 ## Framework delivery
 
 - `App.Web` lists `Assimalign.Cohesion.Web.Health` as a public framework assembly. Web application
   authors see and use its types directly.
-- All 17 other area frameworks list the same assembly privately because they carry Web.Hosting
-  and its implementation closure. Their application authors do not gain a public Web health
-  surface from that inclusion; decision 57 adds the 16 frameworks besides App.Database.
+- `App.Database` lists the same assembly privately because Database.Hosting references it for its
+  admin endpoint. Its application authors do not gain a public Web health surface from that
+  inclusion. Web.Hosting does not reference Web.Health, so no other area framework carries it.
 
 The package can also be referenced directly outside those framework profiles.
 
@@ -39,25 +38,18 @@ Compose an immutable service, then explicitly map the endpoints that the applica
 
 ```csharp
 using Assimalign.Cohesion.Web.Health;
-using Assimalign.Cohesion.Web.Hosting.Health;
 
 IHealthCheckService health = new HealthChecksBuilder()
     .AddCheck(
         "self",
         () => HealthCheckResult.Healthy("accepting traffic"),
         tags: new[] { HealthTags.Ready, HealthTags.Live })
-    .AddContributor(resourceContext)
     .Build();
 
 pipeline.MapHealthChecks(health);       // /healthz, all checks
 pipeline.MapReadinessCheck(health);     // /readyz, ready-tagged checks
 pipeline.MapLivenessCheck(health);      // /livez, live-tagged checks
 ```
-
-`AddContributor` uses `IHealthContributor.Name` as the registration name and preserves the
-contribution's status, description, and diagnostic data. It forwards request cancellation and
-supports the same failure status, tags, and timeout policy as `AddCheck`. When tags are omitted,
-both `ready` and `live` are applied; pass an empty collection for aggregate-only participation.
 
 The middleware receives `IHealthCheckService` explicitly. It does not locate services during a
 request and does not mutate registrations after the service is built.
@@ -85,8 +77,6 @@ description either way ([breaking changes](DESIGN.md#exception-detail)). The exc
 in process, through `IHealthFeature.Report` or a custom `IHealthResponseWriter`
 ([DESIGN](DESIGN.md#exception-detail)).
 
-Hosting contributor integration ships in `Assimalign.Cohesion.Web.Hosting`, using the
-`Assimalign.Cohesion.Web.Hosting.Health` namespace; no separate adapter package is needed.
 `Web.Health` owns the health model and endpoints and references no hosting library (O34).
 
 ### Server-side diagnostics

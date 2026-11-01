@@ -22,12 +22,10 @@ public class HttpLoggingRequestCaptureTests
         // Arrange
         RecordingLoggerProvider recorded = new();
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
-        TestPipelineBuilder builder = new();
-        builder.UseHttpLogging(loggerFactory, options =>
-        {
-            options.Fields = HttpLoggingFields.RequestBody | HttpLoggingFields.BytesTransferred;
-            options.RequestBodyLimit = 4;
-        });
+        HttpLoggingBuilder logging = new HttpLoggingBuilder().UseLoggerFactory(loggerFactory);
+        logging.Options.Fields = HttpLoggingFields.RequestBody | HttpLoggingFields.BytesTransferred;
+        logging.Options.RequestBodyLimit = 4;
+        IWebApplicationMiddleware middleware = logging.Build();
         LoggingTestContext context = new(new HttpConnectionInfo());
         using MemoryStream body = new(Encoding.UTF8.GetBytes("body-content"));
         context.Request.Body = body;
@@ -56,11 +54,11 @@ public class HttpLoggingRequestCaptureTests
         if (fault)
         {
             (await Should.ThrowAsync<InvalidOperationException>(
-                () => builder.LastMiddleware!.InvokeAsync(context, ReadAsync))).ShouldBeSameAs(failure);
+                () => middleware.InvokeAsync(context, ReadAsync))).ShouldBeSameAs(failure);
         }
         else
         {
-            await builder.LastMiddleware!.InvokeAsync(context, ReadAsync);
+            await middleware.InvokeAsync(context, ReadAsync);
         }
 
         // Assert

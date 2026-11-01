@@ -11,7 +11,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.DependencyInjection;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Hosting.Internal;
@@ -70,32 +69,6 @@ public sealed class WebServerEventSourceAcceptanceTests
         EventSourceRecorder.CounterSample after = await recorder.WaitForCounterAsync(
             "refused-response-heads", recorder.CounterSequence, timeout.Token);
         after.Value.ShouldBe(before.Value + 1);
-        recorder.Events.ShouldNotContain(candidate => candidate.EventId == 0);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Web.Hosting] - EventSource: A resource without an HTTP control endpoint reports disabled control plane once")]
-    public async Task Build_ResourceWithoutHttpEndpoint_ShouldReportDisabledControlPlaneOnce()
-    {
-        // Arrange
-        using EventSourceRecorder recorder = new(WebHostingEventSource.Log, EventLevel.Verbose);
-        string resourceName = $"disabled-control-plane-{Guid.NewGuid():N}";
-        using IDisposable scope = ResourceRuntime.CreateScope(new ResourceContext(
-            resourceName: resourceName,
-            endpoints: new Dictionary<string, Uri> { ["metrics"] = Uri.CreateEndpoint("http", "127.0.0.1", 48123) }));
-        WebApplicationBuilder builder = WebApplication.CreateBuilder([], typeof(WebServerEventSourceAcceptanceTests).Assembly);
-        await using WebApplication application = builder.Build();
-
-        // Act — the singleton pipeline factory diagnoses the composition when materialized.
-        IWebApplicationPipeline pipeline = application.Context.ServiceProvider.GetRequiredService<IWebApplicationPipeline>();
-        application.Context.ServiceProvider.GetRequiredService<IWebApplicationPipeline>().ShouldBeSameAs(pipeline);
-
-        // Assert
-        EventWrittenEventArgs entry = recorder.Events.Where(candidate => candidate.EventId == 1 &&
-            Equals(Payload(candidate, "resourceName"), resourceName)).ShouldHaveSingleItem();
-        entry.EventName.ShouldBe("ControlPlaneDisabled");
-        entry.Level.ShouldBe(EventLevel.Warning);
-        entry.PayloadNames!.ToArray().ShouldBe(["resourceName", "observedEndpoints"]);
-        entry.Payload!.ToArray().ShouldBe(new object?[] { resourceName, "metrics" });
         recorder.Events.ShouldNotContain(candidate => candidate.EventId == 0);
     }
 

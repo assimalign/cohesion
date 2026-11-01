@@ -7,12 +7,11 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 ## The dependency rule (build-enforced)
 
 > **`Assimalign.Cohesion.Web.Hosting` is the runtime module — no Web-area library may reference
-> it, and it may reference any Web-area library except `Web.Testing`, `Web.ApplicationModel`,
-> the `App.Web` producers (`Web.Refs`, `Web.Runtime`), and test, example, sample, and fixture
-> projects.** (COHRES002, relaxed by owner decision 2026-10-09; before that, `Web.Hosting` could
-> reference only the root `Assimalign.Cohesion.Web` and its own hosting family.) `Web.ApplicationModel`
-> stays out of `Web.Hosting`'s resolved closure by any route, including through a Web library it
-> references.
+> it, and it may reference any Web-area library except `Web.Testing`,
+> `Web.Hosting.ApplicationModel`, the `App.Web` producers (`Web.Refs`, `Web.Runtime`), and test,
+> example, sample, and fixture projects.** (COHRES002, relaxed by owner decision 2026-10-09; before
+> that, `Web.Hosting` could reference only the root `Assimalign.Cohesion.Web` and its own hosting
+> family.)
 
 - A Web feature library (`Assimalign.Cohesion.Web.<Feature>`) may reference: the root
   `Assimalign.Cohesion.Web`, **other Web feature libraries**, and anything outside the Web area
@@ -22,11 +21,11 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - **Never reference `Assimalign.Cohesion.Web.Hosting`** from a feature library. Hosting composes
   DI, configuration, logging, and transports; a reference to it drags that surface into every
   consumer and pushes users toward container-driven design.
-- `Web.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself (owner decision 57,
-  2026-10-13). Its public integrations live in `src/Health/` and `src/Resources/`, keeping the
-  `Assimalign.Cohesion.Web.Hosting.Health` and `.Resources` namespaces. No separate Web
-  hosting-family package exists. A future `Web.Hosting.<Suffix>` package is permitted only for
-  an integration that must not land in every framework carrying `Web.Hosting`; it retains the
+- `Web.Hosting` is a plain host. The application-model integration is
+  `Web.Hosting.ApplicationModel`, which references `Web.Hosting` and makes a Web application a
+  managed resource with `builder.Services.AddResource(name, resource => resource.UseInProcess())`
+  (`resource-areas.md`). A future `Web.Hosting.<Suffix>` package is permitted only for an
+  integration that must not land in every framework carrying `Web.Hosting`; it retains the
   family constraints in `resource-areas.md`. Roots and features may not reference the hosting
   module, its family (COHRES001) or shared Hosting libraries (COHRES004).
 - **`Web.Hosting` references a Web library only when the runtime itself needs it** — runtime
@@ -34,19 +33,24 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   Web library but the exclusions above. Applications still get the whole family through the
   `App.Web` shared framework (via `Sdk.Web`), and feature registration still ships with the
   feature, so hosting a feature never needs the reference. Every reference costs more than one
-  framework: `Web.Hosting` is a private member of all 17 other area frameworks, so its new
-  reference's closure must be added to each of them.
-- Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` (the test factory
-  drives the concrete runtime and its integrated control plane; owner decision 57, 2026-10-13),
-  declared via `CohesionHostingIsolationExemptions` in its own
-  csproj. Do not add others without the deviation protocol (`deviations.md`) — see
-  `resource-areas.md` for the opt-out mechanism.
+  framework: `Web.Hosting` is a private member of the five other area frameworks whose hosting
+  modules serve HTTP (ConfigurationStore, Database, IdentityHub, LogSpace, SecretStore), so its
+  new reference's closure must be added to each of them.
+- The two sanctioned references to `Web.Hosting`:
+  `Assimalign.Cohesion.Web.Hosting.ApplicationModel → Web.Hosting` (the integration joins the
+  runtime module to `ApplicationModel.Hosting`; owner decisions 2026-10-28 and 2026-10-29), which
+  COHRES001 permits by the project's exact name with no exemption property, and
+  `Assimalign.Cohesion.Web.Testing → Web.Hosting` (the test factory drives the concrete runtime;
+  owner decision 57, 2026-10-13), declared via `CohesionHostingIsolationExemptions` in its own
+  csproj. Do not add others without the deviation protocol (`deviations.md`) — see `resource-areas.md` for the
+  opt-out mechanism.
 
 **Enforcement:** this is the Web instance of the repo-wide **resource hosting-isolation rule** —
 see `resource-areas.md` for the general rule, the `COHRES001`/`COHRES002`/`COHRES004` build errors, the
-two-layer check semantics, COHRES002's excluded categories (direct references, plus the resolved closure for the ApplicationModel packages), and the per-project `CohesionHostingIsolationExemptions` opt-out
-(deviation protocol required; `Web.Testing` is the standing exemption, declared in its own
-csproj). Every Web library is in the `.github/workflows/resource-web.yml` matrix so the guard
+two-layer check semantics, COHRES002's excluded categories (checked on direct references), and the
+per-project `CohesionHostingIsolationExemptions` opt-out (deviation protocol required;
+`Web.Testing` is the standing exemption, declared in its own csproj; `Web.Hosting.ApplicationModel`
+needs none). Every Web library is in the `.github/workflows/resource-web.yml` matrix so the guard
 executes in CI. The two framework producers, `Assimalign.Cohesion.Web.Refs` and
 `Assimalign.Cohesion.Web.Runtime`, are neither libraries nor exemption holders: they are the
 `App.Web` packaging shells, which the guard skips by exact identity, and `sdk-smoke.yml` packs them
@@ -65,7 +69,8 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
   `targetMethodName: "AddSingleton"` and `Contract = typeof(IHttpFeature)`
   (`component-integration.md`). The generator projects the verb into the application, so the
   package takes **no** DI reference and `Web.Hosting` takes no reference to the package for it
-  (each `Web.Hosting` reference would land the feature's closure in all 18 area frameworks). No
+  (each `Web.Hosting` reference would land the feature's closure in `App.Web` and in every area
+  framework that carries `Web.Hosting`). No
   feature package declares an `extension(IWebApplicationBuilder)` registration verb.
   Precedents: the eight packages Antiforgery, Authentication, Authorization, ErrorHandling,
   OpenApi, Routing, Serialization and Validation.
@@ -106,7 +111,11 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
 - **Pipeline verbs ship with the feature as `extension(...)` members:** `Use<Feature>` extends
   `IWebApplicationPipelineBuilder`, and `Map*` verbs extend the pipeline or router surface (all
   from `Assimalign.Cohesion.Web` and `Web.Routing`). Ordering matters there, which the
-  component-integration mechanism does not model.
+  component-integration mechanism does not model. A `Use<Feature>` verb takes no configuration:
+  the feature's registration verb owns it and registers the configured middleware, which the
+  `Use` verb finds in `IWebApplicationContext.Middleware` (`resource-areas.md`, "`Add` configures,
+  `Use` places"). A value an operator may change while the application runs is an `IWebApplicationSetting` the
+  registration verb registers; the middleware reads it from `IWebApplicationContext.Settings`.
 - Registration stays dependency-free: a factory or builder composes values and options objects
   into the feature eagerly. No configuration binding and no request-time service location — the
   `*.Hosting`-only DI rule still stands; the feature package never sees the container.
@@ -152,8 +161,8 @@ hosting-family package:
    frameworks that need it, never every framework carrying `Web.Hosting` (decision 57).
    **If `Web.Hosting` references the new library**, its closure
    also becomes a `CohesionFrameworkPrivateAssembly` in every other area's
-   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (all 17 carry
-   `Web.Hosting` privately); pack each of those producers too.
+   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (the five that carry
+   `Web.Hosting` privately: ConfigurationStore, Database, IdentityHub, LogSpace, SecretStore); pack each of those producers too.
 3. **Solutions** — entries in `resources/Web/Assimalign.Cohesion.Web.slnx`,
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root `Assimalign.Cohesion.slnx`
    (src, tests, docs files).

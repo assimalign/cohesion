@@ -3,8 +3,9 @@ using System;
 namespace Assimalign.Cohesion.Web.RequestTimeouts;
 
 /// <summary>
-/// Builder-time options for the request-timeout middleware
-/// (<see cref="WebApplicationExtensions.UseRequestTimeouts(IWebApplicationPipelineBuilder, Action{RequestTimeoutOptions}?)"/>).
+/// Options for the request-timeout middleware, configured on <see cref="RequestTimeoutsBuilder.Options"/>
+/// where <c>builder.Services.AddRequestTimeouts(timeouts =&gt; ...)</c> registers it. The registered
+/// middleware takes a snapshot, so a later change to this object has no effect on it.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("RequestTimeoutOptions")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]

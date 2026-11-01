@@ -6,4 +6,7 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+	</ItemGroup>
 </Project>

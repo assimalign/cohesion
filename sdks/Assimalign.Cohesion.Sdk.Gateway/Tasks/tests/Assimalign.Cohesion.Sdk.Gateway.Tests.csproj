@@ -7,6 +7,8 @@
     <IsAotCompatible>true</IsAotCompatible>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- Selects the Gateway variant of the base SDK's package-boundary workspace. -->
+    <DefineConstants>$(DefineConstants);COHESION_GATEWAY_SDK_TESTS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,6 +21,8 @@
 
   <ItemGroup>
     <Compile Remove="TestProjects\**\*.cs" />
+    <Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\tests\ConsumerWorkspace.cs" Link="TestObjects\ConsumerWorkspace.cs" />
+    <Compile Include="..\..\..\Assimalign.Cohesion.Sdk\Tasks\tests\DotNetBuildResult.cs" Link="TestObjects\DotNetBuildResult.cs" />
   </ItemGroup>
 
 </Project>

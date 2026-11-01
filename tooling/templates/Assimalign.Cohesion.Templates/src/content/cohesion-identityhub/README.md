@@ -8,5 +8,11 @@ dotnet build
 dotnet run
 ```
 
-Set the organization feed owner in `nuget.config` and the image registry in `Directory.Build.props`.
-Orchestration starts disabled. Follow the csproj comment to enable the manifest, typed accessors and area-owned default control plane before referencing this project from a gateway.
+Set the organization feed owner in `nuget.config`.
+
+To run the application as a resource that a gateway manages, register it on `builder.Services` with
+`builder.Services.AddResource("<name>", resource => resource.UseInProcess())`. The verb comes from
+`Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`, which the `App.IdentityHub` framework carries; each platform
+the resource runs on is a package the project references, such as
+`Assimalign.Cohesion.ApplicationModel.Hosting.InProcess` for `UseInProcess()`. When no platform is named in
+its environment, the application runs unmanaged and the call registers nothing.

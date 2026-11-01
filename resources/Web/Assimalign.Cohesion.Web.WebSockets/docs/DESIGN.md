@@ -6,7 +6,8 @@ The WebSocket **policy** of the Web pipeline, as decided by
 [Http ADR 1](../../../../docs/libraries/Http/DECISIONS.md#adr-1-server-websockets) (plan §7.4,
 decision 16). `Assimalign.Cohesion.Http.WebSockets` owns the protocol: the handshake, its
 negotiation, and the BCL framing. A browser-facing server needs more around that accept, and this
-package supplies it as one middleware, `UseWebSockets`:
+package supplies it as one middleware, configured by `builder.Services.AddWebSockets(...)` and
+placed by `UseWebSockets()`:
 
 1. **The cross-site WebSocket hijacking defense** (decision 6). A browser sends cookies with a
    WebSocket handshake to any site, and neither the same-origin policy nor CORS applies to it, so
@@ -214,9 +215,12 @@ The decisions:
   `context.WebSockets.IsWebSocketRequest`.
 - **The policy always applies.** When `UseWebSockets` ran, it refused a malformed or cross-site
   handshake before the endpoint and installed its decorator. Otherwise the endpoint applies the
-  default policy itself, the one `UseWebSockets()` with default options applies, so an application
-  that forgot the middleware still refuses a cross-site handshake. Configure origins, keep-alive or
-  compression with `UseWebSockets`.
+  default policy itself, the one `UseWebSockets()` places when the application registered none, so
+  an application that forgot the middleware still refuses a cross-site handshake. Configure origins,
+  keep-alive or compression with `AddWebSockets`; a registered policy applies where `UseWebSockets()`
+  places it, never through the endpoint's fallback. The endpoint does not look the registration up:
+  `MapWebSocket` on a route group has no application context to look in, and a fallback that read
+  it on one verb and not the other would make the group's endpoints behave differently.
 - **Policies attach where the endpoint is mapped.** The route builder takes metadata like any
   route's: `RequireAuthorization` on the endpoint or its group refuses an anonymous handshake with
   the scheme's `401` before the handler runs, on every protocol. A socket outlives any request
@@ -224,9 +228,26 @@ The decisions:
 - **No source generator.** The verb takes typed delegates, not `Delegate`, so the Web endpoint
   generator neither intercepts it nor needs to; it is AOT-safe as written.
 
+## Registration: `AddWebSockets` configures, `UseWebSockets` places (2026-10-28)
+
+`builder.Services.AddWebSockets(webSockets => ...)` is a generated component integration over
+`WebSocketsBuilder` (`src/Properties/ComponentIntegrations.cs`, both builder templates). The builder's
+`Options` is the existing `WebSocketOptions`; the keep-alive values validate themselves on
+assignment, and `Build()` validates the allowed origins (`ArgumentException` for an empty entry, the
+`*` wildcard, the opaque `null`, or anything that is not a serialized origin) and snapshots everything
+into the immutable `WebSocketPolicy`, so a retained options object changes nothing after registration.
+The middleware registers as an `IWebApplicationMiddleware` singleton. `UseWebSockets()` takes no
+arguments: it places the last `WebSocketMiddleware` it finds in `IWebApplicationContext.Middleware`,
+or one built from the default policy (same-origin only, 30-second keep-alive, compression off) when
+the application registered none. The defaults are safe, so placing the verb never fails.
+
+*Rejected:* configuration on the pipeline verb, the former `UseWebSockets(Action<WebSocketOptions>?)`.
+It split the policy's settings across two call sites and kept them out of the registrations the host
+enumerates.
+
 ## Ordering
 
-Register `UseWebSockets` after `UseForwardedHeaders`, whose effective scheme and host the origin
+Place `UseWebSockets` after `UseForwardedHeaders`, whose effective scheme and host the origin
 check reads, and ahead of every endpoint that accepts a socket. The area's
 [middleware order](../../../../docs/resources/Web/MIDDLEWARE_ORDER.md) places it last, closest to
 the endpoints, so host filtering, authorization and rate limiting apply to a handshake first.

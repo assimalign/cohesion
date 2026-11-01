@@ -4,7 +4,8 @@
 
 The plain Hosting package coordinates a host lifetime without assuming how an application is
 supervised, how health is transported, or whether the process represents a Cohesion resource.
-Those policies live in sibling packages and integrate through the public run seam.
+Those policies live in other packages and integrate as ordinary host services:
+ApplicationModel.Hosting's `ApplicationInstanceService` is an `IHostLifecycleService`.
 
 ## Lifecycle coordinator
 
@@ -94,7 +95,7 @@ stopped or compensated host restartable without relying on a derived hook callin
 
 A run token already cancelled at entry performs one complete lifecycle: startup uses
 `CancellationToken.None`, followed immediately by graceful shutdown with a fresh stop budget.
-The run completes in `Stopped` and delivers the normal observer sequence. A startup failure still
+The run completes in `Stopped` after the normal lifecycle sequence. A startup failure still
 rolls back to `Failed` and propagates. Both the concrete host and the plain `IHost` extension own
 this semantic; applications need no shadows. Stop completion is joined only if stopping actually
 began, so a rejected stop cannot strand a run on a completion signal that will never fire.
@@ -103,22 +104,39 @@ began, so a rejected stop cannot strand a run on a completion signal that will n
 shutdown is requested or the current lifetime begins stopping, stops, or fails; cancelling one
 wait abandons only that caller and does not signal the host. A later start creates a fresh signal.
 
-## Complete-run pipeline
+## Shutdown signals
 
-`HostContext.Runner` is an optional pipeline around `IHost.RunAsync`. The host captures the runner
-once at the start of each run, creates a new `IHostRun`, and rejects concurrent re-entry even when a
-runner delays before executing that handle. Replacing `HostContext.Runner` affects only later runs.
+`RunAsync` owns the process's shutdown signals for the duration of the run. It registers SIGINT,
+SIGQUIT and SIGTERM through `PosixSignalRegistration`, cancels each signal's default action, and
+requests the run's shutdown instead by cancelling a token linked to the caller's. A signal therefore
+takes the caller's cancellation path: before the host has started it cancels the start, and
+afterward it drains the host within `ShutdownTimeout`. `RunAsync` then returns, and the process
+exits when its entry point does. A platform that delivers no such signal, such as a browser,
+registers none, and a host started with `StartAsync` registers none: a nested host and a test host
+never compete with the outer run for them. Each run registers afresh and removes its handlers when it
+ends. `ShutdownTimeout` should stay below the platform's grace period between SIGTERM and SIGKILL
+(30 seconds by default on Kubernetes).
 
-`IHostRun` is deliberately one-shot. It exposes:
+A run inside an `AppEnvironmentScope` (Core, 2026-10-29) shares its process with other programs,
+as each resource of an in-process gateway does, and calls `RunAsync` from its own `Main`. The
+process's signals are not its own there: it registers on the scope's `Shutdown` token instead, which
+the host of programs cancels to stop it, and registers no process signal. So a gateway program keeps
+SIGTERM for itself and stops its programs in the order it chooses, and a program's `Program.cs` needs
+no change to run in process.
 
-- the `IHost` being run;
-- a configurable `ShutdownTimeout` applied beginning with that run;
-- `RunAsync`, which performs startup, waits for shutdown, drains, and joins completion; and
-- `TryShutdown`, a race-safe request for the current run.
+The registration itself is Core's `AppEnvironment.RegisterShutdown` (2026-10-29), which the
+application-model gateway's run uses too; Hosting's internal `HostShutdownSignals` keeps only the
+test seam and the never-throwing request that cancels the run.
 
-A runner can subscribe to platform signals, enforce policy, or translate failures without an
-internal host decorator. Plain runs use the same handle with no observer, so the extension point
-does not create a second lifecycle implementation.
+Before this (2026-10-28), nothing in Hosting handled a signal. SIGTERM, which Kubernetes and Docker
+send to stop a container, ended the process without stopping the host and cut off in-flight work.
+
+*Rejected:* a public pipeline around `RunAsync` (`HostContext.Runner` with `IHostRunner`,
+`IHostRun`, and `IHostRunObserver`, removed 2026-10-28). It existed for the retired
+resource-process contract: readiness lines on stdout, signal subscription, sysexits exit codes, and a
+per-run shutdown timeout. It ran only for `RunAsync`, so a host started any other way bypassed it.
+`IHostLifecycleService` reports every transition on every start path, and signals are now the host's
+own. *Not yet:* an opt-out for an application that handles signals itself.
 
 ## Nested host composition
 
@@ -149,28 +167,9 @@ that state for both hosts under the test timeout, while the shorter parent budge
 child drain. This changes only test synchronization, with no runtime change from 10.0.0-preview.1.
 
 Nesting is lifecycle composition, not process-policy composition. The wrapper calls only the
-child's `StartAsync` and `StopAsync`; it never invokes, replaces, or clears the child's
-`HostContext.Runner`. Only the outer host's direct `RunAsync` owns the process-level runner and its
-supervisor protocol. Child startup and stop failures flow through the wrapper and fault the
-parent's complete run.
-
-### Observer contract
-
-When `OnStartedAsync` completes before a stop is accepted, callbacks are delivered in this order:
-
-1. `Started`, after startup and `OnStartedAsync` complete.
-2. `Stopping`, after the host atomically accepts the transition to `Stopping` and before drain work.
-3. `Stopped`, after services, state reset, and `OnStoppedAsync` complete.
-
-The host enters `Started` before it awaits `OnStartedAsync`, allowing an external stop to be
-accepted during that hook. In that race, the observer never receives a late `Started`; its sequence
-begins with `Stopping` and continues through the completed stop.
-
-If the graceful-drain token is cancelled, `DrainAborted` occurs at most once between `Stopping` and
-`Stopped`. `Stopped` still reports the completed stop sequence. An observer callback is never
-allowed to strand teardown: its first exception is retained, shutdown proceeds, and the run
-surfaces it after coordinated stop unless a stop failure takes precedence. A `Started` observer
-failure requests shutdown immediately.
+child's `StartAsync` and `StopAsync`, so a nested host never registers the process's shutdown
+signals; only the outer host's direct `RunAsync` owns them. Child startup and stop failures flow
+through the wrapper and fault the parent's complete run.
 
 ### Stop join and per-run stop ownership
 
@@ -180,22 +179,9 @@ run sees that stopping already began, does not call `StopAsync` again, waits for
 and observes the same stop exception. Disposal uses the same behavior rather than racing a second
 teardown.
 
-These fields belong to one `IHostRun`. After completion the host clears that handle; a subsequent
+These fields belong to one run's internal state. After completion the host clears it; a subsequent
 run receives a fresh marker and completion signal. This prevents stop state from leaking across
 restarts.
-
-### `TryShutdown` acceptance
-
-`IHostRun.TryShutdown` returns true only when all three conditions hold atomically:
-
-- the host state is exactly `Started`;
-- the handle is still the host's current run; and
-- the current run's shutdown callback is installed.
-
-The optional `onAccepted` callback executes under the host state lock before cancellation is
-signalled. Calls made before `Started`, once `Stopping` begins, after `Stopped`/`Failed`, or through
-an old handle return false. This makes signal adapters race-safe and prevents a late signal from
-shutting down a later run.
 
 ## Service execution menu
 
@@ -216,23 +202,25 @@ join the same work.
 | Package | Direct dependencies | Policy boundary |
 | --- | --- | --- |
 | `Assimalign.Cohesion.Hosting` | Core | Plain lifecycle only |
-| `Assimalign.Cohesion.Hosting.Health` | Core | Transport-neutral health data only |
-| `Assimalign.Cohesion.Hosting.Resources` | Core, Hosting, Hosting.Health, ProtectedData | Resource invocation, context, supervisor protocol, and process policy |
+| `Assimalign.Cohesion.ApplicationModel.Hosting` | Core, Hosting, ApplicationModel.Protocol | Resource instances, their control plane, and the host service that joins one to its gateway (`libraries/ApplicationModel/`) |
 
-Hosting does not reference either sibling. Health does not reference Hosting. Resources is the
-opt-in composition layer and installs its runner through `HostContext.Runner`.
+Hosting does not reference ApplicationModel.Hosting. ApplicationModel.Hosting is the opt-in
+composition layer: an area's `<Area>.Hosting.ApplicationModel` registers its
+`ApplicationInstanceService`, an `IHostLifecycleService`, with the application's host.
 
-Both siblings still ship in the base `Assimalign.Cohesion.App` framework. All opt-in resource SDKs
-generate calls to `Hosting.Resources.ResourceRuntime`, so Resources belongs beside the shared
-Hosting assembly and Health follows transitively. Framework presence is not activation: only an
-enabled `CohesionApplicationModel` registration causes an area builder to install the runner.
+Both ship in the base `Assimalign.Cohesion.App` framework. Framework presence is not activation: an
+application becomes a managed resource only when it calls its area's
+`builder.Services.AddResource(...)`.
 
 ## Non-goals
 
-- Process signal handling, stdout readiness messages, exit-code classification, and resource
-  invocation belong to `Assimalign.Cohesion.Hosting.Resources`.
-- Health contributors and aggregated health values belong to
-  `Assimalign.Cohesion.Hosting.Health`.
+- Resource behavior belongs to `Assimalign.Cohesion.ApplicationModel.Hosting`. Stdout readiness messages
+  and exit-code classification belong to no package: a resource reports readiness to its gateway,
+  and a platform restarts a process on any failed exit.
+- Other signals, and shutdown signals outside a run: Hosting registers SIGINT, SIGQUIT and SIGTERM
+  only while `RunAsync` runs.
+- Health checks. A resource reports its health through ApplicationModel.Hosting
+  (`IApplicationHealthContributor`), and a Web application serves health endpoints through Web.Health.
 - Dependency injection, configuration, logging, and HTTP delivery belong to their respective
   packages.
 - Hosting does not install a synchronization context or task scheduler.

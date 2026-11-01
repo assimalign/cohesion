@@ -17,19 +17,6 @@
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub/src/Assimalign.Cohesion.IdentityHub.csproj" />
 	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/src/Assimalign.Cohesion.IdentityHub.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.IdentityHub.ApplicationModel/tests/Assimalign.Cohesion.IdentityHub.ApplicationModel.Tests.csproj" />
-	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Client/src/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Client/src/Assimalign.Cohesion.IdentityHub.Client.csproj" />
@@ -47,6 +34,17 @@
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting/tests/Assimalign.Cohesion.IdentityHub.Hosting.Tests.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/" />
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/src/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel/tests/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel.Tests.csproj" />
 	</Folder>
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/" />
 	<Folder Name="/IdentityHub/Assimalign.Cohesion.IdentityHub.Models/docs/">
@@ -75,11 +73,11 @@
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel/src/Assimalign.Cohesion.IdentityModel.csproj" />
 		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj" />
-		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/Assimalign.Cohesion.Hosting.Resources.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/src/Assimalign.Cohesion.ApplicationModel.Protocol.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/src/Assimalign.Cohesion.ApplicationModel.Definition.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/Assimalign.Cohesion.ApplicationModel.Hosting.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
-		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting.Health/src/Assimalign.Cohesion.Hosting.Health.csproj" />
 		<Project Path="../../libraries/DependencyInjection/Assimalign.Cohesion.DependencyInjection/src/Assimalign.Cohesion.DependencyInjection.csproj" />
-		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/src/Assimalign.Cohesion.Hosting.Telemetry.csproj" />
 		<Project Path="../../libraries/Logging/Assimalign.Cohesion.Logging/src/Assimalign.Cohesion.Logging.csproj" />
 		<Project Path="../../libraries/Logging/Assimalign.Cohesion.Logging.Console/src/Assimalign.Cohesion.Logging.Console.csproj" />
 		<Project Path="../../libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/Assimalign.Cohesion.OpenTelemetry.csproj" />
@@ -87,5 +85,7 @@
 		<Project Path="../Web/Assimalign.Cohesion.Web/src/Assimalign.Cohesion.Web.csproj" />
 		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token/src/Assimalign.Cohesion.IdentityModel.Token.csproj" />
 		<Project Path="../../libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken/src/Assimalign.Cohesion.IdentityModel.Token.JsonWebToken.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj" />
 	</Folder>
 </Solution>

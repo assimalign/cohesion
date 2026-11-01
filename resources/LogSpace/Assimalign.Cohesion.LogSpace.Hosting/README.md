@@ -1,3 +1,3 @@
 # LogSpace Hosting
 
-Authenticated OTLP/HTTP JSON log ingest on private HTTPS 4318, query/control-plane on private HTTPS 8443, and append-only mounted storage. See [Overview](docs/OVERVIEW.md) and [Design](docs/DESIGN.md).
+The LogSpace runtime composition entry point. Its OTLP/HTTP JSON ingest and query handlers are internal and unregistered; the resource integration, `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel`, registers none of them. See [Overview](docs/OVERVIEW.md) and [Design](docs/DESIGN.md).

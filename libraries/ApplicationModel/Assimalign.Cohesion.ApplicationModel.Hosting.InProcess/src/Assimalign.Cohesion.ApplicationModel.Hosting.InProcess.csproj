@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Hosting.InProcess</RootNamespace>
+		<Description>Cohesion application model hosting for the in-process platform: the gateway client a resource instance uses when its gateway runs it inside the gateway's own process, which publishes through the gateway's in-process endpoint and opens the instance's control plane to the gateway's direct calls.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Protocol" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+	</ItemGroup>
+</Project>

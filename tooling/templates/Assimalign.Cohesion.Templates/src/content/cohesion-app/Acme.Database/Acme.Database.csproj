@@ -1,9 +1,7 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Database">
-  <!-- An ordinary executable: Program.cs defines the schema in C#. Sdk.Database defaults: endpoint `db`, endpoint `admin`
-       (the Database default control plane: probes + commands), mount `data`, StatefulSet, replicas 1. -->
+  <!-- An ordinary executable: Program.cs defines the schema in C#. The Database area has no application-model
+       integration yet, so this application runs unmanaged beside the gateway's resources. -->
   <PropertyGroup>
-    <CohesionResourceName>acme-database</CohesionResourceName>
-    <CohesionApplicationModel>enabled</CohesionApplicationModel>   <!-- referenced by Acme.Api and Acme.Gateway -->
     <!-- Keeps the Database engine's EventSource tracing in a NativeAOT or trimmed publish, so dotnet-trace,
          dotnet-counters and the log forwarder still receive its events. The .NET SDK default removes EventSource
          support from such builds; delete this line to accept that default. -->

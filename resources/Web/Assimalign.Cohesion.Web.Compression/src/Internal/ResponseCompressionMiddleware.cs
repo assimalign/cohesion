@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -36,7 +37,9 @@ namespace Assimalign.Cohesion.Web.Compression.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
 {
-    private readonly ResponseCompressionOptions _options;
+    private readonly bool _enableForHttps;
+    private readonly int _minimumResponseSizeBytes;
+    private readonly CompressionLevel _level;
     private readonly CompressibleMimeMatcher _matcher;
     private readonly string[] _serverCodings;
 
@@ -44,7 +47,11 @@ internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _options = options;
+        // A snapshot: every value is read here, so the registered middleware never observes a later
+        // change to the options object.
+        _enableForHttps = options.EnableForHttps;
+        _minimumResponseSizeBytes = options.MinimumResponseSizeBytes;
+        _level = options.Level;
         _matcher = CompressibleMimeMatcher.Create(options.MimeTypes);
         _serverCodings = BuildServerCodings(options);
     }
@@ -57,7 +64,7 @@ internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
 
         // BREACH (CVE-2013-3587): do not compress dynamic content over HTTPS unless opted in. The
         // effective scheme is the client-facing one, so TLS terminated at a trusted proxy counts.
-        if (context.EffectiveScheme == HttpScheme.Https && !_options.EnableForHttps)
+        if (context.EffectiveScheme == HttpScheme.Https && !_enableForHttps)
         {
             await next.Invoke(context).ConfigureAwait(false);
             return;
@@ -86,7 +93,7 @@ internal sealed class ResponseCompressionMiddleware : IWebApplicationMiddleware
         ResponseCompressionFeature feature = new();
         context.Features.Set<IResponseCompressionFeature>(feature);
 
-        CompressionBodyStream body = new(originalBody, context.Response, _options, _matcher, feature, coding, identityAcceptable);
+        CompressionBodyStream body = new(originalBody, context.Response, _minimumResponseSizeBytes, _level, _matcher, feature, coding, identityAcceptable);
         context.Response.Body = body;
 
         try

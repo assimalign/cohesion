@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,16 +61,7 @@ public sealed class SchedulerApplication : Host<SchedulerApplicationContext>, IS
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(SchedulerApplication).Assembly;
-        return new SchedulerApplicationBuilder(args, resourceAssembly);
-    }
-
-    internal static SchedulerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-
-        return new SchedulerApplicationBuilder(args, resourceAssembly);
+        return new SchedulerApplicationBuilder(args);
     }
 
     private sealed class DebugView

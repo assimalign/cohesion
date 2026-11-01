@@ -35,22 +35,23 @@
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.Rezolvr.Hosting/tests/Assimalign.Cohesion.Rezolvr.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/" />
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/src/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel/tests/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/Rezolvr/refs/" >
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/src/Assimalign.Cohesion.Rezolvr.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.Rezolvr.ApplicationModel/tests/Assimalign.Cohesion.Rezolvr.ApplicationModel.Tests.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/Assimalign.Cohesion.ApplicationModel.Hosting.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj" />
 	</Folder>
 	<Folder Name="/Rezolvr/Assimalign.Cohesion.Rezolvr.Refs/">
 		<File Path="Assimalign.Cohesion.Rezolvr.Refs/Directory.Build.props" />

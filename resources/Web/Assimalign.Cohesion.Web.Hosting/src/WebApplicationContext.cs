@@ -56,8 +56,7 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
     /// Gets the application's content root: the directory configuration files are read from.
     /// </summary>
     /// <remarks>
-    /// <see cref="WebApplicationOptions.ContentRootPath"/> when set; otherwise the ambient resource
-    /// context's content root for an orchestrated resource; otherwise
+    /// <see cref="WebApplicationOptions.ContentRootPath"/> when set; otherwise
     /// <see cref="AppContext.BaseDirectory"/>.
     /// </remarks>
     public FileSystemPath? ContentRootPath { get; init; }
@@ -91,6 +90,8 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
     public IEnumerable<IWebApplicationMiddleware> Middleware => ServiceProvider.GetRequiredService<IEnumerable<IWebApplicationMiddleware>>();
 
     public IEnumerable<IHttpFeature> Features => ServiceProvider.GetRequiredService<IEnumerable<IHttpFeature>>();
+
+    public IEnumerable<IWebApplicationSetting> Settings => ServiceProvider.GetRequiredService<IEnumerable<IWebApplicationSetting>>();
 
     // Pipeline composition owns these resources until final application teardown.
     internal void RegisterForDisposal(IDisposable resource)
@@ -199,6 +200,5 @@ public sealed class WebApplicationContext : HostContext, IWebApplicationContext
         public FileSystemPath? WebRootPath => _target.WebRootPath;
         public HostId HostId => _target.HostId;
         public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

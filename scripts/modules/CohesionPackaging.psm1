@@ -64,9 +64,12 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/ApplicationModel
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel'
+    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition'
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway'
-    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane'
     'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess'
+    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting'
+    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess'
+    'libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol'
 
     # libraries/Cache
     'libraries/Cache/Assimalign.Cohesion.Caching'
@@ -127,9 +130,6 @@ $script:CohesionReleaseLibrary = @(
 
     # libraries/Hosting
     'libraries/Hosting/Assimalign.Cohesion.Hosting'
-    'libraries/Hosting/Assimalign.Cohesion.Hosting.Health'
-    'libraries/Hosting/Assimalign.Cohesion.Hosting.Resources'
-    'libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry'
 
     # libraries/Http
     'libraries/Http/Assimalign.Cohesion.Http'
@@ -203,19 +203,17 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/ApiManager
     'resources/ApiManager/Assimalign.Cohesion.ApiManager'
-    'resources/ApiManager/Assimalign.Cohesion.ApiManager.ApplicationModel'
     'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting'
+    'resources/ApiManager/Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel'
 
     # resources/ConfigurationStore
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore'
-    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel'
-    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Client'
     'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting'
+    'resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel'
 
     # resources/Database
     'resources/Database/Assimalign.Cohesion.Database'
-    'resources/Database/Assimalign.Cohesion.Database.ApplicationModel'
     'resources/Database/Assimalign.Cohesion.Database.Blob'
     'resources/Database/Assimalign.Cohesion.Database.Blob.Client'
     'resources/Database/Assimalign.Cohesion.Database.Blob.Protocol'
@@ -251,83 +249,81 @@ $script:CohesionReleaseLibrary = @(
 
     # resources/EmailHub
     'resources/EmailHub/Assimalign.Cohesion.EmailHub'
-    'resources/EmailHub/Assimalign.Cohesion.EmailHub.ApplicationModel'
     'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting'
+    'resources/EmailHub/Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel'
 
     # resources/EventHub
     'resources/EventHub/Assimalign.Cohesion.EventHub'
-    'resources/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel'
     'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting'
+    'resources/EventHub/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel'
 
     # resources/IdentityHub
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub'
-    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting'
+    'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel'
     'resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Models'
 
     # resources/IoTHub
     'resources/IoTHub/Assimalign.Cohesion.IoTHub'
-    'resources/IoTHub/Assimalign.Cohesion.IoTHub.ApplicationModel'
     'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting'
+    'resources/IoTHub/Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel'
 
     # resources/LoadBalancer
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer'
-    'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.ApplicationModel'
     'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting'
+    'resources/LoadBalancer/Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel'
 
     # resources/LogSpace
     'resources/LogSpace/Assimalign.Cohesion.LogSpace'
-    'resources/LogSpace/Assimalign.Cohesion.LogSpace.ApplicationModel'
     'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting'
+    'resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel'
 
     # resources/MediaHub
     'resources/MediaHub/Assimalign.Cohesion.MediaHub'
-    'resources/MediaHub/Assimalign.Cohesion.MediaHub.ApplicationModel'
     'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting'
+    'resources/MediaHub/Assimalign.Cohesion.MediaHub.Hosting.ApplicationModel'
 
     # resources/MessageHub
     'resources/MessageHub/Assimalign.Cohesion.MessageHub'
-    'resources/MessageHub/Assimalign.Cohesion.MessageHub.ApplicationModel'
     'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting'
+    'resources/MessageHub/Assimalign.Cohesion.MessageHub.Hosting.ApplicationModel'
 
     # resources/NatGateway
     'resources/NatGateway/Assimalign.Cohesion.NatGateway'
-    'resources/NatGateway/Assimalign.Cohesion.NatGateway.ApplicationModel'
     'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting'
+    'resources/NatGateway/Assimalign.Cohesion.NatGateway.Hosting.ApplicationModel'
 
     # resources/NotificationHub
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub'
-    'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.ApplicationModel'
     'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting'
+    'resources/NotificationHub/Assimalign.Cohesion.NotificationHub.Hosting.ApplicationModel'
 
     # resources/Rezolvr
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr'
-    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel'
     'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting'
+    'resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel'
 
     # resources/Scheduler
     'resources/Scheduler/Assimalign.Cohesion.Scheduler'
-    'resources/Scheduler/Assimalign.Cohesion.Scheduler.ApplicationModel'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Cron'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting'
+    'resources/Scheduler/Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel'
     'resources/Scheduler/Assimalign.Cohesion.Scheduler.Timer'
 
     # resources/SecretStore
     'resources/SecretStore/Assimalign.Cohesion.SecretStore'
-    'resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel'
-    'resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Client'
     'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting'
+    'resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel'
 
     # resources/VpnGateway
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway'
-    'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel'
     'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting'
+    'resources/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel'
 
     # resources/Web
     'resources/Web/Assimalign.Cohesion.Web'
     'resources/Web/Assimalign.Cohesion.Web.Antiforgery'
-    'resources/Web/Assimalign.Cohesion.Web.ApplicationModel'
     'resources/Web/Assimalign.Cohesion.Web.Api'
     'resources/Web/Assimalign.Cohesion.Web.Authentication'
     'resources/Web/Assimalign.Cohesion.Web.Authentication.Bearer'
@@ -345,6 +341,7 @@ $script:CohesionReleaseLibrary = @(
     'resources/Web/Assimalign.Cohesion.Web.Health'
     'resources/Web/Assimalign.Cohesion.Web.HostFiltering'
     'resources/Web/Assimalign.Cohesion.Web.Hosting'
+    'resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel'
     'resources/Web/Assimalign.Cohesion.Web.HttpsPolicy'
     'resources/Web/Assimalign.Cohesion.Web.OpenApi'
     'resources/Web/Assimalign.Cohesion.Web.ProblemDetails'
@@ -373,7 +370,6 @@ $script:CohesionReleaseLibrary = @(
 # sdks/<name>/Tasks/src/<name>.Tasks.csproj and packs as the NuGet id <name>.
 $script:CohesionReleaseSdk = @(
     'Assimalign.Cohesion.Sdk'
-    'Assimalign.Cohesion.Sdk.ApplicationModel'
     'Assimalign.Cohesion.Sdk.Web'
     'Assimalign.Cohesion.Sdk.Database'
     'Assimalign.Cohesion.Sdk.Gateway'
@@ -474,36 +470,10 @@ $script:CohesionCiMatrixExclusion = [ordered]@{
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Api/Acme.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Database/Acme.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-app/Acme.Gateway/Acme.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-composite/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-configurationstore/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-database/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-gateway/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-identityhub/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Gateway/Example.Gateway/Example.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Identity/Example.Identity.Gateway/Example.Identity.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Identity/Example.Identity.IdentityHub/Example.Identity.IdentityHub.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Networking/Example.Networking.Gateway/Example.Networking.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Networking/Example.Networking.Rezolvr/Example.Networking.Rezolvr.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Networking/Example.Networking.VpnGateway/Example.Networking.VpnGateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.ConfigurationStore/Example.Platform.ConfigurationStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.Gateway/Example.Platform.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.LogSpace/Example.Platform.LogSpace.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Platform/Example.Platform.SecretStore/Example.Platform.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Api/Example.AppA.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Database/Example.AppA.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Gateway/Example.AppA.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.SecretStore/Example.AppA.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppA/Example.AppA.Spa/Example.AppA.Spa.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Api/Example.AppB.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Database/Example.AppB.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Gateway/Example.AppB.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.SecretStore/Example.AppB.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppB/Example.AppB.Spa/Example.AppB.Spa.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Api/Example.AppC.Api.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Database/Example.AppC.Database.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Gateway/Example.AppC.Gateway.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.SecretStore/Example.AppC.SecretStore.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
-    'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-landing-zone/Zones/AppC/Example.AppC.Spa/Example.AppC.Spa.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-rezolvr/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-secretstore/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'
     'tooling/templates/Assimalign.Cohesion.Templates/src/content/cohesion-spa/CohesionProject.csproj' = 'dotnet new template content; instantiated and built by tooling-templates.yml'

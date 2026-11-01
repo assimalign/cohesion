@@ -1,14 +1,8 @@
 using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Rezolvr;
 using Assimalign.Cohesion.Rezolvr.Hosting.Internal;
 
@@ -27,12 +21,10 @@ namespace Assimalign.Cohesion.Rezolvr.Hosting;
 public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
 {
     private readonly RezolvrApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
 
     private bool _isBuilt;
 
-    internal RezolvrApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal RezolvrApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -41,43 +33,8 @@ public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered Rezolvr control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
 
-            // One record repository backs the control-plane command handlers and the admin endpoint.
-            ResourceContext resourceContext = _resourceContext;
-            Services.AddSingleton<RezolvrRecordRepository>(_ =>
-            {
-                string fallback = Path.GetFullPath(Path.Combine(resourceContext.ContentRootPath, "data"));
-                ResourceMount mount = resourceContext.GetMount("data", fallback);
-                return string.IsNullOrWhiteSpace(mount.Path)
-                    ? throw new InvalidOperationException("The Rezolvr data directory must expose a file-system path.")
-                    : new RezolvrRecordRepository(mount.Path);
-            });
-            foreach (string kind in _controlPlane.AcceptedCommandKinds)
-            {
-                if (kind is RezolvrResourceCommandHandler.AddARecord or RezolvrResourceCommandHandler.AddCnameRecord)
-                {
-                    Services.AddSingleton<IResourceCommandHandler>(serviceProvider => new RezolvrResourceCommandHandler(
-                        kind, serviceProvider.GetRequiredService<RezolvrRecordRepository>()));
-                }
-            }
-        }
-
-        _context = new RezolvrApplicationContext(_resourceContext);
+        _context = new RezolvrApplicationContext();
     }
 
     /// <summary>
@@ -142,19 +99,6 @@ public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The Rezolvr application has already been built.");
 
-        if (_controlPlane is not null)
-        {
-            _controlPlane.AddHealthContributor(_context);
-            if (_resourceContext!.Endpoints.TryGetValue("admin", out Uri? endpoint))
-            {
-                _controlPlane.ObserveEndpoint("admin", endpoint);
-
-                // Registered after every AddService call, so the endpoint starts last and stops first.
-                Services.AddSingleton<IHostService>(serviceProvider => new RezolvrControlPlaneEndpointService(
-                    endpoint, _controlPlane, _resourceContext, _context, serviceProvider.GetRequiredService<RezolvrRecordRepository>()));
-            }
-        }
-
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<IRezolvrApplicationContext>(_context);
 
@@ -172,19 +116,7 @@ public sealed class RezolvrApplicationBuilder : IRezolvrApplicationBuilder
         {
             _context.ResolveHostedServices();
 
-            var application = new RezolvrApplication(new RezolvrApplicationOptions(), _context);
-            if (_controlPlane is not null)
-            {
-                foreach (IResourceCommandHandler handler in
-                    _context.ServiceProvider.GetRequiredService<IEnumerable<IResourceCommandHandler>>())
-                {
-                    _controlPlane.RegisterCommandHandler(handler);
-                }
-
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
+            return new RezolvrApplication(new RezolvrApplicationOptions(), _context);
         }
         catch (Exception exception)
         {

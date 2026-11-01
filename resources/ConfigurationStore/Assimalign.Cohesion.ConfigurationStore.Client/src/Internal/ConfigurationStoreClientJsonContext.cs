@@ -8,7 +8,6 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client.Internal;
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(List<string>), TypeInfoPropertyName = "NamespaceNames")]
 [JsonSerializable(typeof(Dictionary<string, string?>), TypeInfoPropertyName = "NamespaceValues")]
-[JsonSerializable(typeof(ResourceCommand))]
 internal sealed partial class ConfigurationStoreClientJsonContext : JsonSerializerContext
 {
     private sealed class DebugView

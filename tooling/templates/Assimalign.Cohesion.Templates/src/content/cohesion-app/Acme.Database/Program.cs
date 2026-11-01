@@ -1,6 +1,5 @@
 using System;
-
-using Acme.Database;
+using System.IO;
 
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
@@ -9,11 +8,13 @@ using Assimalign.Cohesion.Hosting;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
+// The SQL engine, named once. Its callback runs while the application is built, so configuration
+// (appsettings.json, environment variables, --Database:DataPath=... or --Database:Endpoint=...
+// arguments) has its final values here. Acme.Api reads the same endpoint from its own configuration.
 builder.AddSql("acme-sql", sql =>
 {
-    sql.Options.RootPath = Resource.Mounts.Data.Path
-        ?? throw new InvalidOperationException("The database data mount must have a materialized path.");
-    sql.AddServer(server => server.Listen(Resource.Endpoints.Db));
+    sql.Options.RootPath = builder.Configuration["Database:DataPath"] ?? Path.Combine(AppContext.BaseDirectory, "data");
+    sql.AddServer(server => server.Listen(new Uri(builder.Configuration["Database:Endpoint"] ?? "cohesion-db://localhost:5740")));
 
     // The engine's build creates the database when it does not exist and applies this schema
     // before the server accepts its first connection. Every member the table stores is declared:

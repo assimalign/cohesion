@@ -11,7 +11,7 @@ using Assimalign.Cohesion.Database.Blob;
 using Assimalign.Cohesion.Database.Protocol;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Web.Health;
 
 using Shouldly;
 
@@ -55,19 +55,19 @@ public sealed class DatabaseWorkerHealthTests
         var applicationBuilder = new DatabaseApplicationBuilder(options);
         applicationBuilder.AddEngine(engine);
         await using var application = applicationBuilder.Build();
-        HealthContribution before = await application.Context.CheckAsync(CancellationToken.None);
+        HealthCheckResult before = await application.Context.CheckAsync(CancellationToken.None);
 
         // Act: the worker's pass fails for the database, and the engine base folds it as Faulted.
         worker.Failure = new IOException("Injected page write failure");
         bool failed = !worker.RunIteration(CancellationToken.None);
         var faulted = engine.State;
-        HealthContribution degraded = await application.Context.CheckAsync(CancellationToken.None);
+        HealthCheckResult degraded = await application.Context.CheckAsync(CancellationToken.None);
 
         worker.Failure = null;
         Thread.Sleep(DatabaseEngineWorker.FailureBackoff);
         bool recovered = worker.RunIteration(CancellationToken.None) && worker.Fault is null;
         var running = engine.State;
-        HealthContribution healthy = await application.Context.CheckAsync(CancellationToken.None);
+        HealthCheckResult healthy = await application.Context.CheckAsync(CancellationToken.None);
 
         // Assert: degraded names the worker and the type of its failure, and the data carries it;
         // the failure's message, which can carry file paths, stays out of the unauthenticated
@@ -107,10 +107,10 @@ public sealed class DatabaseWorkerHealthTests
 
         // Act
         engine.Offline = ["app"];
-        HealthContribution unhealthy = await application.Context.CheckAsync(CancellationToken.None);
+        HealthCheckResult unhealthy = await application.Context.CheckAsync(CancellationToken.None);
 
         engine.Offline = [];
-        HealthContribution reopened = await application.Context.CheckAsync(CancellationToken.None);
+        HealthCheckResult reopened = await application.Context.CheckAsync(CancellationToken.None);
 
         // Assert
         unhealthy.Status.ShouldBe(HealthStatus.Unhealthy);
@@ -164,7 +164,7 @@ public sealed class DatabaseWorkerHealthTests
         worker.Failure = new IOException("Injected page write failure");
         worker.RunIteration(token);
         await ((IHost)application).StartAsync(token);
-        HealthContribution degraded = await application.Context.CheckAsync(token);
+        HealthCheckResult degraded = await application.Context.CheckAsync(token);
         var served = await HandshakeAsync(listener, "healthy", listContainer: true, token);
         var refused = await HandshakeAsync(listener, "failing", listContainer: false, token);
         await ((IHost)application).StopAsync(token);
@@ -181,6 +181,98 @@ public sealed class DatabaseWorkerHealthTests
         refused.Code.ShouldBe(ProtocolErrorCode.Unavailable);
         refused.Message.ShouldNotBeNull().ShouldStartWith("CB06003", Case.Sensitive);
         refused.Listed.ShouldBeNull();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: aggregates distinct engine states and worker inventory")]
+    public async Task CheckAsync_WithFaultedServerEngine_ShouldReportDegradedWithWorkerInventory()
+    {
+        // Arrange: an engine fronted by a server; the context health contribution must count the
+        // data machine once while still discovering server engines. A pass of the engine's worker
+        // fails, so the engine base folds the engine as Faulted.
+        var worker = new RecordingEngineWorker(
+            "sql/wal-flush",
+            DatabaseEngineWorkerKind.WriteAheadFlush,
+            TimeSpan.FromMilliseconds(25));
+        await using var engine = new RecordingEngine("sql");
+        engine.AddWorker(worker);
+        engine.AddServer(owner => new RecordingServer([], engine: owner));
+        worker.Failure = new InvalidOperationException("Injected flush failure");
+        worker.RunIteration(CancellationToken.None).ShouldBeFalse();
+        var applicationBuilder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
+
+        // Act
+        HealthCheckResult contribution = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Assert
+        contribution.Status.ShouldBe(HealthStatus.Degraded);
+        IReadOnlyDictionary<string, object> data = contribution.Data.ShouldNotBeNull();
+        data["engineCount"].ShouldBe(1);
+        data["workerCount"].ShouldBe(1);
+        data["engine.0.name"].ShouldBe("sql");
+        data["engine.0.state"].ShouldBe(nameof(EngineState.Faulted));
+        data["engine.0.worker.0.name"].ShouldBe("sql/wal-flush");
+        data["engine.0.worker.0.kind"].ShouldBe(nameof(DatabaseEngineWorkerKind.WriteAheadFlush));
+    }
+
+    /// <summary>
+    /// A database goes offline (a commit's journal fsync failed): it refuses every request while
+    /// its engine keeps running. The application's health is unhealthy and names the database, so
+    /// an operator or an orchestrator acting on health learns of it; reopening the database brings
+    /// health back (#1243 review). Until phase 4 of the concrete-types plan the test failed a real
+    /// SQL engine's fsync through the model's fault-injecting storage strategy, internal since
+    /// (D9); the engine double reports the offline database the real engine lists, and the SQL
+    /// model's own suites prove the real engine lists it.
+    /// </summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a database offline after a failed fsync is unhealthy until reopened")]
+    public async Task CheckAsync_WithDatabaseOfflineAfterFailedFsync_ShouldReportUnhealthyUntilReopened()
+    {
+        // Arrange: a running engine whose database the test takes offline.
+        var engine = new RecordingEngine("sql");
+        var options = new DatabaseApplicationOptions();
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
+        HealthCheckResult before = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Act: the commit's journal fsync fails, and the engine lists the database offline until
+        // it is reopened.
+        engine.Offline = ["app"];
+        HealthCheckResult offline = await application.Context.CheckAsync(CancellationToken.None);
+        engine.Offline = [];
+        HealthCheckResult reopened = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Assert
+        before.Status.ShouldBe(HealthStatus.Healthy);
+        offline.Status.ShouldBe(HealthStatus.Unhealthy);
+        offline.Description.ShouldNotBeNull().ShouldContain("sql/app");
+        offline.Description.ShouldContain("A device operation of their storage failed");
+        IReadOnlyDictionary<string, object> data = offline.Data.ShouldNotBeNull();
+        data["engine.0.state"].ShouldBe(nameof(EngineState.Running));
+        data["engine.0.offlineDatabaseCount"].ShouldBe(1);
+        data["engine.0.offlineDatabases"].ShouldBe("app");
+        data["offlineDatabaseCount"].ShouldBe(1);
+        reopened.Status.ShouldBe(HealthStatus.Healthy);
+        reopened.Data.ShouldNotBeNull()["offlineDatabaseCount"].ShouldBe(0);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Context health: a disposed engine is unhealthy")]
+    public async Task CheckAsync_WithDisposedEngine_ShouldReportUnhealthy()
+    {
+        // Arrange: an engine disposed by its owner while the application still borrows it.
+        var engine = new RecordingEngine();
+        await engine.DisposeAsync();
+        var options = new DatabaseApplicationOptions();
+        var applicationBuilder = new DatabaseApplicationBuilder(options);
+        applicationBuilder.AddEngine(engine);
+        await using var application = applicationBuilder.Build();
+
+        // Act
+        HealthCheckResult contribution = await application.Context.CheckAsync(CancellationToken.None);
+
+        // Assert
+        contribution.Status.ShouldBe(HealthStatus.Unhealthy);
     }
 
     // Starts a session of the database on the Blob server behind the listener, and lists its

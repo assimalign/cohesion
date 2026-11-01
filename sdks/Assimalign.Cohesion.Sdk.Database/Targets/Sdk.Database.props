@@ -6,8 +6,6 @@
 		The resource's domain composition remains in its Program.cs.
 	-->
 	<PropertyGroup>
-		<CohesionResourceApplicationModel Condition="'$(CohesionResourceApplicationModel)' == ''">Assimalign.Cohesion.Database.ApplicationModel</CohesionResourceApplicationModel>
-		<CohesionResourceControlPlaneType Condition="'$(CohesionResourceControlPlaneType)' == ''">Assimalign.Cohesion.ApplicationModel.DatabaseResourceControlPlane</CohesionResourceControlPlaneType>
 		<CohesionResourceKind Condition="'$(CohesionResourceKind)' == ''">Database</CohesionResourceKind>
 		<CohesionControlPlaneEndpoint Condition="'$(CohesionControlPlaneEndpoint)' == ''">admin</CohesionControlPlaneEndpoint>
 		<CohesionControlPlanePath Condition="'$(CohesionControlPlanePath)' == ''">/cohesion/v1</CohesionControlPlanePath>

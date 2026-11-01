@@ -79,8 +79,11 @@ public sealed class StaticFilesEventSourceTests
             }
             else
             {
+                // Registering builds the middleware; the web root is mounted, and reported, only when the
+                // nested branch composes it.
+                factory.Builder.Services.AddStaticFiles(files => files.Options.RequestPath = new HttpPath("/assets/"));
                 factory.Application.Map("/branch", branch => branch.UseWhen(_ => true,
-                    nested => nested.UseStaticFiles(options => options.RequestPath = new HttpPath("/assets/"))));
+                    nested => nested.UseStaticFiles()));
             }
 
             string expectedRoot = factory.Application.Context.WebRootPath?.ToString() ?? string.Empty;

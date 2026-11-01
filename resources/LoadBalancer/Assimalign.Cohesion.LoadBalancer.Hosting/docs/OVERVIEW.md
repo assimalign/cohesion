@@ -1,8 +1,8 @@
 # Assimalign.Cohesion.LoadBalancer.Hosting
 
-`LoadBalancerApplication.CreateBuilder(args)` returns the public concrete `LoadBalancerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. Enabled resources discover their area control plane and serve health, readiness, liveness, endpoint discovery, stop, and command envelopes on the ambient `http` endpoint (http). The plain host opens no listener without registration.
+`LoadBalancerApplication.CreateBuilder(args)` returns the public concrete `LoadBalancerApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
-Managed namespaced routes use ES256 bootstrap verification. The private Web implementation stays out of consumer reference packs. Domain service behavior and command kinds remain deferred.
+Domain service behavior remains deferred.
 
 See [DESIGN.md](DESIGN.md).
 

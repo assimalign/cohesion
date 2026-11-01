@@ -5,14 +5,16 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.CookiePolicy;
 
 /// <summary>
-/// Configures the cookie policy that <c>UseCookiePolicy</c> applies to every cookie the application
-/// appends to a response: the attribute floors, the RFC 6265bis requirements, the lifetime cap, and
-/// consent gating for non-essential cookies.
+/// Configures the cookie policy that <c>builder.Services.AddCookiePolicy(policy =&gt; ...)</c> registers
+/// (<see cref="CookiePolicyBuilder.Options"/>) and <c>UseCookiePolicy()</c> places, applied to every
+/// cookie the application appends to a response: the attribute floors, the RFC 6265bis requirements,
+/// the lifetime cap, and consent gating for non-essential cookies.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>UseCookiePolicy</c> validates the options and copies them once, at registration. Changing this
-/// instance afterwards has no effect, and nothing is resolved per request.
+/// <see cref="CookiePolicyBuilder.Build"/>, which <c>AddCookiePolicy</c> calls when it registers the
+/// policy, validates the options and copies them once. Changing this instance afterwards has no effect,
+/// and nothing is resolved per request.
 /// </para>
 /// <para>
 /// The policy judges a cookie when it is appended and applies its rules in this order:
@@ -127,7 +129,7 @@ public sealed class CookiePolicyOptions
     /// <para>
     /// The predicate and the consent cookie options configure the <see cref="ICookieConsentFeature"/>
     /// the policy installs. They do not apply to an exchange that already carries a consent feature when
-    /// the policy runs: one an outer <c>UseCookiePolicy</c> installed, or one the application supplied.
+    /// the policy runs: one an outer cookie policy installed, or one the application supplied.
     /// </para>
     /// </remarks>
     public Func<IHttpContext, bool>? CheckConsentNeeded { get; set; }
@@ -139,7 +141,7 @@ public sealed class CookiePolicyOptions
     /// <remarks>
     /// Assigning an out-of-grammar <see cref="string"/> throws <see cref="ArgumentException"/>
     /// from the <see cref="HttpCookieName"/> conversion, before the setter runs.
-    /// <c>UseCookiePolicy</c> refuses <see langword="default"/> at registration.
+    /// <see cref="CookiePolicyBuilder.Build"/> refuses <see langword="default"/> at registration.
     /// </remarks>
     public HttpCookieName ConsentCookieName { get; set; } = DefaultConsentCookieName;
 
@@ -151,7 +153,7 @@ public sealed class CookiePolicyOptions
     /// <remarks>
     /// Assigning an out-of-grammar <see cref="string"/> throws <see cref="ArgumentException"/>
     /// from the <see cref="HttpCookieValue"/> conversion, before the setter runs.
-    /// <c>UseCookiePolicy</c> refuses <see langword="default"/> and an empty value at registration;
+    /// <see cref="CookiePolicyBuilder.Build"/> refuses <see langword="default"/> and an empty value at registration;
     /// the cookie-value grammar permits an empty string, but a consent record must be non-empty.
     /// </remarks>
     public HttpCookieValue ConsentCookieValue { get; set; } = DefaultConsentCookieValue;

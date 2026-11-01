@@ -30,7 +30,8 @@ public class CookiePolicyProtocolUpgradeTests
     {
         // Arrange — the default server registers the upgrade interceptor, and the policy adds Secure.
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options => options.Secure = CookieSecurePolicy.Always);
+        factory.Builder.Services.AddCookiePolicy(policy => policy.Options.Secure = CookieSecurePolicy.Always);
+        factory.Application.UseCookiePolicy();
         factory.Application.Use(async (context, next) =>
         {
             context.Response.Cookies.Add(new HttpCookie("a", "1"));

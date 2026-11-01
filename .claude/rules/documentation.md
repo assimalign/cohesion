@@ -136,9 +136,9 @@ flowchart LR
     Auth -.->|"COHRES001 ✗"| Hosting
 ```
 
-Web.Hosting references the Web root and routing feature; its health and resource integrations
-live inside the module (owner decision 57, 2026-10-13). Solid edges are the references the area
-permits; the dotted edge is the one `COHRES001` rejects —
+Web.Hosting references the Web root and routing feature; its resource integration is the separate
+`Web.Hosting.ApplicationModel` package, which references the module. Solid edges are the
+references the area permits; the dotted edge is the one `COHRES001` rejects —
 a feature library may never reference its area's runtime module, which the surrounding prose has
 to say in words as well.
 
@@ -171,8 +171,8 @@ editing that section, never as a standalone sweep. Don't add new box art for gra
 [`docs/DEPENDENCIES.md`](../../docs/DEPENDENCIES.md) is the repository-wide reference graph: every
 project, every declared reference, an area roll-up, and a fan-in ranking. It is **generated** by
 reading the csprojs statically — no restore, no MSBuild evaluation — so it runs in seconds and
-reports exactly what the project files declare, which is the thing `COHRES001`–`COHRES004`,
-`COHAM001`, and `COHLIB001` are written against.
+reports exactly what the project files declare, which is the thing `COHRES001`–`COHRES004` and
+`COHLIB001` are written against.
 
 > **When a dependency is added or removed, rerun the generator in the same commit.**
 

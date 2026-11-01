@@ -30,23 +30,24 @@
 	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.EventHub.Hosting/tests/Assimalign.Cohesion.EventHub.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/" />
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/src/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.EventHub.Hosting.ApplicationModel/tests/Assimalign.Cohesion.EventHub.Hosting.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/EventHub/refs/" >
 		<Project Path="../../libraries/Connections/Assimalign.Cohesion.Connections/src/Assimalign.Cohesion.Connections.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
-	</Folder>
-	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.EventHub.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.EventHub.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.EventHub.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.EventHub.ApplicationModel/src/Assimalign.Cohesion.EventHub.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.EventHub.ApplicationModel/tests/Assimalign.Cohesion.EventHub.ApplicationModel.Tests.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/Assimalign.Cohesion.ApplicationModel.Hosting.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj" />
 	</Folder>
 	<Folder Name="/EventHub/Assimalign.Cohesion.EventHub.Refs/">
 		<File Path="Assimalign.Cohesion.EventHub.Refs/Directory.Build.props" />

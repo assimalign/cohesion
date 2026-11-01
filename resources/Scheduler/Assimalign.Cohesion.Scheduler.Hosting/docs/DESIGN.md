@@ -1,22 +1,12 @@
 # Scheduler Hosting Design
 
-SchedulerApplication discovers an enabled resource registration from the entry assembly and builds the public concrete SchedulerApplication. The builder materializes user host services, validates every provider binding against the declared job registry, adds the resource control-plane listener when an ambient http endpoint exists, and finally adds the schedule execution service.
+The builder materializes user host services, validates every provider binding against the declared job registry, and finally adds the schedule execution service.
 
 The execution service snapshots schedules from every registered IScheduleProvider and runs their evaluation loops concurrently. It does not execute unbound jobs. On stop it cancels trigger waits, prevents new occurrences, and joins any occurrence already underway within the shared host shutdown budget.
 
-The private http listener serves public /healthz, /readyz, and /livez probes and their authenticated /cohesion/v1 equivalents. It also serves authenticated endpoint and command discovery and accepts /cohesion/v1/stop. Readiness stays unavailable until the outer Scheduler host reaches Started.
-
-Namespaced requests consult the resource's registered credential verifier first (`ResourceRuntime.TryGetCredentialVerifier`); `NoResult` falls through to the default application-key verifier, a thin configuration of the shared ES256 `JsonWebTokenValidator` with `ResourceCredentialProfile` constants (issuer = application, subject = gateway, audience = resource, 24-hour ceiling). The mapped caller must be a `Gateway` of the ambient application whose `Subject` is the ambient gateway; failures are 401 with a Bearer challenge, and an authentic caller for another audience or role is 403.
+The area's resource integration is `Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 `SchedulerApplication.CreateBuilder(args)` returns the public concrete `SchedulerApplicationBuilder`; its `Build()` returns the public `SchedulerApplication : Host<SchedulerApplicationContext>`. The public `SchedulerApplicationContext` implements `ISchedulerApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal.
-
-## HTTPS endpoint certificate contract (31t)
-
-The enabled resource's `http` listener consumes the shared Hosting.Resources endpoint certificate accessor. Endpoint metadata identifies an ordinary Secret mount (default `tls`), carrying one PEM leaf/private-key/chain document; existing hand-authored IdentityHub and LogSpace bundles retain the same format. Empty mounts are absent; malformed or multi-key bundles fail. TLS options are composed in Hosting from the returned leaf and chain, with no hosting-isolation exemptions or dependency changes. Plain application composition is unchanged.
-
-## Optional telemetry (31b)
-
-The registered resource constructor calls ResourceTelemetry.Configure using the invocation snapshot. With no gateway or telemetry endpoint, existing providers and hosted services are unchanged. When enabled, the shared Hosting.Telemetry sibling adds OTLP/HTTP JSON logging and a service registered before producers; reverse StopAsync drains producers before a flush bounded by five seconds and the host shutdown token. Logging remains composed only in Hosting. See libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md for ordering and protocol limits.
 
 ## Concrete composition (T10 / O34)
 
@@ -24,19 +14,8 @@ Background-work registration belongs to the concrete `SchedulerApplicationBuilde
 
 ## Dependency injection composition
 
-`SchedulerApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<SchedulerApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: telemetry registers in the builder constructor, so it starts first and stops last; the control-plane endpoint and then `SchedulerExecutionService` register in `Build`, so schedules run only after every other service has started and stop before any of them.
+`SchedulerApplicationBuilder.Services` is the application's one composition registry, created with `EnableDynamicCode = false`, `ValidateOnBuild = true`, and `ValidateScopes = true`. The module registers only factories and instances, so the provider stays reflection-free. Every lifecycle service is an `IHostService` registration: `AddService(IHostService)` registers the caller's instance, `AddService(Func<SchedulerApplicationContext, IHostService>)` registers a factory closed over the context, and a direct `Services.AddSingleton<IHostService>(...)` joins the lifecycle the same way. Order is registration order: `SchedulerExecutionService` registers in `Build`, so schedules run only after every other service has started and stop before any of them.
 
 `Build` closes registration (the container becomes read-only, and a second `Build` throws), creates the provider once, and resolves `IEnumerable<IHostService>` once into the snapshot the host reuses for every start, stop, and rollback pass. The application owns the provider: disposal stops the host, then disposes the provider, which disposes every factory-created service in reverse creation order while instance registrations stay with their callers. A failed `Build` disposes the provider before rethrowing. The concrete context exposes the provider as `ServiceProvider` to hosting-layer factories; the area root and its features never see it.
 
 Declared jobs are `IScheduleJob` registrations and schedule providers are `IScheduleProvider` registrations. The root verbs `AddJob` and `AddScheduleProvider` are explicit `ISchedulerApplicationBuilder` shims over those registrations, forwarding to public concrete counterparts that return the builder for chaining; the Cron and Timer packages therefore register through the dependency-free root contract while this module owns the container. Registration-time checks read the container, so `AddJob` still rejects a different job with a declared identifier and `AddScheduleProvider` a repeated instance. `Build` resolves both aggregates once, rejects conflicts that arrived through direct registrations, validates every schedule binding, and only then resolves the lifecycle services.
-
-
-## Factory implementation migration (#1465)
-
-Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
-owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
-where the caller previously accepted null or blank audiences, an ordinal audience-list match
-preserves those inputs locally. Existing validation guards remain in place. This package's
-public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
-signatures require rebuilding; the source and binary breaks are recorded in the JWT and
-DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.

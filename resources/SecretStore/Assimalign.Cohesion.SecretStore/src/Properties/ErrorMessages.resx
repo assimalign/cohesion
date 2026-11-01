@@ -15,7 +15,4 @@
   <data name="SeedPathInvalid" xml:space="preserve">
     <value>A secret seed path must not be empty or whitespace.</value>
   </data>
-  <data name="SeedPathReserved" xml:space="preserve">
-    <value>Secret path 'trusted-issuers.json' is reserved for the trust-grant document.</value>
-  </data>
 </root>

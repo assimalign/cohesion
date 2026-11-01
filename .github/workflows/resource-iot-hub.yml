@@ -5,6 +5,9 @@ on:
       - 'resources/IoTHub/**'
       - '!resources/IoTHub/**/*.slnx'
       - '!resources/IoTHub/**/*.md'
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
+      # change to the application model reruns the area.
+      - 'libraries/ApplicationModel/**'
       - '.github/workflows/resource-iot-hub.yml'        # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
       - '.github/actions/build/**'
@@ -51,8 +54,8 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.IoTHub',
-            'Assimalign.Cohesion.IoTHub.ApplicationModel',
-            'Assimalign.Cohesion.IoTHub.Hosting'
+            'Assimalign.Cohesion.IoTHub.Hosting',
+            'Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel'
         ]]
     steps:
       - uses: actions/checkout@v7

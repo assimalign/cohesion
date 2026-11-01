@@ -37,16 +37,11 @@ internal sealed class TemplateWorkspace : IDisposable
         _installed = true;
     }
 
-    internal async Task<string> InstantiateAsync(string template, string name, string? topology = null,
+    internal async Task<string> InstantiateAsync(string template, string name,
         string? applicationName = null, CancellationToken cancellationToken = default)
     {
         string output = Path.Combine(Root, Guid.NewGuid().ToString("N")[..8]);
         var arguments = new List<string> { "new", template, "-n", name, "-o", output };
-        if (topology is not null)
-        {
-            arguments.AddRange(["--topology", topology]);
-        }
-
         if (applicationName is not null)
         {
             arguments.AddRange(["--applicationName", applicationName]);

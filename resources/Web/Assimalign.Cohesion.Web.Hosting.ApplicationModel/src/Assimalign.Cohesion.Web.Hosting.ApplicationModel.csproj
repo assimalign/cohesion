@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Web.Hosting.ApplicationModel</RootNamespace>
+		<Description>Runs a Cohesion Web application as a managed resource instance: it joins the gateway that runs it through the client of the platform the resource opted into, and exposes its CORS policy as a resource state action.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Http" />
+	</ItemGroup>
+</Project>

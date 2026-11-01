@@ -3,8 +3,9 @@
 Transparent HTTP body compression for the Cohesion Web pipeline, both directions in one lean
 feature package. Cohesion serves HTTP directly in its in-process hosting story, so response
 compression (bandwidth, TTFB for JSON/HTML) and safe request decompression cannot be punted to a
-reverse proxy. This package fills that gap with two independent, builder-time-configured middleware
-verbs over the BCL codecs only — no external dependencies, AOT-safe.
+reverse proxy. This package fills that gap with two independent middleware, each configured where it
+is registered (`builder.Services.AddResponseCompression(...)`, `builder.Services.AddRequestDecompression(...)`)
+and placed by a parameterless `Use` verb, over the BCL codecs only — no external dependencies, AOT-safe.
 
 ## What it does
 
@@ -46,26 +47,38 @@ verbs over the BCL codecs only — no external dependencies, AOT-safe.
 
 ## Usage
 
+Configuration lives on the `Add` verbs only ("Add configures, Use places"). Each `Use` verb takes no
+arguments: it places the middleware its `Add` verb registered, or one with the defaults when the
+application registered none. When the application registers one more than once, the last
+registration wins.
+
 Compression size thresholds and decompressed-body limits must be nonnegative; zero is supported.
 Assignments below zero throw `ArgumentOutOfRangeException`. `MimeTypes` entries must be
-`type/subtype`, `type/*`, or `*/*`; invalid patterns throw `ArgumentException` from
-`UseResponseCompression`. Use `*/*` instead of the formerly accepted bare `*` alias.
+`type/subtype`, `type/*`, or `*/*`; invalid patterns, or both codings disabled, throw
+`ArgumentException` from `AddResponseCompression`. Use `*/*` instead of the formerly accepted bare `*`
+alias.
 
 ```csharp
-// Response compression — register early so it wraps the responses it should compress. With output
-// caching, register it after UseRouting and UseOutputCache instead (Web.Caching DESIGN, "Ordering").
-application.UseResponseCompression(options =>
-{
-    options.EnableForHttps = false;              // BREACH: default; enable only when safe
-    options.MinimumResponseSizeBytes = 1024;     // skip tiny responses
-    options.MimeTypes.Add("application/hal+json");
-});
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-// Request decompression — register after UseErrorHandling, before handlers read the body.
-application.UseRequestDecompression(options =>
+builder.Services.AddResponseCompression(compression =>
 {
-    options.MaxDecompressedSizeBytes = 50L * 1024 * 1024;
+    compression.Options.EnableForHttps = false;              // BREACH: default; enable only when safe
+    compression.Options.MinimumResponseSizeBytes = 1024;     // skip tiny responses
+    compression.Options.MimeTypes.Add("application/hal+json");
 });
+builder.Services.AddRequestDecompression(decompression =>
+    decompression.Options.MaxDecompressedSizeBytes = 50L * 1024 * 1024);
+
+WebApplication application = builder.Build();
+application.UseErrorHandling();
+
+// Response compression — place it early so it wraps the responses it should compress. With output
+// caching, place it after UseRouting and UseOutputCache instead (Web.Caching DESIGN, "Ordering").
+application.UseResponseCompression();
+
+// Request decompression — after UseErrorHandling, before handlers read the body.
+application.UseRequestDecompression();
 
 // Per-response opt-out from a handler:
 context.Features.Get<IResponseCompressionFeature>()?.Disable();
@@ -75,10 +88,12 @@ context.Features.Get<IResponseCompressionFeature>()?.Disable();
 
 | Type | Role |
 | --- | --- |
-| `ResponseCompressionExtensions` | `UseResponseCompression(...)` pipeline verb |
+| `ResponseCompressionBuilder` | What `builder.Services.AddResponseCompression(compression => ...)` configures: `Options`, and `Build()`, which validates and snapshots them |
+| `ResponseCompressionExtensions` | `UseResponseCompression()`, which places the registered middleware |
 | `ResponseCompressionOptions` | Codings, eligible media types, size threshold, level, `EnableForHttps` |
 | `IResponseCompressionFeature` | Per-exchange opt-out (`Disable()`) read at first write |
-| `RequestDecompressionExtensions` | `UseRequestDecompression(...)` pipeline verb |
+| `RequestDecompressionBuilder` | What `builder.Services.AddRequestDecompression(decompression => ...)` configures: `Options`, and `Build()`, which snapshots them |
+| `RequestDecompressionExtensions` | `UseRequestDecompression()`, which places the registered middleware |
 | `RequestDecompressionOptions` | The decompressed-size guard (`MaxDecompressedSizeBytes`) |
 
 ## Diagnostics

@@ -1,16 +1,18 @@
 using System;
 using System.Threading;
 
-using Assimalign.Cohesion.ApplicationModel;
+using Assimalign.Cohesion.ApplicationModel.Gateway;
+using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 
-IApplicationBuilder builder = Gateway.CreateBuilder(args);
-// Compose each CohesionResourceReference member with its area's verb over the generated Manifests
-// member, for example builder.AddWeb(Manifests.ExampleApi, new WebResourceOptions { Replicas = 2 })
-// for a referenced Example.Api project, or builder.AddResource(Manifests.ExampleWorker) for a kind
-// without an ApplicationModel package. Providers are explicit too: reference a store's
-// Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration package and register it here, for example
-// builder.UseSecretStore(secrets).AsCertificateAuthority().AsTrustStore().
-builder.UseGateway(args);
+// The in-process platform runs each resource's program on a thread of this process. It runs only the
+// programs registered here: reference a resource's project and register its entry point, for example
+// infrastructure.AddProgram("Web", "orders-api", Orders.Api.Program.MainAsync).
+await using var infrastructure = new InProcessInfrastructure();
+
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("__APPLICATION_NAME__").UseInProcess(infrastructure);
+
+// Declare the model: one AddResource(provider, name) per resource, with its dependencies and settings,
+// for example builder.AddResource("Web", "orders-api").WithSetting("Orders:PageSize", "25").
 
 using var shutdown = new CancellationTokenSource();
 ConsoleCancelEventHandler stop = (_, signal) =>

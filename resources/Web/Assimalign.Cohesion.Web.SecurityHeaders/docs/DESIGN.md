@@ -9,11 +9,12 @@ opener, or use the camera. None of them are emitted unless a server says so. Thi
 with safe defaults on every response and opt-in policies for the rest (issue #1058, owner decision 4
 of the HTTP/Web program: in v1).
 
-The package owns one pipeline verb (`UseSecurityHeaders`), one policy type, validating builders for the
-two fields with a real grammar (Content Security Policy and Permissions Policy), a framing policy, four
-enumerations, one sealed endpoint-metadata carrier with three convention verbs, and one typed feature
-that carries the per-request nonce. Everything is composed at builder time; request-time work is a
-presence check and an assignment per field, plus one string join when a policy carries a nonce.
+The package owns one registration verb (`AddSecurityHeaders`, generated over `SecurityHeadersBuilder`),
+one pipeline verb (`UseSecurityHeaders`), one policy type, validating builders for the two fields with a
+real grammar (Content Security Policy and Permissions Policy), a framing policy, four enumerations, one
+sealed endpoint-metadata carrier with three convention verbs, and one typed feature that carries the
+per-request nonce. Everything is composed at builder time; request-time work is a presence check and an
+assignment per field, plus one string join when a policy carries a nonce.
 
 ## Why a new package, and not HttpsPolicy
 
@@ -87,8 +88,9 @@ its status and body.
 The nonce stays the exchange's nonce. A callback failure faults the exchange before any bytes are sent;
 no partially applied security policy is sent as a fallback response.
 
-A custom server must publish `IWebResponseStartingFeature`. If it does not, `UseSecurityHeaders` throws
-an actionable `InvalidOperationException` instead of silently omitting protection.
+A custom server must publish `IWebResponseStartingFeature`. If it does not, the middleware
+`UseSecurityHeaders` placed throws an actionable `InvalidOperationException` when it runs, instead of
+silently omitting protection.
 
 ### Compatibility against 10.0.0-preview.1 (#1156)
 
@@ -154,10 +156,12 @@ IRouterConventionBuilder`):
 | `DisableSecurityHeaders()` | `SecurityHeadersMetadata.Disabled` | emit nothing |
 
 **Adjust is the common case.** "Like every other page, but partners may frame it" should not mean
-re-declaring the application's CSP on the endpoint. An adjustment receives a copy of the policy
-configured on the `UseSecurityHeaders` that serves the request, so it depends on that middleware. It
-is compiled the first time the middleware stages a response for the endpoint, then cached per metadata
-instance in that middleware; the route table bounds the cache. The cost is that an exception thrown by
+re-declaring the application's CSP on the endpoint. An adjustment receives a copy of the policy of the
+middleware that serves the request (the one `AddSecurityHeaders` registered, or the defaults), so it
+depends on that middleware. It is compiled the first time the middleware stages a response for the
+endpoint, then cached per metadata instance in that middleware; the route table bounds the cache. The
+middleware holds its own copy of the registered policy, so a reference to `SecurityHeadersBuilder.Options`
+kept after registration cannot reach an adjustment either. The cost is that an exception thrown by
 the adjustment surfaces on that first request rather than at startup, the same trade
 `Web.RateLimiting` makes for an unknown policy name. A replacement does not depend on the pipeline, so
 it is copied and compiled when the metadata is created, and an invalid value fails at map time.
@@ -240,6 +244,31 @@ RFC 9651 key grammar, and allowlist entries are serialized origins (`scheme://ho
 optional `*.` subdomain wildcard). The four forms map to `Disable` (`()`), `AllowAll` (`*`), `AllowSelf`
 (`(self ...)`) and `AllowOrigins` (`("..." ...)`).
 
+## Registration: `AddSecurityHeaders` configures, `UseSecurityHeaders` places (2026-10-28)
+
+`builder.Services.AddSecurityHeaders(headers => ...)` is a generated component integration over
+`SecurityHeadersBuilder`, declared in `src/Properties/ComponentIntegrations.cs` through Core's
+`ComponentIntegration` shared-source module, so the package takes no DI reference. The builder's
+`Options` is a `SecurityHeadersPolicy` that starts from the safe defaults. `Build` copies it, compiles the
+copy (an undefined enumeration value throws there), and returns the middleware, which the verb registers
+as an `IWebApplicationMiddleware` singleton. The ordinary overload builds at the `Add` call. The provider
+overload, `AddSecurityHeaders((services, headers) => ...)`, builds when its registration is first
+resolved, normally when the pipeline is composed and `UseSecurityHeaders()` reads the registrations.
+
+`UseSecurityHeaders()` takes no arguments. It places the last security-headers middleware it finds in
+`IWebApplicationContext.Middleware`, skipping the other features' registrations in that aggregate, or one
+with the safe defaults when the application registered none. Placing the verb twice places the
+registered middleware twice; as before, the exchange keeps one nonce and the diagnostics count an
+unprotected response once.
+
+The copy in `Build` matters beyond the pipeline's own fields, which are compiled when the middleware is
+built: an endpoint adjustment derives from the middleware's policy on that endpoint's first response, so
+without the copy a reference to `Options` kept after registration would reach it.
+
+*Rejected:* a configuration callback on the pipeline verb (`UseSecurityHeaders(policy => ...)`, the
+former shape). It split the policy across two call sites and kept it out of the registrations the host
+enumerates. The package is not in `10.0.0-preview.1`, so removing that overload breaks no released API.
+
 ## Ordering
 
 `UseHttpLogging` → `UseSecurityHeaders` → `UseForwardedHeaders` → `UseHostFiltering` →
@@ -274,7 +303,10 @@ flowchart LR
 
 The dotted edge is the reference `COHRES001` rejects: like every Web feature library, this one never
 references the runtime module, and its composition is dependency-free (values captured at builder time,
-no container, no configuration binding). Applications get it through the `App.Web` shared framework.
+no container, no configuration binding). It also compiles Core's `ComponentIntegration` shared-source
+module, a build-time declaration of `AddSecurityHeaders`, not a runtime reference; the generator emits
+the verb into each application that references both this package and the DI library. Applications get
+the package through the `App.Web` shared framework.
 
 ## Error model
 
@@ -285,7 +317,9 @@ the policy is composed:
   sandbox keyword, reporting endpoint, feature name, origin, ancestor source) and for an empty or
   `'none'`-mixed source list.
 - `ArgumentOutOfRangeException` for an undefined enumeration value, thrown when the policy is compiled:
-  at `UseSecurityHeaders` for the pipeline's policy, at map time for a replacement.
+  by `SecurityHeadersBuilder.Build` for the pipeline's policy (at the `AddSecurityHeaders` call, or when
+  the provider overload's registration is first resolved as the pipeline is composed), at map time for a
+  replacement.
 - `InvalidOperationException` for a CSP or Permissions Policy built with nothing in it, and, at request
   time, for an application-supplied nonce outside the CSP grammar or a missing response-starting feature.
 
@@ -295,7 +329,8 @@ aborts the exchange without sending a head.
 
 ## AOT posture
 
-No reflection, no runtime code generation, no configuration binding. Enumerations map to their tokens
+No reflection, no runtime code generation, no configuration binding. `AddSecurityHeaders` is generated
+at compile time and registers a factory over the built middleware. Enumerations map to their tokens
 through switch expressions. Field values are computed once when a policy is compiled; per response the
 middleware does feature-collection lookups, header presence checks and assignments, and one
 `string.Join` for a nonce-bearing policy. The Structured Field serializer and `RandomNumberGenerator` are
@@ -364,17 +399,25 @@ changes; the WebSocket acceptance tests add a test-only Web.WebSockets reference
 ## Testing
 
 `tests/SecurityHeadersEndToEndTests.cs` drives the middleware over the in-memory
-`WebApplicationTestFactory`: the defaults and their opt-outs, every opt-in field with its exact wire
-value, an unmatched route's `404`, a short-circuiting middleware, the exception boundary's error page on either side of the middleware,
+`WebApplicationTestFactory`, registered with the generated `AddSecurityHeaders` verb: the defaults and
+their opt-outs, every opt-in field with its exact wire value, an unmatched route's `404`, a
+short-circuiting middleware, the exception boundary's error page on either side of the middleware,
 a static file and its `304`, the no-clobber and framing-ownership rules, `OverwriteExistingHeaders`,
 the nonce (matching the handler's, unique per request, 128 bits, shared by both policies, supplied by
 the application, never read without a nonce source, refused when outside the grammar), streamed
-responses over HTTP/1.1 (chunked framing proves the handler committed the head) and HTTP/2, and
-composition-time validation. `tests/SecurityHeadersRouteConventionTests.cs` covers the overrides
-through the real router: adjust, replace (copied at map time), disable, group-versus-route precedence,
-the override on an endpoint's error and streamed responses, the CORS preflight, an adjustment compiled
-once, and map-time validation. The builder, framing and feature suites cover serialization and every
-grammar rule in isolation.
+responses over HTTP/1.1 (chunked framing proves the handler committed the head) and HTTP/2, and the
+registration itself: validation at the `Add` call, a kept `Options` reference that cannot reconfigure
+the pipeline, the last of two registrations winning in the real container, and the provider overload.
+`tests/SecurityHeadersBuilderTests.cs` drives `SecurityHeadersBuilder.Build` and `UseSecurityHeaders()`
+over a pipeline double (`TestPipelineBuilder`) whose application context lists the registrations,
+staging through the starting callback of `TestHttpContext`: the registered middleware is placed, the
+last of two registrations wins, the defaults stand in when nothing is registered, and another feature's
+registered middleware is never placed. `tests/SecurityHeadersRouteConventionTests.cs` covers the
+overrides through the real router: adjust (from the policy as it was registered), replace (copied at map
+time), disable, group-versus-route precedence, the override on an endpoint's error and streamed
+responses, the CORS preflight, an adjustment compiled once, and map-time validation. The CSP and
+Permissions Policy builder, framing and feature suites cover serialization and every grammar rule in
+isolation.
 
 ## HTTP interceptor consumer compatibility (#1465)
 

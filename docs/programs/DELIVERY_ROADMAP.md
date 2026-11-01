@@ -38,7 +38,7 @@ This document is the execution map for the current GitHub backlog. It assigns pr
 
 - Every service-root initiative starts with its contract or engine epic before its client, hosting, or distribution epic.
 - Runtime and AOT epics always complete before large service hosting or reflection-sensitive features.
-- L2 provides the concrete `<Area>.Hosting` builders' `AddService` verb (O34) over nestable `IHost` and `Gateway.InProcess` composite realization; L3 services compose through those contracts.
+- L2 provides the concrete `<Area>.Hosting` builders' `AddService` verb (O34) over nestable `IHost`, and the application model's instance side (`ApplicationModel.Hosting`) that every area's `<Area>.Hosting.ApplicationModel` builds on; L3 services compose through those contracts.
 - Database model epics depend on the shared database core storage and execution epics.
 - Identity federation depends on the shared `IdentityModel` foundation, the token or key epic, and the operational services initiative for secure config and secret handling.
 - Eventing, IoT, email, and notifications depend on the core messaging primitives and on operational observability.
@@ -58,7 +58,7 @@ This document is the execution map for the current GitHub backlog. It assigns pr
 Use issue dependencies to encode the real execution path in GitHub:
 
 - Runtime is blocked by Foundation.
-- Nested host composition is delivered in Runtime through the concrete `<Area>.Hosting` builders' `AddService` verb (item 9, revised by O34) and `Gateway.InProcess` (item 24); dependent L3 services use those seams.
+- Nested host composition is delivered in Runtime through the concrete `<Area>.Hosting` builders' `AddService` verb (item 9, revised by O34); dependent L3 services use that seam.
 - SDK is blocked by Foundation.
 - Database Core is blocked by Runtime and Foundation.
 - Web is blocked by Runtime and Foundation.
@@ -84,15 +84,15 @@ Use issue dependencies to encode the real execution path in GitHub:
 ## Nested Service Composition
 
 - The public composition model is the concrete `<Area>.Hosting` builder's `AddService` verb (O34; root contracts reference no hosting library) over nestable `IHost` (item 9, `51045965`; design note `4ef29290`). `HostToServiceWrapper.cs` and `HostExtensions.cs` in `libraries/Hosting/Assimalign.Cohesion.Hosting/src/` are the underlying host-as-service plumbing.
-- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` realizes composite members through their real application entry points (item 24, `a03cfcf8`); its [package design](../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) owns the lifecycle and resource-context contract.
+- `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` runs a gateway's resources in the gateway's own process, each program on a thread and in an environment of its own; its [package design](../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) owns that lifecycle.
 - The built layers are L1 foundation plus SDK/tooling; L2 application runtime and composition (`ApplicationModel`, the gateway family, and `Hosting`); and L3 the 18 service platforms.
-- Service dependencies remain explicit graph relationships; the composite's platform-neutral plan belongs to the base ApplicationModel planner.
+- Service dependencies remain explicit relationships in a gateway's model (`ApplicationModel.Definition`), which the gateway deploys in dependency order.
 
 ## WBS Title Scheme and Backlog Dispositions
 
 - [Workflow rules](../../.claude/rules/workflow.md) define `[<wbs>] <title>` in Project #13: area epic `L01.01.NN`, feature `L01.01.NN.MM`, task `L01.01.NN.MM.PP`.
-- The initiative table's `[L3.x]` titles are legacy display names, mapped to WBS ids by the [developer-experience design](../DEVELOPER_EXPERIENCE_DESIGN.md) §10 issue map; retain those table rows as historical scheduling context.
-- Program epics #17/#18/#19 and #130–#132 are superseded by that design and its §13 `[R]` decisions.
+- The initiative table's `[L3.x]` titles are legacy display names; retain those table rows as historical scheduling context. The 2026-09 build-out's item-to-issue map was §10 of the [developer-experience design](../DEVELOPER_EXPERIENCE_DESIGN.md) and remains in that file's git history (removed 2026-10-31).
+- Program epics #17/#18/#19 and #130–#132 are superseded by the developer-experience design (its decision O15).
 - Item 41's remaining dispositions were already applied in GitHub during the 2026-09-07 review: #23/#139–#141 delivered; #21 re-titled "InProcess gateway"; #304 maps to item 9; #305 satisfied; #306/#307 folded into item 9. This records that review; it does not perform backlog mutations.
 
 ## GitHub Project Update Rules

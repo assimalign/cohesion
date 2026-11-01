@@ -1,15 +1,14 @@
 # Assimalign.Cohesion.SecretStore.Client
 
-Thin, NativeAOT-safe protocol client for the SecretStore control plane. Gateways reach it only
-through `Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration` (`UseSecretStore(...)`),
-which resolves secret and certificate mounts with it; a gateway never references the client
-directly, and the client never references the SecretStore runtime.
+Thin, NativeAOT-safe protocol client for reading SecretStore secrets and certificates. A program
+that reads the store's secrets or certificates references it directly; the client never references
+the SecretStore runtime, and a gateway reaches a managed instance through the resource integration,
+`Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`, instead.
 
-The package exposes `ISecretStoreClient`, the `SecretStoreClient.Create(Uri,
-ClientCredential)` factory, and `CreateForControlPlane` for a full control-plane address.
-`ObserveCommandAsync` and `DeleteCommandAsync` return command observations while
-`SendCommandAsync` preserves the existing trust-grant transport. It references Core only; it does not reference
-`Assimalign.Cohesion.SecretStore.Hosting`, shared Hosting, Web, or Microsoft.Extensions packages.
+The package exposes `ISecretStoreClient` and the `SecretStoreClient.Create(Uri, ClientCredential)`
+factory, with an overload that takes a caller-owned transport. It references Core only; it does not
+reference `Assimalign.Cohesion.SecretStore.Hosting`, shared Hosting, Web, or Microsoft.Extensions
+packages.
 
 Core supplies the Cohesion endpoint guard for `System.Uri`: the factory requires an absolute HTTP
 or HTTPS URI with a host and valid port, without user information, a query, or a fragment.

@@ -12,4 +12,7 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Cookies" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
+	<ItemGroup>
+		<CohesionSharedSource Include="Assimalign.Cohesion.Core" Module="ComponentIntegration" />
+	</ItemGroup>
 </Project>

@@ -69,6 +69,30 @@ public class ConfigurationEnvironmentVariablesProviderTests
         Assert.Equal("MySql.Data.MySqlClient", configuration[$"ConnectionStrings:{token}_ProviderName"]);
     }
 
+    [Fact(DisplayName = "Cohesion Test [Environment Variables] - Provider: A program in a scope loads its scope's variables")]
+    public void EnvironmentVariables_InAppEnvironmentScope_ShouldLoadTheScopesVariables()
+    {
+        // A process variable of the runtime contract is hidden inside a scope; the scope's own load.
+        string prefix = $"COHESION_ENV_{CreateToken()}_";
+
+        using var variables = new EnvironmentVariablesScope(
+            ($"{prefix}Process__Value", "process"));
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(
+            new Dictionary<string, string> { [$"{prefix}Scope__Value"] = "scope" },
+            System.Threading.CancellationToken.None);
+
+        IConfiguration configuration;
+        using (AppEnvironment.Enter(scope))
+        {
+            configuration = new ConfigurationBuilder()
+                .AddEnvironmentVariables(prefix)
+                .Build();
+        }
+
+        Assert.Equal("scope", configuration["Scope:Value"]);
+        Assert.Null(configuration["Process:Value"]);
+    }
+
     private static string CreateToken()
     {
         return Guid.NewGuid().ToString("N").ToUpperInvariant();

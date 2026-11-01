@@ -2,8 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
+using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
 
 using Shouldly;
 
@@ -33,14 +33,9 @@ public sealed class WebApplicationConfigurationTests
                 """{"EnvironmentFileSelection":"local-machine"}""");
             File.WriteAllText(Path.Combine(contentRootPath, "appsettings.Development.json"),
                 """{"EnvironmentFileSelection":"development-deployment"}""");
-            using IDisposable resourceScope = ResourceRuntime.CreateScope(new ResourceContext(
-                environmentName: environmentName,
-                contentRootPath: contentRootPath));
 
             // Act
-            WebApplicationBuilder builder = WebApplication.CreateBuilder(
-                [],
-                typeof(WebApplicationConfigurationTests).Assembly);
+            WebApplicationBuilder builder = CreateEntryPointBuilder(environmentName, contentRootPath, []);
             try
             {
                 // Assert
@@ -76,7 +71,6 @@ public sealed class WebApplicationConfigurationTests
                     "BaseOnly": "base",
                     "EnvironmentFile": "base",
                     "EnvironmentVariable": "base",
-                    "Ambient": "base",
                     "Arguments": "base",
                     "Winner": "base"
                   }
@@ -89,7 +83,6 @@ public sealed class WebApplicationConfigurationTests
                   "Settings": {
                     "EnvironmentFile": "environment-file",
                     "EnvironmentVariable": "environment-file",
-                    "Ambient": "environment-file",
                     "Arguments": "environment-file",
                     "Winner": "environment-file"
                   }
@@ -98,26 +91,15 @@ public sealed class WebApplicationConfigurationTests
 
             using var variables = new EnvironmentVariablesScope(
                 ("COHESION_CONFIG__Settings__EnvironmentVariable", "environment-variable"),
-                ("COHESION_CONFIG__Settings__Ambient", "environment-variable"),
                 ("COHESION_CONFIG__Settings__Arguments", "environment-variable"),
                 ("COHESION_CONFIG__Settings__Winner", "environment-variable"));
-            using IDisposable resourceScope = ResourceRuntime.CreateScope(new ResourceContext(
-                environmentName: environmentName,
-                contentRootPath: contentRootPath,
-                settings: new Dictionary<string, string>
-                {
-                    ["Settings:Ambient"] = "ambient",
-                    ["Settings:Arguments"] = "ambient",
-                    ["Settings:Winner"] = "ambient",
-                }));
 
             // Act
-            WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            WebApplicationBuilder builder = CreateEntryPointBuilder(environmentName, contentRootPath,
             [
                 "--Settings:Arguments=arguments",
                 "--Settings:Winner=arguments",
-            ],
-            typeof(WebApplicationConfigurationTests).Assembly);
+            ]);
 
             try
             {
@@ -125,7 +107,6 @@ public sealed class WebApplicationConfigurationTests
                 builder.Configuration["Settings:BaseOnly"].ShouldBe("base");
                 builder.Configuration["Settings:EnvironmentFile"].ShouldBe("environment-file");
                 builder.Configuration["Settings:EnvironmentVariable"].ShouldBe("environment-variable");
-                builder.Configuration["Settings:Ambient"].ShouldBe("ambient");
                 builder.Configuration["Settings:Arguments"].ShouldBe("arguments");
                 builder.Configuration["Settings:Winner"].ShouldBe("arguments");
             }
@@ -138,6 +119,17 @@ public sealed class WebApplicationConfigurationTests
         {
             Directory.Delete(contentRootPath, recursive: true);
         }
+    }
+
+    // The entry-point builder CreateBuilder(args) creates, with an environment and content root
+    // the test chooses.
+    private static WebApplicationBuilder CreateEntryPointBuilder(string environmentName, string contentRootPath, string[] args)
+    {
+        return new WebApplicationBuilder(new WebApplicationOptions
+        {
+            Environment = environmentName,
+            ContentRootPath = FileSystemPath.Parse(contentRootPath),
+        }, args);
     }
 
     private sealed class EnvironmentVariablesScope : IDisposable

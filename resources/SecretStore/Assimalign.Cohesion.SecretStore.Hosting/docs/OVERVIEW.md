@@ -3,106 +3,49 @@
 ## Summary
 
 Provides the SecretStore runtime: `SecretStoreApplication.CreateBuilder(args)`, protected durable
-secret/trust/certificate storage, an ECDSA certificate authority, and the HTTP data and control
+secret/certificate storage, an ECDSA certificate authority, and the HTTP data
 protocol served on the resource's `api` endpoint.
 
 ## Current behavior
 
-- Captures the ambient `ResourceRuntime.Current` context when the builder is created and honors
-  its `api` endpoint, `data` mount, identity, environment, application trust key, and registered
-  control plane.
+- The area's resource integration is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 - Always appends an HTTP/1 endpoint service after caller-registered host services, so the endpoint
   starts last and drains first.
-- Authenticates gateway-managed `/cohesion/v1/*` calls with trusted ES256 bootstrap JWTs and
-  distinguishes unauthenticated (`401`) from wrong-audience (`403`) requests.
-- Interoperates with `SecretStore.Client` for secret reads, durable leaf-certificate reads, and the
-  `cohesion.trust.add` command.
-- Protects secrets, issuer state, CA keys, pending enrollment keys, and leaf bundles at rest.
-- Supports durable standalone CA self-seeding and explicit request/sign/complete intermediate-CA
-  enrollment with optional Platform-root pinning.
+- Interoperates with `SecretStore.Client` for secret reads and durable leaf-certificate reads.
+- Protects secrets, CA keys, and leaf bundles at rest.
+- Seeds its certificate authority from supplied PEM material or a durable self-signed root.
 - Renews named leaves on resolution and checks the HTTPS transport leaf at listener startup; a
   continuously running host must restart before transport expiry until the shared TLS listener
   supports asynchronous certificate selection per handshake.
 
 ## Configuration
 
-Endpoint precedence is registered-control-plane observation, ambient `api`, `--endpoint`, then
-`https://127.0.0.1:8443`. Data-path precedence is ambient `data` mount, `--data`, then
+Endpoint precedence is `--endpoint`, then
+`https://127.0.0.1:8443`. Data-path precedence is `--data`, then
 `<content-root>/data`. Plaintext HTTP is permitted only on loopback in
-`Local`. A standalone host has no bootstrap credential and therefore may bind only to
+`Local`. The host authenticates no caller and therefore may bind only to
 loopback, including when it uses HTTPS. Its `/cohesion/v1` and `/cohesion/v1/*` routes accept only
 transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other or unknown peers receive
 `403`. Forwarded headers do not affect this check. Bare `/healthz`, `/readyz`, and `/livez` remain
-open for probes. This tightens standalone request authorization from 10.0.0-preview.1;
-gateway-managed authentication is unchanged.
+open for probes. This tightens standalone request authorization from 10.0.0-preview.1.
 
 Builder-declared secrets seed missing durable entries. `AddCertificateAuthority` controls the
-standalone root common name, initial certificate/key material, pending Platform enrollment,
-Platform root pin, and standalone self-seeding. Durable authority state takes precedence on
+root common name, initial certificate/key material, and self-seeding. Durable authority state takes precedence on
 restart.
 
-The persistent volume's file-system ACL protects the colocated DataProtection key ring; an
+The data directory's file-system ACL protects the colocated DataProtection key ring; an
 external KMS/wrapping-key integration and protected-record rewrap migration remain future work.
 
 ## Known gap
 
-The configured Platform enrollment endpoint is not called automatically. A gateway/operator must
-drive the three enrollment routes, deliver trust grants, and provide an out-of-band root for the
-first HTTPS connection. A pending child also cannot start that HTTPS listener before it owns an
-enrolled or provisional transport identity; the loopback HTTP enrollment path is Local-only.
-`certs/public`/ACME issuance and gateway `parameter:` certificate mounts are also not implemented
-by this host. See [DESIGN.md](./DESIGN.md) for the exact routes and bootstrap boundary.
+`certs/public`/ACME issuance is not implemented
+by this host. See [DESIGN.md](./DESIGN.md) for the exact routes.
 
 ## Public types
 
 - `SecretStoreApplication` — concrete host and creation entry point.
 - `SecretStoreApplicationBuilder` — composition and background-work registration.
 - `SecretStoreApplicationContext` — host environment and runtime state.
-
-## Commands
-
-| Wire kind | Descriptor verb | Ownership key |
-|---|---|---|
-| `secretstore.add-secret` | `AddSecret` | secret path |
-| `secretstore.issue-certificate` | `IssueCertificate` | certificate name |
-
-AddSecret declarations carry only a source reference. The gateway resolves it before delivery only
-through a registered `secretstore.add-secret` input resolver, normally the one
-`UseSecretStore(...)` registers (`SecretStore.ApplicationModel.Orchestration`): `parameter:<name>`
-from the application's parameter bindings, `<resource>:<key>` through the source provider
-registered for that store, which requires a declared dependency and an available source endpoint.
-`literal:<value>` is rejected during declaration construction: literal secret material never enters
-the desired model, deterministic id or manifest. Only the transient delivery envelope contains
-resolved bytes; the protected repository stores the value and source together. An unresolved
-source is a named Rejected result. Original source-only commands remain the gateway's declaration
-ledger.
-
-The SDK manifest marks `secretstore.add-secret` as requiring an input resolver
-(`{ "kind": "secretstore.add-secret", "requiresInputResolver": true }`), so an application that
-declares `AddSecret` without `UseSecretStore(...)` fails `Build()` (a set member fails at set
-start) naming that package and verb, before anything is delivered. This host still rejects an
-add-secret whose payload has no string `resolvedValue`, as defense in depth for any sender that
-bypasses that validation. `IssueCertificate` is not flagged and is still delivered as declared when
-no resolver is registered.
-
-IssueCertificate honors the supplied subject and SAN set. An existing certificate with different
-identity is rejected until deleted; renewal preserves its identity. Private key and leaf storage
-reuse the existing protected CA repository.
-
-The control plane also accepts `cohesion.trust.add`, which the SDK manifest deliberately does not
-advertise. It is the gateway's trust-store channel, sent only by the `SecretStoreTrustedIssuerStore`
-provider a gateway registers with `builder.UseSecretStore(store).AsTrustStore()`
-(`SecretStore.ApplicationModel.Orchestration`), never a Build-declared application command. Trust keeps owner `issuer@subject`, POST-only behavior, empty 204 success,
-empty 409 conflict and existing 403 authorization refusals. New commands use owner `issuer`, accept
-POST and DELETE, return 200 application/octet-stream on success, and JSON `{status,detail}` refusals.
-Malformed command envelopes return 400 with that JSON refusal shape, including invalid base64 payloads.
-The client accepts empty successful responses as Applied (Deleted for DELETE); legacy SendCommandAsync
-continues to work. This owner split lets local gateway declarations authenticate end to end.
-
-Restricted trust grants accept `{trustKey,allowedCommandKinds}` while unrestricted grants retain
-the bare JWK payload. The protected trust document round-trips the optional string array; absent
-or empty means every command kind is allowed. Enroll(platformStore) is deferred to item 31t:
-automatic Platform enrollment needs a gateway-owned mediator and Platform-audience signer.
 
 ## Concrete composition (T10 / O34)
 
@@ -119,7 +62,6 @@ The concrete application and IHost route share it. Startup failures still roll b
 `SecretStoreApplicationBuilder.Services` holds every registration the application runs with. `AddService` registers an `IHostService`, and a direct `IHostService` registration joins the lifecycle in the same order. `Build` closes registration and resolves the services once. Disposing the application disposes every factory-created service. See [DESIGN.md](DESIGN.md#dependency-injection-composition).
 
 `AddSecret` accepts the root's generated `SecretStoreSeedPath` (ordinary strings convert implicitly).
-It refuses blank paths, exact `trusted-issuers.json`, and `default` during registration. Seeds may
-still use `certs/`; that namespace is reserved only for add-secret commands. Command delivery and
-certificate reads share the declaring/client packages' validation predicates through internal shared
-source, so malformed values cannot bypass validation by supplying raw JSON or query strings.
+It refuses blank paths and `default` during registration. Seeds may
+still use `certs/`. Certificate reads share the client package's validation predicate through
+internal shared source, so malformed values cannot bypass validation by supplying raw query strings.

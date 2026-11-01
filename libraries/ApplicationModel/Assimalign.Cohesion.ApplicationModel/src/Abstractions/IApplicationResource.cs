@@ -1,21 +1,35 @@
-﻿using System;
-
 namespace Assimalign.Cohesion.ApplicationModel;
 
 /// <summary>
-/// Identifies a resource in an application's desired-state graph. Capability interfaces and
-/// manifest-backed resources describe the facts a gateway uses to plan and realize it.
+/// One application resource: a logical service, such as <c>orders-api</c>, under its provider, such
+/// as <c>Web</c>.
 /// </summary>
+/// <remarks>
+/// A resource appears in three forms that share its identity: its definition, which a model
+/// declares (<c>IApplicationResourceDefinition</c>); its deployment, a gateway's view of it across
+/// its instances (<c>IApplicationGatewayDeployment</c>); and each instance, one running copy
+/// (<c>IApplicationInstance</c>).
+/// </remarks>
 public interface IApplicationResource
 {
     /// <summary>
-    /// The unique resource ID.
+    /// Gets the id every form of the resource shares.
     /// </summary>
-    ResourceId Id => Guid.AsDeterministicGuid(Name);
+    /// <remarks>
+    /// The id is derived from <see cref="Provider"/> and <see cref="Name"/> by
+    /// <see cref="ResourceId.FromName(ProviderName, ResourceName)"/>, so it is unique among one
+    /// gateway's resources.
+    /// </remarks>
+    ResourceId Id => ResourceId.FromName(Provider, Name);
 
     /// <summary>
-    /// The name of the resource, which should be unique within the application context. This name
-    /// is used to generate the resource ID and should be descriptive of the resource's purpose or function.
+    /// Gets the resource's provider: its kind, such as <c>Web</c> or <c>Database.Sql</c>.
+    /// </summary>
+    ProviderName Provider { get; }
+
+    /// <summary>
+    /// Gets the resource's name, such as <c>orders-api</c>, unique among one gateway's resources of
+    /// the same provider.
     /// </summary>
     ResourceName Name { get; }
 }

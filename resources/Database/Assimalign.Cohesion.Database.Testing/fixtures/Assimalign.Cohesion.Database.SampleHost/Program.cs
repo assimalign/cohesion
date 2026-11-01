@@ -2,18 +2,14 @@ using System;
 
 using Assimalign.Cohesion.Database;
 using Assimalign.Cohesion.Database.Hosting;
-using Assimalign.Cohesion.Database.SampleHost;
 using Assimalign.Cohesion.Database.Sql;
-using Assimalign.Cohesion.Database.Storage;
 
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 
 builder.AddSql("sample-sql", sql =>
 {
-    sql.Options.RootPath = Resource.Mounts.Data.Path
-        ?? throw new InvalidOperationException("The Database data mount must have a materialized path.");
-    sql.Options.Durability = Resource.Settings.DatabaseDurability.Get<StorageCommitDurability>();
-    sql.AddServer(server => server.Listen(Resource.Endpoints.Db));
+    sql.Options.RootPath = builder.Configuration["Sample:DataPath"] ?? "data";
+    sql.AddServer(server => server.Listen(new Uri("cohesion-db://127.0.0.1:5740")));
 
     // The engine's build provisions the database before application Build returns; the SDK reads
     // this declaration to emit obj/.../cohesion/database/sample.schema.json at build time.

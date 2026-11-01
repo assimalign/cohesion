@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class EmailHubApplication : Host<EmailHubApplicationContext>, IEma
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(EmailHubApplication).Assembly);
-    }
-
-    internal static EmailHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new EmailHubApplicationBuilder(args, resourceAssembly);
+        return new EmailHubApplicationBuilder(args);
     }
 
     private sealed class DebugView

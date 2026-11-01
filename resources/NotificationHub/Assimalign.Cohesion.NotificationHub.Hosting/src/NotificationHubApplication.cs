@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class NotificationHubApplication : Host<NotificationHubApplication
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(NotificationHubApplication).Assembly);
-    }
-
-    internal static NotificationHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new NotificationHubApplicationBuilder(args, resourceAssembly);
+        return new NotificationHubApplicationBuilder(args);
     }
 
     private sealed class DebugView

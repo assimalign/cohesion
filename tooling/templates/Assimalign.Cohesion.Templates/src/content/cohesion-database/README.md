@@ -13,5 +13,7 @@ dotnet run
 dotnet run -- --Database:Endpoint=cohesion-db://localhost:5741 --Database:DataPath=./data
 ```
 
-Set the organization feed owner in `nuget.config` and the image registry in `Directory.Build.props`.
-Orchestration starts disabled. Follow the csproj comment to enable the manifest, typed accessors and area-owned default control plane before referencing this project from a gateway.
+Set the organization feed owner in `nuget.config`.
+
+The Database area has no application-model integration yet, so a gateway cannot manage this application; it
+runs as a plain executable.

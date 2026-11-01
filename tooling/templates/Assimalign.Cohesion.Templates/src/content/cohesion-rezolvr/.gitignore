@@ -1,6 +1,4 @@
 bin/
 obj/
 .vs/
-.cohesion/
-parameters.json
 *.user

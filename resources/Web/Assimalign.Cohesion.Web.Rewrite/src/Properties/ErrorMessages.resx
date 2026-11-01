@@ -147,6 +147,9 @@
   <data name="RewriteExchangeAlreadyEnded" xml:space="preserve">
     <value>The rule already ended the exchange with a redirect or a response; it can take no further action.</value>
   </data>
+  <data name="RewriteNotRegistered" xml:space="preserve">
+    <value>UseRewrite places the middleware that builder.Services.AddRewrite(rewrite =&gt; ...) registers, and no rules are registered. Register the rewrite and redirect rules first.</value>
+  </data>
   <data name="RewritePassLimitExceeded" xml:space="preserve">
     <value>URL rewriting did not finish within {0} rule passes: a rule restarted rule evaluation on every pass. Check the rules that restart evaluation ({1}.{2}), or raise {3}.{4}.</value>
   </data>

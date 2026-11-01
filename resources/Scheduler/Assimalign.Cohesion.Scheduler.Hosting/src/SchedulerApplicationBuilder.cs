@@ -1,14 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Scheduler;
 using Assimalign.Cohesion.Scheduler.Hosting.Internal;
 
@@ -32,11 +27,9 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
 {
     private readonly SchedulerApplicationOptions _options;
     private readonly SchedulerApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
     private bool _isBuilt;
 
-    internal SchedulerApplicationBuilder(string[] args, Assembly? resourceAssembly = null)
+    internal SchedulerApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
 
@@ -46,31 +39,10 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (resourceAssembly is not null &&
-            ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException(
-                "The registered Scheduler resource control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
 
         _options = new SchedulerApplicationOptions
         {
-            Environment = _resourceContext?.EnvironmentName ?? AppEnvironment.GetEnvironmentName(),
-            ContentRootPath = _resourceContext is null
-                ? (FileSystemPath?)null
-                : FileSystemPath.Parse(_resourceContext.ContentRootPath),
+            Environment = AppEnvironment.GetEnvironmentName(),
         };
         _context = new SchedulerApplicationContext(_options);
     }
@@ -194,20 +166,6 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The scheduler application has already been built.");
 
-        if (_controlPlane is not null && _resourceContext is not null)
-        {
-            _controlPlane.AddHealthContributor(_context);
-            if (_resourceContext.Endpoints.TryGetValue("http", out Uri? endpoint))
-            {
-                _controlPlane.ObserveEndpoint("http", endpoint);
-                Services.AddSingleton<IHostService>(_ => new SchedulerControlPlaneEndpointService(
-                    endpoint,
-                    _controlPlane,
-                    _resourceContext,
-                    _context));
-            }
-        }
-
         // Registered last, so schedules execute only after every other service has started and
         // stop before any of them.
         Services.AddSingleton<IHostService>(_ => new SchedulerExecutionService(_context.Schedules));
@@ -231,13 +189,7 @@ public sealed class SchedulerApplicationBuilder : ISchedulerApplicationBuilder
             _context.ResolveSchedules();
             _context.ResolveHostedServices();
 
-            var application = new SchedulerApplication(_options, _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
+            return new SchedulerApplication(_options, _context);
         }
         catch (Exception exception)
         {

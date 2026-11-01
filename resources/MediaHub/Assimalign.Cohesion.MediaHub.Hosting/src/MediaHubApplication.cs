@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class MediaHubApplication : Host<MediaHubApplicationContext>, IMed
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(MediaHubApplication).Assembly);
-    }
-
-    internal static MediaHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new MediaHubApplicationBuilder(args, resourceAssembly);
+        return new MediaHubApplicationBuilder(args);
     }
 
     private sealed class DebugView

@@ -12,9 +12,8 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Connections.Security;
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 using Assimalign.Cohesion.Web;
@@ -35,64 +34,40 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
     private readonly bool _allowDevelopmentDeviceApproval;
     private readonly IdentityHubApplicationContext _applicationContext;
     private readonly IPAddress _bindAddress;
-    private readonly IdentityCommandRegistry _registry;
-    private readonly IResourceControlPlane _commands;
-    private readonly string? _applicationIssuer;
-    private readonly IResourceControlPlane? _controlPlane;
+    private readonly IReadOnlyDictionary<string, IdentityHubClientRegistration> _clients;
     private readonly string _dataPath;
     private readonly DeviceAuthorizationStore _devices = new();
     private readonly Uri _endpoint;
     private readonly string _issuer;
     private readonly string _basePath;
-    private readonly bool _requireAuthentication;
-    private readonly string _resourceAudience;
-    private readonly BootstrapTokenVerifier? _bootstrapVerifier;
-    private readonly ResourceContext _resourceContext;
     private IdentitySigningKey? _signingKey;
     private WebApplication? _host;
     private X509Certificate2? _serverCertificate;
-    private X509Certificate2[] _serverCertificateChain = [];
     private SslStreamCertificateContext? _serverCertificateContext;
 
     internal IdentityEndpointService(
         Uri endpoint,
         string dataPath,
-        IReadOnlyCollection<string> audiences,
         IReadOnlyDictionary<string, IdentityHubClientRegistration> clients,
-        IResourceControlPlane? controlPlane,
-        ResourceContext resourceContext,
+        string environmentName,
         IdentityHubApplicationContext applicationContext)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentException.ThrowIfNullOrWhiteSpace(dataPath);
-        ArgumentNullException.ThrowIfNull(audiences);
         ArgumentNullException.ThrowIfNull(clients);
-        ArgumentNullException.ThrowIfNull(resourceContext);
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentName);
         ArgumentNullException.ThrowIfNull(applicationContext);
 
         _endpoint = endpoint;
         _dataPath = dataPath;
-        _registry = new IdentityCommandRegistry(dataPath, resourceContext, audiences, clients);
-        _applicationIssuer = resourceContext.ApplicationName;
-        _controlPlane = controlPlane;
-        _commands = controlPlane ?? ResourceControlPlane.Create([IdentityResourceCommandHandler.AddAudience, IdentityResourceCommandHandler.AddClient]);
-        foreach (string kind in _commands.AcceptedCommandKinds)
-        {
-            if (kind is IdentityResourceCommandHandler.AddAudience or IdentityResourceCommandHandler.AddClient)
-            {
-                _commands.RegisterCommandHandler(new IdentityResourceCommandHandler(kind, _registry));
-            }
-        }
+        _clients = clients;
         _applicationContext = applicationContext;
         _bindAddress = ResolveBindAddress(endpoint.IdnHost);
         _basePath = endpoint.AbsolutePath == "/" ? string.Empty : endpoint.AbsolutePath.TrimEnd('/');
         _issuer = endpoint.ToString().TrimEnd('/');
-        _requireAuthentication = resourceContext.GatewayName is not null;
-        _resourceAudience = resourceContext.ResourceName ?? string.Empty;
         _allowDevelopmentDeviceApproval =
-            string.Equals(resourceContext.EnvironmentName, AppEnvironment.Keys.Local, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(environmentName, AppEnvironment.Keys.Local, StringComparison.OrdinalIgnoreCase) &&
             IPAddress.IsLoopback(_bindAddress);
-        _resourceContext = resourceContext;
 
         bool isHttp = string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
         bool isHttps = string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
@@ -108,29 +83,10 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
                 "IdentityHub permits plaintext HTTP only on loopback in Local.");
         }
 
-        if (isHttps && resourceContext.TryGetEndpointCertificate("https", out _serverCertificate, out X509Certificate2Collection chain))
-        {
-            _serverCertificateChain = new X509Certificate2[chain.Count];
-            chain.CopyTo(_serverCertificateChain, 0);
-            _serverCertificateContext = SslStreamCertificateContext.Create(_serverCertificate, chain, offline: true);
-        }
-
-        if (isHttps && _serverCertificateContext is null && !_allowDevelopmentDeviceApproval)
+        if (isHttps && !_allowDevelopmentDeviceApproval)
         {
             throw new InvalidOperationException(
-                "IdentityHub requires a PEM certificate, private key, and optional chain in the 'tls' " +
-                "resource mount outside loopback Local. Self-signed TLS is Local-only.");
-        }
-
-        if (_requireAuthentication)
-        {
-            if (string.IsNullOrWhiteSpace(_resourceAudience))
-            {
-                throw new InvalidOperationException(
-                    "A gateway-managed IdentityHub requires an ambient resource name.");
-            }
-
-            _bootstrapVerifier = new BootstrapTokenVerifier(resourceContext);
+                "IdentityHub has no TLS certificate source outside loopback Local. Self-signed TLS is Local-only.");
         }
     }
 
@@ -138,10 +94,6 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        foreach (ResourceCommand command in await _registry.InitializeAsync(cancellationToken).ConfigureAwait(false))
-        {
-            await _commands.ExecuteCommandAsync(command, cancellationToken).ConfigureAwait(false);
-        }
         _signingKey = await IdentitySigningKey.LoadOrCreateAsync(_dataPath, cancellationToken)
             .ConfigureAwait(false);
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
@@ -164,22 +116,25 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
                 options.UseHttp1(tcp => tcp.EndPoint = new IPEndPoint(_bindAddress, _endpoint.Port)));
         }
 
+        // Nothing IdentityHub serves loads a subresource, is meant to be framed, or needs a referrer,
+        // so one strict policy fits all of it. Registered as the generated AddSecurityHeaders verb
+        // registers it; UseSecurityHeaders places it.
+        var securityHeaders = new SecurityHeadersBuilder();
+        securityHeaders.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
+            .DefaultSrc(sources => sources.None())
+            .FormAction(sources => sources.Self())
+            .BaseUri(sources => sources.None()));
+        securityHeaders.Options.ReferrerPolicy = ReferrerPolicy.NoReferrer;
+        IWebApplicationMiddleware securityHeadersMiddleware = securityHeaders.Build();
+        builder.Services.AddSingleton<IWebApplicationMiddleware>(_ => securityHeadersMiddleware);
+
         _host = builder.Build();
         IWebApplicationPipelineBuilder pipeline = _host;
 
         // First, so every response carries the fields: the JSON endpoints and the Local device-approval
-        // page alike. Nothing IdentityHub serves loads a subresource, is meant to be framed, or needs a
-        // referrer, so one strict policy fits all of it.
-        pipeline.UseSecurityHeaders(policy =>
-        {
-            policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp
-                .DefaultSrc(sources => sources.None())
-                .FormAction(sources => sources.Self())
-                .BaseUri(sources => sources.None()));
-            policy.ReferrerPolicy = ReferrerPolicy.NoReferrer;
-        });
+        // page alike.
+        pipeline.UseSecurityHeaders();
         pipeline.Use(next => context => InvokeAsync(context, next));
-        _controlPlane?.ObserveEndpoint("https", _endpoint);
         await ((IHost)_host).StartAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -195,27 +150,11 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
         _signingKey?.Dispose();
         _serverCertificate?.Dispose();
-        for (int index = 0; index < _serverCertificateChain.Length; index++)
-        {
-            _serverCertificateChain[index].Dispose();
-        }
     }
 
     internal async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
     {
         string path = context.Request.Path.Value;
-        bool namespaced = path == Route("/cohesion/v1") ||
-            path.StartsWith(Route("/cohesion/v1/"), StringComparison.Ordinal);
-        if (namespaced)
-        {
-            ResourceCredentialStatus authorization = await AuthorizeAsync(context).ConfigureAwait(false);
-            if (authorization is not ResourceCredentialStatus.Authorized)
-            {
-                SetAuthorizationFailure(context, authorization);
-                return;
-            }
-        }
-
         if (path == Route("/.well-known/openid-configuration"))
         {
             await HandleDiscoveryAsync(context).ConfigureAwait(false);
@@ -236,33 +175,17 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         {
             await HandleDeviceVerificationAsync(context).ConfigureAwait(false);
         }
-        else if (path == Route("/healthz") || path == Route("/cohesion/v1/healthz"))
+        else if (path == Route("/healthz"))
         {
             await HandleHealthAsync(context, HealthReportKind.Health).ConfigureAwait(false);
         }
-        else if (path == Route("/readyz") || path == Route("/cohesion/v1/readyz"))
+        else if (path == Route("/readyz"))
         {
             await HandleHealthAsync(context, HealthReportKind.Readiness).ConfigureAwait(false);
         }
-        else if (path == Route("/livez") || path == Route("/cohesion/v1/livez"))
+        else if (path == Route("/livez"))
         {
             await HandleHealthAsync(context, HealthReportKind.Liveness).ConfigureAwait(false);
-        }
-        else if (path == Route("/cohesion/v1/endpoints"))
-        {
-            await HandleEndpointsAsync(context).ConfigureAwait(false);
-        }
-        else if (path == Route("/cohesion/v1/commands"))
-        {
-            await HandleCommandsAsync(context).ConfigureAwait(false);
-        }
-        else if (path == Route("/cohesion/v1/stop"))
-        {
-            await HandleStopAsync(context).ConfigureAwait(false);
-        }
-        else if (namespaced)
-        {
-            context.Response.StatusCode = HttpStatusCode.NotFound;
         }
         else
         {
@@ -642,207 +565,15 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
             return;
         }
 
-        ResourceHealthReport report = _controlPlane is null
-            ? new ResourceHealthReport(HealthStatus.Healthy, new Dictionary<string, HealthContribution>())
-            : kind switch
-            {
-                HealthReportKind.Health => await _controlPlane.CheckHealthAsync(context.RequestCancelled).ConfigureAwait(false),
-                HealthReportKind.Readiness => await _controlPlane.CheckReadinessAsync(context.RequestCancelled).ConfigureAwait(false),
-                _ => await _controlPlane.CheckLivenessAsync(context.RequestCancelled).ConfigureAwait(false),
-            };
         bool ready = kind is not HealthReportKind.Readiness || _applicationContext.State is HostState.Started;
-        context.Response.StatusCode = report.Status is HealthStatus.Unhealthy || !ready
-            ? HttpStatusCode.ServiceUnavailable
-            : HttpStatusCode.Ok;
+        context.Response.StatusCode = ready ? HttpStatusCode.Ok : HttpStatusCode.ServiceUnavailable;
         context.Response.Headers[HttpHeaderKey.CacheControl] = "no-store, no-cache";
         await WriteJsonAsync(context, writer =>
         {
             writer.WriteStartObject();
-            writer.WriteString("status", ready ? report.Status.ToString() : HealthStatus.Unhealthy.ToString());
+            writer.WriteString("status", ready ? "Healthy" : "Unhealthy");
             writer.WriteEndObject();
         }, "application/health+json; charset=utf-8").ConfigureAwait(false);
-    }
-
-    private async Task HandleEndpointsAsync(IHttpContext context)
-    {
-        if (!RequireRead(context))
-        {
-            return;
-        }
-
-        await WriteJsonAsync(context, writer =>
-        {
-            writer.WriteStartObject();
-            writer.WritePropertyName("endpoints");
-            writer.WriteStartObject();
-            writer.WriteString("https", _endpoint.ToString());
-            writer.WriteEndObject();
-            writer.WriteEndObject();
-        }).ConfigureAwait(false);
-    }
-
-    private async Task HandleCommandsAsync(IHttpContext context)
-    {
-        if (context.Request.Method == HttpMethod.Get || context.Request.Method == HttpMethod.Head)
-        {
-            await WriteJsonAsync(context, writer =>
-            {
-                writer.WriteStartObject();
-                writer.WriteStartArray("acceptedCommandKinds");
-                foreach (string kind in _commands.AcceptedCommandKinds) { writer.WriteStringValue(kind); }
-                writer.WriteEndArray();
-                writer.WriteStartArray("commands");
-                foreach (ResourceCommand command in _commands.Commands)
-                {
-                    writer.WriteStartObject();
-                    writer.WriteString("id", command.Id);
-                    writer.WriteString("kind", command.Kind);
-                    writer.WriteString("owner", command.Owner);
-                    writer.WriteString("key", command.Key);
-                    writer.WriteString("status", "Applied");
-                    writer.WriteEndObject();
-                }
-                writer.WriteEndArray();
-                writer.WriteEndObject();
-            }).ConfigureAwait(false);
-            return;
-        }
-        if (context.Request.Method != HttpMethod.Post && context.Request.Method != HttpMethod.Delete)
-        {
-            context.Response.StatusCode = HttpStatusCode.MethodNotAllowed;
-            context.Response.Headers[HttpHeaderKey.Allow] = "GET, HEAD, POST, DELETE";
-            return;
-        }
-        try
-        {
-            using JsonDocument document = await JsonDocument.ParseAsync(context.Request.Body,
-                cancellationToken: context.RequestCancelled).ConfigureAwait(false);
-            JsonElement root = document.RootElement;
-            var command = new ResourceCommand(
-                RequiredCommandString(root, "id"), RequiredCommandString(root, "kind"),
-                RequiredCommandString(root, "owner"), RequiredCommandString(root, "key"),
-                root.TryGetProperty("payload", out JsonElement payload) && payload.ValueKind == JsonValueKind.String
-                    ? payload.GetBytesFromBase64() : throw new JsonException("The command payload must be a base64 string."));
-            if (_requireAuthentication && command.Owner != _applicationIssuer)
-            {
-                context.Response.StatusCode = HttpStatusCode.Forbidden;
-                await WriteCommandRefusalAsync(context,
-                    $"Command owner '{command.Owner}' must match authenticated issuer '{_applicationIssuer}'.").ConfigureAwait(false);
-                return;
-            }
-            ReadOnlyMemory<byte> response = context.Request.Method == HttpMethod.Delete
-                ? await _commands.DeleteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false)
-                : await _commands.ExecuteCommandAsync(command, context.RequestCancelled).ConfigureAwait(false);
-            context.Response.StatusCode = HttpStatusCode.Ok;
-            context.Response.Headers[HttpHeaderKey.ContentType] = "application/octet-stream";
-            await context.Response.Body.WriteAsync(response, context.RequestCancelled).ConfigureAwait(false);
-        }
-        catch (ResourceCommandRejectedException exception)
-        {
-            context.Response.StatusCode = HttpStatusCode.Conflict;
-            await WriteCommandRefusalAsync(context, exception.Detail).ConfigureAwait(false);
-        }
-        catch (NotSupportedException exception)
-        {
-            context.Response.StatusCode = HttpStatusCode.NotImplemented;
-            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is JsonException or FormatException or ArgumentException)
-        {
-            context.Response.StatusCode = HttpStatusCode.BadRequest;
-            await WriteCommandRefusalAsync(context, exception.Message).ConfigureAwait(false);
-        }
-    }
-
-    private static Task WriteCommandRefusalAsync(IHttpContext context, string detail) =>
-        WriteJsonAsync(context, writer =>
-        {
-            writer.WriteStartObject();
-            writer.WriteString("status", "Rejected");
-            writer.WriteString("detail", detail);
-            writer.WriteEndObject();
-        });
-
-    private static string RequiredCommandString(JsonElement payload, string property)
-    {
-        if (payload.ValueKind != JsonValueKind.Object || !payload.TryGetProperty(property, out JsonElement value) ||
-            value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
-        {
-            throw new JsonException($"An identity command requires a nonblank '{property}'.");
-        }
-        return value.GetString()!;
-    }
-
-    private async Task HandleStopAsync(IHttpContext context)
-    {
-        if (context.Request.Method != HttpMethod.Post)
-        {
-            SetMethodNotAllowed(context, "POST");
-            return;
-        }
-
-        if (_controlPlane is null)
-        {
-            context.Response.StatusCode = HttpStatusCode.NotFound;
-            return;
-        }
-
-        await _controlPlane.RequestStopAsync(context.RequestCancelled).ConfigureAwait(false);
-        context.Response.StatusCode = HttpStatusCode.Accepted;
-    }
-
-    private async ValueTask<ResourceCredentialStatus> AuthorizeAsync(IHttpContext context)
-    {
-        if (!_requireAuthentication)
-        {
-            // The accepted transport peer is authoritative; forwarded headers cannot grant access.
-            if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint endpoint)
-            {
-                return ResourceCredentialStatus.Forbidden;
-            }
-
-            IPAddress address = endpoint.Address;
-            if (address.IsIPv4MappedToIPv6)
-            {
-                address = address.MapToIPv4();
-            }
-
-            return address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback)
-                ? ResourceCredentialStatus.Authorized
-                : ResourceCredentialStatus.Forbidden;
-        }
-
-        ResourceCredentialPresentation presentation = ResourceCredentialPresentation.FromAuthorizationValue(
-            context.Request.Headers.TryGetValue(HttpHeaderKey.Authorization, out HttpHeaderValue authorization)
-                ? authorization.Value
-                : null,
-            _resourceAudience,
-            DateTimeOffset.UtcNow);
-        ResourceCredentialVerification verification = default;
-        if (ResourceRuntime.TryGetCredentialVerifier(_resourceContext, out IResourceCredentialVerifier? registered))
-        {
-            verification = await registered.VerifyAsync(presentation, context.RequestCancelled).ConfigureAwait(false);
-        }
-
-        if (verification.Status is ResourceCredentialStatus.NoResult)
-        {
-            verification = presentation.Scheme.Equals("Bearer", StringComparison.OrdinalIgnoreCase)
-                ? _bootstrapVerifier!.Validate(presentation.Credential, presentation.ExpectedAudience, presentation.Now)
-                : new ResourceCredentialVerification(ResourceCredentialStatus.Unauthorized, null, null);
-        }
-
-        if (verification.Status is not ResourceCredentialStatus.Authorized)
-        {
-            return verification.Status;
-        }
-
-        // The management plane serves only this application's gateway: the mapped form of the
-        // default verifier's iss and sub rules.
-        return verification.Caller is { Kind: ResourceCallerKind.Gateway } caller &&
-            string.Equals(caller.Application, _applicationIssuer, StringComparison.Ordinal) &&
-            string.Equals(caller.Subject, _resourceContext.GatewayName, StringComparison.Ordinal)
-                ? ResourceCredentialStatus.Authorized
-                : ResourceCredentialStatus.Forbidden;
     }
 
     private ClientAuthenticationStatus AuthenticateClient(
@@ -889,7 +620,7 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
             }
         }
 
-        if (clientId is null || !_registry.TryGetClient(clientId, out client))
+        if (clientId is null || !_clients.TryGetValue(clientId, out client))
         {
             client = null;
             return ClientAuthenticationStatus.Invalid;
@@ -1034,17 +765,6 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
         return false;
     }
 
-    private static void SetAuthorizationFailure(IHttpContext context, ResourceCredentialStatus status)
-    {
-        context.Response.StatusCode = status is ResourceCredentialStatus.Forbidden
-            ? HttpStatusCode.Forbidden
-            : HttpStatusCode.Unauthorized;
-        if (status is ResourceCredentialStatus.Unauthorized)
-        {
-            context.Response.Headers[HttpHeaderKey.WWWAuthenticate] = "Bearer";
-        }
-    }
-
     private static void SetMethodNotAllowed(IHttpContext context, string allow)
     {
         context.Response.StatusCode = HttpStatusCode.MethodNotAllowed;
@@ -1164,8 +884,45 @@ internal sealed class IdentityEndpointService : IHostService, IDisposable
 
     private SslStreamCertificateContext CreateDevelopmentServerCertificateContext(string host)
     {
-        _serverCertificate = _resourceContext.CreateDevelopmentEndpointCertificate(host);
+        _serverCertificate = CreateDevelopmentCertificate(host);
         return SslStreamCertificateContext.Create(_serverCertificate, null, offline: true);
+    }
+
+    // The ephemeral self-signed certificate of a loopback Local endpoint, the only place the
+    // constructor admits HTTPS.
+    private static X509Certificate2 CreateDevelopmentCertificate(string host)
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest($"CN={host}", key, HashAlgorithmName.SHA256);
+        var names = new SubjectAlternativeNameBuilder();
+        if (IPAddress.TryParse(host, out IPAddress? address))
+        {
+            names.AddIpAddress(address);
+        }
+        else
+        {
+            names.AddDnsName(host);
+        }
+
+        request.CertificateExtensions.Add(names.Build());
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new("1.3.6.1.5.5.7.3.1") },
+            false));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        using X509Certificate2 ephemeral = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddMinutes(-5),
+            DateTimeOffset.UtcNow.AddYears(1));
+        byte[] pkcs12 = ephemeral.Export(X509ContentType.Pkcs12);
+        try
+        {
+            // The PKCS#12 import gives SslStream a Windows-compatible private-key association.
+            return X509CertificateLoader.LoadPkcs12(pkcs12, null, X509KeyStorageFlags.Exportable);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(pkcs12);
+        }
     }
 
     private enum ClientAuthenticationStatus

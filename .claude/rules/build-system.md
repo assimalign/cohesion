@@ -117,7 +117,7 @@ No installer required. Resource consumers get the hosting kernel and their area 
 | `Assimalign.Cohesion.Sdk.Database` | `App` + `App.Database` |
 | `Assimalign.Cohesion.Sdk.<Domain>` | `App` + `App.<Domain>` |
 
-The base SDK declares `KnownFrameworkReference` entries for every framework in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props`, so explicit references resolve even in a base-only project. Each resource-area SDK sets its executable marker before importing the base props, then adds both implicit references under `CohesionAutoIncludeAppFramework != false`. Gateway remains NuGet-only unless in-process composition adds App plus the referenced areas (see *What `Sdk.Gateway` injects and generates*).
+The base SDK declares `KnownFrameworkReference` entries for every framework in `sdks/Assimalign.Cohesion.Sdk/Targets/Assimalign.Cohesion.Sdk.FrameworkReference.props`, so explicit references resolve even in a base-only project. Each resource-area SDK sets its executable marker before importing the base props, then adds both implicit references under `CohesionAutoIncludeAppFramework != false`. `Sdk.Gateway` adds no framework: a gateway takes the `Assimalign.Cohesion.ApplicationModel.Gateway` package (see *What `Sdk.Gateway` references*).
 
 ## Each framework is two NuGet packages
 
@@ -202,18 +202,16 @@ The Runtime csproj converts the public items to `<CohesionProjectReference>` ite
 
 **Package-delivered assemblies are members too.** A member that takes a `CohesionPackageReference` on a package outside `Microsoft.NETCore.App` needs that package's assembly at run time, and an `Sdk.<Area>` application has no reference to the package. The framework lists the assembly by name, beside the members: public when a member's public API exposes its types (`System.Threading.RateLimiting` in `App.Web`, because `RateLimitingPolicy` takes a `PartitionedRateLimiter<IHttpContext>`), private otherwise. The name resolves to no project. Every Runtime producer sets `CopyLocalLockFileAssemblies` (in `App.props`), so the package's runtime asset reaches the producer's bin through the member's project reference, and the pack collects it there like any member. Its manifest entries keep the package's own versions and token (*Each framework is two NuGet packages*). The framework tests read each closure member's package references. They reject a package the framework does not carry, and a package entry no member references. The App framework's packages count for every area. The tests read direct package references only, and the packages assume the assembly name equals the package id.
 
-Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting and its Health/Resources/Telemetry siblings, Connections, the host-composed configuration providers, Logging.Console, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Connections is a kernel root because generated resource accessors and every area hosting module depend on it. Everything outside that hosting kernel remains an ordinary package. The derivation walks project references only, so the kernel's package-delivered assemblies are App's one explicit list: `CohesionFrameworkPrivateAssembly` items in App's group, today `System.Security.Cryptography.ProtectedData`, which Hosting.Resources uses to decrypt Windows mount files.
+Base App is different: never add a library directly to its assembly list. `@(CohesionAppKernelRoot)` in `App.props` is the sole policy input, and `App.targets` derives the transitive Assimalign project-reference closure plus the umbrella assembly. The roots are Hosting, ApplicationModel.Hosting, Connections and its StreamAbort, StreamLimits, and Tls siblings, the host-composed configuration providers, Logging.Console, Logging.EventSource, OpenTelemetry, DependencyInjection, and FileSystem.Physical. Everything outside that hosting kernel remains an ordinary package. The derivation walks project references only, so the kernel's package-delivered assemblies would be App's one explicit list, as `CohesionFrameworkPrivateAssembly` items in App's group; the kernel references no package today.
 
-The Hosting-area package graph is exact: `Assimalign.Cohesion.Hosting.Health` references Core only;
-`Assimalign.Cohesion.Hosting.Resources` references Core, plain Hosting, Hosting.Health, and the
-ProtectedData facade; plain Hosting references neither sibling. The `Assimalign.Cohesion.App`
-hosting kernel carries both opt-in siblings. All 18 resource SDKs emit generated code that references
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`, so Resources belongs beside the
-already-shared plain Hosting assembly; Health follows because Resources references it. This
-framework-level delivery does not add direct project references to the 16 filler resource areas.
-Those generated accessors also expose `Assimalign.Cohesion.Connections.ConnectionString`, and
-every area hosting module reaches Connections, so Connections is carried once by App rather than
-repeated in all 18 area frameworks.
+`Assimalign.Cohesion.ApplicationModel.Hosting` is a kernel root because every area's
+`<Area>.Hosting.ApplicationModel` integration (an `App.<Area>` member) builds on it; carrying it
+once in App keeps it out of all 18 area frameworks. Its closure (the ApplicationModel identity and
+Protocol packages) arrives with it. The platform packages a resource opts into
+(`ApplicationModel.Hosting.InProcess`, the `cohesion-platforms` instance halves) are not in the
+kernel: the application references the ones it uses. Every area hosting module reaches
+Connections, so Connections is likewise carried once by App rather than repeated in all 18 area
+frameworks.
 
 ## Cross-resource dependencies (private implementation details)
 
@@ -240,45 +238,27 @@ generated contracts, default-value semantics, diagnostics, and write-on-change g
 `build/Targets/Build.Rules.targets` protects the boundary between resource-area packages and the
 orchestration gateway:
 
-- **COHAM001** is the strict dependency-closure guard for an assembly under `resources/**` whose
-  name ends in `.ApplicationModel`. It activates only when that project sets
-  `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`; every resource
-  `*.ApplicationModel` project — all 18 at HEAD — sets the guard. Once active, the only permitted non-BCL assemblies
-  are `Assimalign.Cohesion.Core` (the evaluated Core assembly name),
-  `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
-  `Assimalign.Cohesion.Hosting.Health`, and `Assimalign.Cohesion.Hosting.Resources`. The area's
-  ApplicationModel project directly references only `Assimalign.Cohesion.ApplicationModel` and
-  `Assimalign.Cohesion.Hosting.Resources`; the latter brings the plain host and health contracts
-  into the resolved closure. BCL means assemblies supplied by the `Microsoft.NETCore.App`
-  reference pack, plus the `System.Security.Cryptography.ProtectedData` facade used by
-  Hosting.Resources' Windows mount reader; third-party packages are not implicitly allowed.
 - **COHRES003** applies automatically to every non-harness project under `resources/**` and bans
   any `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. It has no opt-in and no exemption.
+  A resource builds on the instance side only: its `<Area>.Hosting.ApplicationModel` integration
+  references `Assimalign.Cohesion.ApplicationModel.Hosting`.
 - **COHRES004** rejects `Assimalign.Cohesion.Hosting` and every `Assimalign.Cohesion.Hosting.*`
-  assembly for roots and features. Only `<Area>.Hosting`, `<Area>.Hosting.<Suffix>`,
-  `<Area>.Testing`, and `<Area>.ApplicationModel` may depend on that closure. The hosting
-  family is classified case-insensitively.
+  assembly for roots and features. Only `<Area>.Hosting`, `<Area>.Hosting.<Suffix>` (which
+  includes `<Area>.Hosting.ApplicationModel`), and `<Area>.Testing` may depend on that closure.
+  The hosting family is classified case-insensitively.
   COHRES001 separately rejects an area's exact runtime module and rejects hosting-family
   integrations from roots/features. Each assembly is filtered against the project's named
-  exemptions independently. COHRES002 checks only the exact runtime module; since owner decision
-  2026-10-09 it rejects only the same-area `Testing`, `ApplicationModel`,
-  `ApplicationModel.Orchestration`, framework-producer, and harness projects among its direct
-  references, and `<Area>.ApplicationModel` or `<Area>.ApplicationModel.Orchestration` anywhere in
-  its resolved closure (`resource-areas.md`).
-- **COHAM002** requires `<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>` for
-  every non-harness `resources/**` assembly whose name ends in `.ApplicationModel` or
-  `.ApplicationModel.Orchestration`. One `using` then composes every area's verbs and every opt-in
-  provider in an apphost or gateway `Program.cs`; the type names carry the area prefix.
+  exemptions independently; `<Area>.Testing` is the standing exemption holder for the exact
+  module, and `<Area>.Hosting.ApplicationModel` references it with no exemption: COHRES001
+  sanctions that one integration by its exact name. COHRES002 checks only the exact runtime module; since
+  owner decision 2026-10-09 it rejects only the same-area `Testing`, `Hosting.ApplicationModel`,
+  framework-producer, and harness projects among its direct references (`resource-areas.md`).
 
-An `<Area>.ApplicationModel.Orchestration` package (the opt-in gateway providers, such as
-`SecretStore.ApplicationModel.Orchestration`) gets no carve-out from these guards. Its name does not
-end in `.ApplicationModel`, so COHRES004 bars every `Hosting*` assembly, and COHRES003 bars every
-`ApplicationModel.Gateway*` assembly. It references `Assimalign.Cohesion.ApplicationModel`, its
-area's `<Area>.Client`, and other `libraries/**` packages outside the Hosting and Gateway families,
-never `<Area>.ApplicationModel` (whose `Hosting.Resources` reference would trip COHRES004). See
-`resource-areas.md` for the package kind.
+An area's integration package declares its own `RootNamespace`
+(`Assimalign.Cohesion.<Area>.Hosting.ApplicationModel`), like any library; no rule pins a shared
+ApplicationModel namespace on resource packages.
 
-COHAM001, COHRES003, and COHRES004 inspect the direct/transitive project-reference graph before
+COHRES003 and COHRES004 inspect the direct/transitive project-reference graph before
 assembly resolution and the complete `ReferencePath` closure after `ResolveAssemblyReferences`. The
 latter catches package assets and raw `<Reference>`+`HintPath` routes. Tests, examples, samples, and
 fixtures are exempt from every guard in this section; error text names each offending assembly so
@@ -308,19 +288,19 @@ non-harness project under `libraries/**` or `sdks/**`:
 may reference `resources/<Area>/**`: an area SDK's build tasks may reuse that area's own
 declaration contract. The precedent is `Sdk.Database.Tasks → Database.Sql.Schema`. The exception is
 decided by path in both layers. It never covers another area. The base SDK
-(`sdks/Assimalign.Cohesion.Sdk/`) has no area, and `Sdk.ApplicationModel` and `Sdk.Gateway` have no
-`resources/` folder to match, so none of the three may reference `resources/**` at all.
+(`sdks/Assimalign.Cohesion.Sdk/`) has no area, and `Sdk.Gateway` has no `resources/` folder to
+match, so neither may reference `resources/**` at all.
 
 - **Harnesses are exempt by path:** `tests`, `examples`, `samples`, and `fixtures` as complete
-  path segments, matched case-insensitively. This is why the Gateway fixtures and test hosts under
+  path segments, matched case-insensitively. This is why test projects under
   `libraries/ApplicationModel/**` may compose resource runtimes. The match runs against the path
   **relative to the repository root**, so a checkout under a folder named `tests` or `libraries`
   is not misread.
 - **There is no opt-out property.** A library that "needs" a resource type is missing a contract
-  in `libraries/`: move the seam there and let the resource package implement it. The gateway's
-  store, certificate, trust, command-input, telemetry, and credential seams in
-  `Assimalign.Cohesion.ApplicationModel` are the precedent; their implementations ship in opt-in
-  `resources/<Area>/…ApplicationModel.Orchestration` packages.
+  in `libraries/`: move the seam there and let the resource package implement it. The
+  managed-instance contracts in `Assimalign.Cohesion.ApplicationModel.Hosting`
+  (`IApplicationInstance`, `IApplicationInstanceAction`, `ApplicationInstanceOptions`) are the
+  precedent; each area implements them in `resources/<Area>/…Hosting.ApplicationModel`.
 - **The scope is computed from strings.** `Path.GetFullPath` takes one argument, and the relative
   path comes from `StartsWith`/`Substring`. It evaluates the same under Visual Studio's .NET
   Framework MSBuild, Core MSBuild, and on Unix.
@@ -328,48 +308,34 @@ decided by path in both layers. It never covers another area. The base SDK
 Relaxing COHLIB001 beyond the same-area SDK exception is an architectural decision, on the same
 terms as the resource guards (`resource-areas.md`).
 
-## What `Sdk.Gateway` injects and generates
+## What `Sdk.Gateway` references
 
-A gateway is an executable on `Assimalign.Cohesion.Sdk.Gateway`. The SDK injects only the
-following references:
+A gateway is an executable on `Assimalign.Cohesion.Sdk.Gateway`, a slim SDK chained to the base
+`Assimalign.Cohesion.Sdk`. It sets executable output and references one package,
+`Assimalign.Cohesion.ApplicationModel.Gateway`, at `$(CohesionVersion)`. That is all it does:
 
-- **The orchestration core:** `Assimalign.Cohesion.ApplicationModel`,
-  `ApplicationModel.Gateway`, `ApplicationModel.Gateway.ControlPlane`, `Hosting.Resources`, and
-  `Connections`.
-- **Each selected provider's package.** These are the names in `CohesionGateways`: `Local` is the
-  core `ApplicationModel.Gateway`, while `InProcess`, `Docker`, and `Kubernetes` map through
-  `CohesionGatewayPackage`.
-- **One area ApplicationModel per referenced area.** The area comes from each
-  `CohesionResourceReference` project's `Sdk="Assimalign.Cohesion.Sdk.<Area>"` attribute, or from
-  the reference's `Area` metadata. The SDK injects that area's `<Area>.ApplicationModel`.
-- **In process only** (`InProcess` selected in `CohesionGateways` and
-  `CohesionGatewayInProcess=true`): `App` plus `App.<Area>` for those areas.
-
-The SDK injects nothing else by convention:
-
-- **No client packages.** Resource commands travel through the generic control-plane command
-  client in `ApplicationModel.Gateway`, so no `<Area>.Client` is restored for a gateway.
-- **No store, certificate-authority, or trust provider.** These come from the opt-in
-  `<Area>.ApplicationModel.Orchestration` packages. The gateway references each one itself and
-  registers it in `Program.cs`, for example
-  `builder.UseSecretStore(store).AsCertificateAuthority().AsTrustStore()`. Credential issuers and
-  caller authenticators are assigned on `builder.Providers` there as well.
-- **No generated per-resource verbs.** `Gateway.g.cs` carries `Manifests`, `Externals`,
-  `Applications`, `References`, the `CohesionGatewayProviders` catalog, `UseGateway`, and
-  `Gateway.CreateBuilder`. There is no generated `Add<Member>` verb, no
-  `CohesionGatewayResourceKind` table, and no `COHGW003`. `Program.cs` calls the area's
-  hand-written verb over the generated manifest, such as
-  `builder.AddWeb(Manifests.AppAApi, new WebResourceOptions { ... })`. A kind without an
-  ApplicationModel package uses `builder.AddResource(Manifests.X)`.
-- **In-process bindings still apply to hand-written verbs.** `Gateway.CreateBuilder` registers them
-  by manifest identity, so they apply whichever verb adds the resource.
+- **No generated sources.** There is no manifest, accessor, or gateway-builder generation; the
+  gateway's `Program.cs` declares its model in code and builds the gateway with
+  `ApplicationGateway.CreateBuilder(name)`, then runs it (`RunAsync`).
+- **No framework.** A gateway takes no `App` or `App.<Area>` framework and no area package: it
+  manages resources through their platform without loading their runtimes.
+- **Self-contained by default.** `Sdk/Sdk.targets` gives an executable gateway the resource
+  executables' defaults (`SelfContained=true`, `RuntimeIdentifier=$(NETCoreSdkRuntimeIdentifier)`,
+  `ValidateExecutableReferencesMatchSelfContained=false`), because an in-process gateway that
+  references a self-contained `Sdk.<Area>` project otherwise fails NETSDK1151, and with that check
+  off cannot start: the referenced program's App frameworks flow in and ship only as runtime packs.
+- **Platforms are explicit references.** The gateway references each platform's gateway half it
+  uses (`ApplicationModel.Gateway.InProcess`, or a `cohesion-platforms` package such as
+  `ApplicationModel.Gateway.Kubernetes`) and registers it on the builder, for example
+  `UseInProcess(infrastructure)`. The in-process platform runs each resource's program in the
+  gateway's process, so an in-process gateway also references the resource programs it runs.
 
 ## Adding a new framework + SDK domain
 
 ```powershell
 # 1. Create the resources/<Name>/ folder if it doesn't exist.
 
-# 2. Generate the SDK, framework producer, and ApplicationModel scaffold (12 files).
+# 2. Generate the SDK and framework producer scaffold.
 #    The producers land at resources/<Name>/Assimalign.Cohesion.<Name>.Refs and
 #    .Runtime, named per "Framework producer projects" above, each with its
 #    Directory.Build.props; the area's own Directory.Build.props is written
@@ -575,7 +541,7 @@ Every external `uses:` in `release.yml`, `ci-packages.yml`, `ci-packages-prune.y
 
 On pull requests and relevant pushes, a matrix (Linux, plus Windows and macOS on `main` or a manual `all-os` run) runs strict `Pack-Release.ps1 -SkipLibraries` for the host RID and packs the Core/ObjectMapping packages used by the analyzer sample. The shared `scripts/sdks/Invoke-SdkConsumerSmoke.ps1` harness then materializes isolated base, Web, Database, and analyzer-bearing consumers against that feed. The base executables explicitly reference App; the analyzer references ObjectMapping as an ordinary package. The harness builds, asserts generated source, publishes self-contained, runs each apphost, and asserts its output. The same job runs the framework closure tests, which check each area's member list against its project-graph closure.
 
-The workflow retains the broader `Sdk.Gateway` package-boundary, in-process, NativeAOT, and container smoke added with that SDK. Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
+A second pair of jobs packs the SDKs and the `ApplicationModel.Gateway` package closure and runs the base, Database, and Gateway SDK package-boundary tests on each OS leg; the Gateway test builds a package-only consumer of the slim `Sdk.Gateway`. The generated-gateway publish, in-process, NativeAOT, and container smoke left with the generated surface (2026-10-31). Its permissions remain `contents: read`; artifact uploads are run-local test inputs, never package-feed publication.
 
 `release.yml` repeats the same package-only consumer harness as `validate-consumer`, using the exact full release artifact, before staging or promotion. The former publishing overlap is resolved: nuget.org has one writer, `release.yml`. GitHub Packages has two, `release.yml` for release versions and `ci-packages.yml` for CI versions, and their versions cannot collide because a CI version extends the canonical version's predecessor. Neither replaces a published version.
 
@@ -623,15 +589,6 @@ sdks/Assimalign.Cohesion.Sdk/Targets/      ← base SDK only
 ├── ...Sdk.StronglyTypedSettings.props / .targets
 ├── ...Sdk.Defaults.props                  ← SDK-owned consumer project defaults
 └── ...Sdk.PinValidation.targets           ← SDK and platform version-pin validation
-
-sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Targets/
-├── ...Sdk.ResourceManifest.props          ← resource manifest metadata defaults
-├── RESOURCE_MANIFEST_README.md            ← resource manifest build contract
-├── Sdk.Image.targets                     ← OCI image production and publication gather
-├── Sdk.Resource.props                    ← resource opt-in properties
-├── Sdk.Resource.Paths.targets            ← late RID/TFM intermediate-path defaults
-├── Sdk.Resource.targets                  ← manifest and resource surface generation
-└── ...Sdk.ApplicationModel.Build.targets
 
 scripts/
 ├── build/

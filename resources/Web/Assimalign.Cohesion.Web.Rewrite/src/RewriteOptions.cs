@@ -8,7 +8,9 @@ using Assimalign.Cohesion.Web.Rewrite.Internal;
 namespace Assimalign.Cohesion.Web.Rewrite;
 
 /// <summary>
-/// The rules <c>UseRewrite</c> evaluates, in the order they are added, and the bound on rule passes.
+/// The rules the rewrite middleware evaluates, in the order they are added, and the bound on rule passes:
+/// the <see cref="RewriteBuilder.Options"/> that <c>builder.Services.AddRewrite(rewrite =&gt; ...)</c>
+/// configures.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -37,9 +39,9 @@ namespace Assimalign.Cohesion.Web.Rewrite;
 /// is below the branch's prefix; an absolute URL is not.
 /// </para>
 /// <para>
-/// Composition is dependency-free: every rule is built and validated while <c>UseRewrite</c> runs, and the
-/// middleware keeps its own copy of the list, so a misconfigured rule fails at startup and changing the
-/// options afterwards has no effect.
+/// Composition is dependency-free: every rule is built and validated as it is added, while the application
+/// registers the rewrite, and <see cref="RewriteBuilder.Build"/> gives the middleware its own copy of the
+/// list, so a misconfigured rule fails at startup and changing the options afterwards has no effect.
 /// </para>
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("RewriteOptions")]

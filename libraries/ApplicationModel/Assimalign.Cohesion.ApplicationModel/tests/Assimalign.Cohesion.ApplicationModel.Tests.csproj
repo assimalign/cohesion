@@ -1,28 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
-  <PropertyGroup>
-    <RootNamespace>Assimalign.Cohesion.ApplicationModel.Tests</RootNamespace>
-    <IsPackable>false</IsPackable>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <CohesionPackageReference Include="coverlet.collector" />
-    <CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
-    <CohesionPackageReference Include="xunit" />
-    <CohesionPackageReference Include="xunit.runner.visualstudio" />
-    <CohesionPackageReference Include="Shouldly" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
-    <CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.TestHost" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="TestHost/**/*.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Update="Fixtures\plans\*.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.ApplicationModel.Tests</RootNamespace>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
+		<CohesionPackageReference Include="Shouldly" />
+		<CohesionPackageReference Include="xunit" />
+		<CohesionPackageReference Include="xunit.runner.visualstudio" />
+		<CohesionPackageReference Include="coverlet.collector" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel" />
+	</ItemGroup>
 </Project>

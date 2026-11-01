@@ -17,12 +17,11 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.IdentityHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityHub.Models" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.IdentityModel" />
 
-        <!-- IdentityHub.ApplicationModel is NuGet-only. -->
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.SecurityHeaders" />
@@ -34,7 +33,6 @@
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Streaming" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />

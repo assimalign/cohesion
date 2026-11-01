@@ -126,4 +126,10 @@
   <data name="HttpLoggingLevelInvalid" xml:space="preserve">
     <value>The HTTP logging level must not be LogLevel.None - it could never emit. To silence logging for specific endpoints attach HttpLoggingMetadata with HttpLoggingFields.None; to silence it globally do not call UseHttpLogging.</value>
   </data>
+  <data name="HttpLoggingLoggerNotSet" xml:space="preserve">
+    <value>HTTP logging needs the logger its entries are written to. Call logging.UseLoggerFactory(loggerFactory) or logging.UseLogger(logger) in builder.Services.AddHttpLogging(logging =&gt; ...), or resolve the application's ILoggerFactory in builder.Services.AddHttpLogging((services, logging) =&gt; ...).</value>
+  </data>
+  <data name="HttpLoggingNotRegistered" xml:space="preserve">
+    <value>UseHttpLogging places the middleware that builder.Services.AddHttpLogging(logging =&gt; ...) registers, and no HTTP logging is registered. Register it, with the logger its entries are written to, first.</value>
+  </data>
 </root>

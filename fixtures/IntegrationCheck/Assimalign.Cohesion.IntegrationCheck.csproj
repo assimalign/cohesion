@@ -8,11 +8,27 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Antiforgery" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authentication" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Authorization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Caching" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Compression" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.CookiePolicy" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Diagnostics" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Cors" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ErrorHandling" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.ForwardedHeaders" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.HostFiltering" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.HttpsPolicy" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.OpenApi" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Query" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.RateLimiting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.RequestTimeouts" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Rewrite" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Routing" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.SecurityHeaders" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Serialization" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Sessions" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.StaticFiles" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web.Validation" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Web.WebSockets" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
 	</ItemGroup>
 	<ItemGroup>

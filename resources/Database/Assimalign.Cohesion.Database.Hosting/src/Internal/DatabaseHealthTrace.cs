@@ -4,7 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Web.Health;
 
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
@@ -21,7 +21,7 @@ internal sealed class DatabaseHealthTrace
     private long _nextObservation;
     private long _lastObservation;
 
-    internal async ValueTask<HealthContribution> CheckAsync(DatabaseApplicationContext context, CancellationToken cancellationToken)
+    internal async ValueTask<HealthCheckResult> CheckAsync(DatabaseApplicationContext context, CancellationToken cancellationToken)
     {
         long sequence = Interlocked.Increment(ref _nextObservation);
         var observation = new Observation();

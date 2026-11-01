@@ -11,11 +11,11 @@ using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Logging;
+using Assimalign.Cohesion.Web.Health;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
 
 /// <summary>
 /// The host context for <see cref="DatabaseApplication"/> — the concrete
@@ -29,8 +29,13 @@ using Assimalign.Cohesion.Hosting.Health;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationContext")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Hosting.DatabaseApplicationContext.DebugView))]
-public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicationContext, IHealthContributor
+public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicationContext
 {
+    /// <summary>
+    /// The name of the database application's entry in a health report.
+    /// </summary>
+    internal const string HealthCheckName = "database";
+
     private DatabaseHealthTrace? _healthTrace;
     private readonly HostEnvironment _environment;
     private IReadOnlyList<DatabaseEngine> _engines;
@@ -99,11 +104,6 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     }
 
     /// <summary>
-    /// Gets the stable name of the database application health contribution.
-    /// </summary>
-    public string Name => "database";
-
-    /// <summary>
     /// Gets the application's reopen service (owner decision 22), or null when
     /// <see cref="DatabaseApplicationOptions.ReopenOfflineDatabases"/> is off. Set once at Build.
     /// </summary>
@@ -132,7 +132,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
     /// the reopen attempts to the <c>Assimalign.Cohesion.Database.Hosting</c> event source, which
     /// the application's logging forwards (<c>docs/EVENT_SOURCES.md</c>).
     /// </remarks>
-    public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
+    internal ValueTask<HealthCheckResult> CheckAsync(CancellationToken cancellationToken = default)
     {
         if (!DatabaseHostingEventSource.Log.IsEnabled(System.Diagnostics.Tracing.EventLevel.Warning, System.Diagnostics.Tracing.EventKeywords.None) &&
             !DatabaseHostingEventSource.Log.IsEnabled(System.Diagnostics.Tracing.EventLevel.Informational, System.Diagnostics.Tracing.EventKeywords.None))
@@ -143,7 +143,7 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         return trace.CheckAsync(this, cancellationToken);
     }
 
-    internal async ValueTask<HealthContribution> CheckCoreAsync(CancellationToken cancellationToken, DatabaseHealthTrace.Observation? observation = null)
+    internal async ValueTask<HealthCheckResult> CheckCoreAsync(CancellationToken cancellationToken, DatabaseHealthTrace.Observation? observation = null)
     {
         var engines = new List<DatabaseEngine>(_engines.Count + _servers.Count);
         var observedEngines = new HashSet<DatabaseEngine>(ReferenceEqualityComparer.Instance);
@@ -330,20 +330,20 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
 
         if (unavailableEngines.Count > 0)
         {
-            return HealthContribution.Unhealthy(
+            return HealthCheckResult.Unhealthy(
                 $"Unavailable database engines: {string.Join(", ", unavailableEngines)}.",
-                data);
+                data: data);
         }
         else if (offlineDatabases.Count > 0)
         {
-            return HealthContribution.Unhealthy(
+            return HealthCheckResult.Unhealthy(
                 $"Offline databases: {string.Join(", ", offlineDatabases)}. A device operation of their storage failed, or their " +
                 "engine gave up on them after a background worker kept failing, so every operation on them is refused until " +
                 "each is reopened. " + (ReopenService is not null
                     ? "The application reopens each by itself, with backoff, until the reopen succeeds; the reopen's recovery " +
                       "decides every commit that was not confirmed."
                     : "Reopen each (OpenDatabaseAsync), or restart the process to open them again; either runs recovery."),
-                data);
+                data: data);
         }
         else if (faultedEngines.Count > 0)
         {
@@ -355,15 +355,15 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
                     "returns to Running once its workers complete the work their failures left.");
             }
 
-            return HealthContribution.Degraded(description.ToString(), data);
+            return HealthCheckResult.Degraded(description.ToString(), data: data);
         }
         else if (provisioningDatabases.Count > 0)
         {
-            return HealthContribution.Degraded($"Provisioning databases: {string.Join("; ", provisioningDatabases)}.", data);
+            return HealthCheckResult.Degraded($"Provisioning databases: {string.Join("; ", provisioningDatabases)}.", data: data);
         }
         else
         {
-            return HealthContribution.Healthy(
+            return HealthCheckResult.Healthy(
                 $"{engines.Count} database engine(s) running with {workerCount} worker(s).",
                 data);
         }
@@ -426,8 +426,6 @@ public sealed class DatabaseApplicationContext : HostContext, IDatabaseApplicati
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.DatabaseServer> Servers => _target.Servers;
         public global::Assimalign.Cohesion.Configuration.IConfiguration Configuration => _target.Configuration;
         public global::System.IServiceProvider Services => _target.Services;
-        public string Name => _target.Name;
         public global::Assimalign.Cohesion.Hosting.HostId HostId => _target.HostId;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

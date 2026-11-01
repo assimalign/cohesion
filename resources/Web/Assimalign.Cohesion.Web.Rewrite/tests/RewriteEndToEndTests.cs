@@ -40,10 +40,12 @@ public class RewriteEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Services.AddRouting();
+        factory.Builder.Services
+            .AddRouting()
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/old/(\\d+)$", "/new/$1"));
         int oldInvocations = 0;
 
-        factory.Application.UseRewrite(rules => rules.AddRewrite("^/old/(\\d+)$", "/new/$1"));
+        factory.Application.UseRewrite();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/old/{id:int}", Text(_ => "old", () => Interlocked.Increment(ref oldInvocations)));
         routes.Map(CohesionHttpMethod.Get, "/new/{id:int}", Text(context =>
@@ -81,8 +83,10 @@ public class RewriteEndToEndTests
         ActivitySource.AddActivityListener(listener);
 
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Services.AddRouting();
-        factory.Application.UseRewrite(rules => rules.AddRewrite("^/legacy/telemetry/(\\d+)$", "/telemetry/orders/$1"));
+        factory.Builder.Services
+            .AddRouting()
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/legacy/telemetry/(\\d+)$", "/telemetry/orders/$1"));
+        factory.Application.UseRewrite();
         factory.Application.UseRouting().Map(CohesionHttpMethod.Get, "/telemetry/orders/{id:int}", Text(_ => "order"));
 
         using HttpClient client = factory.CreateClient();
@@ -105,8 +109,11 @@ public class RewriteEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         using InMemoryFileSystem site = StaticSite.Create(("app.js", "console.log('app');"));
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseRewrite(rules => rules.AddRewrite("^/assets/v\\d+/(.*)$", "/$1"));
-        factory.Application.UseStaticFiles(site);
+        factory.Builder.Services
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/assets/v\\d+/(.*)$", "/$1"))
+            .AddStaticFiles(files => files.UseFileSystem(site));
+        factory.Application.UseRewrite();
+        factory.Application.UseStaticFiles();
 
         using HttpClient client = factory.CreateClient();
 
@@ -127,10 +134,13 @@ public class RewriteEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         using InMemoryFileSystem site = StaticSite.Create(("app.js", "console.log('app');"));
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/v\\d+/(.*)$", "/$1"))
+            .AddStaticFiles(files => files.UseFileSystem(site));
         factory.Application.Map("/static", branch =>
         {
-            branch.UseRewrite(rules => rules.AddRewrite("^/v\\d+/(.*)$", "/$1"));
-            branch.UseStaticFiles(site);
+            branch.UseRewrite();
+            branch.UseStaticFiles();
         });
 
         using HttpClient client = factory.CreateClient();
@@ -149,9 +159,10 @@ public class RewriteEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRewrite(rewrite => rewrite.Options.AddRewrite("^/latest/(.*)$", "/v2/$1"));
         factory.Application.Map("/docs", branch =>
         {
-            branch.UseRewrite(rules => rules.AddRewrite("^/latest/(.*)$", "/v2/$1"));
+            branch.UseRewrite();
             branch.Run(context => WriteTextAsync(context, $"{context.GetPathBase()}|{context.GetEffectivePath()}|{context.Request.Path}"));
         });
 
@@ -170,8 +181,10 @@ public class RewriteEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Services.AddRouting();
-        factory.Application.UseRewrite(rules => rules.AddRewrite("^/products/(\\d+)$", "/product?id=$1&view=full"));
+        factory.Builder.Services
+            .AddRouting()
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/products/(\\d+)$", "/product?id=$1&view=full"));
+        factory.Application.UseRewrite();
         factory.Application.UseRouting();
         factory.Application.MapGet("/product", (int id, string view) => $"product:{id}:{view}");
 
@@ -191,10 +204,12 @@ public class RewriteEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Services.AddRouting();
+        factory.Builder.Services
+            .AddRouting()
+            .AddRewrite(rewrite => rewrite.Options.AddRedirect("^/v1/orders$", "/v2/orders", CohesionHttpStatusCode.PermanentRedirect));
         int oldInvocations = 0;
 
-        factory.Application.UseRewrite(rules => rules.AddRedirect("^/v1/orders$", "/v2/orders", CohesionHttpStatusCode.PermanentRedirect));
+        factory.Application.UseRewrite();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Post, "/v1/orders", Text(_ => "v1", () => Interlocked.Increment(ref oldInvocations)));
         routes.Map(CohesionHttpMethod.Post, "/v2/orders", Text(context => $"{context.Request.Method.Value} v2"));
@@ -219,8 +234,10 @@ public class RewriteEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Builder.Services.AddRouting();
-        factory.Application.UseRewrite(rules => rules.AddRewrite("^/shop/(.*)$", "/store/$1?ref=shop"));
+        factory.Builder.Services
+            .AddRouting()
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/shop/(.*)$", "/store/$1?ref=shop"));
+        factory.Application.UseRewrite();
         factory.Application.UseRouting().Map(CohesionHttpMethod.Get, "/store/{**rest}", Text(context =>
         {
             IRewriteFeature feature = context.Features.Get<IRewriteFeature>()!;
@@ -242,11 +259,12 @@ public class RewriteEndToEndTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseRewrite(rules => rules.AddRewrite(
+        factory.Builder.Services.AddRewrite(rewrite => rewrite.Options.AddRewrite(
             "^/search\\?q=([^&]+)$",
             "/find/$1?",
             RewriteFlow.Continue,
             RewriteMatchTarget.PathAndQuery));
+        factory.Application.UseRewrite();
         factory.Application.Run(context => WriteTextAsync(context, context.Request.Path.Value));
 
         using HttpClient client = factory.CreateClient();
@@ -259,6 +277,83 @@ public class RewriteEndToEndTests
         invalid.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
         valid.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         (await valid.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("/find/café");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - E2E: UseRewrite should place the last registration when the rules are registered twice")]
+    public async Task UseRewrite_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/old$", "/first"))
+            .AddRewrite(rewrite => rewrite.Options.AddRewrite("^/old$", "/last"));
+        factory.Application.UseRewrite();
+        factory.Application.Run(context => WriteTextAsync(context, context.Request.Path.Value));
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/old", cancellation.Token);
+
+        // Assert — only the last registration's rules run.
+        response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("/last");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - E2E: A service-provider callback should register the rules UseRewrite places")]
+    public async Task AddRewrite_ServiceProviderCallback_ShouldRegisterTheRules()
+    {
+        // Arrange — the provider overload builds on first resolve, when the pipeline is composed.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        bool configured = false;
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRewrite((services, rewrite) =>
+        {
+            configured = services is not null;
+            rewrite.Options.AddRedirect("^/old$", "/new", CohesionHttpStatusCode.PermanentRedirect);
+        });
+        factory.Application.UseRewrite();
+        factory.Application.Run(context => WriteTextAsync(context, context.Request.Path.Value));
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act — the client follows the redirect to the target the provider callback registered.
+        using HttpResponseMessage response = await client.GetAsync("/old", cancellation.Token);
+
+        // Assert
+        configured.ShouldBeTrue();
+        response.RequestMessage!.RequestUri!.AbsolutePath.ShouldBe("/new");
+        (await response.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("/new");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - E2E: An invalid rule should fail inside the AddRewrite call")]
+    public async Task AddRewrite_InvalidRule_ShouldFailAtRegistration()
+    {
+        // Arrange — the builder template builds eagerly, so a target naming a capture group the pattern
+        // does not define fails where the application registers the rules, never per request.
+        await using WebApplicationTestFactory factory = new();
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(
+            () => factory.Builder.Services.AddRewrite(rewrite => rewrite.Options.AddRewrite("^/old$", "/new/$1")));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - E2E: UseRewrite without registered rules should fail the application's start")]
+    public async Task UseRewrite_WithoutRegistration_ShouldFailToStart()
+    {
+        // Arrange — the rules have no default, so there is nothing to place.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        IWebApplication application = factory.Application;
+        factory.Application.UseRewrite();
+
+        // Act — composing the pipeline, which starting the application does, names the verb to call.
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => application.StartAsync(cancellation.Token));
+
+        // Assert
+        exception.Message.ShouldContain("AddRewrite", Case.Sensitive);
     }
 
     private static RouterRouteHandler Text(Func<IHttpContext, string> text, Action? onInvoke = null) => new(context =>

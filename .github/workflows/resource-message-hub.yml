@@ -5,6 +5,9 @@ on:
       - "resources/MessageHub/**"
       - "!resources/MessageHub/**/*.slnx"
       - "!resources/MessageHub/**/*.md"
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
+      # change to the application model reruns the area.
+      - "libraries/ApplicationModel/**"
       - ".github/workflows/resource-message-hub.yml" # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
       - ".github/actions/build/**"
@@ -47,7 +50,7 @@ jobs:
         os: ${{ fromJSON((github.ref == 'refs/heads/main' || inputs.all-os) && '["ubuntu-latest","windows-latest","macos-latest"]' || '["ubuntu-latest"]') }}
         # One leg per OS builds and tests the whole area: the inner list is a single matrix value
         # that .github/actions/build receives whole. The release inventory guard reads this list.
-        projects: [["Assimalign.Cohesion.MessageHub", "Assimalign.Cohesion.MessageHub.ApplicationModel", "Assimalign.Cohesion.MessageHub.Hosting"]]
+        projects: [["Assimalign.Cohesion.MessageHub", "Assimalign.Cohesion.MessageHub.Hosting", "Assimalign.Cohesion.MessageHub.Hosting.ApplicationModel"]]
     steps:
       - uses: actions/checkout@v7
         name: Checkout
