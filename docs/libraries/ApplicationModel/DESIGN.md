@@ -59,28 +59,30 @@ for the in-process rendezvous only; a later chunk removes that edge.
 | `Assimalign.Cohesion.ApplicationModel.Protocol` | The gateway-to-instance wire: `InstanceKey`, `DeploymentId`, `ActionName`, `ApplicationInstanceManifest`, action invocation and results, snapshots, `IApplicationInstancePublisher`, `JsonApplicationContentSerializer` | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md) |
 | `Assimalign.Cohesion.ApplicationModel.Definition` | The logical model one gateway runs | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Definition/docs/DESIGN.md) |
 | `Assimalign.Cohesion.ApplicationModel.Hosting` | The instance runtime: `IApplicationInstance`, `IApplicationInstanceAction`, `ApplicationInstanceOptions`, `ApplicationInstanceControlPlane`, `ApplicationInstanceService`, `IApplicationInstanceGatewayClient` | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md) |
-| `Assimalign.Cohesion.ApplicationModel.Hosting.InProcess` | The in-process platform's instance half: `UseInProcess()` on a resource's options | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/DESIGN.md) |
+| `Assimalign.Cohesion.ApplicationModel.Hosting.InProcess` | The in-process platform's instance half: `UseInProcess()` on a resource's options, and `InProcessProgramAttribute`, which names the entry point a program's build exposes | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/DESIGN.md) |
 | `Assimalign.Cohesion.ApplicationModel.Gateway` | The gateway: `ApplicationGateway.CreateBuilder(name)` → `ApplicationGatewayBuilder`, `IApplicationGateway` (`StartAsync`, `StopAsync`, `Completion`), and the `RunAsync` extension | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md) |
-| `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | The in-process platform's gateway half: `InProcessInfrastructure` and `UseInProcess(infrastructure)`; runs each resource's program on a thread and in an environment scope of its own | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) |
+| `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` | The in-process platform's gateway half: `InProcessInfrastructure`, `InProcessInfrastructureBuilder`, `UseInProcess(configure)` / `UseInProcess(infrastructure)`, and the `InProcessProgramCatalog` the build fills; runs each resource's program on a thread and in an environment scope of its own | [DESIGN](../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/docs/DESIGN.md) |
 
 ## 3. A gateway program
 
 A gateway is an executable on `Assimalign.Cohesion.Sdk.Gateway`, which references the Gateway
-package and generates nothing. Its `Program.cs` declares the model, registers the platforms it
+package and generates no model. Its `Program.cs` declares the model, registers the platforms it
 deploys through, and runs:
 
 ```csharp
-await using var infrastructure = new InProcessInfrastructure();
-infrastructure
-    .AddProgram("Web", "orders-api", Orders.Program.MainAsync)
-    .AddProgram("Web", "storefront", Storefront.Program.MainAsync);
-
-ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess();
 IApplicationResourceDefinition orders = builder.AddResource("Web", "orders-api");
 builder.AddResource("Web", "storefront").WithSetting("Orders:Url", orders.Endpoint);
 
-await builder.Build().RunAsync(cancellationToken);
+await using ApplicationGateway gateway = builder.Build();
+await gateway.RunAsync(cancellationToken);
 ```
+
+An in-process gateway references each resource's project and names the resource on the reference
+(`<ProjectReference Include="..\Orders\Orders.csproj" CohesionResource="orders-api" />`). The
+resource's build exposes its entry point, top-level statements included, and the gateway's build
+registers it, so the bare `UseInProcess()` above runs both programs with no `AddProgram` call
+(Gateway.InProcess I15; the generators are in `Assimalign.Cohesion.SourceGeneration`).
 
 `StartAsync` takes the gateway's record over with a new epoch, deploys the resources in dependency
 order (independent ones at once), waits for an instance of each deployment to publish, reads its
@@ -89,8 +91,10 @@ outputs, and tears down what the model no longer declares; the run then continue
 operator's action runs on one instance and a write is restored on every instance (Gateway G38). A
 resource is declared generically by provider and name: no area ships a gateway-side package.
 
-The program above creates its platform and lends it to the builder, so it disposes the platform
-itself once the gateway has stopped. A platform can instead reach the builder as a factory,
+`UseInProcess()` builds the platform when the gateway is built, so the gateway owns it. A program
+can instead create its platform (`new InProcessInfrastructure()`) and lend it to the builder with
+`UseInProcess(infrastructure)`, and then disposes the platform itself once the gateway has
+stopped. A platform's verb reaches the builder as a factory,
 `UsePlatform(() => platform)`, which a platform's own verb calls with its builder: the factory runs
 in `Build()`, the gateway owns what it creates, and `await using` the gateway stops the run and then
 disposes the platform. An infrastructure or instance client given to `UseInfrastructure` or
@@ -157,8 +161,10 @@ opaque bytes and needs no area's types.
 
 ## 7. Non-goals
 
-- **Build-time generation.** No manifest, accessor, or registration is generated into a resource
-  or a gateway; both compose in code.
+- **Build-time generation of the model.** No manifest or accessor is generated into a resource or
+  a gateway, and both declare their model in code. The one generated piece is the in-process
+  binding of a referenced program's entry point to the resource name its project reference states
+  (Gateway.InProcess I15).
 - **Area gateway packages.** An area ships no definition or provider package; the gateway declares
   any resource by provider and name.
 - **A transport in the core packages.** Each platform brings its own, push or pull.

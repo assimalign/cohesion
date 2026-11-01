@@ -5,6 +5,9 @@
 > Since 2026-10-30 it is the gateway half of the in-process platform, whose instance half is
 > [ApplicationModel.Hosting.InProcess](../../Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/DESIGN.md)
 > (I12).
+> Since 2026-11-01 the gateway can own it: `UseInProcess(configure)` builds the infrastructure
+> with an `InProcessInfrastructureBuilder` through the gateway's `UsePlatform` (I14), and the
+> gateway program's build binds every resource program it references (I15).
 
 ## Purpose
 
@@ -45,7 +48,7 @@ sequenceDiagram
     Gateway->>Infra: ExecuteAsync (as instance client), an operator's action
     Infra->>Program: the attached control plane, in the program's environment
     Gateway->>Infra: StopAsync, the channel, when the run ends
-    Gateway->>Infra: DisposeAsync, after the run (gateway program)
+    Gateway->>Infra: DisposeAsync, after the run (its owner)
     Infra->>Program: scope shutdown, the last deployed first
 ```
 
@@ -70,7 +73,8 @@ to the delegate the gateway program calls, such as `Orders.Program.Main`. Nothin
 assembly scanning, no reflection over entry points, no generated host-construction convention. The
 entry point is called with no arguments, because everything a platform tells a workload arrives in
 its environment (I4). *Rejected:* binding by assembly (`Assembly.EntryPoint`), which is reflection a
-trimmed program keeps only with generated roots. The SDK can generate the `AddProgram` calls later.
+trimmed program keeps only with generated roots. Since 2026-11-01 the build generates the bindings
+(I15), and `AddProgram` stays for a program the build does not bind.
 
 **I3 — Each program runs on its own thread in its own environment.** A process gives every program
 one set of environment variables and one set of shutdown signals, so programs that share one
@@ -126,8 +130,9 @@ and every request still queued is refused.
 **I7 — Programs outlive their gateway.** A gateway that stops leaves its programs running, as a
 platform's workloads outlive their gateway. A gateway that runs again over the same infrastructure
 plans each running program `None` and adopts it: the program's next renewal finds its instance
-unknown, so it publishes again and restores what the gateway answers with. The gateway program owns
-the infrastructure, and `DisposeAsync` stops every program, the last deployed first, so a program
+unknown, so it publishes again and restores what the gateway answers with. Whoever created the
+infrastructure owns it: the gateway program for `new InProcessInfrastructure()`, the gateway for
+`UseInProcess(configure)` (I14). `DisposeAsync` stops every program, the last deployed first, so a program
 stops before what it depends on.
 
 **I8 — Plans compare what runs.** A resource whose program does not run, or ended, plans `Create`;
@@ -182,6 +187,46 @@ from `InProcessApplicationBuilderExtensions` with the builder) calls `UseInfrast
 `IInProcessGateway`, and this package's references to Hosting and Hosting.InProcess, are unchanged;
 reworking them is a later chunk.
 
+**I14 — The gateway can own the infrastructure (2026-11-01).** `UseInProcess(Action<InProcessInfrastructureBuilder>? configure = null)`
+registers the platform through the gateway's `UsePlatform` (Gateway G42): the gateway's `Build()`
+creates an `InProcessInfrastructureBuilder`, applies `configure`, builds the infrastructure, and owns
+it, so disposing the gateway stops the gateway's run and then the programs. The builder carries
+`Options` (`InProcessInfrastructureOptions`, with `StopTimeout`) and `AddProgram`, and each `Build()`
+makes new infrastructure at a new endpoint. `UseInProcess(infrastructure)` and
+`new InProcessInfrastructure()` stay for a caller that owns the infrastructure itself; the gateway
+borrows that one and never disposes it.
+
+```csharp
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("shop").UseInProcess(inProcess =>
+{
+    inProcess.Options.StopTimeout = TimeSpan.FromSeconds(10);
+    inProcess.AddProgram("Web", "legacy-api", Legacy.Program.MainAsync);
+});
+```
+
+**I15 — The build binds the programs (2026-11-01).** A top-level program compiles to an internal
+`Program` with a private `<Main>$` that the gateway program cannot name, so a binding needs the
+program's own build. The Cohesion source generator does both halves (its
+[DESIGN.md](../../../../analyzers/Assimalign.Cohesion.SourceGeneration/docs/DESIGN.md), "In-process
+program bindings"):
+- **Resource.** An executable that references ApplicationModel.Hosting.InProcess, and not the
+  gateway, gets a public `InProcessEntryPoint.RunAsync(string[])` that calls its entry point, and
+  `[assembly: InProcessProgram(typeof(InProcessEntryPoint), "<provider>")]`.
+- **Gateway.** Sdk.Gateway turns each project reference that carries `CohesionResource="<name>"`
+  (and optionally `CohesionProvider`) into compiler-visible metadata. In a gateway that references
+  this package, the generator emits a module initializer that calls
+  `InProcessProgramCatalog.Register(provider, name, bridge.RunAsync)` for each one.
+
+`InProcessInfrastructureBuilder.Build()` binds every catalog program the builder did not bind with
+`AddProgram`, so an explicit binding wins and a bare `UseInProcess()` runs every referenced
+resource. `new InProcessInfrastructure()` binds nothing from the catalog: a caller that creates the
+infrastructure itself binds what it runs. The catalog is process-wide, public only for the generated
+code (`[EditorBrowsable(Never)]`), and refuses a second program for one resource. Resource names
+still come from the resource's `AddResource(name)` and the gateway's model; the reference's
+`CohesionResource` must name the same resource, and a mismatch shows as a resource that never
+publishes. *Rejected:* `Assembly.EntryPoint` with trimming roots (I2), and a discovery scan of the
+referenced assemblies at run time, which is reflection.
+
 ## Non-goals
 
 - Isolation comparable to separate processes. A program that crashes the process, exhausts memory,
@@ -191,7 +236,8 @@ reworking them is a later chunk.
 ## AOT
 
 No reflection, runtime code generation, or assembly loading. Programs are delegates the gateway
-program binds; the channel is `System.Threading.Channels`; ports come from a loopback
+program or its generated module initializer binds (I15), and a top-level program is reached through
+an `UnsafeAccessor` its own build generates; the channel is `System.Threading.Channels`; ports come from a loopback
 `TcpListener`.
 
 ## Diagnostics
@@ -202,9 +248,8 @@ None. The package raises no events and has no event source.
 
 1. **A program that ends before it publishes — settled by I11.** The gateway hears it at once, with
    the program's exception.
-2. **Generated bindings.** The SDK should emit the `AddProgram` calls for a gateway's referenced
-   programs. A top-level-statements program has no entry point a delegate can name, so the binding
-   needs either a generated wrapper or `Assembly.EntryPoint` with trimming roots.
+2. **Generated bindings — settled by I15.** The resource's build emits a public bridge to its entry
+   point, and the gateway's build registers it in `InProcessProgramCatalog`.
 3. **Process-wide state in programs.** Each Web application that `CreateBuilder(args)` builds
    registers its default event-source forwarding, which listens process-wide, so two in-process Web
    programs each forward the other's events. Console output is not attributed per program.

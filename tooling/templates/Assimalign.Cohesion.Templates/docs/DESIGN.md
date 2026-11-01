@@ -82,7 +82,11 @@ each resource's program by delegate (`infrastructure.AddProgram(provider, name, 
 needs the gateway to reference the resource's project and the resource to expose a public entry
 point. A template cannot write that wiring across two generated projects without also changing the
 resource's entry point, so the scaffolds register no program and say how in a comment and the
-README; until a program is registered, deploying its resource fails. The READMEs describe the other
+README; until a program is registered, deploying its resource fails. Since 2026-11-01 the resource's
+entry point no longer has to change: a resource executable that references ApplicationModel.Hosting.InProcess gets a
+generated public bridge, and a `CohesionResource="<name>"` project reference binds it with no `AddProgram` call
+(ApplicationModel.Gateway.InProcess I15). The scaffolds do not write that reference yet, so they
+still register no program. The READMEs describe the other
 choice, the Kubernetes pair from `cohesion-platforms`, which replaces the in-process package and
 registration and leaves the model unchanged.
 
