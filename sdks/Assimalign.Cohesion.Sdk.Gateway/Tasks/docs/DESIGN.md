@@ -8,8 +8,10 @@ gateway package. Everything that describes the application is code in the gatewa
 `Program.cs`: the model (`ApplicationGateway.CreateBuilder(name)` and one
 `AddResource(provider, name)` per resource), the platform it runs on, and the run itself.
 
-The SDK generates nothing. Its name is what the CLI's gateway discovery and consumers'
-`global.json` pins rely on.
+The SDK generates no source of its own. Its one build step hands the compiler the resource
+names an in-process gateway puts on its project references, so the Cohesion source generator can
+bind each resource's program (In-process resource bindings, below). Its name is what the CLI's
+gateway discovery and consumers' `global.json` pins rely on.
 
 ## Package and import shape
 
@@ -52,7 +54,7 @@ adds to the consumer.
   runtime identifier (`RuntimeIdentifier=$(NETCoreSdkRuntimeIdentifier)`) with
   `ValidateExecutableReferencesMatchSelfContained=false`, the defaults a resource
   executable takes, then imports the base targets and `Targets/Sdk.Gateway.targets`, which
-  is empty. A project that sets `SelfContained` or `RuntimeIdentifier` keeps its values.
+  holds the in-process resource bindings target. A project that sets `SelfContained` or `RuntimeIdentifier` keeps its values.
 
 ## Decisions
 
@@ -74,8 +76,30 @@ adds to the consumer.
   `cohesion-platforms` gateway half such as `Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes`.
   Choosing one by an MSBuild property would hide the dependency the
   code already names.
-- **No generation.** Identity and topology are values the program declares. Nothing in the
-  build has to agree with them, so nothing can drift from them.
+- **No generated model.** Identity and topology are values the program declares. Nothing in
+  the build has to agree with them, so nothing can drift from them. The in-process bindings
+  below generate the binding of a program to a resource name the reference states, not the
+  model: the program still declares `AddResource(provider, name)`.
+- **In-process resource bindings (2026-11-01).** An in-process gateway names each resource it
+  runs on the project reference:
+
+  ```xml
+  <ProjectReference Include="..\Shop.Orders\Shop.Orders.csproj" CohesionResource="orders-api" />
+  ```
+
+  `CohesionProvider="Web"` on the reference overrides the provider the resource's build
+  recorded. `CohesionAddInProcessResources` in `Targets/Sdk.Gateway.targets` runs after
+  `ResolveAssemblyReferences` and before `GenerateMSBuildEditorConfigFileShouldRun`. It turns
+  each resolved `ReferencePath` that carries `CohesionResource` into an `AdditionalFiles` item
+  (the referenced project file, so an analyzer that reads additional files never reads an
+  assembly) with `CohesionResource`, `CohesionProvider` and `CohesionResourceAssembly` (the
+  reference's file name), and the SDK declares the three as `CompilerVisibleItemMetadata`. The
+  Cohesion source generator, which reaches the gateway through the Core package, reads them when
+  the gateway references `Assimalign.Cohesion.ApplicationModel.Gateway.InProcess` and emits a
+  module initializer that registers each program in `InProcessProgramCatalog`, so a bare
+  `UseInProcess()` runs every referenced resource (Gateway.InProcess I15). Without that package
+  the metadata is inert. The target ships only in this SDK: a plain `Microsoft.NET.Sdk` gateway
+  binds its programs with `AddProgram`.
 - **Keep the SDK at all.** A plain `Microsoft.NET.Sdk` project with the package reference
   works too. The SDK stays because it is the marker the CLI discovers (`cohesion run`), it
   keeps the package version in step with the rest of the Cohesion SDK pins, and it carries
@@ -89,14 +113,19 @@ links the base SDK's `ConsumerWorkspace` (`COHESION_GATEWAY_SDK_TESTS`). The con
 `Program.cs` declares a model with no reference of its own; the test asserts the build
 succeeds, the output carries the gateway assembly and an apphost, and no App framework,
 manifest, or generated gateway source appears. A second consumer
-(`TestProjects/GatewayInProcessConsumer`) references a `Sdk.Web` resource project
-(`TestProjects/GatewayWebResource`) and calls into it; the test asserts the build passes
-without NETSDK1151 and that the built gateway starts and loads the resource's App.Web types.
-It needs the App and App.Web packs for the host RID in the feed.
+(`TestProjects/GatewayInProcessConsumer`) is the in-process path end to end. It references a
+top-level `Sdk.Web` resource (`TestProjects/GatewayWebResource`, which calls
+`AddResource("smoke-api", resource => resource.UseInProcess())` and answers one request) with
+`CohesionResource="smoke-api"`, and builds its gateway with a bare `UseInProcess()`. The test
+asserts the build passes without NETSDK1151 or a `COHAPM` diagnostic, and that the built gateway
+starts the resource in its own process, reads its endpoint output, gets the resource's answer
+over HTTP, then stops and disposes with exit code 0. It needs the App and App.Web packs for the
+host RID, the Core package (which carries the generator), and the ApplicationModel packages,
+Hosting.InProcess and Gateway.InProcess included, in the feed.
 `.github/workflows/sdk-smoke.yml` packs the closure and the frameworks and runs both on each
 OS leg.
 
 ## Non-goals
 
-The SDK does not generate sources, read other projects, select platforms, publish images,
-or describe a model at build time.
+The SDK does not generate a model, select platforms, publish images, or describe a model at
+build time. It reads no other project beyond the metadata on its own references.

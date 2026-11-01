@@ -1,3 +1,44 @@
 <Project>
+	<!--
+		In-process resource bindings. A gateway that runs its resources in process references each
+		resource's project and names the resource on the reference:
 
+			<ProjectReference Include="..\Shop.Orders\Shop.Orders.csproj" CohesionResource="orders-api" />
+
+		CohesionProvider="Web" on the reference overrides the provider the resource's build recorded.
+		The resource's build (an executable referencing ApplicationModel.Hosting.InProcess) emits a
+		public bridge to its entry point and an InProcessProgramAttribute naming it. This target hands
+		the compiler each resolved reference that carries CohesionResource as an additional file, with
+		its metadata and the referenced assembly's name, so the Cohesion source generator can register
+		the resource's program in Gateway.InProcess's InProcessProgramCatalog. A bare UseInProcess()
+		then runs it with no AddProgram call. The generator runs only when the gateway references
+		Gateway.InProcess; without it the metadata is inert.
+
+		The additional file is the referenced project file: the generator reads only its metadata, and
+		naming a text file keeps other analyzers that read additional files from reading an assembly.
+		It runs after the references resolve and before the compiler's analyzer configuration is
+		written, which is where the metadata reaches the generator.
+	-->
+	<ItemGroup>
+		<CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="CohesionResource" />
+		<CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="CohesionProvider" />
+		<CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="CohesionResourceAssembly" />
+	</ItemGroup>
+
+	<Target Name="CohesionAddInProcessResources"
+			DependsOnTargets="ResolveAssemblyReferences"
+			BeforeTargets="GenerateMSBuildEditorConfigFileShouldRun">
+		<ItemGroup>
+			<_CohesionInProcessResource Include="@(ReferencePath)"
+										Condition="'%(ReferencePath.CohesionResource)' != '' and '%(ReferencePath.MSBuildSourceProjectFile)' != ''"
+										CohesionResourceAssembly="%(ReferencePath.Filename)" />
+		</ItemGroup>
+		<ItemGroup>
+			<AdditionalFiles Include="@(_CohesionInProcessResource->'%(MSBuildSourceProjectFile)')"
+							 KeepMetadata="CohesionResource;CohesionProvider;CohesionResourceAssembly" />
+		</ItemGroup>
+		<ItemGroup>
+			<_CohesionInProcessResource Remove="@(_CohesionInProcessResource)" />
+		</ItemGroup>
+	</Target>
 </Project>
