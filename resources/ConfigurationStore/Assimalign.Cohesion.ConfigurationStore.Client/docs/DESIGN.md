@@ -43,15 +43,10 @@ The endpoint's existing base path is prepended to every route. Namespace lookup 
 query-escaped and otherwise treated as opaque values. Listing preserves the server's array order and
 duplicates.
 
-### Removed: the command surface (2026-11-01)
+### Read-only
 
-The client used to submit resource commands: `SendCommandAsync`, `ObserveCommandAsync`,
-`DeleteCommandAsync`, the `ResourceCommand` and `ResourceCommandObservation` types, and
-`CreateForControlPlane`, which pointed the command routes at a manifest's control-plane address. All
-of it targeted `/cohesion/v1/commands`, a route of the old resource control plane. The application
-model restart removed that control plane, and ConfigurationStore.Hosting no longer serves the route,
-so the surface called an endpoint that does not exist. A managed instance's state changes now arrive
-as actions through its platform (`ConfigurationStore.Hosting.ApplicationModel`).
+The client reads; it changes no store state. A managed instance's state changes arrive as actions
+through its platform (`ConfigurationStore.Hosting.ApplicationModel`).
 
 ## Transport and ownership
 

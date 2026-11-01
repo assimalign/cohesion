@@ -31,13 +31,11 @@ only while composing the builder; `Build()` snapshots them into an immutable
 `IHealthCheckService`. The service is supplied to endpoint middleware explicitly, so request-time
 service location is unnecessary.
 
-## Hosting contributor integration (removed)
+## Hosting integration
 
-Web.Hosting's `AddContributor` adapter for `Hosting.Health` contributors, and its
-`Assimalign.Cohesion.Web.Hosting.Health` namespace, were removed with `Hosting.Health` on
-2026-10-28. A Web application registers its checks here directly; a managed resource reports its
-state to its gateway through `Web.Hosting.ApplicationModel`. This package references only the Web
-root, and no Web root or feature library may reference the hosting module.
+A Web application registers its checks here directly; a managed resource joins its gateway through
+`Web.Hosting.ApplicationModel`, which does not read these checks. This package references only the Web root, and no
+Web root or feature library may reference the hosting module.
 
 ## Status model and aggregation
 
@@ -187,8 +185,8 @@ event. This is an observable diagnostics change on decision 15's terms, with no 
 - **A DI-specific registration surface.** Composition remains explicit and container-neutral.
 - **Runtime registry mutation.** The built service is an immutable snapshot.
 - **Request-time service location.** Endpoint middleware receives the service directly.
-- **An in-process health publisher.** This package evaluates and serves health; it does not publish
-  control-plane state.
+- **An in-process health publisher.** This package evaluates and serves health; it does not push
+  health state to another component.
 - **Reflection-based response serialization.** The default response path is statically authored.
 
 ## Exception messages (#1467)

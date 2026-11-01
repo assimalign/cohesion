@@ -14,31 +14,21 @@ Each build creates a new context, invokes every registered service factory exact
 
 The module references the area root, DependencyInjection, and Hosting publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. It references no application-model library: the resource integration, `Rezolvr.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
-## Enabled resource lifecycle
+## Resource integration
 
-The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+The area's resource integration is `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
-## Declarative commands (item 31c)
+## Record store
 
-| Wire kind | Descriptor verb | Ownership key |
-|---|---|---|
-| `rezolvr.add-a-record` | `AddARecord` | record name |
-| `rezolvr.add-cname-record` | `AddCnameRecord` | record name |
+The module carries an internal `RezolvrRecordRepository` that validates and stores A and CNAME
+record declarations (kinds `rezolvr.add-a-record` and `rezolvr.add-cname-record`, each keyed by
+its record name and held by the one owner that declared it) atomically in `records.json`. A-record declarations use a BCL IPv4
+IPAddress serialized as a string. CNAME declarations carry a DNS target string; TTL is a positive
+integer in seconds. Nothing registers the repository yet: the application exposes no record
+surface, and the resource integration adds no record action.
 
-Kinds use verb-noun kebab under the area prefix. The examples `rezolvr.record` and
-`identityhub.audience` in developer-experience design section 7 are illustrative; item 27's design
-rewrite should reflect the landed convention. Manifest commands remain bare JSON strings.
-Typed verbs validate argument shape and use source-generated JSON metadata. Build validates the
-advertised kind, canonical payload, deterministic id, and uniqueness of the target ownership key.
-
-A-record declarations use a BCL IPv4 IPAddress serialized as a string. CNAME declarations
-carry a DNS target string; TTL is a positive integer in seconds, defaulting to 300.
-
-Hosting stores records atomically in `records.json`. No CohesionMount or CohesionWorkloadKind change
-is made: GenericPlanner requires StatefulSet for a Volume while RezolvrPlanner requires Deployment.
-
-Records are stored, not served as DNS answers. ResolverEndpointService remains parked. DNS serving
-and reconciling a durable Volume with the Deployment contract are deferred area work.
+Records are stored, not served as DNS answers. ResolverEndpointService remains parked, and DNS
+serving is deferred area work.
 
 ## Concrete composition (T10 / O34)
 

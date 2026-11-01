@@ -24,9 +24,7 @@ also query-escapes its namespace name.
 valid port, without user information, a query, or a fragment. It additionally restricts the scheme
 to HTTP or HTTPS before creating the internal transport client.
 
-The command surface (`SendCommandAsync`, `ObserveCommandAsync`, `DeleteCommandAsync`,
-`ResourceCommand`, `CreateForControlPlane`) was removed on 2026-11-01 with the old resource control
-plane: no store host serves `/cohesion/v1/commands` any more (see [Design](./DESIGN.md)).
+The client reads; it changes no store state (see [Design](./DESIGN.md)).
 
 ## Links
 

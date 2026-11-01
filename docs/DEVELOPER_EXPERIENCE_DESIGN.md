@@ -1,14 +1,10 @@
 # Cohesion — Developer-Experience Design
 
-> **Status (2026-10-31).** This document keeps the developer-experience decisions that are still in
-> force: how a project picks a Cohesion SDK, which frameworks it gets, the canonical runtime API,
-> and the hosting decisions the rules cite by id. The application-model content of the earlier
-> versions (v4.1, owner rounds R1–R11: generated manifests, typed resource accessors, the
-> `CohesionApplicationModel` build switch, per-area definition and gateway-provider packages, the
-> realization plan, application sets) described a design the 2026-10-27 restart retired. It was
-> removed on 2026-10-31 and survives in this file's git history. The managed-resource design is
-> recorded in [docs/libraries/ApplicationModel/DESIGN.md](libraries/ApplicationModel/DESIGN.md);
-> the area-integration rule is in `.claude/rules/resource-areas.md`.
+> **Status (2026-10-31).** This document holds the developer-experience decisions in force: how a
+> project picks a Cohesion SDK, which frameworks it gets, the canonical runtime API, and the
+> hosting decisions the rules cite by id. The managed-resource design is
+> [docs/libraries/ApplicationModel/DESIGN.md](libraries/ApplicationModel/DESIGN.md); the
+> area-integration rule is in `.claude/rules/resource-areas.md`.
 
 ## 1. Mental model
 

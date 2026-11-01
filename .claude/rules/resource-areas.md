@@ -155,8 +155,7 @@ semicolon-delimited, in its own csproj:
 
 ## The resource instance is the SDK consumer's project
 
-The framework-owned `Assimalign.Cohesion.<Area>.Application` name is retired. A resource
-instance is the customer's ordinary executable project using `Assimalign.Cohesion.Sdk.<Area>`:
+A resource instance is the customer's ordinary executable project using `Assimalign.Cohesion.Sdk.<Area>`:
 it contains a `Program.cs`, composes the area's application through its public builder, and runs
 like any other .NET executable. Domain content also lives there — database schema, resource
 policies, zones, user-flow pipelines, and equivalent area-owned declarations are application
@@ -367,8 +366,7 @@ feature's configuration on the registration verb.
   child root) pulling in anything feature- or model-specific.
 - **Hosting integrations:** an area's application-model integration ships as
   `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel` (below), which references the area's
-  hosting module, the one reference COHRES001 sanctions by name. `Assimalign.Cohesion.Hosting.Health` was removed on
-  2026-10-28: a Web application serves health through Web.Health.
+  hosting module, the one reference COHRES001 sanctions by name.
   Any other `Assimalign.Cohesion.<Area>.Hosting.<Suffix>` package is permitted only for an
   integration that must not land in every framework that carries the runtime module, so it stays
   opt-in; no area has one today. Such a package keeps the hosting-family constraints: it may

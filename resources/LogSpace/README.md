@@ -45,13 +45,13 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 ## Projects
 
 - `Assimalign.Cohesion.LogSpace` defines the public area-root application and builder contracts.
-- `Assimalign.Cohesion.LogSpace.Hosting` owns HTTPS ingest/query, mounted segments and host lifecycle.
+- `Assimalign.Cohesion.LogSpace.Hosting` owns the host lifecycle, plus internal HTTPS ingest/query handlers and a segment store that nothing registers yet.
 - `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel` registers the application as a managed resource instance (`builder.Services.AddResource(name, ...)`) on the platform its gateway names, with the actions the application adds.
 - `Assimalign.Cohesion.LogSpace.Telemetry` reserves the area-specific telemetry integration surface and is currently project scaffolding.
 
 ## Layering and dependencies
 
-As an L3 service platform, LogSpace composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.Hosting, HTTP, and TCP for its resource listener.
+As an L3 service platform, LogSpace composes the L2 `Assimalign.Cohesion.Hosting` runtime rather than defining its own host lifecycle. Hosting is built on the L1 `Assimalign.Cohesion.Core` foundation; Hosting privately composes Web.Hosting, HTTP, and TCP for its OTLP receiver.
 
 ## Project documentation
 

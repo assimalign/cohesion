@@ -75,7 +75,7 @@ implementation while the public root remains trimming- and NativeAOT-safe.
 ## Non-goals
 
 This project does not persist or encrypt secrets, generate or enroll certificates, contact the
-Platform service, verify bootstrap credentials, or expose a protocol endpoint. Those are runtime
+Platform service, or expose a protocol endpoint. Those are runtime
 responsibilities. Seed declarations are builder-time only; changing a running store is the
 resource integration's, through the actions its application adds.
 

@@ -8,10 +8,8 @@ The hosting module implements the area root's contract-only application seam. `C
 
 The builder captures code-first namespace declarations, materializes explicit services once, and
 appends the ConfigurationStore HTTP endpoint. Explicit services therefore start before the listener
-and stop after it. The retired resource integration (control plane, declarative commands,
-bootstrap-token trust, endpoint certificates, telemetry) was removed on 2026-10-31 with the
-application-model restart (assimalign/cohesion#1759), and the area's resource integration is
-`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library. The host accepts `--endpoint`
+and stop after it. The area's resource integration is
+`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library. The host accepts `--endpoint`
 and `--data` overrides (defaulting to `http://127.0.0.1:8080` and `data` under the content root).
 
 ## Persistence and protocol
@@ -39,7 +37,7 @@ endpoint base path.
 This is a behavior break from 10.0.0-preview.1 (#1431, owner decision 46, accepted on
 decision 15's preview terms): a reachable
 standalone listener previously accepted remote reads, commands, and stop requests
-without credentials. The command and stop routes left with the old resource control plane (2026-10-31).
+without credentials. The listener serves no command or stop route.
 
 ## Boundaries
 

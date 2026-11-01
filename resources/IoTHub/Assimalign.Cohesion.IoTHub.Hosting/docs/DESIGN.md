@@ -16,7 +16,7 @@ The module references the area root, DependencyInjection, and Hosting publicly. 
 
 ## Resource integration
 
-The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+The area's resource integration is `Assimalign.Cohesion.IoTHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 ## Concrete composition (T10 / O34)
 

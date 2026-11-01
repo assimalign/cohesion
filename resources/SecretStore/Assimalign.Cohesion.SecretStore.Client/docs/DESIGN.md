@@ -49,21 +49,14 @@ Every request carries `Authorization: Bearer <opaque-token>`. Redirects and cook
 a credential is never forwarded to a different authority or mixed with ambient cookie state. Non-success status codes surface as
 `HttpRequestException`; cancellation propagates unchanged.
 
-`Assimalign.Cohesion.SecretStore.Hosting` serves the secret and certificate routes. The retired
-resource integration (bearer-token validation and the command route) was removed on 2026-10-31
-with the application-model restart (assimalign/cohesion#1759), and the area's resource integration
-is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`. Secret and certificate
+`Assimalign.Cohesion.SecretStore.Hosting` serves the secret and certificate routes. The area's resource
+integration is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`. Secret and certificate
 responses are marked `no-store`.
 
-### Removed: the command surface (2026-11-01)
+### Read-only
 
-The client used to deliver resource commands: `SendCommandAsync`, `ObserveCommandAsync`,
-`DeleteCommandAsync`, the `ResourceCommand` envelope and `ResourceCommandObservation` result, and
-`CreateForControlPlane`, which pointed the routes at a manifest's control-plane address. All of it
-targeted `POST`/`DELETE /cohesion/v1/commands`, which SecretStore.Hosting stopped serving with the
-old resource control plane, so the surface called a route that no longer exists. It was removed
-rather than kept as dead public API. A managed instance takes state changes as actions through its
-platform (`SecretStore.Hosting.ApplicationModel`).
+The client reads; it changes no store state. A managed instance takes state changes as actions
+through its platform (`SecretStore.Hosting.ApplicationModel`).
 
 ## Credential contract
 
@@ -88,7 +81,6 @@ preserving trimming and NativeAOT compatibility.
 ## Non-goals
 
 - Reading bootstrap-token files or acquiring and rotating credentials.
-- Resolving mount declarations in a gateway.
 - Changing a store's state: a managed instance takes changes as actions through its platform.
 - Hosting SecretStore endpoints or implementing persistence, trust, enrollment, or certificate
   issuance.

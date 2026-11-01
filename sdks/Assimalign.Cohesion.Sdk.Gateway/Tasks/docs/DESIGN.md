@@ -8,12 +8,8 @@ gateway package. Everything that describes the application is code in the gatewa
 `Program.cs`: the model (`ApplicationGateway.CreateBuilder(name)` and one
 `AddResource(provider, name)` per resource), the platform it runs on, and the run itself.
 
-The SDK generated that surface until 2026-10-31: it read referenced projects'
-`resource.json` manifests through `CohesionResourceReference` items and wrote
-`Gateway.CreateBuilder(args)`, `Manifests`, `Externals`, and provider selection into the
-gateway. The application-model restart retired manifests, the generated surface, and the
-`Assimalign.Cohesion.Sdk.ApplicationModel` package it imported, so the SDK kept only its
-name, which the CLI's gateway discovery and consumers' `global.json` pins rely on.
+The SDK generates nothing. Its name is what the CLI's gateway discovery and consumers'
+`global.json` pins rely on.
 
 ## Package and import shape
 
@@ -76,7 +72,7 @@ adds to the consumer.
   registers, so the platform is the consumer's own package reference: the in-process
   gateway half (`Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`) or a
   `cohesion-platforms` gateway half such as `Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes`.
-  Choosing one by property (the retired `CohesionGateways`) would hide the dependency the
+  Choosing one by an MSBuild property would hide the dependency the
   code already names.
 - **No generation.** Identity and topology are values the program declares. Nothing in the
   build has to agree with them, so nothing can drift from them.

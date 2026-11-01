@@ -611,8 +611,8 @@ internal static class HttpServerConfiguration
                 GetString(certificate, "Password"));
         }
 
-        // A scalar Certificate named a Secret mount of the retired resource runtime. There is no
-        // secret store any more: the platform supplies certificates as files.
+        // A scalar or absent Certificate names no file: the application or its platform
+        // supplies certificates as files.
         throw new InvalidOperationException(
             string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
     }

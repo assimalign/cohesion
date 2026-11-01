@@ -126,10 +126,9 @@ internal static class LogSpaceHttp
         { context.Response.StatusCode = HttpStatusCode.ServiceUnavailable; }
     }
 
-    // The OTLP routes authenticated callers only through the retired resource credentials (a
-    // telemetry-scoped emitter token; without a gateway they admitted every caller), so they refuse every
-    // caller until an authentication path returns. The query keeps its transport-peer rule: only a
-    // loopback peer, and forwarded headers never grant access.
+    // The OTLP routes have no authentication path, so they refuse every caller until one exists.
+    // The query keeps its transport-peer rule: only a loopback peer, and forwarded headers never
+    // grant access.
     private static bool Authorize(IHttpContext context, bool telemetry)
     {
         if (!telemetry && context.ConnectionInfo.RemoteEndPoint is IPEndPoint endpoint)

@@ -31,9 +31,8 @@ is nonblank, because a launch profile would otherwise override the inherited val
 developer-machine environment; Development is an ordinary deployed environment with strict
 security requirements. The framework's unset default remains Production.
 
-The gateway's own command-line modes (`--gateway`, `--mode apply|describe|trust-issue|trust-add`),
-its local state files under `.cohesion/`, and the `deploy`, `trust`, `parameter` and `status`
-verbs that wrapped them were retired with the generated application model on 2026-10-31.
+A gateway program has no command-line modes and keeps no local state under `.cohesion/`, and the
+CLI has no `deploy`, `trust`, `parameter` or `status` verb.
 
 The shipped `new` names are:
 

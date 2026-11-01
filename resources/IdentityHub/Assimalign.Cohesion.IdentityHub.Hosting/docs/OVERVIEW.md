@@ -7,7 +7,7 @@ and context for the AOT-safe OpenID Connect issuer runtime. Issuer services rema
 
 The host serves discovery, persisted ES256 JWKS, client-credentials tokens, and public health probes. Configuration is code-first through `AddAudience` and `AddClient`. Only `openid` and an empty scope are accepted.
 
-The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+The area's resource integration is `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 Device authorization and its fixed-subject browser approval page are exposed only by a loopback Local endpoint. Applications needing account login, subject selection, consent, recovery, or federation compose an authenticated user-facing flow separately.
 

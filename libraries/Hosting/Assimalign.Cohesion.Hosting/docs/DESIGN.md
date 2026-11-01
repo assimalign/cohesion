@@ -129,8 +129,7 @@ application-model gateway's run uses too; Hosting's internal `HostShutdownSignal
 test seam and the never-throwing request that cancels the run.
 
 Before this (2026-10-28), nothing in Hosting handled a signal. SIGTERM, which Kubernetes and Docker
-send to stop a container, ended the process without stopping the host and cut off in-flight work;
-only the retired resource-process runner had subscribed to it.
+send to stop a container, ended the process without stopping the host and cut off in-flight work.
 
 *Rejected:* a public pipeline around `RunAsync` (`HostContext.Runner` with `IHostRunner`,
 `IHostRun`, and `IHostRunObserver`, removed 2026-10-28). It existed for the retired

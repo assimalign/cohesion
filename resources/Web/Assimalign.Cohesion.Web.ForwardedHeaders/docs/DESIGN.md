@@ -2,8 +2,8 @@
 
 ## Design intent
 
-Cohesion's deployment story makes a proxy hop the norm: the ApplicationModel K8s
-self-registry gateway and the first-party LoadBalancer/NatGateway resources put every
+Cohesion's deployment story makes a proxy hop the norm: a platform's ingress (Kubernetes,
+for one) and the first-party LoadBalancer/NatGateway resources put every
 web service behind at least one forwarder. Without resolution, every downstream concern
 — CORS origin checks, cookie `Secure`/`SameSite` decisions, session partitioning,
 rate-limit keys, redirect generation, access logs — sees the proxy's IP and `http://`.

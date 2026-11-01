@@ -149,7 +149,7 @@ shells. Each row records the reason from
 | --- | --- |
 | `Assimalign.Cohesion.Web` | Contracts and pure pipeline helpers have no runtime state, loop or swallowed failure; the root must not claim every Web package's signals. |
 | `Assimalign.Cohesion.Web.Testing` | A shipped test harness, like Connections.InMemory, rather than a runtime component; it receives no access to internal sources. |
-| `Assimalign.Cohesion.Web.Hosting` | Its control-plane events left with the retired resource integration; the server, connection and request signals belong to Web.Server. |
+| `Assimalign.Cohesion.Web.Hosting` | A composition root: the server, connection and request signals it composes belong to Web.Server. |
 | `Assimalign.Cohesion.Web.Hosting.ApplicationModel` | The resource integration carries no transport: an action's outcome reaches the gateway through the platform's client, and the instance side's diagnostics come with ApplicationModel.Hosting's design. |
 | `Assimalign.Cohesion.Web.Routing` | Failures throw at startup or reach the exception boundary; 404/405 are statuses and the matched template is already the span's `http.route`. |
 | `Assimalign.Cohesion.Web.Api` | Binding failures are visible client-driven 400s in access logs and request metrics; the signal does not justify a new public rejection API. |

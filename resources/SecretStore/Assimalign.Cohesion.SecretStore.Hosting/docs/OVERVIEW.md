@@ -8,10 +8,7 @@ protocol served on the resource's `api` endpoint.
 
 ## Current behavior
 
-- The retired resource integration (control plane, declarative commands, bootstrap-token
-  authentication, trust store, endpoint certificates, telemetry) was removed on 2026-10-31 with the
-  application-model restart (assimalign/cohesion#1759), and the area's resource integration
-  is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+- The area's resource integration is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 - Always appends an HTTP/1 endpoint service after caller-registered host services, so the endpoint
   starts last and drains first.
 - Interoperates with `SecretStore.Client` for secret reads and durable leaf-certificate reads.
@@ -27,7 +24,7 @@ protocol served on the resource's `api` endpoint.
 Endpoint precedence is `--endpoint`, then
 `https://127.0.0.1:8443`. Data-path precedence is `--data`, then
 `<content-root>/data`. Plaintext HTTP is permitted only on loopback in
-`Local`. A standalone host has no bootstrap credential and therefore may bind only to
+`Local`. The host authenticates no caller and therefore may bind only to
 loopback, including when it uses HTTPS. Its `/cohesion/v1` and `/cohesion/v1/*` routes accept only
 transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other or unknown peers receive
 `403`. Forwarded headers do not affect this check. Bare `/healthz`, `/readyz`, and `/livez` remain
@@ -38,7 +35,7 @@ standalone root common name, initial certificate/key material, pending Platform 
 Platform root pin, and standalone self-seeding. Durable authority state takes precedence on
 restart.
 
-The persistent volume's file-system ACL protects the colocated DataProtection key ring; an
+The data directory's file-system ACL protects the colocated DataProtection key ring; an
 external KMS/wrapping-key integration and protected-record rewrap migration remain future work.
 
 ## Known gap

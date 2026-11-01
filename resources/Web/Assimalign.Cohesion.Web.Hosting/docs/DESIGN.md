@@ -173,9 +173,8 @@ that list removes HTTP policy defaults but cannot remove the engine's required f
 
 ## Diagnostics
 
-The assembly owns no `EventSource`. Its former `WebHostingEventSource` reported only the resource
-control plane, which the application-model restart removed (2026-10-27/28); a managed resource's
-instance side is ApplicationModel.Hosting's, through `Web.Hosting.ApplicationModel`. The server's
+The assembly owns no `EventSource`. A managed resource's instance side is
+ApplicationModel.Hosting's, through `Web.Hosting.ApplicationModel`. The server's
 `EventSource`, Meter and ActivitySource are named `Assimalign.Cohesion.Web.Server` and belong to
 Web.Server; the default `Assimalign.Cohesion.Web.` forwarding prefix covers them. No spans or HTTP
 request metrics originate here.
@@ -548,9 +547,7 @@ currently captures only the design decisions that are settled.
 
 This module knows nothing of resources. `Web.Hosting.ApplicationModel` makes a Web application a managed
 resource with `builder.Services.AddResource(name, ...)`: it registers the resource service as a host
-service, and exposes the application's settings as actions. Until the application-model
-restart of 2026-10-27, this module carried a resource integration and a health adapter of its own;
-both were removed.
+service, and exposes the application's settings as actions.
 
 ## Default application configuration
 
@@ -758,21 +755,19 @@ The binding is deliberately **not** reflection-based:
   endpoint exists to carry it, and derives the port from the bound QUIC listener. A later
   `UseServer` callback can still turn it off; the configuration has no key for it.
 - **Endpoint certificate.** A TLS endpoint (`Https`, `Http1s`, `Http2s`, `Http3`) reads its
-  certificate from `Certificate`:
-  - a **scalar** names the Secret mount carrying a PEM bundle (see "HTTPS endpoint certificate
-    contract"); an absent `Certificate` uses the endpoint's registered mount, or `tls`;
-  - a **section** names a file. `Path` is a PEM or PKCS#12 (PFX) file; `KeyPath` names a
-    separate PEM key file; `Password` decrypts an encrypted PEM key or a protected PFX. A file
-    that opens with the DER `SEQUENCE` tag (`0x30`) is PKCS#12, anything else is PEM, and a
-    `KeyPath` implies PEM. A relative path resolves against the content root. The leaf is the
-    PEM file's first certificate (or the PFX entry carrying a private key); the rest of the
-    file is its chain.
+  certificate from the file its `Certificate` section names. `Path` is a PEM or PKCS#12 (PFX)
+  file; `KeyPath` names a separate PEM key file; `Password` decrypts an encrypted PEM key or a
+  protected PFX. A file that opens with the DER `SEQUENCE` tag (`0x30`) is PKCS#12, anything
+  else is PEM, and a `KeyPath` implies PEM. A relative path resolves against the content root.
+  The leaf is the PEM file's first certificate (or the PFX entry carrying a private key); the
+  rest of the file is its chain. A scalar or absent `Certificate` is refused with
+  `EndpointCertificateRequired` (see "HTTPS endpoint certificates").
 
-  Either way the leaf must carry its private key and be inside its validity window, and a
+  The leaf must carry its private key and be inside its validity window, and a
   file that cannot be read or decoded fails with an `InvalidOperationException` naming the
-  endpoint and the path. A PEM key is re-imported through PKCS#12, as the Secret-mount loader
-  does, because Windows Schannel rejects an ephemeral key for server authentication. The
-  host owns and disposes the loaded certificates. A `Password` in a checked-in
+  endpoint and the path. A PEM key is re-imported through PKCS#12 because Windows Schannel
+  rejects an ephemeral key for server authentication. The host owns and disposes the loaded
+  certificates. A `Password` in a checked-in
   `appsettings.json` is plaintext; supply it through `COHESION_CONFIG__…` or the command line.
 - **Client certificates.** A TLS endpoint's `ClientCertificateMode` is `NoCertificate` (the
   default), `AllowCertificate`, or `RequireCertificate` — Kestrel's names — and maps to
@@ -852,13 +847,6 @@ terms; their package DESIGN files record exactly which calls shipped in `10.0.0-
 replacement spellings. Hosted applications using only `WebApplicationServerBuilder` keep the same
 source calls. Applications constructing those Http interceptors themselves must update the calls and
 rebuild against the updated packages.
-
-The bootstrap credential verifier also uses `EcdsaJsonWebTokenSignatureVerifier.Create` and
-IdentityModel.Token's `token.HasAudience(...)`. For null or blank expected audiences it retains
-the former ordinal audience-list lookup locally, because the extension rejects those inputs.
-This preserves the previous authorization result. Existing Hosting public calls remain
-source-compatible; consumers must rebuild for the IdentityModel binary changes recorded in
-that package's preview.1 compatibility section.
 
 ### What it is
 
@@ -1308,12 +1296,11 @@ handling.
 
 A TLS endpoint's certificate is a file the application or its platform supplies. `Http:Endpoints`
 accepts Protocol Https/Http1s/Http2s/Http3, with a `Certificate` section naming the file (`Path`,
-`KeyPath`, `Password`; see "Configuration-bound server limits and endpoints"). A scalar
-`Certificate`, which named a Secret mount of the resource runtime the application-model restart
-retired, is refused with `EndpointCertificateRequired`. The platform's own endpoint is bound only
-when it is plain `http` (see "Entry-point defaults"): an `https` endpoint needs a certificate the
-application configures itself. `Server.UseConfiguration` stays opt-in for explicit compositions; a
-plain entry-point application with no listener of its own binds `Http:Endpoints` by default.
+`KeyPath`, `Password`; see "Configuration-bound server limits and endpoints"). A scalar or
+absent `Certificate` names no file and is refused with `EndpointCertificateRequired`. The
+platform's own endpoint is bound only when it is plain `http` (see "Entry-point defaults"): an
+`https` endpoint needs a certificate the application configures itself.
+`Server.UseConfiguration` stays opt-in for explicit compositions; a plain entry-point application with no listener of its own binds `Http:Endpoints` by default.
 
 ## Hosting integrations
 

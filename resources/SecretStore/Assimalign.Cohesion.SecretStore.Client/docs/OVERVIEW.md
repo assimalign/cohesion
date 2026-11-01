@@ -3,9 +3,9 @@
 ## Summary
 
 This package is the protocol boundary for reading secret bytes and PEM certificates from a
-realized SecretStore resource. A program that reads the store
+SecretStore instance. A program that reads the store
 references it directly; a gateway does not, because it reaches a managed instance through the
-resource integration, `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`. It keeps mount-source resolution out of runtime libraries and hides its
+resource integration, `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`. It hides its
 BCL HTTP implementation behind `ISecretStoreClient`.
 
 ## Public surface
@@ -37,17 +37,15 @@ Invalid references and `default` are refused before sending a request. The typed
 the preview.1 string signature, so implementations and precompiled consumers must be updated.
 
 The certificate response is a PEM bundle containing the persistent first-issued leaf, its PKCS#8
-private key, and the issuer chain. A `parameter:` source bypasses this client and is mounted by the
-gateway unchanged. `certs/public`/`Certificate="public"` is reserved for a later public-CA item.
+private key, and the issuer chain.
+`certs/public` is reserved for a later public-CA item.
 
 The factory accepts only HTTP or HTTPS Cohesion endpoint URIs: absolute, host-bearing values with a
 valid port and no user information, query, or fragment. Each request presents the credential as a
 bearer token; the package treats the token as opaque and does not acquire, parse, refresh, or persist
 it.
 
-## Removed: the command surface (2026-11-01)
+## Read-only
 
-`SendCommandAsync`, `ObserveCommandAsync`, `DeleteCommandAsync`, `ResourceCommand`,
-`ResourceCommandObservation`, and `CreateForControlPlane` targeted `/cohesion/v1/commands`, a route
-of the old resource control plane that SecretStore.Hosting no longer serves. They were removed with
-it; a managed instance takes state changes as actions through its platform (see [Design](./DESIGN.md)).
+The client reads; it changes no store state. A managed instance takes state changes as actions
+through its platform (see [Design](./DESIGN.md)).

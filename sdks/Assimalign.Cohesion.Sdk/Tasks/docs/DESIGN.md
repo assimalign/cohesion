@@ -70,10 +70,6 @@ equality; absence is allowed. The base pin is the anchor when present, otherwise
 the first recognized identity in ordinal order is the anchor. This validates
 agreement rather than imposing the repository's canonical version, so the local
 identity is supported.
-
-The retired `Assimalign.Cohesion.Sdk.ApplicationModel` is no longer a recognized
-identity; a stale pin for it is ignored like any non-Cohesion SDK.
-
 ## Framework boundary
 
 The base registers every `KnownFrameworkReference` but auto-includes none. It is
@@ -107,5 +103,4 @@ their own fixtures.
 
 The base SDK does not create resource manifests, generated resource or control-
 plane source, image indexes, OCI archives, or application image gathers, and no
-other SDK in the family does either (the `Sdk.ApplicationModel` package that did
-was retired in 2026-10). Application-model composition is code.
+other SDK in the family does either. Application-model composition is code.

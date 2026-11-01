@@ -40,16 +40,12 @@ attribute name/version and child Sdk forms. Explicit project paths avoid ambiguo
 selection. The CLI starts `run` in the gateway project's directory: an SDK 10.0.401 probe showed
 that `dotnet run --project` alone retains the caller's directory.
 
-## Retired verbs
+## Gateway state
 
-`deploy`, `trust issue|add`, `parameter set|list|remove` and `status [--live]` mapped onto the
-generated gateway's command-line modes (`--mode apply`, `trust-issue`, `trust-add`) and read or
-wrote its local state under `.cohesion/<app>/` (`export.json`, `control-plane.json`, `.state/`,
-`parameters.json`). The application-model restart removed that command line and that state: a
-gateway program now has no modes, and its record lives in the `IApplicationGatewayStore` its
-`Program.cs` chooses. The verbs, `LocalStateCommands` and `StateJsonContext` were deleted on
-2026-10-31 rather than kept against a contract nothing implements. `publish --in-container`
-forwarded to the retired SDK's `CohesionPublishImage` target and was removed with it.
+The CLI has no deploy, trust, parameter, or status verbs and keeps no local state for a gateway:
+a gateway program has no command-line modes, and its record lives in the `IApplicationGatewayStore`
+its `Program.cs` chooses. `publish` forwards to `dotnet publish` and adds no container-image
+option.
 
 ## Login protocol and proposed credential store
 

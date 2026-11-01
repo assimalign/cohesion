@@ -785,7 +785,7 @@ The gate is chosen for AOT-safety: a semaphore, stored `Task`s, and a
 
 The default server emits one span per request and the OpenTelemetry HTTP server metrics through
 the BCL's `System.Diagnostics.ActivitySource` and `System.Diagnostics.Metrics.Meter`. It only emits.
-Exporting stays with `Hosting.Telemetry` and the OpenTelemetry foundation (#317), whose OTLP
+Exporting belongs to the OpenTelemetry foundation (#317), whose OTLP
 exporter is logs-only and does not subscribe to either yet. Any `ActivityListener` or
 `MeterListener` subscribes by name: an exporter, `dotnet-counters`, or a test.
 
@@ -1120,8 +1120,7 @@ a proxy it is the proxy. Pipeline failures belong to
 [ErrorHandling](../../Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics), while
 pre-dispatch rejections and protocol/client-fault classifications belong to Http.Connections.
 
-Web.Hosting raises no events of its own (its control-plane source, `WebHostingEventSource`, and
-its `rejected-credentials` counter left with the resource control plane on 2026-10-31). Each
+Web.Hosting raises no events of its own. Each
 assembly keeps a local `EventThrottle`; no throttle instance, source provider or shipped visibility
 grant crosses an assembly boundary. The entry-point host's default `Assimalign.Cohesion.Web.`
 forwarding prefix covers this provider, while

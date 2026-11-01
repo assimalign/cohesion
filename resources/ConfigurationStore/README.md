@@ -2,7 +2,7 @@
 
 ConfigurationStore is the L3 resource area for durable, named configuration namespaces. Its
 default host serves namespace snapshots over its `/cohesion/v1` endpoint; values are configuration
-rather than secrets and are stored as plain JSON beneath the `data` volume. A ConfigurationStore application becomes a managed resource instance with `Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`: `builder.Services.AddResource("settings", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into.
+rather than secrets and are stored as plain JSON beneath the `data` directory. A ConfigurationStore application becomes a managed resource instance with `Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`: `builder.Services.AddResource("settings", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into.
 
 ## Project map
 

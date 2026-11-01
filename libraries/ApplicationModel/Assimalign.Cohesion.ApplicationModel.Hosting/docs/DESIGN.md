@@ -283,9 +283,9 @@ platform reporting each instance's address to the gateway. A provider does not k
 an in-process provider would report what it had just assigned.
 
 **D19 — The platform owns the transport; the host takes its client through options (owner,
-2026-10-30).** The publishers here and the area's control-plane server made Hosting and every area
-carry transports, and the gateway's HTTP client needed a Web reference no library may take
-(COHLIB001). The owner moved all of it to the platforms. This library keeps only what hosting an
+2026-10-30).** Publishers here or a control plane each area serves would make Hosting and every area
+carry transports, and a gateway HTTP client would need a Web reference no library may take
+(COHLIB001). The owner put all of it in the platforms. This library keeps only what hosting an
 instance needs:
 - **`IApplicationInstanceGatewayClient`** is a platform's instance half. It publishes and renews
   (`IApplicationInstancePublisher`), names where the gateway reaches the control plane in the

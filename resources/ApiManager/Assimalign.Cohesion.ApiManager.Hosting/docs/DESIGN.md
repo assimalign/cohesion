@@ -14,9 +14,9 @@ The built host exposes the ordered `HostedServices` materialized from explicit b
 
 The module references the area root, DependencyInjection, and Hosting publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. It references no application-model library: the resource integration, `ApiManager.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
-## Enabled resource lifecycle
+## Resource integration
 
-The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+The area's resource integration is `Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 ## Concrete composition (T10 / O34)
 

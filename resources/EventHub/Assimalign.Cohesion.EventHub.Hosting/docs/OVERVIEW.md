@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.EventHub.Hosting
 
-`EventHubApplication.CreateBuilder(args)` returns the public concrete `EventHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The retired resource integration (control plane, health, telemetry) was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.EventHub.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+`EventHubApplication.CreateBuilder(args)` returns the public concrete `EventHubApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.EventHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 Domain service behavior remains deferred.
 

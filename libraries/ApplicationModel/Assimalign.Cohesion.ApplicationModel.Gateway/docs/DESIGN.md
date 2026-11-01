@@ -7,9 +7,8 @@
 > [ApplicationModel.Hosting](../../Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md)
 > (chunk 1), is not a dependency. Since 2026-10-29 (G26, G27) each
 > gateway runs a model of its own and a child joins its parent; the deployment view and the gateway
-> seam moved here from ApplicationModel.Definition. The previous implementation (Local gateway,
-> records, credentials, certificates) is retired; its source is at commit `6576e7c64`. Since
-> 2026-10-31 the provider is also the gateway's inbound channel (G39), and the gateway starts, stops,
+> seam moved here from ApplicationModel.Definition.
+> Since 2026-10-31 the provider is also the gateway's inbound channel (G39), and the gateway starts, stops,
 > and reports its run through `StartAsync`, `StopAsync`, and `Completion` (G40).
 
 ## Purpose
@@ -180,7 +179,7 @@ gateway joins a parent, and `IApplicationModelParent` names the parent's outputs
 one of the three layers an application brings together, so the gateway composes an
 `IApplicationGatewayInfrastructureProvider` instead of each platform deriving its own gateway. Orchestration
 (aggregates, the startup window, publications) then exists once, and a provider can be tested
-without a gateway. The retired design had a platform-specific gateway per platform.
+without a gateway. *Rejected:* a platform-specific gateway per platform.
 
 **G2 — The publication endpoint is transport-neutral.** `PublishAsync` is the endpoint's logic: route
 the manifest to its resource's aggregate and answer with the snapshots to restore. A transport only

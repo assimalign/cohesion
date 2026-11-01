@@ -12,7 +12,7 @@ Device authorization and the built-in verification page are available only when 
 
 ## Keys and tokens
 
-The data mount contains one persisted P-256 PKCS#8 signing key. Creation uses an atomic same-directory move and owner-only permissions on Unix. JWKS publishes only public `EC`/`P-256`/`ES256` coordinates; `kid` is the RFC 7638 SHA-256 thumbprint of canonical public members. Token creation uses IdentityModel's `JsonWebTokenWriter`. Signing is serialized because the ECDSA instance is shared.
+The data directory contains one persisted P-256 PKCS#8 signing key. Creation uses an atomic same-directory move and owner-only permissions on Unix. JWKS publishes only public `EC`/`P-256`/`ES256` coordinates; `kid` is the RFC 7638 SHA-256 thumbprint of canonical public members. Token creation uses IdentityModel's `JsonWebTokenWriter`. Signing is serialized because the ECDSA instance is shared.
 
 An ephemeral self-signed certificate is allowed only on loopback in Local; every other HTTPS binding fails closed with an explicit configuration error. TLS material is always distinct from the issuer signing key.
 
@@ -20,7 +20,7 @@ Issued access tokens contain `iss`, `sub`, `aud`, `iat`, `nbf`, `exp`, `jti`, `c
 
 ## Resource integration
 
-The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration is `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+The area's resource integration is `Assimalign.Cohesion.IdentityHub.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 ## AOT and dependency boundary
 
@@ -49,10 +49,8 @@ Each `AddAudience` and `AddClient` declaration is a registration. `IdentityHubRe
 
 ## Factory implementation migration (#1465)
 
-Composition uses the public sealed IdentityModel/DataProtection implementations sanctioned by
-owner decision 59. Token audience checks use IdentityModel.Token's `HasAudience` extension;
-where the caller previously accepted null or blank audiences, an ordinal audience-list match
-preserves those inputs locally. Existing validation guards remain in place. This package's
+Composition uses the public sealed IdentityModel implementation sanctioned by owner
+decision 59 (`JsonWebTokenWriter.CreateEs256`). Existing validation guards remain in place. This package's
 public API and behavior are unchanged from 10.0.0-preview.1. Its updated dependency creation
-signatures require rebuilding; the source and binary breaks are recorded in the JWT and
-DataProtection package designs on decision 15's terms. Advisory: not applicable: API shape.
+signatures require rebuilding; the source and binary breaks are recorded in the JWT package
+design on decision 15's terms. Advisory: not applicable: API shape.

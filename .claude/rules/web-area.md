@@ -24,10 +24,8 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - `Web.Hosting` is a plain host. The application-model integration is
   `Web.Hosting.ApplicationModel`, which references `Web.Hosting` and makes a Web application a
   managed resource with `builder.Services.AddResource(name, resource => resource.UseInProcess())`
-  (application-model restart, 2026-10-27 to 2026-10-31; `resource-areas.md`), and
-  `Hosting.Health` was removed on 2026-10-28. A future `Web.Hosting.<Suffix>` package is permitted
-  only for
-  an integration that must not land in every framework carrying `Web.Hosting`; it retains the
+  (`resource-areas.md`). A future `Web.Hosting.<Suffix>` package is permitted only for an
+  integration that must not land in every framework carrying `Web.Hosting`; it retains the
   family constraints in `resource-areas.md`. Roots and features may not reference the hosting
   module, its family (COHRES001) or shared Hosting libraries (COHRES004).
 - **`Web.Hosting` references a Web library only when the runtime itself needs it** — runtime

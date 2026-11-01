@@ -127,8 +127,8 @@ internal sealed class TcpConnectionEventSource : EventSource
     An exception is written as its type's full name and its `Message`, never `ToString()`: payloads
     stay bounded, and stack traces belong to the caller that handles the exception.
     - **Type-only carve-out.** Omit the message where it is known to echo request input:
-      Http.Forms' `InvalidDataException`; StaticFiles' `FileSystemException`; application-delegate
-      exceptions in Web.Diagnostics; and JSON and handler exceptions in control-plane commands.
+      Http.Forms' `InvalidDataException`; StaticFiles' `FileSystemException`; and
+      application-delegate exceptions in Web.Diagnostics.
       Application exceptions outside these carve-outs stay type plus `Message`, including
       ErrorHandling, completion callbacks and health checks. Each owning `DESIGN.md` states this.
     - **Attacker-chosen identifiers.** Keep one only where it is the diagnosis, only at Verbose,
@@ -138,8 +138,7 @@ internal sealed class TcpConnectionEventSource : EventSource
       - `url.path`, the query or the raw target;
       - header values, bodies or form fields;
       - cookie or session values, tokens, claims, user names or roles;
-      - rate-limit partition keys, cache keys or tag names;
-      - control-plane command payloads, keys or caller identities.
+      - rate-limit partition keys, cache keys or tag names.
     - **Web routes and peers.** Routes appear as `routeTemplate`
       (`IRouterEndpointFeature.RouteTemplate`), only in packages already referencing Web.Routing.
       A peer address appears only in

@@ -13,17 +13,15 @@ concrete durable ConfigurationStore host, builder, and context.
 ## Primary Responsibilities
 
 - Capture `AddNamespace` declarations as first-start seeds.
-- Persist configuration as plain JSON beneath the `data` volume using atomic replacement.
+- Persist configuration as plain JSON beneath the `data` directory using atomic replacement.
 - Serve list and read operations plus standard health and endpoints routes.
 
 The protocol listener starts after user services and drains before them. The host uses
 `--endpoint` or the loopback default.
 `/cohesion/v1` accepts only transport peers at `127.0.0.1`, `::1`,
 or IPv4-mapped `127.0.0.1`; other peers receive 403, regardless of forwarded headers.
-Bare `/healthz`, `/readyz`, and `/livez` stay open. The retired resource integration (control
-plane, declarative commands, bootstrap-token trust, telemetry) was removed on 2026-10-31 with the
-application-model restart (assimalign/cohesion#1759), and the area's resource integration is
-`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+Bare `/healthz`, `/readyz`, and `/livez` stay open. The area's resource integration is
+`Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 ## Public types
 

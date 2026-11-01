@@ -1,8 +1,6 @@
 # Assimalign.Cohesion.ApplicationModel.Gateway.InProcess — Design
 
-> **Status (2026-10-30):** rebuilt on the restarted application model. The plan-driven
-> in-process gateway (`InProcessGateway`, `ProcessHost`, member supervision, plan compilation) is
-> gone; this package is now an infrastructure provider of the gateway in
+> **Status (2026-10-30):** this package is an infrastructure provider of the gateway in
 > [ApplicationModel.Gateway](../../Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md).
 > Since 2026-10-30 it is the gateway half of the in-process platform, whose instance half is
 > [ApplicationModel.Hosting.InProcess](../../Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/docs/DESIGN.md)
@@ -61,8 +59,8 @@ gateway has stopped, the gateway program disposes the infrastructure, which stop
 
 ## Decisions
 
-**I1 — In process is a platform, not a gateway (2026-10-29).** The retired package was a gateway of
-its own, with its own plans, readiness gate, and supervision. Now the one gateway reconciles,
+**I1 — In process is a platform, not a gateway (2026-10-29).** It is not a gateway of
+its own, with its own plans, readiness gate, and supervision: the one gateway reconciles,
 orders, waits, and records, whatever it deploys onto, and in-process is its `inprocess` platform:
 `InProcessInfrastructure : IApplicationGatewayInfrastructureProvider`. A resource's extensions for `inprocess` apply
 here, as any platform's do (Gateway G25).
@@ -213,5 +211,5 @@ None. The package raises no events and has no event source.
 4. **The gateway program's signals — settled by Gateway G37.** `ApplicationGateway.RunAsync` stops on
    SIGINT, SIGQUIT and SIGTERM, so a gateway program that `await using`s its infrastructure ahead of
    the gateway stops its programs once the run returns.
-5. **Supervision.** The retired package restarted failing members; this one restarts nothing.
+5. **Supervision.** This package restarts nothing.
    Restarting a program belongs with health and liveness, which the model has not settled.

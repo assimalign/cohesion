@@ -4,10 +4,7 @@
 
 The hosting module is the SecretStore runtime and protocol boundary. `SecretStoreApplication.CreateBuilder(args)` returns the public concrete `SecretStoreApplicationBuilder`; its `Build()` returns the public `SecretStoreApplication : Host<SecretStoreApplicationContext>`. The public `SecretStoreApplicationContext` implements `ISecretStoreApplicationContext`, reading `ContentRootPath` from the host environment. The application explicitly forwards the root lifecycle contract to `IHost`, and consumers use the concrete application for `RunAsync` and `await using`. Runtime options and supporting services remain internal. Persistence, the certificate-authority manager, and endpoint service remain internal.
 
-The retired resource integration (control plane, declarative commands, bootstrap-token
-authentication, trust store, endpoint certificates, telemetry) was removed on 2026-10-31 with the
-application-model restart (assimalign/cohesion#1759), and the area's resource integration is
-`Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`, which references this module; this module references no application-model library.
+The area's resource integration is `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
 ## Composition and endpoint selection
 
@@ -73,7 +70,7 @@ through `Assimalign.Cohesion.Security.DataProtection`. The key ring is durable b
 directory. Builder-declared secrets
 seed only absent paths; existing durable values win on restart.
 
-The file-system ACL on the `data` volume remains the confidentiality boundary for the key ring;
+The file-system ACL on the `data` directory remains the confidentiality boundary for the key ring;
 this item does not add an external KMS or hardware-backed wrapping key. Files and directories are
 restricted to their owner on POSIX. Keys rotate lazily on a 90-day lifetime. Until durable records
 gain a rewrap migration, the store retains a long unprotect grace period so ordinary key rotation
@@ -100,8 +97,8 @@ never falls back to a new self-signed root.
 
 ## Explicit bootstrap gap
 
-`PlatformEnrollmentEndpoint` selects pending-enrollment mode, which needs the ambient application
-and resource names; a plain host has none, so it fails to start with that option. `public`
+`PlatformEnrollmentEndpoint` selects pending-enrollment mode, which needs application and resource
+names the host does not supply, so a host configured with it fails to start. `public`
 remains reserved for later ACME integration. Default issued leaves include localhost and both
 loopback IP SANs so local clients can validate the same application certificate.
 
@@ -133,8 +130,7 @@ Each `AddSecret` declaration and the `AddCertificateAuthority` options snapshot 
 ## Validated declaration values (#1482)
 
 The certificate authority keeps its leaf-name and subject-alternative-name predicates as private
-members, unchanged from the `SecretStoreCommandGrammar` it compiled from the retired declaring
-package's `shared/` folder. The client owns the certificate reference predicate compiled here for
+members. The client owns the certificate reference predicate compiled here for
 certificate reads; that is a source dependency, not an assembly reference. The runtime never
 constructs a certificate merely to validate.
 

@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.NatGateway.Hosting.ApplicationModel — Design
 
-> **Status (2026-10-31):** the area's integration with the restarted Application Model, generated from
+> **Status (2026-10-31):** the area's integration with the Application Model, generated from
 > the [EmailHub template](../../../EmailHub/Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel/docs/DESIGN.md). The instance-side
 > contracts are [ApplicationModel.Hosting](../../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md);
 > this package is their NatGateway implementation. Web's

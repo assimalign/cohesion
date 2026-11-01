@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.EmailHub.Hosting.ApplicationModel — Design
 
-> **Status (2026-10-31):** the area's integration with the restarted Application Model, and the
+> **Status (2026-10-31):** the area's integration with the Application Model, and the
 > template every other area's `<Area>.Hosting.ApplicationModel` is generated from. The instance-side
 > contracts are [ApplicationModel.Hosting](../../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md);
 > this package is their EmailHub implementation. Web's

@@ -1,6 +1,6 @@
 # Assimalign.Cohesion.Web.Hosting.ApplicationModel — Design
 
-> **Status (2026-10-30):** the first resource area on the restarted Application Model. The
+> **Status (2026-10-30):** the first resource area on the Application Model. The
 > instance-side contracts are [ApplicationModel.Hosting](../../../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md);
 > this package is their Web implementation. Since 2026-10-30 it carries no transport: the platform
 > a resource opts into publishes for it and carries the gateway's calls in (W9). Since 2026-10-31 a

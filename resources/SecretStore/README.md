@@ -1,6 +1,6 @@
 # SecretStore
 
-SecretStore is the L3 operational service platform for protected secret persistence and private certificate workflows. The substantive runtime stores protected files on its persistent `data` volume and issues durable private-CA leaves on first resolution of `certs/<name>`. A SecretStore application becomes a managed resource instance with `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`: `builder.Services.AddResource("secrets", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into.
+SecretStore is the L3 operational service platform for protected secret persistence and private certificate workflows. The substantive runtime stores protected files in its durable `data` directory and issues durable private-CA leaves on first resolution of `certs/<name>`. A SecretStore application becomes a managed resource instance with `Assimalign.Cohesion.SecretStore.Hosting.ApplicationModel`: `builder.Services.AddResource("secrets", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into.
 
 ## Project map
 
@@ -61,8 +61,7 @@ A gateway references neither the client nor the store's runtime: it declares the
 - A store with no Platform authority creates a self-signed development root on first start.
 - `certs/<name>` creates a persistent private leaf, renews it near expiration, and returns a PEM bundle containing the leaf, its PKCS#8 key, and its issuer chain.
 - The host exposes Platform-signing and completion operations for intermediate enrollment.
-- A `parameter:` certificate source is resolved and mounted by the gateway without alteration; the SecretStore protocol is not called for that source.
-- `Certificate="public"` and ACME/public-CA issuance are intentionally deferred to a later design item.
+- `certs/public` (ACME/public-CA issuance) is intentionally deferred to a later design item.
 
 ## Project documentation
 

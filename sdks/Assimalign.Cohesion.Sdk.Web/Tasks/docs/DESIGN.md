@@ -30,8 +30,8 @@ App and App.Web framework references unless `CohesionAutoIncludeAppFramework=fal
 `Targets/Sdk.Web.props` before the consumer's project body. `Sdk/Sdk.targets` imports the base targets, then
 `Targets/Sdk.Web.targets`.
 
-The SDK declares no endpoints, probes, or other manifest items: those belonged to the retired generated
-application model. `wwwroot/**` files copy to both build and publish
+The SDK declares no endpoints, probes, or other manifest items: application-model composition
+is code. `wwwroot/**` files copy to both build and publish
 output unless the consumer replaces the item metadata. The SDK also enables the generated Web API
 interceptor namespace required for typed route handlers.
 

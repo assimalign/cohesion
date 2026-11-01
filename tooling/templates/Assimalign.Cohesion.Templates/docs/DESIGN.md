@@ -11,7 +11,7 @@ and `cohesion-rezolvr`. The application-model design every scaffold follows is
 There is no runtime API or assembly reference surface for this package.
 The package is L1 tooling; its output consumes the corresponding resource-area SDKs and frameworks.
 The CLI wrapper belongs to item 40, and further resource-area templates are deferred until their
-SDKs mature. The retired generic resource and zone template names are not aliases.
+SDKs mature.
 
 ```mermaid
 flowchart LR
@@ -24,18 +24,13 @@ The diagram is `cohesion-app`'s package references: the API references the in-pr
 platform's instance half, the gateway its gateway half, and the database neither. No project
 references another.
 
-## Retired templates
+## No landing-zone template
 
-`cohesion-landing-zone` and `cohesion-composite` were removed on 2026-10-31 with the generated
-application model they were built on. A composite was a gateway whose generated manifest made it a
-`Composite` resource that an outer gateway or application set could reference; the landing zone was
-six domain gateways federated by a root application set over generated `Applications` members,
-cross-application `Externals`, store-provider (`ApplicationModel.Orchestration`) packages, and the
-gateway's parameter files. In the new design a gateway is a plain program, a child gateway joins its
-parent through a platform's channel (`UseParent`), and no platform with a cross-process parent join
-ships from this repository, so a federated landing zone cannot be expressed until one does. A landing
-zone on the new design belongs with the first out-of-process platform pair, in `cohesion-platforms`
-or `cohesion-examples`.
+The roster ships no landing-zone or composite template. A gateway is a plain program, a child
+gateway joins its parent through a platform's channel (`UseParent`), and no platform with a
+cross-process parent join ships from this repository, so a federated landing zone cannot be
+expressed until one does. A landing-zone template belongs with the first out-of-process platform
+pair, in `cohesion-platforms` or `cohesion-examples`.
 
 ## Content
 
@@ -134,10 +129,8 @@ under `_out/verify-39/w` to stay within the repository and limit Windows path de
 builds; it sets no project defaults. Logs and generated projects remain available for inspection.
 
 Feed-free assertions cover every installed template, complete inventory pins, authored programs,
-source hygiene, root files and every source launch profile. They reject every retired element
-(`CohesionApplicationModel`, `CohesionResourceReference`, `CohesionEndpoint`, `CohesionGateways`
-and the rest) and the retired generated surface in content (`Manifests.`, `Resource.Endpoints`,
-`UseGateway(`), and check that a gateway program builds its gateway under the expected name, that
+source hygiene, root files and every source launch profile. They reject MSBuild elements and generated
+members no SDK defines, and check that a gateway program builds its gateway under the expected name, that
 a resource calling `AddResource` opts into a platform it references, and that every package is
 pinned to `$(CohesionVersion)`. Name replacement and the explicit gateway name receive separate
 coverage.

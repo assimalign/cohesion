@@ -54,10 +54,7 @@ pipeline snapshot — pipeline mutations after start are not observed. This mirr
 production composition order rather than inventing a test-only one.
 
 **One drive path.** The factory composes a mutable, socketless application and starts its default
-server directly; it shares no hidden hooks or process-wide mutable lists with other factories. A
-Program-backed mode, which ran a resource executable under the retired resource runtime's ambient
-context and stopped it through its control plane, was removed with that runtime (application-model
-restart, 2026-10-27).
+server directly; it shares no hidden hooks or process-wide mutable lists with other factories.
 
 **Start-on-first-client.** `CreateClient()` starts the factory when it has not been started
 yet (ASP.NET `WebApplicationFactory.CreateClient` parity). The blocking wait inside is safe

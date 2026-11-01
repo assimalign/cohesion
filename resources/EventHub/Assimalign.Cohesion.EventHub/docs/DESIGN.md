@@ -14,7 +14,7 @@ The concrete application, builder, and context live in `Assimalign.Cohesion.Even
 
 Background-work registration belongs to the concrete `EventHubApplicationBuilder`: `AddService(IHostService)` and `AddService(Func<EventHubApplicationContext, IHostService>)`. The factory receives the same concrete context as Web's and Database's AddService, so hosting consumers can use environment, state, and hosted-service members beyond the small root contract. Database's root-level AddServer keeps the interface context. Factories run once per build against the same context retained by the application; the hosted-service snapshot is installed after factory evaluation. Services start in registration order and stop in reverse. No area-owned service abstraction is introduced.
 
-Plain application defaults are described by the Hosting design; the retired resource integration was removed on 2026-10-31 with the application-model restart.
+Plain application defaults are described by the Hosting design; the area's resource integration is `Assimalign.Cohesion.EventHub.Hosting.ApplicationModel`.
 
 ## AOT posture
 
