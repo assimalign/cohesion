@@ -10,23 +10,19 @@ layer on top of this file.
 Every resource area ships exactly one runtime module, `Assimalign.Cohesion.<Area>.Hosting` — the
 composition root that integrates DI, configuration, logging, and transports.
 
-> **COHRES001** — No library in an area may reference its exact hosting module except a
-> named exemption holder. Roots and feature libraries may not reference the area's
+> **COHRES001** — No library in an area may reference its exact hosting module except the
+> area's application-model integration, `<Area>.Hosting.ApplicationModel`, and a named exemption
+> holder. Roots and feature libraries may not reference the area's
 > `<Area>.Hosting.<Suffix>` integrations. Hosting-family integrations may reference each
-> other, but never the exact `<Area>.Hosting` runtime module. Exemptions name individual
+> other, but never the exact `<Area>.Hosting` runtime module; the integration is recognized by its
+> exact name for its own area and needs no exemption property. Exemptions name individual
 > assemblies; an exemption for the runtime does not waive the rest of the hosting family.
 >
 > **COHRES002** — The exact hosting module may reference any library in its own area **except**:
-> `<Area>.Testing`, which references the hosting module, so the reverse reference is a cycle;
-> `<Area>.ApplicationModel`, which the realization-plan design keeps the runtime off (generated
-> code in the consumer executable joins the declarative plane to the runtime; COHAM001 bounds the
-> other direction); `<Area>.ApplicationModel.Orchestration`, the gateway-side provider package
-> that R8 (owner decisions of 2026-09-25) makes opt-in, NuGet-only, and never an `App.<Area>`
-> member, so a runtime reference would force it into every framework that carries the module
-> (the Orchestration rules below bound the other direction); the framework producers
-> `<Area>.Refs` and `<Area>.Runtime`, packaging shells that themselves reference the hosting
-> module; and test, example, sample, and fixture projects, which are harnesses. The two
-> ApplicationModel exclusions hold by any route: the module's resolved closure may carry neither.
+> `<Area>.Testing` and `<Area>.Hosting.ApplicationModel`, which both reference the hosting
+> module, so the reverse reference is a cycle; the framework producers `<Area>.Refs` and
+> `<Area>.Runtime`, packaging shells that themselves reference the hosting module; and test,
+> example, sample, and fixture projects, which are harnesses.
 > Owner decision 2026-10-09 ("allow the Hosting project tobe [sic] able reference all `Web.*`
 > projects, or more generically all the `<Area>.*` projects"; the exclusions follow from earlier
 > decisions); until then the module could reference only the area root,
@@ -36,29 +32,16 @@ composition root that integrates DI, configuration, logging, and transports.
 > expected to provide").
 >
 > **COHRES003** — No shipped project under `resources/**` may resolve an
-> `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. Gateway orchestration belongs outside
-> resource-area packages; there is no exemption property or opt-out.
+> `Assimalign.Cohesion.ApplicationModel.Gateway*` assembly. A resource is a managed instance, never
+> a gateway: it builds on the instance side (`Assimalign.Cohesion.ApplicationModel.Hosting`), and
+> gateway orchestration belongs outside resource-area packages. There is no exemption property or
+> opt-out.
 
 > **COHRES004** — Area roots and feature libraries may reference no
 > `Assimalign.Cohesion.Hosting` or `Assimalign.Cohesion.Hosting.*` library, directly or
 > transitively. Only the area's hosting family (`<Area>.Hosting` and
-> `<Area>.Hosting.<Suffix>`), `<Area>.Testing`, and `<Area>.ApplicationModel` may depend
-> on those libraries.
-
-ApplicationModel packages have an additional rollout guard:
-
-> **COHAM001** — When a non-harness `resources/**` assembly whose name ends in
-> `.ApplicationModel` sets `<CohesionApplicationModelGuard>true</CohesionApplicationModelGuard>`,
-> its entire dependency closure is limited to `Assimalign.Cohesion.Core` (the Core assembly's
-> actual name), `Assimalign.Cohesion.ApplicationModel`, `Assimalign.Cohesion.Hosting`,
-> `Assimalign.Cohesion.Hosting.Resources`, BCL assemblies
-> supplied by `Microsoft.NETCore.App`, and the `System.Security.Cryptography.ProtectedData` BCL
-> facade used by Hosting.Resources' Windows-only mount carrier. The opt-in is a migration gate, not an
-> architectural exemption: once enabled, a project cannot add to the allowlist locally.
-
-The Hosting-area dependency graph behind that closure is fixed: Hosting.Resources references Core
-and plain Hosting; plain Hosting does not reference it. An area ApplicationModel reaches the closure through its
-direct Hosting.Resources reference.
+> `<Area>.Hosting.<Suffix>`, which includes the application-model integration
+> `<Area>.Hosting.ApplicationModel`) and `<Area>.Testing` may depend on those libraries.
 
 The opposite direction has its own guard, because resources consume libraries and libraries never
 depend on resources:
@@ -69,12 +52,12 @@ depend on resources:
 > reference `resources/<Area>/**` (precedent: `Sdk.Database.Tasks → Database.Sql.Schema`).
 
 When a library needs behavior an area owns, the library defines the seam and the area implements
-it: the gateway's store, certificate-authority, trust-store, command-input, telemetry, and
-credential seams live in `Assimalign.Cohesion.ApplicationModel`, and the shipped implementations
-are the opt-in `<Area>.ApplicationModel.Orchestration` packages below. The guard's two layers,
-harness exemptions, and scope computation are in `build-system.md` ("Library and SDK boundary
-guard (COHLIB001)"); relaxing it is an architectural decision on the same terms as this file's
-rules (owner decision 5 of 2026-09-25, recorded as R8 in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`).
+it: the managed-instance contracts (`IApplicationInstance`, `IApplicationInstanceAction`,
+`ApplicationInstanceOptions`) live in `Assimalign.Cohesion.ApplicationModel.Hosting`, and each
+area implements them in its `<Area>.Hosting.ApplicationModel` package below. The guard's two
+layers, harness exemptions, and scope computation are in `build-system.md` ("Library and SDK
+boundary guard (COHLIB001)"); relaxing it is an architectural decision on the same terms as this
+file's rules (owner decision 5 of 2026-09-25).
 
 Cross-references **between feature libraries in an area are fine** — the rule is
 hosting-centric, not hub-and-spoke. References to anything outside the area (`Http.*`,
@@ -88,7 +71,7 @@ without exposing Web types through the Database reference pack. Public cross-are
 the ordinary `CohesionProjectReference`/`CohesionFrameworkAssembly` path instead.
 
 **Enforcement** lives in `build/Targets/Build.Rules.targets` (imported for every project; the
-COHRES and COHAM guards leave projects outside `resources/` untouched, and COHLIB001 is the only
+COHRES guards leave projects outside `resources/` untouched, and COHLIB001 is the only
 boundary guard that applies to `libraries/` and `sdks/`; the repo-wide COHNS001 `RootNamespace` check
 in the same file applies everywhere, see `general-rules.md`). Violations fail the build:
 
@@ -96,34 +79,28 @@ in the same file applies everywhere, see `general-rules.md`). Violations fail th
   `CohesionProjectReference`, `CohesionPrivateProjectReference`, raw `ProjectReference`,
   transitive) and the resolved assembly closure after `ResolveAssemblyReferences` (which also
   catches `<Reference>`+`HintPath` and package-delivered DLLs). Exact-module and hosting-family
-  candidates are checked separately, with exact assembly-name exemptions applied to each.
-- `COHRES002` rejects only its excluded categories, in two layers. The first checks the hosting
-  module's **direct** references (the evaluation-time snapshot, taken before NuGet adds transitive
-  project references) against every category. A reference is same-area when its name carries the
-  `Assimalign.Cohesion.<Area>.` prefix or its project lives under `resources/<Area>/`. `Testing`,
-  `ApplicationModel`, `ApplicationModel.Orchestration`, `Refs`, and `Runtime` are matched by exact
-  name; a harness is a referenced project with a `tests/`, `examples/`, `samples/`, or `fixtures/`
-  segment in its path below the repository root. The second checks the module's resolved assembly
-  closure after `ResolveAssemblyReferences` for `<Area>.ApplicationModel` and
-  `<Area>.ApplicationModel.Orchestration` only, because no rule on an intermediate library stops
-  either: an Orchestration package resolves no `Hosting*` assembly, so COHRES004 lets a root or
-  feature the module references take it, and COHRES004 exempts the hosting family, so a
-  `<Area>.Hosting.<Suffix>` integration could take either package. The other categories are
-  checked on direct references only: a route to `Testing` or a producer is a cycle, and a route to
-  a harness through another library is not checked.
-- `COHAM001`, `COHRES003`, and `COHRES004` are checked in two layers: the direct/transitive
-  project-reference graph, then the resolved assembly closure after `ResolveAssemblyReferences`.
-  The latter also catches package-delivered and `<Reference>`+`HintPath` assemblies. Every error
-  names the offending assembly or assemblies.
-- `COHAM001` applies only to opted-in `.ApplicationModel` assemblies. All 18 resource
-  `*.ApplicationModel` assemblies are guarded. `COHRES003` applies automatically to every shipped
-  resource project and has no opt-in or exemption.
-- `COHRES004` applies automatically outside the hosting family, the area's exact `Testing`
-  package, and assemblies ending in `.ApplicationModel`. It rejects the base Hosting library
-  and every `Hosting.*` sibling in both layers.
+  candidates are checked separately, with exact assembly-name exemptions applied to each. The
+  exact-module check skips the project named `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel`
+  in its own area; the hosting-family checks still apply to it.
+- `COHRES002` rejects only its excluded categories, and only among the hosting module's
+  **direct** references (the evaluation-time snapshot, taken before NuGet adds transitive project
+  references). A reference is same-area when its name carries the `Assimalign.Cohesion.<Area>.`
+  prefix or its project lives under `resources/<Area>/`. `Testing`, `Refs`, and `Runtime` are
+  matched by exact name; a harness is a referenced project with a `tests/`, `examples/`,
+  `samples/`, or `fixtures/` segment in its path below the repository root. A route to `Testing`,
+  `Hosting.ApplicationModel`, or a producer is a cycle the build already rejects, and a route to a
+  harness through another library is not checked.
+- `COHRES003` and `COHRES004` are checked in two layers: the direct/transitive project-reference
+  graph, then the resolved assembly closure after `ResolveAssemblyReferences`. The latter also
+  catches package-delivered and `<Reference>`+`HintPath` assemblies. Every error names the
+  offending assembly or assemblies.
+- `COHRES003` applies automatically to every shipped resource project and has no opt-in or
+  exemption.
+- `COHRES004` applies automatically outside the hosting family and the area's exact `Testing`
+  package. It rejects the base Hosting library and every `Hosting.*` sibling in both layers.
 - Test (`tests/`), example (`examples/`), sample (`samples/`), and fixture (`fixtures/`) projects
   are automatically excluded from these guards — the rule constrains shipped libraries, not
-  harnesses. This path-based exclusion applies to COHRES001–004 and COHAM001; everything else in an
+  harnesses. This path-based exclusion applies to COHRES001–004; everything else in an
   area is guarded regardless of folder layout. It is distinct from holding an explicit
   `CohesionHostingIsolationExemptions` waiver.
 - The area's two **framework producers**, `Assimalign.Cohesion.<Area>.Refs` and
@@ -152,23 +129,24 @@ semicolon-delimited, in its own csproj:
 - The exemption is **per-assembly and per-project**: it waives `COHRES001` for a listed hosting
   assembly, or `COHRES002` for a listed same-area assembly, in the declaring project only. Since
   2026-10-09 COHRES002 rejects only its excluded categories, so a COHRES002 exemption can only name
-  a `Testing`, ApplicationModel, framework-producer, or harness project — every one of which
-  signals a design problem rather than a missing permission.
+  a `Testing`, `Hosting.ApplicationModel`, framework-producer, or harness project — every one of
+  which signals a design problem rather than a missing permission.
 - Setting the property is itself the deviation marker at the point of use — always pair it with
   a comment stating the rationale, and surface it in the change summary.
 - **Exactly one standing exemption holder is permitted per area:**
-  `Assimalign.Cohesion.<Area>.Testing`. The test factory drives the concrete runtime, which
-  cannot be done through abstractions alone. Precedents:
-  `resources/Web/Assimalign.Cohesion.Web.Testing` and
-  `resources/Database/Assimalign.Cohesion.Database.Testing`. Web.Testing names only
-  `Assimalign.Cohesion.Web.Hosting`: that module now owns its health and resource integrations
-  (owner decision 57, 2026-10-13). Any other project needs the
-  deviation protocol case-by-case; there is no standing `.Application` exemption.
-- The former standing exemption for `Assimalign.Cohesion.<Area>.ApplicationModel` is retired by
-  the signed-off realization-plan design. An area ApplicationModel directly references
-  `Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`, but never
-  the plain host directly or its area's runtime module `Assimalign.Cohesion.<Area>.Hosting`;
-  `COHAM001` enforces the complete resolved-assembly boundary as each project opts in.
+  `Assimalign.Cohesion.<Area>.Testing`, naming only the exact module
+  `Assimalign.Cohesion.<Area>.Hosting`. The test factory drives the concrete runtime, which cannot
+  be done through abstractions alone. Precedents: `resources/Web/Assimalign.Cohesion.Web.Testing`
+  and `resources/Database/Assimalign.Cohesion.Database.Testing`.
+- **The application-model integration needs no exemption.**
+  `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel` joins the area's runtime module to
+  `ApplicationModel.Hosting`, so it must reference that module (owner decisions 2026-10-28 and
+  2026-10-29). The rule itself sanctions that one reference, by the project's exact name in its own
+  area (since 2026-10-31; until then each integration declared an exemption). Precedent:
+  `resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel`.
+
+  Any other project needs the deviation protocol case-by-case; there is no standing
+  `.Application` exemption.
 - Do not use the property to route around design pressure: if a feature library "needs" hosting,
   the missing piece is almost always a seam on the area root or a component integration (that is
   how the Web area moved its authentication builder verbs out of `Web.Hosting`; since owner
@@ -184,24 +162,35 @@ like any other .NET executable. Domain content also lives there — database sch
 policies, zones, user-flow pipelines, and equivalent area-owned declarations are application
 code, not a generated entry point or a framework-owned apphost.
 
-Orchestration is an opt-in build behavior on that executable:
+Being managed is a registration in that program, not a build behavior. There is no build switch,
+no generated manifest or accessor, and no generated control-plane registration:
 
-- With `<CohesionApplicationModel>enabled</CohesionApplicationModel>`, the area SDK
-  imports `Assimalign.Cohesion.Sdk.ApplicationModel`; that SDK emits `resource.json`,
-  typed `Resource.g.cs` accessors over the ambient
-  `Assimalign.Cohesion.Hosting.Resources.ResourceContext`, and
-  `ResourceControlPlane.g.cs`, which registers the default control plane supplied by the area's
-  `<Area>.ApplicationModel` package.
-- With the default `disabled` value, the project is a plain application: no manifest, generated
-  resource surface, control-plane registration, or orchestration diagnostics.
-- `<Area>.ApplicationModel` remains the declarative orchestration plane (manifest-backed typed
-  resource, planner, `Add<Area>(...)` verbs, and default-control-plane contract) and never
-  references the area's runtime.
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddResource("orders-api", resource => resource.UseInProcess());
+
+var app = builder.Build();
+await app.RunAsync();
+```
+
+- `AddResource` is an `extension(IServiceProviderBuilder)` member that the area's
+  `<Area>.Hosting.ApplicationModel` package ships, called on the concrete builder's `Services`.
+  The callback configures the area's `ApplicationInstanceOptions` subclass: the platforms the
+  resource opts into (`UseInProcess()` from `ApplicationModel.Hosting.InProcess`, and each
+  out-of-process platform's own verb) and the actions the application adds (`AddAction`).
+- **Unmanaged** — no `COHESION_GATEWAY` platform in the environment — `AddResource` registers
+  nothing, and the program is a plain application.
+- **Managed**, it registers one singleton `IHostService` factory: an `ApplicationInstanceService`
+  over an `ApplicationInstanceControlPlane` over the area's internal `IApplicationInstance`. The
+  service publishes the instance's manifest and restores the gateway's state through the client of
+  the platform the environment names, then opens the control plane to the gateway's calls. A
+  platform the resource did not opt into fails the application's build.
 
 An SDK consumer is the composition root and may reference `<Area>.Hosting`; it is not a shipped
-resource-area library governed as an exemption holder. `<Area>.Testing` invokes that program under
-a test-scoped `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime.CreateScope(...)` and remains
-the area's sole explicit exemption holder.
+resource-area library governed as an exemption holder. The gateway that manages it is a separate
+executable on `Assimalign.Cohesion.Sdk.Gateway` (`build-system.md`), built with
+`ApplicationGateway.CreateBuilder(name)` from `Assimalign.Cohesion.ApplicationModel.Gateway`; the
+library area's design is `docs/libraries/ApplicationModel/DESIGN.md`.
 
 ### Executable acceptance fixtures live in `fixtures/`, beside the project that drives them
 
@@ -218,10 +207,9 @@ resources/Database/Assimalign.Cohesion.Database.Testing/
     └── Assimalign.Cohesion.Database.SampleHost/
 ```
 
-The owner is whichever project's tests the fixture exists for, and the name says which: the Web
-area's `Assimalign.Cohesion.Web.Testing.TestHost` lives under `Web.Testing`, and the Gateway's two
-resource fixtures live under `ApplicationModel.Gateway`, not in the areas whose runtimes they
-happen to compose.
+The owner is whichever project's tests the fixture exists for: the Database SampleHost lives under
+`Database.Testing`, whose tests launch it. A fixture a library's tests drive lives under that
+library, not in the area whose runtime it happens to compose.
 
 - **Fixtures are not samples.** A sample demonstrates the product to a reader; a fixture is a test
   input that must compile from source against the current tree. Consumer-facing examples and
@@ -231,7 +219,7 @@ happen to compose.
 - **The guards exempt `fixtures/` by path**, on the same terms as `tests/`: a fixture composes the
   very `<Area>.Hosting` runtime module the area's own libraries may not touch, which is the whole
   point of it. The exclusion is in `build/Targets/Build.Rules.targets` alongside
-  `tests|examples|samples`, and it applies to COHRES001–004 and COHAM001.
+  `tests|examples|samples`, and it applies to COHRES001–004.
 - **No wiring needed.** `fixtures/` sits under `libraries/` or `resources/`, both of which
   `build/Targets/Build.References.Projects.targets` already indexes, so a test project resolves the
   fixture by name through `CohesionProjectReference` — and both trees' `Directory.Build.props`
@@ -260,9 +248,9 @@ this way. Web is the reference implementation (`resources/Web/Assimalign.Cohesio
 - **Every composition input is a registration; there is no parallel private registry.**
   `AddService(IHostService)` is `Services.AddSingleton<IHostService>(service)`;
   `AddService(Func<<Area>ApplicationContext, IHostService>)` is a factory registration closed over
-  the context. Health checks register `IHealthContributor`, control-plane command handlers
-  register `IResourceCommandHandler` (both handed to the control plane once, at `Build`), the
-  module's own endpoints and data-plane services register `IHostService`, and collaborators they
+  the context. The module's own endpoints and data-plane services register `IHostService` (so
+  does a managed resource's `ApplicationInstanceService`, through `AddResource`), and
+  collaborators they
   share (repositories, stores, key providers) are singletons their factories resolve. Web registers
   its default HTTP policies as `IHttpExchangeInterceptor` singleton instances before application
   registrations and resolves that aggregate once in the default server factory, before listener
@@ -353,9 +341,10 @@ feature's configuration on the registration verb.
   that shape the pipeline rather than configure a feature, such as `UseWhen`'s predicate and branch
   or a `Map*` route pattern, are not configuration.
 - **Why.** Configuration on `Use` splits one feature's settings across two call sites and keeps
-  them out of the registrations the host and an operator surface enumerate. A
-  `<Area>.Hosting.Resources` package could then expose the feature only if the application were
-  rewritten.
+  them out of the registrations the host and an operator surface enumerate. An
+  `<Area>.Hosting.ApplicationModel` package, which turns registered settings into resource actions
+  (Web: the `cors` setting becomes the `cors` action), could then expose the feature only if the
+  application were rewritten.
 - **Web follows it throughout** since 2026-10-28: every Web `Use<Feature>` verb is parameterless
   (Web.Cors moved first; the other 16 feature packages followed the same day).
 
@@ -376,12 +365,11 @@ feature's configuration on the registration verb.
   the area exception root — the layer that owns both vocabularies translates at its boundary).
   Child-to-child references are fine. The breakdown signal for either shape is the root (or a
   child root) pulling in anything feature- or model-specific.
-- **Hosting integrations:** an area's resource integration ships as
-  `Assimalign.Cohesion.<Area>.Hosting.Resources`, which references the area's hosting module
-  (application-model restart, 2026-10-27/28; precedent `Web.Hosting.Resources`).
-  `Assimalign.Cohesion.Hosting.Health` was removed on 2026-10-28: a Web application serves health
-  through Web.Health, and a resource reports its health through Hosting.Resources.
-  A separate `Assimalign.Cohesion.<Area>.Hosting.<Suffix>` package is permitted only for an
+- **Hosting integrations:** an area's application-model integration ships as
+  `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel` (below), which references the area's
+  hosting module, the one reference COHRES001 sanctions by name. `Assimalign.Cohesion.Hosting.Health` was removed on
+  2026-10-28: a Web application serves health through Web.Health.
+  Any other `Assimalign.Cohesion.<Area>.Hosting.<Suffix>` package is permitted only for an
   integration that must not land in every framework that carries the runtime module, so it stays
   opt-in; no area has one today. Such a package keeps the hosting-family constraints: it may
   reference the base Hosting library and siblings, the area root, features, other hosting-family
@@ -391,11 +379,9 @@ feature's configuration on the registration verb.
   framework that carries the module, which is the cost the separate package exists to avoid.
 - **The application builder seam:** the area root provides `I<Area>ApplicationBuilder` (and the
   `I<Area>Application` it builds); the hosting module implements them and exposes the creation
-  entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs` executable;
-  when the project opts into orchestration (`CohesionApplicationModel=enabled`) the builder honors
-  the ambient `Assimalign.Cohesion.Hosting.Resources.ResourceContext` and the registered default
-  control plane, otherwise it behaves as a plain application — see
-  `docs/DEVELOPER_EXPERIENCE_DESIGN.md` §2/§4.2). Feature/model registration verbs ship with
+  entry point (`<Area>Application.CreateBuilder(string[] args)` — every resource is a `Program.cs`
+  executable, managed only when it calls `builder.Services.AddResource(...)`; see "The resource
+  instance is the SDK consumer's project", above). Feature/model registration verbs ship with
   their feature package — never in the hosting module — so a feature or model registers itself
   without knowing the hosting layer. They take one of two forms:
   `extension(I<Area>ApplicationBuilder)` members that compose against the root builder, or
@@ -419,9 +405,10 @@ feature's configuration on the registration verb.
   returns the public concrete `Host<TContext>` application (Web, Database, and all 16 fillers).
 - `Assimalign.Cohesion.<Area>.Hosting` — the runtime module, referencing the area root, its own hosting
   family, the same-area libraries the runtime itself needs, and non-area infrastructure. Roots and
-  feature libraries reference no `Assimalign.Cohesion.Hosting*` library. Enabled-resource
-  implementations consume the plain lifecycle host and `Assimalign.Cohesion.Hosting.Resources` without
-  referencing their area's ApplicationModel package.
+  feature libraries reference no `Assimalign.Cohesion.Hosting*` library. The application-model
+  wiring lives in `<Area>.Hosting.ApplicationModel`, never in the module, which cannot reference
+  that package (COHRES002) and needs no ApplicationModel package of its own (precedent:
+  `Web.Hosting` references none).
   **The module may reference any library in its own area except COHRES002's exclusions** (owner
   decision 2026-10-09), so runtime machinery that belongs in its own package — a server, a router
   the host drives — no longer has to be pushed into the root or routed through an exemption.
@@ -433,92 +420,36 @@ feature's configuration on the registration verb.
   with the feature, as root-builder extensions or as component integrations on `Services` (Web,
   owner decision 34). It composes through its container ("Hosting composition — DI is the dependency
   control", above).
-- `Assimalign.Cohesion.<Area>.ApplicationModel` — the AOT-compatible, dependency-guarded declarative plane: a
-  manifest-backed typed resource, platform-neutral planner, `Add<Area>(...)` graph verbs, and the
-  area's default-control-plane contract/factory. Its direct Cohesion references are
-  `Assimalign.Cohesion.ApplicationModel` and `Assimalign.Cohesion.Hosting.Resources`. It never
-  references `<Area>.Hosting`; generated code in an enabled consumer executable registers the two
-  sides through `Assimalign.Cohesion.Hosting.Resources.ResourceRuntime`.
-  **Every ApplicationModel package declares the `Assimalign.Cohesion.ApplicationModel` namespace**
-  (`RootNamespace` and every `namespace` directive; `COHAM002` checks the project property), never
-  `Assimalign.Cohesion.<Area>.ApplicationModel`: an apphost's `Program.cs` composes every area with
-  one `using`, the way the base library's own verbs work. The package and assembly names keep the
-  area segment, so types are area-prefixed (`WebResourceOptions`, `IDatabaseResourceDescriptor`,
-  `AddIdentityHub`) to stay unambiguous inside the shared namespace. The same rule binds
-  companion-repository ApplicationModel packages such as `Assimalign.Cohesion.Viu.ApplicationModel`.
-  `Sdk.Gateway` injects an area's ApplicationModel only for the areas of the resource projects a
-  gateway names in `CohesionResourceReference` (read from each project's `Sdk="Assimalign.Cohesion.Sdk.<Area>"`
-  attribute, or the reference's `Area` metadata), and in-process gateways get exactly those areas'
-  `App.<Area>` frameworks; any other area package is the gateway's own explicit reference.
-  `Sdk.Gateway` generates no per-resource verb: the gateway's `Program.cs` calls the area's
-  hand-written verb over the generated manifest,
-  `builder.AddWeb(Manifests.AppAApi, new WebResourceOptions { ... })`, and adds a kind without an
-  ApplicationModel package with `builder.AddResource(Manifests.<Name>)`. The `Add<Area>` verb is
-  therefore the area's public composition API, not an SDK implementation detail.
-- `Assimalign.Cohesion.<Area>.ApplicationModel.Orchestration` — **optional**: the gateway-side
-  provider package. It implements the gateway provider seams that `Assimalign.Cohesion.ApplicationModel`
-  defines (`IResourceSourceProvider`, `IResourceCertificateAuthority`, `ITrustedIssuerStore`,
-  `IResourceCommandInputResolver`, and the other roles on `ApplicationProviders`), so the area's
-  wire knowledge (paths, payload schemas, command kinds) lives here and not in
-  `libraries/ApplicationModel/**`. It ships explicit `Use<Area>(...)` registration verbs in two
-  forms that make the same registrations, each in its receiver's `Providers`: an
-  `extension(IApplicationBuilder)` member taking the
-  store's resource descriptor, for an application built in code, and an
-  `extension(IApplicationProviderBuilder)` member taking the store's `ResourceName`, which an
-  application set uses for a member whose model it imports
-  (`set.AddApplication(Applications.X, member => member.Use<Area>("<store>"))`).
-  `IApplicationBuilder` does not extend `IApplicationProviderBuilder`: they are separate
-  interfaces and the default builder implements both, so a single application registers through
-  the descriptor form and the `ResourceName` form is the application-set member surface (owner
-  decision O45 of 2026-09-27, R10 in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`). A new area's
-  Orchestration package ships both forms. Precedents:
-  `SecretStore.ApplicationModel.Orchestration` (`UseSecretStore(store)`, then
-  `.AsCertificateAuthority()` / `.AsTrustStore()`) and
-  `ConfigurationStore.ApplicationModel.Orchestration` (`UseConfigurationStore(store)`). A verb
-  registers only for its own application; bindings to a store of another application are
-  rejected at `Build()`, or for an application-set member when the set starts (owner decision 4
-  of 2026-09-25; member validation accepted in O45).
-  - **Name and verb are load-bearing.** When a mount source `<source>:<key>` in the application's
-    own manifests names a store resource that has no registered provider, `Build()` (for an
-    application-set member, the set's start) throws an error built from that store's manifest
-    Kind: reference `Assimalign.Cohesion.<Kind>.ApplicationModel.Orchestration` and call
-    `builder.Use<Kind>(...)`, or for a member
-    `set.AddApplication(Applications.<Member>, application => application.Use<Kind>("<store>"))`.
-    The same package-and-verb hint, built from the target's manifest Kind, is produced when the
-    application declares a command whose target manifest marks its kind `requiresInputResolver`
-    and registers no `IResourceCommandInputResolver` for that kind (owner decision of 2026-09-28,
-    R11 in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`; for a target of another application the error
-    asks for the resolver in `Providers.CommandInputs` instead). So an area whose command payloads
-    carry source expressions (`parameter:<name>`, `<store>:<key>`) that only the delivering gateway
-    can resolve marks those kinds `RequiresInputResolver="true"` on their `CohesionCommand` items in
-    `sdks/Assimalign.Cohesion.Sdk.<Area>/Targets/Sdk.<Area>.props`, and its Orchestration package's
-    `Use<Area>(...)` registers the resolver (precedent: `secretstore.add-secret` in
-    `Sdk.SecretStore.props`, resolved by `UseSecretStore`). An unmarked kind with no resolver is
-    delivered as declared; the SecretStore runtime still rejects an unresolved `add-secret` as
-    defense in depth.
-    A package or verb named any other way sends the developer to a package that does not exist.
-  - **References:** `Assimalign.Cohesion.ApplicationModel`, the area's own `<Area>.Client`, and
-    other `libraries/**` packages outside the Hosting and Gateway families. It never references
-    `Assimalign.Cohesion.Hosting*`, `Assimalign.Cohesion.ApplicationModel.Gateway*`, or
-    `<Area>.ApplicationModel`. The existing guards enforce all three. The assembly name ends in
-    `.Orchestration`, not `.ApplicationModel`, so COHRES004 classifies the package as a feature
-    library: it rejects Hosting directly, and it rejects `<Area>.ApplicationModel` transitively
-    through that package's direct `Hosting.Resources` reference. COHRES003 rejects the Gateway
-    family and COHRES001 rejects the runtime module; COHAM001 does not apply. Between the two
-    packages the arrow points Orchestration → Client, never back: `<Area>.Client` takes no
-    ApplicationModel reference, which keeps the client eligible for a shared framework (O2).
-  - **Delivery:** NuGet-only. It is never a member of an `App.<Area>` shared framework, and no
-    SDK injects it (neither `Sdk.<Area>` nor `Sdk.Gateway`). The gateway project references the
-    package and calls its verb in `Program.cs`; nothing registers by convention.
-  - **Namespace:** it declares the shared `Assimalign.Cohesion.ApplicationModel` namespace
-    (`RootNamespace` pinned in the csproj) with area-prefixed type names
-    (`SecretStoreSourceProvider`, `ConfigurationStoreSourceProvider`), so the gateway's one
-    `using` composes it with the ApplicationModel verbs. COHAM002 covers assembly names ending
-    in `.ApplicationModel.Orchestration` as well as `.ApplicationModel`, so the build rejects any
-    other `RootNamespace` (`build-system.md`, COHAM002).
-- `Assimalign.Cohesion.<Area>.Testing` — the optional shippable test factory that invokes a
-  consumer's real `Program.cs` under a test-scoped ambient resource context. When present, this
-  is the area's sole explicit `CohesionHostingIsolationExemptions` holder.
+- `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel` — the area's **one** application-model
+  integration: it makes the area's application a managed resource instance. An area ships no
+  definition package and nothing gateway-side: a gateway's model is declared with the library
+  area's `Assimalign.Cohesion.ApplicationModel.Definition`.
+  - **What it ships:** the `AddResource(ResourceName name, Action<<Area>ResourceOptions>? configure = null)`
+    verb as an `extension(IServiceProviderBuilder)` member, an `<Area>ResourceOptions` deriving
+    from `ApplicationInstanceOptions` (so every platform's verb and `AddAction` apply), and an
+    internal `IApplicationInstance` whose actions are the area's own (Web: one per registered
+    setting it knows, such as `cors`) followed by the ones the application adds. Behavior,
+    managed and unmanaged, is in "The resource instance is the SDK consumer's project" above.
+    The verb is an ordinary extension member, not a generated component integration, because the
+    package references the container directly. Precedent:
+    `resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel` (its `docs/DESIGN.md`).
+  - **References:** the area root, the area's exact `<Area>.Hosting` module (sanctioned by COHRES001 itself, with no
+    `CohesionHostingIsolationExemptions` entry), `Assimalign.Cohesion.DependencyInjection`,
+    `Assimalign.Cohesion.Hosting`, and `Assimalign.Cohesion.ApplicationModel.Hosting`, plus the
+    area's feature packages whose settings it turns into actions (Web: `Web.Cors`). It references
+    no platform: the application references each platform it opts into
+    (`ApplicationModel.Hosting.InProcess`, or an out-of-process platform's instance half from
+    `cohesion-platforms`). It never resolves an `ApplicationModel.Gateway*` assembly (COHRES003).
+  - **Transport:** none. Every transport belongs to a platform; the package selects the client
+    of the platform the environment names and registers nothing else — no server, listener, or
+    HTTP client.
+  - **Namespace:** its own `RootNamespace`, `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel`,
+    like any library. Area-prefixed type names (`WebResourceOptions`) keep the options unambiguous.
+  - **Delivery:** a public member of the area's `App.<Area>` framework, so an `Sdk.<Area>`
+    application calls `AddResource` with no package reference.
+- `Assimalign.Cohesion.<Area>.Testing` — the optional shippable test factory that composes the
+  area's concrete runtime for tests. When present, it is the area's sole standing
+  `CohesionHostingIsolationExemptions` holder.
 - `Assimalign.Cohesion.<Area>.<Feature>` — feature libraries; builder verbs ship here, not in
   hosting (registration verbs may be component integrations on `Services`, as Web's are).
 - `Assimalign.Cohesion.<Area>.Refs` and `Assimalign.Cohesion.<Area>.Runtime` — the producers of
@@ -540,24 +471,19 @@ feature's configuration on the registration verb.
   get the family without project wiring. The framework closure tests guard every
   area, including feature dependencies such as Web.Caching → Caching/InMemory. Validate with
   `dotnet pack resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/src/Assimalign.Cohesion.<Area>.Runtime.csproj`.
-  App carries `Assimalign.Cohesion.Connections` because every generated resource accessor exposes
-  its `ConnectionString` type and every area hosting module depends on it; area frameworks must
-  not duplicate that kernel entry.
-  `<Area>.ApplicationModel` packages are NuGet-only, injected by `Sdk.<Area>` (its own area) and
-  `Sdk.Gateway` (the areas of its referenced resource projects), and never members of an
-  `App.<Area>` shared framework (owner-signed developer-experience design O2/O27). No SDK injects
-  an `<Area>.Client` package, and a gateway references none directly: it delivers resource commands
-  through its generic control-plane command client, and it reads a store only through the
-  `<Area>.ApplicationModel.Orchestration` package that wraps the store's client (the client arrives
-  transitively with that package). The owner
-  decisions of 2026-09-25 supersede O13's "gateways may reference `<Area>.Client`". A client takes
-  no ApplicationModel reference, so it stays eligible for a shared framework: an area lists it in
-  `App.<Area>` when the area's own applications consume it at run time (`App.Database` carries
-  `Database.Client` and `Database.Sql.Client`) and otherwise ships it NuGet-only
-  (`Database.Graph.Client`, `SecretStore.Client`, `ConfigurationStore.Client`). The runtime
-  producer's `Directory.Build.props` records which choice the area made. `<Area>.ApplicationModel.Orchestration`
-  packages are NuGet-only, never framework members, and injected by no SDK; the gateway references
-  each one explicitly (above).
+  App carries `Assimalign.Cohesion.Connections` because every area hosting module depends on it,
+  and `Assimalign.Cohesion.ApplicationModel.Hosting` because every area's
+  `<Area>.Hosting.ApplicationModel` builds on it; area frameworks must not duplicate those kernel
+  entries. `<Area>.Hosting.ApplicationModel` is a public `App.<Area>` member; the platform
+  packages a resource opts into (`ApplicationModel.Hosting.InProcess`, the `cohesion-platforms`
+  instance halves) are NuGet packages the application references, and no `ApplicationModel.Gateway*`
+  assembly is a member of any shared framework (COHRES003).
+  No SDK injects an `<Area>.Client` package. A client takes no ApplicationModel reference, so it
+  stays eligible for a shared framework: an area lists it in `App.<Area>` when the area's own
+  applications consume it at run time (`App.Database` carries `Database.Client` and
+  `Database.Sql.Client`) and otherwise ships it NuGet-only (`Database.Graph.Client`,
+  `SecretStore.Client`, `ConfigurationStore.Client`). The runtime producer's
+  `Directory.Build.props` records which choice the area made.
 
 Relaxing the rule itself (beyond a per-project exemption) is an architectural decision: change
 `build/Targets/Build.Rules.targets`, this file, and the owning area's README in the same commit,

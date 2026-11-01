@@ -130,12 +130,6 @@ address type. A declared endpoint's HOST/PORT/SCHEME values describe its bind ad
 separately advertised PUBLIC_URL remains available through the URI reader. Dependency URLs may
 carry an optional path.
 
-The default application-key credential profile constants are not in Core. They are
-`Assimalign.Cohesion.Hosting.Resources.ResourceCredentialProfile`, beside the resource credential
-verifier seam, because every gateway and hosting module that mints or verifies the default
-credential already references Hosting.Resources; the base ApplicationModel and the platform
-gateways never use them.
-
 `UriExtensions` is a single C# 14 extension block in the `System` namespace for the endpoint
 behavior the BCL does not supply directly: `CreateEndpoint`, `TryCreateEndpoint`,
 `TryParseEndpoint`, `ThrowIfNotEndpoint`, `IsEndpoint`, `EndpointPath`, and
@@ -173,9 +167,8 @@ starts. Inside a scope:
   that stops on signals in its own process stops on its scope in a host of programs, with no change.
 
 It lives in Core because every reader of the contract already does, and both sides of the line,
-the Configuration and Hosting readers and the gateway that writes the scope, reference Core. It
-replaces the retired `Hosting.Resources` `ResourceContext`/`ResourceRuntime` pair, which carried the
-same keys in a typed context that every reader had to know. `Variables.Prefix` is internal, so the
+the Configuration and Hosting readers and the gateway that writes the scope, reference Core. *Rejected:* a typed context
+carrying the same keys, which every reader would have to know. `Variables.Prefix` is internal, so the
 contract test, which reads `public const string` declarations, still sees exactly the documented
 variables. `Variables.Configuration(key)` builds the bridge variable of a whole colon-separated key
 (`Orders:Url` becomes `…CONFIG__Orders__Url`), the form a gateway writes a setting in.
@@ -207,8 +200,8 @@ away when the prefix names a drive or a UNC share, rather than preserving it:
 | `\\?\Volume{guid}\a`, `\\.\pipe\name`, `\\?\GLOBALROOT\...` | `ArgumentException` |
 
 Why it matters: the .NET host fully qualifies an application path at or past `MAX_PATH` (260)
-with `\\?\`, so `AppContext.BaseDirectory`, and `ResourceContext.ContentRootPath` derived from
-it, arrive prefixed. Every area hosting module parses one of them at startup, so rejecting the
+with `\\?\`, so `AppContext.BaseDirectory`, and every content root derived from it, arrive
+prefixed. Every area hosting module parses one of them at startup, so rejecting the
 `?` stopped every Cohesion application installed under a deep directory.
 
 Why normalize rather than preserve:
@@ -357,7 +350,7 @@ bool isMatch = pattern.IsMatch("settings/appsettings.json");
 string environmentName = AppEnvironment.GetEnvironmentName();
 ```
 
-`AppEnvironment.Variables.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; Hosting.Resources owns protected-file reading and TLS chain validation. The constant, runtime table, and golden variable list remain in identical order.
+`AppEnvironment.Variables.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; the variable is reserved (`docs/RUNTIME_CONTRACT.md`), and the platform that sets it owns reading the file and validating chains. The constant, runtime table, and golden variable list remain in identical order.
 
 ## Build-generated resources (#1467)
 

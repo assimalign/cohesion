@@ -118,7 +118,7 @@ explains when to use an event, a request span, a metric, or the HTTP access log.
 | `Assimalign.Cohesion.Web.ErrorHandling` | Application pipeline fault (Error), expected fault (Verbose), error-handler failure (Error), diagnostic-callback failure (Warning), peer-abandoned response (Verbose); client-caused and cancelled exchanges excluded from application-fault reporting | `total-faults`, `faults-per-second`, `aborted-responses` | [ErrorHandling DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ErrorHandling/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Forms` | Form limit or malformed input (Verbose); rejection after response commit (Warning, throttled); configured limit names and exception types only | `form-limit-rejections`, `malformed-forms` | [Forms DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Forms/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.ForwardedHeaders` | Forwarding stop reason, family and applied depth (Verbose); transport peer IP only for an untrusted peer at depth zero | `untrusted-forwarding`, `malformed-forwarding` | [ForwardedHeaders DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.ForwardedHeaders/docs/DESIGN.md#diagnostics) |
-| `Assimalign.Cohesion.Web.Health` | Health worsened (Warning), improved (Informational), thrown or timed-out check (Verbose); includes adapted Hosting.Health contributors | `failed-checks` | [Health DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Health/docs/DESIGN.md#diagnostics) |
+| `Assimalign.Cohesion.Web.Health` | Health worsened (Warning), improved (Informational), thrown or timed-out check (Verbose) | `failed-checks` | [Health DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Health/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.HostFiltering` | Rejected effective host with bounded host component, reason and request id (Verbose) | `rejected-requests` | [HostFiltering DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.HostFiltering/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.Server` | Server lifecycle and failures, peer-ended connections (Verbose), refused response heads and telemetry listener failures (throttled), completion callback and isolation failures; process-unique serverId | `connection-faults`, `connection-cap-waits`, `refused-response-heads` | [Server DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.Server/docs/DESIGN.md#diagnostics) |
 | `Assimalign.Cohesion.Web.RateLimiting` | Rejected global or endpoint policy (Verbose); rejection after response commit (Warning, throttled); partition keys are never written | `rejected-requests` | [RateLimiting DESIGN.md](../resources/Web/Assimalign.Cohesion.Web.RateLimiting/docs/DESIGN.md#diagnostics) |
@@ -150,7 +150,7 @@ shells. Each row records the reason from
 | `Assimalign.Cohesion.Web` | Contracts and pure pipeline helpers have no runtime state, loop or swallowed failure; the root must not claim every Web package's signals. |
 | `Assimalign.Cohesion.Web.Testing` | A shipped test harness, like Connections.InMemory, rather than a runtime component; it receives no access to internal sources. |
 | `Assimalign.Cohesion.Web.Hosting` | Its control-plane events left with the retired resource integration; the server, connection and request signals belong to Web.Server. |
-| `Assimalign.Cohesion.Web.Hosting.ApplicationModel` | The resource integration is being rebuilt; its control-plane outcomes are HTTP statuses the gateway sees, and diagnostics come with the design. |
+| `Assimalign.Cohesion.Web.Hosting.ApplicationModel` | The resource integration carries no transport: an action's outcome reaches the gateway through the platform's client, and the instance side's diagnostics come with ApplicationModel.Hosting's design. |
 | `Assimalign.Cohesion.Web.Routing` | Failures throw at startup or reach the exception boundary; 404/405 are statuses and the matched template is already the span's `http.route`. |
 | `Assimalign.Cohesion.Web.Api` | Binding failures are visible client-driven 400s in access logs and request metrics; the signal does not justify a new public rejection API. |
 | `Assimalign.Cohesion.Web.OpenApi` | Build failures reach the boundary and are not cached; first-route-wins is documented and the package is development-facing. |
@@ -194,7 +194,6 @@ adapters over `Database.Storage`, which reports their I/O; a DDL refusal is a fa
 the catalogs' swallowed reads skip reclaimed MVCC versions, an expected outcome); `Database.Sql.Tcp`
 (one extension method configuring a listener `Connections.Tcp` reports); `Database.Embedded` (holds
 and disposes engines, whose lifecycle the root reports); `Database.Testing` (a test harness);
-`Database.ApplicationModel` (a declarative planner a gateway runs at build, with no run-time work);
 and `Sdk.Database.Tasks` (MSBuild tasks log through `TaskLoggingHelper` into the build log, inside a
 node no application tool attaches to). `Database.Sql.Schema` also remains uninstrumented after
 the redesign: compilation, validation and migration planning transform in-memory values during

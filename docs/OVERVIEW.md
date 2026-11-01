@@ -7,8 +7,9 @@ Repository-level documentation for the Cohesion mono repository. Coding standard
 - [Delivery Roadmap](./programs/DELIVERY_ROADMAP.md) — delivery waves, initiative sequencing, and the L1/L2/L3 layering model
 - [Service Layer Design](./SERVICE_LAYER_DESIGN.md) — high-level design for each service under `resources/`
 - [Service Story Requirements](./programs/SERVICE_STORY_REQUIREMENTS.md) — implementation requirements for service-level backlog stories
-- [Developer Experience Design](./DEVELOPER_EXPERIENCE_DESIGN.md) — authoritative gateway, discovery, trust, and application-set contracts
-- [Application Model Build and Deploy](./APPLICATION_MODEL_BUILD_AND_DEPLOY.md) — the build plane, gateway selection, and the local versus live-cluster realizations, drawn
+- [Developer Experience Design](./DEVELOPER_EXPERIENCE_DESIGN.md) — how a project picks a Cohesion SDK, the frameworks it receives, the canonical runtime API, and the hosting decisions in force
+- [Runtime Contract](./RUNTIME_CONTRACT.md) — the language-neutral `COHESION_*` variables a gateway gives the instances it runs
+- [Application Model design](./libraries/ApplicationModel/DESIGN.md) — gateways, managed resource instances, and the platforms between them
 - Build
   - [Cohesion Custom MSBuild Items](./build/MSBUILD_COHESION_PROPS.md) — `CohesionProjectReference`, `CohesionPackageReference`, code generation
   - [Common MSBuild Properties](./build/MSBUILD_COMMON_PROPS.md) — where shared build properties are defined
@@ -17,45 +18,32 @@ Repository-level documentation for the Cohesion mono repository. Coding standard
 - [Versioning and Release Channels](./VERSIONING_RELEASE_POLICY.md) — synchronized versions, staging, promotion, and local package policy
 - [References](./REFERENCES.md) — external MSBuild and tooling references
 
-The ApplicationModel gateway family includes the portable model and export contracts, the
-plan-driven gateway lifecycle, and the hosting-free authenticated gateway control plane used by
-`remote.Gateway(url)`. Local gateways publish its discovery metadata beneath
-`.cohesion/<application>/control-plane.json`; platform exposure remains platform-owned.
-
 ## Landed package and area map
 
 The layers are L1 foundation and SDK/tooling, L2 application runtime and composition, and
-L3 service platforms. The [ApplicationModel design v3](./libraries/ApplicationModel/DESIGN.md)
-connects the packages to the signed direction and records the build-out decisions.
+L3 service platforms.
 
 | Family | Packages and responsibility |
 |---|---|
-| ApplicationModel | `Assimalign.Cohesion.ApplicationModel` (shared contracts), `.Definition` (the logical model), `.Hosting` (the running instance), `.Gateway` (reconciles one gateway's model onto an infrastructure provider), `.Gateway.InProcess` (runs a gateway's resources in its own process). Rebuilt since 2026-10-27; see the area README. |
-| Hosting | `Assimalign.Cohesion.Hosting` (nestable lifecycle), `.Health`, `.Resources` (ambient runtime context), `.Telemetry` (resource log-export bootstrap and shutdown). |
-| OpenTelemetry | `Assimalign.Cohesion.OpenTelemetry` is implemented by item 31b (`acc951aa`): `OtlpProtocol`, `OtlpSignal`, `OtlpExporterOptions`, `IOtlpLogExporter`, `OtlpLogRecord`, and `OtlpExporter`; OTLP/HTTP JSON logs, with traces, metrics, and protobuf deferred. |
-| Resource declarative planes | All 18 areas deliver a guarded `<Area>.ApplicationModel` package: typed resource, planner, graph verbs, and the area's default-control-plane factory. They are NuGet-only. |
-| Web hosting integrations | `Assimalign.Cohesion.Web.Hosting` supplies the resource control plane and adapts Hosting contributors onto the independent Web health model, in its `.Resources` and `.Health` namespaces (owner decision 57, 2026-10-13). |
-| Orchestration clients | `SecretStore.Client` and `ConfigurationStore.Client` back the opt-in store providers in `SecretStore.ApplicationModel.Orchestration` and `ConfigurationStore.ApplicationModel.Orchestration`; a gateway references those packages, never a client. The gateway delivers resource commands through its generic `ResourceControlPlaneCommandClient` and takes no area client. The dedicated `IdentityHub.Client` and `Rezolvr.Client` packages are retired; `Database.Client` still ships `DatabaseCommandClient` for direct callers of the Database admin command endpoint. |
+| ApplicationModel | `Assimalign.Cohesion.ApplicationModel` (the shared identity), `.Protocol` (the gateway-to-instance wire), `.Definition` (the logical model a gateway runs), `.Hosting` (the running instance), `.Hosting.InProcess` (the in-process platform's instance half), `.Gateway` (deploys and manages one gateway's model through an infrastructure provider), `.Gateway.InProcess` (the in-process platform's gateway half). Rebuilt since 2026-10-27; see the [area README](../libraries/ApplicationModel/README.md). The Kubernetes and Docker platform pairs live in `cohesion-platforms`. |
+| Hosting | `Assimalign.Cohesion.Hosting` (the nestable lifecycle host every area application is). |
+| OpenTelemetry | `Assimalign.Cohesion.OpenTelemetry`: `OtlpProtocol`, `OtlpSignal`, `OtlpExporterOptions`, `IOtlpLogExporter`, `OtlpLogRecord`, and `OtlpExporter`; OTLP/HTTP JSON logs, with traces, metrics, and protobuf deferred. |
+| Resource application-model integrations | Each area makes its application a managed resource with one package, `<Area>.Hosting.ApplicationModel`, a member of its `App.<Area>` framework: `builder.Services.AddResource(name, resource => resource.UseInProcess())`. Web's is the reference implementation ([Web.Hosting.ApplicationModel](../resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md)). |
+| Area clients | `Database.Client`, `Database.{Sql,Documents,Graph,Blob,Cache,KeyValuePair}.Client`, `ConfigurationStore.Client`, `SecretStore.Client`, `IdentityHub.Client`, `MessageHub.Client`, and `NotificationHub.Client` are ordinary client packages; an area framework carries one only when the area's own applications use it at run time. |
 
 The seven areas with real service hosts are **Web, Database, ConfigurationStore, SecretStore,
 IdentityHub, Rezolvr, and LogSpace**. The eleven generic hosts are **ApiManager, EmailHub,
 EventHub, IoTHub, LoadBalancer, MediaHub, MessageHub, NatGateway, NotificationHub, Scheduler,
-and VpnGateway**. LogSpace now provides the OTLP receiver, segment store, scoped-token
+and VpnGateway**. LogSpace provides the OTLP receiver, segment store, scoped-token
 verification and paged query; its `.Telemetry` project remains an empty placeholder.
-
-The orchestration clients above are distinct from the existing area clients:
-`Database.Client`, `Database.{Sql,Documents,Graph,Blob,Cache,KeyValuePair}.Client`,
-`MessageHub.Client`, and `NotificationHub.Client`.
 
 ## Executable acceptance samples
 
 These are non-packable consumers with real `Program.cs` entry points:
 
 - `fixtures/SdkSmoke/`: `SdkSmoke.Analyzer`, `SdkSmoke.App`, `SdkSmoke.Database`, and `SdkSmoke.Web`.
-- `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost`.
-- `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.Web.HttpsHost` and `Assimalign.Cohesion.Web.TestHost`.
-- `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/fixtures/Assimalign.Cohesion.LogSpace.SinkHost` (item 31b).
+- `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/`: `Assimalign.Cohesion.Database.SampleHost` and `Assimalign.Cohesion.Database.TcpSdkHost`.
 
-The [runtime contract](RUNTIME_CONTRACT.md), [Hosting.Telemetry design](../libraries/Hosting/Assimalign.Cohesion.Hosting.Telemetry/docs/DESIGN.md),
-and [OpenTelemetry design](../libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md)
-own the precise injection, protocol, and lifecycle contracts.
+The [runtime contract](RUNTIME_CONTRACT.md) and the
+[OpenTelemetry design](../libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/docs/DESIGN.md)
+own the precise variable and protocol contracts.

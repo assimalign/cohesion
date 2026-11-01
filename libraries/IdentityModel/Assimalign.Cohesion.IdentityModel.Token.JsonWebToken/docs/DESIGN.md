@@ -150,10 +150,8 @@ borrowed verifier to the selected trusted key and coordinate verification with d
 has no mutable static state, no handle ownership, and no public API. Public validators retain their
 existing contract and token acceptance relative to 10.0.0-preview.1.
 
-The Cohesion claim names and ceilings (`cohesion_token_use`, `scope=telemetry`, `cohesion-export`,
-24 hours, 8 hours) are not here: they belong to the resource credential seam, so they live in
-`Assimalign.Cohesion.Hosting.Resources.ResourceCredentialProfile`, which this package does not
-reference, and each call site passes them into its profile.
+No Cohesion-specific claim names or lifetime ceilings are defined here: a caller that needs them
+owns them and passes them into its profile.
 
 ## The JWT / OpenID Connect validation split
 

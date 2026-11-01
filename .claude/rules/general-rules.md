@@ -458,22 +458,22 @@ parameterless constructor and no `Create()` instead (owner decision 61, 2026-10-
 methods that take arguments and validate them keep the decision-59 shape.
 
 The implementation takes the static class's name when that name describes the object returned
-(`AuthenticationService`, `ResourceControlPlane`, `DataProtectionProvider`). Otherwise keep its
+(`AuthenticationService`, `DataProtectionProvider`). Otherwise keep its
 descriptive name (`EcdsaJsonWebTokenSignatureVerifier`, `CookieAuthenticationHandler`) and use
 `Create(...)` for creation with arguments.
 When a facade creates different implementations, each implementation owns its creation method.
 Use `git mv` when promoting or renaming the implementation, and document every public member,
 including inherited contracts and their argument validation.
 
-A facade or builder DSL that composes operations is not this pattern: `RoutePatternFactory`,
-`ResourceControlPlaneMiddleware`, `ResourceRuntime` and `ResourceTelemetry` stay as they are.
+A facade or builder DSL that composes operations is not this pattern: `RoutePatternFactory` stays
+as it is.
 Component-integration factories whose required value arguments cannot be expressed by a builder
 remain governed by [component-integration.md](component-integration.md).
 
 Database adoption is tracked by [#1470](https://github.com/assimalign/cohesion/issues/1470).
 No `resources/Database/` file changes during the owner's active Database PR. The Web.Health
 `HealthChecks.CreateBuilder()` conversion is deferred because Database.Hosting calls it;
-`ResourceControlPlane.Create` and `JsonWebTokenWriter.CreateEs256` keep their existing spelling.
+`JsonWebTokenWriter.CreateEs256` keeps its existing spelling.
 
 ### `InternalsVisibleTo` is for tests
 
@@ -489,9 +489,7 @@ supply that capability — it hides the question, and every later reader has to 
 the producer's internals are load-bearing for whom. Resolve it at the design level instead:
 
 - **Give the producer a public seam** for what the consumer legitimately needs, and keep the rest
-  internal. This is the resolution of record for the host's run wrapper
-  (`DEVELOPER_EXPERIENCE_DESIGN.md` R6: `IHostRunner`/`IHostRun`/`IHostRunObserver`, explicitly
-  "no `InternalsVisibleTo`").
+  internal.
 - **Move the work to the package that owns the type.** If the consumer is manipulating the
   producer's data structures, the operation usually belongs on the producer's side of the line.
 - **Restructure so the consumer does not need it** — often the smallest change of the three.
@@ -518,10 +516,10 @@ grep -rn "InternalsVisibleTo" --include=*.cs --include=*.csproj . \
   | grep -vE "[/\\\\](obj|bin)[/\\\\]" | grep -vE '\.Tests"|\.Tests" />|\.Tests,'
 ```
 
-A **fourth** pattern exists and is deliberately not counted above: two projects grant to
-*another project's* test assembly (`SecretStore.Hosting` → `SecretStore.Client.Tests` and
-`ApplicationModel.Gateway` → `ApplicationModel.Gateway.InProcess.Tests`; the `IdentityHub.Hosting`
-and `Rezolvr.Hosting` grants left with their retired client packages). Those are test-only
+A **fourth** pattern exists and is deliberately not counted above: one project grants to
+*another project's* test assembly (`SecretStore.Hosting` → `SecretStore.Client.Tests`; the
+`IdentityHub.Hosting` and `Rezolvr.Hosting` grants left with their retired client packages, and
+`ApplicationModel.Gateway` now grants only its own tests). That grant is test-only
 and do not widen a shipped boundary, but they do reach past a project's own tests. Prefer a
 project's own test assembly; if a sibling's tests genuinely need the internals, that is worth
 questioning on the same terms as the rest of this section.

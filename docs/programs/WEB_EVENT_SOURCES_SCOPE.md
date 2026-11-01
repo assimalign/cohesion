@@ -6,6 +6,14 @@
 **Program:** HTTP/Web (`docs/programs/HTTP_WEB_PROGRAM_PLAN.md`). Recommended placement: Stage 14, lane G.
 **Tracking:** epic #1396, tasks #1397–#1408, side defects #1409–#1413.
 
+> **Superseded in part (2026-10-31).** Everything here about the resource control plane —
+> `Web.Hosting.Resources`, `ResourceControlPlaneMiddleware` and its `ResourceControlPlaneEventSource`
+> (§5.2, T3), the Hosting.Resources command-outcome source, `Web.ApplicationModel`, and side defect
+> #1412 — describes code the application-model restart removed. A Web application now becomes a
+> managed resource through `Web.Hosting.ApplicationModel`, which carries no transport; see the
+> [Web signal ownership table](../resources/Web/DESIGN.md#diagnostic-signal-ownership) and
+> [docs/EVENT_SOURCES.md](../EVENT_SOURCES.md) for the current catalog.
+
 Claims that are not plain from the code are tagged **[Certain]** (checked against the code at
 `5b51304b`), **[Likely]** (a strong inference) or **[Guessing]** (a gap filled by judgment).
 
@@ -247,7 +255,7 @@ Two steps, in order:
    the binary-size delta in the Sdk.Web docs before the owner decides. **[Guessing]** The setting also
    keeps the runtime's own sources, so the delta may be noticeable.
 2. **Add an Sdk.Web evaluation test.** It asserts that `EventSourceSupport` evaluates to `true` under
-   `PublishAot=true` unless the project sets it. `sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/ResourceAreaDefaultsTests.cs`
+   `PublishAot=true` unless the project sets it. `sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/ResourceAreaDefaultsTests.cs` (deleted 2026-10-31)
    is the precedent for area-SDK default tests **[Likely]**; the package-only `SdkSmoke` consumer in
    `cohesion-examples` is the fallback.
    - **[Certain]** The Web AOT guard cannot prove the SDK default: it is `<Project Sdk="Microsoft.NET.Sdk">`.

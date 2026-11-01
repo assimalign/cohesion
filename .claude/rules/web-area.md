@@ -7,12 +7,11 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 ## The dependency rule (build-enforced)
 
 > **`Assimalign.Cohesion.Web.Hosting` is the runtime module — no Web-area library may reference
-> it, and it may reference any Web-area library except `Web.Testing`, `Web.ApplicationModel`,
-> the `App.Web` producers (`Web.Refs`, `Web.Runtime`), and test, example, sample, and fixture
-> projects.** (COHRES002, relaxed by owner decision 2026-10-09; before that, `Web.Hosting` could
-> reference only the root `Assimalign.Cohesion.Web` and its own hosting family.) `Web.ApplicationModel`
-> stays out of `Web.Hosting`'s resolved closure by any route, including through a Web library it
-> references.
+> it, and it may reference any Web-area library except `Web.Testing`,
+> `Web.Hosting.ApplicationModel`, the `App.Web` producers (`Web.Refs`, `Web.Runtime`), and test,
+> example, sample, and fixture projects.** (COHRES002, relaxed by owner decision 2026-10-09; before
+> that, `Web.Hosting` could reference only the root `Assimalign.Cohesion.Web` and its own hosting
+> family.)
 
 - A Web feature library (`Assimalign.Cohesion.Web.<Feature>`) may reference: the root
   `Assimalign.Cohesion.Web`, **other Web feature libraries**, and anything outside the Web area
@@ -22,9 +21,12 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
 - **Never reference `Assimalign.Cohesion.Web.Hosting`** from a feature library. Hosting composes
   DI, configuration, logging, and transports; a reference to it drags that surface into every
   consumer and pushes users toward container-driven design.
-- `Web.Hosting` is a plain host. The resource integration is `Web.Hosting.Resources`, which
-  references `Web.Hosting` (application-model restart, 2026-10-27/28), and `Hosting.Health` was
-  removed on 2026-10-28. A future `Web.Hosting.<Suffix>` package is permitted only for
+- `Web.Hosting` is a plain host. The application-model integration is
+  `Web.Hosting.ApplicationModel`, which references `Web.Hosting` and makes a Web application a
+  managed resource with `builder.Services.AddResource(name, resource => resource.UseInProcess())`
+  (application-model restart, 2026-10-27 to 2026-10-31; `resource-areas.md`), and
+  `Hosting.Health` was removed on 2026-10-28. A future `Web.Hosting.<Suffix>` package is permitted
+  only for
   an integration that must not land in every framework carrying `Web.Hosting`; it retains the
   family constraints in `resource-areas.md`. Roots and features may not reference the hosting
   module, its family (COHRES001) or shared Hosting libraries (COHRES004).
@@ -35,17 +37,21 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   feature, so hosting a feature never needs the reference. Every reference costs more than one
   framework: `Web.Hosting` is a private member of all 17 other area frameworks, so its new
   reference's closure must be added to each of them.
-- Sole sanctioned exception: `Assimalign.Cohesion.Web.Testing → Web.Hosting` (the test factory
-  drives the concrete runtime and its integrated control plane; owner decision 57, 2026-10-13),
-  declared via `CohesionHostingIsolationExemptions` in its own
-  csproj. Do not add others without the deviation protocol (`deviations.md`) — see
-  `resource-areas.md` for the opt-out mechanism.
+- The two sanctioned references to `Web.Hosting`:
+  `Assimalign.Cohesion.Web.Hosting.ApplicationModel → Web.Hosting` (the integration joins the
+  runtime module to `ApplicationModel.Hosting`; owner decisions 2026-10-28 and 2026-10-29), which
+  COHRES001 permits by the project's exact name with no exemption property, and
+  `Assimalign.Cohesion.Web.Testing → Web.Hosting` (the test factory drives the concrete runtime;
+  owner decision 57, 2026-10-13), declared via `CohesionHostingIsolationExemptions` in its own
+  csproj. Do not add others without the deviation protocol (`deviations.md`) — see `resource-areas.md` for the
+  opt-out mechanism.
 
 **Enforcement:** this is the Web instance of the repo-wide **resource hosting-isolation rule** —
 see `resource-areas.md` for the general rule, the `COHRES001`/`COHRES002`/`COHRES004` build errors, the
-two-layer check semantics, COHRES002's excluded categories (direct references, plus the resolved closure for the ApplicationModel packages), and the per-project `CohesionHostingIsolationExemptions` opt-out
-(deviation protocol required; `Web.Testing` is the standing exemption, declared in its own
-csproj). Every Web library is in the `.github/workflows/resource-web.yml` matrix so the guard
+two-layer check semantics, COHRES002's excluded categories (checked on direct references), and the
+per-project `CohesionHostingIsolationExemptions` opt-out (deviation protocol required;
+`Web.Testing` is the standing exemption, declared in its own csproj; `Web.Hosting.ApplicationModel`
+needs none). Every Web library is in the `.github/workflows/resource-web.yml` matrix so the guard
 executes in CI. The two framework producers, `Assimalign.Cohesion.Web.Refs` and
 `Assimalign.Cohesion.Web.Runtime`, are neither libraries nor exemption holders: they are the
 `App.Web` packaging shells, which the guard skips by exact identity, and `sdk-smoke.yml` packs them

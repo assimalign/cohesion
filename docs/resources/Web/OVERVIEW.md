@@ -1,16 +1,17 @@
 # Web area overview
 
-Web.Hosting includes reusable resource-management middleware. Thirteen other area hosting modules
-consume the module privately to expose readiness, liveness, health, endpoints, stop, and command
-envelopes. Web applications receive its public pipeline extension through App.Web, in the unchanged
-`Assimalign.Cohesion.Web.Hosting.Resources` namespace.
+Web.Hosting is the Web area's runtime module: a plain host that composes the application's
+services, servers, and pipeline. It carries no resource-management or health integration; Web
+applications serve health through Web.Health. The 17 other area frameworks carry Web.Hosting
+privately.
 
-Web.Hosting also adapts Hosting.Health contributors onto Web.Health's builder, in the unchanged
-`Assimalign.Cohesion.Web.Hosting.Health` namespace. Web.Health retains the health model and HTTP
-endpoints without a hosting-library reference. The integrations ship with Web.Hosting; their
-former separate packages are removed (owner decision 57, 2026-10-13).
+A Web application becomes a managed resource instance through Web.Hosting.ApplicationModel, the
+area's one application-model integration and a member of App.Web:
+`builder.Services.AddResource("orders-api", resource => resource.UseInProcess())`. Without a
+gateway platform in its environment the application runs unmanaged. The area design records the
+references both packages take.
 
 - [Area project map](../../../resources/Web/README.md)
-- [Control-plane overview](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/OVERVIEW.md#resource-control-plane)
-- [Control-plane design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#resource-control-plane)
-- [Health integration](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#health-integration)
+- [Area design](DESIGN.md)
+- [Web.Hosting design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md)
+- [Web.Hosting.ApplicationModel design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md)
