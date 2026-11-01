@@ -2,7 +2,7 @@
 
 The area's resource integration is `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
-Nothing registers the OTLP receiver or the query handler yet, and the OTLP routes answer every caller `403 Forbidden` until an authentication path exists. POST /v1/logs requires application/json. Query accepts resource, since (ISO-8601), limit (default 100/max 1000), and cursor, returning application/x-ndjson and X-Cohesion-Next-Cursor when more scanning is possible. Query pages are bounded to four million characters (plus at most one bounded record).
+Nothing registers the OTLP receiver or the query handler yet. The OTLP routes check no caller identity, so they stay unregistered until an access decision is made. POST /v1/logs requires application/json. Query accepts resource, since (ISO-8601), limit (default 100/max 1000), and cursor, returning application/x-ndjson and X-Cohesion-Next-Cursor when more scanning is possible. Query pages are bounded to four million characters (plus at most one bounded record).
 
 Query under `/cohesion/v1` accepts only transport peers
 at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other callers receive `403 Forbidden`. Forwarded

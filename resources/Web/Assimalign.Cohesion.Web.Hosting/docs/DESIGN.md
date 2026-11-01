@@ -15,8 +15,8 @@ Web feature libraries: `Web.Routing` and `Web.Server` (#1379). It references the
 non-Web infrastructure. The rule as adopted forbade this module's references to Web features too;
 since its relaxation (COHRES002, owner decision 32 of 2026-10-09) the module may reference any Web
 library except `Web.Testing`, `Web.Hosting.ApplicationModel`, the `App.Web` producers, and harnesses, and
-takes such a reference only for runtime machinery it composes itself, because each one ships in all
-18 area frameworks. Routing and Server supply the terminal and server engine, whose contracts left the Web root
+takes such a reference only for runtime machinery it composes itself, because each one ships in App.Web and in every
+area framework that carries Web.Hosting privately. Routing and Server supply the terminal and server engine, whose contracts left the Web root
 under owner decision 33: `Web.Routing` for the pipeline terminal (`WebApplicationTerminal`) and the
 `IRouterEndpointFeature` it dispatches, and `Web.Server` for the engine and the per-exchange features
 it publishes. Applications still see the whole Web family because the

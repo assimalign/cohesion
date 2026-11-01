@@ -17,11 +17,9 @@ flowchart LR
     AMH["Assimalign.Cohesion.ApplicationModel.Hosting — L2"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    PRIV["other areas, referenced privately"]
     P0 --> CORE
     P2 --> P0
     P2 --> HOSTFAM
-    P2 -->|"private"| PRIV
     P3 --> P2
     P3 --> P0
     P3 --> AMH

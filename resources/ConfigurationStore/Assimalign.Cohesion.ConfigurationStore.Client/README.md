@@ -11,7 +11,7 @@ using Assimalign.Cohesion.ConfigurationStore.Client;
 
 IConfigurationStoreClient client = ConfigurationStoreClient.Create(
     new Uri("https://configuration.internal:8443"),
-    new ClientCredential(bootstrapToken));
+    new ClientCredential(token));
 
 IReadOnlyList<string> namespaces =
     await client.ListNamespacesAsync(cancellationToken);

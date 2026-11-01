@@ -23,8 +23,6 @@ public sealed class StandaloneLoopbackGateTests
     [InlineData("/cohesion/v1/endpoints", "GET")]
     [InlineData("/cohesion/v1/secrets", "GET")]
     [InlineData("/cohesion/v1/certificates", "GET")]
-    [InlineData("/cohesion/v1/certificates/enroll", "POST")]
-    [InlineData("/cohesion/v1/certificates/enrollment", "POST")]
     [InlineData("/cohesion/v1/unknown", "GET")]
     public async Task InvokeAsync_StandaloneNonLoopbackCaller_ShouldForbidNamespacedRoute(string path, string method)
     {
@@ -33,11 +31,11 @@ public sealed class StandaloneLoopbackGateTests
         using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
         await using SecretStoreApplication application = CreateStandaloneBuilder(directory.Path).Build();
         SecretsEndpointService endpoint = application.Context.HostedServices.OfType<SecretsEndpointService>().Single();
-        await using var exchange = new ControlPlaneExchange(path, new HttpMethod(method),
+        await using var exchange = new TestHttpExchange(path, new HttpMethod(method),
             new IPEndPoint(IPAddress.Parse("192.0.2.10"), 50000));
 
         // Act
-        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
+        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Namespaced routes are terminal."));
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -56,11 +54,11 @@ public sealed class StandaloneLoopbackGateTests
         using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
         await using SecretStoreApplication application = CreateStandaloneBuilder(directory.Path).Build();
         SecretsEndpointService endpoint = application.Context.HostedServices.OfType<SecretsEndpointService>().Single();
-        await using var exchange = new ControlPlaneExchange("/cohesion/v1/endpoints", HttpMethod.Get,
+        await using var exchange = new TestHttpExchange("/cohesion/v1/endpoints", HttpMethod.Get,
             new IPEndPoint(IPAddress.Parse(address), 50000));
 
         // Act
-        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
+        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Namespaced routes are terminal."));
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
@@ -83,10 +81,10 @@ public sealed class StandaloneLoopbackGateTests
         SecretsEndpointService endpoint = application.Context.HostedServices.OfType<SecretsEndpointService>().Single();
         EndPoint? remote = address is null ? null : IPAddress.TryParse(address, out IPAddress? ip)
             ? new IPEndPoint(ip, 50000) : new DnsEndPoint(address, 50000);
-        await using var exchange = new ControlPlaneExchange("/cohesion/v1/endpoints", HttpMethod.Get, remote);
+        await using var exchange = new TestHttpExchange("/cohesion/v1/endpoints", HttpMethod.Get, remote);
 
         // Act
-        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
+        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Namespaced routes are terminal."));
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -101,13 +99,13 @@ public sealed class StandaloneLoopbackGateTests
         await using SecretStoreApplication application = SecretStoreTestHost.CreateBuilder(
             new Uri("http://127.0.0.1:8443/store"), directory.Path).Build();
         SecretsEndpointService endpoint = application.Context.HostedServices.OfType<SecretsEndpointService>().Single();
-        await using var exchange = new ControlPlaneExchange("/store/cohesion/v1/endpoints", HttpMethod.Get,
+        await using var exchange = new TestHttpExchange("/store/cohesion/v1/endpoints", HttpMethod.Get,
             new IPEndPoint(IPAddress.Parse("192.0.2.10"), 50000));
         exchange.Request.Headers[new HttpHeaderKey("X-Forwarded-For")] = "127.0.0.1";
         exchange.Request.Headers[new HttpHeaderKey("Forwarded")] = "for=\"[::1]\"";
 
         // Act
-        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Control-plane routes are terminal."));
+        await endpoint.InvokeAsync(exchange, _ => throw new InvalidOperationException("Namespaced routes are terminal."));
 
         // Assert
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -124,7 +122,7 @@ public sealed class StandaloneLoopbackGateTests
         using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
         await using SecretStoreApplication application = CreateStandaloneBuilder(directory.Path).Build();
         SecretsEndpointService endpoint = application.Context.HostedServices.OfType<SecretsEndpointService>().Single();
-        await using var exchange = new ControlPlaneExchange(path, HttpMethod.Get,
+        await using var exchange = new TestHttpExchange(path, HttpMethod.Get,
             new IPEndPoint(IPAddress.Parse("192.0.2.10"), 50000));
 
         // Act

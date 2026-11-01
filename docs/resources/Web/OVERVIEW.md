@@ -2,8 +2,8 @@
 
 Web.Hosting is the Web area's runtime module: a plain host that composes the application's
 services, servers, and pipeline. It carries no resource-management or health integration; Web
-applications serve health through Web.Health. The 17 other area frameworks carry Web.Hosting
-privately.
+applications serve health through Web.Health. Five other area frameworks (ConfigurationStore, Database, IdentityHub, LogSpace,
+SecretStore) carry Web.Hosting privately.
 
 A Web application becomes a managed resource instance through Web.Hosting.ApplicationModel, the
 area's one application-model integration and a member of App.Web:

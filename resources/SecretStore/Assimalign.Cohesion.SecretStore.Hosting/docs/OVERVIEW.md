@@ -12,9 +12,8 @@ protocol served on the resource's `api` endpoint.
 - Always appends an HTTP/1 endpoint service after caller-registered host services, so the endpoint
   starts last and drains first.
 - Interoperates with `SecretStore.Client` for secret reads and durable leaf-certificate reads.
-- Protects secrets, CA keys, pending enrollment keys, and leaf bundles at rest.
-- Supports durable standalone CA self-seeding and explicit sign/complete intermediate-CA
-  enrollment with optional Platform-root pinning.
+- Protects secrets, CA keys, and leaf bundles at rest.
+- Seeds its certificate authority from supplied PEM material or a durable self-signed root.
 - Renews named leaves on resolution and checks the HTTPS transport leaf at listener startup; a
   continuously running host must restart before transport expiry until the shared TLS listener
   supports asynchronous certificate selection per handshake.
@@ -31,8 +30,7 @@ transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other or unkn
 open for probes. This tightens standalone request authorization from 10.0.0-preview.1.
 
 Builder-declared secrets seed missing durable entries. `AddCertificateAuthority` controls the
-standalone root common name, initial certificate/key material, pending Platform enrollment,
-Platform root pin, and standalone self-seeding. Durable authority state takes precedence on
+root common name, initial certificate/key material, and self-seeding. Durable authority state takes precedence on
 restart.
 
 The data directory's file-system ACL protects the colocated DataProtection key ring; an
@@ -40,9 +38,7 @@ external KMS/wrapping-key integration and protected-record rewrap migration rema
 
 ## Known gap
 
-A configured Platform enrollment endpoint needs the ambient application and resource names, which
-a plain host does not have, so the host fails to start with it.
-`certs/public`/ACME issuance is also not implemented
+`certs/public`/ACME issuance is not implemented
 by this host. See [DESIGN.md](./DESIGN.md) for the exact routes.
 
 ## Public types
@@ -66,6 +62,6 @@ The concrete application and IHost route share it. Startup failures still roll b
 `SecretStoreApplicationBuilder.Services` holds every registration the application runs with. `AddService` registers an `IHostService`, and a direct `IHostService` registration joins the lifecycle in the same order. `Build` closes registration and resolves the services once. Disposing the application disposes every factory-created service. See [DESIGN.md](DESIGN.md#dependency-injection-composition).
 
 `AddSecret` accepts the root's generated `SecretStoreSeedPath` (ordinary strings convert implicitly).
-It refuses blank paths, exact `trusted-issuers.json`, and `default` during registration. Seeds may
+It refuses blank paths and `default` during registration. Seeds may
 still use `certs/`. Certificate reads share the client package's validation predicate through
 internal shared source, so malformed values cannot bypass validation by supplying raw query strings.

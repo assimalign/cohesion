@@ -1,54 +1,48 @@
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Http;
 
-using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
-using HttpVersion = Assimalign.Cohesion.Http.HttpVersion;
+using EndPoint = System.Net.EndPoint;
+using IPAddress = System.Net.IPAddress;
+using IPEndPoint = System.Net.IPEndPoint;
 
-namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
+namespace Assimalign.Cohesion.LogSpace.Hosting.Tests;
 
-internal sealed class ControlPlaneExchange : IHttpContext
+internal sealed class TestHttpExchange : IHttpContext
 {
-    internal ControlPlaneExchange(string path, HttpMethod method, EndPoint? remoteEndPoint)
+    internal TestHttpExchange(string path, HttpMethod method)
     {
         Request = new RequestData(this, path, method);
         Response = new ResponseData(this);
-        ConnectionInfo = new ConnectionData(remoteEndPoint);
     }
 
     public HttpVersion Version => HttpVersion.Http11;
     public IHttpRequest Request { get; }
     public IHttpResponse Response { get; }
-    public IHttpConnectionInfo ConnectionInfo { get; }
+    internal ConnectionData Connection { get; } = new();
+    public IHttpConnectionInfo ConnectionInfo => Connection;
     public IHttpFeatureCollection Features { get; } = new HttpFeatureCollection();
     public IDictionary<string, object?> Items { get; } = new Dictionary<string, object?>();
-    public CancellationToken RequestCancelled => CancellationToken.None;
+    public CancellationToken RequestCancelled { get; set; }
     public void Cancel() { }
     public Task CancelAsync() => Task.CompletedTask;
-
     public async ValueTask DisposeAsync()
     {
         await Request.Body.DisposeAsync();
         await Response.Body.DisposeAsync();
     }
 
-    private sealed class ConnectionData : IHttpConnectionInfo
+    internal sealed class ConnectionData : IHttpConnectionInfo
     {
-        internal ConnectionData(EndPoint? remoteEndPoint)
-        {
-            RemoteEndPoint = remoteEndPoint;
-        }
-
-        public int LocalPort => 8443;
+        public int LocalPort { get; set; }
         public IPAddress? LocalIp => IPAddress.Loopback;
         public EndPoint? LocalEndPoint => new IPEndPoint(IPAddress.Loopback, LocalPort);
         public int RemotePort => (RemoteEndPoint as IPEndPoint)?.Port ?? 0;
         public IPAddress? RemoteIp => (RemoteEndPoint as IPEndPoint)?.Address;
-        public EndPoint? RemoteEndPoint { get; }
+        public EndPoint? RemoteEndPoint { get; set; } = new IPEndPoint(IPAddress.Loopback, 12345);
         public CancellationToken ConnectionAborted => CancellationToken.None;
         public void Abort() { }
         public ValueTask AbortAsync() => ValueTask.CompletedTask;
@@ -56,33 +50,49 @@ internal sealed class ControlPlaneExchange : IHttpContext
 
     private sealed class RequestData : IHttpRequest
     {
-        internal RequestData(IHttpContext context, string path, HttpMethod method)
+        private readonly IHttpContext _context;
+        private readonly string _path;
+        private readonly HttpMethod _method;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RequestData"/> class.
+        /// </summary>
+        /// <param name="context">The exchange that owns the request.</param>
+        /// <param name="path">The request path.</param>
+        /// <param name="method">The request method.</param>
+        public RequestData(IHttpContext context, string path, HttpMethod method)
         {
-            HttpContext = context;
-            Path = new HttpPath(path);
-            Method = method;
+            _context = context;
+            _path = path;
+            _method = method;
         }
 
         public HttpHost Host => new("localhost");
-        public HttpPath Path { get; }
-        public HttpMethod Method { get; }
+        public HttpPath Path => new(_path);
+        public HttpMethod Method => _method;
         public HttpScheme Scheme => HttpScheme.Http;
         public IHttpQueryCollection Query { get; } = new HttpQueryCollection();
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public IHttpContext HttpContext { get; }
+        public IHttpContext HttpContext => _context;
         public Stream Body { get; } = new MemoryStream();
     }
 
     private sealed class ResponseData : IHttpResponse
     {
-        internal ResponseData(IHttpContext context)
+        private readonly IHttpContext _context;
+
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ResponseData"/> class.
+        /// </summary>
+        /// <param name="context">The exchange that owns the response.</param>
+        public ResponseData(IHttpContext context)
         {
-            HttpContext = context;
+            _context = context;
         }
 
         public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.Ok;
         public IHttpHeaderCollection Headers { get; } = new HttpHeaderCollection();
-        public IHttpContext HttpContext { get; }
+        public IHttpContext HttpContext => _context;
         public Stream Body { get; set; } = new MemoryStream();
     }
 }

@@ -41,7 +41,7 @@ public class ConfigurationStoreClientTests
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
             new Uri("https://configuration.test:8443/api"),
-            new ClientCredential("bootstrap-token"),
+            new ClientCredential("bearer-token"),
             transport);
 
         // Act
@@ -54,7 +54,7 @@ public class ConfigurationStoreClientTests
         Action mutation = () => ((IList<string>)result).Add("late");
         Should.Throw<NotSupportedException>(mutation);
         observedAccept.ShouldBe("application/json");
-        observedAuthorization.ShouldBe("Bearer bootstrap-token");
+        observedAuthorization.ShouldBe("Bearer bearer-token");
         observedMethod.ShouldBe("GET");
         observedUri.ShouldBe(
             "https://configuration.test:8443/api/cohesion/v1/namespaces");
@@ -72,7 +72,7 @@ public class ConfigurationStoreClientTests
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
             new Uri("https://configuration.test:8443"),
-            new ClientCredential("bootstrap-token"),
+            new ClientCredential("bearer-token"),
             transport);
 
         // Act
@@ -105,7 +105,7 @@ public class ConfigurationStoreClientTests
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
             new Uri("https://configuration.test:8443/api"),
-            new ClientCredential("bootstrap-token"),
+            new ClientCredential("bearer-token"),
             transport);
 
         // Act
@@ -122,7 +122,7 @@ public class ConfigurationStoreClientTests
         observedMethod.ShouldBe("GET");
         observedUri.ShouldBe(
             "https://configuration.test:8443/api/cohesion/v1/namespaces?name=apps%2Fapi");
-        observedAuthorization.ShouldBe("Bearer bootstrap-token");
+        observedAuthorization.ShouldBe("Bearer bearer-token");
     }
 
     [Fact(DisplayName = "Cohesion Test [ConfigurationStore] - GetNamespaceAsync: Should reject a redirect response")]
@@ -144,7 +144,7 @@ public class ConfigurationStoreClientTests
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
             new Uri("https://configuration.test:8443"),
-            new ClientCredential("bootstrap-token"),
+            new ClientCredential("bearer-token"),
             transport);
 
         // Act
@@ -167,7 +167,7 @@ public class ConfigurationStoreClientTests
         using var transport = new HttpMessageInvoker(handler);
         IConfigurationStoreClient client = ConfigurationStoreClient.Create(
             new Uri("https://configuration.test:8443"),
-            new ClientCredential("bootstrap-token"),
+            new ClientCredential("bearer-token"),
             transport);
 
         // Act
@@ -182,7 +182,7 @@ public class ConfigurationStoreClientTests
     {
         // Arrange
         var endpoint = new Uri("tcp://configuration.test:8443");
-        var credential = new ClientCredential("bootstrap-token");
+        var credential = new ClientCredential("bearer-token");
 
         // Act
         Action action = () => ConfigurationStoreClient.Create(endpoint, credential);
@@ -196,7 +196,7 @@ public class ConfigurationStoreClientTests
     {
         // Arrange
         var endpoint = new Uri("https://configuration.test:8443?q=1");
-        var credential = new ClientCredential("bootstrap-token");
+        var credential = new ClientCredential("bearer-token");
 
         // Act
         Action action = () => ConfigurationStoreClient.Create(endpoint, credential);
@@ -209,7 +209,7 @@ public class ConfigurationStoreClientTests
     public void Create_WhenEndpointIsNull_ShouldThrowArgumentNullException()
     {
         // Arrange
-        var credential = new ClientCredential("bootstrap-token");
+        var credential = new ClientCredential("bearer-token");
 
         // Act
         Action action = () => ConfigurationStoreClient.Create(null!, credential);

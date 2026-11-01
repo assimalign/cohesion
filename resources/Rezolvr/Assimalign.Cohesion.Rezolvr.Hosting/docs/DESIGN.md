@@ -12,23 +12,16 @@ Each build creates a new context, invokes every registered service factory exact
 
 ## Boundaries
 
-The module references the area root, DependencyInjection, and Hosting publicly. Its Web, Web.Hosting, HTTP, and transport implementation dependencies are private, with their resolved closure supplied by the area runtime framework. It references no application-model library: the resource integration, `Rezolvr.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
+The module references the area root, DependencyInjection, and Hosting publicly. It references no Web, HTTP, or transport library: none of its services opens a listener yet. It references no application-model library: the resource integration, `Rezolvr.Hosting.ApplicationModel`, references this module instead. It uses no reflection or dynamic activation and remains trimming- and NativeAOT-safe.
 
 ## Resource integration
 
 The area's resource integration is `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
-## Record store
+## DNS serving
 
-The module carries an internal `RezolvrRecordRepository` that validates and stores A and CNAME
-record declarations (kinds `rezolvr.add-a-record` and `rezolvr.add-cname-record`, each keyed by
-its record name and held by the one owner that declared it) atomically in `records.json`. A-record declarations use a BCL IPv4
-IPAddress serialized as a string. CNAME declarations carry a DNS target string; TTL is a positive
-integer in seconds. Nothing registers the repository yet: the application exposes no record
-surface, and the resource integration adds no record action.
-
-Records are stored, not served as DNS answers. ResolverEndpointService remains parked, and DNS
-serving is deferred area work.
+The module stores no records and serves no DNS answers yet. `ResolverEndpointService` remains
+parked, and zones, records and DNS serving are deferred area work.
 
 ## Concrete composition (T10 / O34)
 

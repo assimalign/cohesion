@@ -19,12 +19,10 @@ flowchart LR
     P4["Scheduler.Timer"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    PRIV["other areas, referenced privately"]
     P0 --> CORE
     P2 --> P0
     P3 --> HOSTFAM
     P3 --> P0
-    P3 -->|"private"| PRIV
     P4 --> P0
     PAM --> P3
     PAM --> P0

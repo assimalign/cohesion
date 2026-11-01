@@ -11,9 +11,9 @@ using HttpVersion = Assimalign.Cohesion.Http.HttpVersion;
 
 namespace Assimalign.Cohesion.ConfigurationStore.Hosting.Tests;
 
-internal sealed class ConfigurationControlPlaneExchange : IHttpContext
+internal sealed class TestHttpExchange : IHttpContext
 {
-    internal ConfigurationControlPlaneExchange(string path, HttpMethod method, EndPoint? remoteEndPoint)
+    internal TestHttpExchange(string path, HttpMethod method, EndPoint? remoteEndPoint)
     {
         Request = new RequestData(this, path, method);
         Response = new ResponseData(this);

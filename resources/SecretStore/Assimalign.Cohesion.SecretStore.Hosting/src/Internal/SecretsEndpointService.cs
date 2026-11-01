@@ -1,7 +1,6 @@
 using System;
 using System.Buffers;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography;
@@ -65,7 +64,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         if (!IPAddress.IsLoopback(bindAddress))
         {
             throw new InvalidOperationException(
-                "A standalone SecretStore without bootstrap authentication must bind to loopback.");
+                "A SecretStore takes no credentials, so it must bind to loopback.");
         }
 
         if (string.Equals(endpoint.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
@@ -218,18 +217,6 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
             return;
         }
 
-        if (path == Route("/cohesion/v1/certificates/enroll"))
-        {
-            await HandleEnrollmentAsync(context).ConfigureAwait(false);
-            return;
-        }
-
-        if (path == Route("/cohesion/v1/certificates/enrollment"))
-        {
-            await HandleEnrollmentCompletionAsync(context).ConfigureAwait(false);
-            return;
-        }
-
         if (isNamespaced)
         {
             context.Response.StatusCode = HttpStatusCode.NotFound;
@@ -308,92 +295,6 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         }
     }
 
-    private async Task HandleEnrollmentAsync(IHttpContext context)
-    {
-        if (context.Request.Method != HttpMethod.Post)
-        {
-            SetMethodNotAllowed(context, "POST");
-            return;
-        }
-
-        try
-        {
-            using JsonDocument document = await ReadJsonAsync(context).ConfigureAwait(false);
-            JsonElement root = document.RootElement;
-            string application = GetRequiredString(root, "application");
-            string resource = GetRequiredString(root, "resource");
-            string csr = GetRequiredString(root, "certificateSigningRequest");
-
-            CertificateEnrollmentResponse response = await _certificateAuthority
-                .IssueIntermediateAsync(
-                    application,
-                    resource,
-                    csr,
-                    context.RequestCancelled)
-                .ConfigureAwait(false);
-            await WriteJsonAsync(context, writer =>
-            {
-                writer.WriteStartObject();
-                writer.WriteString("certificate", response.Certificate);
-                writer.WritePropertyName("issuerChain");
-                writer.WriteStartArray();
-                for (int index = 0; index < response.IssuerChain.Count; index++)
-                {
-                    writer.WriteStringValue(response.IssuerChain[index]);
-                }
-
-                writer.WriteEndArray();
-                writer.WriteEndObject();
-            }).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (
-            exception is JsonException or FormatException or InvalidDataException or CryptographicException)
-        {
-            context.Response.StatusCode = HttpStatusCode.BadRequest;
-        }
-    }
-
-    private async Task HandleEnrollmentCompletionAsync(IHttpContext context)
-    {
-        if (context.Request.Method != HttpMethod.Post)
-        {
-            SetMethodNotAllowed(context, "POST");
-            return;
-        }
-
-        try
-        {
-            using JsonDocument document = await ReadJsonAsync(context).ConfigureAwait(false);
-            JsonElement root = document.RootElement;
-            string certificate = GetRequiredString(root, "certificate");
-            if (!root.TryGetProperty("issuerChain", out JsonElement chainProperty) ||
-                chainProperty.ValueKind is not JsonValueKind.Array)
-            {
-                throw new JsonException("An enrollment completion requires an issuerChain array.");
-            }
-
-            string[] chain = chainProperty.EnumerateArray()
-                .Select(static item => item.GetString() ?? throw new JsonException(
-                    "Every issuerChain member must be a string."))
-                .ToArray();
-            await _certificateAuthority.CompleteEnrollmentAsync(
-                    certificate,
-                    chain,
-                    context.RequestCancelled)
-                .ConfigureAwait(false);
-            context.Response.StatusCode = HttpStatusCode.NoContent;
-        }
-        catch (Exception exception) when (
-            exception is JsonException or InvalidDataException or CryptographicException)
-        {
-            context.Response.StatusCode = HttpStatusCode.BadRequest;
-        }
-        catch (InvalidOperationException)
-        {
-            context.Response.StatusCode = HttpStatusCode.Conflict;
-        }
-    }
-
     private async Task HandleEndpointsAsync(IHttpContext context)
     {
         if (!IsRead(context))
@@ -422,7 +323,7 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
         }
 
         bool ready = kind is not HealthReportKind.Readiness ||
-            (_applicationContext.State is HostState.Started && _certificateAuthority.IsEnrolled);
+            _applicationContext.State is HostState.Started;
         context.Response.StatusCode = ready
             ? HttpStatusCode.Ok
             : HttpStatusCode.ServiceUnavailable;
@@ -475,33 +376,6 @@ internal sealed class SecretsEndpointService : IHostService, IDisposable
     {
         context.Response.StatusCode = HttpStatusCode.MethodNotAllowed;
         context.Response.Headers[HttpHeaderKey.Allow] = allow;
-    }
-
-    private static async Task<JsonDocument> ReadJsonAsync(IHttpContext context)
-    {
-        JsonDocument document = await JsonDocument.ParseAsync(
-                context.Request.Body,
-                cancellationToken: context.RequestCancelled)
-            .ConfigureAwait(false);
-        if (document.RootElement.ValueKind is not JsonValueKind.Object)
-        {
-            document.Dispose();
-            throw new JsonException("The request body must be a JSON object.");
-        }
-
-        return document;
-    }
-
-    private static string GetRequiredString(JsonElement element, string name)
-    {
-        if (!element.TryGetProperty(name, out JsonElement property) ||
-            property.ValueKind is not JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(property.GetString()))
-        {
-            throw new JsonException($"Request property '{name}' is required.");
-        }
-
-        return property.GetString()!;
     }
 
     private static async Task WriteJsonAsync(

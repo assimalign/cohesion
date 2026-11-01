@@ -18,8 +18,8 @@ Each namespace is a plain JSON document beneath `data/namespaces`; its file name
 digest of the namespace name, while the document retains the original name. Writes use a temporary
 file and atomic replacement. A declaration is written only when that namespace is absent, so
 durable values survive restart. Configuration values are not
-secret material and are intentionally stored unencrypted. A mutation is committed to the live
-snapshot only after its durable replacement succeeds, so a failed write cannot create restart drift.
+secret material and are intentionally stored unencrypted. The store serves no write route: a
+namespace changes only when its document is edited on disk before start.
 
 `GET /cohesion/v1/namespaces` lists names and `?name=` reads one direct key/value object. Health,
 readiness, liveness, and the endpoint listing are also served under `/cohesion/v1`.

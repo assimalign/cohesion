@@ -19,7 +19,6 @@ internal sealed class ConfigurationStoreRepository
     private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string?>> _seeds;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<string, Dictionary<string, string?>> _values = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, NamespaceDeclaration> _declarations = new(StringComparer.Ordinal);
     private bool _initialized;
 
     internal ConfigurationStoreRepository(
@@ -51,7 +50,7 @@ internal sealed class ConfigurationStoreRepository
             Array.Sort(paths, StringComparer.Ordinal);
             for (int index = 0; index < paths.Length; index++)
             {
-                (string name, Dictionary<string, string?> values, NamespaceDeclaration? declaration) = await ReadFileAsync(
+                (string name, Dictionary<string, string?> values) = await ReadFileAsync(
                         paths[index],
                         cancellationToken)
                     .ConfigureAwait(false);
@@ -59,10 +58,6 @@ internal sealed class ConfigurationStoreRepository
                 {
                     throw new InvalidDataException(
                         $"Configuration namespace '{name}' occurs in more than one durable document.");
-                }
-                if (declaration is not null)
-                {
-                    _declarations.Add(name, declaration);
                 }
             }
 
@@ -125,72 +120,7 @@ internal sealed class ConfigurationStoreRepository
         }
     }
 
-    internal async Task<bool> SetAsync(
-        string namespaceName,
-        string key,
-        string? value,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(namespaceName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureInitialized();
-            if (!_values.TryGetValue(namespaceName, out Dictionary<string, string?>? values))
-            {
-                return false;
-            }
-
-            var updated = new Dictionary<string, string?>(values, StringComparer.Ordinal)
-            {
-                [key] = value,
-            };
-            await WriteFileAsync(namespaceName, updated, cancellationToken).ConfigureAwait(false);
-            _values[namespaceName] = updated;
-            return true;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    internal async Task<bool> RemoveAsync(
-        string namespaceName,
-        string key,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(namespaceName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            EnsureInitialized();
-            if (!_values.TryGetValue(namespaceName, out Dictionary<string, string?>? values))
-            {
-                return false;
-            }
-
-            if (values.ContainsKey(key))
-            {
-                var updated = new Dictionary<string, string?>(values, StringComparer.Ordinal);
-                updated.Remove(key);
-                await WriteFileAsync(namespaceName, updated, cancellationToken).ConfigureAwait(false);
-                _values[namespaceName] = updated;
-            }
-
-            return true;
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    private static async Task<(string Name, Dictionary<string, string?> Values, NamespaceDeclaration? Declaration)> ReadFileAsync(
+    private static async Task<(string Name, Dictionary<string, string?> Values)> ReadFileAsync(
         string path,
         CancellationToken cancellationToken)
     {
@@ -224,22 +154,7 @@ internal sealed class ConfigurationStoreRepository
                 }
             }
 
-            NamespaceDeclaration? declaration = null;
-            if (root.TryGetProperty("declaration", out JsonElement declared))
-            {
-                string? owner = declared.GetProperty("owner").GetString();
-                if (string.IsNullOrWhiteSpace(owner))
-                {
-                    throw new InvalidDataException($"Configuration namespace document '{path}' has an invalid declaration owner.");
-                }
-                var seed = new Dictionary<string, string?>(StringComparer.Ordinal);
-                foreach (JsonProperty property in declared.GetProperty("seed").EnumerateObject())
-                {
-                    seed.Add(property.Name, property.Value.ValueKind == JsonValueKind.Null ? null : property.Value.GetString());
-                }
-                declaration = new NamespaceDeclaration(owner, seed);
-            }
-            return (nameProperty.GetString()!, values, declaration);
+            return (nameProperty.GetString()!, values);
         }
         catch (JsonException exception)
         {
@@ -252,11 +167,9 @@ internal sealed class ConfigurationStoreRepository
     private async Task WriteFileAsync(
         string name,
         IReadOnlyDictionary<string, string?> values,
-        CancellationToken cancellationToken,
-        NamespaceDeclaration? declaration = null)
+        CancellationToken cancellationToken)
     {
         string path = Path.Combine(_namespaceDirectory, GetFileName(name));
-        declaration ??= _declarations.GetValueOrDefault(name);
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
@@ -287,18 +200,6 @@ internal sealed class ConfigurationStoreRepository
                 }
 
                 writer.WriteEndObject();
-                if (declaration is not null)
-                {
-                    writer.WriteStartObject("declaration");
-                    writer.WriteString("owner", declaration.Owner);
-                    writer.WriteStartObject("seed");
-                    foreach ((string key, string? value) in declaration.Seed.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
-                    {
-                        writer.WriteString(key, value);
-                    }
-                    writer.WriteEndObject();
-                    writer.WriteEndObject();
-                }
                 writer.WriteEndObject();
                 await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -321,8 +222,6 @@ internal sealed class ConfigurationStoreRepository
         byte[] hash = SHA256.HashData(encoded);
         return Convert.ToHexStringLower(hash) + ".json";
     }
-
-    private sealed record NamespaceDeclaration(string Owner, Dictionary<string, string?> Seed);
 
     private void EnsureInitialized()
     {

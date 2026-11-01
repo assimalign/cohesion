@@ -49,7 +49,8 @@ Why the rule exists:
   delivers the family to applications, so an app using `Sdk.Web` sees every Web assembly without
   any project wiring, and builder verbs ship with their feature (see *Feature registration*
   below). Each reference `Web.Hosting` takes ships its closure in every framework that carries
-  `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks. It takes two:
+  `Web.Hosting`: `App.Web` and, privately, the five other area frameworks whose hosting modules serve HTTP
+  (ConfigurationStore, Database, IdentityHub, LogSpace, SecretStore). It takes two:
   `Web.Routing` for the pipeline terminal and `Web.Server` for the public engine and its
   per-exchange features (decisions 33 and 57).
 - **The root holds no feature contracts** (owner decision 33, #1379). An `IHttpFeature` contract

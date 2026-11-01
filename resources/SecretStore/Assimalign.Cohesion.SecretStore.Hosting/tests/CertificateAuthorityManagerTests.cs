@@ -2,7 +2,6 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -30,9 +29,7 @@ public sealed class CertificateAuthorityManagerTests
             using (var first = new CertificateAuthorityManager(
                 dataPath,
                 firstProvider,
-                new CertificateAuthorityOptions(),
-                "appa",
-                "secrets"))
+                new CertificateAuthorityOptions()))
             {
                 using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 await first.InitializeAsync(cancellationTokenSource.Token);
@@ -47,9 +44,7 @@ public sealed class CertificateAuthorityManagerTests
             using (var second = new CertificateAuthorityManager(
                 dataPath,
                 secondProvider,
-                new CertificateAuthorityOptions(),
-                "appa",
-                "secrets"))
+                new CertificateAuthorityOptions()))
             {
                 using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 await second.InitializeAsync(cancellationTokenSource.Token);
@@ -76,87 +71,6 @@ public sealed class CertificateAuthorityManagerTests
         finally
         {
             Directory.Delete(dataPath, recursive: true);
-        }
-    }
-
-    [Fact(DisplayName = "Cohesion Test [SecretStore.Hosting] - Certificate enrollment: requester, issuer, and completion form a pinned three-step chain")]
-    public async Task Enrollment_BetweenManagers_ShouldCompletePinnedThreeStepAuthorityChain()
-    {
-        // Arrange
-        string rootPath = SecretStoreTestHost.CreateTemporaryDirectory();
-        string childPath = SecretStoreTestHost.CreateTemporaryDirectory();
-        try
-        {
-            using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            using var platform = new CertificateAuthorityManager(
-                rootPath,
-                CreateProtectionProvider(rootPath),
-                new CertificateAuthorityOptions { CommonName = "Platform Root" },
-                "platform",
-                "secrets");
-            await platform.InitializeAsync(cancellationTokenSource.Token);
-            string platformRootPem = await platform.GetCertificatePemAsync(
-                "ca/root",
-                cancellationTokenSource.Token);
-            var childOptions = new CertificateAuthorityOptions
-            {
-                CommonName = "AppA Intermediate",
-                SelfSeedWhenNoPlatform = false,
-                PlatformEnrollmentEndpoint = new Uri("https://platform.example.test/"),
-                PlatformCertificate = Encoding.UTF8.GetBytes(platformRootPem),
-            };
-            using var child = new CertificateAuthorityManager(
-                childPath,
-                CreateProtectionProvider(childPath),
-                childOptions,
-                "appa",
-                "secrets");
-            await child.InitializeAsync(cancellationTokenSource.Token);
-
-            // Act
-            string request = await child.CreateEnrollmentRequestAsync(
-                "appa",
-                "secrets",
-                cancellationTokenSource.Token);
-            CertificateEnrollmentResponse issued = await platform.IssueIntermediateAsync(
-                "appa",
-                "secrets",
-                request,
-                cancellationTokenSource.Token);
-            await child.CompleteEnrollmentAsync(
-                issued.Certificate,
-                issued.IssuerChain,
-                cancellationTokenSource.Token);
-            string leafPem = await child.GetCertificatePemAsync(
-                "certs/appa-api",
-                cancellationTokenSource.Token);
-
-            // Assert
-            child.IsEnrolled.ShouldBeTrue();
-            X509Certificate2Collection bundle = LoadCertificates(leafPem);
-            try
-            {
-                bundle.Count.ShouldBe(3);
-                X509Certificate2 leaf = bundle.Single(certificate => !IsCertificateAuthority(certificate));
-                X509Certificate2 root = bundle.Single(certificate =>
-                    IsCertificateAuthority(certificate) &&
-                    string.Equals(certificate.Subject, certificate.Issuer, StringComparison.Ordinal));
-                X509Certificate2 intermediate = bundle.Single(certificate =>
-                    IsCertificateAuthority(certificate) &&
-                    !string.Equals(certificate.Subject, certificate.Issuer, StringComparison.Ordinal));
-                BuildChain(leaf, root, [intermediate]).ShouldBeTrue();
-                using X509Certificate2 expectedRoot = X509Certificate2.CreateFromPem(platformRootPem);
-                root.RawData.ShouldBe(expectedRoot.RawData);
-            }
-            finally
-            {
-                DisposeCertificates(bundle);
-            }
-        }
-        finally
-        {
-            Directory.Delete(rootPath, recursive: true);
-            Directory.Delete(childPath, recursive: true);
         }
     }
 

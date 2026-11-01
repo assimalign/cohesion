@@ -516,12 +516,11 @@ grep -rn "InternalsVisibleTo" --include=*.cs --include=*.csproj . \
   | grep -vE "[/\\\\](obj|bin)[/\\\\]" | grep -vE '\.Tests"|\.Tests" />|\.Tests,'
 ```
 
-A **fourth** pattern exists and is deliberately not counted above: one project grants to
-*another project's* test assembly (`SecretStore.Hosting` → `SecretStore.Client.Tests`; the
-`IdentityHub.Hosting` and `Rezolvr.Hosting` grants left with their retired client packages, and
-`ApplicationModel.Gateway` now grants only its own tests). That grant is test-only
-and do not widen a shipped boundary, but they do reach past a project's own tests. Prefer a
-project's own test assembly; if a sibling's tests genuinely need the internals, that is worth
+A **fourth** pattern is deliberately not counted above: one project granting to *another
+project's* test assembly. None remains: the last, `SecretStore.Hosting` → `SecretStore.Client.Tests`,
+left with the client tests that needed it (2026-11-01). Such a grant is test-only and does not
+widen a shipped boundary, but it reaches past a project's own tests. Prefer a project's own test
+assembly; if a sibling's tests genuinely need the internals, that is worth
 questioning on the same terms as the rest of this section.
 
 ### Shared source — the `shared/` folder

@@ -6,9 +6,9 @@ pipeline endpoints, and an AOT-safe JSON response writer.
 
 `App.Web` exposes this assembly publicly, so application authors can register their own
 `IHealthCheck` implementations and inline probes.
-All 17 other area frameworks, including `App.Database`, carry the health-model assembly
-privately as part of Web.Hosting's runtime closure; that private inclusion does not expose
-the Web health API to those applications.
+`App.Database` carries the health-model assembly privately because Database.Hosting references
+it; that private inclusion does not expose the Web health API to Database applications. No other
+area framework carries it.
 
 ```csharp
 using Assimalign.Cohesion.Web.Health;

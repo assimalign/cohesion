@@ -2,13 +2,13 @@
 
 ## Platform sink and boundaries
 
-The area's resource integration is `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library. The resource root remains contract-only; all composition is in Hosting. The builder registers only the application context and host environment: the internal OTLP receiver (`OtlpReceiverEndpointService`), its segment store and flush service, and the query middleware exist, but nothing registers them, so a built LogSpace application opens no listener. The OTLP routes have no authentication path and answer every caller `403 Forbidden` after the path and method checks. Past that check, OTLP/HTTP JSON logs are accepted and protobuf receives 415 with an OTLP/JSON-only detail; /v1/traces and /v1/metrics are reserved POST routes returning 501 after content validation: libraries/Logging has no span or instrument primitive, and protobuf is deferred. The HTTP server has no gRPC framing (response trailers ship on HTTP/2 and HTTP/3 since decision 18, but gRPC hosting stays outside the HTTP/Web program), so the receiver serves OTLP over HTTPS and requires an `https` endpoint.
+The area's resource integration is `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library. The resource root remains contract-only; all composition is in Hosting. The builder registers only the application context and host environment: the internal OTLP receiver (`OtlpReceiverEndpointService`), its segment store and flush service, and the query middleware exist, but nothing registers them, so a built LogSpace application opens no listener. They stay unregistered on purpose: the receiver has no access control, and an access decision comes before any registration. OTLP/HTTP JSON logs are accepted and protobuf receives 415 with an OTLP/JSON-only detail; /v1/traces and /v1/metrics are reserved POST routes returning 501 after content validation: libraries/Logging has no span or instrument primitive, and protobuf is deferred. The HTTP server has no gRPC framing (response trailers ship on HTTP/2 and HTTP/3 since decision 18, but gRPC hosting stays outside the HTTP/Web program), so the receiver serves OTLP over HTTPS and requires an `https` endpoint.
 
 ## HTTP and TLS
 
-Middleware checks known path, method, authentication (which refuses every caller today) and application/json content. Wrong method yields 405/Allow: POST, unknown path 404, malformed JSON 400, oversized body 413 and unavailable storage 503. Http.RequestLimits is a private reference. LogSpace owns the one-MiB Content-Length check and bounded streaming read, returning 413 with Connection: close. The listener body cap is disabled because its post-dispatch Http1LimitExceededException currently closes the connection without a 413; header and data-rate transport limits remain in force. No HTTP-area code was changed. JSON uses a depth bound and at most 8192 records per request. Full acceptance returns {"partialSuccess":{}}; queue overflow returns rejectedLogRecords as an int64 string. Traces/metrics have no acceptance path.
+Middleware checks known path, method and application/json content; the OTLP routes check no caller identity. Wrong method yields 405/Allow: POST, unknown path 404, malformed JSON 400, oversized body 413 and unavailable storage 503. Http.RequestLimits is a private reference. LogSpace owns the one-MiB Content-Length check and bounded streaming read, returning 413 with Connection: close. The listener body cap is disabled because its post-dispatch Http1LimitExceededException currently closes the connection without a 413; header and data-rate transport limits remain in force. No HTTP-area code was changed. JSON uses a depth bound and at most 8192 records per request. Full acceptance returns {"partialSuccess":{}}; queue overflow returns rejectedLogRecords as an int64 string. Traces/metrics have no acceptance path.
 
-## Authentication and middleware order
+## Query access and middleware order
 
 The query middleware permits `/cohesion/v1` and every path below it
 only when the exchange's transport `RemoteEndPoint` is `127.0.0.1`, `::1`, or IPv4-mapped
@@ -28,7 +28,7 @@ R-5 explicitly defers the developer-experience design §8 Database.Embedded stor
 
 ## Non-goals
 
-LogSpace.Telemetry remains empty project scaffolding. An OTLP authentication path, inferred telemetry dependencies, retention/archival, protobuf, gRPC, traces and metrics are separate deliverables.
+LogSpace.Telemetry remains empty project scaffolding. OTLP access control, inferred telemetry dependencies, retention/archival, protobuf, gRPC, traces and metrics are separate deliverables.
 
 ## Concrete composition (T10 / O34)
 

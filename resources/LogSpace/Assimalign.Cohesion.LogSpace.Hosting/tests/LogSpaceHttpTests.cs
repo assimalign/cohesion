@@ -21,8 +21,6 @@ public sealed class LogSpaceHttpTests
     [InlineData("/cohesion/v1")]
     [InlineData("/cohesion/v1/logs")]
     [InlineData("/cohesion/v1/endpoints")]
-    [InlineData("/cohesion/v1/commands")]
-    [InlineData("/cohesion/v1/stop")]
     [InlineData("/cohesion/v1/healthz")]
     [InlineData("/cohesion/v1/readyz")]
     [InlineData("/cohesion/v1/livez")]
@@ -111,51 +109,30 @@ public sealed class LogSpaceHttpTests
         exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
     }
 
-    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - A bearer credential no longer admits a remote query peer")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task QueryAsync_RemotePeerWithOrWithoutCredential_ShouldRefuseQuery(bool credential)
-    {
-        // Arrange
-        await using var exchange = CreateExchange("/cohesion/v1/logs", "192.0.2.1");
-        if (credential)
-        {
-            exchange.Request.Headers[HttpHeaderKey.Authorization] = "Bearer eyJhbGciOiJFUzI1NiJ9.e30.c2ln";
-        }
-
-        // Act
-        await LogSpaceHttp.QueryAsync(exchange, _ => Task.CompletedTask, store: null);
-
-        // Assert
-        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-    }
-
-    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - OTLP ingest fails closed for every peer")]
+    [Theory(DisplayName = "Cohesion Test [LogSpace.Hosting] - OTLP ingest reaches content validation for every peer")]
     [InlineData("192.0.2.1")]
     [InlineData("127.0.0.1")]
-    public async Task IngestAsync_AnyPeer_ShouldRefuseTelemetry(string address)
+    public async Task IngestAsync_AnyPeer_ShouldValidateTelemetryRoute(string address)
     {
         // Arrange
-        await using var exchange = new ControlPlaneExchange("/v1/traces", HttpMethod.Post)
+        await using var exchange = new TestHttpExchange("/v1/traces", HttpMethod.Post)
         {
             RequestCancelled = CancellationToken.None,
         };
         exchange.Connection.RemoteEndPoint = new IPEndPoint(IPAddress.Parse(address), 12345);
         exchange.Request.Headers[HttpHeaderKey.ContentType] = "application/json";
-        exchange.Request.Headers[HttpHeaderKey.Authorization] = "Bearer eyJhbGciOiJFUzI1NiJ9.e30.c2ln";
         var store = new LogSegmentStore(Path.GetTempPath());
 
         // Act
         await LogSpaceHttp.IngestAsync(exchange, store);
 
         // Assert
-        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        exchange.Response.Body.Length.ShouldBe(0);
+        exchange.Response.StatusCode.ShouldBe(HttpStatusCode.NotImplemented);
     }
 
-    private static ControlPlaneExchange CreateExchange(string path, string address)
+    private static TestHttpExchange CreateExchange(string path, string address)
     {
-        var exchange = new ControlPlaneExchange(path, HttpMethod.Get) { RequestCancelled = CancellationToken.None };
+        var exchange = new TestHttpExchange(path, HttpMethod.Get) { RequestCancelled = CancellationToken.None };
         exchange.Connection.RemoteEndPoint = new IPEndPoint(IPAddress.Parse(address), 12345);
         return exchange;
     }

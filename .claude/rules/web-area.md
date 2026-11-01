@@ -33,8 +33,9 @@ canonical prose lives in `resources/Web/README.md`; this file is the working rul
   Web library but the exclusions above. Applications still get the whole family through the
   `App.Web` shared framework (via `Sdk.Web`), and feature registration still ships with the
   feature, so hosting a feature never needs the reference. Every reference costs more than one
-  framework: `Web.Hosting` is a private member of all 17 other area frameworks, so its new
-  reference's closure must be added to each of them.
+  framework: `Web.Hosting` is a private member of the five other area frameworks whose hosting
+  modules serve HTTP (ConfigurationStore, Database, IdentityHub, LogSpace, SecretStore), so its
+  new reference's closure must be added to each of them.
 - The two sanctioned references to `Web.Hosting`:
   `Assimalign.Cohesion.Web.Hosting.ApplicationModel → Web.Hosting` (the integration joins the
   runtime module to `ApplicationModel.Hosting`; owner decisions 2026-10-28 and 2026-10-29), which
@@ -68,7 +69,8 @@ by kind, and decision 39 of 2026-10-10 (#1395) settled the registration verbs' s
   `targetMethodName: "AddSingleton"` and `Contract = typeof(IHttpFeature)`
   (`component-integration.md`). The generator projects the verb into the application, so the
   package takes **no** DI reference and `Web.Hosting` takes no reference to the package for it
-  (each `Web.Hosting` reference would land the feature's closure in all 18 area frameworks). No
+  (each `Web.Hosting` reference would land the feature's closure in `App.Web` and in every area
+  framework that carries `Web.Hosting`). No
   feature package declares an `extension(IWebApplicationBuilder)` registration verb.
   Precedents: the eight packages Antiforgery, Authentication, Authorization, ErrorHandling,
   OpenApi, Routing, Serialization and Validation.
@@ -159,8 +161,8 @@ hosting-family package:
    frameworks that need it, never every framework carrying `Web.Hosting` (decision 57).
    **If `Web.Hosting` references the new library**, its closure
    also becomes a `CohesionFrameworkPrivateAssembly` in every other area's
-   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (all 17 carry
-   `Web.Hosting` privately); pack each of those producers too.
+   `resources/<Area>/Assimalign.Cohesion.<Area>.Runtime/Directory.Build.props` (the five that carry
+   `Web.Hosting` privately: ConfigurationStore, Database, IdentityHub, LogSpace, SecretStore); pack each of those producers too.
 3. **Solutions** — entries in `resources/Web/Assimalign.Cohesion.Web.slnx`,
    `resources/Assimalign.Cohesion.Resources.slnx`, and the root `Assimalign.Cohesion.slnx`
    (src, tests, docs files).

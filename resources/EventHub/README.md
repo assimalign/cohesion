@@ -16,10 +16,8 @@ flowchart LR
     PAM["EventHub.Hosting.ApplicationModel — resource integration"]
     AMH["Assimalign.Cohesion.ApplicationModel.Hosting — L2"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    PRIV["other areas, referenced privately"]
     P2 --> P0
     P2 --> HOSTFAM
-    P2 -->|"private"| PRIV
     PAM --> P2
     PAM --> P0
     PAM --> AMH

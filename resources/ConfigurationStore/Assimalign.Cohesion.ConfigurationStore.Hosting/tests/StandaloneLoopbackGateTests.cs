@@ -22,7 +22,7 @@ public sealed class StandaloneLoopbackGateTests
     [InlineData("::ffff:192.0.2.10", "")]
     [InlineData("127.0.0.2", "")]
     [InlineData("192.0.2.10", "/store")]
-    public async Task InvokeAsync_StandaloneNonLoopbackPeer_ShouldForbidControlPlane(string peer, string basePath)
+    public async Task InvokeAsync_StandaloneNonLoopbackPeer_ShouldForbidNamespacedRoutes(string peer, string basePath)
     {
         // Arrange
         using ConfigurationEndpointService service = CreateService(basePath);
@@ -31,7 +31,7 @@ public sealed class StandaloneLoopbackGateTests
         {
             foreach (HttpMethod method in new[] { HttpMethod.Get, HttpMethod.Post, HttpMethod.Delete })
             {
-                await using var exchange = new ConfigurationControlPlaneExchange(basePath + "/cohesion/v1" + route, method, remoteEndPoint);
+                await using var exchange = new TestHttpExchange(basePath + "/cohesion/v1" + route, method, remoteEndPoint);
 
                 // Act
                 await service.InvokeAsync(exchange, UnexpectedNext);
@@ -51,7 +51,7 @@ public sealed class StandaloneLoopbackGateTests
     {
         // Arrange
         using ConfigurationEndpointService service = CreateService();
-        await using var exchange = new ConfigurationControlPlaneExchange(
+        await using var exchange = new TestHttpExchange(
             "/cohesion/v1/endpoints", HttpMethod.Get, new IPEndPoint(IPAddress.Parse(peer), 41000));
 
         // Act
@@ -67,7 +67,7 @@ public sealed class StandaloneLoopbackGateTests
     {
         // Arrange
         using ConfigurationEndpointService service = CreateService();
-        await using var exchange = new ConfigurationControlPlaneExchange(
+        await using var exchange = new TestHttpExchange(
             "/cohesion/v1/endpoints", HttpMethod.Get, new IPEndPoint(IPAddress.Parse("192.0.2.10"), 41000));
         exchange.Request.Headers[new HttpHeaderKey("X-Forwarded-For")] = "127.0.0.1";
         exchange.Request.Headers[new HttpHeaderKey("Forwarded")] = "for=\"[::1]\"";
@@ -86,7 +86,7 @@ public sealed class StandaloneLoopbackGateTests
     {
         // Arrange
         using ConfigurationEndpointService service = CreateService();
-        await using var exchange = new ConfigurationControlPlaneExchange(
+        await using var exchange = new TestHttpExchange(
             "/cohesion/v1/endpoints", HttpMethod.Get, hasDnsEndPoint ? new DnsEndPoint("localhost", 41000) : null);
 
         // Act
@@ -104,7 +104,7 @@ public sealed class StandaloneLoopbackGateTests
     {
         // Arrange
         using ConfigurationEndpointService service = CreateService();
-        await using var exchange = new ConfigurationControlPlaneExchange(
+        await using var exchange = new TestHttpExchange(
             path, HttpMethod.Get, new IPEndPoint(IPAddress.Parse("192.0.2.10"), 41000));
 
         // Act

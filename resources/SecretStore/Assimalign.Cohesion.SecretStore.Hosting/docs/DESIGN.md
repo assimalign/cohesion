@@ -21,8 +21,7 @@ The `api` endpoint is selected in this order:
 
 Only absolute `http` and `https` endpoint URIs are accepted. Hosts must be `localhost` or a
 bindable IP address. Plaintext HTTP is restricted to loopback in the `Local` environment;
-HTTPS is otherwise required. An unauthenticated standalone store is loopback-only for either
-scheme. A non-root path on the endpoint URI becomes a prefix for every route below.
+HTTPS is otherwise required. The store takes no credentials, so it is loopback-only for either scheme. A non-root path on the endpoint URI becomes a prefix for every route below.
 
 The durable data directory is selected from `--data`, then
 `<content-root>/data`. Command-line values are snapshots
@@ -34,17 +33,20 @@ The host implements these routes over a real HTTP/1 listener:
 
 | Route | Methods | Behavior |
 | --- | --- | --- |
-| `/healthz`, `/readyz`, `/livez` | `GET`, `HEAD` | Compatibility health routes. Readiness additionally requires a started host and an enrolled CA. |
+| `/healthz`, `/readyz`, `/livez` | `GET`, `HEAD` | Compatibility health routes. Readiness additionally requires a started host. |
 | `/cohesion/v1/healthz`, `/readyz`, `/livez` | `GET`, `HEAD` | Namespaced health reports. |
 | `/cohesion/v1/endpoints` | `GET`, `HEAD` | Returns the `api` endpoint string. |
 | `/cohesion/v1/secrets?path=<path>` | `GET`, `HEAD` | Reads protected secret bytes. |
 | `/cohesion/v1/certificates?name=<name>` | `GET`, `HEAD` | Returns the root (`ca/root`) or a durable leaf bundle (`certs/<one-segment-name>`). |
-| `/cohesion/v1/certificates/enroll` | `POST` | An enrolled authority signs a matching intermediate-CA CSR. |
-| `/cohesion/v1/certificates/enrollment` | `POST` | Completes a pending enrollment with the issued certificate and issuer chain. |
 
 Unsupported methods return `405` with `Allow`; malformed input returns `400`; unknown namespaced
 routes return `404`. Secret and certificate responses are marked `no-store, no-cache`. `HEAD`
 follows `GET` validation and headers without writing a body.
+
+Compared with 10.0.0-preview.1, `POST /cohesion/v1/certificates/enroll` and
+`POST /cohesion/v1/certificates/enrollment` are removed with Platform enrollment (now `404`), and
+readiness no longer waits for an enrolled authority. Seed declarations at the formerly reserved
+`trusted-issuers.json` path are now accepted.
 
 `SecretStore.Client` interoperates directly with the secret and certificate routes.
 
@@ -65,7 +67,7 @@ peer reaching it. Plaintext HTTP is allowed only on loopback in `Local`.
 
 ## Protected persistence and certificate authority
 
-Secrets, CA state, pending enrollment private keys, and leaf bundles are written
+Secrets, CA state, and leaf bundles are written
 through `Assimalign.Cohesion.Security.DataProtection`. The key ring is durable below the data
 directory. Builder-declared secrets
 seed only absent paths; existing durable values win on restart.
@@ -77,7 +79,7 @@ gain a rewrap migration, the store retains a long unprotect grace period so ordi
 cannot make an existing protected record unreadable.
 
 CA initialization precedence is durable authority state, explicitly supplied certificate/private
-key material, configured Platform enrollment, then standalone self-seeding. A self-seeded root is
+key material, then self-seeding (`CertificateAuthorityOptions.SelfSeed`). A self-seeded root is
 an ECDSA P-256 CA. Leaf requests are issued on first resolution and persisted as PEM containing the
 leaf private key and full issuer chain. Named leaves renew lazily on resolution within seven days
 of expiration. A transport leaf is checked and renewed when the HTTPS listener starts; until the
@@ -87,19 +89,10 @@ running store must restart before that leaf expires. `ca/root` returns the termi
 `501 Not Implemented`: ACME/public-CA issuance is outside the current runtime.
 
 The private HTTPS endpoint certificate covers its bind host, `secret-store`, and `secret-store-api`.
-The Platform/public root still must be distributed to clients.
-
-Platform enrollment is a safe explicit three-step protocol: the child creates and persists a CSR
-and private key; an enrolled parent validates the requested application/resource subject and signs
-an intermediate CA; the child verifies the returned certificate, chain, and optional pinned
-Platform root before committing it and deleting pending state. A configured enrollment failure
-never falls back to a new self-signed root.
-
-## Explicit bootstrap gap
-
-`PlatformEnrollmentEndpoint` selects pending-enrollment mode, which needs application and resource
-names the host does not supply, so a host configured with it fails to start. `public`
-remains reserved for later ACME integration. Default issued leaves include localhost and both
+The root still must be distributed to clients. The store issues no intermediate authorities and
+enrolls with no parent: its authority is either the supplied material or its own root. A durable
+authority record keeps an issuer-chain member, which is empty for every authority the store creates
+or is given. `public` remains reserved for later ACME integration. Default issued leaves include localhost and both
 loopback IP SANs so local clients can validate the same application certificate.
 
 ## Boundaries and AOT posture
@@ -140,7 +133,7 @@ as `SubjectAlternativeNameBuilder.AddDnsName`, including supported wildcards. Ce
 are exact `ca/root` or `certs/<leaf>` with a valid leaf segment. Original spelling is preserved.
 
 `AddSecret` takes the root's generated `SecretStoreSeedPath`. Seed paths retain their distinct
-rule: nonblank except exact `trusted-issuers.json`; `certs/` remains permitted. The builder rejects
+rule: nonblank; `certs/` remains permitted. The builder rejects
 `default`, and the repository validates raw seed dictionary keys with that same `IsValid`.
 
 Compared with 10.0.0-preview.1, the public builder's seed parameter changes from `string` to

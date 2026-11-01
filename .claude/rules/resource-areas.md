@@ -412,8 +412,9 @@ feature's configuration on the registration verb.
   the host drives — no longer has to be pushed into the root or routed through an exemption.
   **Reference only what the runtime needs:** each library the module references lands, with its
   closure, in every framework that carries the module — its own `App.<Area>`, plus every area
-  framework that carries it privately (`Web.Hosting` is a private member of all 17 other area
-  frameworks, so one new `Web.Hosting` reference is a framework-membership change in each of them).
+  framework that carries it privately (`Web.Hosting` is a private member of the five other area frameworks whose hosting modules
+  serve HTTP: ConfigurationStore, Database, IdentityHub, LogSpace and SecretStore, so one new
+  `Web.Hosting` reference is a framework-membership change in each of them).
   Feature registration never needs the module to reference the feature: the feature's verbs ship
   with the feature, as root-builder extensions or as component integrations on `Services` (Web,
   owner decision 34). It composes through its container ("Hosting composition — DI is the dependency

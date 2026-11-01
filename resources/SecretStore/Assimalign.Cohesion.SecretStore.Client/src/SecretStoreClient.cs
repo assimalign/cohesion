@@ -22,7 +22,7 @@ public static class SecretStoreClient
     /// Creates a client for a secret-store endpoint. Creation performs no network I/O.
     /// </summary>
     /// <param name="endpoint">The HTTP or HTTPS endpoint exposed by the secret store.</param>
-    /// <param name="credential">The opaque bootstrap credential presented with each request.</param>
+    /// <param name="credential">The opaque bearer credential presented with each request.</param>
     /// <returns>A client bound to the endpoint and credential.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="endpoint"/> or <paramref name="credential"/> is <see langword="null"/>.
@@ -39,7 +39,7 @@ public static class SecretStoreClient
 
     /// <summary>Creates a client with a caller-owned transport, including its TLS trust policy.</summary>
     /// <param name="endpoint">The HTTP(S) resource endpoint.</param>
-    /// <param name="credential">The opaque bootstrap credential.</param>
+    /// <param name="credential">The opaque bearer credential.</param>
     /// <param name="transport">The transport, owned and disposed by the caller after requests finish.</param>
     /// <returns>A client using the supplied transport.</returns>
     /// <exception cref="ArgumentNullException">A required argument is null.</exception>

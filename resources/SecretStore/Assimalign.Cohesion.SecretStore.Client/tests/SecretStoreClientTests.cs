@@ -34,7 +34,7 @@ public class SecretStoreClientTests
         using var transport = new HttpMessageInvoker(handler);
         ISecretStoreClient client = SecretStoreClient.Create(
             new Uri("https://secrets.test:8443/api"),
-            new ClientCredential("bootstrap-token"),
+            new ClientCredential("bearer-token"),
             transport);
 
         // Act
@@ -44,7 +44,7 @@ public class SecretStoreClientTests
         Encoding.UTF8.GetString(result.ToArray()).ShouldBe("classified");
         observedMethod.ShouldBe("GET");
         observedUri.ShouldBe("https://secrets.test:8443/api/cohesion/v1/secrets?path=apps%2Fapi%2Fpassword");
-        observedAuthorization.ShouldBe("Bearer bootstrap-token");
+        observedAuthorization.ShouldBe("Bearer bearer-token");
     }
 
     [Fact(DisplayName = "Cohesion Test [SecretStore] - GetCertificateAsync: Should return PEM from the endpoint")]
@@ -60,7 +60,7 @@ public class SecretStoreClientTests
         using var transport = new HttpMessageInvoker(handler);
         ISecretStoreClient client = SecretStoreClient.Create(
             new Uri("http://127.0.0.1:5080"),
-            new ClientCredential("bootstrap-token"),
+            new ClientCredential("bearer-token"),
             transport);
 
         // Act
@@ -75,7 +75,7 @@ public class SecretStoreClientTests
     {
         // Arrange
         var endpoint = new Uri("tcp://secrets.test:8443");
-        var credential = new ClientCredential("bootstrap-token");
+        var credential = new ClientCredential("bearer-token");
 
         // Act
         Action action = () => SecretStoreClient.Create(endpoint, credential);
@@ -89,7 +89,7 @@ public class SecretStoreClientTests
     {
         // Arrange
         var endpoint = new Uri("https://secrets.test:8443?q=1");
-        var credential = new ClientCredential("bootstrap-token");
+        var credential = new ClientCredential("bearer-token");
 
         // Act
         Action action = () => SecretStoreClient.Create(endpoint, credential);
@@ -102,7 +102,7 @@ public class SecretStoreClientTests
     public void Create_WhenEndpointIsNull_ShouldThrowArgumentNullException()
     {
         // Arrange
-        var credential = new ClientCredential("bootstrap-token");
+        var credential = new ClientCredential("bearer-token");
 
         // Act
         Action action = () => SecretStoreClient.Create(null!, credential);

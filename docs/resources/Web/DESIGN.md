@@ -18,8 +18,9 @@ registers nothing; managed, it registers one `IHostService` factory, and the res
 from the settings the application's features registered (the `cors` setting becomes the `cors`
 action). It is a public member of App.Web; ApplicationModel.Hosting arrives with the App kernel.
 
-Web.Hosting is a private member of the 17 other area frameworks: Database.Hosting references it
-privately for its admin endpoint, through the coordinated
+Web.Hosting is a private member of five other area frameworks, App.ConfigurationStore,
+App.Database, App.IdentityHub, App.LogSpace and App.SecretStore, whose hosting modules serve HTTP
+through a nested WebApplication. Each references it privately through the coordinated
 CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. Web.Testing and
 Web.Hosting.ApplicationModel are the only Web packages that reference Web.Hosting.
 

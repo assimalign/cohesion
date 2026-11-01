@@ -39,15 +39,17 @@ public sealed class OtlpReceiverTests
         finally { if (Directory.Exists(directory)) { Directory.Delete(directory, recursive: true); } }
     }
 
-    [Fact(DisplayName = "Cohesion Test [LogSpace.Hosting] - JSON reader refuses service impersonation and malformed values")]
-    public void Read_ResourceIdentity_ShouldMatchAuthenticatedEmitter()
+    [Fact(DisplayName = "Cohesion Test [LogSpace.Hosting] - JSON reader takes the service name from resource attributes and refuses malformed values")]
+    public void Read_ResourceAttributes_ShouldSetServiceName()
     {
         using var document = JsonDocument.Parse("""{"resourceLogs":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"web"}}]},"scopeLogs":[{"scope":{"name":"category"},"logRecords":[{"timeUnixNano":"1","body":{"stringValue":"message"}}]}]}]}""");
-        OtlpLogReader.Read(document.RootElement, "web").Single().Body.ShouldBe("message");
-        Should.Throw<UnauthorizedAccessException>(() => OtlpLogReader.Read(document.RootElement, "other"));
+        StoredLog record = OtlpLogReader.Read(document.RootElement).Single();
+        record.Body.ShouldBe("message");
+        record.Svc.ShouldBe("web");
+        record.Cat.ShouldBe("category");
         using var empty = JsonDocument.Parse("{}");
-        OtlpLogReader.Read(empty.RootElement, "web").ShouldBeEmpty();
+        OtlpLogReader.Read(empty.RootElement).ShouldBeEmpty();
         using var invalid = JsonDocument.Parse("{\"resourceLogs\":false}");
-        Should.Throw<InvalidOperationException>(() => OtlpLogReader.Read(invalid.RootElement, "web"));
+        Should.Throw<InvalidOperationException>(() => OtlpLogReader.Read(invalid.RootElement));
     }
 }

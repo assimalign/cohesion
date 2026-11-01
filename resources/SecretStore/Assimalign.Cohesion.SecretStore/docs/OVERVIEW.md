@@ -12,18 +12,19 @@ in `Assimalign.Cohesion.SecretStore.Hosting`.
 - `ISecretStoreApplicationBuilder` owns secret and certificate declarations and builds an `ISecretStoreApplication`.
 - `ISecretStoreApplicationBuilder.AddSecret` declares first-start secret bytes without overwriting
   later durable versions.
-- `SecretStoreSeedPath` validates those ordinal logical paths. It rejects blank text and exact
-  `trusted-issuers.json`; the builder also refuses `default`. String arguments convert implicitly,
+- `SecretStoreSeedPath` validates those ordinal logical paths. It rejects blank text; the builder also
+  refuses `default`. String arguments convert implicitly,
   so `builder.AddSecret("apps/api/client-secret", secretBytes)` retains its usual syntax.
-- `ISecretStoreApplicationBuilder.AddCertificateAuthority` declares the store's root or
-  intermediate authority bootstrap.
-- `CertificateAuthorityOptions` selects explicit PEM seed material, optional Platform enrollment,
-  or standalone self-seeding (the default).
+- `ISecretStoreApplicationBuilder.AddCertificateAuthority` declares the store's certificate
+  authority.
+- `CertificateAuthorityOptions` selects explicit PEM seed material or self-seeding
+  (the default). Compared with `10.0.0-preview.1` it drops `PlatformEnrollmentEndpoint` and
+  `PlatformCertificate` and renames `SelfSeedWhenNoPlatform` to `SelfSeed` (source and binary
+  break; see `DESIGN.md`).
 - `ISecretStoreApplication` exposes `Context`, `StartAsync`, and `StopAsync`.
 - `ISecretStore` is the common disposable lifetime boundary for feature contracts.
 
-The root is declarative and dependency-light. Persistence, trust verification, enrollment,
-certificate generation, protocol serving, and cryptographic resource ownership remain runtime
+The root is declarative and dependency-light. Persistence, certificate generation, protocol serving, and cryptographic resource ownership remain runtime
 responsibilities; none are performed by this assembly.
 
 ## Hosting-free application contract (O34)

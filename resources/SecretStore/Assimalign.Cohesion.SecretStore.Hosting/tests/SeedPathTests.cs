@@ -14,10 +14,9 @@ namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
 
 public sealed class SeedPathTests
 {
-    [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - AddSecret: blank and reserved seed paths are refused at composition")]
+    [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - AddSecret: blank seed paths are refused at composition")]
     [InlineData("")]
     [InlineData(" \t\r\n")]
-    [InlineData("trusted-issuers.json")]
     public void AddSecret_WithInvalidSeedPath_ShouldRejectAtComposition(string path)
     {
         // Arrange
@@ -48,7 +47,6 @@ public sealed class SeedPathTests
 
     [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - AddSecret: seed paths preserve the logical-path grammar")]
     [InlineData("certs/api")]
-    [InlineData("Trusted-issuers.json")]
     [InlineData("../relative\\name")]
     [InlineData(" path ")]
     public void AddSecret_WithPermittedSeedPath_ShouldSnapshotAtExactPath(string path)
@@ -74,7 +72,6 @@ public sealed class SeedPathTests
     [Theory(DisplayName = "Cohesion Test [SecretStore.Hosting] - Repository: raw invalid seed paths are refused before persistence")]
     [InlineData("")]
     [InlineData(" \t")]
-    [InlineData("trusted-issuers.json")]
     public void Constructor_WithInvalidRawSeedPath_ShouldRejectBeforePersistence(string path)
     {
         // Arrange

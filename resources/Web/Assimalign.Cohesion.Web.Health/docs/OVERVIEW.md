@@ -26,9 +26,9 @@ the health model is part of its runtime closure.
 
 - `App.Web` lists `Assimalign.Cohesion.Web.Health` as a public framework assembly. Web application
   authors see and use its types directly.
-- All 17 other area frameworks list the same assembly privately because they carry Web.Hosting
-  and its implementation closure. Their application authors do not gain a public Web health
-  surface from that inclusion; decision 57 adds the 16 frameworks besides App.Database.
+- `App.Database` lists the same assembly privately because Database.Hosting references it for its
+  admin endpoint. Its application authors do not gain a public Web health surface from that
+  inclusion. Web.Hosting does not reference Web.Health, so no other area framework carries it.
 
 The package can also be referenced directly outside those framework profiles.
 

@@ -40,9 +40,9 @@ public sealed class HealthProbeTests
             new Dictionary<string, IdentityHubClientRegistration>(), AppEnvironment.Keys.Local,
             new IdentityHubApplicationContext(AppEnvironment.Keys.Local, contentRootPath: null));
 
-    private static ControlPlaneExchange CreateExchange(string path, HttpMethod method, string address)
+    private static TestHttpExchange CreateExchange(string path, HttpMethod method, string address)
     {
-        var exchange = new ControlPlaneExchange(path, method) { RequestCancelled = CancellationToken.None };
+        var exchange = new TestHttpExchange(path, method) { RequestCancelled = CancellationToken.None };
         exchange.Connection.RemoteEndPoint = new IPEndPoint(IPAddress.Parse(address), 12345);
         return exchange;
     }

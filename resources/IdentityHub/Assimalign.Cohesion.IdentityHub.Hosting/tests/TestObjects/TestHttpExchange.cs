@@ -11,9 +11,9 @@ using IPEndPoint = System.Net.IPEndPoint;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting.Tests;
 
-internal sealed class ControlPlaneExchange : IHttpContext
+internal sealed class TestHttpExchange : IHttpContext
 {
-    internal ControlPlaneExchange(string path, HttpMethod method)
+    internal TestHttpExchange(string path, HttpMethod method)
     {
         Request = new RequestData(this, path, method);
         Response = new ResponseData(this);

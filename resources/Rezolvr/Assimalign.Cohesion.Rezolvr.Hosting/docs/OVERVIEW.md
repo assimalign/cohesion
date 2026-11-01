@@ -2,19 +2,9 @@
 
 `RezolvrApplication.CreateBuilder(args)` returns the public concrete `RezolvrApplicationBuilder`. Explicit services preserve registration/start order and reverse stop order. The area's resource integration is `Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library. The plain host opens no listener without registration.
 
-The private Web implementation stays out of consumer reference packs. An internal record repository persists A and CNAME declarations; nothing registers it yet, and serving DNS answers remains deferred.
+The module stores no records and serves no DNS answers yet.
 
 See [DESIGN.md](DESIGN.md).
-
-## Records
-
-The internal record repository stores `rezolvr.add-a-record` and `rezolvr.add-cname-record`
-declarations, each keyed by record name, atomically in `records.json`. A-record declarations use a
-BCL IPv4 IPAddress serialized as a string. CNAME declarations carry a DNS target string; TTL is a
-positive integer in seconds.
-
-Records are stored, not served as DNS answers. ResolverEndpointService remains parked, and DNS
-serving is deferred area work.
 
 ## Concrete composition (T10 / O34)
 

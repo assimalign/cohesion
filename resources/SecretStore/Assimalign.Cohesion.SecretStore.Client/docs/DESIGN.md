@@ -80,9 +80,8 @@ preserving trimming and NativeAOT compatibility.
 
 ## Non-goals
 
-- Reading bootstrap-token files or acquiring and rotating credentials.
+- Reading token files or acquiring and rotating credentials.
 - Changing a store's state: a managed instance takes changes as actions through its platform.
-- Hosting SecretStore endpoints or implementing persistence, trust, enrollment, or certificate
-  issuance.
+- Hosting SecretStore endpoints or implementing persistence or certificate issuance.
 - Defining SecretStore-specific verbs or handlers; those belong to SecretStore.Hosting and its
   resource integration.

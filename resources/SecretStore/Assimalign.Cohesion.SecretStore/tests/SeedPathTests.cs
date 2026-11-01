@@ -11,7 +11,6 @@ public sealed class SeedPathTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData(" \t\r\n")]
-    [InlineData("trusted-issuers.json")]
     public void TryCreate_WithInvalidPath_ShouldReturnFalse(string? candidate)
     {
         // Arrange and Act
@@ -24,7 +23,6 @@ public sealed class SeedPathTests
 
     [Theory(DisplayName = "Cohesion Test [SecretStore] - Seed path: logical identifiers retain exact spelling")]
     [InlineData("apps/api/client-secret")]
-    [InlineData("Trusted-issuers.json")]
     [InlineData("certs/api")]
     [InlineData("../relative\\name")]
     [InlineData(" path ")]

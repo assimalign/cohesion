@@ -63,7 +63,7 @@ public sealed class ConfigurationStoreApplicationBuilder : IConfigurationStoreAp
     /// </summary>
     /// <remarks>
     /// Declared values seed a namespace only when no durable namespace document exists.
-    /// Later command mutations therefore survive application restarts. The declaration is
+    /// A durable document therefore survives a restart with a changed declaration. The declaration is
     /// registered in <see cref="Services"/>.
     /// </remarks>
     /// <param name="name">The namespace name.</param>

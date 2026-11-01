@@ -25,7 +25,6 @@ internal static class LogSpaceHttp
         { context.Response.StatusCode = HttpStatusCode.NotFound; return; }
         if (context.Request.Method != HttpMethod.Post)
         { context.Response.StatusCode = HttpStatusCode.MethodNotAllowed; context.Response.Headers[HttpHeaderKey.Allow] = "POST"; return; }
-        if (!Authorize(context, telemetry: true)) { return; }
         string contentType = context.Request.Headers[HttpHeaderKey.ContentType].ToString().Split(';')[0].Trim();
         if (!string.Equals(contentType, "application/json", StringComparison.OrdinalIgnoreCase))
         {
@@ -66,7 +65,7 @@ internal static class LogSpaceHttp
             }
             finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
             using JsonDocument document = JsonDocument.Parse(body.GetBuffer().AsMemory(0, (int)body.Length), new JsonDocumentOptions { MaxDepth = 32 });
-            var records = OtlpLogReader.Read(document.RootElement, authenticatedResource: null);
+            var records = OtlpLogReader.Read(document.RootElement);
             long rejected = 0;
             foreach (StoredLog record in records) { if (!store.TryEnqueue(record)) { rejected++; } }
             context.Response.StatusCode = HttpStatusCode.Ok;
@@ -81,7 +80,6 @@ internal static class LogSpaceHttp
                 writer.WriteEndObject(); writer.WriteEndObject();
             }).ConfigureAwait(false);
         }
-        catch (UnauthorizedAccessException) { context.Response.StatusCode = HttpStatusCode.Forbidden; }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException or OverflowException or ArgumentException or System.Collections.Generic.KeyNotFoundException)
         { context.Response.StatusCode = HttpStatusCode.BadRequest; }
         catch (IOException) { context.Response.StatusCode = HttpStatusCode.BadRequest; }
@@ -93,7 +91,7 @@ internal static class LogSpaceHttp
         if (path == "/cohesion/v1" || path.StartsWith("/cohesion/v1/", StringComparison.Ordinal))
         {
             // Every namespaced route admits only a loopback transport peer.
-            if (!Authorize(context, telemetry: false)) { return; }
+            if (!IsLoopbackPeer(context)) { context.Response.StatusCode = HttpStatusCode.Forbidden; return; }
         }
         if (path != "/cohesion/v1/logs") { await next(context).ConfigureAwait(false); return; }
         if (context.Request.Method != HttpMethod.Get)
@@ -126,27 +124,18 @@ internal static class LogSpaceHttp
         { context.Response.StatusCode = HttpStatusCode.ServiceUnavailable; }
     }
 
-    // The OTLP routes have no authentication path, so they refuse every caller until one exists.
-    // The query keeps its transport-peer rule: only a loopback peer, and forwarded headers never
-    // grant access.
-    private static bool Authorize(IHttpContext context, bool telemetry)
+    // The query admits only a loopback transport peer; forwarded headers never grant access.
+    private static bool IsLoopbackPeer(IHttpContext context)
     {
-        if (!telemetry && context.ConnectionInfo.RemoteEndPoint is IPEndPoint endpoint)
+        if (context.ConnectionInfo.RemoteEndPoint is not IPEndPoint endpoint)
         {
-            IPAddress address = endpoint.Address;
-            if (address.IsIPv4MappedToIPv6)
-            {
-                address = address.MapToIPv4();
-            }
-
-            if (address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback))
-            {
-                return true;
-            }
+            return false;
         }
 
-        context.Response.StatusCode = HttpStatusCode.Forbidden;
-        return false;
+        IPAddress address = endpoint.Address.IsIPv4MappedToIPv6
+            ? endpoint.Address.MapToIPv4()
+            : endpoint.Address;
+        return address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback);
     }
 
     private static Task DetailAsync(IHttpContext context, string detail) => JsonAsync(context, writer =>

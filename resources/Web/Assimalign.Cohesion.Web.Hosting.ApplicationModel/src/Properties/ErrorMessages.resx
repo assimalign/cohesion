@@ -6,5 +6,4 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
   <data name="CorsPolicyRequired" xml:space="preserve"><value>A CORS policy is required.</value></data>
-  <data name="SnapshotValueRequired" xml:space="preserve"><value>A snapshot value is required.</value></data>
 </root>

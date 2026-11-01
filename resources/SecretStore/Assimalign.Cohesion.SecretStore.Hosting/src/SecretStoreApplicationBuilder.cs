@@ -109,18 +109,16 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     /// </summary>
     /// <remarks>
     /// Durable certificate-authority state always wins over composition-time seed material. On a
-    /// first start, paired initial PEM material is used when supplied; otherwise a configured
-    /// Platform endpoint selects gateway-mediated intermediate enrollment. When neither is configured,
-    /// <see cref="CertificateAuthorityOptions.SelfSeedWhenNoPlatform"/> controls whether the store
-    /// creates a self-signed development root. A failed configured Platform enrollment never
-    /// silently falls back to an unrelated self-signed root. A snapshot of the options is
+    /// first start, paired initial PEM material is used when supplied; otherwise
+    /// <see cref="CertificateAuthorityOptions.SelfSeed"/> controls whether the store creates a
+    /// self-signed development root. A snapshot of the options is
     /// registered in <see cref="Services"/>.
     /// </remarks>
     /// <param name="configure">An optional callback that configures the certificate authority.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentException">
-    /// The common name is empty; the Platform enrollment endpoint is not absolute HTTPS; configured
-    /// PEM material is empty; or an initial certificate and private key are not supplied together.
+    /// The common name is empty, configured PEM material is empty, or an initial certificate and
+    /// private key are not supplied together.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A certificate authority has already been declared, or no first-start authority source is
@@ -229,9 +227,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         Services.AddSingleton<CertificateAuthorityManager>(serviceProvider => new CertificateAuthorityManager(
             dataPath,
             serviceProvider.GetRequiredService<IDataProtectionProvider>(),
-            serviceProvider.GetService<CertificateAuthorityOptions>() ?? new CertificateAuthorityOptions(),
-            applicationName: null,
-            resourceName: null));
+            serviceProvider.GetService<CertificateAuthorityOptions>() ?? new CertificateAuthorityOptions()));
 
         // Registered after every AddService call, so the endpoint starts last and stops first.
         Services.AddSingleton<IHostService>(serviceProvider => new SecretsEndpointService(
@@ -352,17 +348,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
     private static void ValidateCertificateAuthority(CertificateAuthorityOptions options)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.CommonName);
-        if (options.PlatformEnrollmentEndpoint is { } endpoint &&
-            (!endpoint.IsAbsoluteUri ||
-             !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new ArgumentException(
-                "The Platform enrollment endpoint must be an absolute HTTPS endpoint.",
-                nameof(options));
-        }
-
-        if ((options.PlatformCertificate.HasValue && options.PlatformCertificate.Value.IsEmpty) ||
-            (options.InitialCertificate.HasValue && options.InitialCertificate.Value.IsEmpty) ||
+        if ((options.InitialCertificate.HasValue && options.InitialCertificate.Value.IsEmpty) ||
             (options.InitialPrivateKey.HasValue && options.InitialPrivateKey.Value.IsEmpty))
         {
             throw new ArgumentException("Supplied certificate and private-key values must not be empty.", nameof(options));
@@ -376,11 +362,10 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         }
 
         if (!options.InitialCertificate.HasValue &&
-            options.PlatformEnrollmentEndpoint is null &&
-            !options.SelfSeedWhenNoPlatform)
+            !options.SelfSeed)
         {
             throw new InvalidOperationException(
-                "A certificate authority requires initial material, a Platform enrollment endpoint, or standalone self-seeding.");
+                "A certificate authority requires initial material or self-seeding.");
         }
     }
 
@@ -389,9 +374,7 @@ public sealed class SecretStoreApplicationBuilder : ISecretStoreApplicationBuild
         return new CertificateAuthorityOptions
         {
             CommonName = source.CommonName,
-            SelfSeedWhenNoPlatform = source.SelfSeedWhenNoPlatform,
-            PlatformEnrollmentEndpoint = source.PlatformEnrollmentEndpoint,
-            PlatformCertificate = Copy(source.PlatformCertificate),
+            SelfSeed = source.SelfSeed,
             InitialCertificate = Copy(source.InitialCertificate),
             InitialPrivateKey = Copy(source.InitialPrivateKey),
         };

@@ -23,11 +23,7 @@
              - ConfigurationStore.Client - no ConfigurationStore application consumes it at run
                time; a program that reads the store's namespaces references the package. -->
 
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Server" />

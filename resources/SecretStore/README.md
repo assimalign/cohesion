@@ -58,9 +58,8 @@ A gateway references neither the client nor the store's runtime: it declares the
 
 ## Certificate scope
 
-- A store with no Platform authority creates a self-signed development root on first start.
+- A store with no supplied authority material creates a self-signed development root on first start.
 - `certs/<name>` creates a persistent private leaf, renews it near expiration, and returns a PEM bundle containing the leaf, its PKCS#8 key, and its issuer chain.
-- The host exposes Platform-signing and completion operations for intermediate enrollment.
 - `certs/public` (ACME/public-CA issuance) is intentionally deferred to a later design item.
 
 ## Project documentation
