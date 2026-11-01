@@ -41,6 +41,18 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
     /// </summary>
     public ConcurrentDictionary<ResourceName, Func<Task>> Delayed { get; } = new();
 
+    /// <summary>
+    /// Resources whose planning waits until the task the function returns completes, as a platform
+    /// slow to read what it runs does; the plan call is recorded before it waits.
+    /// </summary>
+    public ConcurrentDictionary<ResourceName, Func<Task>> PlanDelays { get; } = new();
+
+    /// <summary>
+    /// Resources whose rollout has not finished, so their plan is an update even when the platform
+    /// runs their definition, as a Kubernetes deployment whose pods are restarting.
+    /// </summary>
+    public HashSet<ResourceName> RollingOut { get; } = [];
+
     public ScaleAction Scale { get; } = new();
 
     public List<string> Deployed { get; } = [];
@@ -140,7 +152,7 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         return [Scale];
     }
 
-    public ValueTask<ApplicationGatewayDeploymentPlan> PlanResourceAsync(
+    public async ValueTask<ApplicationGatewayDeploymentPlan> PlanResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
@@ -149,17 +161,22 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         Record($"plan:{resource.Name}");
         Planned[resource.Name] = settings;
         Seen[resource.Name] = resource;
+        if (PlanDelays.TryGetValue(resource.Name, out Func<Task>? delay))
+        {
+            await delay.Invoke().WaitAsync(cancellationToken);
+        }
 
         // A workload that runs other settings or extensions needs an update; the revision leaves
         // both out.
         string revision = Revisions.GetValueOrDefault(resource.Name, "1");
         ApplicationGatewayDeploymentChange change = !Running.TryGetValue(resource.Name, out string? running) ? ApplicationGatewayDeploymentChange.Create
             : running == revision
+                && !RollingOut.Contains(resource.Name)
                 && SameSettings(RunningSettings.GetValueOrDefault(resource.Name), settings)
                 && RunningExtensions.GetValueOrDefault(resource.Name, string.Empty) == Describe(resource.Extensions) ? ApplicationGatewayDeploymentChange.None
             : ApplicationGatewayDeploymentChange.Update;
 
-        return ValueTask.FromResult(new ApplicationGatewayDeploymentPlan(change, revision));
+        return new ApplicationGatewayDeploymentPlan(change, revision);
     }
 
     public async ValueTask DeployResourceAsync(

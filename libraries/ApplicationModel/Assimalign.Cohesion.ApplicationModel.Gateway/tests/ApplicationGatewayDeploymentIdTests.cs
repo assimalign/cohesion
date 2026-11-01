@@ -62,6 +62,74 @@ public sealed class ApplicationGatewayDeploymentIdTests
         instances.ShouldContain(instance => instance.Deployment == current);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "An instance that publishes the planned deployment before its resource is planned makes the resource ready")]
+    public async Task PublishAsync_BeforeThePlanWithThePlannedDeployment_ShouldMakeTheResourceReady()
+    {
+        // Arrange: a first run deploys the resource. The second runs with a fresh store, while the
+        // platform's rollout of the same workload has not finished, so it plans an update to what
+        // runs; deploying it again starts nothing new, as applying an unchanged pod template does not.
+        var infrastructure = new TestInfrastructure();
+        IApplicationModel model = CreateModel("hello");
+        await using (await RunningGateway.StartAsync(infrastructure, new InMemoryApplicationGatewayStore(), model))
+        {
+        }
+
+        DeploymentId running = infrastructure.RunningDeployments["orders-api"];
+        infrastructure.RollingOut.Add("orders-api");
+        infrastructure.Silent.Add("orders-api");
+        var planned = new TaskCompletionSource();
+        infrastructure.PlanDelays["orders-api"] = () => planned.Task;
+        ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, TimeSpan.FromSeconds(2));
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+
+        // Act: while the resource's step plans it, a restarted instance of the running workload
+        // publishes, then the plan completes.
+        await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "plan:orders-api") == 2);
+        TestInstance restarted = await infrastructure.StartInstanceAsync("Web", "orders-api", running);
+        planned.SetResult();
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        ApplicationInstanceManifest[] instances = [.. gateway.Resources.ShouldHaveSingleItem().Instances];
+        await stop.CancelAsync();
+        await run;
+
+        // Assert: the plan's deployment is the one the instance repeats, so it made the resource
+        // ready, and startup completed within the window.
+        infrastructure.Deployments.Last().Deployment.ShouldBe(running);
+        instances.ShouldContain(instance => instance.Key == restarted.Key && instance.Deployment == running);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance of another deployment that publishes before its resource is planned does not make the resource ready")]
+    public async Task PublishAsync_BeforeThePlanWithAnotherDeployment_ShouldNotMakeTheResourceReady()
+    {
+        // Arrange: as above, but the instance that publishes early repeats a deployment the plan
+        // does not make.
+        var infrastructure = new TestInfrastructure();
+        IApplicationModel model = CreateModel("hello");
+        await using (await RunningGateway.StartAsync(infrastructure, new InMemoryApplicationGatewayStore(), model))
+        {
+        }
+
+        infrastructure.RollingOut.Add("orders-api");
+        infrastructure.Silent.Add("orders-api");
+        var planned = new TaskCompletionSource();
+        infrastructure.PlanDelays["orders-api"] = () => planned.Task;
+        ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, TimeSpan.FromSeconds(1));
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out _);
+
+        // Act
+        await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "plan:orders-api") == 2);
+        TestInstance other = await infrastructure.StartInstanceAsync("Web", "orders-api", DeploymentId.New());
+        planned.SetResult();
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => run.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Assert: the window closed without an instance of the plan's deployment.
+        exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.StartupTimedOut);
+        exception.Message.ShouldContain("Web/orders-api", Case.Sensitive);
+        other.Deployment.ShouldNotBe(infrastructure.Deployments.Last().Deployment);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "Deploying the same inputs gives the same deployment, and another setting value another")]
     public async Task DeployResourceAsync_WithSameInputs_ShouldReceiveTheSameDeployment()
     {
