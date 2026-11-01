@@ -884,7 +884,9 @@ INNER, LEFT and CROSS joins. RIGHT, FULL or parenthesized joins directly in thes
 These forms execute and are advertised as UPDATE FROM and DELETE USING in the SQL profile.
 Plain EXPLAIN describes the target/source association plan without applying the mutation.
 
-Two through eight eligible source relations use exact join-order search (#1629).
+Two through eight eligible source relations use exact join-order search (#1629);
+source graphs of nine through 64 use bounded deterministic greedy search (SQ-Z2) under the same legality and
+zero-additional-retention rules.
 UPDATE FROM, DELETE USING and MERGE retain the target/source boundary: only source
 relations participate in search. One source retains existing planning. Outer source joins,
 derived sources and predicates without the non-throwing safety proof retain bound order.
@@ -2133,17 +2135,32 @@ PostgreSQL anchors: optimizer/path/joinrels.c:1157-1180, executor/nodeHashjoin.c
 
 Three through eight eligible stored-table inputs use exact subset dynamic programming
 over INNER and CROSS joins, including bushy trees. The default exact relation limit is eight;
-above it this run retains bound order (the bounded heuristic is SQ-Z2). One and two inputs
+from nine through 64 a deterministic connected greedy heuristic chooses a seed pair and extends one
+component, considering connected joins before cross products. It uses no fixed-width masks
+and keeps bound order without search above the heuristic limit of 64. Such statements remain
+executable; EXPLAIN reports join_search=bound. One and two inputs
 keep existing costing. Every outer join is a conservative barrier: its inputs and ON level
 stay fixed. Derived inputs, LATERAL (currently refused with CK00001), subquery predicates,
 application calls and potentially throwing expressions prevent reassociation. Mandatory safe
 ON/WHERE conjunctions move to the lowest subtree containing their referenced inputs; local
 restrictions also remain on scans. Physical columns, USING outputs and ORDER BY semantics
 retain written ordinals. Joins retain their sort; ordered index sort removal is single-table only.
-EXPLAIN shows chosen_order, reordered, exact_dp/bound, and exact search state/partition counts.
-Equal work costs prefer smaller estimated retained builds/frames before deterministic
+EXPLAIN shows chosen_order, reordered, exact_dp/greedy_connected/bound, collapse_limit=8,
+and search state/partition or component-pair/cost-evaluation counts. Above eight, it retains
+the bound plan unless a candidate has no greater estimated work or memory and passes the physical
+retention proof. Identity-order predicate pushdown is eligible on equal work. Bound work costs ON
+terms from their written step and WHERE terms after the full product; all candidates use the same
+summation order. Greedy search prunes bushy alternatives
+and new hash/index paths; existing expression keys and DML target boundaries are preserved.
+For n inputs it considers `(n-1)*(3*n-2)/2` component pairs and retains linear graph/search
+storage. Flat DML/hash plans only consider identity pushdown, and normalized trees skip search. The
+live conformance corpus includes
+the large-join order/column/EXPLAIN case and generated 9-20 input result oracles.
+Costs within relative tolerance 1e-12 prefer smaller estimated retained builds, nested-loop buffers
+and frames before deterministic
 binding-ordinal and subset order. Execution admission separately requires zero extra retained
-bytes against the pre-search costed plan and preserves its hash/index paths and build-activation
+bytes against the pre-search costed plan, never moves an unknown/incomplete streamed driver into a
+retained buffer, and preserves its hash/index paths and build-activation
 prefix; unproven full-width/bushy candidates keep that old plan. Expression hash keys remain
 eligible and use normalized full-frame evaluation. A LEFT
 step always drives from its preserved left input. Mandatory equalities must bind an
