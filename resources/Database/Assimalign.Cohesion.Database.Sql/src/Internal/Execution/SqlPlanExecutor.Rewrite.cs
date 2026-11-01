@@ -256,6 +256,7 @@ internal sealed partial class SqlPlanExecutor
             {
                 statement.CheckCopySpace(touches, allocations);
                 long allocationStart = statement.CaptureCopyAllocations();
+                if (statement.CheckpointCopy) { RewriteStage?.Invoke("CopyAllocationsCaptured", allocationStart); }
                 journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 for (int i = 0; i < batch.Count; i++)
                 {
@@ -281,6 +282,7 @@ internal sealed partial class SqlPlanExecutor
                 if (statement.CheckpointCopy)
                 {
                     statement.AddCopyAllocations(allocationStart);
+                    RewriteStage?.Invoke("CopyAllocationsAdded", statement.CaptureCopyAllocations() - allocationStart);
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);

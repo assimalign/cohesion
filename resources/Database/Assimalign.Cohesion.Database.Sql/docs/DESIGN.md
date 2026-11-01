@@ -7604,6 +7604,7 @@ bounded peer-sent names) are in the area's
 | 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
+| 27 | `TableReclamationYielded` | Verbose | — | `engineName`, `database`, `objectId` (each poll yielding to a due or pending checkpoint) |
 | 25 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 `Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
@@ -8695,12 +8696,25 @@ replacement estimate, increased by copy-owned allocated pages and the next brack
 O the larger retiring/prepared owner count, B=8192 and C=CheckpointJournalSize.
 One reclamation bracket frees at most 32 pages. Before opening each bracket, reclamation
 yields to a due or pending checkpoint, including between owners in the same pass. Only the
-single in-flight bracket can add WAL past C. Its complete two-image/page and framing bound is
+single in-flight bracket can add WAL past C. The size due accessor counts bytes appended since
+the last completed checkpoint, excluding its own record, so even C=1 permits progress.
+A due reclamation bracket sets CheckpointNeededSignal after commit closes it: the worker can
+retry its refused attempt immediately. Because the next bracket yields while due persists,
+this sends one retry wake per checkpoint cycle; yielding polls never send wakes.
+Verbose event 27, TableReclamationYielded, makes each stalled drain poll observable.
+Its complete two-image/page and framing bound is
 U=32*2*(B+46)+152=527384 bytes, independent of O, poll cadence and refused attempts. Define
 W=min(P*(B+46)+152*(ceil(P/32)+O), C+U), or the whole first term if C=0.
+The 152-byte framing allowance includes the checkpoint record's 38-byte base and the bracket's
+38-byte Begin and Commit frames; an active-writer list consumes the other-writer margin below.
 Let K=BufferPoolCapacity+1 MiB on strategies whose data-file extensions can be sparse,
-and K=0 otherwise. The file strategy uses sparse growth on Unix-like platforms; Windows
-SetLength allocates blocks upfront. Memory has no volume exposure; the capacity fake supplies
+and K=0 otherwise. The file strategy conservatively uses sparse growth on non-Windows platforms.
+On Windows it decides per database data file and its containing directory: COMPRESSED,
+SPARSE_FILE or INTEGRITY_STREAM on either, a UNC path (including extended UNC and \\wsl$),
+or a remote/network volume counts as sparse. The volume is resolved from the file's actual
+mount point; unknown or inaccessible allocation modes conservatively count as sparse too.
+An ordinary local Windows file without those attributes uses eager SetLength allocation.
+Memory has no volume exposure; the capacity fake supplies
 both NTFS and Unix behaviours independently of the host. E0=F+W+K and
 E=E0+max(1 MiB,ceil(E0/4)). F covers discard itself;
 W covers reclamation until the engine truncates its WAL; K covers engine dirty-page
@@ -8714,7 +8728,7 @@ new owned sequences, retirement intents and catalog counters. Declaration and me
 supply these counts, with one full page per record. Admission requires
 N=R+J+ceil((R+J)/4)+V+E. Before every root/copy bracket the watchdog requires
 D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
-unflushed allocation bytes, capped at the data pool capacity because eviction or an engine
+unflushed allocation bytes only for sparse data growth, capped at the data pool capacity because eviction or an engine
 checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
 Copy-owned allocation counts accumulate until a successful forced checkpoint flushes them;
 that checkpoint resets both the pending allocation and WAL counters. PageCount/FreePageCount
@@ -8727,10 +8741,17 @@ copy brackets contribute to neither sample difference and can never inflate the 
 prepared or pending allocations. Split bounds are never accumulated as actual lifetime allocations. Unix sparse file
 extensions are therefore charged even when the volume probe cannot see the unwritten holes.
 Immediately before the catalog storage bracket, after uniqueness/FK validation, snapshot
-admission and record encoding, a final probe requires V+E plus those pending bytes.
+admission and record encoding, a final probe requires V+E plus those pending bytes only for sparse data growth.
 A refusal discards online with CS03402 and needed/available bytes. Reclamation after both
 a watchdog stop and successful publication retains the same headroom. The final residual
-risk is other writers consuming space faster than one bracket while the migration runs, and the engine-wide disk-full behaviour that applies to every workload.
+risk is other writers' WAL and data allocations exceeding E's margin, max(1 MiB,ceil(E0/4)),
+during copying and during the whole reclamation drain after a stop or publication.
+Other writers' WAL can accrue from C until truncation while an in-flight, possibly stalled,
+reclamation bracket delays the checkpoint; W bounds reclamation's own WAL, and E's margin
+absorbs the other writers' growth. Cheap file/volume probes cannot establish every backing
+allocation policy: undetected copy-on-write, deduplication, thin provisioning, remote-server
+backing policies, reparse-target allocation modes and changes after probing remain risks,
+along with the engine-wide disk-full behaviour that applies to every workload.
 The watchdog and WAL counters live in the existing provisioning-only context slot, leaving
 ordinary statement context/metrics sizes and allocation budgets unchanged.
 

@@ -194,16 +194,17 @@ internal sealed partial class SqlSchemaProvisioner
             JointMetrics = statement.Metrics;
             BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken);
             AdmitJointSpace(migration.JointPlan!, migration.Intent, cancellationToken);
+            bool sparseGrowth = _database.Engine.SparseDataGrowth(_database.Name);
             statement.ConfigureCopySpace((touches, allocations, unflushed, prepared) =>
             {
                 JointSpaceDiscardBytes = JointEngineReserve(prepared);
                 long reused = Math.Min(allocations, _database.DataStorage.PageManager.FreePageCount);
                 // Eviction and engine checkpoints may have flushed earlier copy
                 // allocations. The unwritten backlog cannot exceed the data pool.
-                long pending = Math.Min(checked(unflushed * Page.Size), _database.Engine.EngineOptions.BufferPoolCapacity);
+                long pending = sparseGrowth ? Math.Min(checked(unflushed * Page.Size), _database.Engine.EngineOptions.BufferPoolCapacity) : 0;
                 CheckJointSpace(checked(JointBracketBytes(touches, allocations - reused) + pending + JointSpaceDiscardBytes));
             }, unflushed => CheckJointSpace(checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
-                Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity))), _database.TableReclamation.CaptureAllocationCount);
+                (sparseGrowth ? Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity) : 0))), _database.TableReclamation.CaptureAllocationCount);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
             await executor.ExecuteJointMigrationAsync(migration.JointPlan!, migration.Schema, statement,
                 phase => JointStage?.Invoke(phase), cancellationToken).ConfigureAwait(false);
