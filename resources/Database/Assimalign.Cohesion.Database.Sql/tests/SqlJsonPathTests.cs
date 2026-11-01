@@ -437,7 +437,7 @@ public sealed class SqlJsonPathTests
         await using var reopened = SqlDatabaseEngine.Create("json-format", new() { StorageStrategy = storage.CaptureDurableImages() });
         // Act / Assert
         var refusal = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await reopened.OpenDatabaseAsync("db", CancellationToken.None));
-        refusal.Message.ShouldContain("supports only format 33", Case.Sensitive);
+        refusal.Message.ShouldContain("supports only format 34", Case.Sensitive);
     }
 
     private static SqlExpression Expression(string source)

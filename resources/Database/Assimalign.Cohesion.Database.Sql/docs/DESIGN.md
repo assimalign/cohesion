@@ -243,7 +243,7 @@ and fresh READ COMMITTED transactions, with deterministic monitor-entry counters
 
 CREATE [UNIQUE] INDEX accepts WHERE with an immutable Boolean row predicate. The engine
 stores canonical text, column dependencies and exact function-call identities in index
-extension 3. Current catalog/record-space format 33 refuses all earlier files before data recovery;
+extension 3. Current catalog/record-space format 34 refuses all earlier files before data recovery;
 compiled-schema v11 adds CompiledSchemaIndex.Predicate and refuses earlier artifacts.
 No upgrade reader or wire change is introduced. Defaults remain unconditional indexes and
 no predicate. FALSE and UNKNOWN rows have no entry. A partial UNIQUE index permits repeated
@@ -3307,8 +3307,8 @@ database name, and a shape the shipped SQL DDL surface can represent. It then
 reconstructs or reads the last canonical catalog state, uses
 `SqlSchemaMigrationPlanner` from `Database.Sql.Schema` for deterministic ordering/destructive gating, and
 `SqlMigrationScriptGenerator` for parser-validated engine requests. Supported
-steps are table, column, and secondary-index add/drop, plus validation-only column changes;
-operations requiring a rewrite and advanced objects (principals/grants) fail before execution rather than
+steps are table, column, and secondary-index add/drop, column changes and joint TYPE rewrites;
+advanced objects (principals/grants) fail before execution rather than
 recording a false applied hash. Foreign keys and checks now render into provisioning
 DDL and persist in the table catalog; unique declarations use unique indexes. Every message names
 the engine and the database. A plan the planner refuses (a destructive step the schema does not
@@ -3359,9 +3359,9 @@ DDL forces this path; a zero-step plan refreshes the marker. Verify mode reports
 without writing it. After all statements, the live catalog is checked once more against the
 declaration, so a concurrent name collision cannot be recorded as convergence. The marker is
 saved last with the generation captured before that check, which the catalog checks
-under its metadata lock. A failed or crashed multi-statement apply leaves earlier committed steps
+under its metadata lock. For plans without a TYPE rewrite, a failed or crashed multi-statement apply leaves earlier committed steps
 visible; recovery restores their counter atomically with their DDL, and the next Build plans only
-the uncommitted tail. There is no multi-statement atomicity claim.
+the uncommitted tail. That per-step path makes no multi-statement atomicity claim.
 
 The snapshot covers ordered columns, storage types and bounds, named SQL types/domains, effective
 primary-key nullability, literal DEFAULTs, composite primary keys, ordinary and unique indexes,
@@ -3370,7 +3370,7 @@ the desired spelling so the planner does not invent changes. The desired CLR row
 primary-key name are retained when the catalog's corresponding structure matches; neither is SQL
 catalog metadata. E3 domains are engine registrations made before provisioning, so registered
 declared domains are included in the snapshot even when no table exists; their planner operations
-emit no DDL. Principals/grants and ALTER metadata requiring rewrites remain explicitly refused.
+emit no DDL. Principals/grants remain explicitly refused. TYPE plans use the joint boundary below.
 
 `table.Default(selector, value)` renders a typed C# value through the schema package's shared
 renderer; `table.DefaultSql(selector, sqlLiteral)` supplies a raw SQL literal. Strings are values
@@ -3448,6 +3448,17 @@ engine's Build-complete gate prevents a batch during schema/script reconciliatio
 worker remains independent: its old snapshot can postpone reclamation, but reclamation never
 takes its apply gate or table reservations. DROP against a pending table waits through the existing
 admission/lock-manager path; ordinary ownership and dependency refusals still apply afterwards.
+
+Reclamation yields before every owner's bracket when the data journal is due for a checkpoint
+(size or interval) or the engine has a checkpoint wake pending (#1447). This changes every SQL
+DROP, TRUNCATE and rewrite cleanup: retired pages wait while the checkpointer gets an idle
+storage bracket boundary. No live object, reader fence or durable retirement intent changes.
+The run lock serializes reclamation, so only the single bracket already open can cross the
+size threshold; subsequent owners in that pass and all later polls yield. Once that bracket
+finishes, reclamation causes zero refusals and the next due checkpointer poll can truncate.
+A stalled open bracket can still refuse multiple attempts, but cannot append another bracket's
+WAL; there is no elapsed-time or absolute attempt-count promise while it remains open.
+The checkpointer, journal truncation, write-back and page allocation paths are unchanged.
 
 Before this change, DROP's Exclusive object lock excluded writers (IntentExclusive) but plain
 SELECT did not take a table lock. An in-flight scan could skip pages the statement freed; the
@@ -4616,7 +4627,7 @@ project reference or InternalsVisibleTo change is required.
   format, no upgrade path.** The catalog stores the format version of the whole
   data file set, rows and the index trees that ride it (a kind-4 record for
   versions 1–3, a kind-8 record from version 4). The engine reads and writes
-  format 33 only: format 6's stamped rows in per-object page chains whose index keys use the
+  format 34 only: format 6's stamped rows in per-object page chains whose index keys use the
   temporal identity encoding (#1099, below), in index trees of B-tree page format
   2, which order entries by key, entry reference and writer (#1194,
   `Database.Indexing` DESIGN), decoded through each table's physical column
@@ -7593,6 +7604,7 @@ bounded peer-sent names) are in the area's
 | 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |
+| 27 | `TableReclamationYielded` | Verbose | — | `engineName`, `database`, `objectId` (each poll yielding to a due or pending checkpoint) |
 | 25 | `TransactionCleanupFailed` | Warning | — | `transactionId`, `exceptionType`, `exceptionMessage` (bounded to 1024 characters) |
 
 `Sessions = 0x1`; `Statements = 0x2`. Provisioning has no keyword. Id 17 stays retired.
@@ -8542,12 +8554,12 @@ leaving the durable intent publicly pending until reclamation frees its pages. T
 TYPE and the maintenance RewriteTableAsync path. The shared copier publishes the logical description,
 indexes, generation and optional script receipt in one transaction. Older snapshots retain the
 old owner; stale writers retry with CS04006. Cancellation after publication cannot undo it.
-The populated-table worker handoff and expanded crash/wire convergence coverage remain SQ-A3.
+Typed-schema worker handoff and joint crash/wire convergence are described in SQ-A3 below.
 
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 33); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 34); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8558,6 +8570,270 @@ race, and inject failure/cancellation at each preparation stage to verify owners
 TYPE crash-image tests reopen success and cancellation images under all three durability policies,
 checking complete old/new definitions, rows, unique-index seeks and abandoned-owner reclamation
 through copy checkpoints and cleanup.
+
+#### Typed TYPE migrations: unpublished preparation and joint publication (#1447, SQ-A3)
+
+Every compiled-schema apply containing a physical TYPE rewrite uses one joint executor:
+empty-table Build, RunMigrationsInline, ApplySchemaAsync and populated-table worker work.
+Other migrations retain decision 49a's per-step executor; single-statement TYPE retains SQ-A2.
+Precision and widening length changes keep 49a's existing path unless another operation in
+the migration requires TYPE. Every VARCHAR narrowing can trim assignment values and uses
+TYPE, even if the current values already fit; CHAR width changes also require a rewrite.
+This classification reads metadata only. Without a TYPE rewrite anywhere in the plan, a
+changed default retains the base generator's CS03105 refusal before intent save. A joint
+plan carries every final default, including changes to columns with no TYPE change.
+The generator lowers type, default and nullability changes separately and never advertises
+a reverse TYPE statement as compensation. Same-name compiled domains are diffed through their
+effective storage facets so their referring columns cannot be skipped.
+
+Deferred Build binds metadata and probes Storage.HasOwnerPages. It checks only a constant-time
+space floor in stored-table size; precise owner snapshots and tree walks run on the worker. Open does not scan data for joint
+provisioning. Empty-table work runs inline. RunMigrationsInline and a declaration containing
+any script force the typed migration inline too: such a populated Build copies rows synchronously.
+One read-committed transaction reserves owned sequences, then every touched old table in ascending
+identity order, bounded by LockTimeout, before queueing. The closure includes both sides of old
+and final FKs, including a removed/re-pointed old parent. Build takes the non-definition metadata
+lease while EnterApply excludes session DDL, then transfers it with the table reservation;
+all migration and user object waits use the lock manager with their actual transaction owner.
+The provisioning queue monitor never spans work or a lock wait. The code at reservation records
+the complete lock/latch order. DML on untouched tables remains available throughout preparation.
+Definition DDL (views, functions, domains and schemas) is refused database-wide while the
+joint lease is held, from Build through queue time (including behind migrations of other
+databases on the engine) until worker completion. Build takes the lease so unrelated definition
+DDL cannot invalidate the target before the worker starts. Session CREATE TABLE, CTAS, CREATE
+VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an unpublished target name
+(CS03404, case-insensitive schema/name matching). Column rename is the only other rename in
+the dialect and does not enter this namespace. Planning checks all table names against tables,
+views and sequences, refusing CS03105 before intent save; publication rechecks that namespace
+under the catalog monitor before its commit, using the same collision rules as catalog load,
+excluding permanently abandoned owned sequences. Those surrender their names in the joint
+publication transaction, as CREATE TABLE does; planning also skips them on the 49a path.
+Implicit CREATE TABLE / ADD COLUMN identity-sequence candidates skip pending joint table names,
+including suffixed candidates. PostgreSQL similarly checks its shared relation
+namespace before creation (src/backend/catalog/heap.c:1191-1198) and rename
+(src/backend/commands/tablecmds.c:4362-4367); SQL retains its own table/view/sequence namespace.
+Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 through both the thrown
+diagnostic and Provisioning before an intent is saved. A reservation timeout uses CS03402 in
+both places, retaining its lock-manager cause rather than throwing an unrelated timeout code.
+
+Space admission has two phases. Before saving kind 9, Build checks only
+F = 1 MiB + (ceil(I / 3072) + 4) * (5*B + 168), where I is the UTF-8 byte length of
+the serialized intent and B = 8192. Catalog kind-9 chunks hold 3 KiB; this reserves a data
+page plus full pre-image/delta frames for both deleting a kept intent and writing its replacement,
+four directory/counter pages, and 1 MiB
+for encoding/checkpoint headers. F depends on declaration size, never stored table size:
+Build takes no owner-directory snapshot, visits no data/index page and decodes zero rows.
+A floor refusal uses CS03402 online and preserves a kept intent without writing it.
+
+Before the first prepared write, the worker measures each rewritten table's actual heap slots,
+record bytes and encoded component lengths, without materializing values or invoking conversions.
+Stable owner-checked record copies tolerate concurrent pruning; one temporary raw record is
+retained at a time. It walks B-tree format-2 child links and measures leaf payload high-water
+bytes plus directory bytes, conservatively including payload orphaned by pruning until the
+next insertion compacts it. This avoids racing a shifted leaf directory. CHAR key lengths exclude
+padding. Storage's public owner directory omits index pages; the local read-only walk avoids a
+new public API or shipped friend grant. Cost is O(rewritten record bytes + index pages), with one
+extra source pass before copying; retention is O(index pages + columns), not decoded rows.
+Frozen missing tails use their encoded literal width. Adjacent FK tables, dropped tables and
+untouched owners add no replacement allocation. Cancellation is observed per page. A matching
+resumed intent repeats admission before any prepared write; Build still reads zero data pages.
+
+For each final column, unchanged values contribute their measured encoded bytes (1x).
+Built-in conversions to TEXT/VARCHAR use the source's maximum rendered width, with four bytes
+for the string tag, collation and terminator: BOOLEAN 5, TINYINT 4, SMALLINT 6, INT 11,
+BIGINT 20, DECIMAL 31, REAL 16, DOUBLE 25, DATE 10, TIME 16, timestamp 27, timestamp with
+zone 33, INTERVAL 32 and UUID 36 ASCII characters. Binary hex output uses at most twice the
+measured component bytes plus four per row. Numeric and temporal targets use encoded fixed
+widths (DECIMAL uses its 33-byte maximum component). Encoded NULL tags are counted separately:
+NULL remains one byte and never invokes a cast. Growth bounds apply only to potentially
+non-NULL values. CHAR(n) adds only possible ASCII padding: max(0, n-m) for CHAR(m), n for
+TEXT; successful built-in scalar/hex output pads to n (longer output refuses assignment).
+CHAR keys exclude that padding. Added literal defaults contribute their actual encoded value; expression defaults contribute the fixed
+encoded width of their result type (or one byte when variable width is opaque). Added NULLs
+cost one byte. JSONB to TEXT or JSON includes the extra collation byte. Application casts and other conversions without a knowable bound contribute 1x
+upfront, while retaining known minimum CHAR padding. No target's declared VARCHAR/TEXT/JSON
+maximum is treated as stored data, and there is no whole-row cap that can hide another
+column's growth.
+
+Let H be measured heap pages, M the measured record/slot bytes and M' the sum of projected
+components plus 29 bytes per row for stamps, owner and slot. Prepared heap pages are
+ceil(H * max(M,M')/M). Retained indexes scale measured pages by max(1, projected/actual leaf
+entry bytes), applying only converted-column growth to the measured key bytes. New indexes
+use projected key bytes plus 28 bytes per entry, 50% leaf occupancy, and internal levels at
+minimum fanout three. Empty tables allocate no heap and one page per index root. R is the
+prepared page count, less reusable FreePageCount capped at that count, times B=8192. The 25% margin below covers packing estimation. Regression
+fixtures require R within 3x the measured copy allocation, independently of the explicit WAL
+and catalog reserves; those fixed reserves dominate tiny tables and are not row-width factors.
+
+Every 64-row bracket can append one pre-image (including spill) and one committed delta/image
+per page: each payload is at most B+8 and each frame adds 38 bytes, giving 2(B+46).
+A row touches at most two heap pages plus 4h+3 pages per index, including split children and
+sibling links. For the watchdog, h is each prepared tree's actual height, read along its leftmost path
+before each bracket, plus the maximum growth that bracket can cause. Root identities never
+change on splits. The largest key encoded so far bounds separator width and minimum split
+fanout; a root with room for all of the bracket's separators cannot grow. Heap touches and
+allocations use the batch's encoded record/slot sizes. Heap touches additionally charge one
+existing page per row, because the emptiest-page search can fill a different old gap for each
+row; the charge is rows plus allocated pages. Retained
+trees use their measured heights in the admission WAL estimate. C is the maximum 64-row
+page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, and K the
+number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
+its brackets, including their begin/commit frames; existing WAL and writes between brackets
+never trigger its checkpoint. J = min(Q*2(B+46)+152K, 16 MiB + max(C,T)*2(B+46)+152).
+The 16 MiB threshold is 1/16 of the engine's default 256 MiB: twice the previous copy allowance,
+while bounding the WAL reserve independently of a large database. Checkpoints flush the shared
+pool and stall every database writer under the apply gate, including untouched tables; they
+can also increase subsequent full-page images. This deliberate stall cost buys bounded copy
+WAL. Busy storage brackets, including reclamation outside the apply gate, retry the same
+checkpoint after a cancellation-aware delay until it succeeds. No checkpoint is skipped.
+Peak-WAL tests sample at durable commit, before truncation, and assert the stated J overshoot;
+a checkpoint-disabled negative control must violate the bound. Reclamation-backlog tests hold
+a real bracket open before inline apply, including a retry after failed preparation.
+
+One engine reserve E survives copying, discard and successful publication. Let P be the
+larger of the old owners' measured page count and the prepared page bound (initially the
+replacement estimate, increased by copy-owned allocated pages and the next bracket's allocation bound),
+O the larger retiring/prepared owner count, B=8192 and C=CheckpointJournalSize.
+One reclamation bracket frees at most 32 pages. Before opening each bracket, reclamation
+yields to a due or pending checkpoint, including between owners in the same pass. Only the
+single in-flight bracket can add WAL past C. The size due accessor counts bytes appended since
+the last completed checkpoint, excluding its own record, so even C=1 permits progress.
+A due reclamation bracket sets CheckpointNeededSignal after commit closes it: the worker can
+retry its refused attempt immediately. Because the next bracket yields while due persists,
+this sends one retry wake per checkpoint cycle; yielding polls never send wakes.
+Verbose event 27, TableReclamationYielded, makes each stalled drain poll observable.
+Its complete two-image/page and framing bound is
+U=32*2*(B+46)+152=527384 bytes, independent of O, poll cadence and refused attempts. Define
+W=min(P*(B+46)+152*(ceil(P/32)+O), C+U), or the whole first term if C=0.
+The 152-byte framing allowance includes the checkpoint record's 38-byte base and the bracket's
+38-byte Begin and Commit frames; an active-writer list consumes the other-writer margin below.
+Let K=BufferPoolCapacity+1 MiB on strategies whose data-file extensions can be sparse,
+and K=0 otherwise. The file strategy conservatively uses sparse growth on non-Windows platforms.
+On Windows it decides per database data file and its containing directory: COMPRESSED,
+SPARSE_FILE or INTEGRITY_STREAM on either, a UNC path (including extended UNC and \\wsl$),
+or a remote/network volume counts as sparse. The volume is resolved from the file's actual
+mount point; unknown or inaccessible allocation modes conservatively count as sparse too.
+An ordinary local Windows file without those attributes uses eager SetLength allocation.
+Memory has no volume exposure; the capacity fake supplies
+both NTFS and Unix behaviours independently of the host. E0=F+W+K and
+E=E0+max(1 MiB,ceil(E0/4)). F covers discard itself;
+W covers reclamation until the engine truncates its WAL; K covers engine dirty-page
+capacity; the margin covers cleared-page deltas, headers and metadata. This is engine
+headroom derived from engine parameters, without predicting each reclamation write.
+Reclamation now yields as described above; write-back, truncation and allocation are unchanged.
+
+The publication bound V is F plus (old/new kind-6 chunks + catalog record bound)*(5B+168).
+The record bound includes table/index descriptions, registrations, dependent views, old and
+new owned sequences, retirement intents and catalog counters. Declaration and metadata
+supply these counts, with one full page per record. Admission requires
+N=R+J+ceil((R+J)/4)+V+E. Before every root/copy bracket the watchdog requires
+D+E, where D=(A-min(A,FreePageCount))*B+touches*2(B+46)+152, plus copy-owned
+unflushed allocation bytes only for sparse data growth, capped at the data pool capacity because eviction or an engine
+checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
+Copy-owned allocation counts accumulate until a successful forced checkpoint flushes them;
+that checkpoint resets both the pending allocation and WAL counters. PageCount/FreePageCount
+deltas plus reclamation frees are sampled at both ends of each copy/root bracket, under its
+apply gate. A private reclamation accounting monitor pairs its allocator releases at commit
+with the reclaimed-page counter update, making each sample exact across concurrent frees.
+The monitor covers no page walk, discovery, coordinator operation or pre-commit observer;
+its lock order is accounting monitor then storage commit/allocator locks. Frees between
+copy brackets contribute to neither sample difference and can never inflate the copy's
+prepared or pending allocations. Split bounds are never accumulated as actual lifetime allocations. Unix sparse file
+extensions are therefore charged even when the volume probe cannot see the unwritten holes.
+Immediately before the catalog storage bracket, after uniqueness/FK validation, snapshot
+admission and record encoding, a final probe requires V+E plus those pending bytes only for sparse data growth.
+A refusal discards online with CS03402 and needed/available bytes. Reclamation after both
+a watchdog stop and successful publication retains the same headroom. The final residual
+risk is other writers' WAL and data allocations exceeding E's margin, max(1 MiB,ceil(E0/4)),
+during copying and during the whole reclamation drain after a stop or publication.
+Other writers' WAL can accrue from C until truncation while an in-flight, possibly stalled,
+reclamation bracket delays the checkpoint; W bounds reclamation's own WAL, and E's margin
+absorbs the other writers' growth. Cheap file/volume probes cannot establish every backing
+allocation policy: undetected copy-on-write, deduplication, thin provisioning, remote-server
+backing policies, reparse-target allocation modes and changes after probing remain risks,
+along with the engine-wide disk-full behaviour that applies to every workload.
+The watchdog and WAL counters live in the existing provisioning-only context slot, leaving
+ordinary statement context/metrics sizes and allocation budgets unchanged.
+
+An admission CS03402 includes N and available bytes; no prepared write precedes that check.
+A watchdog CS03402 includes its bracket/publication bound, pending allocation bytes, E and available bytes. Either refusal discards kind 9 and every
+prepared object, releases reservations and leaves the old schema online.
+A later successful apply or matching/rollback Build clears an earlier Provisioning failure,
+including an already-applied schema skip. Disposed, offline, corrupt and canceled planning
+retain their own identities and precedence; only data-independent refusals become CS03105.
+
+Windows probes the actual directory with source-generated GetDiskFreeSpaceExW, including mount
+points and UNC shares, normalizing a trailing backslash and long-path prefix. Unix uses
+DriveInfo for that directory; memory strategies report no volume limit. Admission is an
+estimate, not a reservation: the per-bracket watchdog supplies the copy guarantee, with the
+other-writer race described above. The explicit unsafe-storage offline exception below remains.
+
+The final table shapes, new tables and all their indexes are unpublished. Changed CHECKs and
+defaults bind against those shapes before any row is read. SQ-A1's bounded 64-row copier and
+SQ-A2's assignment conversions populate fresh owners. NOT NULL, domains, CHECKs and unique
+indexes validate while copying; incoming, outgoing and self FKs validate against the complete
+prepared state. Ad-hoc indexes survive unless their dependencies would be invalidated, which
+refuses before preparation. Views depending on changed/dropped columns retain their refusal.
+
+Publication reuses SQ-T1's snapshot gate, coordinator snapshot pin and catalog storage bracket.
+One commit writes table/index/constraint descriptions, registrations, dependent view identities,
+retirement/drop reclamation records, the applied kind-6 marker, removal of prepared kind-14
+records and deletion of the kind-9 intent. Directory allocations precede that commit. Old
+snapshots retain old owners/layouts; stale writers abort retryably with CS04006.
+
+Every failure before publication discards the kind-9 intent while leaving each unpublished
+owner's durable kind-14 record eligible for reclamation. No step is compensated, no old object
+or committed row is removed, all reservations are released and the old applied marker remains
+trusted. CS03402 reports this failure through Provisioning, Hosting health and DeferredStepFailed.
+The database remains online at its old schema; this deliberately differs from 49a's CS03104
+step failure/offline contract. It does not retry automatically. Explicit apply or a subsequent
+Build declaring the new target may try again. Late cancellation cannot reverse a publication.
+
+Read errors, conversion/constraint failures, cancellation and prepared data-page write errors
+stay online when no independent kernel/worker latch fired. Storage policy is unchanged:
+unsafe journal append/frame/drain/flush failures (including ENOSPC, zero-byte failure and any
+possibly partial write), an unconfirmed commit/durability wait (JournalFlush), failed durable
+data-file flushes (DataFlush), and failures after issuing a checkpoint header-slot write
+(HeaderWrite) take the file sets offline. Engine-wide failure windows for page write-back,
+checkpoints, write-ahead flushing and version purge retain PageWriteBackFailures,
+CheckpointFailures, WriteAheadFlushFailures and VersionPurgeFailures. A second consecutive
+failed checkpoint at the journal size cap retains JournalSizeLimit. 49a step failure still
+uses ProvisioningFailure; interrupted open-time recovery still uses RecoveryInterrupted.
+These are the existing StorageOfflineCause conditions; the joint path never requests
+ProvisioningFailure. This is the explicit availability exception: an unknown WAL/commit outcome
+cannot be safely retried online (PostgreSQL src/backend/access/transam/xlog.c:2525-2532
+raises PANIC on WAL write failure). Admission reduces predictable space failures; it does
+not clear or weaken a latch. Other corruption/recovery fences retain their existing policy.
+An unconfirmed joint publication reports CS03403 and an unknown old/new outcome, through
+Provisioning and the thrown diagnostic. It leaves all new trees and directory records in
+place; recovery alone decides the schema. Joint cleanup never turns it into "schema unchanged".
+
+After a crash, recovery reclaims abandoned owners. A matching Build retains the kind-9 target
+and replans preparation from the old marker. An old/different/no-target Build or plain open
+discards the intent and opens the old schema without fencing. After publication it opens the
+new schema. Rollback after success plans an ordinary reverse migration: every unproven conversion,
+length/precision/scale narrowing and rounding requires destructive opt-in, refused with CS03105
+before any step otherwise. The planner's conservative exact whitelist includes integer widening,
+exact integer-to-float widening, REAL to DOUBLE and non-narrowing same-type facets. All
+domain conversions require opt-in because application casts are unknown to the schema planner;
+existing metadata-only gating stays unchanged.
+
+Kind 9 identifies joint jobs with Joint/ step kinds; kind 6 and kind 14 keep their encodings.
+The changed kind-9 meaning requires SQL catalog/record-space format 34 (#1152): every earlier
+format, including 33, is refused by the existing read-only gate, with no upgrade reader.
+Compiled-schema v11 stays current. There is no new public interface, reference or wire message.
+Deterministic row-decoding counters prove zero Build visits with 1 and 1,024 stored rows.
+Crash images, counter-driven nonparallel admission stress, rollback Builds, all six data refusal
+categories, lifecycle/fault injection, old snapshots and both wire transports cover the boundary.
+Reference anchors: PostgreSQL src/backend/commands/tablecmds.c:4667-4691 takes exclusive
+rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference code is copied.
+
+| Code | Condition |
+|---|---|
+| CS03105 | Permanent metadata/planning refusal before intent save |
+| CS03402 | Joint preparation/space admission failed; old schema retained unless a storage latch fired |
+| CS03403 | Joint publication commit unconfirmed; reopen/recovery decides old or new |
+| CS03404 | Session relation creation/table rename names a relation reserved by a pending joint plan |
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
@@ -8614,7 +8890,7 @@ or the complete compact layout/index set, and abandoned/retired owners converge 
 existing reclamation worker. Interrupted preparation is abandoned; the caller retries explicitly.
 
 The shared copier accepts an internal replacement-definition function, row transform and final
-validation callback for #1447. TYPE uses these hooks; its deferred schema intent is a later run.
+validation callback for #1447. TYPE and joint typed migrations use these hooks.
 There is no second type-only copier. Physical maintenance adds no SQL syntax, wire
 message, public interface, visibility grant or project reference. The maintenance API uses a
 generated SqlObjectName value object for decoded schema and table components, preserving case-insensitive
@@ -8730,7 +9006,7 @@ would tell every caller the value is changeable and then guard that promise at
 runtime.
 
 Table metadata extension version 2 introduced one collation identifier per column
-after the existing constraints. Current format 33 requires the complete table extension 8 record,
+after the existing constraints. Current format 34 requires the complete table extension 8 record,
 including resolved-call vectors, identity facets and frozen missing-value literals described below. Column additions,
 drops, and restart preserve explicit overrides. An index inherits its key
 columns' effective collations; the SQL engine verifies index eligibility and
@@ -8808,7 +9084,7 @@ codec, the key encoding and every comparison read, so they do not consult the do
   column (the primary key's implicit NOT NULL).
 - **Persistence: table extension version 4** (data-storage format 7). After the dropped
   ordinals, one optional string per live column, NULL for a column of a built-in type,
-  which this catalog always writes. Current format 33 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
+  which this catalog always writes. Current format 34 also requires extension 8's OnUpdate byte, alongside call vectors, identity facets and the missing-value literals and TYPE default-assignment flags introduced in extension 7;
   the format gate refuses earlier databases rather than loading their definitions. A persisted blank
   name fails the load with `SqlCatalogException`, as does a blank `domainName` at the
   column's constructor (`ArgumentException`).
@@ -9647,8 +9923,8 @@ Three through eight eligible stored-table relations use subset dynamic programmi
 all ordered binary partitions, including bushy trees and Cartesian partitions. Each subset
 keeps one minimum-cost tree; its cardinality depends only on the relation set and mandatory
 predicates, so child costs are reusable. The default exact limit is eight relations. One/two
-relations retain the previous costing/allocation path. Larger graphs retain bound order until
-SQ-Z2 supplies its bounded heuristic. Search allocates no persistent statistics or public API,
+relations retain the previous costing/allocation path. Larger graphs use the bounded heuristic
+below. Search allocates no persistent statistics or public API,
 changes no format or wire contract, and introduces no diagnostic identity.
 
 The legal graph deliberately implements a conservative subset of PostgreSQL's outer-join
@@ -9662,8 +9938,8 @@ input filters. Normalized seeks apply their local filter in the joined ordinal f
 the probe bypasses the input reader; scan fallback uses the input reader's filter instead.
 Reference-identity deduplication prevents repeating bound local conjuncts during graph assembly.
 Volatile and set-returning expressions are never moved into a different evaluation level.
-UPDATE FROM, DELETE USING and MERGE search only their source graph (two through eight
-sources); the target remains outside it at the original target/source boundary. MERGE's root
+UPDATE FROM, DELETE USING and MERGE search only their source graph (exact for two through
+eight sources, greedy above eight); the target remains outside it at the original target/source boundary. MERGE's root
 outer kind, ON predicate and presence tracking remain unchanged.
 Flat UPDATE/DELETE WHERE conjuncts referencing both target and sources are a dependency
 barrier: source probes are parameterized by the target row, and replacing them with an
@@ -9686,9 +9962,14 @@ probe takes preference over an unindexed product estimate; hash work can still w
 Proven partial indexes remain eligible only with a
 binding proof. No persisted distribution or distinct-count claim is implied.
 
-Equal-work ties compare estimated retained bytes before ascending leaf ordinals and the
+Costs within a relative tolerance of 1e-12 compare estimated retained bytes before ascending leaf
+ordinals and the
 deterministic subset enumeration. The estimate includes row width, padded full ordinal
-frames, bucket-array growth and simultaneously retained builds; it is not a memory proof.
+frames, bucket-array growth, nested-loop inner lists and simultaneously retained builds; it is not a
+memory proof. Flat loop lists include decoded row widths and reference-array growth. An
+unknown/incomplete driver count never permits moving that streamed input into a retained buffer.
+SELECT lists retain their existing budget-free execution; these estimates only restrict optional
+rewrites.
 PostgreSQL costsize.c:4364-4400 and nodeHash.c:683-720 likewise distinguish build work and
 tuple width. A separate conservative certificate permits zero additional retained bytes
 against the pre-search costed plan: streaming hash builds retain the same input, NULL-key
@@ -9715,17 +9996,102 @@ seek fallback still applies the residual. Joins keep their sort (SQ-K3 remains s
 
 Deterministic tests assert 3/15/63/255 states and 2/50/602/6050 ordered partitions at
 2/4/6/8 inputs (2 exercises the search kernel; production retains its old two-input path).
-An exhaustive four-input binary-tree oracle verifies the bushy optimum. Generated data
+An exhaustive four-input binary-tree oracle verifies the bushy optimum. Finalized subset summaries
+memoize peak/output bytes, width, left-deep shape, expression keys and flat retention. Partition
+memory is computed in O(1) only on cost ties; losing partitions allocate no tree or step.
+Nonnegative child costs prune physical path construction without changing partition counters. Empty
+crossings skip index/hash extraction, and hashes that cannot win skip key extraction. Generated data
 compares selected plans with forced bound plans for duplicates, NULLs, multi-column and
 non-equi joins, grouped/CROSS joins, outer barriers, EXISTS/NOT EXISTS and DML sources.
 A later selective third input reduces tested pairs from 12,800 to 160, and target-parameterized
 DML retains three examined rows at 16/500/2000-row sources rather than materializing
-33/1001/4001 rows. These are work counters, not duration thresholds. PostgreSQL reference anchors (local clone):
+33/1001/4001 rows. These are work counters, not duration thresholds. PostgreSQL reference anchors
+(local clone):
 src/backend/optimizer/README:199-285 (identities, strictness, semi/anti and FULL barriers),
 src/backend/optimizer/path/joinrels.c:355-676 (legality and LATERAL constraints), and
 src/backend/optimizer/plan/initsplan.c:2018-2110 (make_outerjoininfo and FULL's fixed sets).
 src/backend/utils/misc/guc_parameters.dat:1107-1114,1186-1192,1537-1544 keeps the collapse
 defaults of eight and GEQO's distinct threshold of twelve as separate policies.
+
+### Bounded large-join search (#1629, SQ-Z2)
+
+From nine through 64 eligible relations, `greedy_connected` compares every ordered seed pair,
+then repeatedly adds one remaining relation to the chosen component. Connected extensions
+precede Cartesian extensions; work, estimated retained memory and ascending binding ordinals
+settle ties, in that order. This is greedy operator ordering with a left-deep pruning rule:
+there are no bushy alternatives, exact refinement windows, random seeds or restart rounds.
+Left-deep pruning avoids spending search on new materialized trees that SQ-Z1's physical
+memory certificate cannot admit. Physical alternatives are likewise pruned to the bound
+plan's existing index/hash paths when their outer keys are available. New hash builds and
+new index paths are not proposed. The common work function retains the exact search's loop,
+index and hash formulas. An identity-order pushdown candidate always preserves the bound paths,
+builds and buffers and is admissible on equal work. The cheaper certified candidate survives, with
+cost tolerance, memory and binding ordinal settling ties. Every candidate must have no greater total
+estimated work or retention and pass SQ-Z1's physical retention certificate, extended to all
+nested-loop buffers;
+otherwise the original costed plan survives, including expression hash keys, activation
+prefixes, target buffers, partial-index proofs and multiple-match refusals. Flat DML and existing
+hash builds pin order, so only identity pushdown is built for them; their greedy pair count is zero.
+Normalized baselines return bound with zero search counters and no candidate. Their reordered flag
+compares the written tree, including MERGE source/target normalization. Bound work observes real ON
+placement from its own step and WHERE placement after the final product. Bound, identity and greedy
+costs share physical work and interleaved row/work summation.
+
+Both search sizes enter through the same legality proof, including whole-SELECT outer-join,
+derived/view/system, subquery, unsafe-expression and target-dependency barriers. The heuristic
+uses ordinal-indexed component arrays and sorted predicate-reference arrays. Its heuristic limit is
+64 relations: larger graphs keep ordinary bound costing/execution, report join_search=bound, and
+perform no search work or search probes. This is an availability policy, never a statement refusal.
+The eight-input DP keeps its `int` masks and four-bit order representation.
+Tests exercise search at 64 and executable bound fallback at 65. Cardinalities implement the same
+product/selectivity model in logarithms
+to avoid intermediate overflow and NaN when an empty input follows a huge product;
+the 1e100 cap and the existing unknown/incomplete/input-selectivity defaults are unchanged.
+
+For n inputs, seed/extension comparisons are exactly
+`n*(n-1) + (n-2)*(n-1)/2 = (n-1)*(3*n-2)/2`. Total join cost evaluations add
+`2*(n-1)` for real bound costing and identity pushdown. Greedy winner materialization reuses the
+kernel cost and does not evaluate work again. State count is `2*n-1`
+(n inputs and n-1 selected prefixes). With R total predicate references and C physical
+columns, graph search takes `O(n*n*(n+R))` work after the common safety proof/input costing.
+It allocates no candidate object per comparison: working and resulting storage is
+`O(n+P+R+C+L)`, where P is conjunct count and L is the emitted order's character count.
+Input access costing retains its existing bounded probes and catalog-index enumeration.
+All counters use 64-bit integers where quadratic growth requires it; cancellation is checked
+at every candidate. No new planning refusal or diagnostic identity is needed.
+
+EXPLAIN reports `join_search=greedy_connected` for an admitted candidate, including identity
+pushdown; rejected candidates report `join_search=bound`. Both carry `collapse_limit=8`,
+`chosen_order`,
+`reordered`, `search_method=greedy_connected`, `search_states`, `search_pairs`,
+`search_cost_evaluations` and the existing source/target scope. Evidence lives in a separate
+internal derived plan so neither ordinary nor exact-plan allocation sizes grow.
+
+Physical planning measurements surround Cost (snapshot probes included, parse/binding/setup
+excluded), taking minimum current-thread allocation over three warmed rounds. No duration decides an
+outcome. Chain, star, clique and disconnected shapes cover 2/8/16/64 relations and bound fallback at
+65. Eight-relation planning stays below 1 MB for chain/star/disconnected and 2.3 MB for clique; tests
+assert each configuration/shape's three-warmed-round minimum as a ceiling, allowing other platforms
+to allocate less. Larger search fixtures retain the existing polynomial ceilings. The generated differential corpus
+records b6224ec66 chosen order, cost and all counters across 2–8 relation chains, stars, cliques and
+disconnected graphs, including mixed estimates and existing hash/index paths. Separate regressions
+cover the corrected buffer tie-break and memory admission.
+Identity pushdown reduces the 16-relation singleton/40-row-tail fixture from 1,653 to 93 candidate
+pairs and the greedy trap from 2,782,220 to 320, while retaining written order. Legality, output
+columns, volatile/sequence counts, DML multiple-match policy, ordinary allocation guards, formats
+and error identities remain unchanged.
+
+PostgreSQL reference anchors in `C:/Source/repos/postgres/postgres`:
+`src/backend/optimizer/path/allpaths.c:3830-3908` (`make_rel_from_joinlist`, nested sublists
+and the separate GEQO threshold), `:3913-3992` (`standard_join_search` and level DP),
+`src/backend/optimizer/plan/initsplan.c:1396-1413,1538-1563,1741-1756`
+(`deconstruct_jointree`, FROM/JOIN collapse limits and FULL boundaries), and
+`src/backend/optimizer/geqo/geqo_main.c:111-128` plus `geqo_random.c:19-43`
+(seeded random initialization and genetic search). Collapse-limit decomposition was not
+chosen because written sublists can conceal the selective relation; GEQO was not chosen
+because it uses seeded pseudorandom genetic search. This run requires no randomness and
+a fixed bound on comparisons in binding-ordinal order.
+The collapse default of eight remains distinct from PostgreSQL's GEQO default of twelve.
 
 ### Existing costing contract
 

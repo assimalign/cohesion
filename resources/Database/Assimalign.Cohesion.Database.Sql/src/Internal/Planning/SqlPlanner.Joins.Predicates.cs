@@ -342,8 +342,9 @@ internal sealed partial class SqlPlanner
         IReadOnlyList<SqlCatalogColumn> columns, int inner, int? lastInner = null, bool fullFrame = false, int innerMask = 0)
     {
         // Skipping nonmatching pairs must not suppress errors, application calls or lazy scalars.
+        if (condition is null) { return null; }
         var referenced = new HashSet<int>();
-        if (condition is null || !JoinRestrictionColumns(condition, referenced, columns)) { return null; }
+        if (!JoinRestrictionColumns(condition, referenced, columns)) { return null; }
         // Every ON term is skipped for nonmatching hash keys. Derived text has no stored
         // codec guarantee of valid Unicode, even when it appears only in a residual term.
         if (bindings.Any(binding => binding.Source.Derived is not null && referenced.Any(ordinal =>

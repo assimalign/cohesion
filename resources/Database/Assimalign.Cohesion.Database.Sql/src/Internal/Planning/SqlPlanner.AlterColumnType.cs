@@ -10,6 +10,15 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
+    internal SqlBoundExpression PlanMigrationConversion(SqlCatalogTable previous, SqlCatalogColumn column)
+    {
+        var target = column.DomainName is { } name && _functions.Types.TryGetDomain(name, out var domain)
+            ? domain : SqlType.ForStorage(column.Type);
+        return PlanColumnRewrite(previous, column, target, null,
+            null, recastDefault: false).Conversion
+            ?? new SqlBoundColumn(FindColumnOrdinal(previous, column.Name));
+    }
+
     private SqlAlterColumnPlan PlanAlterColumnType(SqlTableReference reference, SqlAlterColumnTypeAction change)
     {
         var table = ResolveTable(reference);
@@ -29,7 +38,7 @@ internal sealed partial class SqlPlanner
             (previous.Collation ?? _catalog.DefaultCollation).Id != (column.Collation ?? _catalog.DefaultCollation).Id;
 
     private SqlAlterColumnPlan PlanColumnRewrite(SqlCatalogTable table, SqlCatalogColumn column, SqlType target,
-        SqlExpression? expression, SqlTableReference reference, bool recastDefault = true)
+        SqlExpression? expression, SqlTableReference? reference, bool recastDefault = true)
     {
         int ordinal = FindColumnOrdinal(table, column.Name);
         var previous = table.Columns[ordinal];

@@ -79,6 +79,18 @@ public sealed partial class SqlDatabase : DatabaseInstance
         {
             return;
         }
+        if (pending.Steps.All(step => step.Kind.StartsWith("Joint/", StringComparison.Ordinal)))
+        {
+            // SQL format 34 gates this new kind-9 meaning from earlier 49a-only readers.
+            // Only the application that still declares this target may resume it.
+            // Recovery reclaims abandoned kind-14 owners; matching Build replans their
+            // preparation from the trusted old marker, retaining the durable intent.
+            // A rolled-back application (or a plain open) discards it without fencing.
+            if (_engine.FindDeclaration(Name)?.Schema is not { } target ||
+                !string.Equals(target.Hash, pending.ContentHash, StringComparison.Ordinal))
+            { await _catalog.DiscardJointIntentAsync(cancellationToken).ConfigureAwait(false); }
+            return;
+        }
         var schema = SqlCompiledSchemaSerializer.Deserialize(pending.CanonicalDocument);
         if (!string.Equals(schema.Hash, pending.ContentHash, StringComparison.Ordinal))
         {
@@ -181,6 +193,13 @@ public sealed partial class SqlDatabase : DatabaseInstance
         // the data set offline, whose hook ends the waits, so both paths end them.
         _storage.OnOffline = error =>
         {
+            // SQ-A3's metadata space admission cannot undo unsafe-storage failures.
+            // Journal append/drain/flush (including ENOSPC and zero-byte failures),
+            // unconfirmed commit, durable data flush, issued checkpoint header write,
+            // engine failure windows (write-back/checkpoint/WAL flush/version purge),
+            // failed-checkpoint journal limit, 49a failure and interrupted recovery
+            // retain the kernel latch. Reads and unpublished prepared-page write refusals
+            // stay online unless an independent kernel/worker latch was raised.
             _catalogStorage.TakeOffline(error);
             _coordinator.AbandonLockWaits(error);
         };
@@ -573,9 +592,9 @@ public sealed partial class SqlDatabase : DatabaseInstance
 
     /// <summary>
     /// Diffs the database against a compiled schema and applies the difference: the schema's
-    /// tables, columns, keys, indexes and constraints, created and changed on a private session
-    /// that stamps them <see cref="DatabaseObjectOwner.Schema"/>-owned, then the schema's hash and
-    /// canonical document recorded in the catalog.
+    /// tables, columns, keys, indexes and constraints, stamped
+    /// <see cref="DatabaseObjectOwner.Schema"/>-owned, and the schema's hash and canonical document.
+    /// A plan containing a TYPE rewrite prepares all changes unpublished and publishes them together.
     /// </summary>
     /// <param name="schema">The desired schema; its name must be the database's.</param>
     /// <param name="cancellationToken">Observed before anything runs and between steps.</param>
@@ -588,14 +607,18 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// The engine's builder declared the database with another schema: the declaration owns the
     /// database (owner decision 56 of 2026-10-09), so its schema changes through the declaration.
     /// Also thrown before changes when an ordinary session DDL statement, another apply,
-    /// verification or deferred provisioning worker already owns admission. Contention never waits.
+    /// verification or deferred provisioning worker already owns admission. Admission contention
+    /// refuses immediately; table reservations may wait under the engine's lock timeout.
     /// </exception>
     /// <exception cref="SqlSchemaMigrationException">
     /// The schema targets another database, declares what the engine has no DDL for (principals),
     /// declares a domain the engine does not register with that base type (<c>CS03105</c>: an
     /// imperative apply cannot add to the engine's frozen type catalog), would adopt an ad-hoc object
     /// (<c>CS03105</c>), needs a destructive step it does not allow (<c>CS03105</c>), or a step
-    /// failed (<c>CS03104</c>, after the completed reversible steps were compensated).
+    /// failed (<c>CS03104</c>, after the completed reversible steps were compensated), or unpublished
+    /// joint TYPE preparation failed (<c>CS03402</c>, with the old schema retained online
+    /// unless a storage latch fired), or publication is unconfirmed (<c>CS03403</c>:
+    /// recovery determines the committed schema).
     /// </exception>
     /// <exception cref="SqlSchemaValidationException">A recorded schema document uses an unsupported format.</exception>
     /// <remarks>
@@ -606,6 +629,8 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// next build. A database declared without a schema, and one the builder did not declare, accept
     /// any schema. The checks run in the order the root base's members use: disposal, the schema,
     /// the token, then the offline refusal, then the declaration.
+    /// Potentially lossy TYPE conversions, including reverse migrations after application rollback,
+    /// require the declaration's destructive-change opt-in before any step runs.
     /// </remarks>
     public ValueTask<SqlSchemaMigrationResult> ApplySchemaAsync(SqlCompiledSchema schema, CancellationToken cancellationToken = default)
     {

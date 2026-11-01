@@ -46,6 +46,38 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
     internal StorageCommitDurability Durability => _durability;
 
+    internal bool UnixSparseGrowth { get; set; }
+    internal override bool SparseDataGrowth(string databaseName) => UnixSparseGrowth;
+    internal long MigrationAvailableBytes { get; set; } = long.MaxValue;
+    internal long VolumeCapacityBytes { get; set; } = long.MaxValue;
+    internal long PeakAllocatedBytes { get; private set; }
+    internal int CapacityFailures { get; private set; }
+    internal long AllocatedBytes
+    {
+        get
+        {
+            lock (_sync)
+            {
+                long bytes = 0;
+                foreach (var streams in _live.Values) { bytes += streams.Data.ChargedBytes + streams.Journal.ChargedBytes + streams.Backup.ChargedBytes; }
+                return bytes;
+            }
+        }
+    }
+    internal override long GetAvailableMigrationBytes(string databaseName)
+        => Math.Min(MigrationAvailableBytes, VolumeCapacityBytes - AllocatedBytes);
+
+    private void OnGrowing(long growth)
+    {
+        long next = AllocatedBytes + growth;
+        if (next > VolumeCapacityBytes)
+        {
+            CapacityFailures++;
+            throw new IOException("Faked volume filled");
+        }
+        PeakAllocatedBytes = Math.Max(PeakAllocatedBytes, next);
+    }
+
     internal int JournalFlushes(string databaseName)
     {
         lock (_sync) { return _live[Key(databaseName, false)].Journal.FlushCount; }
@@ -238,9 +270,9 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
             // without pretending that its unflushed journal survives a power loss.
             Action changed = () => OnDurableChange(catalog);
             Action writing = () => OnWriteStarting(catalog);
-            var streams = (Data: new GatedStream(writeThrough: true, changed, writing),
-                Journal: new GatedStream(writeThrough: _durability == StorageCommitDurability.None, changed, writing),
-                Backup: new GatedStream(writeThrough: true, changed, writing));
+            var streams = (Data: new GatedStream(writeThrough: true, changed, writing, OnGrowing, () => UnixSparseGrowth),
+                Journal: new GatedStream(writeThrough: _durability == StorageCommitDurability.None, changed, writing, OnGrowing, () => UnixSparseGrowth),
+                Backup: new GatedStream(writeThrough: true, changed, writing, OnGrowing, () => UnixSparseGrowth));
             _live[key] = streams;
             if (!catalog) { _images[CreationKey(databaseName)] = (System.Text.Encoding.UTF8.GetBytes(CreationSignature), [], []); }
             var storage = SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
@@ -272,9 +304,9 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
             Action changed = () => OnDurableChange(catalog);
             Action writing = () => OnWriteStarting(catalog);
-            var streams = (Data: new GatedStream(image.Data, writeThrough: true, changed, writing),
-                Journal: new GatedStream(image.Journal, writeThrough: _durability == StorageCommitDurability.None, changed, writing),
-                Backup: new GatedStream(image.Backup, writeThrough: true, changed, writing));
+            var streams = (Data: new GatedStream(image.Data, writeThrough: true, changed, writing, OnGrowing, () => UnixSparseGrowth),
+                Journal: new GatedStream(image.Journal, writeThrough: _durability == StorageCommitDurability.None, changed, writing, OnGrowing, () => UnixSparseGrowth),
+                Backup: new GatedStream(image.Backup, writeThrough: true, changed, writing, OnGrowing, () => UnixSparseGrowth));
             _live[key] = streams;
 
             // Deferred checkpoint per the strategy contract: the engine analyzes
@@ -365,32 +397,50 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         private readonly bool _writeThrough;
         private readonly Action _onDurableChange;
         private readonly Action _onWriteStarting;
+        private readonly Action<long> _onGrowing;
         private byte[] _durable;
+        private int _durableLength;
+        private readonly Func<bool> _sparse;
+        private long _writtenHighWater;
+        internal long ChargedBytes => _sparse() ? _writtenHighWater : Length;
 
         internal int FlushCount { get; private set; }
 
-        internal GatedStream(bool writeThrough, Action onDurableChange, Action onWriteStarting)
+        internal GatedStream(bool writeThrough, Action onDurableChange, Action onWriteStarting, Action<long> onGrowing, Func<bool> sparse)
         {
             _liveBuffer = new MemoryStream();
             _durable = Array.Empty<byte>();
             _writeThrough = writeThrough;
             _onDurableChange = onDurableChange;
             _onWriteStarting = onWriteStarting;
+            _onGrowing = onGrowing;
+            _sparse = sparse;
         }
 
-        internal GatedStream(byte[] content, bool writeThrough, Action onDurableChange, Action onWriteStarting)
+        internal GatedStream(byte[] content, bool writeThrough, Action onDurableChange, Action onWriteStarting, Action<long> onGrowing, Func<bool> sparse)
         {
             // Copy into an expandable stream: MemoryStream(byte[]) cannot grow.
             _liveBuffer = new MemoryStream();
             _liveBuffer.Write(content, 0, content.Length);
             _liveBuffer.Position = 0;
             _durable = (byte[])content.Clone();
+            _durableLength = content.Length;
+            _writtenHighWater = content.Length;
             _writeThrough = writeThrough;
             _onDurableChange = onDurableChange;
             _onWriteStarting = onWriteStarting;
+            _onGrowing = onGrowing;
+            _sparse = sparse;
         }
 
-        internal byte[] CaptureDurable() => (byte[])_durable.Clone();
+        internal byte[] CaptureDurable() => _durable.AsSpan(0, _durableLength).ToArray();
+
+        private void SetDurableLength(int length)
+        {
+            if (_durable.Length < length) { Array.Resize(ref _durable, Math.Max(length, Math.Max(256, _durable.Length * 2))); }
+            if (length > _durableLength) { _durable.AsSpan(_durableLength, length - _durableLength).Clear(); }
+            _durableLength = length;
+        }
 
         public override bool CanRead => true;
         public override bool CanSeek => true;
@@ -407,6 +457,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         {
             FlushCount++;
             _durable = _liveBuffer.ToArray();
+            _durableLength = _durable.Length;
             _onDurableChange();
         }
 
@@ -416,11 +467,13 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
         public override void SetLength(long value)
         {
+            if (!_sparse()) { _onGrowing(Math.Max(0, value - _liveBuffer.Length)); }
+            _writtenHighWater = Math.Min(_writtenHighWater, value);
             _liveBuffer.SetLength(value);
 
             if (_writeThrough)
             {
-                _durable = _liveBuffer.ToArray();
+                SetDurableLength(checked((int)value));
                 _onDurableChange();
             }
         }
@@ -428,11 +481,15 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         public override void Write(byte[] buffer, int offset, int count)
         {
             _onWriteStarting();
+            _onGrowing(Math.Max(0, _liveBuffer.Position + count - ChargedBytes));
+            _writtenHighWater = Math.Max(_writtenHighWater, _liveBuffer.Position + count);
+            int position = checked((int)_liveBuffer.Position);
             _liveBuffer.Write(buffer, offset, count);
 
             if (_writeThrough)
             {
-                _durable = _liveBuffer.ToArray();
+                SetDurableLength(checked((int)_liveBuffer.Length));
+                buffer.AsSpan(offset, count).CopyTo(_durable.AsSpan(position, count));
                 _onDurableChange();
             }
         }

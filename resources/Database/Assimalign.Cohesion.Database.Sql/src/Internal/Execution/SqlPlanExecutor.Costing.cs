@@ -275,7 +275,7 @@ internal sealed partial class SqlPlanExecutor
             }
             if (join.Steps.Count == 0) { return join; }
             // Preserve the allocation/probe contract of one- and two-relation queries.
-            if (join.InputEstimates is null && join.Bindings.Count >= 3 && join.Bindings.Count <= SqlJoinSearch.ExactRelationLimit + (pinFirst ? 1 : 0) &&
+            if (join.InputEstimates is null && join.Bindings.Count >= 3 &&
                 TrySearchJoin(join, pinFirst) is { } searched)
             {
                 // An earlier input can change while a later input's count is observed.

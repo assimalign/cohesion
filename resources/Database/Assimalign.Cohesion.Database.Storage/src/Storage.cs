@@ -332,11 +332,19 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     public long JournalLength => _journal?.Length ?? 0;
 
     /// <summary>
-    /// Gets or sets the journal length, in bytes, at which the storage asks for a checkpoint
-    /// (#1254): the first append that takes <see cref="JournalLength"/> to this size or past it
+    /// Gets the journal bytes appended since the last completed checkpoint, excluding its
+    /// checkpoint record. Before the first checkpoint, includes the whole journal.
+    /// </summary>
+    /// <remarks>A concurrent checkpoint can make this advisory count briefly stale.</remarks>
+    internal long JournalBytesSinceCheckpoint => _journal?.BytesSinceCheckpoint ?? 0;
+
+    /// <summary>
+    /// Gets or sets the appended journal bytes at which the storage asks for a checkpoint
+    /// (#1254): the first append that takes <see cref="JournalBytesSinceCheckpoint"/> to this size or past it
     /// invokes <see cref="OnCheckpointNeeded"/>, once per checkpoint cycle, and
-    /// <see cref="IsCheckpointDue"/> reports the storage due. Zero (the default) disables the
-    /// size trigger.
+    /// <see cref="IsCheckpointDue"/> tests <see cref="JournalBytesSinceCheckpoint"/> so the
+    /// completed checkpoint record alone never makes storage due. Zero (the default) disables
+    /// the size trigger.
     /// </summary>
     /// <remarks>
     /// PostgreSQL requests a checkpoint the same way once the WAL written since the last redo
@@ -357,7 +365,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Gets or sets the hook invoked when an append takes the journal to
+    /// Gets or sets the hook invoked when an append takes <see cref="JournalBytesSinceCheckpoint"/> to
     /// <see cref="CheckpointJournalSize"/> or past it, so an engine's checkpoint worker can be
     /// woken. Invoked outside storage locks, at most once per checkpoint cycle.
     /// </summary>
@@ -523,7 +531,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Reports whether this storage should be checkpointed now: it is online, and either the
-    /// journal reached <see cref="CheckpointJournalSize"/> (when that is set), or
+    /// <see cref="JournalBytesSinceCheckpoint"/> reached <see cref="CheckpointJournalSize"/> (when that is set), or
     /// <paramref name="interval"/> has passed since the last checkpoint (or since the storage
     /// was created or opened) and something was written to the journal since then.
     /// </summary>
@@ -545,7 +553,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         }
 
         long threshold = CheckpointJournalSize;
-        if (threshold > 0 && journal.Length >= threshold)
+        if (threshold > 0 && JournalBytesSinceCheckpoint >= threshold)
         {
             return true;
         }

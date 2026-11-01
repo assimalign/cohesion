@@ -39,7 +39,7 @@ covers default ORDER BY against default indexes on primary keys and filtered nul
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 33; index predicates are persisted by Sql, independently
+The current record-space format is 34; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -167,7 +167,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 33's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 34's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -305,6 +305,11 @@ ALTER TYPE renders this structured name with identifier escaping, so a decoded d
 beginning and ending in quote characters cannot be confused with SQL delimiters. Parser and
 direct-AST round trips cover both forms. DIALECT.md records TYPE's assignment-default casts,
 narrowing rewrites and persisted CHECK rules; the engine's live conformance corpus exercises them.
+Joint typed migrations share the catalog's table/view/sequence namespace. The live conformance
+corpus covers planning refusals, deferred name reservations and locked publication checks;
+these are engine admission rules and add no grammar or AST variant. The metadata lease includes
+engine-wide queue time. Stored-byte estimation, copy/publication probes and the engine reserve belong to the worker, while Build checks
+only its metadata floor, as SQL DESIGN and DIALECT.md specify.
 
 ## TRUNCATE (#1716, SQ-T1)
 
@@ -360,8 +365,14 @@ so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
 retains visible output ordinals separately from physical association slots; plain DML is unchanged.
-Equality-driven steps follow written source order; DIALECT.md documents the dependence and the
-source-order workaround pending general join-order search in #1629. No reordering is introduced.
+Eligible source graphs now use exact search through eight sources and deterministic bounded
+connected greedy growth from nine through 64 (#1629); larger graphs keep executable bound plans
+without search. Identity-order predicate pushdown is eligible on equal work. The live corpus covers
+the 64/65 boundary. Costs use relative tolerance 1e-12 before memory/ordinal ties, and retention
+covers loop buffers as well as hash builds. The engine retains the target boundary, physical
+output ordinals, parameterized-source barriers and zero additional retained-memory certificate.
+DIALECT.md records the legality, work bounds and EXPLAIN evidence; parsing, profiles and persisted
+syntax representations are unchanged.
 
 ## Cascade progress and deadlock diagnostics (w11 review)
 

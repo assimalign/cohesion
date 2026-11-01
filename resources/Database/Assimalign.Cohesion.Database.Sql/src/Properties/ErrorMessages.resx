@@ -851,6 +851,14 @@
   <data name="ValidateSupportedSchemaFailure" xml:space="preserve"><value>{0}: the database cannot apply schema '{1}'.</value></data>
   <data name="ValidateSupportedSchemaFailure2" xml:space="preserve"><value>{0}: SQL schema '{1}' declares {2}.</value></data>
   <data name="ValidateSupportedSchemaFailure3" xml:space="preserve"><value>{0}: {1}: SQL schema '{2}': {3} Nothing was changed.</value></data>
+  <data name="JointMigrationFailed" xml:space="preserve">
+    <value>Unpublished joint migration failed. The published schema is unchanged; correct the cause and retry.</value>
+  </data>
+  <data name="JointPlanningRefused" xml:space="preserve"><value>Schema migration planning refused: {0} Nothing was changed.</value></data>
+  <data name="JointSpaceInsufficient" xml:space="preserve"><value>Joint migration space refused: {0} bytes needed, {1} bytes available. The published schema is unchanged.</value></data>
+  <data name="JointSpaceProbeFailed" xml:space="preserve"><value>The database volume's available space could not be determined.</value></data>
+  <data name="JointPublicationUnconfirmed" xml:space="preserve"><value>Joint migration publication is unconfirmed. Recovery must determine whether the old or new schema committed; reopen before retrying.</value></data>
+  <data name="JointTableNameReserved" xml:space="preserve"><value>Relation name '{0}' is reserved by a pending joint schema migration.</value></data>
   <data name="ProvisionerRunDeferredAsyncFailure" xml:space="preserve"><value>The applied catalog differs: {0}.</value></data>
   <data name="ProvisionerRunDeferredAsyncFailure2" xml:space="preserve"><value>{0}: {1}: deferred step {2} of {3} ({4} '{5}.{6}') failed. The pending migration is retained for recovery and retry.</value></data>
   <data name="RendererAppendConstraintDatabase" xml:space="preserve"><value>Constraint '{0}' has an unsupported delete action.</value></data>
@@ -1047,4 +1055,7 @@
   <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
   <data name="RecursiveReaderCountExceeded" xml:space="preserve"><value>The CTE '{0}' opened more readers than its execution plan counted.</value></data>
   <data name="JsonAlternativesMismatch" xml:space="preserve"><value>CASE/COALESCE alternatives in a JSON operand require compatible types; found {0} and {1}.</value></data>
+  <data name="JointIndexShapeInvalid" xml:space="preserve">
+    <value>A prepared migration source index has invalid page geometry or ownership.</value>
+  </data>
 </root>
