@@ -28,6 +28,9 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
     private readonly string _rootPath;
     private readonly StorageCommitDurability? _durability;
 
+    internal override long GetAvailableMigrationBytes(string databaseName)
+        => SqlVolumeSpace.GetAvailableBytes(Path.GetFullPath(DatabaseFileNames.GetDirectory(_rootPath, databaseName)));
+
     internal FileSystemSqlStorageStrategy(string rootPath, StorageCommitDurability? durability = null)
     {
         _rootPath = rootPath;

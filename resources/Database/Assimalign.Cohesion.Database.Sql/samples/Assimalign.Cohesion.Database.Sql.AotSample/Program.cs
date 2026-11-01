@@ -13,6 +13,8 @@ using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Client;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Sql.Schema;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.AotSample;
 
@@ -170,6 +172,7 @@ internal static class Program
             }
 
             await listener.DisposeAsync();
+            await RunJointMigrationAsync();
         }
         catch (Exception exception)
         {
@@ -178,6 +181,32 @@ internal static class Program
 
         Console.WriteLine($"smoke: {(_failed == 0 ? "passed" : "FAILED")} {_passed} of {_passed + _failed} checks (in process and over the wire)");
         return _failed == 0 ? 0 : 1;
+    }
+
+    private static async Task RunJointMigrationAsync()
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        await using var engine = SqlDatabaseEngine.Create("joint-aot", new());
+        var database = await engine.CreateDatabaseAsync("joint", timeout.Token);
+        SqlCompiledSchema Declare(DatabaseType type, bool destructive) => new(SqlCompiledSchema.CurrentFormat,
+            "joint", destructive, [], [new("items", "aot-row", [new("v", type, false)], null, [], [])], []);
+        var source = Declare(DatabaseType.Int32, false);
+        await database.ApplySchemaAsync(source, timeout.Token);
+        await using var session = await database.CreateSessionAsync(timeout.Token);
+        await session.ExecuteAsync("INSERT INTO items VALUES(2000)", cancellationToken: timeout.Token);
+        try
+        {
+            await database.ApplySchemaAsync(Declare(DatabaseType.Int8, true), timeout.Token);
+            Fail("joint failure", "expected conversion refusal");
+        }
+        catch (SqlSchemaMigrationException failure)
+        {
+            Check("joint failure code", failure.Diagnostics[0].Code, "CS03402");
+            Check("joint old layout", await RowsAsync(session, "SELECT v FROM items", timeout.Token), [[2000]]);
+        }
+        await database.ApplySchemaAsync(Declare(DatabaseType.Int64, false), timeout.Token);
+        Check("joint publication", await RowsAsync(session, "SELECT v FROM items", timeout.Token), [[2000L]]);
+        Check("joint progress cleared", database.Provisioning is null, true);
     }
 
     /// <summary>Builds the engine: the functions, the declared database with its CHECK, and a server on the in-memory driver.</summary>
@@ -801,11 +830,11 @@ internal static class Program
         return slug.ToString();
     }
 
-    private static async Task<object?[][]> RowsAsync(SqlDatabaseSession session, string sql)
+    private static async Task<object?[][]> RowsAsync(SqlDatabaseSession session, string sql, CancellationToken cancellationToken = default)
     {
-        await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql, cancellationToken: CancellationToken.None);
+        await using var result = (DatabaseResultSet)await session.ExecuteAsync(sql, cancellationToken: cancellationToken);
         var rows = new List<object?[]>();
-        await foreach (var row in result.GetRowsAsync(CancellationToken.None))
+        await foreach (var row in result.GetRowsAsync(cancellationToken))
         {
             var values = new object?[row.FieldCount];
             for (int field = 0; field < values.Length; field++)

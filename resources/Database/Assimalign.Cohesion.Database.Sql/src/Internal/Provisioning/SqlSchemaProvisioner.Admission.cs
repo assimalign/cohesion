@@ -13,11 +13,32 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlSchemaProvisioner
 {
-    internal async ValueTask WaitForTablesAsync(SqlQueryRequest request, CancellationToken cancellationToken)
+    internal async ValueTask WaitForTablesAsync(SqlQueryRequest request, CancellationToken cancellationToken,
+        TransactionContext? transaction = null)
     {
         if (Deferred is not { } migration)
         {
             return;
+        }
+        var created = request.Statement.SqlExpression switch
+        {
+            SqlCreateTableExpression create => create.Table,
+            SqlCreateTableAsExpression create => create.Table,
+            SqlCreateViewExpression create => create.View,
+            SqlCreateSequenceExpression create => create.Sequence,
+            _ => null,
+        };
+        string? schema = created?.SchemaName ?? SqlPlanner.DefaultSchema;
+        string? name = created?.TableName;
+        if (request.Statement.SqlExpression is SqlAlterTableExpression { Action: SqlAlterRenameTableAction rename } alterName)
+        { schema = alterName.Table.SchemaName ?? SqlPlanner.DefaultSchema; name = rename.NewName; }
+        if (name is not null && migration.JointPlan is { } joint &&
+            joint.Tables.Any(table => table.Previous is null &&
+                table.Shape.Schema.Equals(schema, System.StringComparison.OrdinalIgnoreCase) &&
+                table.Shape.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SqlCatalogException(SqlProvisioningCodes.JointNameReserved,
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.JointTableNameReserved, name));
         }
         var tables = new SortedSet<ulong>();
         string referenceSchema = request.Statement.SqlExpression switch
@@ -62,7 +83,7 @@ internal sealed partial class SqlSchemaProvisioner
 
         // Wait before binding a plan or capturing the auto-commit snapshot. Readers
         // ordinarily need no table lock, but must not bind the old schema here.
-        var waiter = await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
+        var waiter = transaction ?? await _database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, cancellationToken).ConfigureAwait(false);
         try
         {
             foreach (ulong table in tables)
@@ -71,9 +92,10 @@ internal sealed partial class SqlSchemaProvisioner
                     LockMode.IntentShared, cancellationToken).ConfigureAwait(false);
             }
         }
+        catch (TransactionDeadlockException failure) { throw SqlExecutionException.Deadlock(failure); }
         finally
         {
-            if (!_database.IsOffline)
+            if (transaction is null && !_database.IsOffline)
             {
                 await _database.Coordinator.RollbackAsync(waiter, CancellationToken.None).ConfigureAwait(false);
             }

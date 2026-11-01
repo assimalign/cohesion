@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
+using Assimalign.Cohesion.Database.Sql.Language.Internal;
+using Assimalign.Cohesion.Database.Types;
+
 namespace Assimalign.Cohesion.Database.Sql.Schema;
 
 /// <summary>Creates deterministic migration plans by diffing compiled schemas.</summary>
@@ -35,7 +38,8 @@ public static class SqlSchemaMigrationPlanner
         // Domains first, so the columns of the tables below can be declared with them; a domain the
         // schema no longer declares is dropped last, after the columns that used it.
         PlanAddedDomains(currentTypes, desired.Types, operations, identifiers);
-        PlanTables(current?.Tables ?? Array.Empty<CompiledSchemaTable>(), desired.Tables, operations, identifiers);
+        PlanTables(current?.Tables ?? Array.Empty<CompiledSchemaTable>(), desired.Tables, operations, identifiers,
+            currentTypes, desired.Types);
         PlanDroppedDomains(currentTypes, desired.Types, operations, identifiers);
         EnsureSupportedMetadataIsUnchanged(current, desired);
 
@@ -57,8 +61,11 @@ public static class SqlSchemaMigrationPlanner
         IReadOnlyList<CompiledSchemaTable> current,
         IReadOnlyList<CompiledSchemaTable> desired,
         List<SqlSchemaMigrationOperation> operations,
-        StringComparer identifiers)
+        StringComparer identifiers,
+        IReadOnlyList<CompiledSchemaType> previousTypes, IReadOnlyList<CompiledSchemaType> desiredTypes)
     {
+        var oldDomains = previousTypes.ToDictionary(type => type.Name, identifiers);
+        var newDomains = desiredTypes.ToDictionary(type => type.Name, identifiers);
         var oldTables = current.ToDictionary(table => table.Name, identifiers);
         var newTables = desired.ToDictionary(table => table.Name, identifiers);
 
@@ -90,7 +97,7 @@ public static class SqlSchemaMigrationPlanner
             foreach (CompiledSchemaIndex oldIndex in oldTable.Indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
             {
                 if (!newIndexes.TryGetValue(oldIndex.Name, out CompiledSchemaIndex? newIndex) || !IndexEquals(oldIndex, newIndex, identifiers) ||
-                    oldIndex.Predicate is not null && RetypesColumn(oldTable, newTable, identifiers))
+                    oldIndex.Predicate is not null && RetypesColumn(oldTable, newTable, identifiers, oldDomains, newDomains))
                 {
                     operations.Add(new SqlSchemaMigrationOperation(
                         SqlSchemaMigrationOperationKind.DropIndex,
@@ -124,10 +131,11 @@ public static class SqlSchemaMigrationPlanner
                 continue;
             }
 
-            var oldColumns = oldTable.Columns.ToDictionary(column => column.Name, identifiers);
-            var newColumns = newTable.Columns.ToDictionary(column => column.Name, identifiers);
-            foreach (CompiledSchemaColumn column in newTable.Columns)
+            var oldColumns = oldTable.Columns.Select(column => EffectiveColumn(column, oldDomains)).ToDictionary(column => column.Name, identifiers);
+            var newColumns = newTable.Columns.Select(column => EffectiveColumn(column, newDomains)).ToDictionary(column => column.Name, identifiers);
+            foreach (CompiledSchemaColumn declaredColumn in newTable.Columns)
             {
+                var column = newColumns[declaredColumn.Name];
                 if (!oldColumns.TryGetValue(column.Name, out CompiledSchemaColumn? previous))
                 {
                     operations.Add(new SqlSchemaMigrationOperation(
@@ -141,7 +149,7 @@ public static class SqlSchemaMigrationPlanner
                 {
                     operations.Add(new SqlSchemaMigrationOperation(
                         SqlSchemaMigrationOperationKind.AlterColumn,
-                        SqlSchemaMigrationSafety.Destructive,
+                        ColumnChangeSafety(previous, column, oldDomains, newDomains),
                         column.Name,
                         newTable.Name,
                         column: column,
@@ -172,7 +180,7 @@ public static class SqlSchemaMigrationPlanner
             foreach (CompiledSchemaIndex index in newTable.Indexes.OrderBy(value => value.Name, StringComparer.Ordinal))
             {
                 if (!oldIndexes.TryGetValue(index.Name, out CompiledSchemaIndex? previous) || !IndexEquals(previous, index, identifiers) ||
-                    index.Predicate is not null && RetypesColumn(oldTable, newTable, identifiers))
+                    index.Predicate is not null && RetypesColumn(oldTable, newTable, identifiers, oldDomains, newDomains))
                 {
                     operations.Add(new SqlSchemaMigrationOperation(
                         SqlSchemaMigrationOperationKind.AddIndex,
@@ -223,6 +231,71 @@ public static class SqlSchemaMigrationPlanner
                     oldTable.Name));
             }
         }
+    }
+
+    // A domain's immutable storage facets live on its declaration rather than every
+    // referring column. Diff those effective facets so a same-name domain change
+    // carries an AlterColumn payload and cannot merely advance the applied hash.
+    private static CompiledSchemaColumn EffectiveColumn(CompiledSchemaColumn column,
+        IReadOnlyDictionary<string, CompiledSchemaType> domains)
+        => column.CustomType is { } name && domains.TryGetValue(name, out var domain)
+            ? column with { Type = domain.StorageType, Precision = domain.Precision, Scale = domain.Scale }
+            : column;
+
+    // Metadata-only changes retain the existing planner policy. A TYPE conversion
+    // is safe only when every source value has an exact representation at the target.
+    // Unknown application domains/casts are deliberately outside this closed proof.
+    private static SqlSchemaMigrationSafety ColumnChangeSafety(CompiledSchemaColumn previous, CompiledSchemaColumn desired,
+        IReadOnlyDictionary<string, CompiledSchemaType> oldDomains, IReadOnlyDictionary<string, CompiledSchemaType> newDomains)
+    {
+        if (previous.IsNullable != desired.IsNullable || previous.DefaultLiteral != desired.DefaultLiteral ||
+            !TryStorage(previous, oldDomains, out var source) || !TryStorage(desired, newDomains, out var target))
+        { return SqlSchemaMigrationSafety.Destructive; }
+        bool typeChanged = previous.Type != desired.Type || previous.MaxLength != desired.MaxLength ||
+            previous.Precision != desired.Precision || previous.Scale != desired.Scale ||
+            !string.Equals(previous.CustomType, desired.CustomType, StringComparison.OrdinalIgnoreCase);
+        if (!typeChanged) { return SqlSchemaMigrationSafety.Destructive; }
+        if (target.MaxLength is { } length && (source.MaxLength is null || length < source.MaxLength))
+        { return SqlSchemaMigrationSafety.Destructive; }
+        bool exact;
+        if (source.Type == target.Type)
+        {
+            exact = target.Type != DatabaseType.Decimal
+                ? source.Scale == target.Scale
+                : target.Precision is null || source.Precision is { } precision &&
+                    target.Scale >= source.Scale && target.Precision - target.Scale >= precision - source.Scale;
+        }
+        else
+        {
+            exact = (source.Type, target.Type) switch
+            {
+                (DatabaseType.Int8, DatabaseType.Int16 or DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64) => true,
+                (DatabaseType.Int16, DatabaseType.Int32 or DatabaseType.Int64 or DatabaseType.Float32 or DatabaseType.Float64) => true,
+                (DatabaseType.Int32, DatabaseType.Int64 or DatabaseType.Float64) => true,
+                (DatabaseType.Float32, DatabaseType.Float64) => true,
+                _ => false,
+            };
+        }
+        return exact ? SqlSchemaMigrationSafety.Safe : SqlSchemaMigrationSafety.Destructive;
+    }
+
+    private static bool TryStorage(CompiledSchemaColumn column, IReadOnlyDictionary<string, CompiledSchemaType> domains,
+        out DatabaseTypeInfo storage)
+    {
+        storage = new(column.Type, column.MaxLength, column.Precision, column.Scale);
+        if (column.CustomType is not { } text) { return true; }
+        // Even a schema-declared domain can retain an application's registered casts.
+        // This assembly cannot prove those conversions preserve every source value.
+        if (domains.ContainsKey(text)) { return false; }
+        if (!SqlTypeModifiers.TrySplit(text, out string name, out int? first, out int? second) ||
+            SqlTypeModifiers.StorageType(name) is not { } type) { return false; }
+        storage = type switch
+        {
+            DatabaseType.String or DatabaseType.Character or DatabaseType.Binary => new(type, first ?? (type == DatabaseType.Character ? 1 : null)),
+            DatabaseType.Decimal => new(type, null, first, SqlTypeModifiers.NormalizeScale(type, first, second)),
+            _ => new(column.Type),
+        };
+        return true;
     }
 
     /// <summary>
@@ -277,10 +350,16 @@ public static class SqlSchemaMigrationPlanner
 
     // Predicate fragments intentionally have no parser in this assembly. Conservatively
     // rebuild every partial index on a retyped table rather than guessing dependencies.
-    private static bool RetypesColumn(CompiledSchemaTable previous, CompiledSchemaTable desired, StringComparer identifiers)
-        => desired.Columns.Any(column => previous.Columns.FirstOrDefault(old => identifiers.Equals(old.Name, column.Name)) is { } old &&
-            (old.Type != column.Type || old.MaxLength != column.MaxLength || old.Precision != column.Precision || old.Scale != column.Scale ||
-             !identifiers.Equals(old.CustomType, column.CustomType)));
+    private static bool RetypesColumn(CompiledSchemaTable previous, CompiledSchemaTable desired, StringComparer identifiers,
+        IReadOnlyDictionary<string, CompiledSchemaType> oldDomains, IReadOnlyDictionary<string, CompiledSchemaType> newDomains)
+        => desired.Columns.Any(declared =>
+        {
+            if (previous.Columns.FirstOrDefault(old => identifiers.Equals(old.Name, declared.Name)) is not { } prior) { return false; }
+            var column = EffectiveColumn(declared, newDomains);
+            var old = EffectiveColumn(prior, oldDomains);
+            return old.Type != column.Type || old.MaxLength != column.MaxLength || old.Precision != column.Precision || old.Scale != column.Scale ||
+                !identifiers.Equals(old.CustomType, column.CustomType);
+        });
 
     private static bool IndexEquals(
         CompiledSchemaIndex left,

@@ -10,6 +10,10 @@ both paths (#1629).
 SqlDatabaseSession.CopyToAsync and its negotiated SQL outbound stream export physical tables as
 snapshot-consistent UTF-8 text/CSV (#1724).
 
+Typed migrations containing TYPE rewrites prepare the entire target unpublished and publish
+it in one catalog commit. Failed preparation leaves the old schema online and available to
+a rolled-back application; potentially lossy reversals require destructive opt-in (#1447).
+
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
 Conservative implication also supports ON CONFLICT target-WHERE inference; EXPLAIN reports the
 selected index and proof. Unproven cases use the existing complete access paths (#1630).
@@ -33,7 +37,11 @@ aggregates use inverse transitions or monotonic queues; NULL treatment is suppor
 
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
-(#1447). This run executes inline; populated-table provisioning handoff follows in SQ-A3.
+(#1447). Typed migrations use joint unpublished preparation and one-commit publication,
+deferred on populated tables and inline for explicit ApplySchemaAsync, RunMigrationsInline or
+a declaration containing any script. VARCHAR narrowing also uses this assignment rewrite.
+Worker admission measures actual encoded bytes; a per-bracket volume watchdog stops expanding
+copies online with the old schema intact. Copy-owned WAL triggers bounded, retryable checkpoints.
 
 TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).
@@ -92,8 +100,18 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   `ApplySchemaAsync(SqlCompiledSchema)` remains inline. Both paths use the same DDL planner and
   B2's complete catalog snapshot, typed defaults and crash convergence. Format 9 adds ordered
   pending intent to the generation-stamped applied document. An unchanged applied hash/generation
-  with no pending intent still skips in constant time. Deferred failure takes only that database
-  offline with `CS03104`, retaining intent for the next open. Inline failures retain compensation;
+  with no pending intent still skips in constant time. Decision 49a's non-TYPE deferred failure takes only that database
+  offline with `CS03104`, retaining intent for the next open. Non-TYPE inline failures retain compensation;
+  joint TYPE preparation failure reports `CS03402`, discards its intent and keeps the old schema
+  online unless an unsafe-storage latch fired. Build checks a metadata-only space floor before intent save;
+  the worker measures rewritten heap/index pages and bounded copy-WAL growth before prepared writes.
+  Untouched tables never change the need. Refusals report needed/available bytes online; precise
+  refusals discard the intent, while a floor refusal leaves a kept crash intent unchanged.
+  Unconfirmed publication uses `CS03403`; recovery decides old/new and retains the new trees.
+  Definition DDL is excluded database-wide from Build through queue time and worker completion; DML on untouched tables proceeds.
+  Pending names refuse relation creation/table rename (`CS03404`); planning and publication
+  check the table/view/sequence namespace. A successful apply or skip clears an earlier failure. A default change without a TYPE rewrite
+  retains the base `CS03105` refusal before any intent or inline change.
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.
 - **Bounded DDL workspace** — validation streams rows; uniqueness compares adjacent live keys
@@ -163,7 +181,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 33). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 34). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.

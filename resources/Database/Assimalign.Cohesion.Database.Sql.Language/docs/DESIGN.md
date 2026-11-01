@@ -39,7 +39,7 @@ covers default ORDER BY against default indexes on primary keys and filtered nul
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 33; index predicates are persisted by Sql, independently
+The current record-space format is 34; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -167,7 +167,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 33's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 34's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -305,6 +305,11 @@ ALTER TYPE renders this structured name with identifier escaping, so a decoded d
 beginning and ending in quote characters cannot be confused with SQL delimiters. Parser and
 direct-AST round trips cover both forms. DIALECT.md records TYPE's assignment-default casts,
 narrowing rewrites and persisted CHECK rules; the engine's live conformance corpus exercises them.
+Joint typed migrations share the catalog's table/view/sequence namespace. The live conformance
+corpus covers planning refusals, deferred name reservations and locked publication checks;
+these are engine admission rules and add no grammar or AST variant. The metadata lease includes
+engine-wide queue time. Precise copy-space accounting belongs to the worker, while Build checks
+only its metadata floor, as SQL DESIGN and DIALECT.md specify.
 
 ## TRUNCATE (#1716, SQ-T1)
 

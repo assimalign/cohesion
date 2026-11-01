@@ -210,8 +210,8 @@ public class SqlSchemaStatementRendererTests
         script.IsReversible.ShouldBeTrue();
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: unsupported ALTER fails before execution")]
-    public void Generate_UnsupportedOperation_ShouldFailPrecisely()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: TYPE is rendered without reverse conversion compensation")]
+    public void Generate_TypeChange_ShouldRenderTypeWithoutCompensation()
     {
         // Arrange
         var plan = new SqlSchemaMigrationPlan(
@@ -225,9 +225,14 @@ public class SqlSchemaStatementRendererTests
                 column: new CompiledSchemaColumn("value", DatabaseType.Int64, IsNullable: false),
                 previousColumn: new CompiledSchemaColumn("value", DatabaseType.Int32, IsNullable: false))]);
 
-        // Act / Assert
-        Should.Throw<SqlSchemaMigrationException>(() => SqlMigrationScriptGenerator.Generate(plan))
-            .Message.ShouldContain("ALTER metadata");
+        // Act
+        var script = SqlMigrationScriptGenerator.Generate(plan);
+
+        // Assert
+        var step = script.Steps.ShouldHaveSingleItem();
+        step.StatementText.ShouldBe("ALTER TABLE dbo.records ALTER COLUMN value TYPE BIGINT;");
+        step.RollbackRequest.ShouldBeNull();
+        script.IsReversible.ShouldBeFalse();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - Migration scripts: payload names must match operation names")]

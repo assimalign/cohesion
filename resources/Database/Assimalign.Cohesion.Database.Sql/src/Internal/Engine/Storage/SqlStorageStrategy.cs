@@ -99,6 +99,10 @@ internal abstract class SqlStorageStrategy
     // A strategy without a read-only probe cannot prove an incomplete create safe to adopt.
     internal virtual SqlStorageProbe? ProbeStorage(string databaseName, bool catalog) => null;
 
+    // Memory strategies have no disk capacity limit. File strategies query the actual
+    // database volume; tests supply capacity without filling a disk.
+    internal virtual long GetAvailableMigrationBytes(string databaseName) => long.MaxValue;
+
     internal virtual SqlStorage RestartStorage(string databaseName, bool catalog)
         => throw new System.InvalidOperationException(ErrorMessages.CreationRestartUnavailable);
     internal const string CreationFileName = "sql.create";

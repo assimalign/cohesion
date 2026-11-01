@@ -7,6 +7,19 @@ Graph's foreign tests bind its setter with UnsafeAccessor and require an active 
 callback counts. A thrown callback therefore exercises the normal physical rollback and model
 compensation path without taking storage offline or introducing a public test surface.
 
+## Joint migration admission and unsafe-storage failures (#1447)
+
+SQL joint migrations (#1447) now admit estimated volume space before saving their intent.
+This changes no kernel latch policy. Journal frame writes, drains and flushes still fence on
+failure, including ENOSPC or an exception before the provider reports any written byte: the
+medium outcome cannot be proved. Unconfirmed commit waits, failed durable data-file flushes
+and failures after issuing a checkpoint header-slot write retain their fences. Engine-wide
+write-back/checkpoint/write-ahead-flush/version-purge failure windows and the repeated
+failed-checkpoint journal limit retain their offline policies; so do 49a provisioning failure
+and interrupted open-time recovery. A read error or a prepared-page write refusal alone stays
+online. SQL documents the admission formula,
+its concurrency/expansion limits and CS03403's unknown publication outcome in its DESIGN.
+
 ## Maintenance due hints (#1279)
 
 Storage.HasPendingCommits reads the grouped durability gate's requested/durable LSNs under its

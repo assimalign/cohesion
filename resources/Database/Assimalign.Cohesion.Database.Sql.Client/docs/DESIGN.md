@@ -1,5 +1,11 @@
 # Database.Sql.Client — Design
 
+## Typed TYPE migration publication (#1447, SQ-A3)
+
+InMemory and TCP code-first server tests reopen populated typed tables with a changed column
+type, wait through ordinary statement admission and observe the complete published layout and
+rebuilt index. The existing exchange carries the result without client API or protocol changes.
+
 ## Join-order search over the existing exchange (#1629, SQ-Z1/SQ-Z2)
 
 InMemory and TCP return stable written-column results after cost-based join reassociation.

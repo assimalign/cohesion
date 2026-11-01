@@ -163,7 +163,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task CopyReplacementRowsAsync(SqlCatalogTable previous, SqlCatalogTable replacement,
         SqlCatalogIndex[] descriptions, SqlStatementContext statement, Func<object?[], object?[]>? transform,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, long copyRows = 0)
     {
         var indexes = descriptions.Select(description =>
         {
@@ -206,8 +206,14 @@ internal sealed partial class SqlPlanExecutor
                 memory.Retain(converted[i]);
                 foreach (var index in indexes) { MatchesIndex(replacement, index.Metadata, converted[i], cancellationToken: cancellationToken); }
             }
+            long journalStart = 0;
+            statement.CheckCopySpace(SqlSchemaProvisioner.JointCopyTouches(batch.Count, copyRows, indexes.Length),
+                SqlSchemaProvisioner.JointCopyAllocations(batch.Count, copyRows, indexes.Length));
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                statement.CheckCopySpace(SqlSchemaProvisioner.JointCopyTouches(batch.Count, copyRows, indexes.Length),
+                    SqlSchemaProvisioner.JointCopyAllocations(batch.Count, copyRows, indexes.Length));
+                journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 for (int i = 0; i < batch.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -231,6 +237,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
+            await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             ForgetIndexRows(converted);
             processed += batch.Count;
             statement.ProvisioningProgress?.Invoke(processed, null);
@@ -241,5 +248,30 @@ internal sealed partial class SqlPlanExecutor
             await ValidateBuiltUniqueIndexAsync(replacement, index.Index, statement, cancellationToken, index.Metadata.Predicate is null ? null : index.Ordinals, index.Metadata.Predicate is not null).ConfigureAwait(false);
         }
         statement.ProvisioningProgress?.Invoke(processed, processed);
+    }
+
+    private async Task CheckpointReplacementCopyAsync(SqlStatementContext statement, long journalStart, CancellationToken token)
+    {
+        if (!statement.CheckpointCopy) { return; }
+        // Sample at commit, before checkpoint truncation; include only deltas across
+        // our brackets, never untouched writers' WAL accumulated between brackets.
+        long length = _storage.Journal.Length;
+        long added = statement.AddCopyJournalBytes(length - journalStart);
+        RewriteStage?.Invoke("CopyCommitted", length);
+        if (added < SqlSchemaProvisioner.JointCopyCheckpointBytes) { return; }
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            try { statement.Coordinator.Checkpoint(token); break; }
+            catch (StorageTransactionException busy) when (busy.Code != StorageTransactionErrorCode.ForeignStorage)
+            {
+                // Reclamation uses bounded storage brackets outside the apply gate.
+                // Like the engine checkpoint worker, retry busy; never skip the bound.
+                RewriteStage?.Invoke("CheckpointBusy", length);
+                await Task.Delay(1, token).ConfigureAwait(false);
+            }
+        }
+        statement.ResetCopyJournalBytes();
+        RewriteStage?.Invoke("CopyCheckpointed", length);
     }
 }
