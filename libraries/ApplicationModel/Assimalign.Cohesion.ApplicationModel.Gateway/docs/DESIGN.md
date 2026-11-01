@@ -5,7 +5,7 @@
 > (chunk 2) and the gateway-to-instance protocol of
 > [ApplicationModel.Protocol](../../Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md). The instance side,
 > [ApplicationModel.Hosting](../../Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md)
-> (chunk 1, formerly Hosting.Resources), is not a dependency. Since 2026-10-29 (G26, G27) each
+> (chunk 1), is not a dependency. Since 2026-10-29 (G26, G27) each
 > gateway runs a model of its own and a child joins its parent; the deployment view and the gateway
 > seam moved here from ApplicationModel.Definition. The previous implementation (Local gateway,
 > records, credentials, certificates) is retired; its source is at commit `6576e7c64`. Since
@@ -620,10 +620,7 @@ an operator's action fails with `InstanceUnavailable` and names the missing clie
 *Superseded:* the HTTP instance client this library carried on the BCL's `HttpClient` (the 2026-10-30
 form of G38), and the owner's 2026-10-29 plan for an HTTP transport over a private Web reference,
 which COHLIB001 and COHRES003 blocked and the owner scratched on 2026-10-30. The first out-of-process
-platform defines its transport, push or pull, and its authentication. The retired
-`Gateway.ControlPlane`, which served HTTP on `Http.Connections` with its own router, was removed on
-2026-10-29: everything it served (the export document, application sets, declarative commands,
-trusted-issuer grants) was retired with the old model. Joins have no transport either: a child joins
+platform defines its transport, push or pull, and its authentication. Joins have no transport either: a child joins
 a parent in the same process directly (G26).
 
 **G39 — The provider is the gateway's inbound channel (owner, 2026-10-31).** The owner deleted

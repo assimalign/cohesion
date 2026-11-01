@@ -1,12 +1,10 @@
 # Assimalign.Cohesion.ApplicationModel.Hosting — Design
 
-> **Status (2026-10-29):** chunk 1 of the Application Model rebuild, formerly
-> `Assimalign.Cohesion.Hosting.Resources`. On 2026-10-29 it became the physical side of the model
+> **Status (2026-10-29):** chunk 1 of the Application Model rebuild. On 2026-10-29 it became the physical side of the model
 > (ApplicationModel.Definition D20): the types it shares with the logical side moved to
 > [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md), and `IResource`
 > became `IApplicationInstance`. The library was restarted from scratch on 2026-10-27; the
-> previous implementation (deployment records, the ambient `ResourceRuntime`, commands, mounts,
-> credentials) is retired, and its source is at commit `6576e7c64`. On 2026-10-30 its transports left
+> previous implementation is retired, and its source is at commit `6576e7c64`. On 2026-10-30 its transports left
 > for the platform packages (D19): it holds only the abstractions for hosting an instance, and the
 > options through which a resource takes each platform's client. Since D20 (2026-10-31) it
 > references [ApplicationModel.Protocol](../../Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md)
@@ -75,7 +73,7 @@ an area builds against both.
 | `IApplicationInstanceControlPlane`, `ApplicationInstanceControlPlane` | The instance's actions and state: a plain object with no lifecycle that executes actions and restores snapshots from the moment it is created (D15). |
 | `IApplicationInstanceService`, `ApplicationInstanceService` | The `IHostLifecycleService` an area registers with the platform's client: it publishes the manifest and restores the answer in `StartingAsync`, renews the lease, opens the control plane to the gateway's calls in `StartAsync`, and closes it and stops renewing in `StopAsync` (D15, D19). |
 | `IApplicationInstanceGatewayClient` | The instance half of a platform: publishes and renews (`IApplicationInstancePublisher`), names where the gateway reaches the control plane, and carries the gateway's calls in between `StartAsync` and `StopAsync` (D19). |
-| `ApplicationInstanceOptions` | The base of every area's resource options: the clients a resource opts into, one per platform; the platform its environment names, which selects one; and the deployment that started it (D19). |
+| `ApplicationInstanceOptions` | The base of every area's resource options: the clients a resource opts into, one per platform; the platform its environment names, which selects one; the deployment that started it (D19); and the actions the application adds, with the JSON contexts they came with (D21). |
 | `IApplicationInstanceHealthContributor`, `ApplicationInstanceHealthContribution` | Health, contributed per component. A default contribution is `Unhealthy`, so unset health fails closed. |
 
 Value objects carry the identity: `ProviderName`, `ProviderId`, `ResourceName`, `ResourceId` from the
@@ -128,13 +126,14 @@ sequenceDiagram
 
 ## Decisions
 
-**D1 — No ambient state.** The retired `ResourceRuntime.Current` and its assembly-keyed control-plane
-registry are gone; a control plane exists only where an area creates one. The tier rule needs this:
+**D1 — No ambient state.** A control plane exists only where an area creates one; there is no
+process-wide registry of control planes. The tier rule needs this:
 a Tier 2 or Tier 3 area that composes Web inside its own host must not stand up a second control
 plane, and an ambient registry let a nested Web builder discover the outer resource (the old code
 keyed the registry by entry assembly to stop it). Explicit creation makes "only the outer resource has a
-control plane" structural, and lets one process host several instances. *Cost:* the SDK and
-ApplicationModel chunk must attach an enabled executable's control plane without a registry. What
+control plane" structural, and lets one process host several instances. *Cost:* an area attaches
+the control plane through a registration of its own, `AddResource` on the application's `Services`
+(Web.Hosting.ApplicationModel W10). What
 an instance reads from its environment can be a scope of its own (Core's `AppEnvironmentScope`, which
 a gateway that runs it in process enters for it), but that is the environment, not a registry of
 control planes: this library still creates nothing ambiently.
@@ -254,7 +253,7 @@ opens gets no answer, and the gateway drops the instance until it publishes agai
 and 7).
 
 **D16 — This is the physical side of the application model (owner decision, 2026-10-29).** The
-library was `Assimalign.Cohesion.Hosting.Resources`, and ApplicationModel referenced it for the
+library was the instance half of one undivided model, which referenced it for the
 identity, manifest, and snapshot types a deployment shares with its instances. The model is now
 three projects (ApplicationModel.Definition D20): the shared contracts in ApplicationModel, the
 logical side in ApplicationModel.Definition, and this one. The types both sides exchange moved to the
@@ -330,6 +329,36 @@ C1), and this library references Protocol and `Assimalign.Cohesion.Hosting` only
 - **Invocations carry `ApplicationActionOperation`** (Protocol P2); the control plane dispatches with
   `Kind.HasFlag((ApplicationActionKind)operation)`.
 
+**D21 — The actions an application adds are shared by every area (2026-10-31).** Web's options
+carried `AddAction` and the JSON contexts its actions came with; every area's resource needs the
+same surface, so it moved to `ApplicationInstanceOptions`:
+- **`AddAction(IApplicationInstanceAction, JsonSerializerContext?)`** and
+  **`AddAction(Func<IServiceProvider, IApplicationInstanceAction>, JsonSerializerContext?)`** add an
+  action as an instance or as a factory over the application's services. Both return the base
+  options, so they chain after a platform's generic verb (`resource.UseInProcess().AddAction(...)`)
+  and with each other; an area's own verbs go first when chained.
+- **`JsonContexts`** lists each context once, in the order it was first added. The area writes
+  control-plane content with `JsonApplicationContentSerializer.Create([areaContext, .. options.JsonContexts])`.
+- **`CreateActions(IServiceProvider)`** runs every factory once, in order, from the factory that
+  creates the resource's control plane; a factory that returns `null` throws
+  `InvalidOperationException` (`ActionFactoryResultNull`). The area lists the result after its own
+  actions, and the control plane's duplicate-name check rejects an added action that reuses a name.
+- **A factory-created action is never disposable (2026-11-01).** The action a factory creates is not
+  a container registration, and neither `ApplicationInstanceService` nor the control plane owns it,
+  so the application's provider would never dispose it. `CreateActions` therefore rejects an
+  `IDisposable` or `IAsyncDisposable` result (`ActionFactoryResultDisposable`, naming the action and
+  its type), the way Web.Hosting rejects a disposable `IHttpFeature`. A disposable collaborator is
+  resolved from the services, which own it. An action added as an instance is borrowed, matching the
+  container's owned/borrowed split, and may be disposable: its caller disposes it.
+
+*Rejected for disposal:* making `ApplicationInstanceService` `IAsyncDisposable` and handing it the
+actions it should dispose. It would add an ownership channel beside the container and change every
+area's registration for a case no shipped action needs.
+
+*Rejected:* each area copying the surface (Web's was the first copy, and every generated area would
+have repeated it); and a typed `IServiceProvider`-free factory over the area's context, which would
+give each area a different action signature.
+
 ## Concurrency
 
 Reads run concurrently. Writes and restores run one at a time per resource, under one gate, so the
@@ -346,7 +375,7 @@ Application Model on it creates its control plane only.
 
 An area's implementation of this library (its actions, its options deriving from
 `ApplicationInstanceOptions`, and its registration of the instance service) ships as
-`<Area>.Hosting.ApplicationModel`; Web's is the first. A platform's instance half ships as
+`<Area>.Hosting.ApplicationModel`; Web's is the first, and EmailHub's is the template the other areas are generated from. A platform's instance half ships as
 `ApplicationModel.Hosting.<Platform>`; the in-process one is the first. The area
 `<Area>.ApplicationModel` packages of the retired design were deleted on 2026-10-30 (owner): a
 gateway declares any resource generically.
@@ -370,8 +399,8 @@ None. The library raises no events and has no event source.
 2. **Health aggregation.** Contributors exist; who aggregates them, and do readiness and liveness differ?
 3. **Instance key.** The key is a process-generated ULID. Does the manifest also need the platform's
    instance id (a Kubernetes pod UID) for the gateway's infrastructure actions?
-4. **Attaching the control plane.** How does an executable with `CohesionApplicationModel=enabled`
-   create and register its control plane without an ambient registry (D1)?
+4. **Attaching the control plane — settled 2026-10-31.** The area's `AddResource` registration on
+   the application's `Services` creates it (D1; Web.Hosting.ApplicationModel W10).
 5. **Management routes.** `/resources/providers/{provider}/controls` has no segment for the
    application resource or the instance an action addresses. The gateway's `ExecuteAsync` addresses
    the resource and picks the instance (ApplicationModel.Gateway G38); a platform's routes, if it

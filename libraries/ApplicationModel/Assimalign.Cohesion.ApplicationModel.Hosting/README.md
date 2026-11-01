@@ -1,7 +1,7 @@
 # Assimalign.Cohesion.ApplicationModel.Hosting
 
 The physical side of the Cohesion application model: what a running resource instance is, and the
-control plane that runs inside it. Formerly `Assimalign.Cohesion.Hosting.Resources`; the types an
+control plane that runs inside it. The types an
 instance shares with its gateway, such as its manifest and action results, live in
 `Assimalign.Cohesion.ApplicationModel.Protocol`, and its identity in `Assimalign.Cohesion.ApplicationModel`.
 

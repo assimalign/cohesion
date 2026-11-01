@@ -21,7 +21,7 @@ await builder.Build().RunAsync(cancellationToken);
 ```
 
 Each program is an ordinary application that opts into the platform. A Web program calls
-`WebApplication.CreateBuilder(args)` and `builder.AddResource(name, resource => resource.UseInProcess())`
+`WebApplication.CreateBuilder(args)` and `builder.Services.AddResource(name, resource => resource.UseInProcess())`
 with the instance half, ApplicationModel.Hosting.InProcess. It listens on the loopback port the
 infrastructure assigned, reads its settings from configuration, publishes to the gateway over the
 in-process channel, and receives the gateway's calls as direct calls. Its code is the same on

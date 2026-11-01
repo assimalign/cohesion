@@ -13,7 +13,7 @@ record is [DESIGN.md](DESIGN.md).
   contributions, the generic `ApplicationInstanceControlPlane`, the `ApplicationInstanceService`
   that joins it to its host and gateway, the instance half's seam `IApplicationInstanceGatewayClient`, and
   `ApplicationInstanceOptions`, the base of every area's resource options through which a resource
-  opts into each platform it runs on. The identity value objects, the manifest, invocation results,
+  opts into each platform it runs on and the application adds actions of its own. The identity value objects, the manifest, invocation results,
   the content serializer, and the publication seam are the protocol in
   `Assimalign.Cohesion.ApplicationModel.Protocol`, over the identity in
   `Assimalign.Cohesion.ApplicationModel`.
@@ -34,11 +34,14 @@ An area's resource options derive from the shared base, so a platform's verb wor
 ```csharp
 public sealed class AreaResourceOptions : ApplicationInstanceOptions
 {
-    // The area's own settings, such as the actions an application adds.
+    // The area's own settings, if it has any.
 }
 
-// In the application's Program.cs: the resource opts into every platform it runs on.
-builder.Services.AddResource("orders-api", resource => resource.UseInProcess());
+// In the application's Program.cs: the resource opts into every platform it runs on, and adds
+// an action of its own with the JSON context that declares its content.
+builder.Services.AddResource("orders-api", resource => resource
+    .UseInProcess()
+    .AddAction(new LogLevelAction(), OrdersJsonContext.Default));
 ```
 
 The area defines its actions, hands the instance to a control plane, and registers the service with
@@ -58,7 +61,11 @@ if (options.GetGatewayClient() is not { } client)
 
 // The format of everything the instance exchanges: JSON over source-generated contexts by
 // default, so it is NativeAOT-safe.
-IApplicationContentSerializer serializer = JsonApplicationContentSerializer.Create(AreaJsonContext.Default);
+// The area's own context comes first, then the contexts the added actions came with.
+IApplicationContentSerializer serializer = JsonApplicationContentSerializer.Create([AreaJsonContext.Default, .. options.JsonContexts]);
+
+// The resource lists its own actions, then options.CreateActions(provider): the added ones, created
+// once from the application's services when the container creates the service.
 ApplicationInstanceControlPlane controlPlane = ApplicationInstanceControlPlane.Create(resource, serializer);
 
 // The service publishes the manifest and restores the state written since the last deployment

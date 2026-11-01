@@ -7,5 +7,4 @@
   <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
   <data name="CorsPolicyRequired" xml:space="preserve"><value>A CORS policy is required.</value></data>
   <data name="SnapshotValueRequired" xml:space="preserve"><value>A snapshot value is required.</value></data>
-  <data name="ResourceActionFactoryResultNull" xml:space="preserve"><value>An action factory passed to WebResourceOptions.AddAction returned null.</value></data>
 </root>

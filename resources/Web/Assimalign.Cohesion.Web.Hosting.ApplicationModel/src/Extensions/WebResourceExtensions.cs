@@ -29,7 +29,7 @@ public static class WebResourceExtensions
         /// <c>cors</c> setting that <c>builder.Services.AddCors(...)</c> registers becomes the <c>cors</c>
         /// action, whose writes change the default policy the middleware <c>UseCors()</c> placed applies.
         /// Actions the application defines are added with
-        /// <see cref="WebResourceOptions.AddAction(IApplicationInstanceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
+        /// <see cref="ApplicationInstanceOptions.AddAction(IApplicationInstanceAction, System.Text.Json.Serialization.JsonSerializerContext)"/>.
         /// </para>
         /// <para>
         /// The resource opts into each platform it runs on through that platform's hosting package,
@@ -81,27 +81,14 @@ public static class WebResourceExtensions
             // StartingAsync, which the host completes for every lifecycle service before it starts any
             // service or server, and opens the control plane to the gateway's calls in StartAsync; the
             // Web host stops it only after the application's servers have drained.
-            Func<IServiceProvider, IApplicationInstanceAction>[] addedActions = [.. options.Actions];
             DeploymentId? deployment = options.Deployment;
             services.AddSingleton<IHostService>(provider => ApplicationInstanceService.Create(
                 ApplicationInstanceControlPlane.Create(
-                    new WebResource(name, deployment, provider.GetRequiredService<IEnumerable<IWebApplicationSetting>>(), CreateAddedActions(addedActions, provider)),
+                    new WebResource(name, deployment, provider.GetRequiredService<IEnumerable<IWebApplicationSetting>>(), options.CreateActions(provider)),
                     serializer),
                 client));
 
             return services;
         }
-    }
-
-    private static IApplicationInstanceAction[] CreateAddedActions(Func<IServiceProvider, IApplicationInstanceAction>[] factories, IServiceProvider provider)
-    {
-        var actions = new IApplicationInstanceAction[factories.Length];
-        for (int i = 0; i < factories.Length; i++)
-        {
-            actions[i] = factories[i].Invoke(provider)
-                ?? throw new InvalidOperationException(ErrorMessages.ResourceActionFactoryResultNull);
-        }
-
-        return actions;
     }
 }

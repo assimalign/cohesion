@@ -1,8 +1,7 @@
 # Assimalign.Cohesion.ApplicationModel.Definition — Design
 
 > **Status (2026-10-29):** chunk 2 of the Application Model rebuild, the logical side. Until
-> 2026-10-29 this was the `Assimalign.Cohesion.ApplicationModel` project, which referenced
-> Hosting.Resources; the split (D20) moved the types both sides share into
+> 2026-10-29 this was the `Assimalign.Cohesion.ApplicationModel` project; the split (D20) moved the types both sides share into
 > [ApplicationModel](../../Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md) and the instance
 > side into [ApplicationModel.Hosting](../../Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md).
 > Since D21 and D22 (2026-10-29) it holds the definition only: a model covers one gateway, a child
@@ -132,8 +131,7 @@ version of this decision, which recorded access only and accepted mutual depende
 **D9 — One set of identity, manifest, and snapshot types — superseded by D20.** A deployment
 aggregates the instances that publish to it, so the model and the instance side use the same
 identity, instance manifest, and snapshot types. The previous model duplicated `ResourceName` and
-`ResourceId` instead. Until D20 the model got those types by referencing Hosting.Resources; they now
-live in the shared contracts, ApplicationModel, which both sides reference.
+`ResourceId` instead. The types now live in the shared contracts, ApplicationModel, which both sides reference.
 
 **D10 — The builder is the gateway's set.** `IApplicationModelBuilder` extends `IApplicationSet`,
 so a program composes with `builder.AddResource(...)`, and a resource's `Set` is the builder itself.
@@ -243,9 +241,7 @@ exchange the same `ApplicationInstanceManifest` object. The root and Definition 
 `Assimalign.Cohesion.ApplicationModel` namespace, so a gateway's `Program.cs` still needs one
 `using`; Hosting has its own. The deployment sits here rather than in the gateway, because it is
 built from a definition and keeps D15's reason: a transport can expose it without a gateway
-reference. Hosting.Resources is removed, and `Web.Hosting.Resources` is
-`Web.Hosting.ApplicationModel`. *Rejected:* linking Hosting.Resources' files into the model as
-shared source. Each assembly would compile its own public copy of every type, so the gateway,
+reference. *Rejected:* linking the instance runtime's files into the model as shared source. Each assembly would compile its own public copy of every type, so the gateway,
 which sees both, could not tell them apart, and an in-process instance would hand the gateway a
 manifest of the wrong type. D22 later moved the deployment to the gateway, once this project became
 the definition only.
@@ -275,8 +271,8 @@ and dependencies on a parent's resources for their permissions (open questions 3
 `IApplicationGatewayBuilder` builds the gateway, and its `ApplicationGatewayBuilder` implements both side by
 side, wrapping a builder of `ApplicationModel.CreateBuilder`, the way an area's application builder
 implements its area's builder beside the host's.
-- `IApplication`, `Application`, and the old `IApplicationBuilder` are removed: they only paired a
-  model with a gateway. `IApplicationBuilder.Args`, which nothing read, goes with them.
+- `IApplication`, `Application`, and the earlier application builder are removed: they only paired
+  a model with a gateway.
 - The gateway seam (`IApplicationGateway`), the deployment view (`IApplicationGatewayDeployment`,
   `ApplicationGatewayDeployment`), and infrastructure actions (`IApplicationGatewayDeploymentAction`) moved to
   ApplicationModel.Gateway, which alone uses them. Each form of a resource now lives with its owner:
@@ -335,9 +331,9 @@ None. The library raises no events and has no event source.
    `<Area>.ApplicationModel` packages of the retired design were deleted, and a model declares any
    resource with `AddResource(provider, name)`. An area package returns only when the area has
    something of its own to declare.
-6. **Static assets.** The SDK will generate assets for each `CohesionResourceReference` that the
-   gateway needs. A descriptor and its manifest record have no slot for them yet; the slot's shape
-   comes with the generation that fills it.
+6. **Static assets.** A gateway may need assets for a resource it deploys, such as an image or a
+   program's files. A descriptor and its manifest record have no slot for them yet; the slot's shape
+   comes with whatever supplies them.
 7. **A child gateway's model — settled by D21:** the child's own program builds it and names the
    parent.
 8. **Apply conditions beyond the platform.** An extension applies on one platform (D19). A

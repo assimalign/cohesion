@@ -28,4 +28,6 @@
   <data name="GatewayClientMissing" xml:space="preserve"><value>The instance's gateway runs it on platform '{0}', and the resource uses no gateway client for that platform. Reference the platform's hosting package and call its verb on the resource's options, such as UseInProcess() for the inprocess platform.</value></data>
   <data name="PlatformVariableInvalid" xml:space="preserve"><value>The {0} variable holds '{1}', which is not a platform name: lowercase ASCII letters and digits in hyphen-separated words.</value></data>
   <data name="DeploymentVariableInvalid" xml:space="preserve"><value>The {0} variable holds '{1}', which is not a deployment id.</value></data>
+  <data name="ActionFactoryResultNull" xml:space="preserve"><value>An action factory passed to ApplicationInstanceOptions.AddAction returned null.</value></data>
+  <data name="ActionFactoryResultDisposable" xml:space="preserve"><value>The factory passed to ApplicationInstanceOptions.AddAction for action '{0}' returned a disposable {1}. Nothing disposes an action a factory creates: return an action that is not disposable and resolve its disposable collaborators from the application's services, or add an action you own as an instance.</value></data>
 </root>

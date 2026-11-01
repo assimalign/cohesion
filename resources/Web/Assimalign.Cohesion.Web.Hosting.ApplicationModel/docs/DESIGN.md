@@ -53,7 +53,7 @@ application's `IServiceProvider`, and builds these pieces:
 
 | Piece | Role |
 | --- | --- |
-| `WebResourceOptions` | Derives from `ApplicationInstanceOptions`, so every platform's verb applies to it; its `GetGatewayClient()` selects the client of the platform the environment names, and its `Deployment` is the deployment that started the instance. |
+| `WebResourceOptions` | Derives from `ApplicationInstanceOptions`, so every platform's verb and `AddAction` apply to it; its `GetGatewayClient()` selects the client of the platform the environment names, its `Deployment` is the deployment that started the instance, and its `CreateActions(provider)` creates the actions the application added. |
 | `WebResource` (internal) | The `IApplicationInstance`: provider `Web`, the resource's name, a new instance key, the deployment its environment names, one action for each registered setting the resource knows, then the actions the application added, built when the application is built. |
 | `ApplicationInstanceControlPlane` | ApplicationModel.Hosting's control plane over the resource, writing JSON through the resource's own context and the contexts the added actions came with. |
 | `ApplicationInstanceService` | Publishes and restores in `StartingAsync` through the selected client, opens the control plane to the gateway's calls in `StartAsync`, and closes it and stops renewing in `StopAsync`. |
@@ -107,8 +107,11 @@ it, and the action rebuilt CORS through a capturing pipeline builder to swap the
 **W5 — The resource's own actions are hidden; the application adds its own (owner request,
 2026-10-28).** The actions the resource builds from settings, and their content types such as the
 `cors` action's policy, are internal: the gateway and its platform see only content, described by
-the manifest and this document. `WebResourceOptions.AddAction` adds an action the application
-defines, as an instance or as a factory that runs once the application's container exists. Added
+the manifest and this document. `AddAction` adds an action the application defines, as an instance
+or as a factory that runs once the application's container exists. Since 2026-10-31 it is the base
+`ApplicationInstanceOptions.AddAction`, shared by every area (ApplicationModel.Hosting D21), and the
+resource creates the added actions with `ApplicationInstanceOptions.CreateActions` and writes their
+content through `ApplicationInstanceOptions.JsonContexts`; `WebResourceOptions` declares only `Name`. Added
 actions follow the resource's own in the manifest. A name already in use fails the application's
 build, because the control plane rejects duplicate names, so an added action cannot replace one of
 the resource's own.

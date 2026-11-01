@@ -1,11 +1,10 @@
 # ApplicationModel Library Area
 
-> **Being rebuilt (2026-10-27).** Since 2026-10-31 the area is seven projects: four core ones, the shared
+> **Rebuilt since 2026-10-27.** Since 2026-10-31 the area is seven projects: four core ones, the shared
 > [identity](Assimalign.Cohesion.ApplicationModel/docs/DESIGN.md), the gateway-to-instance
 > [protocol](Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md), the logical side in
 > [Definition](Assimalign.Cohesion.ApplicationModel.Definition/docs/DESIGN.md), and the instance
-> runtime in [Hosting](Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md), formerly
-> `Assimalign.Cohesion.Hosting.Resources`. The [gateway](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
+> runtime in [Hosting](Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md). The [gateway](Assimalign.Cohesion.ApplicationModel.Gateway/docs/DESIGN.md)
 > builds on the definitions and the protocol. Each gateway runs a model of its own, deployed by its own pipeline, and
 > a child gateway joins its parent. Since 2026-10-30 every transport belongs to a platform, which is
 > a pair of packages: the in-process platform is
@@ -14,8 +13,6 @@
 > which runs a gateway's resources in its own process. The first out-of-process platform, the
 > Kubernetes pair (`ApplicationModel.Gateway.Kubernetes` and `ApplicationModel.Hosting.Kubernetes`),
 > lives in the `cohesion-platforms` repository.
-> `Gateway.ControlPlane`, the retired gateway's HTTP front end, was removed on 2026-10-29. The
-> linked area records describe the retired design.
 
 The L2 application-composition and orchestration plane: the shared identity and protocol, the definitions a
 gateway program declares, and the instance side every area's `<Area>.Hosting.ApplicationModel`
@@ -24,9 +21,7 @@ runtimes.
 
 The area's architecture record lives in
 [docs/libraries/ApplicationModel/DESIGN.md](../../docs/libraries/ApplicationModel/DESIGN.md);
-this README is the project map. The signed
-[developer-experience design](../../docs/DEVELOPER_EXPERIENCE_DESIGN.md) is the direction of
-record and wins on every conflict. The full reference graph for every Cohesion assembly is in
+this README is the project map. The full reference graph for every Cohesion assembly is in
 [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 
 ## Layering
@@ -78,7 +73,5 @@ outside resource-area packages. That prohibition has no opt-out and no exemption
 ## Further reading
 
 - [docs/libraries/ApplicationModel/DESIGN.md](../../docs/libraries/ApplicationModel/DESIGN.md) — the area architecture record
-- [docs/APPLICATION_MODEL_BUILD_AND_DEPLOY.md](../../docs/APPLICATION_MODEL_BUILD_AND_DEPLOY.md) — the build and deploy flow drawn: SDK generation, gateway selection, and the in-process, Local, and Kubernetes realizations side by side
-- [docs/programs/REALIZATION_PLAN.md](../../docs/programs/REALIZATION_PLAN.md) — the platform-neutral realization plan contract
 - [docs/RUNTIME_CONTRACT.md](../../docs/RUNTIME_CONTRACT.md) — the language-neutral `COHESION_*` runtime contract
 - Per-project `docs/OVERVIEW.md` and `docs/DESIGN.md` beside each project's `src/`

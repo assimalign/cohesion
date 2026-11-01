@@ -10,9 +10,9 @@ which expose the settings the application's features registered. The design reco
 
 ## Scope
 
-- In scope: the `AddResource` verb on `WebApplicationBuilder` and its `WebResourceOptions`, the
+- In scope: the `AddResource` verb on `builder.Services` and its `WebResourceOptions`, the
   resource's own actions over registered settings (the `cors` action over the `cors` setting), and
-  the actions the application adds with `AddAction`.
+  the actions the application adds with the base options' `AddAction`.
 - Out of scope: every transport, which belongs to the platform packages the resource opts into
   (such as ApplicationModel.Hosting.InProcess); the resource contracts and the resource service
   (ApplicationModel.Hosting); the settings themselves (each feature package and the Web root);

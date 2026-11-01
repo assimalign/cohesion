@@ -2,10 +2,6 @@
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.Web.Hosting.ApplicationModel</RootNamespace>
 		<Description>Runs a Cohesion Web application as a managed resource instance: it joins the gateway that runs it through the client of the platform the resource opted into, and exposes its CORS policy as a resource state action.</Description>
-		<!-- The <Area>.Hosting.ApplicationModel packages join an area's runtime module to the
-		     application model's hosting, so they reference it (owner decisions 2026-10-28 and
-		     2026-10-29). -->
-		<CohesionHostingIsolationExemptions>Assimalign.Cohesion.Web.Hosting</CohesionHostingIsolationExemptions>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Web" />

@@ -3,8 +3,7 @@
 > **Status (2026-10-31):** reduced to resource identity when the gateway-to-instance protocol moved
 > to [ApplicationModel.Protocol](../../Assimalign.Cohesion.ApplicationModel.Protocol/docs/DESIGN.md)
 > (C1, C5). It was created on 2026-10-29 when the application model was split into contracts,
-> definitions, and hosting (ApplicationModel.Definition D20); its first types came from
-> Hosting.Resources, whose history is in
+> definitions, and hosting (ApplicationModel.Definition D20); its first types came from the instance runtime, whose history is in
 > [ApplicationModel.Hosting](../../Assimalign.Cohesion.ApplicationModel.Hosting/docs/DESIGN.md)'s
 > decisions.
 
