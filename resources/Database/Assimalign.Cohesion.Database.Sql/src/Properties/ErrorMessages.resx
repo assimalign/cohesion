@@ -855,7 +855,7 @@
     <value>Unpublished joint migration failed. The published schema is unchanged; correct the cause and retry.</value>
   </data>
   <data name="JointPlanningRefused" xml:space="preserve"><value>Schema migration planning refused: {0} Nothing was changed.</value></data>
-  <data name="JointSpaceInsufficient" xml:space="preserve"><value>Joint migration space admission refused: {0} bytes needed, {1} bytes available. No prepared migration write was made; the published schema is unchanged.</value></data>
+  <data name="JointSpaceInsufficient" xml:space="preserve"><value>Joint migration space refused: {0} bytes needed, {1} bytes available. The published schema is unchanged.</value></data>
   <data name="JointSpaceProbeFailed" xml:space="preserve"><value>The database volume's available space could not be determined.</value></data>
   <data name="JointPublicationUnconfirmed" xml:space="preserve"><value>Joint migration publication is unconfirmed. Recovery must determine whether the old or new schema committed; reopen before retrying.</value></data>
   <data name="JointTableNameReserved" xml:space="preserve"><value>Relation name '{0}' is reserved by a pending joint schema migration.</value></data>

@@ -8594,7 +8594,10 @@ VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an unpublished targ
 the dialect and does not enter this namespace. Planning checks all table names against tables,
 views and sequences, refusing CS03105 before intent save; publication rechecks that namespace
 under the catalog monitor before its commit, using the same collision rules as catalog load,
-including persisted abandoned owned sequences. PostgreSQL similarly checks its shared relation
+excluding permanently abandoned owned sequences. Those surrender their names in the joint
+publication transaction, as CREATE TABLE does; planning also skips them on the 49a path.
+Implicit CREATE TABLE / ADD COLUMN identity-sequence candidates skip pending joint table names,
+including suffixed candidates. PostgreSQL similarly checks its shared relation
 namespace before creation (src/backend/catalog/heap.c:1191-1198) and rename
 (src/backend/commands/tablecmds.c:4362-4367); SQL retains its own table/view/sequence namespace.
 Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 through both the thrown
@@ -8610,61 +8613,88 @@ for encoding/checkpoint headers. F depends on declaration size, never stored tab
 Build takes no owner-directory snapshot, visits no data/index page and decodes zero rows.
 A floor refusal uses CS03402 online and preserves a kept intent without writing it.
 
-Before the first prepared write, the worker measures each rewritten table's heap directory
-and actual registered index trees. It counts heap slots without decoding rows and walks
-B-tree format-2 internal child links, recording actual page counts and heights. SQL's local
-read-only walker validates geometry/ownership through normal storage pins. Storage's public
-owner directory omits index pages; the walk avoids adding a public API or shipped friend grant.
-Cost and retained visited identities are O(pages of rewritten owners); adjacent FK tables,
-dropped tables and untouched owners contribute no replacement allocation. Cancellation is
-observed per page. A resumed matching kind-9 intent passes this same worker check again.
+Before the first prepared write, the worker measures each rewritten table's actual heap slots,
+record bytes and encoded component lengths, without materializing values or invoking conversions.
+Stable owner-checked record copies tolerate concurrent pruning; one temporary raw record is
+retained at a time. It walks B-tree format-2 child links and measures leaf payload high-water
+bytes plus directory bytes, conservatively including payload orphaned by pruning until the
+next insertion compacts it. This avoids racing a shifted leaf directory. CHAR key lengths exclude
+padding. Storage's public owner directory omits index pages; the local read-only walk avoids a
+new public API or shipped friend grant. Cost is O(rewritten record bytes + index pages), with one
+extra source pass before copying; retention is O(index pages + columns), not decoded rows.
+Frozen missing tails use their encoded literal width. Adjacent FK tables, dropped tables and
+untouched owners add no replacement allocation. Cancellation is observed per page. A matching
+resumed intent repeats admission before any prepared write; Build still reads zero data pages.
 
-Let H_t be measured heap pages and W_t, W'_t the old/new encoded row-width estimates
-(29 bytes for stamps/owner/slot plus encoded components, capped at the maximum stored row).
-Fixed components use their encoded widths; bounded text/binary use declared lengths and
-UTF-8/escape allowance, and unbounded/custom values use the maximum stored-row allowance.
-Existing VARCHAR/BINARY bound changes preserve the old value-width estimate because they
-cannot enlarge copied values; CHAR padding and changed domain casts use target widths.
-An added column without a default contributes its one-byte NULL, regardless of its declared bound.
-The heap estimate is ceil(H_t * max(1, W'_t/W_t)). For each retained final index, multiply
-its measured pages by max(1, new/old encoded key-entry width), rounding up; entries include
-28 bytes for stamps/reference/length/slot and at most 1024 key bytes. New index trees use
-heap-slot count times that entry width, 50% leaf occupancy, and internal levels at minimum
-fanout three. New empty tables need no heap pages and one page per index root. R is B times
-the resulting prepared heap/tree page count. Old owners remain allocated until publication
-and snapshot reclamation; they are already allocated and add no new-space charge.
+For each final column, unchanged values contribute their measured encoded bytes (1x).
+Built-in conversions to TEXT/VARCHAR use the source's maximum rendered width, with four bytes
+for the string tag, collation and terminator: BOOLEAN 5, TINYINT 4, SMALLINT 6, INT 11,
+BIGINT 20, DECIMAL 31, REAL 16, DOUBLE 25, DATE 10, TIME 16, timestamp 27, timestamp with
+zone 33, INTERVAL 32 and UUID 36 ASCII characters. Binary hex output uses at most twice the
+measured component bytes plus four per row. Numeric and temporal targets use encoded fixed
+widths (DECIMAL uses its 33-byte maximum component). Encoded NULL tags are counted separately:
+NULL remains one byte and never invokes a cast. Growth bounds apply only to potentially
+non-NULL values. CHAR(n) adds only possible ASCII padding: max(0, n-m) for CHAR(m), n for
+TEXT; successful built-in scalar/hex output pads to n (longer output refuses assignment).
+CHAR keys exclude that padding. Added literal defaults contribute their actual encoded value; added NULLs
+cost one byte. Application casts and other conversions without a knowable bound contribute 1x
+upfront, while retaining known minimum CHAR padding. No target's declared VARCHAR/TEXT/JSON
+maximum is treated as stored data, and there is no whole-row cap that can hide another
+column's growth.
 
-The WAL derivation is from CopyReplacementRowsAsync, TransactionCoordinator.ApplyStatementAsync,
-Storage.RegisterTouch/CommitTransaction, PageImageCodec and StorageJournal: every durable
-64-row copy bracket can append full pre-images (including spills) and committed deltas/images,
-not only metadata frames. A page payload is at most B+8 bytes and a frame adds 38 bytes.
-At most two such records per touched page cost 2*(B+46). A row touches at most two heap
-pages plus (4*h+3) pages per final index including split paths/children/sibling links.
-Measured tree heights h grow by ceil(log_3(page-growth factor)); new trees use their estimated
-levels. C is the maximum over copied tables of min(64, heap slots) times that per-row cost
-in pages; T is the total new root count. Joint copying explicitly checkpoints after a chunk
-or root-creation bracket when the journal reaches 8 MiB. The physical bracket has ended,
-and the coordinator persists active logical identities and truncates WAL under its apply gate;
-the read-committed migration reservation does not pin WAL. The checkpoint marker uses the
-existing provisioning-only context slot; ordinary statement context/metrics sizes and allocation
-budgets are unchanged. A checkpoint may therefore truncate
-throughout copying. No second executor or compensation path is introduced.
+Let H be measured heap pages, E the measured record/slot bytes and E' the sum of projected
+components plus 29 bytes per row for stamps, owner and slot. Prepared heap pages are
+ceil(H * max(E,E')/E). Retained indexes scale measured pages by max(1, projected/actual leaf
+entry bytes), applying only converted-column growth to the measured key bytes. New indexes
+use projected key bytes plus 28 bytes per entry, 50% leaf occupancy, and internal levels at
+minimum fanout three. Empty tables allocate no heap and one page per index root. R is the
+prepared page count times B=8192. The 25% margin below covers packing estimation. Regression
+fixtures require R within 3x the measured copy allocation, independently of the explicit WAL
+and catalog reserves; those fixed reserves dominate tiny tables and are not row-width factors.
 
-Let Q be total heap slots times their per-row page-touch allowances, plus T, and K be one
-root-creation bracket plus sum(ceil(heap slots/64)). Total possible copy WAL is
-L = Q*2*(B+46) + K*152. Peak additional copy WAL is estimated by
-J = min(L, 8 MiB + max(C,T)*2*(B+46) + 152). The 152 allows four metadata frames per
-bracket. Small jobs pay only their total-frame bound, rather than an unconditional 8 MiB.
-Admission requires
-N = R + J + ceil((R+J)/4) + 16 MiB + F available bytes. The 25% margin covers occupancy
-and width estimation; the 16 MiB reserve covers catalog publication/reclamation. The explicit
-copy checkpoints make this a peak-growth allowance rather than an invented whole-file multiple.
-For example, a 1 GiB rewritten table including its own two height-four trees in a 100 GiB
-database, with unchanged widths and a 6 KiB intent, has R=1,073,741,824, C=2560,
-J=50,567,320 and F=1,295,344 bytes. N=1,423,458,990 bytes (about 1.326 GiB); the other
-99 GiB contributes zero. The 25% margin and catalog/floor reserves are included.
-CS03402 includes N and available bytes; a precise refusal discards kind 9 and every prepared
-object, releases reservations and leaves the old schema online. No prepared write precedes it.
+Every 64-row bracket can append one pre-image (including spill) and one committed delta/image
+per page: each payload is at most B+8 and each frame adds 38 bytes, giving 2(B+46).
+A row touches at most two heap pages plus 4h+3 pages per index, including split children and
+sibling links. For the watchdog, h is a conservative maximum over all source versions at
+minimum fanout three; unknown cast growth cannot invalidate it. C is the maximum 64-row
+page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, and K the
+number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
+its brackets, including their begin/commit frames; existing WAL and writes between brackets
+never trigger its checkpoint. J = min(Q*2(B+46)+152K, 16 MiB + max(C,T)*2(B+46)+152).
+The 16 MiB threshold is 1/16 of the engine's default 256 MiB: twice the previous copy allowance,
+while bounding the WAL reserve independently of a large database. Checkpoints flush the shared
+pool and stall every database writer under the apply gate, including untouched tables; they
+can also increase subsequent full-page images. This deliberate stall cost buys bounded copy
+WAL. Busy storage brackets, including reclamation outside the apply gate, retry the same
+checkpoint after a cancellation-aware delay until it succeeds. No checkpoint is skipped.
+Peak-WAL tests sample at durable commit, before truncation, and assert the stated J overshoot;
+a checkpoint-disabled negative control must violate the bound. Reclamation-backlog tests hold
+a real bracket open before inline apply, including a retry after failed preparation.
+
+For P prepared owners and T roots, the discard reserve is
+S = F + (4+2P+2T)*(B+2(B+46)). Kind-14 records are already durable before copying;
+this also covers kind-9 removal, kind-14/directory changes and their journal frames. Admission
+requires N = R + J + ceil((R+J)/4) + 16 MiB + S. The separate 16 MiB
+publication/preparation allowance may be consumed before copying; it is not required to
+remain free by the watchdog. Old owners are already allocated and cost no new bytes.
+Before every root-build and copy bracket, the watchdog probes the real directory volume for
+D = A*B + touches*2(B+46)+152 plus S. A is min(64, remaining rows)*(1+2h*index count)
+for a copy bracket: one new heap page per row and two index allocations per level bound
+sibling splits and root growth. For root creation, A=touches=T. Every touched page gets
+two full WAL frames, with four metadata frames per bracket. Copy A is at most half the
+touch count, so the 25% WAL margin also covers this maximum bracket allocation. It rechecks under the apply gate before
+page writes, after any queued writer. A refusal discards the intent online with CS03402 and
+needed/available bytes, leaves the old schema usable and allows an explicit retry. Unknown
+application expansion and other writers' consumption are therefore handled during copying,
+instead of pretending the upfront estimate reserves a volume. The final residual risk is other
+writers racing between a probe and completion of that one bounded bracket; their writes can
+still exhaust the volume and invoke the existing unsafe-storage offline policy.
+The watchdog and WAL counters live in the existing provisioning-only context slot, leaving
+ordinary statement context/metrics sizes and allocation budgets unchanged.
+
+An admission CS03402 includes N and available bytes; no prepared write precedes that check.
+A watchdog CS03402 includes D+S and available bytes. Either refusal discards kind 9 and every
+prepared object, releases reservations and leaves the old schema online.
 A later successful apply or matching/rollback Build clears an earlier Provisioning failure,
 including an already-applied schema skip. Disposed, offline, corrupt and canceled planning
 retain their own identities and precedence; only data-independent refusals become CS03105.
@@ -8672,8 +8702,8 @@ retain their own identities and precedence; only data-independent refusals becom
 Windows probes the actual directory with source-generated GetDiskFreeSpaceExW, including mount
 points and UNC shares, normalizing a trailing backslash and long-path prefix. Unix uses
 DriveInfo for that directory; memory strategies report no volume limit. Admission is an
-estimate, not a reservation: concurrent writers/processes and opaque application cast expansion
-can still exhaust the volume. The explicit unsafe-storage offline exception below remains.
+estimate, not a reservation: the per-bracket watchdog supplies the copy guarantee, with the
+other-writer race described above. The explicit unsafe-storage offline exception below remains.
 
 The final table shapes, new tables and all their indexes are unpublished. Changed CHECKs and
 defaults bind against those shapes before any row is read. SQ-A1's bounded 64-row copier and

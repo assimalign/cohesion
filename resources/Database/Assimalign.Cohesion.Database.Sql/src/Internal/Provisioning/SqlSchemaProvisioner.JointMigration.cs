@@ -19,6 +19,8 @@ internal sealed partial class SqlSchemaProvisioner
     internal Action? JointSpaceCounting { get; set; }
     internal long JointSpaceNeed { get; private set; }
     internal long JointSpaceIndexPages { get; private set; }
+    internal long JointSpaceReplacementBytes { get; private set; }
+    internal long JointSpaceDiscardBytes { get; private set; }
     internal SqlStatementMetrics? JointMetrics { get; private set; }
     private (CancellationTokenSource Stop, TaskCompletionSource Finished)? _jointPreparing;
 
@@ -190,6 +192,8 @@ internal sealed partial class SqlSchemaProvisioner
             JointMetrics = statement.Metrics;
             BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken);
             AdmitJointSpace(migration.JointPlan!, migration.Intent, cancellationToken);
+            long reserve = JointDiscardReserve(migration.JointPlan!, migration.Intent);
+            statement.ConfigureCopySpace(bytes => CheckJointSpace(checked(bytes + reserve)));
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
             await executor.ExecuteJointMigrationAsync(migration.JointPlan!, migration.Schema, statement,
                 phase => JointStage?.Invoke(phase), cancellationToken).ConfigureAwait(false);

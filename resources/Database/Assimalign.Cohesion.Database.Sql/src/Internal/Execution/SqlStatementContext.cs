@@ -82,6 +82,23 @@ internal readonly struct SqlStatementContext
     // sizes and allocation budgets stay unchanged, including nonzero lock timeouts.
     internal bool CheckpointCopy => _names is JointProvisioningNames;
 
+    internal void ConfigureCopySpace(Action<long> check)
+        => ((JointProvisioningNames)_names).CheckSpace = check;
+
+    internal void CheckCopySpace(long touches, long? allocations = null)
+    {
+        if (_names is JointProvisioningNames joint)
+        { joint.CheckSpace!(SqlSchemaProvisioner.JointBracketBytes(touches, allocations ?? touches)); }
+    }
+
+    internal long AddCopyJournalBytes(long bytes)
+    {
+        var joint = (JointProvisioningNames)_names;
+        return joint.JournalBytes = checked(joint.JournalBytes + Math.Max(0, bytes));
+    }
+
+    internal void ResetCopyJournalBytes() => ((JointProvisioningNames)_names).JournalBytes = 0;
+
     /// <summary>
     /// Gets the database's transaction coordinator.
     /// </summary>
@@ -146,6 +163,8 @@ internal readonly struct SqlStatementContext
 
     private sealed class JointProvisioningNames : ProvisioningNames
     {
+        internal Action<long>? CheckSpace { get; set; }
+        internal long JournalBytes { get; set; }
         internal JointProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
             : base(schema, database, lockTimeout)
         {

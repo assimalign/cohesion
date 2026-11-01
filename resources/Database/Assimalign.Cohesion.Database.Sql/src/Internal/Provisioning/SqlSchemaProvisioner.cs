@@ -1038,7 +1038,7 @@ internal sealed partial class SqlSchemaProvisioner
         {
             if (!_catalog.TryGetTable(SqlPlanner.DefaultSchema, table.Name, out SqlCatalogTable actual))
             {
-                if (_catalog.RelationNameExists(SqlPlanner.DefaultSchema, table.Name, includeOrphans: true))
+                if (_catalog.RelationNameExists(SqlPlanner.DefaultSchema, table.Name))
                 {
                     throw new SqlSchemaMigrationException(
                         string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateCatalogOwnershipFailure,

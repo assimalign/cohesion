@@ -23,8 +23,10 @@ public sealed partial class SqlJointTypeMigrationTests
     private static SqlCompiledSchema WithAudit() => Compiled(Target().Compile().Tables.Append(
         new CompiledSchemaTable("audit", "audit", [new("id", DatabaseType.Int32, true)], null, [], [])).ToArray());
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Joint planning: abandoned owned sequences still occupy the persisted relation namespace")]
-    public async Task ApplyAsync_OrphanSequenceName_ShouldRefuseBeforeIntent()
+    [Theory(DisplayName = "Cohesion Test [Sql] - Joint planning: abandoned owned sequences surrender names atomically, including 49a")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApplyAsync_OrphanSequenceName_ShouldSurrenderAtPublication(bool joint)
     {
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -40,12 +42,15 @@ public sealed partial class SqlJointTypeMigrationTests
             database.Catalog.AbandonStorageReplacement(prepared);
 
             // Act
-            var failure = await Should.ThrowAsync<SqlSchemaMigrationException>(async () => await database.ApplySchemaAsync(WithAudit(), guard.Token));
+            var target = joint ? WithAudit() : Compiled(Source().Compile().Tables.Append(
+                new CompiledSchemaTable("audit", "audit", [new("id", DatabaseType.Int32, true)], null, [], [])).ToArray());
+            await database.ApplySchemaAsync(target, guard.Token);
 
             // Assert
-            failure.Diagnostics.ShouldContain(d => d.Code == "CS03105");
+            database.Catalog.Sequences.ShouldNotContain(sequence => sequence.Name == "audit");
+            database.Catalog.TryGetTable("dbo", "audit", out _).ShouldBeTrue();
             database.Catalog.PendingMigration.ShouldBeNull();
-            database.Catalog.SchemaState!.ContentHash.ShouldBe(Source().Compile().Hash);
+            database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
             database.IsOffline.ShouldBeFalse();
         }
         finally { database.TableReclamation.ExitStatement(epoch); }

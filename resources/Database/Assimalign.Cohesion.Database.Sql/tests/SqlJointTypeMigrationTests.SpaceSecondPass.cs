@@ -66,7 +66,7 @@ public sealed partial class SqlJointTypeMigrationTests
     public async Task ApplyAsync_WideCopy_ShouldCheckpointBetweenChunks()
     {
         // Arrange
-        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         var storage = new CrashCaptureSqlStorageStrategy(StorageCommitDurability.None);
         var builder = Builder(storage);
         builder.Options.CheckpointJournalSize = 0;
@@ -78,7 +78,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await database.ApplySchemaAsync(source, guard.Token);
         var table = Table(database);
         byte[] record = SqlRowCodec.Encode(table, [1, new string('x', 4000)], TransactionSequence.None);
-        for (int start = 0; start < 4096; start += 64)
+        for (int start = 0; start < 8192; start += 64)
         {
             using var bracket = database.DataStorage.BeginTransaction();
             for (int i = 0; i < 64; i++) { database.DataStorage.InsertRow(bracket, table.ObjectId, record); }
@@ -88,8 +88,11 @@ public sealed partial class SqlJointTypeMigrationTests
         int chunks = 0, truncations = 0;
         long last = 0, peak = 0;
         CrashCaptureSqlStorageStrategy? checkpointImage = null;
+        storage.DurableStorageChanged = catalog =>
+        { if (!catalog) { peak = Math.Max(peak, database.DataStorage.Journal.Length); } };
         SqlPlanExecutor.RewriteStage = (stage, _) =>
         {
+            if (stage == "CopyCommitted") { peak = Math.Max(peak, database.DataStorage.Journal.Length); return; }
             if (stage != "Copied") { return; }
             long length = database.DataStorage.Journal.Length;
             chunks++;
@@ -107,9 +110,10 @@ public sealed partial class SqlJointTypeMigrationTests
             await database.ApplySchemaAsync(target, guard.Token);
 
             // Assert
-            chunks.ShouldBe(64);
+            peak.ShouldBeGreaterThan(0);
+            peak.ShouldBeLessThanOrEqualTo(SqlSchemaProvisioner.JointCopyCheckpointBytes + 128L * 2 * (Page.Size + 46) + 152);
+            chunks.ShouldBe(128);
             truncations.ShouldBeGreaterThan(0);
-            peak.ShouldBeLessThan(8L * 1024 * 1024);
             database.Catalog.SchemaState!.ContentHash.ShouldBe(target.Hash);
             _output.WriteLine($"Wide copy: chunks={chunks}; observed truncations={truncations}; between-chunk WAL peak={peak} bytes.");
             await using var reopen = await Builder(storage.CaptureDurableImages()).BuildAsync(guard.Token);
@@ -119,9 +123,9 @@ public sealed partial class SqlJointTypeMigrationTests
             old.Catalog.SchemaState!.ContentHash.ShouldBe(source.Hash);
             old.Catalog.PendingMigration.ShouldBeNull();
             await using var oldReader = await old.CreateSessionAsync(guard.Token);
-            (await RowsAsync(oldReader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe(4096L);
+            (await RowsAsync(oldReader, "SELECT COUNT(*) FROM items", guard.Token)).Single()[0].ShouldBe(8192L);
         }
-        finally { SqlPlanExecutor.RewriteStage = null; }
+        finally { SqlPlanExecutor.RewriteStage = null; storage.DurableStorageChanged = null; }
     }
 
     private sealed record WideOldRow(int Value, string Payload);
@@ -131,7 +135,7 @@ public sealed partial class SqlJointTypeMigrationTests
     public async Task ApplyAsync_UntouchedAllocation_ShouldRequireIdenticalBytes()
     {
         // Arrange
-        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         var small = await SeedAsync(guard.Token, 1);
         long smallNeed = await MeasureNeedAsync(small.CaptureDurableImages(), Target().Compile(), guard.Token);
         await using (var engine = await Builder(small).BuildAsync(guard.Token))

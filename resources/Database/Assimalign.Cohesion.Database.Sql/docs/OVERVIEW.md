@@ -32,6 +32,8 @@ shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically repla
 (#1447). Typed migrations use joint unpublished preparation and one-commit publication,
 deferred on populated tables and inline for explicit ApplySchemaAsync, RunMigrationsInline or
 a declaration containing any script. VARCHAR narrowing also uses this assignment rewrite.
+Worker admission measures actual encoded bytes; a per-bracket volume watchdog stops expanding
+copies online with the old schema intact. Copy-owned WAL triggers bounded, retryable checkpoints.
 
 TRUNCATE table lists execute through atomic storage replacement, with recursive FK closure,
 identity restart/continuation and deferred reclamation that preserves older snapshots (#1716).

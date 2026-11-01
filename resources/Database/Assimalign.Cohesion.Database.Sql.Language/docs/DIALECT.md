@@ -1874,6 +1874,9 @@ proceeds. Definition DDL is refused database-wide from Build through queue time 
 CREATE TABLE, CTAS, CREATE VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an
 unpublished joint target name (CS03404). Existing table/view/sequence name clashes refuse at
 planning with CS03105, and catalog publication checks the same namespace again under its lock.
+Implicit identity-sequence naming skips every pending joint table name, including suffixed
+candidates. Permanently abandoned owned sequences surrender names atomically at publication;
+they do not refuse a new declared table during planning (including the 49a path).
 Conversion, FK, CHECK, NOT NULL, unique and domain failures discard preparation and the pending
 intent with CS03402, leaving the old schema online. There is no compensation or automatic retry.
 An old/no-target application opens the old schema after interrupted preparation; a matching new
@@ -1886,8 +1889,11 @@ CHAR width changes also rewrite. Default changes in a plan without any TYPE rewr
 the base generator's CS03105 refusal before saving anything. The joint plan publishes all defaults.
 Metadata planning refusals report CS03105; joint reservation failures agree on CS03402 in the
 exception and provisioning report. Before intent save, Build checks only the metadata space floor, without owner snapshots or row
-decodes. The worker counts rewritten heap/index pages and new trees before prepared writes;
-copy checkpoints bound journal growth. A 25% margin and catalog reserve complete the estimate;
+decodes. The worker measures actual rewritten record/key bytes and conversion growth before prepared writes.
+A volume watchdog checks each copy/index bracket plus its discard reserve, stopping CS03402
+online when an application cast expands unexpectedly or other writers consume space. Copy-owned
+WAL triggers checkpoints at 16 MiB; a busy reclamation bracket retries with cancellation.
+A 25% margin and catalog reserve complete the upfront estimate;
 Sql DESIGN defines the formula. Untouched tables never change the need.
 Insufficient space reports CS03402 with needed/available bytes online, including resumed intents.
 WAL write/flush, unconfirmed commit and existing engine-wide failure policies still take storage

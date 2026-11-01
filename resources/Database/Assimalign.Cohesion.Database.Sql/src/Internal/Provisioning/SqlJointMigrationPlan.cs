@@ -6,4 +6,7 @@ internal sealed record SqlJointMigrationPlan(SqlJointMigrationTable[] Tables, Sq
     SqlCatalogTable[] Touched);
 
 internal sealed record SqlJointMigrationTable(SqlCatalogTable? Previous, SqlCatalogTable Shape,
-    SqlCatalogIndex[] Indexes, SqlBoundExpression?[] Values);
+    SqlCatalogIndex[] Indexes, SqlBoundExpression?[] Values)
+{
+    internal long CopyRows { get; set; }
+}

@@ -198,8 +198,12 @@ internal sealed partial class SqlPlanExecutor
                     LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 _definitions.Get(table, cancellationToken);
             }
+            statement.CheckCopySpace(descriptions.Length);
+            long journalStart = 0;
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
             {
+                statement.CheckCopySpace(descriptions.Length);
+                journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 foreach (var index in descriptions)
                 {
                     await _indexManager.CreateIndexAsync(statement.Transaction, index.TableObjectId,
@@ -208,7 +212,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
-            CheckpointReplacementCopy(statement, cancellationToken);
+            await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             stage("TreesDurable");
             foreach (var item in changed)
             {
@@ -223,7 +227,7 @@ internal sealed partial class SqlPlanExecutor
                     CheckDomains(bound, converted, evaluator);
                     ValidateRows(table, [converted], statement, cancellationToken, checksOnly: true);
                     return converted;
-                }, cancellationToken).ConfigureAwait(false);
+                }, cancellationToken, item.CopyRows).ConfigureAwait(false);
                 stage("TablePrepared");
             }
             var replacedNames = retiring.Select(table => (table.Schema, table.Name)).ToHashSet();

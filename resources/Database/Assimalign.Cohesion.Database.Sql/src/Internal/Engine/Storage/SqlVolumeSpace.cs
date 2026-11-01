@@ -22,6 +22,7 @@ internal static partial class SqlVolumeSpace
         // GetDiskFreeSpaceEx requires a trailing backslash for UNC directories.
         string normalized = directory.TrimEnd('\\', '/') + "\\";
         if (normalized.Length < 260 || normalized.StartsWith(@"\\?\", StringComparison.Ordinal)) { return normalized; }
+        if (normalized.StartsWith(@"\\.\", StringComparison.Ordinal)) { return @"\\?\" + normalized[4..]; }
         return normalized.StartsWith(@"\\", StringComparison.Ordinal)
             ? @"\\?\UNC\" + normalized[2..] : @"\\?\" + normalized;
     }

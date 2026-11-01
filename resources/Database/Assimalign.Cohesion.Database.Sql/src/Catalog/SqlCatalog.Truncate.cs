@@ -132,7 +132,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (!newTable) { ValidateStorageReplacement(expected, named); }
-            else if (expected.Any(table => RelationExists(table.Schema, table.Name, includeOrphans: true)))
+            else if (expected.Any(table => RelationExists(table.Schema, table.Name)))
             { throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog); }
             ulong next = _nextObjectId;
             var replacements = expected.Select(table => describe is not null ? describe(table, checked(next++)) : new SqlCatalogTable(checked(next++), table.Schema, table.Name,
@@ -148,7 +148,7 @@ public sealed partial class SqlCatalog
             {
                 var additions = table.Columns.Where(column => column.Identity is not null && expected[index].FindColumn(column.Name)?.Identity is null).ToArray();
                 if (additions.Length == 0) { return (Action)(() => { }); }
-                return StageOwnedSequences(transaction, null, new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, additions), ref next);
+                return StageOwnedSequences(transaction, null, new SqlCatalogTable(table.ObjectId, table.Schema, table.Name, additions), ref next, surrenderName: false);
             }).ToArray();
             var counterLocation = PersistCounter(transaction, next, _ddlGeneration);
             var intents = locations.Select(location => new SqlReclamationIntent(location.PageId, location.SlotIndex)).ToArray();
@@ -197,7 +197,7 @@ public sealed partial class SqlCatalog
                 // Use the same namespace as Load's view/sequence directory validators.
                 // Existing tables may keep their own name; every other relation must be absent.
                 if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name)) ||
-                    _sequences.ContainsKey((table.Schema, table.Name)) ||
+                    SequenceNameExists(table.Schema, table.Name) ||
                     _tables.ContainsKey((table.Schema, table.Name)) &&
                     !expected.Any(old => TableNameComparer.Instance.Equals((old.Schema, old.Name), (table.Schema, table.Name))))
                 { throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog); }
@@ -248,7 +248,8 @@ public sealed partial class SqlCatalog
             var retired = retiring.Select(table => (table.ObjectId, Location: _storage.InsertRow(transaction, table.ObjectId,
                 SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name)))).ToArray();
             ulong next = _nextObjectId;
-            Action[] owned = _sequences.Count == 0 ? [] : retiring.Select(table => StageOwnedSequences(transaction, table, mapping.GetValueOrDefault(table.ObjectId), ref next, restartIdentity)).ToArray();
+            Action[] owned = _sequences.Count == 0 ? [] : retiring.Select(table => StageOwnedSequences(transaction, table, mapping.GetValueOrDefault(table.ObjectId), ref next, restartIdentity))
+                .Concat(replacements.Where(table => !mapping.Values.Contains(table)).Select(table => StageOwnedSequences(transaction, null, table, ref next))).ToArray();
             foreach (var table in replacements)
             {
                 var location = _pendingReclamations[table.ObjectId];

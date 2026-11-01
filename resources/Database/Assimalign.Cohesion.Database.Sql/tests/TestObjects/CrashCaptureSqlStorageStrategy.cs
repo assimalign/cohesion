@@ -47,7 +47,34 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
     internal StorageCommitDurability Durability => _durability;
 
     internal long MigrationAvailableBytes { get; set; } = long.MaxValue;
-    internal override long GetAvailableMigrationBytes(string databaseName) => MigrationAvailableBytes;
+    internal long VolumeCapacityBytes { get; set; } = long.MaxValue;
+    internal long PeakAllocatedBytes { get; private set; }
+    internal int CapacityFailures { get; private set; }
+    internal long AllocatedBytes
+    {
+        get
+        {
+            lock (_sync)
+            {
+                long bytes = 0;
+                foreach (var streams in _live.Values) { bytes += streams.Data.Length + streams.Journal.Length + streams.Backup.Length; }
+                return bytes;
+            }
+        }
+    }
+    internal override long GetAvailableMigrationBytes(string databaseName)
+        => Math.Min(MigrationAvailableBytes, VolumeCapacityBytes - AllocatedBytes);
+
+    private void OnGrowing(long growth)
+    {
+        long next = AllocatedBytes + growth;
+        if (next > VolumeCapacityBytes)
+        {
+            CapacityFailures++;
+            throw new IOException("Faked volume filled");
+        }
+        PeakAllocatedBytes = Math.Max(PeakAllocatedBytes, next);
+    }
 
     internal int JournalFlushes(string databaseName)
     {
@@ -241,9 +268,9 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
             // without pretending that its unflushed journal survives a power loss.
             Action changed = () => OnDurableChange(catalog);
             Action writing = () => OnWriteStarting(catalog);
-            var streams = (Data: new GatedStream(writeThrough: true, changed, writing),
-                Journal: new GatedStream(writeThrough: _durability == StorageCommitDurability.None, changed, writing),
-                Backup: new GatedStream(writeThrough: true, changed, writing));
+            var streams = (Data: new GatedStream(writeThrough: true, changed, writing, OnGrowing),
+                Journal: new GatedStream(writeThrough: _durability == StorageCommitDurability.None, changed, writing, OnGrowing),
+                Backup: new GatedStream(writeThrough: true, changed, writing, OnGrowing));
             _live[key] = streams;
             if (!catalog) { _images[CreationKey(databaseName)] = (System.Text.Encoding.UTF8.GetBytes(CreationSignature), [], []); }
             var storage = SqlStorage.Create(new StorageStream(new SimulatedDurableFileHandle(streams.Data)),
@@ -275,9 +302,9 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
             Action changed = () => OnDurableChange(catalog);
             Action writing = () => OnWriteStarting(catalog);
-            var streams = (Data: new GatedStream(image.Data, writeThrough: true, changed, writing),
-                Journal: new GatedStream(image.Journal, writeThrough: _durability == StorageCommitDurability.None, changed, writing),
-                Backup: new GatedStream(image.Backup, writeThrough: true, changed, writing));
+            var streams = (Data: new GatedStream(image.Data, writeThrough: true, changed, writing, OnGrowing),
+                Journal: new GatedStream(image.Journal, writeThrough: _durability == StorageCommitDurability.None, changed, writing, OnGrowing),
+                Backup: new GatedStream(image.Backup, writeThrough: true, changed, writing, OnGrowing));
             _live[key] = streams;
 
             // Deferred checkpoint per the strategy contract: the engine analyzes
@@ -368,20 +395,22 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         private readonly bool _writeThrough;
         private readonly Action _onDurableChange;
         private readonly Action _onWriteStarting;
+        private readonly Action<long> _onGrowing;
         private byte[] _durable;
 
         internal int FlushCount { get; private set; }
 
-        internal GatedStream(bool writeThrough, Action onDurableChange, Action onWriteStarting)
+        internal GatedStream(bool writeThrough, Action onDurableChange, Action onWriteStarting, Action<long> onGrowing)
         {
             _liveBuffer = new MemoryStream();
             _durable = Array.Empty<byte>();
             _writeThrough = writeThrough;
             _onDurableChange = onDurableChange;
             _onWriteStarting = onWriteStarting;
+            _onGrowing = onGrowing;
         }
 
-        internal GatedStream(byte[] content, bool writeThrough, Action onDurableChange, Action onWriteStarting)
+        internal GatedStream(byte[] content, bool writeThrough, Action onDurableChange, Action onWriteStarting, Action<long> onGrowing)
         {
             // Copy into an expandable stream: MemoryStream(byte[]) cannot grow.
             _liveBuffer = new MemoryStream();
@@ -391,6 +420,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
             _writeThrough = writeThrough;
             _onDurableChange = onDurableChange;
             _onWriteStarting = onWriteStarting;
+            _onGrowing = onGrowing;
         }
 
         internal byte[] CaptureDurable() => (byte[])_durable.Clone();
@@ -419,6 +449,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
 
         public override void SetLength(long value)
         {
+            _onGrowing(Math.Max(0, value - _liveBuffer.Length));
             _liveBuffer.SetLength(value);
 
             if (_writeThrough)
@@ -431,6 +462,7 @@ internal sealed class CrashCaptureSqlStorageStrategy : SqlStorageStrategy
         public override void Write(byte[] buffer, int offset, int count)
         {
             _onWriteStarting();
+            _onGrowing(Math.Max(0, _liveBuffer.Position + count - _liveBuffer.Length));
             _liveBuffer.Write(buffer, offset, count);
 
             if (_writeThrough)

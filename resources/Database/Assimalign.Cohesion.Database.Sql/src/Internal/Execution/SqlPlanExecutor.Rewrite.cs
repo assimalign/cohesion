@@ -163,7 +163,7 @@ internal sealed partial class SqlPlanExecutor
 
     private async Task CopyReplacementRowsAsync(SqlCatalogTable previous, SqlCatalogTable replacement,
         SqlCatalogIndex[] descriptions, SqlStatementContext statement, Func<object?[], object?[]>? transform,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, long copyRows = 0)
     {
         var indexes = descriptions.Select(description =>
         {
@@ -206,8 +206,14 @@ internal sealed partial class SqlPlanExecutor
                 memory.Retain(converted[i]);
                 foreach (var index in indexes) { MatchesIndex(replacement, index.Metadata, converted[i], cancellationToken: cancellationToken); }
             }
+            long journalStart = 0;
+            statement.CheckCopySpace(SqlSchemaProvisioner.JointCopyTouches(batch.Count, copyRows, indexes.Length),
+                SqlSchemaProvisioner.JointCopyAllocations(batch.Count, copyRows, indexes.Length));
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
+                statement.CheckCopySpace(SqlSchemaProvisioner.JointCopyTouches(batch.Count, copyRows, indexes.Length),
+                    SqlSchemaProvisioner.JointCopyAllocations(batch.Count, copyRows, indexes.Length));
+                journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 for (int i = 0; i < batch.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -231,7 +237,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
-            CheckpointReplacementCopy(statement, cancellationToken);
+            await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
             ForgetIndexRows(converted);
             processed += batch.Count;
             statement.ProvisioningProgress?.Invoke(processed, null);
@@ -244,12 +250,28 @@ internal sealed partial class SqlPlanExecutor
         statement.ProvisioningProgress?.Invoke(processed, processed);
     }
 
-    private void CheckpointReplacementCopy(SqlStatementContext statement, CancellationToken token)
+    private async Task CheckpointReplacementCopyAsync(SqlStatementContext statement, long journalStart, CancellationToken token)
     {
-        // Each 64-row bracket has ended. A logical read-committed reservation does
-        // not pin WAL: the coordinator checkpoints its active identities and truncates
-        // the physical journal under the apply gate. This bounds joint admission's J.
-        if (statement.CheckpointCopy && _storage.Journal.Length >= SqlSchemaProvisioner.JointCopyCheckpointBytes)
-        { statement.Coordinator.Checkpoint(token); }
+        if (!statement.CheckpointCopy) { return; }
+        // Sample at commit, before checkpoint truncation; include only deltas across
+        // our brackets, never untouched writers' WAL accumulated between brackets.
+        long length = _storage.Journal.Length;
+        long added = statement.AddCopyJournalBytes(length - journalStart);
+        RewriteStage?.Invoke("CopyCommitted", length);
+        if (added < SqlSchemaProvisioner.JointCopyCheckpointBytes) { return; }
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            try { statement.Coordinator.Checkpoint(token); break; }
+            catch (StorageTransactionException busy) when (busy.Code != StorageTransactionErrorCode.ForeignStorage)
+            {
+                // Reclamation uses bounded storage brackets outside the apply gate.
+                // Like the engine checkpoint worker, retry busy; never skip the bound.
+                RewriteStage?.Invoke("CheckpointBusy", length);
+                await Task.Delay(1, token).ConfigureAwait(false);
+            }
+        }
+        statement.ResetCopyJournalBytes();
+        RewriteStage?.Invoke("CopyCheckpointed", length);
     }
 }

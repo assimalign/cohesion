@@ -10,6 +10,19 @@ namespace Assimalign.Cohesion.Database.Sql.Catalog;
 public sealed partial class SqlCatalog
 {
     internal Action? BeforeJointDiscard { get; set; }
+
+    // Called under the catalog monitor, including by implicit identity naming.
+    // Compiled tables live in dbo. Kind 9 carries new-table names for the whole job.
+    private bool JointNameReserved(string schema, string name)
+    {
+        if (_pendingMigration is null || !schema.Equals("dbo", StringComparison.OrdinalIgnoreCase)) { return false; }
+        foreach (var step in _pendingMigration.Steps)
+        {
+            if (step.Kind == "Joint/AddTable" && step.Table.Equals(name, StringComparison.OrdinalIgnoreCase)) { return true; }
+        }
+        return false;
+    }
+
     // Reuse kind 6 and kind 9 in the same storage transaction as SQ-T1's owner swap.
     // No durable envelope or record kind is added by joint migrations.
     private List<(PageId PageId, int SlotIndex)> StageJointSchemaState(StorageTransaction transaction, SqlCatalogSchemaState state)
