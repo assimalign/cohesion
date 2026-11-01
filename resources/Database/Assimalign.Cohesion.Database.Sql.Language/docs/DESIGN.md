@@ -361,7 +361,10 @@ Bare RETURNING * follows PostgreSQL's visible namespace expansion: target column
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
 retains visible output ordinals separately from physical association slots; plain DML is unchanged.
 Eligible source graphs now use exact search through eight sources and deterministic bounded
-connected greedy growth above eight (#1629). The engine retains the target boundary, physical
+connected greedy growth from nine through 64 (#1629); larger graphs keep executable bound plans
+without search. Identity-order predicate pushdown is eligible on equal work. The live corpus covers
+the 64/65 boundary. Costs use relative tolerance 1e-12 before memory/ordinal ties, and retention
+covers loop buffers as well as hash builds. The engine retains the target boundary, physical
 output ordinals, parameterized-source barriers and zero additional retained-memory certificate.
 DIALECT.md records the legality, work bounds and EXPLAIN evidence; parsing, profiles and persisted
 syntax representations are unchanged.

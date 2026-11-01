@@ -9686,9 +9686,14 @@ probe takes preference over an unindexed product estimate; hash work can still w
 Proven partial indexes remain eligible only with a
 binding proof. No persisted distribution or distinct-count claim is implied.
 
-Equal-work ties compare estimated retained bytes before ascending leaf ordinals and the
+Costs within a relative tolerance of 1e-12 compare estimated retained bytes before ascending leaf
+ordinals and the
 deterministic subset enumeration. The estimate includes row width, padded full ordinal
-frames, bucket-array growth and simultaneously retained builds; it is not a memory proof.
+frames, bucket-array growth, nested-loop inner lists and simultaneously retained builds; it is not a
+memory proof. Flat loop lists include decoded row widths and reference-array growth. An
+unknown/incomplete driver count never permits moving that streamed input into a retained buffer.
+SELECT lists retain their existing budget-free execution; these estimates only restrict optional
+rewrites.
 PostgreSQL costsize.c:4364-4400 and nodeHash.c:683-720 likewise distinguish build work and
 tuple width. A separate conservative certificate permits zero additional retained bytes
 against the pre-search costed plan: streaming hash builds retain the same input, NULL-key
@@ -9715,12 +9720,17 @@ seek fallback still applies the residual. Joins keep their sort (SQ-K3 remains s
 
 Deterministic tests assert 3/15/63/255 states and 2/50/602/6050 ordered partitions at
 2/4/6/8 inputs (2 exercises the search kernel; production retains its old two-input path).
-An exhaustive four-input binary-tree oracle verifies the bushy optimum. Generated data
+An exhaustive four-input binary-tree oracle verifies the bushy optimum. Finalized subset summaries
+memoize peak/output bytes, width, left-deep shape, expression keys and flat retention. Partition
+memory is computed in O(1) only on cost ties; losing partitions allocate no tree or step.
+Nonnegative child costs prune physical path construction without changing partition counters. Empty
+crossings skip index/hash extraction, and hashes that cannot win skip key extraction. Generated data
 compares selected plans with forced bound plans for duplicates, NULLs, multi-column and
 non-equi joins, grouped/CROSS joins, outer barriers, EXISTS/NOT EXISTS and DML sources.
 A later selective third input reduces tested pairs from 12,800 to 160, and target-parameterized
 DML retains three examined rows at 16/500/2000-row sources rather than materializing
-33/1001/4001 rows. These are work counters, not duration thresholds. PostgreSQL reference anchors (local clone):
+33/1001/4001 rows. These are work counters, not duration thresholds. PostgreSQL reference anchors
+(local clone):
 src/backend/optimizer/README:199-285 (identities, strictness, semi/anti and FULL barriers),
 src/backend/optimizer/path/joinrels.c:355-676 (legality and LATERAL constraints), and
 src/backend/optimizer/plan/initsplan.c:2018-2110 (make_outerjoininfo and FULL's fixed sets).
@@ -9729,7 +9739,7 @@ defaults of eight and GEQO's distinct threshold of twelve as separate policies.
 
 ### Bounded large-join search (#1629, SQ-Z2)
 
-Above eight eligible relations, `greedy_connected` compares every ordered seed pair,
+From nine through 64 eligible relations, `greedy_connected` compares every ordered seed pair,
 then repeatedly adds one remaining relation to the chosen component. Connected extensions
 precede Cartesian extensions; work, estimated retained memory and ascending binding ordinals
 settle ties, in that order. This is greedy operator ordering with a left-deep pruning rule:
@@ -9738,24 +9748,34 @@ Left-deep pruning avoids spending search on new materialized trees that SQ-Z1's 
 memory certificate cannot admit. Physical alternatives are likewise pruned to the bound
 plan's existing index/hash paths when their outer keys are available. New hash builds and
 new index paths are not proposed. The common work function retains the exact search's loop,
-index and hash formulas. The final candidate must have strictly lower total estimated work,
-no greater estimated retention, and pass the unchanged SQ-Z1 physical retention certificate;
+index and hash formulas. An identity-order pushdown candidate always preserves the bound paths,
+builds and buffers and is admissible on equal work. The cheaper certified candidate survives, with
+cost tolerance, memory and binding ordinal settling ties. Every candidate must have no greater total
+estimated work or retention and pass SQ-Z1's physical retention certificate, extended to all
+nested-loop buffers;
 otherwise the original costed plan survives, including expression hash keys, activation
-prefixes, target buffers, partial-index proofs and multiple-match refusals. Existing hash
-builds and DML buffering therefore often prevent an otherwise cheaper reorder.
+prefixes, target buffers, partial-index proofs and multiple-match refusals. Flat DML and existing
+hash builds pin order, so only identity pushdown is built for them; their greedy pair count is zero.
+Normalized baselines return bound with zero search counters and no candidate. Their reordered flag
+compares the written tree, including MERGE source/target normalization. Bound work observes real ON
+placement from its own step and WHERE placement after the final product. Bound, identity and greedy
+costs share physical work and interleaved row/work summation.
 
 Both search sizes enter through the same legality proof, including whole-SELECT outer-join,
 derived/view/system, subquery, unsafe-expression and target-dependency barriers. The heuristic
-uses ordinal-indexed component arrays and sorted predicate-reference arrays; it has no added
-relation cap. The eight-input DP keeps its `int` masks and four-bit order representation.
-At least 64 and 65 inputs are exercised, including a reference to binding 64 and local
-restriction there. Cardinalities implement the same product/selectivity model in logarithms
+uses ordinal-indexed component arrays and sorted predicate-reference arrays. Its heuristic limit is
+64 relations: larger graphs keep ordinary bound costing/execution, report join_search=bound, and
+perform no search work or search probes. This is an availability policy, never a statement refusal.
+The eight-input DP keeps its `int` masks and four-bit order representation.
+Tests exercise search at 64 and executable bound fallback at 65. Cardinalities implement the same
+product/selectivity model in logarithms
 to avoid intermediate overflow and NaN when an empty input follows a huge product;
 the 1e100 cap and the existing unknown/incomplete/input-selectivity defaults are unchanged.
 
 For n inputs, seed/extension comparisons are exactly
 `n*(n-1) + (n-2)*(n-1)/2 = (n-1)*(3*n-2)/2`. Total join cost evaluations add
-`2*(n-1)` for the written plan and winner materialization. State count is `2*n-1`
+`2*(n-1)` for real bound costing and identity pushdown. Greedy winner materialization reuses the
+kernel cost and does not evaluate work again. State count is `2*n-1`
 (n inputs and n-1 selected prefixes). With R total predicate references and C physical
 columns, graph search takes `O(n*n*(n+R))` work after the common safety proof/input costing.
 It allocates no candidate object per comparison: working and resulting storage is
@@ -9764,25 +9784,26 @@ Input access costing retains its existing bounded probes and catalog-index enume
 All counters use 64-bit integers where quadratic growth requires it; cancellation is checked
 at every candidate. No new planning refusal or diagnostic identity is needed.
 
-EXPLAIN reports `join_search=greedy_connected` only for an admitted winner; rejected or tied
-candidates report `join_search=bound`. Both carry `collapse_limit=8`, `chosen_order`,
+EXPLAIN reports `join_search=greedy_connected` for an admitted candidate, including identity
+pushdown; rejected candidates report `join_search=bound`. Both carry `collapse_limit=8`,
+`chosen_order`,
 `reordered`, `search_method=greedy_connected`, `search_states`, `search_pairs`,
 `search_cost_evaluations` and the existing source/target scope. Evidence lives in a separate
 internal derived plan so neither ordinary nor exact-plan allocation sizes grow.
 
-Physical planning measurements time `Cost` (including its snapshot probes, excluding parse,
-binding and fixture setup), warmed and taking the minimum of three rounds. Chain, star,
-clique and two disconnected components are measured at 2/8/16/64 inputs, with a 65-input
-boundary regression. Durations are reported, never asserted. Tests pin the historical exact
-kernel's 3/255 states and 2/6050 partitions at 2/8, and the heuristic's 31/127 states,
-345/5985 comparisons and 375/6111 evaluations at 16/64. Representative fixture allocation
-ceilings are `32768 + 8192*n + 4096*P` bytes above eight, or
-`32768 + 8192*partitions + 4096*P` at 2/8; these are guard ceilings for the measured schema,
-not a universal grant for arbitrary column/predicate widths. Generated 9-20 input result
-oracles cover NULLs, duplicates, non-equi and multi-column ON/WHERE conditions; large barrier,
-volatile/sequence-count, DML, memory-admission and InMemory/TCP cases retain SQ-Z1's contracts.
-The skewed 16-input chain/star fixtures reduce executed candidate pairs from 24000 to 93;
-a connected greedy trap is estimated worse and keeps the written plan.
+Physical planning measurements surround Cost (snapshot probes included, parse/binding/setup
+excluded), taking minimum current-thread allocation over three warmed rounds. No duration decides an
+outcome. Chain, star, clique and disconnected shapes cover 2/8/16/64 relations and bound fallback at
+65. Eight-relation planning stays below 1 MB for chain/star/disconnected and 2.3 MB for clique; tests
+assert each configuration/shape's three-warmed-round minimum as a ceiling, allowing other platforms
+to allocate less. Larger search fixtures retain the existing polynomial ceilings. The generated differential corpus
+records b6224ec66 chosen order, cost and all counters across 2–8 relation chains, stars, cliques and
+disconnected graphs, including mixed estimates and existing hash/index paths. Separate regressions
+cover the corrected buffer tie-break and memory admission.
+Identity pushdown reduces the 16-relation singleton/40-row-tail fixture from 1,653 to 93 candidate
+pairs and the greedy trap from 2,782,220 to 320, while retaining written order. Legality, output
+columns, volatile/sequence counts, DML multiple-match policy, ordinary allocation guards, formats
+and error identities remain unchanged.
 
 PostgreSQL reference anchors in `C:/Source/repos/postgres/postgres`:
 `src/backend/optimizer/path/allpaths.c:3830-3908` (`make_rel_from_joinlist`, nested sublists

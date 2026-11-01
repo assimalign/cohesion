@@ -33,7 +33,7 @@ public sealed class SqlJoinOrderSearchWireTests
         row[0].ShouldBe(1); row[1].ShouldBe(1); row[2].ShouldBe(1);
         explain.Select(plan => Convert.ToString(plan[5])).ShouldContain(detail => detail != null &&
             detail.Contains("join_search=greedy_connected", StringComparison.Ordinal) && detail.Contains("collapse_limit=8", StringComparison.Ordinal) &&
-            detail.Contains("reordered=true", StringComparison.Ordinal) && detail.Contains("search_pairs=187", StringComparison.Ordinal));
+            detail.Contains("reordered=false", StringComparison.Ordinal) && detail.Contains("search_pairs=187", StringComparison.Ordinal));
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - Join search: reordered results and EXPLAIN survive InMemory and TCP (#1629)")]

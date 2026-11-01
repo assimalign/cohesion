@@ -405,7 +405,7 @@ public sealed class SqlJoinOrderSearchTests
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: large empty graphs retain bound order after equal-cost heuristic search (#1629)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: large empty graphs admit identity pushdown after equal-cost heuristic search (#1629)")]
     [InlineData(9)]
     [InlineData(16)]
     public async Task Cost_AboveExactLimit_ShouldKeepBoundOrder(int count)
@@ -426,7 +426,7 @@ public sealed class SqlJoinOrderSearchTests
 
             // Assert
             selected.Steps.Select(step => step.Binding).ShouldBe(Enumerable.Range(1, count - 1));
-            selected.Accepted.ShouldBeFalse();
+            selected.Accepted.ShouldBeTrue();
         }
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }

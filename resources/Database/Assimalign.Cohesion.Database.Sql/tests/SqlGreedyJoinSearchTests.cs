@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -30,7 +29,7 @@ public sealed class SqlGreedyJoinSearchTests
         { foreach (string shape in new[] { "chain", "star", "clique", "disconnected" }) { yield return [count, shape]; } }
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: planning work and allocation obey polynomial ceilings; times are diagnostics (#1629)")]
+    [Theory(DisplayName = "Cohesion Test [Sql] - Join search: planning work and allocation obey polynomial ceilings (#1629)")]
     [MemberData(nameof(MeasurementCases))]
     public async Task Cost_RepresentativeGraphs_ShouldBoundWorkAndAllocation(int count, string shape)
     {
@@ -51,7 +50,6 @@ public sealed class SqlGreedyJoinSearchTests
             var context = new SqlStatementContext(transaction, database.Coordinator);
             _ = executor.Cost(written, context, CancellationToken.None);
             long minimumBytes = long.MaxValue;
-            double minimumMs = double.PositiveInfinity;
             SqlPlan? selected = null;
             int probes = 0;
             SqlPlanExecutor.CostProbeCompleted = _ => probes++;
@@ -62,11 +60,8 @@ public sealed class SqlGreedyJoinSearchTests
                 {
                     probes = 0;
                     long before = GC.GetAllocatedBytesForCurrentThread();
-                    long timestamp = Stopwatch.GetTimestamp();
                     selected = executor.Cost(written, context, CancellationToken.None);
-                    double ms = Stopwatch.GetElapsedTime(timestamp).TotalMilliseconds;
                     minimumBytes = Math.Min(minimumBytes, GC.GetAllocatedBytesForCurrentThread() - before);
-                    minimumMs = Math.Min(minimumMs, ms);
                 }
             }
             finally { SqlPlanExecutor.CostProbeCompleted = null; }
@@ -74,7 +69,12 @@ public sealed class SqlGreedyJoinSearchTests
             // Assert
             long pairs = 0, evaluations = 0;
             int states = 0;
-            if (count > 8)
+            if (count > 64)
+            {
+                selected.ShouldNotBeOfType<SqlSearchedJoinPlan>();
+                probes.ShouldBe(0);
+            }
+            else if (count > 8)
             {
                 var heuristic = selected.ShouldBeOfType<SqlHeuristicJoinPlan>();
                 pairs = heuristic.ComponentPairs; evaluations = heuristic.CostEvaluations; states = heuristic.States;
@@ -82,7 +82,7 @@ public sealed class SqlGreedyJoinSearchTests
                 evaluations.ShouldBe(pairs + 2 * (count - 1));
                 states.ShouldBe(2 * count - 1);
                 probes.ShouldBe(count);
-                heuristic.Accepted.ShouldBeFalse(); // equal work retains the written plan.
+                heuristic.Accepted.ShouldBeTrue(); // identity pushdown is safe, including equal work.
             }
             else if (count == 8)
             {
@@ -100,9 +100,20 @@ public sealed class SqlGreedyJoinSearchTests
             }
             if (count > 8)
             { minimumBytes.ShouldBeLessThanOrEqualTo(32_768L + 8192L * count + 4096L * predicates.Length); }
+            else if (count == 8)
+            {
+                // Minimum of three warmed rounds on Windows ARM64. Other platforms
+                // may allocate less; these measured values are ceilings, not equalities.
+#if DEBUG
+                long ceiling = shape switch { "chain" => 974_216, "star" => 875_784, "clique" => 2_202_800, _ => 881_728 };
+#else
+                long ceiling = shape switch { "chain" => 973_304, "star" => 874_872, "clique" => 2_201_384, _ => 880_840 };
+#endif
+                minimumBytes.ShouldBeLessThanOrEqualTo(ceiling);
+            }
             else
             { minimumBytes.ShouldBeLessThanOrEqualTo(32_768L + 8192L * evaluations + 4096L * predicates.Length); }
-            _output.WriteLine($"relations={count}; shape={shape}; states={states}; pairs={pairs}; evaluations={evaluations}; probes={probes}; planning_ms={minimumMs:F4}; planning_bytes={minimumBytes}");
+            _output.WriteLine($"relations={count}; shape={shape}; states={states}; pairs={pairs}; evaluations={evaluations}; probes={probes}; planning_bytes={minimumBytes}");
         }
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
@@ -110,7 +121,7 @@ public sealed class SqlGreedyJoinSearchTests
     [Theory(DisplayName = "Cohesion Test [Sql] - Join search: skewed chain and star reduce execution work and repeat deterministically (#1629)")]
     [InlineData(16, "chain")]
     [InlineData(16, "star")]
-    [InlineData(65, "chain")]
+    [InlineData(64, "chain")]
     public async Task Cost_SkewedLargeGraph_ShouldChooseCheaperOrder(int count, string shape)
     {
         // Arrange: WHERE edges leave the old loop plan without a new budgeted hash.
@@ -141,7 +152,7 @@ public sealed class SqlGreedyJoinSearchTests
 
             // Assert
             actual.ShouldBe(expected); actual.ShouldNotBeEmpty();
-            selected.Accepted.ShouldBeTrue(); selected.Reordered.ShouldBeTrue();
+            selected.Accepted.ShouldBeTrue(); selected.Reordered.ShouldBe(shape == "star");
             selected.CandidateCost.ShouldBeLessThan(selected.BoundCost);
             selected.CandidateMemory.ShouldBeLessThanOrEqualTo(selected.BoundMemory);
             after.Metrics.JoinCandidatePairs.ShouldBeLessThan(before.Metrics.JoinCandidatePairs);
@@ -157,8 +168,8 @@ public sealed class SqlGreedyJoinSearchTests
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Sql] - Join search: a greedy connected trap keeps the cheaper bound order (#1629)")]
-    public async Task Cost_EstimatedWorseCandidate_ShouldKeepBoundOrder()
+    [Fact(DisplayName = "Cohesion Test [Sql] - Join search: identity pushdown escapes a greedy connected trap (#1629)")]
+    public async Task Cost_GreedyTrap_ShouldChooseIdentityPushdown()
     {
         // Arrange: connecting the small 1/4/8 component first is a local minimum.
         int[] counts = [20, 1, 10, 10, 10, 2, 2, 3, 10];
@@ -175,16 +186,22 @@ public sealed class SqlGreedyJoinSearchTests
         var transaction = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
         try
         {
+            var executor = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions);
+            var before = new SqlStatementContext(transaction, database.Coordinator);
+            var after = new SqlStatementContext(transaction, database.Coordinator);
+
             // Act
-            var selected = new SqlPlanExecutor(database.DataStorage, database.Catalog, database.IndexManager, database.Definitions)
-                .Cost(written, new(transaction, database.Coordinator), CancellationToken.None).ShouldBeOfType<SqlHeuristicJoinPlan>();
+            var selected = executor.Cost(written, after, CancellationToken.None).ShouldBeOfType<SqlHeuristicJoinPlan>();
+            (await RowsAsync(executor, selected, after)).ShouldBe(await RowsAsync(executor, written, before));
 
             // Assert
-            selected.CandidateCost.ShouldBeGreaterThan(selected.BoundCost);
-            selected.Accepted.ShouldBeFalse(); selected.Reordered.ShouldBeFalse();
+            selected.CandidateCost.ShouldBeLessThan(selected.BoundCost);
+            selected.Accepted.ShouldBeTrue(); selected.Reordered.ShouldBeFalse();
+            before.Metrics.JoinCandidatePairs.ShouldBe(2_782_220);
+            after.Metrics.JoinCandidatePairs.ShouldBe(320);
             selected.FirstBinding.ShouldBe(0);
             selected.Steps.Select(step => step.Binding).ShouldBe(Enumerable.Range(1, 8));
-            _output.WriteLine($"bound_cost={selected.BoundCost}; rejected_cost={selected.CandidateCost}");
+            _output.WriteLine($"bound_cost={selected.BoundCost}; chosen_cost={selected.CandidateCost}; before_pairs={before.Metrics.JoinCandidatePairs}; after_pairs={after.Metrics.JoinCandidatePairs}; examined={after.Metrics.RecordsExamined}; peak={after.Metrics.PeakHashMemoryBytes}");
         }
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
@@ -202,7 +219,7 @@ public sealed class SqlGreedyJoinSearchTests
         await session.ExecuteAsync("CREATE TABLE empty_input(id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
         if (indexed)
         { await session.ExecuteAsync("INSERT INTO t VALUES" + string.Join(',', Enumerable.Range(1, 1000).Select(id => $"({id})")), cancellationToken: CancellationToken.None); }
-        string from = string.Join(',', Enumerable.Range(0, 64).Select(i => $"t r{i}")) + ",empty_input r64";
+        string from = string.Join(',', Enumerable.Range(0, 63).Select(i => $"t r{i}")) + ",empty_input r63";
         var written = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql("SELECT r0.id FROM " + from).Statement.SqlExpression);
         var transaction = await database.Coordinator.BeginAsync(IsolationLevel.ReadCommitted, CancellationToken.None);
         try
@@ -214,9 +231,9 @@ public sealed class SqlGreedyJoinSearchTests
             // Assert
             double.IsFinite(selected.BoundCost).ShouldBeTrue();
             double.IsFinite(selected.CandidateCost).ShouldBeTrue();
-            selected.Accepted.ShouldBeTrue(); selected.Steps[0].Binding.ShouldBe(64);
-            if (indexed) { selected.InputEstimates!.Take(64).ShouldAllBe(count => count.HasValue && !count.Value.IsComplete); }
-            else { selected.InputEstimates!.Take(64).ShouldAllBe(count => count == null); }
+            selected.Accepted.ShouldBeTrue(); selected.FirstBinding.ShouldBe(0);
+            if (indexed) { selected.InputEstimates!.Take(63).ShouldAllBe(count => count.HasValue && !count.Value.IsComplete); }
+            else { selected.InputEstimates!.Take(63).ShouldAllBe(count => count == null); }
         }
         finally { await database.Coordinator.RollbackAsync(transaction, CancellationToken.None); }
     }
@@ -261,7 +278,8 @@ public sealed class SqlGreedyJoinSearchTests
             else
             {
                 var searched = source.Associations.ShouldBeOfType<SqlHeuristicJoinPlan>();
-                searched.SourceOnly.ShouldBeTrue(); searched.Accepted.ShouldBeFalse();
+                searched.SourceOnly.ShouldBeTrue(); searched.Accepted.ShouldBe(operation != "merge");
+                searched.ComponentPairs.ShouldBe(0);
             }
             if (source.Associations.Tree is { } tree) { tree.Left!.Binding.ShouldBe(0); }
             else { source.Associations.FirstBinding.ShouldBe(0); }

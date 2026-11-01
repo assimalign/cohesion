@@ -1,11 +1,14 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
 Eligible stored-table INNER/CROSS graphs use exact join-order search through eight inputs
-and deterministic bounded connected greedy search above eight. EXPLAIN reports the chosen
+and deterministic bounded connected greedy search from nine through 64. Larger graphs keep bound
+order without search. Safe identity-order predicate pushdown also avoids unnecessary products.
+EXPLAIN reports the chosen
 order and search work; legality barriers and zero additional retained execution memory govern
 both paths (#1629).
 
-SqlDatabaseSession.CopyToAsync and its negotiated SQL outbound stream export physical tables as snapshot-consistent UTF-8 text/CSV (#1724).
+SqlDatabaseSession.CopyToAsync and its negotiated SQL outbound stream export physical tables as
+snapshot-consistent UTF-8 text/CSV (#1724).
 
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
 Conservative implication also supports ON CONFLICT target-WHERE inference; EXPLAIN reports the
@@ -40,7 +43,8 @@ WITH NO DATA creates only the inferred definition. Failed builds leave no table 
 MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action() within one statement
 rollback bracket. Repeated target modifications fail with CS05036. USING retains the existing
 read-source forms. FULL associations require a safe mandatory hash equality and complete ON
-safety proof (CS05070). ReadCommitted rechecks concurrently changed targets and reselects ordered actions; Snapshot
+safety proof (CS05070). ReadCommitted rechecks concurrently changed targets and reselects ordered
+actions; Snapshot
 refuses them with CS04064. Foreign keys validate the composed final action state (#1715).
 
 ## Wire contract ownership

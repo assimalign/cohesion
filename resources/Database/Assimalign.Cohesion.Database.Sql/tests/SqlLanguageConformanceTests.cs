@@ -23,6 +23,48 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sql] - Conformance: bound MERGE above the heuristic limit reports its written normalization (#1629)")]
+    public async Task ExecuteAsync_LargeBoundMergeCorpus_ShouldKeepReorderedFalse()
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("search-bound-merge-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(id INT PRIMARY KEY,k INT)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1,1)");
+        string source = string.Join(" CROSS JOIN ", Enumerable.Range(0, 65).Select(i => $"t r{i}"));
+        string query = $"MERGE INTO t USING {source} ON t.id=r0.id WHEN NOT MATCHED THEN INSERT(id,k) VALUES(r0.id,r0.k)";
+
+        // Act
+        var details = (await RowsAsync(session, "EXPLAIN " + query)).SelectMany(row => row).OfType<string>().ToArray();
+
+        // Assert
+        details.ShouldContain(detail => detail.Contains("join_search=bound", StringComparison.Ordinal) &&
+            detail.Contains("reordered=false", StringComparison.Ordinal));
+        details.ShouldNotContain(detail => detail.Contains("reordered=true", StringComparison.Ordinal));
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: heuristic limit keeps larger statements executable with bound EXPLAIN (#1629)")]
+    [InlineData(64, "greedy_connected")]
+    [InlineData(65, "bound")]
+    public async Task ExecuteAsync_JoinSearchLimitCorpus_ShouldKeepBoundFallback(int count, string method)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("search-limit-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE TABLE t(id INT PRIMARY KEY)");
+        await ExecuteAsync(session, "INSERT INTO t VALUES(1)");
+        string query = "SELECT r0.id FROM " + string.Join(',', Enumerable.Range(0, count).Select(i => $"t r{i}")) +
+            " WHERE " + string.Join(" AND ", Enumerable.Range(1, count - 1).Select(i => $"r{i - 1}.id=r{i}.id"));
+
+        // Act / Assert
+        await ExpectRowsAsync(session, query, [[1]]);
+        (await RowsAsync(session, "EXPLAIN " + query)).SelectMany(row => row).OfType<string>()
+            .ShouldContain(detail => detail.Contains($"join_search={method}", StringComparison.Ordinal) &&
+                detail.Contains("reordered=false", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql] - Conformance: heuristic join search preserves output columns, ordering and EXPLAIN (#1629)")]
     public async Task ExecuteAsync_LargeJoinSearchCorpus_ShouldPreserveColumns()
     {

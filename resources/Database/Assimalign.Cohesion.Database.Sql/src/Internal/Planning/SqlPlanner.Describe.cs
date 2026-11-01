@@ -28,7 +28,10 @@ internal sealed partial class SqlPlanner
         var order = plan.Tree is { } tree ? tree.Leaves().ToArray()
             : new[] { plan.FirstBinding }.Concat(plan.Steps.Select((step, i) => i == 0 && plan.FirstBinding == 1 ? 0 : step.Binding)).ToArray();
         string names = string.Join(",", order.Select(i => plan.Bindings[i].Reference.Alias ?? plan.Bindings[i].Source.Name));
-        return $"; join_search=bound; chosen_order={names}; reordered={(order.SequenceEqual(Enumerable.Range(0, plan.Bindings.Count)) ? "false" : "true")}";
+        // A bound normalized tree still has its written association/outer-join
+        // normalization. This also covers MERGE above the heuristic relation limit.
+        bool reordered = plan.Tree is null && !order.SequenceEqual(Enumerable.Range(0, plan.Bindings.Count));
+        return $"; join_search=bound; chosen_order={names}; reordered={reordered.ToString().ToLowerInvariant()}";
     }
 
     // The same closed mapping supplies every emitted plan node. Tests enumerate the plan
