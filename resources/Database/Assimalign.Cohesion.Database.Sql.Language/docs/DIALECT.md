@@ -1902,7 +1902,11 @@ checkpoints at 16 MiB; a busy reclamation bracket retries with cancellation. A 2
 margin and declaration-derived publication allowance complete admission; Sql DESIGN defines
 the formulas. Untouched tables never change the admission need. The executable FourthPass
 corpus retains the volume limit through reclamation and flushing after both stop and success.
-The residual risk is other writers consuming space faster than one bracket while the migration runs, and the engine-wide disk-full behaviour that applies to every workload.
+The residual risk is other writers' WAL and data allocations exceeding the engine reserve's
+margin, max(1 MiB, ceil(E0/4)), during the copy and during the whole reclamation drain after a
+stop or publication, including WAL that accrues while an in-flight, possibly stalled,
+reclamation bracket delays the checkpoint; and the engine-wide disk-full behaviour that applies
+to every workload. Sql DESIGN states the reserve and its terms.
 Insufficient space reports CS03402 with needed/available bytes online, including resumed intents.
 WAL write/flush, unconfirmed commit and existing engine-wide failure policies still take storage
 offline. An unconfirmed publication uses CS03403 and leaves recovery to decide old/new.
