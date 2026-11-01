@@ -89,6 +89,14 @@ outputs, and tears down what the model no longer declares; the run then continue
 operator's action runs on one instance and a write is restored on every instance (Gateway G38). A
 resource is declared generically by provider and name: no area ships a gateway-side package.
 
+The program above creates its platform and lends it to the builder, so it disposes the platform
+itself once the gateway has stopped. A platform can instead reach the builder as a factory,
+`UsePlatform(() => platform)`, which a platform's own verb calls with its builder: the factory runs
+in `Build()`, the gateway owns what it creates, and `await using` the gateway stops the run and then
+disposes the platform. An infrastructure or instance client given to `UseInfrastructure` or
+`UseInstanceClient` stays borrowed, and a later call for either role replaces the platform in that
+role only (Gateway G42).
+
 ## 4. A managed resource
 
 A resource area makes its application a managed instance with **one** package,

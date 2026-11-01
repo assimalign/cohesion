@@ -68,6 +68,16 @@ resource inside the gateway program's own process, use Gateway.InProcess:
 `builder.UseInProcess(infrastructure)` sets its infrastructure, which is also its channel and its
 instance client.
 
+`UseInfrastructure` and `UseInstanceClient` borrow what they are given: the program disposes it
+once the gateway has stopped. `UsePlatform(factory)` hands the builder a factory instead, which
+`Build()` calls; the platform it creates is both the infrastructure and the instance client, and the
+gateway owns it. Disposing the gateway stops its run and then disposes that platform:
+
+```csharp
+await using ApplicationGateway gateway = builder.UsePlatform(() => CreatePlatform()).Build();
+await gateway.RunAsync(cancellationToken);
+```
+
 An operator manages a resource through the gateway. The action runs on one instance's control plane,
 and a write's state is recorded and restored on every other instance; an instance that starts later
 restores it when it publishes:

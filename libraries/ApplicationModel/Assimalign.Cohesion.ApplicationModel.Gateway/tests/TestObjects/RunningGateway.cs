@@ -42,6 +42,7 @@ internal sealed class RunningGateway : IAsyncDisposable
             store,
             parent,
             infrastructure.Client,
+            null,
             startupTimeout ?? TimeSpan.FromSeconds(10),
             leaseDuration ?? TimeSpan.FromSeconds(30));
         infrastructure.Gateway = gateway;

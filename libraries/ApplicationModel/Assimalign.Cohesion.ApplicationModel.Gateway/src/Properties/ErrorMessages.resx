@@ -41,7 +41,7 @@
   <data name="GatewayParentMembershipNull" xml:space="preserve"><value>Parent gateway '{0}' answered a join with null.</value></data>
   <data name="GatewayParentUnavailable" xml:space="preserve"><value>Gateway '{0}' could not join parent '{1}' within {2}: the parent was not running.</value></data>
   <data name="GatewayParentOutputMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in parent gateway '{7}', which the parent did not report within {8}.</value></data>
-  <data name="GatewayInfrastructureMissing" xml:space="preserve"><value>Gateway '{0}' has no infrastructure provider; call UseInfrastructure before Build.</value></data>
+  <data name="GatewayInfrastructureMissing" xml:space="preserve"><value>Gateway '{0}' has no infrastructure provider; call UseInfrastructure or UsePlatform before Build.</value></data>
   <data name="GatewayParentMissing" xml:space="preserve"><value>The model of gateway '{0}' joins parent '{1}', but the gateway has no connection to it; call UseParent with the parent gateway.</value></data>
   <data name="ApplicationGatewayAlreadyBuilt" xml:space="preserve"><value>The gateway is already built; its builder accepts no changes.</value></data>
   <data name="GatewayResourcesStopped" xml:space="preserve"><value>Gateway '{0}': {1} resource(s) stopped before an instance published: {2}. New resources were torn down; updated resources keep whatever instances the platform still runs.</value></data>
@@ -54,4 +54,6 @@
   <data name="GatewayInstanceUnavailable" xml:space="preserve"><value>Gateway '{0}' could not run action '{3}' on {1}/{2}: no registered instance that declares it serves a control plane the gateway reached.</value></data>
   <data name="InstanceClientResultNull" xml:space="preserve"><value>The instance client returned null instead of a result.</value></data>
   <data name="GatewayInstanceClientMissing" xml:space="preserve"><value>Gateway '{0}' has no instance client, so it cannot run action '{3}' on an instance of {1}/{2}: the gateway half of its platform sets one (UseInstanceClient).</value></data>
+  <data name="GatewayPlatformNull" xml:space="preserve"><value>The platform factory of gateway '{0}' returned null.</value></data>
+  <data name="GatewayPlatformUnnamed" xml:space="preserve"><value>The platform the factory of gateway '{0}' created names no platform.</value></data>
 </root>
