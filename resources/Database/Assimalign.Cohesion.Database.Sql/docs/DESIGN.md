@@ -3449,6 +3449,17 @@ worker remains independent: its old snapshot can postpone reclamation, but recla
 takes its apply gate or table reservations. DROP against a pending table waits through the existing
 admission/lock-manager path; ordinary ownership and dependency refusals still apply afterwards.
 
+Reclamation yields before every owner's bracket when the data journal is due for a checkpoint
+(size or interval) or the engine has a checkpoint wake pending (#1447). This changes every SQL
+DROP, TRUNCATE and rewrite cleanup: retired pages wait while the checkpointer gets an idle
+storage bracket boundary. No live object, reader fence or durable retirement intent changes.
+The run lock serializes reclamation, so only the single bracket already open can cross the
+size threshold; subsequent owners in that pass and all later polls yield. Once that bracket
+finishes, reclamation causes zero refusals and the next due checkpointer poll can truncate.
+A stalled open bracket can still refuse multiple attempts, but cannot append another bracket's
+WAL; there is no elapsed-time or absolute attempt-count promise while it remains open.
+The checkpointer, journal truncation, write-back and page allocation paths are unchanged.
+
 Before this change, DROP's Exclusive object lock excluded writers (IntentExclusive) but plain
 SELECT did not take a table lock. An in-flight scan could skip pages the statement freed; the
 iterator's type/owner checks avoided decoding a reused page as the old table. Cleanup now waits
@@ -8660,7 +8671,9 @@ sibling links. For the watchdog, h is each prepared tree's actual height, read a
 before each bracket, plus the maximum growth that bracket can cause. Root identities never
 change on splits. The largest key encoded so far bounds separator width and minimum split
 fanout; a root with room for all of the bracket's separators cannot grow. Heap touches and
-allocations use the batch's encoded record/slot sizes and a next-fit packing bound. Retained
+allocations use the batch's encoded record/slot sizes. Heap touches additionally charge one
+existing page per row, because the emptiest-page search can fill a different old gap for each
+row; the charge is rows plus allocated pages. Retained
 trees use their measured heights in the admission WAL estimate. C is the maximum 64-row
 page-touch bound, T the root count, Q the sum of all row-touch bounds plus T, and K the
 number of copy/root brackets. Copy-owned WAL is accumulated from journal-length deltas across
@@ -8680,16 +8693,20 @@ One engine reserve E survives copying, discard and successful publication. Let P
 larger of the old owners' measured page count and the prepared page bound (initially the
 replacement estimate, increased by copy-owned allocated pages and the next bracket's allocation bound),
 O the larger retiring/prepared owner count, B=8192 and C=CheckpointJournalSize.
-One reclamation bracket frees at most 32 pages per owner. The engine checks busy checkpoints
-at most once per second; reclamation polls every 25 ms. Thus one checkpointer poll's
-overshoot is U=40*max(1,O)*(32*(B+46)+152). Define
+One reclamation bracket frees at most 32 pages. Before opening each bracket, reclamation
+yields to a due or pending checkpoint, including between owners in the same pass. Only the
+single in-flight bracket can add WAL past C. Its complete two-image/page and framing bound is
+U=32*2*(B+46)+152=527384 bytes, independent of O, poll cadence and refused attempts. Define
 W=min(P*(B+46)+152*(ceil(P/32)+O), C+U), or the whole first term if C=0.
-Let K=BufferPoolCapacity+1 MiB include the data and catalog pools' possible unflushed
-dirty pages. E0=F+W+K and E=E0+max(1 MiB,ceil(E0/4)). F covers discard itself;
+Let K=BufferPoolCapacity+1 MiB on strategies whose data-file extensions can be sparse,
+and K=0 otherwise. The file strategy uses sparse growth on Unix-like platforms; Windows
+SetLength allocates blocks upfront. Memory has no volume exposure; the capacity fake supplies
+both NTFS and Unix behaviours independently of the host. E0=F+W+K and
+E=E0+max(1 MiB,ceil(E0/4)). F covers discard itself;
 W covers reclamation until the engine truncates its WAL; K covers engine dirty-page
 capacity; the margin covers cleared-page deltas, headers and metadata. This is engine
 headroom derived from engine parameters, without predicting each reclamation write.
-Reclamation, write-back, truncation and allocation behavior remain unchanged.
+Reclamation now yields as described above; write-back, truncation and allocation are unchanged.
 
 The publication bound V is F plus (old/new kind-6 chunks + catalog record bound)*(5B+168).
 The record bound includes table/index descriptions, registrations, dependent views, old and
@@ -8701,9 +8718,13 @@ unflushed allocation bytes, capped at the data pool capacity because eviction or
 checkpoint may already have flushed earlier allocations. It rechecks under the apply gate before the first mutation.
 Copy-owned allocation counts accumulate until a successful forced checkpoint flushes them;
 that checkpoint resets both the pending allocation and WAL counters. PageCount/FreePageCount
-deltas are sampled inside the copy bracket; the reclamation page counter corrects concurrent
-frees, carrying late completions into the next sample. One completing 32-page batch fits the
-minimum margin. Split bounds are never accumulated as actual lifetime allocations. Unix sparse file
+deltas plus reclamation frees are sampled at both ends of each copy/root bracket, under its
+apply gate. A private reclamation accounting monitor pairs its allocator releases at commit
+with the reclaimed-page counter update, making each sample exact across concurrent frees.
+The monitor covers no page walk, discovery, coordinator operation or pre-commit observer;
+its lock order is accounting monitor then storage commit/allocator locks. Frees between
+copy brackets contribute to neither sample difference and can never inflate the copy's
+prepared or pending allocations. Split bounds are never accumulated as actual lifetime allocations. Unix sparse file
 extensions are therefore charged even when the volume probe cannot see the unwritten holes.
 Immediately before the catalog storage bracket, after uniqueness/FK validation, snapshot
 admission and record encoding, a final probe requires V+E plus those pending bytes.

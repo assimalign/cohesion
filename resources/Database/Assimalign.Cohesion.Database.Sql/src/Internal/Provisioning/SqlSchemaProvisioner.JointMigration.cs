@@ -194,7 +194,6 @@ internal sealed partial class SqlSchemaProvisioner
             JointMetrics = statement.Metrics;
             BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken);
             AdmitJointSpace(migration.JointPlan!, migration.Intent, cancellationToken);
-            long reclaimed = _database.TableReclamation.ReclaimedPages;
             statement.ConfigureCopySpace((touches, allocations, unflushed, prepared) =>
             {
                 JointSpaceDiscardBytes = JointEngineReserve(prepared);
@@ -204,17 +203,7 @@ internal sealed partial class SqlSchemaProvisioner
                 long pending = Math.Min(checked(unflushed * Page.Size), _database.Engine.EngineOptions.BufferPoolCapacity);
                 CheckJointSpace(checked(JointBracketBytes(touches, allocations - reused) + pending + JointSpaceDiscardBytes));
             }, unflushed => CheckJointSpace(checked(JointSpacePublicationBytes + JointSpaceDiscardBytes +
-                Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity))), change =>
-            {
-                // Copy brackets own the apply gate. Only reclamation can free
-                // pages beside them. Carry its counter across brackets so a late
-                // completion is credited on the next sample, never lost. A
-                // currently completing 32-page batch fits E's minimum margin.
-                long now = _database.TableReclamation.ReclaimedPages;
-                long allocated = Math.Max(0, checked(change + now - reclaimed));
-                reclaimed = now;
-                return allocated;
-            });
+                Math.Min(unflushed, _database.Engine.EngineOptions.BufferPoolCapacity))), _database.TableReclamation.CaptureAllocationCount);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
             await executor.ExecuteJointMigrationAsync(migration.JointPlan!, migration.Schema, statement,
                 phase => JointStage?.Invoke(phase), cancellationToken).ConfigureAwait(false);

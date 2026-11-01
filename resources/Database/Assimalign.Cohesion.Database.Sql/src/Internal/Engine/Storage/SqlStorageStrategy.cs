@@ -103,6 +103,10 @@ internal abstract class SqlStorageStrategy
     // database volume; tests supply capacity without filling a disk.
     internal virtual long GetAvailableMigrationBytes(string databaseName) => long.MaxValue;
 
+    // SetLength reserves data blocks on Windows; Unix file extensions can leave
+    // holes whose first dirty-page write still needs volume space.
+    internal virtual bool SparseDataGrowth => false;
+
     internal virtual SqlStorage RestartStorage(string databaseName, bool catalog)
         => throw new System.InvalidOperationException(ErrorMessages.CreationRestartUnavailable);
     internal const string CreationFileName = "sql.create";
