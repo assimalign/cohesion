@@ -203,8 +203,7 @@ internal sealed partial class SqlPlanExecutor
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
             {
                 statement.CheckCopySpace(descriptions.Length);
-                long pageStart = _storage.PageManager.PageCount;
-                long freeStart = _storage.PageManager.FreePageCount;
+                long allocationStart = statement.CaptureCopyAllocations();
                 journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 foreach (var index in descriptions)
                 {
@@ -212,8 +211,7 @@ internal sealed partial class SqlPlanExecutor
                         new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
                     created.Add(index);
                 }
-                long growth = _storage.PageManager.PageCount - pageStart;
-                statement.AddCopyAllocations(growth + freeStart - _storage.PageManager.FreePageCount);
+                statement.AddCopyAllocations(allocationStart);
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);

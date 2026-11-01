@@ -199,21 +199,22 @@ internal sealed partial class SqlSchemaProvisioner
 
     // Engine headroom, not a prediction of individual reclamation writes. A
     // checkpoint-disabled engine needs the whole owner's WAL. Otherwise allow a
-    // full checkpointer poll of reclamation (32 pages/owner every 25 ms), in
-    // addition to the configured threshold. The 25% margin covers cleared-page
-    // deltas and engine metadata; both pools can contain dirty sparse pages.
+    // single in-flight reclamation bracket beyond the threshold: RunBatch
+    // checks before EVERY owner's bracket, independently of worker cadence.
+    // Include both page images and bracket frames in that overshoot. Dirty
+    // pools need extra disk blocks only on strategies with sparse data growth.
     private void ConfigureJointEngineReserve(SqlJointMigrationPlan plan, SqlCatalogPendingMigration intent, long minimumPages)
     {
         checked
         {
             _jointMinimumPages = minimumPages;
             _jointReclamationOwners = Math.Max(plan.Tables.Length, plan.Tables.Count(table => table.Previous is not null) + plan.Dropped.Length);
-            long polls = DivideUp(DatabaseCheckpointWorker<SqlDatabase>.PollInterval.Ticks, TimeSpan.FromMilliseconds(25).Ticks);
-            long overshoot = polls * Math.Max(1, _jointReclamationOwners) * (SqlTableReclamation.BatchSize * (Page.Size + 46L) + 152);
+            long overshoot = JointBracketBytes(SqlTableReclamation.BatchSize, 0);
             long threshold = _database.Engine.EngineOptions.CheckpointJournalSize;
             _jointReclamationLimit = threshold == 0 ? long.MaxValue : threshold + overshoot;
-            _jointReserveBase = JointSpaceFloor(intent) + _database.Engine.EngineOptions.BufferPoolCapacity +
-                SqlDatabaseEngine.CatalogBufferPoolPages * Page.Size;
+            long dirtyPools = _database.Engine.SparseDataGrowth
+                ? _database.Engine.EngineOptions.BufferPoolCapacity + SqlDatabaseEngine.CatalogBufferPoolPages * Page.Size : 0;
+            _jointReserveBase = JointSpaceFloor(intent) + dirtyPools;
         }
     }
 

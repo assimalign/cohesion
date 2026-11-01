@@ -227,11 +227,11 @@ internal sealed partial class SqlPlanExecutor
                     memory.Reserve((24L + records[row].Length + 7) & ~7L);
                     encodedBytes += records[row].Length + 4;
                 }
-                // Next-fit packing: each pair of closed pages holds more than a
-                // page's body. Include a partially filled starting page; at most
-                // one allocation per record. No prepared heap has dead slots.
+                // Newly filled pages bound allocations by encoded bytes, but
+                // the emptiest-page search can place every row on a different
+                // EXISTING page. Charge that touch as well as every new page.
                 allocations = Math.Min(batch.Count, 1 + encodedBytes / ((SlottedPage.BodySize - 16) / 2));
-                touches = 2 * allocations;
+                touches = batch.Count + allocations;
                 for (int tree = 0; tree < indexes.Length; tree++)
                 {
                     var index = indexes[tree];
@@ -255,8 +255,7 @@ internal sealed partial class SqlPlanExecutor
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
                 statement.CheckCopySpace(touches, allocations);
-                long pageStart = statement.CheckpointCopy ? _storage.PageManager.PageCount : 0;
-                long freeStart = statement.CheckpointCopy ? _storage.PageManager.FreePageCount : 0;
+                long allocationStart = statement.CaptureCopyAllocations();
                 journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 for (int i = 0; i < batch.Count; i++)
                 {
@@ -281,8 +280,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 if (statement.CheckpointCopy)
                 {
-                    long growth = _storage.PageManager.PageCount - pageStart;
-                    statement.AddCopyAllocations(growth + freeStart - _storage.PageManager.FreePageCount);
+                    statement.AddCopyAllocations(allocationStart);
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);

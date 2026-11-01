@@ -28,6 +28,8 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
     private readonly string _rootPath;
     private readonly StorageCommitDurability? _durability;
 
+    internal override bool SparseDataGrowth => !OperatingSystem.IsWindows();
+
     internal override long GetAvailableMigrationBytes(string databaseName)
         => SqlVolumeSpace.GetAvailableBytes(Path.GetFullPath(DatabaseFileNames.GetDirectory(_rootPath, databaseName)));
 

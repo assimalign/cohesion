@@ -83,7 +83,7 @@ internal readonly struct SqlStatementContext
     // sizes and allocation budgets stay unchanged, including nonzero lock timeouts.
     internal bool CheckpointCopy => _names is JointProvisioningNames;
 
-    internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long, long> allocations)
+    internal void ConfigureCopySpace(Action<long, long, long, long> check, Action<long> publication, Func<long> allocations)
     {
         var joint = (JointProvisioningNames)_names;
         joint.CheckSpace = check;
@@ -106,10 +106,13 @@ internal readonly struct SqlStatementContext
         joint.CheckPublication!(checked(joint.UnflushedPages * Page.Size));
     }
 
-    internal void AddCopyAllocations(long allocatedChange)
+    internal long CaptureCopyAllocations()
+        => _names is JointProvisioningNames joint ? joint.CountAllocations!() : 0;
+
+    internal void AddCopyAllocations(long start)
     {
         if (_names is not JointProvisioningNames joint) { return; }
-        long pages = joint.CountAllocations!(allocatedChange);
+        long pages = checked(joint.CountAllocations!() - start);
         joint.PreparedPages = checked(joint.PreparedPages + pages);
         joint.UnflushedPages = checked(joint.UnflushedPages + pages);
     }
@@ -193,7 +196,7 @@ internal readonly struct SqlStatementContext
     {
         internal Action<long, long, long, long>? CheckSpace { get; set; }
         internal Action<long>? CheckPublication { get; set; }
-        internal Func<long, long>? CountAllocations { get; set; }
+        internal Func<long>? CountAllocations { get; set; }
         internal long JournalBytes { get; set; }
         internal long UnflushedPages { get; set; }
         internal long PreparedPages { get; set; }

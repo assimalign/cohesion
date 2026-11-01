@@ -228,6 +228,8 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
     /// </summary>
     internal ManualResetEventSlim CheckpointNeededSignal => _checkpointNeededSignal;
 
+    internal bool SparseDataGrowth => _strategy.SparseDataGrowth;
+
     /// <summary>
     /// Gets the signal a database's coordinator sets when it defers an undo; the version-purge
     /// worker waits on it so the first retry runs about 100 ms later, not a maintenance interval.
