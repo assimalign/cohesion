@@ -286,6 +286,51 @@ public class InProcessProgramGeneratorTests
         calls.ShouldBe(["class:1"]);
     }
 
+    [Theory(DisplayName = DisplayPrefix + "An entry point in a file-local type is reached through the type's runtime name")]
+    [InlineData("file class Program { private static void Main(string[] args) { Test.Probe.Probe.Calls.Add(\"file:\" + args.Length); } }")]
+    [InlineData("file static class Program { public static void Main(string[] args) { Test.Probe.Probe.Calls.Add(\"file:\" + args.Length); } }")]
+    [InlineData("file class Program { public static System.Threading.Tasks.Task<int> Main(string[] args) { Test.Probe.Probe.Calls.Add(\"file:\" + args.Length); return System.Threading.Tasks.Task.FromResult(0); } }")]
+    public async Task Bridge_FileLocalProgram_ShouldReachItByTypeNameAsync(string program)
+    {
+        // Arrange: only its own file can name a file-local type, so the bridge can neither call it
+        // nor take it as a parameter.
+        GeneratorRun run = RunResource("Shop.Orders", "namespace Shop.Orders;\n\n" + program);
+
+        // Act
+        string[] calls = await InvokeBridgeAsync(run, ["a", "b"]);
+
+        // Assert
+        string bridge = run.Generated("InProcessEntryPoint.g.cs");
+        bridge.ShouldContain("[global::System.Runtime.CompilerServices.UnsafeAccessorType(\"Shop.Orders.<", Case.Sensitive);
+        bridge.ShouldNotContain("global::Shop.Orders.Program", Case.Sensitive);
+        calls.ShouldBe(["file:2"]);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A type in a namespace of keywords is named without the escapes the runtime would not resolve")]
+    public async Task Bridge_ProgramInKeywordNamespace_ShouldNameItWithoutEscapesAsync()
+    {
+        // Arrange
+        GeneratorRun run = RunResource("Shop.Orders", """
+            namespace @class.@event;
+
+            internal static class Program
+            {
+                private static int Main(string[] args)
+                {
+                    Test.Probe.Probe.Calls.Add("keyword:" + args.Length);
+                    return 0;
+                }
+            }
+            """);
+
+        // Act
+        string[] calls = await InvokeBridgeAsync(run, ["a"]);
+
+        // Assert
+        run.Generated("InProcessEntryPoint.g.cs").ShouldContain("UnsafeAccessorType(\"class.event.Program, Shop.Orders\")", Case.Sensitive);
+        calls.ShouldBe(["keyword:1"]);
+    }
+
     [Fact(DisplayName = DisplayPrefix + "A library gets no bridge")]
     public void Bridge_Library_ShouldEmitNothing()
     {
@@ -415,14 +460,38 @@ public class InProcessProgramGeneratorTests
         // Arrange
         byte[] library = CompileImage("Shop.Library", "namespace Shop.Library; public static class Thing { }", OutputKind.DynamicallyLinkedLibrary, _hosting);
 
-        // Act
-        GeneratorRun gateway = RunGateway([("Shop.Library", library)], Resource("Shop.Library", "orders-api"));
+        (string Path, Dictionary<string, string> Metadata) reference = Resource("Shop.Library", "orders-api");
 
-        // Assert
+        // Act
+        GeneratorRun gateway = RunGateway([("Shop.Library", library)], reference);
+
+        // Assert: the diagnostic points at the referenced project, so the build output names the file.
         Diagnostic diagnostic = gateway.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Id.ShouldBe("COHAPM0001");
         diagnostic.Severity.ShouldBe(DiagnosticSeverity.Warning);
         diagnostic.GetMessage().ShouldContain("'Shop.Library'", Case.Sensitive);
+        diagnostic.Location.GetLineSpan().Path.ShouldBe(reference.Path);
+        gateway.RunResult.GeneratedTrees.ShouldBeEmpty();
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "A resource reference whose assembly the gateway does not reference is reported and not registered")]
+    public void Catalog_WithUnreferencedAssembly_ShouldReportIt()
+    {
+        // Arrange: the build hands over a reference with no resolved assembly, as it does for
+        // ReferenceOutputAssembly="false".
+        byte[] orders = CompileResource("Shop.Orders", "System.Console.WriteLine();");
+        (string Path, Dictionary<string, string> Metadata) reference = Resource("Shop.Orders", "orders-api");
+        reference.Metadata.Remove("CohesionResourceAssembly");
+
+        // Act
+        GeneratorRun gateway = RunGateway([("Shop.Orders", orders)], reference);
+
+        // Assert
+        Diagnostic diagnostic = gateway.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Id.ShouldBe("COHAPM0001");
+        diagnostic.GetMessage().ShouldContain("'Shop.Orders.csproj'", Case.Sensitive);
+        diagnostic.GetMessage().ShouldContain("ReferenceOutputAssembly", Case.Sensitive);
+        diagnostic.Location.GetLineSpan().Path.ShouldBe(reference.Path);
         gateway.RunResult.GeneratedTrees.ShouldBeEmpty();
     }
 
@@ -481,6 +550,29 @@ public class InProcessProgramGeneratorTests
         diagnostic.GetMessage().ShouldContain("'Shop.Billing' and 'Shop.Orders'", Case.Sensitive);
         string registrations = gateway.Generated("InProcessProgramRegistrations.g.cs");
         registrations.ShouldContain("Shop.Billing.InProcessEntryPoint.RunAsync", Case.Sensitive);
+        registrations.ShouldNotContain("Shop.Orders.InProcessEntryPoint", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "Two references whose providers differ only in case name the same resource, which is an error")]
+    public void Catalog_WithDuplicateResourceNamesDifferingInProviderCase_ShouldReportAnError()
+    {
+        // Arrange: the catalog compares provider names without regard to case, so "Web" and "web"
+        // would bind one resource twice and fail at the gateway's module load.
+        byte[] orders = CompileResource("Shop.Orders", "System.Console.WriteLine();");
+        byte[] billing = CompileResource("Shop.Billing", "System.Console.WriteLine();");
+
+        // Act
+        GeneratorRun gateway = RunGateway(
+            [("Shop.Orders", orders), ("Shop.Billing", billing)],
+            Resource("Shop.Orders", "orders-api"),
+            Resource("Shop.Billing", "orders-api", provider: "web"));
+
+        // Assert
+        Diagnostic diagnostic = gateway.Diagnostics.ShouldHaveSingleItem();
+        diagnostic.Id.ShouldBe("COHAPM0003");
+        diagnostic.GetMessage().ShouldContain("'Shop.Billing' and 'Shop.Orders'", Case.Sensitive);
+        string registrations = gateway.Generated("InProcessProgramRegistrations.g.cs");
+        registrations.ShouldContain("Register(\"web\", \"orders-api\", global::Assimalign.Cohesion.Generated.Shop.Billing.InProcessEntryPoint.RunAsync);", Case.Sensitive);
         registrations.ShouldNotContain("Shop.Orders.InProcessEntryPoint", Case.Sensitive);
     }
 

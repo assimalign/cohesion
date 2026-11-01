@@ -202,10 +202,13 @@ names before the compilation's entry point is bound. It emits:
   namespace comes from the assembly name, not the root namespace, so two resources whose code
   declares the same namespace still get distinct bridges in one gateway.
 - `public static Task RunAsync(string[] args)`, which calls `Compilation.GetEntryPoint`. An entry
-  point the bridge can name (not private, in types that are not private) is called directly.
-  Otherwise an `[UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "<Main>$")]` extern reaches
-  it, typed by its declaring type, or, for a static class, which cannot be a parameter type, by that
-  type's runtime name with .NET 10's `[UnsafeAccessorType]`. The runtime binds both without
+  point the bridge can name (not private, in types that are not private or file-local) is called
+  directly. Otherwise an `[UnsafeAccessor(UnsafeAccessorKind.StaticMethod, Name = "<Main>$")]` extern
+  reaches it, typed by its declaring type, or, for a static class (which cannot be a parameter type)
+  or a file-local one (which only its own file can name), by that type's runtime name with .NET 10's
+  `[UnsafeAccessorType]`. The runtime name is built from metadata names, never display strings: a
+  display string keeps keyword escapes (`@class`), which the runtime would look for literally, and a
+  file-local type's metadata name carries its mangling. The runtime binds both without
   reflection, so the bridge works under NativeAOT and trimming. `void`, `int`, `Task` and
   `Task<int>` entry points, with or without `string[] args`, are supported; a nonzero exit code
   faults the returned task with an `InvalidOperationException`.
@@ -214,23 +217,27 @@ names before the compilation's entry point is bound. It emits:
   (every area's resources take the area as their provider). With none or several, the attribute
   records no provider and the gateway's reference must supply one.
 
-**Catalog (`InProcessProgramCatalogGenerator`).** Sdk.Gateway turns each resolved project reference
-with `CohesionResource` metadata into an additional file (the referenced project file) carrying
+**Catalog (`InProcessProgramCatalogGenerator`).** Sdk.Gateway turns each project reference with
+`CohesionResource` metadata into an additional file (the referenced project file) carrying
 `CohesionResource`, the optional `CohesionProvider`, and `CohesionResourceAssembly`, the referenced
-assembly's name, as compiler-visible metadata (Sdk.Gateway Tasks DESIGN). In a compilation that can
+assembly's name, as compiler-visible metadata (Sdk.Gateway Tasks DESIGN). A reference that resolved
+no assembly, such as one with `ReferenceOutputAssembly="false"`, arrives with no assembly name. In a compilation that can
 see `InProcessProgramCatalog` (it references Gateway.InProcess), the generator finds each named
 assembly's `InProcessProgramAttribute` and emits one internal `[ModuleInitializer]` that calls
 `InProcessProgramCatalog.Register(provider, name, <bridge>.RunAsync)` per resource, so every
 binding is in place before the gateway program's first statement. `CohesionProvider` overrides the
-recorded provider. A reference is skipped, with a diagnostic, when its assembly records no program,
-when no provider is known, or when an earlier reference (in assembly-name order) already bound the
-same provider and name.
+recorded provider. A reference is skipped, with a diagnostic, when it resolved no assembly or its
+assembly records no program, when no provider is known, or when an earlier reference (in
+assembly-name order) already bound the same provider and name. Providers are compared without
+regard to case and resource names ordinally, as `ProviderName`, `ResourceName` and the catalog
+compare them, so a pair the catalog would take for one fails the build instead of throwing in the
+gateway's module initializer. Each diagnostic is reported at the referenced project file.
 
 | Id | Severity | Meaning |
 | --- | --- | --- |
-| COHAPM0001 | Warning | A `CohesionResource` reference names an assembly with no in-process program: not an executable, or it does not reference ApplicationModel.Hosting.InProcess |
+| COHAPM0001 | Warning | A `CohesionResource` reference has no in-process program: its assembly is not an executable or does not reference ApplicationModel.Hosting.InProcess, or the gateway does not reference the assembly at all (`ReferenceOutputAssembly="false"`) |
 | COHAPM0002 | Warning | The program records no provider and the reference sets no `CohesionProvider` |
-| COHAPM0003 | Error | Two references bind the same provider and resource name |
+| COHAPM0003 | Error | Two references bind the same provider (ignoring case) and resource name |
 
 The tests (`InProcessProgramGeneratorTests`) compile against stand-ins with the packages' assembly
 names and shapes. They cover each entry-point shape and accessor path, the gating cases (a library,

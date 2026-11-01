@@ -123,7 +123,8 @@ public sealed class InProcessProgramBridgeGenerator : IIncrementalGenerator
         // An entry point the bridge can name is called directly. Otherwise the runtime reaches it
         // with an unsafe accessor, which is resolved without reflection and works under NativeAOT:
         // typed by its declaring type where the bridge can name that type as a parameter, and by
-        // the type's runtime name where it cannot (a static class, or one nested out of reach).
+        // the type's runtime name where it cannot (a static class, a file-local one, or one nested
+        // out of reach).
         CallKind call = IsAccessible(entryPoint)
             ? CallKind.Direct
             : !containingType.IsStatic && IsAccessible(containingType) ? CallKind.TypedAccessor : CallKind.NamedAccessor;
@@ -174,12 +175,14 @@ public sealed class InProcessProgramBridgeGenerator : IIncrementalGenerator
     }
 
     // The bridge sits in the same assembly, so anything short of private (or protected) is in reach,
-    // as long as every type around it is too.
+    // as long as every type around it is too. A file-local type reports itself internal, but only its
+    // own file can name it.
     private static bool IsAccessible(ISymbol symbol)
     {
         for (ISymbol? current = symbol; current is not null and not INamespaceSymbol; current = current.ContainingSymbol)
         {
-            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal))
+            if (current.DeclaredAccessibility is not (Accessibility.Public or Accessibility.Internal or Accessibility.ProtectedOrInternal)
+                || current is INamedTypeSymbol { IsFileLocal: true })
             {
                 return false;
             }
@@ -188,19 +191,24 @@ public sealed class InProcessProgramBridgeGenerator : IIncrementalGenerator
         return symbol.CanBeReferencedByName;
     }
 
+    // Metadata names throughout: a display string escapes keywords (@class), and the runtime would
+    // look for the escaped name literally. A file-local type's metadata name carries its mangling.
     private static string GetRuntimeTypeName(INamedTypeSymbol type, string assemblyName)
     {
-        var names = new Stack<string>();
-        INamedTypeSymbol? current = type;
-        while (current is not null)
+        var types = new Stack<string>();
+        for (INamedTypeSymbol? current = type; current is not null; current = current.ContainingType)
         {
-            names.Push(current.MetadataName);
-            current = current.ContainingType;
+            types.Push(current.MetadataName);
         }
 
-        string typeName = string.Join("+", names);
-        INamespaceSymbol ns = type.ContainingNamespace;
-        string qualified = ns is null || ns.IsGlobalNamespace ? typeName : ns.ToDisplayString() + "." + typeName;
+        var namespaces = new Stack<string>();
+        for (INamespaceSymbol? ns = type.ContainingNamespace; ns is { IsGlobalNamespace: false }; ns = ns.ContainingNamespace)
+        {
+            namespaces.Push(ns.MetadataName);
+        }
+
+        string typeName = string.Join("+", types);
+        string qualified = namespaces.Count == 0 ? typeName : string.Join(".", namespaces) + "." + typeName;
         return qualified + ", " + assemblyName;
     }
 

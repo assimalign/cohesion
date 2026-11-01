@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -27,8 +28,9 @@ namespace Assimalign.Cohesion.SourceGeneration;
 /// </para>
 /// <para>
 /// <c>CohesionProvider</c> overrides the provider the program's build recorded. A reference whose
-/// assembly records no program, a resource with no provider, and a resource bound twice are
-/// reported, and nothing is registered for them.
+/// assembly records no program or is not referenced at all, a resource with no provider, and a
+/// resource bound twice (providers compared without regard to case, as the catalog compares them)
+/// are reported, and nothing is registered for them.
 /// </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]
@@ -102,6 +104,8 @@ public sealed class InProcessProgramCatalogGenerator : IIncrementalGenerator
 
         var registrations = ImmutableArray.CreateBuilder<Registration>();
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+        // Keyed as the catalog compares: provider names ignore case and resource names do not, so two
+        // bindings the catalog would take for one are reported here, not at the gateway's module load.
         var bound = new Dictionary<(string Provider, string Name), string>();
 
         // The order of the references in the project file is the order the build sees them in, but
@@ -112,6 +116,18 @@ public sealed class InProcessProgramCatalogGenerator : IIncrementalGenerator
         {
             cancellationToken.ThrowIfCancellationRequested();
             Location location = Location.Create(reference.Path, default, default);
+
+            if (reference.Assembly.Length == 0)
+            {
+                // The build resolved no assembly for the reference, as with ReferenceOutputAssembly="false";
+                // the gateway cannot run a program it does not load.
+                diagnostics.Add(DiagnosticInfo.Create(
+                    InProcessProgramDiagnostics.ProgramMissing,
+                    location,
+                    $"The project reference to '{Path.GetFileName(reference.Path)}' names resource '{reference.Resource}', but the gateway does not reference its assembly. "
+                        + "An in-process gateway loads the programs it runs; remove ReferenceOutputAssembly=\"false\" from the reference."));
+                continue;
+            }
 
             if (!assemblies.TryGetValue(reference.Assembly, out IAssemblySymbol? assembly)
                 || !TryGetProgram(assembly, out string? bridge, out string? recordedProvider))
@@ -136,7 +152,8 @@ public sealed class InProcessProgramCatalogGenerator : IIncrementalGenerator
                 continue;
             }
 
-            if (bound.TryGetValue((provider, reference.Resource), out string? earlier))
+            (string Provider, string Name) key = (provider.ToUpperInvariant(), reference.Resource);
+            if (bound.TryGetValue(key, out string? earlier))
             {
                 diagnostics.Add(DiagnosticInfo.Create(
                     InProcessProgramDiagnostics.ResourceDuplicate,
@@ -146,7 +163,7 @@ public sealed class InProcessProgramCatalogGenerator : IIncrementalGenerator
                 continue;
             }
 
-            bound.Add((provider, reference.Resource), reference.Assembly);
+            bound.Add(key, reference.Assembly);
             registrations.Add(new Registration(provider, reference.Resource, bridge!));
         }
 
