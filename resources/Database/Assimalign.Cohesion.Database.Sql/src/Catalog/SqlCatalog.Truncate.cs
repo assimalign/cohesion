@@ -183,7 +183,7 @@ public sealed partial class SqlCatalog
         IReadOnlyList<BTreeIndexRegistration> registrations, Dictionary<SqlCatalogIndex, BTreeIndex> retiredIndexes,
         bool restartIdentity, TransactionSequence marker, string actualObject, SqlCatalogScriptPublication? publication, CancellationToken cancellationToken,
         bool definitionChange = false, SqlCatalogSchemaState? appliedSchema = null,
-        IReadOnlyList<SqlCatalogTable>? dropped = null)
+        IReadOnlyList<SqlCatalogTable>? dropped = null, Action? beforeTransaction = null)
     {
         lock (_sync)
         {
@@ -231,6 +231,7 @@ public sealed partial class SqlCatalog
                 { Sequences = _sequences.Count == 0 ? [] : Array.AsReadOnly(_sequencesById.Values.Where(sequence => ids.Contains(sequence.OwnerTableId)).ToArray()) };
             var tableRecords = replacements.Select(EncodeTable).ToArray();
             var indexRecords = indexes.Select(EncodeIndex).ToArray();
+            beforeTransaction?.Invoke();
             using var transaction = _storage.BeginTransaction();
             var tableSlots = replacements.Select((table, index) => new TableSlot(table,
                 UpsertRecord(transaction, _tables.TryGetValue((table.Schema, table.Name), out var existing) ? existing.Location : null, tableRecords[index]))).ToArray();

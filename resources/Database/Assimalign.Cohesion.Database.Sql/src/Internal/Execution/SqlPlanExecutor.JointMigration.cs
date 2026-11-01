@@ -203,6 +203,8 @@ internal sealed partial class SqlPlanExecutor
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async _ =>
             {
                 statement.CheckCopySpace(descriptions.Length);
+                long pageStart = _storage.PageManager.PageCount;
+                long freeStart = _storage.PageManager.FreePageCount;
                 journalStart = _storage.Journal.Length - 38; // Include this bracket's already appended Begin frame.
                 foreach (var index in descriptions)
                 {
@@ -210,6 +212,8 @@ internal sealed partial class SqlPlanExecutor
                         new IndexDefinition(index.Name, IndexKind.BTree, index.IsUnique), cancellationToken).ConfigureAwait(false);
                     created.Add(index);
                 }
+                long growth = _storage.PageManager.PageCount - pageStart;
+                statement.AddCopyAllocations(growth + freeStart - _storage.PageManager.FreePageCount);
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
             await CheckpointReplacementCopyAsync(statement, journalStart, cancellationToken).ConfigureAwait(false);
@@ -227,7 +231,7 @@ internal sealed partial class SqlPlanExecutor
                     CheckDomains(bound, converted, evaluator);
                     ValidateRows(table, [converted], statement, cancellationToken, checksOnly: true);
                     return converted;
-                }, cancellationToken, item.CopyRows).ConfigureAwait(false);
+                }, cancellationToken).ConfigureAwait(false);
                 stage("TablePrepared");
             }
             var replacedNames = retiring.Select(table => (table.Schema, table.Name)).ToHashSet();
@@ -261,7 +265,8 @@ internal sealed partial class SqlPlanExecutor
                 {
                     await _catalog.PublishStorageReplacementAsync(previous, null, prepared, descriptions, PublishedRegistrations(descriptions),
                         retiredIndexes, false, marker.Sequence, string.Empty, null, cancellationToken, definitionChange: true,
-                        appliedSchema: new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, 0), dropped: plan.Dropped).ConfigureAwait(false);
+                        appliedSchema: new SqlCatalogSchemaState(schema.Hash, schema.CanonicalDocument, 0), dropped: plan.Dropped,
+                        beforeTransaction: statement.CheckPublicationSpace).ConfigureAwait(false);
                 }
                 catch (Exception failure) when (SqlSchemaProvisioner.IsCommitUnconfirmed(failure))
                 {
@@ -293,7 +298,8 @@ internal sealed partial class SqlPlanExecutor
         finally
         {
             // Keep the original preparation error if either mandatory cleanup fails.
-            // Capacity was reserved before work; abandonment itself allocates nothing.
+            // The engine reserve survives both abandonment and publication, including
+            // reclamation WAL and dirty pages written after this statement ends.
             int before = failures.Count;
             try { if (!unconfirmed) { await RemoveDroppedIndexesAsync(statement, published ? oldIndexes : created, cancellationToken: CancellationToken.None).ConfigureAwait(false); } }
             catch (Exception cleanup) { failures.Add(cleanup); }
