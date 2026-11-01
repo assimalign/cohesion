@@ -275,13 +275,16 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
 
     /// <summary>
     /// Stops the gateway's run, as <see cref="StopAsync"/> does, and waits for it to end, then disposes
-    /// the platform the gateway owns; what the gateway deployed keeps running.
+    /// the platform the gateway owns.
     /// </summary>
     /// <remarks>
     /// The gateway owns only the platform its builder created through
     /// <see cref="ApplicationGatewayBuilder.UsePlatform{TPlatform}"/>; it disposes it asynchronously
-    /// when it can. An infrastructure provider or instance client the builder was given is borrowed and
-    /// left to its caller. A gateway disposed before it started never runs: <see cref="Completion"/>
+    /// when it can. Whether what the gateway deployed keeps running depends on that platform: a
+    /// platform that runs workloads apart from the gateway, such as a cluster, leaves them running,
+    /// while in-process infrastructure stops every program it runs when it is disposed. An
+    /// infrastructure provider or instance client the builder was given is borrowed and left to its
+    /// caller, and the gateway's disposal leaves its workloads as they are. A gateway disposed before it started never runs: <see cref="Completion"/>
     /// completes, and <see cref="StartAsync"/> throws. Disposing again waits for the first disposal and
     /// does nothing more.
     /// </remarks>

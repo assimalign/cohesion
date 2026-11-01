@@ -31,6 +31,29 @@ public class InProcessInfrastructureBuilderTests
         gateway.Resources.ShouldHaveSingleItem().Instances.ShouldHaveSingleItem().Key.ShouldBe(run.Key);
     }
 
+    [Fact(DisplayName = DisplayPrefix + "Disposing a gateway leaves the programs of borrowed infrastructure running until the infrastructure is disposed")]
+    public async Task UseInProcess_WithBorrowedInfrastructure_ShouldLeaveItsProgramsRunningWhenTheGatewayIsDisposed()
+    {
+        // Arrange
+        var program = new TestProgram("Web", "borrowed-runs");
+        await using var infrastructure = new InProcessInfrastructure();
+        infrastructure.AddProgram("Web", "borrowed-runs", program.MainAsync);
+        ApplicationGatewayBuilder builder = CreateBuilder().UseInProcess(infrastructure);
+        builder.AddResource("Web", "borrowed-runs");
+        ApplicationGateway gateway = builder.Build();
+        await gateway.StartAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        TestProgramRun run = program.Runs.ShouldHaveSingleItem();
+
+        // Act
+        await gateway.DisposeAsync();
+        bool runningAfterGateway = !run.Stopped.IsCompleted;
+        await infrastructure.DisposeAsync();
+
+        // Assert: the gateway disposes only the platform it owns; the caller's disposal stops the program.
+        runningAfterGateway.ShouldBeTrue();
+        run.Stopped.IsCompleted.ShouldBeTrue();
+    }
+
     [Fact(DisplayName = DisplayPrefix + "A program bound on the builder takes the place of the one the build bound")]
     public async Task UseInProcess_WithExplicitProgram_ShouldRunItInsteadOfTheBuildBoundOne()
     {

@@ -26,6 +26,11 @@ public static class InProcessApplicationGatewayBuilderExtensions
         /// options from the in-process hosting package; a program that does not fails to build its
         /// resource under the gateway.
         /// </para>
+        /// <para>
+        /// For the defaults, omit the argument: <c>UseInProcess()</c>. A literal <see langword="null"/>
+        /// converts to the parameter of the overload that takes infrastructure too, so
+        /// <c>UseInProcess(null)</c> is ambiguous and does not compile.
+        /// </para>
         /// </remarks>
         /// <param name="configure">Configures the infrastructure's options and binds programs the build did not.</param>
         /// <returns>The same builder for chaining.</returns>
