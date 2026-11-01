@@ -127,6 +127,15 @@ it needs cancellable construction; model factories still read `IDatabaseApplicat
 
 The module holds no schema knowledge and provisions nothing. A model's engine builder declares the databases its engine owns, and the engine's own build opens or creates each of them and completes inline provisioning before it returns (`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.2 and §5.3). The model verb's factory runs that build inside the application's `Build()`. Servers start when the application starts, after inline work and reservation of deferred tables. Deferred provisioning can continue while the server accepts work: affected-table admission waits for completion, while other tables and the admin endpoint remain available.
 
+SQL joint TYPE migrations retain a metadata lease from Build until worker completion. Definition
+DDL is refused during that whole interval, including time queued behind other databases on the
+engine-wide provisioning worker. Taking the lease in Build prevents unrelated DDL from invalidating
+the migration at worker start. Pending new relation names also refuse session creation or table
+rename with CS03404. A planning/space refusal leaves the old database online; a later successful
+apply or already-applied rollback Build clears the failure observation and restores Healthy when
+no other condition prevents it. Precise page/tree space accounting belongs to the SQL worker; Build
+checks only the metadata floor, so populated Build stays constant-time in table size.
+
 - **What was deleted** (owner decisions 49 to 54 of 2026-10-09): `Provision(engine, schema)` and `Provision(engineName, schema)`, `AddDatabase(engine, name, schema)` and `AddDatabase(engineName, name, schema)`, `Schemas`, their validators, and the internal `DefaultDatabaseProvisioner` host service that opened or created a database and applied a compiled schema in `StartAsync`, under `StartupTimeout`.
 - **The cost, revised by decision 49a:** open, recovery and cheap migration steps run in application Build, outside StartupTimeout. Build accepts a caller cancellation token. Populated-table data-scaling steps run on the engine-owned worker after Build has reserved their tables; the admin endpoint can then listen and report Degraded progress.
 - **Failed inline provisioning fails Build.** The model's build disposes its engine before it throws, and the application's Build rollback disposes every product built before it.

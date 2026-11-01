@@ -92,11 +92,14 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   with no pending intent still skips in constant time. Decision 49a's non-TYPE deferred failure takes only that database
   offline with `CS03104`, retaining intent for the next open. Non-TYPE inline failures retain compensation;
   joint TYPE preparation failure reports `CS03402`, discards its intent and keeps the old schema
-  online unless an unsafe-storage latch fired. Metadata space admission precedes intent save;
-  a small volume refuses with needed/available bytes and leaves any kept crash intent unchanged.
+  online unless an unsafe-storage latch fired. Build checks a metadata-only space floor before intent save;
+  the worker measures rewritten heap/index pages and bounded copy-WAL growth before prepared writes.
+  Untouched tables never change the need. Refusals report needed/available bytes online; precise
+  refusals discard the intent, while a floor refusal leaves a kept crash intent unchanged.
   Unconfirmed publication uses `CS03403`; recovery decides old/new and retains the new trees.
-  Definition DDL is excluded database-wide during joint work; DML on untouched tables proceeds.
-  Pending new-table names are reserved (`CS03404`). A default change without a TYPE rewrite
+  Definition DDL is excluded database-wide from Build through queue time and worker completion; DML on untouched tables proceeds.
+  Pending names refuse relation creation/table rename (`CS03404`); planning and publication
+  check the table/view/sequence namespace. A successful apply or skip clears an earlier failure. A default change without a TYPE rewrite
   retains the base `CS03105` refusal before any intent or inline change.
   Verify drift is coded and identifies the first difference. The engine refuses to drop a declared
   database or apply a different schema than its declaration.

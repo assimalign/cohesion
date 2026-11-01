@@ -38,10 +38,12 @@ internal readonly struct SqlStatementContext
         DateTimeOffset? transactionStart = null,
         SqlDdlInterlock? ddlInterlock = null,
         SqlResultPreparation? resultPreparation = null,
-        TimeSpan metadataLockTimeout = default)
+        TimeSpan metadataLockTimeout = default,
+        bool checkpointCopy = false)
     {
         _transactionStartTicks = (transactionStart ?? DateTimeOffset.UtcNow).UtcTicks;
-        _names = provisioningSchema is null && metadataLockTimeout == TimeSpan.Zero ? databaseName
+        _names = checkpointCopy ? new JointProvisioningNames(provisioningSchema, databaseName, metadataLockTimeout)
+            : provisioningSchema is null && metadataLockTimeout == TimeSpan.Zero ? databaseName
             : new ProvisioningNames(provisioningSchema, databaseName, metadataLockTimeout);
         Transaction = transaction;
         Coordinator = coordinator;
@@ -75,6 +77,10 @@ internal readonly struct SqlStatementContext
     internal SqlDdlInterlock? DdlInterlock { get; }
 
     internal TimeSpan MetadataLockTimeout => (_names as ProvisioningNames)?.LockTimeout ?? TimeSpan.Zero;
+
+    // Marker in the existing provisioning-only slot: ordinary context/metrics
+    // sizes and allocation budgets stay unchanged, including nonzero lock timeouts.
+    internal bool CheckpointCopy => _names is JointProvisioningNames;
 
     /// <summary>
     /// Gets the database's transaction coordinator.
@@ -116,7 +122,7 @@ internal readonly struct SqlStatementContext
 
     [global::System.Diagnostics.DebuggerDisplay("ProvisioningNames")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStatementContext.ProvisioningNames.DebugView))]
-    private sealed class ProvisioningNames
+    private class ProvisioningNames
     {
         internal ProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
         {
@@ -135,6 +141,14 @@ internal readonly struct SqlStatementContext
             {
                 _ = value;
             }
+        }
+    }
+
+    private sealed class JointProvisioningNames : ProvisioningNames
+    {
+        internal JointProvisioningNames(string? schema, string database, TimeSpan lockTimeout)
+            : base(schema, database, lockTimeout)
+        {
         }
     }
 

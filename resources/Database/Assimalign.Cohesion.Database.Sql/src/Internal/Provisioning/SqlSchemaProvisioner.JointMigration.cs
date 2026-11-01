@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Schema;
 using Assimalign.Cohesion.Database.Storage;
@@ -15,6 +16,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlSchemaProvisioner
 {
     internal Action<string>? JointStage { get; set; }
+    internal Action? JointSpaceCounting { get; set; }
+    internal long JointSpaceNeed { get; private set; }
+    internal long JointSpaceIndexPages { get; private set; }
     internal SqlStatementMetrics? JointMetrics { get; private set; }
     private (CancellationTokenSource Stop, TaskCompletionSource Finished)? _jointPreparing;
 
@@ -78,14 +82,21 @@ internal sealed partial class SqlSchemaProvisioner
     {
         var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
         SqlJointMigrationPlan plan;
-        try { plan = executor.PlanJointMigration(schema, script, cancellationToken); }
-        catch (Exception refusal) when (refusal is not (OperationCanceledException or OutOfMemoryException))
+        try { JointStage?.Invoke("Planning"); plan = executor.PlanJointMigration(schema, script, cancellationToken); }
+        catch (Exception refusal)
         {
-            // Permanent metadata refusals are not transient admission contention.
-            // This is the complete data-independent planning boundary, including native
-            // binding callbacks. Lifecycle interruption retains its own exception contract.
-            // No intent or replacement owner exists yet.
-            throw PlanningRefusal(schema, script.Steps.Count, refusal);
+            // Storage, corruption and lifecycle identities take precedence (#1364).
+            // Only the planner's data-independent validation vocabulary is permanent policy.
+            var translated = _database.TranslateFailure(refusal);
+            if (!ReferenceEquals(translated, refusal)) { throw translated; }
+            if (DatabaseFailure.IsCorruption(refusal)) { throw; }
+            if (refusal is DatabaseException coded && coded.Diagnostics.Any(diagnostic => diagnostic.Code is { } code &&
+                (code.StartsWith("CS06", StringComparison.Ordinal) || code.StartsWith("CK06", StringComparison.Ordinal))))
+            { throw; }
+            if (refusal is SqlPlanningException or SqlUnsupportedQueryException or SqlEvaluationException or SqlExecutionException or
+                SqlCatalogException or DatabaseTypeException or DatabaseObjectLockedException or ArgumentException)
+            { throw PlanningRefusal(schema, script.Steps.Count, refusal); }
+            throw;
         }
         var intent = new SqlCatalogPendingMigration(schema.Hash, schema.CanonicalDocument,
             script.Steps.Select((step, index) => new SqlCatalogMigrationStep("Joint/" + step.Kind,
@@ -123,10 +134,9 @@ internal sealed partial class SqlSchemaProvisioner
                 { throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog); }
             }
             if (locks.State != TransactionState.Active) { throw new TransactionAbortedException(ErrorMessages.SequenceTransactionEnded); }
-            // Count while touched writers are excluded, before even kind 9 is durable.
-            // A kept crash intent follows this exact admission again without rewriting it
-            // on a refusal. Read-only rollback and lease release make no durable changes.
-            try { AdmitJointSpace(plan); }
+            // Build checks only the metadata floor, independent of owner size.
+            // The worker counts pages before any prepared write, including after resume.
+            try { CheckJointSpace(JointSpaceFloor(intent)); }
             catch { spaceRefused = true; throw; }
             await _catalog.SavePendingMigrationAsync(intent, cancellationToken).ConfigureAwait(false);
             saved = true;
@@ -176,9 +186,10 @@ internal sealed partial class SqlSchemaProvisioner
                     PublishProgress(migration.Intent.Steps[0], migration.Intent.StepCount, true, processed, total);
                     TraceDeferredProgress(migration, migration.Intent.Steps[0], processed, total);
                     DeferredProgress?.Invoke(processed, total);
-                });
+                }, checkpointCopy: true);
             JointMetrics = statement.Metrics;
             BeforeDeferredStep?.Invoke(migration.Steps[0], cancellationToken);
+            AdmitJointSpace(migration.JointPlan!, migration.Intent, cancellationToken);
             var executor = new SqlPlanExecutor(_database.DataStorage, _catalog, _database.IndexManager, _database.Definitions);
             await executor.ExecuteJointMigrationAsync(migration.JointPlan!, migration.Schema, statement,
                 phase => JointStage?.Invoke(phase), cancellationToken).ConfigureAwait(false);
@@ -257,40 +268,4 @@ internal sealed partial class SqlSchemaProvisioner
             failure is AggregateException aggregate && aggregate.InnerExceptions.Any(IsCommitUnconfirmed) ||
             failure.InnerException is { } inner && IsCommitUnconfirmed(inner);
 
-    private void AdmitJointSpace(SqlJointMigrationPlan plan)
-    {
-        // The public owner directory snapshots data-page ids, not index-page counts.
-        // O(P) metadata and allocation for P touched heap pages; never load a page or row.
-        // A bounds all allocated data-file pages (including indexes/retained owners),
-        // conservatively bounding the touched owners without widening Storage's API.
-        long heapPages = 0, treePages = 0;
-        checked
-        {
-            foreach (var table in plan.Touched)
-            { heapPages += _database.DataStorage.GetOwnerPages(table.ObjectId).Count; }
-            foreach (var table in plan.Tables)
-            {
-                long pages = table.Previous is null ? 0 : _database.DataStorage.GetOwnerPages(table.Previous.ObjectId).Count;
-                treePages += Math.Max(1, 2 * pages) * table.Indexes.Length;
-            }
-            // Sample free first, then the monotonic high-water count. Concurrent DML
-            // on untouched owners cannot make this underestimate the reserved owners.
-            long free = _database.DataStorage.PageManager.FreePageCount;
-            long allocated = Math.Max(heapPages, _database.DataStorage.PageManager.PageCount - free);
-            long replacement = (2 * allocated + treePages + plan.Tables.Length) * Page.Size;
-            // Two owner-sized allowances retain old snapshots and permit replacement.
-            // Journal headroom covers before/after page images plus frame/commit overhead;
-            // a 25% margin and 16 MiB catalog reserve cover small jobs and metadata growth.
-            long journal = Math.Max(64L * 1024 * 1024, 2 * replacement);
-            long need = replacement + journal;
-            need += (need + 3) / 4 + 16L * 1024 * 1024;
-            long available = _database.Engine.GetAvailableMigrationBytes(_database.Name);
-            if (available < need)
-            {
-                string message = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-                    ErrorMessages.JointSpaceInsufficient, need, available);
-                throw CodedMigrationFailure(SqlProvisioningCodes.JointFailed, message);
-            }
-        }
-    }
 }

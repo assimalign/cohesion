@@ -305,6 +305,11 @@ ALTER TYPE renders this structured name with identifier escaping, so a decoded d
 beginning and ending in quote characters cannot be confused with SQL delimiters. Parser and
 direct-AST round trips cover both forms. DIALECT.md records TYPE's assignment-default casts,
 narrowing rewrites and persisted CHECK rules; the engine's live conformance corpus exercises them.
+Joint typed migrations share the catalog's table/view/sequence namespace. The live conformance
+corpus covers planning refusals, deferred name reservations and locked publication checks;
+these are engine admission rules and add no grammar or AST variant. The metadata lease includes
+engine-wide queue time. Precise copy-space accounting belongs to the worker, while Build checks
+only its metadata floor, as SQL DESIGN and DIALECT.md specify.
 
 ## TRUNCATE (#1716, SQ-T1)
 

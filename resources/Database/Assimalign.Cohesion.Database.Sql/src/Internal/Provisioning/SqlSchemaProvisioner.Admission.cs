@@ -24,15 +24,21 @@ internal sealed partial class SqlSchemaProvisioner
         {
             SqlCreateTableExpression create => create.Table,
             SqlCreateTableAsExpression create => create.Table,
+            SqlCreateViewExpression create => create.View,
+            SqlCreateSequenceExpression create => create.Sequence,
             _ => null,
         };
-        if (created is not null && migration.JointPlan is { } joint &&
+        string? schema = created?.SchemaName ?? SqlPlanner.DefaultSchema;
+        string? name = created?.TableName;
+        if (request.Statement.SqlExpression is SqlAlterTableExpression { Action: SqlAlterRenameTableAction rename } alterName)
+        { schema = alterName.Table.SchemaName ?? SqlPlanner.DefaultSchema; name = rename.NewName; }
+        if (name is not null && migration.JointPlan is { } joint &&
             joint.Tables.Any(table => table.Previous is null &&
-                table.Shape.Schema.Equals(created.SchemaName ?? SqlPlanner.DefaultSchema, System.StringComparison.OrdinalIgnoreCase) &&
-                table.Shape.Name.Equals(created.TableName, System.StringComparison.OrdinalIgnoreCase)))
+                table.Shape.Schema.Equals(schema, System.StringComparison.OrdinalIgnoreCase) &&
+                table.Shape.Name.Equals(name, System.StringComparison.OrdinalIgnoreCase)))
         {
             throw new SqlCatalogException(SqlProvisioningCodes.JointNameReserved,
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.JointTableNameReserved, created.TableName));
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.JointTableNameReserved, name));
         }
         var tables = new SortedSet<ulong>();
         string referenceSchema = request.Statement.SqlExpression switch

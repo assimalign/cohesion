@@ -231,6 +231,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
+            CheckpointReplacementCopy(statement, cancellationToken);
             ForgetIndexRows(converted);
             processed += batch.Count;
             statement.ProvisioningProgress?.Invoke(processed, null);
@@ -241,5 +242,14 @@ internal sealed partial class SqlPlanExecutor
             await ValidateBuiltUniqueIndexAsync(replacement, index.Index, statement, cancellationToken, index.Metadata.Predicate is null ? null : index.Ordinals, index.Metadata.Predicate is not null).ConfigureAwait(false);
         }
         statement.ProvisioningProgress?.Invoke(processed, processed);
+    }
+
+    private void CheckpointReplacementCopy(SqlStatementContext statement, CancellationToken token)
+    {
+        // Each 64-row bracket has ended. A logical read-committed reservation does
+        // not pin WAL: the coordinator checkpoints its active identities and truncates
+        // the physical journal under the apply gate. This bounds joint admission's J.
+        if (statement.CheckpointCopy && _storage.Journal.Length >= SqlSchemaProvisioner.JointCopyCheckpointBytes)
+        { statement.Coordinator.Checkpoint(token); }
     }
 }

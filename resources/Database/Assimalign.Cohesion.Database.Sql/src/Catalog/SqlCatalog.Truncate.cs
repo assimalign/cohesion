@@ -132,7 +132,7 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             cancellationToken.ThrowIfCancellationRequested();
             if (!newTable) { ValidateStorageReplacement(expected, named); }
-            else if (expected.Any(table => _tables.ContainsKey((table.Schema, table.Name))))
+            else if (expected.Any(table => RelationExists(table.Schema, table.Name, includeOrphans: true)))
             { throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog); }
             ulong next = _nextObjectId;
             var replacements = expected.Select(table => describe is not null ? describe(table, checked(next++)) : new SqlCatalogTable(checked(next++), table.Schema, table.Name,
@@ -192,9 +192,14 @@ public sealed partial class SqlCatalog
             ValidateStorageReplacement(expected, named);
             dropped ??= [];
             ValidateStorageReplacement(dropped, null);
-            foreach (var table in replacements.Skip(expected.Count))
+            foreach (var table in replacements)
             {
-                if (_tables.ContainsKey((table.Schema, table.Name)))
+                // Use the same namespace as Load's view/sequence directory validators.
+                // Existing tables may keep their own name; every other relation must be absent.
+                if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name)) ||
+                    _sequences.ContainsKey((table.Schema, table.Name)) ||
+                    _tables.ContainsKey((table.Schema, table.Name)) &&
+                    !expected.Any(old => TableNameComparer.Instance.Equals((old.Schema, old.Name), (table.Schema, table.Name))))
                 { throw new SqlCatalogException("CS04064", ErrorMessages.CatalogSaveSchemaDocumentSqlCatalog); }
             }
             var retiring = expected.Concat(dropped).ToArray();

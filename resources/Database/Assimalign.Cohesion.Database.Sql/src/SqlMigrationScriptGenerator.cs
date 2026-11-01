@@ -43,14 +43,14 @@ public static class SqlMigrationScriptGenerator
 
         // A default change needs publication of the complete target. Preserve the base
         // generator's refusal when no operation in the plan requires a TYPE rewrite.
-        joint = joint || plan.Operations.Any(operation =>
+        joint = joint || plan.Operations.Any(operation => RenderChecked(operation, () =>
         {
             if (operation.Kind != SqlSchemaMigrationOperationKind.AlterColumn ||
                 operation.Column is not { } column || operation.PreviousColumn is not { } previous) { return false; }
             var type = ResolveAlterColumnType(column, out string? domain);
             var old = ResolveAlterColumnType(previous, out string? oldDomain);
             return RequiresTypeRewrite(old, oldDomain, type, domain);
-        });
+        }));
         var steps = new List<SqlMigrationScriptStep>(plan.Operations.Count);
 
         foreach (SqlSchemaMigrationOperation operation in plan.Operations)
@@ -64,11 +64,23 @@ public static class SqlMigrationScriptGenerator
             }
 
             if (operation.Kind == SqlSchemaMigrationOperationKind.AlterColumn)
-            { RenderAlterColumns(operation, steps, joint); }
+            { RenderChecked(operation, () => { RenderAlterColumns(operation, steps, joint); return true; }); }
             else { steps.Add(Render(operation, currentSchema)); }
         }
 
         return new SqlMigrationScript(plan, steps);
+    }
+
+    private static T RenderChecked<T>(SqlSchemaMigrationOperation operation, Func<T> render)
+    {
+        try { return render(); }
+        catch (SqlSchemaMigrationException) { throw; }
+        catch (Exception exception) when (exception is DatabaseException or ArgumentException)
+        {
+            throw new SqlSchemaMigrationException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.MigrationScriptGeneratorRenderFailure,
+                    operation.Kind, QualifiedName(operation), exception.Message), exception);
+        }
     }
 
     private static SqlMigrationScriptStep Render(

@@ -1870,8 +1870,10 @@ the same assignment conversion/copy path, then publish every table, index, const
 marker in one commit (#1447, SQ-A3). Build defers populated work to the provisioning worker;
 empty-table Build, RunMigrationsInline and ApplySchemaAsync use the same joint executor inline.
 Before publication users on touched tables wait through the lock manager; DML on other tables
-proceeds. Definition DDL is refused database-wide for the joint migration's metadata lease.
-CREATE TABLE/CTAS cannot claim an unpublished joint target name (CS03404).
+proceeds. Definition DDL is refused database-wide from Build through queue time and worker completion.
+CREATE TABLE, CTAS, CREATE VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an
+unpublished joint target name (CS03404). Existing table/view/sequence name clashes refuse at
+planning with CS03105, and catalog publication checks the same namespace again under its lock.
 Conversion, FK, CHECK, NOT NULL, unique and domain failures discard preparation and the pending
 intent with CS03402, leaving the old schema online. There is no compensation or automatic retry.
 An old/no-target application opens the old schema after interrupted preparation; a matching new
@@ -1883,9 +1885,10 @@ VARCHAR narrowing always takes the joint TYPE path because assignment may trim e
 CHAR width changes also rewrite. Default changes in a plan without any TYPE rewrite retain
 the base generator's CS03105 refusal before saving anything. The joint plan publishes all defaults.
 Metadata planning refusals report CS03105; joint reservation failures agree on CS03402 in the
-exception and provisioning report. Before intent save, space admission reads allocation metadata
-(O(allocated heap pages), zero row decodes) and requires two allocated owner allowances, new
-tree/journal headroom, a 25% margin and a 16 MiB catalog reserve; Sql DESIGN defines the formula.
+exception and provisioning report. Before intent save, Build checks only the metadata space floor, without owner snapshots or row
+decodes. The worker counts rewritten heap/index pages and new trees before prepared writes;
+copy checkpoints bound journal growth. A 25% margin and catalog reserve complete the estimate;
+Sql DESIGN defines the formula. Untouched tables never change the need.
 Insufficient space reports CS03402 with needed/available bytes online, including resumed intents.
 WAL write/flush, unconfirmed commit and existing engine-wide failure policies still take storage
 offline. An unconfirmed publication uses CS03403 and leaves recovery to decide old/new.

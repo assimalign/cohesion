@@ -142,6 +142,7 @@ internal sealed partial class SqlSchemaProvisioner
             SqlCatalogSchemaState? recorded = _catalog.SchemaState;
             if (IsApplied(recorded, schema))
             {
+                _database.ReportProvisioning(null);
                 TraceOutcome("Skipped", 0);
                 return new SqlSchemaMigrationResult(recorded!.ContentHash, schema.Hash, 0, WasAlreadyApplied: true);
             }
@@ -324,6 +325,7 @@ internal sealed partial class SqlSchemaProvisioner
                     inner);
             }
 
+            _database.ReportProvisioning(null);
             TraceOutcome("Applied");
             return new SqlSchemaMigrationResult(
                 plan.SourceHash,
@@ -1036,6 +1038,12 @@ internal sealed partial class SqlSchemaProvisioner
         {
             if (!_catalog.TryGetTable(SqlPlanner.DefaultSchema, table.Name, out SqlCatalogTable actual))
             {
+                if (_catalog.RelationNameExists(SqlPlanner.DefaultSchema, table.Name, includeOrphans: true))
+                {
+                    throw new SqlSchemaMigrationException(
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidateCatalogOwnershipFailure,
+                            SqlProvisioningCodes.PolicyRefused, Describe(), schema.Name, table.Name));
+                }
                 continue;
             }
 

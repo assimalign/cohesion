@@ -208,6 +208,7 @@ internal sealed partial class SqlPlanExecutor
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
+            CheckpointReplacementCopy(statement, cancellationToken);
             stage("TreesDurable");
             foreach (var item in changed)
             {

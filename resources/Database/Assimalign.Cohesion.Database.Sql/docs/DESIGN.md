@@ -8574,8 +8574,8 @@ The generator lowers type, default and nullability changes separately and never 
 a reverse TYPE statement as compensation. Same-name compiled domains are diffed through their
 effective storage facets so their referring columns cannot be skipped.
 
-Deferred Build binds metadata and probes Storage.HasOwnerPages; space admission snapshots
-owner-page allocation metadata without decoding rows. Open does not scan data for joint
+Deferred Build binds metadata and probes Storage.HasOwnerPages. It checks only a constant-time
+space floor in stored-table size; precise owner snapshots and tree walks run on the worker. Open does not scan data for joint
 provisioning. Empty-table work runs inline. RunMigrationsInline and a declaration containing
 any script force the typed migration inline too: such a populated Build copies rows synchronously.
 One read-committed transaction reserves owned sequences, then every touched old table in ascending
@@ -8586,36 +8586,94 @@ all migration and user object waits use the lock manager with their actual trans
 The provisioning queue monitor never spans work or a lock wait. The code at reservation records
 the complete lock/latch order. DML on untouched tables remains available throughout preparation.
 Definition DDL (views, functions, domains and schemas) is refused database-wide while the
-joint lease is held. Session CREATE TABLE and CTAS cannot claim an unpublished target name
-(CS03404, case-insensitive schema/name matching); no second catalog publication path is added.
+joint lease is held, from Build through queue time (including behind migrations of other
+databases on the engine) until worker completion. Build takes the lease so unrelated definition
+DDL cannot invalidate the target before the worker starts. Session CREATE TABLE, CTAS, CREATE
+VIEW, CREATE SEQUENCE and ALTER TABLE RENAME TO cannot claim an unpublished target name
+(CS03404, case-insensitive schema/name matching). Column rename is the only other rename in
+the dialect and does not enter this namespace. Planning checks all table names against tables,
+views and sequences, refusing CS03105 before intent save; publication rechecks that namespace
+under the catalog monitor before its commit, using the same collision rules as catalog load,
+including persisted abandoned owned sequences. PostgreSQL similarly checks its shared relation
+namespace before creation (src/backend/catalog/heap.c:1191-1198) and rename
+(src/backend/commands/tablecmds.c:4362-4367); SQL retains its own table/view/sequence namespace.
 Permanent portable-policy and binding/dependency/type/collation/key refusals use CS03105 through both the thrown
 diagnostic and Provisioning before an intent is saved. A reservation timeout uses CS03402 in
 both places, retaining its lock-manager cause rather than throwing an unrelated timeout code.
 
-Before saving even the kind-9 intent, the reserved plan performs space admission against the
-database volume's available bytes.
-Windows queries the actual directory through source-generated GetDiskFreeSpaceExW interop,
-including mounted volumes and UNC shares; its generated UTF-16 pinning requires the SQL
-project's AllowUnsafeBlocks setting. Unix queries DriveInfo for that directory. No public
-storage API or project reference is added. Let P be the sum of touched heap pages,
-A = max(P, data-file PageCount - FreePageCount), and
-T = sum(max(1, 2 * previous heap pages) * final index count) over prepared tables.
-A deliberately bounds all allocated pages, including touched indexes and retained owners:
-Storage exposes heap-page snapshots but no per-owner index count, and this pass adds no
-public bridge. This may overestimate a migration in a database with large untouched objects.
-For page size B, R = (2*A + T + prepared table count)*B, journal headroom
-J = max(64 MiB, 2*R), and admission requires R + J + ceil((R+J)/4) + 16 MiB free.
-The doubled owners cover replacement while old owners await publication and snapshot release;
-the additional tree allowance, before/after journal image headroom, 25% margin and 16 MiB
-catalog reserve avoid consuming the volume to its limit. P and T use GetOwnerPages snapshots:
-O(allocated heap pages) metadata work/allocation per table, with zero data-page reads or row
-decodes; A is constant time and samples free count before the monotonic high-water count,
-so unrelated DML cannot undercount the reserved owners. Memory strategies report no volume limit. A kept Joint/ intent
-repeats admission when matching Build replans it after crash/offline recovery. CS03402 names
-bytes needed and available, makes no migration durable write, releases admission/locks and
-leaves any pre-existing intent unchanged. Available space is an admission estimate, not a
-volume reservation: other databases/processes or expansion by application casts can still
-exhaust it after admission. The storage fail-stop exception below remains necessary.
+Space admission has two phases. Before saving kind 9, Build checks only
+F = 1 MiB + (ceil(I / 3072) + 4) * (5*B + 168), where I is the UTF-8 byte length of
+the serialized intent and B = 8192. Catalog kind-9 chunks hold 3 KiB; this reserves a data
+page plus full pre-image/delta frames for both deleting a kept intent and writing its replacement,
+four directory/counter pages, and 1 MiB
+for encoding/checkpoint headers. F depends on declaration size, never stored table size:
+Build takes no owner-directory snapshot, visits no data/index page and decodes zero rows.
+A floor refusal uses CS03402 online and preserves a kept intent without writing it.
+
+Before the first prepared write, the worker measures each rewritten table's heap directory
+and actual registered index trees. It counts heap slots without decoding rows and walks
+B-tree format-2 internal child links, recording actual page counts and heights. SQL's local
+read-only walker validates geometry/ownership through normal storage pins. Storage's public
+owner directory omits index pages; the walk avoids adding a public API or shipped friend grant.
+Cost and retained visited identities are O(pages of rewritten owners); adjacent FK tables,
+dropped tables and untouched owners contribute no replacement allocation. Cancellation is
+observed per page. A resumed matching kind-9 intent passes this same worker check again.
+
+Let H_t be measured heap pages and W_t, W'_t the old/new encoded row-width estimates
+(29 bytes for stamps/owner/slot plus encoded components, capped at the maximum stored row).
+Fixed components use their encoded widths; bounded text/binary use declared lengths and
+UTF-8/escape allowance, and unbounded/custom values use the maximum stored-row allowance.
+Existing VARCHAR/BINARY bound changes preserve the old value-width estimate because they
+cannot enlarge copied values; CHAR padding and changed domain casts use target widths.
+An added column without a default contributes its one-byte NULL, regardless of its declared bound.
+The heap estimate is ceil(H_t * max(1, W'_t/W_t)). For each retained final index, multiply
+its measured pages by max(1, new/old encoded key-entry width), rounding up; entries include
+28 bytes for stamps/reference/length/slot and at most 1024 key bytes. New index trees use
+heap-slot count times that entry width, 50% leaf occupancy, and internal levels at minimum
+fanout three. New empty tables need no heap pages and one page per index root. R is B times
+the resulting prepared heap/tree page count. Old owners remain allocated until publication
+and snapshot reclamation; they are already allocated and add no new-space charge.
+
+The WAL derivation is from CopyReplacementRowsAsync, TransactionCoordinator.ApplyStatementAsync,
+Storage.RegisterTouch/CommitTransaction, PageImageCodec and StorageJournal: every durable
+64-row copy bracket can append full pre-images (including spills) and committed deltas/images,
+not only metadata frames. A page payload is at most B+8 bytes and a frame adds 38 bytes.
+At most two such records per touched page cost 2*(B+46). A row touches at most two heap
+pages plus (4*h+3) pages per final index including split paths/children/sibling links.
+Measured tree heights h grow by ceil(log_3(page-growth factor)); new trees use their estimated
+levels. C is the maximum over copied tables of min(64, heap slots) times that per-row cost
+in pages; T is the total new root count. Joint copying explicitly checkpoints after a chunk
+or root-creation bracket when the journal reaches 8 MiB. The physical bracket has ended,
+and the coordinator persists active logical identities and truncates WAL under its apply gate;
+the read-committed migration reservation does not pin WAL. The checkpoint marker uses the
+existing provisioning-only context slot; ordinary statement context/metrics sizes and allocation
+budgets are unchanged. A checkpoint may therefore truncate
+throughout copying. No second executor or compensation path is introduced.
+
+Let Q be total heap slots times their per-row page-touch allowances, plus T, and K be one
+root-creation bracket plus sum(ceil(heap slots/64)). Total possible copy WAL is
+L = Q*2*(B+46) + K*152. Peak additional copy WAL is estimated by
+J = min(L, 8 MiB + max(C,T)*2*(B+46) + 152). The 152 allows four metadata frames per
+bracket. Small jobs pay only their total-frame bound, rather than an unconditional 8 MiB.
+Admission requires
+N = R + J + ceil((R+J)/4) + 16 MiB + F available bytes. The 25% margin covers occupancy
+and width estimation; the 16 MiB reserve covers catalog publication/reclamation. The explicit
+copy checkpoints make this a peak-growth allowance rather than an invented whole-file multiple.
+For example, a 1 GiB rewritten table including its own two height-four trees in a 100 GiB
+database, with unchanged widths and a 6 KiB intent, has R=1,073,741,824, C=2560,
+J=50,567,320 and F=1,295,344 bytes. N=1,423,458,990 bytes (about 1.326 GiB); the other
+99 GiB contributes zero. The 25% margin and catalog/floor reserves are included.
+CS03402 includes N and available bytes; a precise refusal discards kind 9 and every prepared
+object, releases reservations and leaves the old schema online. No prepared write precedes it.
+A later successful apply or matching/rollback Build clears an earlier Provisioning failure,
+including an already-applied schema skip. Disposed, offline, corrupt and canceled planning
+retain their own identities and precedence; only data-independent refusals become CS03105.
+
+Windows probes the actual directory with source-generated GetDiskFreeSpaceExW, including mount
+points and UNC shares, normalizing a trailing backslash and long-path prefix. Unix uses
+DriveInfo for that directory; memory strategies report no volume limit. Admission is an
+estimate, not a reservation: concurrent writers/processes and opaque application cast expansion
+can still exhaust the volume. The explicit unsafe-storage offline exception below remains.
 
 The final table shapes, new tables and all their indexes are unpublished. Changed CHECKs and
 defaults bind against those shapes before any row is read. SQ-A1's bounded 64-row copier and
@@ -8682,7 +8740,7 @@ rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference cod
 | CS03105 | Permanent metadata/planning refusal before intent save |
 | CS03402 | Joint preparation/space admission failed; old schema retained unless a storage latch fired |
 | CS03403 | Joint publication commit unconfirmed; reopen/recovery decides old or new |
-| CS03404 | Session CREATE TABLE/CTAS names a table reserved by a pending joint plan |
+| CS03404 | Session relation creation/table rename names a relation reserved by a pending joint plan |
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
