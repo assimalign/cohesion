@@ -60,7 +60,6 @@ public sealed class SqlCteParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - WITH: excluded forms retain precise capability diagnostics")]
-    [InlineData("WITH RECURSIVE a AS (SELECT * FROM t) SELECT * FROM a;", "RECURSIVE")]
     [InlineData("SELECT * FROM (WITH a AS (SELECT * FROM t) SELECT * FROM a) d;", "WITH inside")]
     [InlineData("SELECT id FROM t WHERE id IN (WITH a AS (SELECT id FROM t) SELECT id FROM a);", "WITH inside")]
     [InlineData("SELECT (WITH a AS (SELECT id FROM t) SELECT id FROM a) FROM t;", "WITH inside")]
@@ -73,12 +72,12 @@ public sealed class SqlCteParserTests
     [InlineData("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d;", "DELETE")]
     [InlineData("WITH a AS (SELECT id FROM t) SEARCH DEPTH FIRST BY id SET ord SELECT * FROM a;", "SEARCH/CYCLE")]
     [InlineData("WITH a AS (SELECT id FROM t) CYCLE id SET mark USING path SELECT * FROM a;", "SEARCH/CYCLE")]
-    [InlineData("WITH a AS (SELECT ROW_NUMBER() OVER () AS n FROM t) SELECT * FROM a;", "OVER")]
+    [InlineData("WITH a AS (SELECT NTH_VALUE(id,1) FROM LAST OVER() AS n FROM t) SELECT * FROM a;", "FROM LAST")]
     [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a NATURAL JOIN u;", "NATURAL")]
-    [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a WINDOW w AS ();", "WINDOW")]
+    [InlineData("WITH a AS (SELECT * FROM t) SELECT * FROM a WINDOW w AS (ORDER BY id GROUPS CURRENT ROW) FOR UPDATE;", "FOR UPDATE/SHARE")]
     [InlineData("WITH top AS (SELECT id FROM t) SELECT TOP (1) WITH TIES * FROM top;", "WITH TIES")]
     [InlineData("WITH natural AS (SELECT id FROM t) SELECT * FROM natural NATURAL JOIN u;", "NATURAL")]
-    [InlineData("WITH window AS (SELECT id FROM t) SELECT * FROM window WINDOW w AS ();", "WINDOW")]
+    [InlineData("WITH window AS (SELECT id FROM t) SELECT * FROM window WINDOW w AS (ORDER BY id GROUPS CURRENT ROW) FOR UPDATE;", "FOR UPDATE/SHARE")]
     public void Parse_ExcludedWithForm_ShouldNameUnsupportedConstruct(string sql, string construct)
     {
         // Arrange
@@ -91,11 +90,6 @@ public sealed class SqlCteParserTests
         var diagnostic = statement.Diagnostics.Where(item => item.Code == "CK00001").ShouldHaveSingleItem();
         diagnostic.Message!.ShouldContain(construct);
         statement.Diagnostics.ShouldNotContain(item => item.Code == "CS00002");
-        if (construct == "RECURSIVE")
-        {
-            statement.Diagnostics.Count(item => item.Severity == DiagnosticSeverity.Error).ShouldBe(1);
-            diagnostic.Start.ShouldBe(sql.IndexOf("RECURSIVE", System.StringComparison.Ordinal));
-        }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - WITH: malformed lists and unsupported command roots are syntax errors")]

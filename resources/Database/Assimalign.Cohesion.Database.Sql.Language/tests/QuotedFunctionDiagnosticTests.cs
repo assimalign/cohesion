@@ -5,12 +5,15 @@ namespace Assimalign.Cohesion.Database.Sql.Language.Tests;
 
 public sealed class QuotedFunctionDiagnosticTests
 {
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Quoted functions: lowercase unsupported names fail during parsing")]
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Quoted functions: window functions require OVER during binding")]
     [InlineData("lead")]
     [InlineData("lag")]
     [InlineData("rank")]
     [InlineData("ntile")]
-    public void Parse_QuotedUnsupportedCall_ShouldCarryLocatedDiagnostic(string name)
+    [InlineData("first_value")]
+    [InlineData("last_value")]
+    [InlineData("nth_value")]
+    public void Parse_QuotedWindowCall_ShouldRespectExecutionBoundary(string name)
     {
         // Arrange
         string sql = $"SELECT \"{name}\"(id) FROM t;";
@@ -19,10 +22,7 @@ public sealed class QuotedFunctionDiagnosticTests
         var statement = new SqlQueryParser().Parse(sql);
 
         // Assert
-        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("CK00001", diagnostic.Message);
-        diagnostic.Start.ShouldBe(7);
-        diagnostic.End.ShouldBe(9 + name.Length);
+        statement.Diagnostics.ShouldBeEmpty(); // Required OVER is a binding diagnostic.
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Quoted functions: preserve case and column references")]

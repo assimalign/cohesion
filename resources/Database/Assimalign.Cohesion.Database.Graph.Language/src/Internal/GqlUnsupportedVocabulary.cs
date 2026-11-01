@@ -18,14 +18,11 @@ internal static class GqlUnsupportedVocabulary
     [
         // Clauses, statements and predicates outside the executable subset.
         new("MANDATORY", GqlClauses.MandatoryMatch, GqlWordPosition.Clause),
-        new("MERGE", "MERGE", GqlWordPosition.Clause),
         new("FOREACH", "FOREACH", GqlWordPosition.Clause),
-        new("UNION", "UNION", GqlWordPosition.Clause),
         new("CALL", "CALL", GqlWordPosition.Clause),
         new("YIELD", "YIELD", GqlWordPosition.Clause),
         // MATCH selector prefixes are parsed; these retain refusals in other positions.
         new("ALL", "ALL", GqlWordPosition.Clause),
-        new("EXISTS", "EXISTS", GqlWordPosition.Clause),
         new("ANY", "ANY", GqlWordPosition.Clause),
         new("NONE", "NONE", GqlWordPosition.Clause),
         new("SINGLE", "SINGLE", GqlWordPosition.Clause),
@@ -60,7 +57,6 @@ internal static class GqlUnsupportedVocabulary
         new("TOFLOATLIST", "FUNCTION toFloatList", GqlWordPosition.FunctionCall),
         new("TOBOOLEANLIST", "FUNCTION toBooleanList", GqlWordPosition.FunctionCall),
         new("ID", "FUNCTION id (use element_id)", GqlWordPosition.FunctionCall),
-        new("REDUCE", "FUNCTION reduce", GqlWordPosition.FunctionCall),
         new("DATE", "FUNCTION date", GqlWordPosition.FunctionCall),
         new("DATETIME", "FUNCTION datetime", GqlWordPosition.FunctionCall),
         new("DURATION", "FUNCTION duration", GqlWordPosition.FunctionCall),

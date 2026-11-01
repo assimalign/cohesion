@@ -42,11 +42,44 @@ public static class SqlClauses
     /// <summary>A <c>CREATE SCHEMA</c> SQL namespace definition.</summary>
     public const string CreateSchema = "CREATE SCHEMA";
 
+    /// <summary>Creates a standalone sequence.</summary>
+    public const string CreateSequence = "CREATE SEQUENCE";
+
+    /// <summary>Changes or restarts a standalone sequence.</summary>
+    public const string AlterSequence = "ALTER SEQUENCE";
+
+    /// <summary>Drops standalone sequences.</summary>
+    public const string DropSequence = "DROP SEQUENCE";
+
+    /// <summary>Reads a standard per-row sequence value.</summary>
+    public const string NextValue = "NEXT VALUE FOR";
+
+    /// <summary>Discard the logical SQL session's state outside a transaction.</summary>
+    public const string DiscardAll = "DISCARD ALL";
+
     /// <summary>A generated identity column, including the SQL Server lexical alias.</summary>
     public const string Identity = "IDENTITY";
 
+    /// <summary>Changes an existing column identity.</summary>
+    public const string AlterIdentity = "ALTER IDENTITY";
+
+    /// <summary>Serial integer identity aliases.</summary>
+    public const string Serial = "SERIAL";
+
+    /// <summary>An INSERT identity assignment override.</summary>
+    public const string Overriding = "OVERRIDING";
+
+    /// <summary>A sequence column ownership declaration.</summary>
+    public const string OwnedBy = "OWNED BY";
+
     /// <summary>A <c>CREATE INDEX</c> statement.</summary>
     public const string CreateIndex = "CREATE INDEX";
+
+    /// <summary>Per-column index directions and NULL placement.</summary>
+    public const string IndexKeyOrder = "CREATE INDEX KEY ORDER";
+
+    /// <summary>A partial index with an immutable row predicate.</summary>
+    public const string PartialIndex = "CREATE INDEX WHERE";
 
     /// <summary>An <c>ALTER TABLE</c> statement.</summary>
     public const string AlterTable = "ALTER TABLE";
@@ -75,6 +108,18 @@ public static class SqlClauses
     /// <summary>A <c>GROUP BY</c> clause.</summary>
     public const string GroupBy = "GROUP BY";
 
+    /// <summary>The GROUPING SETS grouping element.</summary>
+    public const string GroupingSets = "GROUPING SETS";
+
+    /// <summary>The ROLLUP grouping element.</summary>
+    public const string Rollup = "ROLLUP";
+
+    /// <summary>The CUBE grouping element.</summary>
+    public const string Cube = "CUBE";
+
+    /// <summary>An aggregate input FILTER condition.</summary>
+    public const string Filter = "FILTER";
+
     /// <summary>A <c>HAVING</c> clause.</summary>
     public const string Having = "HAVING";
 
@@ -101,6 +146,21 @@ public static class SqlClauses
 
     /// <summary>A named <c>WINDOW</c> clause.</summary>
     public const string Window = "WINDOW";
+
+    /// <summary>A physical-row window frame.</summary>
+    public const string WindowRows = "ROWS window frame";
+
+    /// <summary>A peer-based window frame without offsets.</summary>
+    public const string WindowRange = "RANGE window frame";
+
+    /// <summary>Peer-group window frames.</summary>
+    public const string WindowGroups = "GROUPS window frame";
+
+    /// <summary>Window frame exclusion.</summary>
+    public const string WindowExclude = "EXCLUDE window frame";
+
+    /// <summary>NULL treatment for navigation and frame value functions.</summary>
+    public const string WindowNullTreatment = "window NULL treatment";
 
     /// <summary>A <c>UNION</c> set operation.</summary>
     public const string SetOperation = "UNION";
@@ -162,6 +222,9 @@ public static class SqlClauses
     /// <summary>A <c>REFERENCES</c> constraint.</summary>
     public const string References = "REFERENCES";
 
+    /// <summary>A foreign-key <c>ON UPDATE</c> action declaration.</summary>
+    public const string OnUpdate = "ON UPDATE";
+
     /// <summary>A <c>CHECK</c> constraint.</summary>
     public const string Check = "CHECK";
 
@@ -174,10 +237,10 @@ public static class SqlClauses
     /// <summary>A referential <c>RESTRICT</c> action.</summary>
     public const string Restrict = "RESTRICT";
 
-    /// <summary>Assigns NULL through a foreign-key deletion action.</summary>
+    /// <summary>Assigns NULL through a foreign-key action.</summary>
     public const string SetNull = "SET NULL";
 
-    /// <summary>Assigns defaults through a foreign-key deletion action.</summary>
+    /// <summary>Assigns defaults through a foreign-key action.</summary>
     public const string SetDefault = "SET DEFAULT";
 
     /// <summary>Checks foreign-key references at statement end.</summary>
@@ -185,12 +248,23 @@ public static class SqlClauses
 
     /// <summary>A <c>BEGIN</c> transaction-control statement.</summary>
     public const string Begin = "BEGIN";
+    /// <summary>The isolation option of BEGIN and START TRANSACTION.</summary>
+    public const string IsolationLevel = "ISOLATION LEVEL";
+    /// <summary>Configure the current transaction's isolation level.</summary>
+    public const string SetTransaction = "SET TRANSACTION";
 
     /// <summary>A <c>COMMIT</c> transaction-control statement.</summary>
     public const string Commit = "COMMIT";
 
     /// <summary>A <c>ROLLBACK</c> transaction-control statement.</summary>
     public const string Rollback = "ROLLBACK";
+
+    /// <summary>Create a named undo scope.</summary>
+    public const string Savepoint = "SAVEPOINT";
+    /// <summary>Release a named undo scope and descendants.</summary>
+    public const string ReleaseSavepoint = "RELEASE SAVEPOINT";
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    public const string RollbackToSavepoint = "ROLLBACK TO SAVEPOINT";
 
     /// <summary>The <c>TRANSACTION</c> keyword, required after <c>START</c> and optional (with <c>WORK</c> as a synonym) after <c>BEGIN</c>, <c>COMMIT</c>, or <c>ROLLBACK</c>.</summary>
     public const string Transaction = "TRANSACTION";

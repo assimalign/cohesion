@@ -14,7 +14,7 @@ public sealed partial class GqlQueryParser
         Advance();
         Expect(TokenType.LeftParen, "'('");
         bool distinct = Take("DISTINCT");
-        if (!distinct) { Take("ALL"); }
+        if (!distinct) { TakeSetQuantifierAll(); }
         var arguments = new System.Collections.Generic.List<GqlExpression>();
         if (Current.Type != TokenType.RightParen)
         {
@@ -34,7 +34,7 @@ public sealed partial class GqlQueryParser
         List<GqlExpression> arguments = [];
         if (Current.Type != TokenType.RightParen)
         {
-            if (Is("DISTINCT") || Is("ALL"))
+            if (Is("DISTINCT") || Is("ALL") && !StartsListPredicate())
             { Error("CG00002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParseFunctionVoid, start.Text), Current); }
             if (!Failed)
             { do { arguments.Add(ParseExpression(0)); } while (!Failed && Take(TokenType.Comma)); }

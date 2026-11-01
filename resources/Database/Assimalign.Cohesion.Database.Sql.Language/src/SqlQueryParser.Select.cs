@@ -52,6 +52,7 @@ public sealed partial class SqlQueryParser
 
         // GROUP BY
         var groupBy = new List<SqlExpression>();
+        bool groupByDistinct = false;
         if (!IsAtEnd(ref lexer) && IsKeyword(ref lexer, "GROUP"))
         {
             Advance(ref lexer);
@@ -64,6 +65,11 @@ public sealed partial class SqlQueryParser
                 AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseSelectVoid);
             }
 
+            if (IsKeyword(ref lexer, "DISTINCT") || IsKeyword(ref lexer, "ALL"))
+            {
+                groupByDistinct = IsKeyword(ref lexer, "DISTINCT");
+                Advance(ref lexer);
+            }
             while (true)
             {
                 if (IsAtEnd(ref lexer) || lexer.Current.Type is TokenType.Semicolon or TokenType.RightParen or TokenType.Comma ||
@@ -98,13 +104,15 @@ public sealed partial class SqlQueryParser
             }
         }
 
+        var windows = ParseWindowClause(ref lexer);
+
         // Consume trailing semicolon (don't advance past it so ParseCore picks it up)
         // The semicolon is tracked by TrackToken when we advance
 
         return new SqlSelectExpression(
             columns, from, where, groupBy, having, [],
             limit, null, isDistinct, null,
-            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind);
+            Location.Create(1, 1, pos, _lastTokenEnd), limitSyntaxKind, groupByDistinct, windows);
     }
 
     private IReadOnlyList<SqlFromItem> ParseFromItems(ref TokenLexer lexer)
@@ -214,6 +222,7 @@ public sealed partial class SqlQueryParser
             }
         }
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
+                 !TryReadSelectLockingStrength(lexer, out _) &&
                  !IsStatementBoundaryKeyword(ref lexer))
         {
             // Check it's not a keyword that starts the next clause

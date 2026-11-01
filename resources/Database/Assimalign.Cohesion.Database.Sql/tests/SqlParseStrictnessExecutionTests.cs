@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>
 /// Measures parse strictness (#1101) against the live engine: a statement with a character
-/// outside the dialect, or with <c>~</c>, never executes on either session seam, over an empty
+/// outside the dialect, or with infix regex <c>~</c>, never executes on either session seam, over an empty
 /// table as over a populated one.
 /// </summary>
 public sealed class SqlParseStrictnessExecutionTests
@@ -28,11 +28,13 @@ public sealed class SqlParseStrictnessExecutionTests
     /// CS00003 at the character and changes nothing.
     /// </summary>
     /// <param name="sql">A statement with a character outside the dialect.</param>
-    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character reports CS00003 and nothing executes")]
+    /// <param name="code">The syntax or recognized unsupported-surface identity.</param>
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: a stray character or deferred symbol has a coded refusal and nothing executes")]
     [InlineData("SELECT * FROM t ?;")]
     [InlineData("SELECT * FROM t #;")]
-    [InlineData("SELECT * FROM t ^;")]
-    [InlineData("SELECT a # b FROM t;")]
+    [InlineData("# DELETE FROM t;")]
+    [InlineData("SELECT * FROM t ^;", "CK00001")]
+    [InlineData("SELECT a ^ b FROM t;", "CK00001")]
     [InlineData("SELECT a FROM t WHERE b = ?;")]
     [InlineData("SELECT ? FROM t;")]
     [InlineData("DELETE FROM t ?;")]
@@ -51,27 +53,21 @@ public sealed class SqlParseStrictnessExecutionTests
     [InlineData("DELETE FROM t WHERE a = 1e+;")]
     // A stray character before the statement, such as a byte order mark.
     [InlineData("﻿DELETE FROM t;")]
-    public async Task ExecuteAsync_StrayCharacter_ShouldReportSyntaxErrorWithoutExecuting(string sql)
-        => await AssertRejectedAsync(sql, "CS00003");
+    public async Task ExecuteAsync_StrayCharacter_ShouldReportSyntaxErrorWithoutExecuting(string sql, string code = "CS00003")
+        => await AssertRejectedAsync(sql, code);
 
     /// <summary>
-    /// ~ used to parse as bitwise NOT, whose evaluator returned NULL for a NULL operand and
-    /// threw per row otherwise, so SELECT ~NULL and ~ over an empty table succeeded. Prefix and
-    /// infix ~ now report CK00001 at parse time.
+    /// Infix ~ remains deferred regular-expression matching and reports CK00001 even
+    /// over empty inputs. Prefix bitwise NOT executes under #1721.
     /// </summary>
     /// <param name="sql">A statement using ~.</param>
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Strictness: ~ reports CK00001 and nothing executes, whatever the rows")]
-    [InlineData("SELECT ~NULL;")]
-    [InlineData("SELECT ~a FROM t;")]
     [InlineData("SELECT a FROM t WHERE a ~ 'x';")]
-    [InlineData("SELECT a FROM t WHERE ~a = 1;")]
-    [InlineData("UPDATE t SET a = ~a;")]
     [InlineData("DELETE FROM t WHERE a ~ '1';")]
     [InlineData("DELETE FROM t WHERE a IS NOT NULL ~ '1';")]
     [InlineData("DELETE FROM t WHERE a IN (10, 20) ~ '1';")]
     [InlineData("DELETE FROM t WHERE a !~ '1';")]
     [InlineData("UPDATE t SET a = 1 WHERE b ~* 'x';")]
-    [InlineData("SELECT a FROM t WHERE a = ~ ~a;")]
     public async Task ExecuteAsync_Tilde_ShouldReportUnsupportedOperatorWithoutExecuting(string sql)
         => await AssertRejectedAsync(sql, "CK00001");
 

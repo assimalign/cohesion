@@ -369,7 +369,8 @@ internal sealed partial class SqlPlanner
     /// <summary>Seeks into the added input; only the first INNER pair may reverse direction.</summary>
     private SqlJoinIndexPath? SelectJoinAccessPath(IReadOnlyList<SqlRelationBinding> bindings,
         IReadOnlyList<SqlCatalogColumn> columns, List<(int Left, int Right, Collation Collation)> equalities,
-        int added, bool maySwap, int? firstBinding = null)
+        int added, bool maySwap, int? firstBinding = null,
+        IReadOnlyList<SqlBoundExpression>[]? restrictions = null)
     {
         if (ViewDefinitionBinding is not null) { return null; }
         SqlJoinIndexPath? best = null;
@@ -381,6 +382,12 @@ internal sealed partial class SqlPlanner
             if (innerBinding.Source.Table is not { } table) { continue; }
             foreach (var index in ReadIndexes(table.ObjectId).OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
             {
+                string? proof = null;
+                if (index.Predicate is not null)
+                {
+                    if (restrictions is null || ProvePartialIndex(table, index, restrictions[inner], innerBinding.Offset) is not { } proven) { continue; }
+                    proof = proven;
+                }
                 var outerOrdinals = new List<int>();
                 var innerColumns = new List<SqlCatalogColumn>();
                 foreach (string key in index.ColumnNames)
@@ -406,7 +413,8 @@ internal sealed partial class SqlPlanner
                     innerColumns.Add(columns[joined]);
                 }
                 if (outerOrdinals.Count == 0) { continue; }
-                var path = new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns);
+                SqlJoinIndexPath path = proof is null ? new SqlJoinIndexPath(inner, index, outerOrdinals, innerColumns)
+                    : new SqlPartialJoinIndexPath(inner, index, outerOrdinals, innerColumns, proof);
                 alternatives.Add(path);
                 if (best is null || outerOrdinals.Count > best.OuterOrdinals.Count ||
                     outerOrdinals.Count == best.OuterOrdinals.Count && (index.IsUnique && !best.Index.IsUnique ||
@@ -444,9 +452,9 @@ internal sealed partial class SqlPlanner
     }
 
     /// <summary>
-    /// Requires key equality to match evaluator equality. Floating signed zeros
-    /// share SQL equality but not key bytes, so floating keys must scan even with
-    /// an index present. Timestamps qualify: their keys encode only the ticks
+    /// Requires key equality to match evaluator equality. Floating join admission
+    /// remains conservative even after SQL key identity canonicalization (#1631).
+    /// Timestamps qualify: their keys encode only the ticks
     /// (TIMESTAMP) or the instant (TIMESTAMPTZ), the identity the comparer uses.
     /// </summary>
     private static bool CanSeekJoinEquality(DatabaseType inner, DatabaseType outer)

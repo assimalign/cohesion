@@ -48,6 +48,12 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Commit] = [new("COMMIT TRANSACTION", [[5L]],
                 ["BEGIN", "INSERT INTO items (KEY, VALUE) VALUES ('committed', 1)"], "SELECT COUNT(*) FROM items")],
+            [OqlClauses.Savepoint] = [new("SAVEPOINT scope", [[4L]],
+                ["BEGIN"], "SELECT COUNT(*) FROM items")],
+            [OqlClauses.ReleaseSavepoint] = [new("RELEASE SAVEPOINT scope", [[5L]],
+                ["BEGIN", "SAVEPOINT scope", "INSERT INTO items (KEY, VALUE) VALUES ('scope-proof', 1)"], "SELECT COUNT(*) FROM items")],
+            [OqlClauses.RollbackToSavepoint] = [new("ROLLBACK TO SAVEPOINT scope", [[4L]],
+                ["BEGIN", "SAVEPOINT scope", "DELETE FROM items"], "SELECT COUNT(*) FROM items")],
             [OqlClauses.Rollback] = [new("ROLLBACK WORK", [[4L]],
                 ["BEGIN", "DELETE FROM items"], "SELECT COUNT(*) FROM items")],
             [OqlClauses.Explain] =
@@ -100,12 +106,53 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Select] =
             [
+                new("SELECT RAW g FROM items ORDER BY items.g", [[3m], [2m], [1m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT RAW g FROM items d ORDER BY d.g", [[1m], [2m], [3m]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('a', {g:3}), ('b', {g:1,items:{g:30}}), ('c', {g:2,items:{g:10}})"]),
+                new("SELECT amount = 1 IS NOT NULL, 1 = NULL IS NULL, 1 IN [1] IS NULL, 2 BETWEEN 1 AND 3 IS NOT NULL, 2 BETWEEN 1 IS NOT NULL AND 3 FROM items WHERE name = 'alpha'", [[false, false, null, false, false]]),
+                new("SELECT 'abc' LIKE 'a%' IS NOT NULL, 'a%' LIKE 'a!%' ESCAPE '!' IS NOT NULL, 'a' || 'b', MISSING IS DISTINCT FROM NULL, NULL IS NOT DISTINCT FROM NULL FROM items WHERE name = 'alpha'", [[null, null, "ab", true, true]]),
+                new("SELECT ARRAY_AGG(category) FROM items GROUP BY category HAVING ARRAY_LENGTH(ARRAY_AGG(category)) > 0 ORDER BY ARRAY_AGG(category)", [[Json("[\"a\",\"a\",\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT EVERY x IN [TRUE] SATISFIES EVERY(amount > 0) END FROM items", [[true]]),
+                new("SELECT STDDEV(v) FROM items UNNEST [-79228162514264337593543950335,0,79228162514264337593543950335] v WHERE name = 'alpha'", [[decimal.MaxValue]]),
                 new("SELECT d.name AS label, d.details.score + @increment AS adjusted, d.tags[0] AS tag FROM items AS d WHERE d.name = 'alpha'",
                     [["alpha", 3m, "blue"]], Parameters: new Dictionary<string, object?> { ["increment"] = 2 }),
                 new("SELECT COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items",
                     [[4L, 3L, 12m, 4m, 2m, 6m]]),
+                new("SELECT COUNT(DISTINCT category) AS c, COUNT(ALL category) AS all_c, SUM(DISTINCT amount) AS s, AVG(DISTINCT amount) AS a, MIN(ALL amount) AS lo, MAX(DISTINCT amount) AS hi FROM items",
+                    [[2L, 4L, 12m, 4m, 2m, 6m]]),
                 new("SELECT COUNT(*) AS total, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items WHERE amount > 100",
                     [[0L, null, null, null, null]]),
+            ],
+            [OqlClauses.Subquery] =
+            [
+                new("SELECT RAW (SELECT RAW items.category FROM [1] AS s) FROM items GROUP BY category ORDER BY category", [[Json("[\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT RAW (SELECT RAW META(items).id FROM [1] AS s) FROM items GROUP BY META().id ORDER BY META().id", [[Json("[\"a\"]")], [Json("[\"b\"]")], [Json("[\"c\"]")], [Json("[\"d\"]")]]),
+                new("SELECT RAW (SELECT RAW (SELECT RAW d.n FROM [1] AS s) FROM [1] AS t) FROM [{n:10}] AS d GROUP BY (SELECT RAW d.n FROM [1] AS s)", [[Json("[[10]]")]]),
+                new("SELECT RAW (SELECT s.amount AS d FROM items s ORDER BY d.amount) FROM items d WHERE name = 'alpha'", [[Json("[{\"d\":2},{\"d\":6},{\"d\":4},{\"d\":null}]")]],
+                    ["CREATE INDEX collision ON items (d.amount INCLUDE MISSING)"]),
+                new("SELECT RAW (SELECT RAW META(s).id FROM items s ORDER BY META(d).id DESC LIMIT 1) FROM items d LIMIT 1", [[Json("[\"a\"]")]]),
+                new("SELECT RAW (SELECT RAW d.category FROM [1] AS s) FROM items d GROUP BY d.category ORDER BY d.category", [[Json("[\"a\"]")], [Json("[\"b\"]")]]),
+                new("SELECT RAW (SELECT RAW META(s).id FROM items s WHERE d.category = 'a' ORDER BY META(s).id) FROM items d WHERE name = 'alpha'",
+                    [[Json("[\"a\",\"b\",\"c\",\"d\"]")]], ["CREATE INDEX captured ON items (d.category)"]),
+                new("SELECT RAW 1 FROM [1] AS d WHERE EVERY v IN [1,2,3] SATISFIES EXISTS (SELECT RAW v FROM [1] AS s) END", [[1m]]),
+                new("SELECT (SELECT RAW d.name FROM [1] AS s) AS names FROM items d WHERE name = 'alpha'", [[Json("[\"alpha\"]")]]),
+                new("SELECT (SELECT RAW META(d).id FROM [1] AS s) AS ids FROM items d WHERE name = 'alpha'", [[Json("[\"a\"]")]]),
+                new("SELECT (SELECT d.name AS n, COUNT(*) AS c FROM [1,2] AS s HAVING d.name = 'alpha') AS a FROM items d WHERE name = 'alpha'", [[Json("[{\"n\":\"alpha\",\"c\":2}]")]]),
+                new("SELECT (SELECT RAW v FROM d.tags AS v) AS tags FROM items d WHERE name = 'alpha'", [[Json("[\"blue\"]")]]),
+                new("UPDATE items d SET names = (SELECT RAW d.name FROM [1] AS s) WHERE EXISTS (SELECT RAW s.name FROM items s WHERE s.name = d.name)",
+                    [[Json("[\"alpha\"]")]], VerificationStatement: "SELECT names FROM items WHERE name = 'alpha'", ExpectedAffectedCount: 4),
+                new("DELETE FROM items d WHERE d.name IN (SELECT RAW s.name FROM items s WHERE s.name = 'alpha')", [["beta"], ["gamma"], ["delta"]],
+                    VerificationStatement: "SELECT name FROM items", ExpectedAffectedCount: 1),
+                new("SELECT (SELECT RAW name FROM items WHERE name = 'alpha') AS names FROM items WHERE name = 'beta'", [[Json("[\"alpha\"]")]]),
+                new("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items WHERE category = 'b')", [["gamma"]]),
+                new("SELECT (SELECT RAW name FROM items s WHERE category = 'b') AS names FROM items d WHERE name = 'alpha'", [[Json("[\"gamma\"]")]]),
+            ],
+            [OqlClauses.Exists] =
+            [
+                new("SELECT EXISTS [] AS empty, EXISTS [NULL] AS nonempty, NOT EXISTS [] AS negated FROM items WHERE name = 'alpha'", [[false, true, true]]),
+                new("SELECT EXISTS 'a' || 'b' AS c, EXISTS NULL IS DISTINCT FROM MISSING AS d, NULL IS NOT DISTINCT FROM NULL AS n FROM items WHERE name = 'alpha'", [[null, null, true]]),
+                new("SELECT EXISTS [] IS NULL AS p, EXISTS [] = FALSE AS q, NOT EXISTS [] AND TRUE AS r FROM items WHERE name = 'alpha'", [[null, true, true]]),
             ],
             [OqlClauses.Distinct] =
             [
@@ -138,6 +185,16 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT FIRST x FOR x IN [1,2] WHEN x > 1 END AS f FROM items WHERE name = 'alpha'", [[2m]]),
                 new("SELECT FIRST (x) + CASE WHEN TRUE THEN 1 ELSE 2 END FOR x IN [1] END AS result FROM items WHERE name = 'alpha'", [[2m]]),
             ],
+            [OqlClauses.DerivedFrom] =
+            [
+                new("SELECT d.name FROM (SELECT name FROM items WHERE name = 'alpha') d", [["alpha"]]),
+            ],
+            [OqlClauses.ExpressionFrom] =
+            [
+                new("SELECT RAW v FROM [1,2] AS v", [[1m], [2m]]),
+                new("SELECT RAW v FROM NULL AS v", [[null]]),
+                new("SELECT RAW v FROM MISSING AS v", []),
+            ],
             [OqlClauses.From] =
             [
                 new("SELECT d.name FROM items d", [["alpha"], ["beta"], ["gamma"], ["delta"]]),
@@ -155,6 +212,24 @@ public sealed class OqlExecutionConformanceTests
                 new("SELECT name FROM items WHERE details.score IS NOT MISSING", [["alpha"], ["beta"], ["gamma"]]),
                 new("SELECT name FROM items WHERE amount IS NOT VALUED", [["delta"]]),
                 new("SELECT name FROM items WHERE details.score IS VALUED", [["alpha"], ["beta"], ["gamma"]]),
+            ],
+            [OqlClauses.Join] =
+            [
+                new("SELECT b.name FROM items AS a JOIN items AS b ON META(b).id = META(a).id ORDER BY b.name", [["alpha"], ["beta"], ["delta"], ["gamma"]]),
+                new("SELECT b.name FROM [{key:'A'}] AS a JOIN items AS b ON META(b).id = LOWER(key)", [["alpha"]]),
+            ],
+            [OqlClauses.LeftJoin] =
+            [
+                new("SELECT a.name, b FROM items AS a LEFT JOIN items AS b ON META(b).id = 'absent' ORDER BY a.name", [["alpha", null], ["beta", null], ["delta", null], ["gamma", null]], Missing: [(0,1),(1,1),(2,1),(3,1)]),
+            ],
+            [OqlClauses.Nest] =
+            [
+                new("SELECT ARRAY_LENGTH(b) AS n FROM items AS a NEST items AS b ON META(b).id = META(a).id", [[1L],[1L],[1L],[1L]]),
+            ],
+            [OqlClauses.LeftNest] =
+            [
+                new("SELECT ARRAY_LENGTH(b) AS n FROM items AS a LEFT NEST items AS b ON META(b).id = 'absent'", [[0L],[0L],[0L],[0L]]),
+                new("SELECT b FROM items AS a LEFT NEST items AS b ON META(b).id = NULL", [[null],[null],[null],[null]], Missing: [(0,0),(1,0),(2,0),(3,0)]),
             ],
             [OqlClauses.Unnest] =
             [
@@ -197,10 +272,19 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.GroupBy] =
             [
+                new("SELECT COUNT(*) FROM items UNNEST [" + string.Join(",", Enumerable.Range(0, 100)) + "] x WHERE META().id = 'a' GROUP BY @v AS key",
+                    [[100L]], Parameters: new Dictionary<string, object?> { ["v"] = new string('p', 16000) }, StatementMemoryBudget: 1024 * 1024),
+                new("SELECT key, COUNT(*) AS n FROM items GROUP BY category AS key ORDER BY key", [["a", 3L], ["b", 1L]]),
                 new("SELECT category, COUNT(*) AS total, COUNT(amount) AS present, SUM(amount) AS sum, AVG(amount) AS average, MIN(amount) AS minimum, MAX(amount) AS maximum FROM items GROUP BY category ORDER BY category",
                     [["a", 3L, 2L, 8m, 4m, 2m, 6m], ["b", 1L, 1L, 4m, 4m, 4m, 4m]]),
                 new("SELECT category, tags[0] AS tag, COUNT(*) AS total FROM items GROUP BY category, tags[0] ORDER BY category, tag",
                     [["a", null, 1L], ["a", "blue", 1L], ["a", "green", 1L], ["b", "blue", 1L]], Missing: [(0, 1)]),
+            ],
+            [OqlClauses.GroupAs] =
+            [
+                new("SELECT key, ARRAY_LENGTH(g) AS n, FIRST r.d.name FOR r IN g WHEN r.d.name = 'gamma' END AS found FROM items d GROUP BY category AS key GROUP AS g HAVING ANY r IN g SATISFIES r.d.amount > 0 END ORDER BY key",
+                    [["a", 3L, null], ["b", 1L, "gamma"]], Missing: [(0, 2)]),
+                new("SELECT g FROM items WHERE FALSE GROUP BY TRUE GROUP AS g", []),
             ],
             [OqlClauses.Having] =
             [
@@ -210,11 +294,32 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.OrderBy] =
             [
+                new("SELECT META().id FROM items ORDER BY amount", [["d"], ["a"], ["c"], ["b"]],
+                    ["CREATE INDEX ordered_amount ON items (amount INCLUDE MISSING)"]),
+                new("SELECT META().id FROM items WHERE amount >= 2 AND category = 'a' ORDER BY amount DESC", [["b"], ["a"]],
+                    ["CREATE INDEX ordered_amount ON items (amount)"]),
+                new("SELECT name AS label, amount FROM items ORDER BY amount DESC NULLS FIRST, label ASC NULLS LAST",
+                    [["delta", null], ["beta", 6m], ["gamma", 4m], ["alpha", 2m]]),
                 new("SELECT name AS label, amount FROM items ORDER BY amount DESC, label ASC",
                     [["beta", 6m], ["gamma", 4m], ["alpha", 2m], ["delta", null]]),
             ],
             [OqlClauses.Limit] =
             [
+                new("SELECT RAW META(items).id FROM items ORDER BY META(items).id LIMIT 2", [["a"], ["b"]]),
+                new("SELECT RAW v FROM [1/0] AS v ORDER BY v LIMIT 0", []),
+                new("SELECT DISTINCT RAW v FROM [1/0] AS v LIMIT 0", []),
+                new("SELECT COUNT(*) FROM [1/0] AS v LIMIT 0", []),
+                new("SELECT RAW d FROM (SELECT RAW v FROM [1/0] AS v) d ORDER BY d LIMIT 0", []),
+                new("SELECT RAW name FROM items WHERE 1/0 = 1 ORDER BY name LIMIT 0", []),
+                new("SELECT RAW OBJECT_NAME FROM COHESION_SCHEMA.OBJECT_OWNERSHIP WHERE 1/0 = 1 ORDER BY OBJECT_NAME LIMIT 0", []),
+                new("SELECT * FROM items ORDER BY k LIMIT 1", [[Json("{\"k\":1}")]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('one', {'k':1}), ('two', {'k':2})",
+                     "CREATE INDEX ordered_k ON items (k INCLUDE MISSING)"]),
+                new("SELECT * FROM items ORDER BY k DESC LIMIT 1", [[Json("{\"k\":2}")]],
+                    ["DELETE FROM items", "INSERT INTO items (KEY, VALUE) VALUES ('one', {'k':1}), ('two', {'k':2})",
+                     "CREATE INDEX ordered_k ON items (k INCLUDE MISSING)"]),
+                new("SELECT META().id FROM items ORDER BY category DESC LIMIT 2 OFFSET 1", [["a"], ["b"]],
+                    ["CREATE INDEX ordered_category ON items (category INCLUDE MISSING, amount)"]),
                 new("SELECT name FROM items ORDER BY name LIMIT 2", [["alpha"], ["beta"]]),
                 new("SELECT name FROM items ORDER BY name LIMIT 2 OFFSET 1", [["beta"], ["delta"]]),
                 new("SELECT name FROM items ORDER BY name LIMIT 0", []),
@@ -223,6 +328,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Offset] =
             [
+                new("SELECT META().id FROM items WHERE amount >= 2 ORDER BY amount DESC OFFSET 1 LIMIT 1", [["c"]],
+                    ["CREATE INDEX ordered_amount ON items (amount)"]),
                 new("SELECT name FROM items ORDER BY name OFFSET 3", [["gamma"]]),
                 new("SELECT name FROM items ORDER BY name OFFSET 1 LIMIT 2", [["beta"], ["delta"]]),
             ],
@@ -242,6 +349,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.CreateIndex] =
             [
+                new("CREATE INDEX inclusive ON items (amount INCLUDE MISSING)", [["amount INCLUDE MISSING", true]],
+                    VerificationStatement: "SELECT PATH, INCLUDE_MISSING FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE INDEX by_score ON items (details.score)", [["by_score", "details.score", false]],
                     VerificationStatement: "SELECT INDEX_NAME, PATH, IS_UNIQUE FROM COHESION_SCHEMA.INDEXES"),
                 new("CREATE UNIQUE INDEX by_name ON items (name)", [["by_name", "name", "name", null, true]],
@@ -284,7 +393,9 @@ public sealed class OqlExecutionConformanceTests
                 parsed.Diagnostics.ShouldBeEmpty(context);
                 ContainsClause(parsed.OqlExpression, clause).ShouldBeTrue(context);
 
-                await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
+                var options = new DocumentDatabaseEngineOptions();
+                if (execution.StatementMemoryBudget is long budget) { options.StatementMemoryBudget = budget; }
+                await using var engine = DocumentDatabaseEngine.Create("document-engine", options);
                 var database = await engine.CreateDatabaseAsync("conformance", cancellationToken);
                 await using var session = await database.CreateSessionAsync(cancellationToken);
                 var collection = await session.CreateCollectionAsync("items", cancellationToken);
@@ -419,6 +530,12 @@ public sealed class OqlExecutionConformanceTests
             ["COUNT"] = new("COUNT(*)", [[4L]]),
             ["SUM"] = new("SUM(amount)", [[12m]]),
             ["AVG"] = new("AVG(amount)", [[4m]]),
+            ["ARRAY_AGG"] = new("ARRAY_AGG(DISTINCT 1)", [[Json("[1]")]]),
+            ["BOOL_AND"] = new("BOOL_AND(amount > 3)", [[false]]),
+            ["BOOL_OR"] = new("BOOL_OR(amount > 3)", [[true]]),
+            ["EVERY"] = new("EVERY(amount > 0)", [[true]]),
+            ["STDDEV"] = new("STDDEV(amount)", [[2m]]),
+            ["VARIANCE"] = new("VARIANCE(amount)", [[4m]]),
             ["MIN"] = new("MIN(amount)", [[2m]]),
             ["MAX"] = new("MAX(amount)", [[6m]]),
         };
@@ -491,6 +608,9 @@ public sealed class OqlExecutionConformanceTests
             or OqlUpdateExpression { Returning: not null } or OqlDeleteExpression { Returning: not null },
         OqlClauses.Begin => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Begin },
         OqlClauses.Commit => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Commit },
+        OqlClauses.Savepoint => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Savepoint },
+        OqlClauses.ReleaseSavepoint => expression is OqlTransactionExpression { Command: OqlTransactionCommand.ReleaseSavepoint },
+        OqlClauses.RollbackToSavepoint => expression is OqlTransactionExpression { Command: OqlTransactionCommand.RollbackToSavepoint },
         OqlClauses.Rollback => expression is OqlTransactionExpression { Command: OqlTransactionCommand.Rollback },
         OqlClauses.Explain => expression is OqlExplainExpression,
         OqlClauses.Insert => expression is OqlInsertExpression,
@@ -500,6 +620,8 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Unset => expression is OqlUpdateExpression { Unset.Count: > 0 },
         OqlClauses.Values => expression is OqlInsertExpression { Values.Count: > 0 },
         OqlClauses.Select => expression is OqlSelectExpression { Projections.Count: > 0 },
+        OqlClauses.Subquery => Assimalign.Cohesion.Database.Documents.Internal.DocumentPlanner.HasSubquery(expression),
+        OqlClauses.Exists => expression is OqlSelectExpression exists && exists.Projections.Any(p => p.Expression is OqlUnaryExpression { Operator: "EXISTS" }),
         OqlClauses.Distinct => expression is OqlSelectExpression { IsDistinct: true },
         OqlClauses.SelectValue => expression is OqlSelectExpression { IsValue: true },
         OqlClauses.ObjectConstructor => expression is OqlSelectExpression objectQuery && objectQuery.Projections.Any(p => p.Expression is OqlObjectExpression),
@@ -507,6 +629,12 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.ArrayComprehension => expression is OqlSelectExpression arrays && arrays.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: false }),
         OqlClauses.FirstComprehension => expression is OqlSelectExpression first && first.Projections.Any(p => p.Expression is OqlComprehensionExpression { IsFirst: true }),
         OqlClauses.From => expression is OqlSelectExpression { Collection.Length: > 0 },
+        OqlClauses.DerivedFrom => expression is OqlSelectExpression { Source: OqlSubqueryExpression },
+        OqlClauses.ExpressionFrom => expression is OqlSelectExpression { Source: not null and not OqlSubqueryExpression },
+        OqlClauses.Join => expression is OqlSelectExpression joins && joins.Bindings.OfType<OqlJoinExpression>().Any(binding => !binding.IsLeft && !binding.IsNest),
+        OqlClauses.LeftJoin => expression is OqlSelectExpression leftJoins && leftJoins.Bindings.OfType<OqlJoinExpression>().Any(binding => binding.IsLeft && !binding.IsNest),
+        OqlClauses.Nest => expression is OqlSelectExpression nests && nests.Bindings.OfType<OqlJoinExpression>().Any(binding => !binding.IsLeft && binding.IsNest),
+        OqlClauses.LeftNest => expression is OqlSelectExpression leftNests && leftNests.Bindings.OfType<OqlJoinExpression>().Any(binding => binding.IsLeft && binding.IsNest),
         OqlClauses.Unnest => expression is OqlSelectExpression unnestQuery && unnestQuery.Unnest.Any(binding => !binding.IsLeft),
         OqlClauses.LeftUnnest => expression is OqlSelectExpression leftQuery && leftQuery.Unnest.Any(binding => binding.IsLeft),
         OqlClauses.Any => expression is OqlSelectExpression { Predicate: OqlQuantifiedExpression { IsEvery: false } },
@@ -517,6 +645,7 @@ public sealed class OqlExecutionConformanceTests
         OqlClauses.Like => expression is OqlSelectExpression { Predicate: OqlLikeExpression },
         OqlClauses.Case => expression is OqlSelectExpression select && select.Projections.Any(projection => ContainsCase(projection.Expression)),
         OqlClauses.GroupBy => expression is OqlSelectExpression { GroupBy.Count: > 0 },
+        OqlClauses.GroupAs => expression is OqlSelectExpression { GroupAs: not null },
         OqlClauses.Having => expression is OqlSelectExpression { Having: not null },
         OqlClauses.OrderBy => expression is OqlSelectExpression { OrderBy.Count: > 0 },
         OqlClauses.Limit => expression is OqlSelectExpression { Limit: not null },
@@ -579,7 +708,7 @@ public sealed class OqlExecutionConformanceTests
 
     private sealed record ExecutionCase(string Statement, object?[][] ExpectedRows,
         string[]? Setup = null, string? VerificationStatement = null, (int Row, int Column)[]? Missing = null,
-        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null);
+        long ExpectedAffectedCount = 0, IReadOnlyDictionary<string, object?>? Parameters = null, long? StatementMemoryBudget = null);
 
     private static ExecutionCase UpsertCase()
     {

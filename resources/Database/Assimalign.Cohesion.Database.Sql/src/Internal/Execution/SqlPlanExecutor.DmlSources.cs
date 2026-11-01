@@ -127,6 +127,11 @@ internal sealed partial class SqlPlanExecutor
                 case SqlSetOperationPlan set:
                     foreach (var operand in set.Operands) { Visit(operand.Query); }
                     break;
+                case SqlRecursiveUnionPlan recursive:
+                    Visit(recursive.Anchor.Query);
+                    Visit(recursive.Recursive.Query);
+                    break;
+                case SqlWindowAggregatePlan window: Visit(window.Input); break;
                 case SqlGroupPlan group: Visit(group.Input); break;
             }
         }

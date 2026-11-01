@@ -1,4 +1,8 @@
+using System;
+using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Transactions.Internal;
 
 namespace Assimalign.Cohesion.Database.Transactions;
 
@@ -49,19 +53,37 @@ namespace Assimalign.Cohesion.Database.Transactions;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Transactions.TransactionContext.DebugView))]
 public sealed class TransactionContext
 {
+    private const byte snapshotPinFlag = 1;
+    private const byte statementViewFlag = 2;
+    private const byte endingFlag = 1;
+    private const byte partialUndoFlag = 2;
+    private const byte undoControlFlag = 4;
+
     private readonly TransactionManager _manager;
     private readonly TransactionSnapshot _beginSnapshot;
 
-    // The transaction's own context when this one is a statement view (PinStatementSnapshot),
-    // null for the context the manager begins. The end flag, the apply count and the drain
+    // The transaction's original lifecycle owner when this is a statement view or an isolation
+    // replacement, null for the context the manager begins. The end flag, apply count and drain
     // signal below live on the transaction's own context only: a view forwards every member
     // that touches them, so one lock always guards one set of state.
     private readonly TransactionContext? _transaction;
+    // Share the existing pin-kind byte: another boolean grows this hot context by eight
+    // bytes after alignment, including every auto-commit context and statement pin.
+    private readonly byte _kind;
     private readonly object _endSync;
     private TransactionState _state;
     private int _applying;
-    private bool _ending;
-    private TaskCompletionSource? _drained;
+    private const int streamUnit = 1 << 16;
+    private const int applyMask = streamUnit - 1;
+    private const byte markedFlag = 8;
+    private const byte liveScopesFlag = 16;
+    // Reuse the former end boolean's byte. A second boolean grows every statement pin
+    // by eight aligned bytes; lifecycle and pending-undo bits share this existing storage.
+    private byte _admission;
+    // Reuse the drain reference for the latest isolation replacement while no end waits.
+    // A drain signal carries that reference in its Task.AsyncState and restores it on exit.
+    // Ordinary contexts retain exactly the same field and allocation shape.
+    private object? _drained;
 
     internal TransactionContext(
         TransactionManager manager,
@@ -77,22 +99,22 @@ public sealed class TransactionContext
         Sequence = sequence;
         IsolationLevel = isolationLevel;
         _beginSnapshot = beginSnapshot;
-        IsSnapshotPin = isSnapshotPin;
+        _kind = isSnapshotPin ? snapshotPinFlag : (byte)0;
         _state = TransactionState.Active;
     }
 
-    // A statement view of the transaction's own context: everything but the snapshot is the
-    // transaction's, and the snapshot is the one given.
-    private TransactionContext(TransactionContext transaction, TransactionSnapshot snapshot)
+    // An immutable statement view or isolation replacement sharing the original lifecycle.
+    private TransactionContext(TransactionContext transaction, TransactionSnapshot snapshot,
+        IsolationLevel isolationLevel, bool isStatementView)
     {
         _manager = transaction._manager;
-        _transaction = transaction;
+        _transaction = transaction._transaction ?? transaction;
+        _kind = (byte)((transaction.IsSnapshotPin ? snapshotPinFlag : 0) | (isStatementView ? statementViewFlag : 0));
         _endSync = transaction._endSync;
         Id = transaction.Id;
         Sequence = transaction.Sequence;
-        IsolationLevel = transaction.IsolationLevel;
+        IsolationLevel = isolationLevel;
         _beginSnapshot = snapshot;
-        IsSnapshotPin = transaction.IsSnapshotPin;
     }
 
     /// <summary>
@@ -105,10 +127,145 @@ public sealed class TransactionContext
     /// Gets whether this context is a statement view (<see cref="PinStatementSnapshot"/>) rather
     /// than the context the manager began. A manager ends only its own contexts, never a view.
     /// </summary>
-    internal bool IsStatementView => _transaction is not null;
+    internal bool IsStatementView => (_kind & statementViewFlag) != 0;
 
     /// <summary>Gets whether this context only holds a statement snapshot horizon.</summary>
-    internal bool IsSnapshotPin { get; }
+    internal bool IsSnapshotPin => (_kind & snapshotPinFlag) != 0;
+
+    internal TransactionSnapshot BeginSnapshot => _beginSnapshot;
+
+    internal bool PartialUndoPending
+    {
+        get
+        {
+            if (_transaction is not null) { return _transaction.PartialUndoPending; }
+            return (Volatile.Read(ref _admission) & partialUndoFlag) != 0;
+        }
+    }
+
+    // Called under the manager lock, before physical undo takes the coordinator apply gate.
+    // The control bit excludes later statements while memory-only controls run without that
+    // gate. The apply count makes every end drain an admitted control.
+    internal bool TryEnterUndoControl(bool rollback, out bool undoWasPending)
+    {
+        if (_transaction is not null) { return _transaction.TryEnterUndoControl(rollback, out undoWasPending); }
+        lock (_endSync)
+        {
+            undoWasPending = (_admission & partialUndoFlag) != 0;
+            if ((_admission & (endingFlag | undoControlFlag)) != 0 || (_applying & applyMask) != 0 || State != TransactionState.Active ||
+                (!rollback && undoWasPending)) { return false; }
+            _admission |= undoControlFlag;
+            // Pair the control's store/load with the stream's interlocked registration.
+            // Volatile reads alone do not forbid store buffering, including on ARM64.
+            Thread.MemoryBarrier();
+            if (HasOpenWriteStreams)
+            {
+                _admission = (byte)(_admission & ~undoControlFlag);
+                throw new TransactionUndoException("CK04010", ErrorMessages.UndoOpenWriteStream);
+            }
+            if (rollback) { _admission |= partialUndoFlag; }
+            IncrementApplyCount();
+            return true;
+        }
+    }
+
+    private void IncrementApplyCount()
+    {
+        // Called under _endSync. The database gate normally bounds low-word use to
+        // one apply plus its control waiter; enforce the packed limit at this seam too.
+        if ((Volatile.Read(ref _applying) & applyMask) == applyMask)
+        { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
+        Interlocked.Increment(ref _applying);
+    }
+
+    internal bool HasOpenWriteStreams => (Volatile.Read(ref (_transaction ?? this)._applying) & ~applyMask) != 0;
+    internal bool HadUndoMarkers => (Volatile.Read(ref (_transaction ?? this)._admission) & markedFlag) != 0;
+    // Ledger and lock-table monitors are released before this lifecycle latch. The
+    // admitted control keeps its apply count until this bit and its ledger agree.
+    internal void MarkUndoScopes(bool active = true)
+    {
+        lock (_endSync)
+        {
+            var owner = _transaction ?? this;
+            owner._admission = active
+                ? (byte)(owner._admission | markedFlag | liveScopesFlag)
+                : (byte)(owner._admission & ~liveScopesFlag);
+        }
+    }
+
+    internal void BeginWriteStream()
+    {
+        var owner = _transaction ?? this;
+        while (true)
+        {
+            int before = Volatile.Read(ref owner._applying);
+            if ((before & ~applyMask) == unchecked((int)0xffff0000))
+            {
+                if ((Volatile.Read(ref owner._admission) & endingFlag) != 0 || owner.State != TransactionState.Active)
+                { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
+                throw new TransactionUndoException("CK04011", ErrorMessages.WriteStreamLimitExceeded);
+            }
+            if (Interlocked.CompareExchange(ref owner._applying, unchecked(before + streamUnit), before) == before) { break; }
+        }
+        // Lock-free handshake with control admission: either control sees this count,
+        // or this registration sees its flag. Model sessions serialize stream/control work.
+        if ((Volatile.Read(ref owner._admission) & (endingFlag | partialUndoFlag | undoControlFlag)) != 0 || owner.State != TransactionState.Active)
+        {
+            owner.EndWriteStream();
+            if ((Volatile.Read(ref owner._admission) & endingFlag) != 0 || owner.State != TransactionState.Active)
+            { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
+            throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending);
+        }
+    }
+
+    internal void EndWriteStream()
+    {
+        var owner = _transaction ?? this;
+        while (true)
+        {
+            int before = Volatile.Read(ref owner._applying);
+            if ((before & ~applyMask) == 0)
+            { throw new InvalidOperationException(ErrorMessages.WriteStreamNotRegistered); }
+            if (Interlocked.CompareExchange(ref owner._applying, unchecked(before - streamUnit), before) == before) { return; }
+        }
+    }
+
+    internal void MarkPartialUndoPending()
+    {
+        var owner = _transaction ?? this;
+        lock (_endSync) { owner._admission |= partialUndoFlag; }
+    }
+
+    // A commit may have claimed the end while its admitted statement was still running.
+    // Compensation can fail during that drain. Return the claim to the active writer so
+    // it can retry undo; ordinary commits add no latch acquisition.
+    internal bool HasFailedCompensation => (Volatile.Read(ref (_transaction ?? this)._admission) & partialUndoFlag) != 0;
+
+    internal void ReopenAfterFailedCompensation()
+    {
+        var owner = _transaction ?? this;
+        lock (_endSync) { owner._admission = (byte)(owner._admission & ~endingFlag); }
+    }
+
+    internal void CompletePartialUndo()
+    {
+        if (_transaction is not null) { _transaction.CompletePartialUndo(); return; }
+        lock (_endSync) { _admission = (byte)(_admission & ~partialUndoFlag); }
+    }
+
+    /// <summary>Gets the exact current lifecycle handle issued for this transaction, or null for a snapshot pin.</summary>
+    /// <remarks>Earlier isolation handles and statement views resolve to the same current handle.
+    /// Identity is independent of transaction state; this property acquires no monitor.</remarks>
+    public TransactionContext? Current
+    {
+        get
+        {
+            if (IsSnapshotPin) { return null; }
+            var owner = _transaction ?? this;
+            var state = Volatile.Read(ref owner._drained);
+            return state as TransactionContext ?? (state as TaskCompletionSource)?.Task.AsyncState as TransactionContext ?? owner;
+        }
+    }
 
     /// <summary>
     /// Gets the external identity of the transaction.
@@ -132,7 +289,11 @@ public sealed class TransactionContext
     public TransactionState State
     {
         get => _transaction is null ? _state : _transaction.State;
-        internal set => _state = value;
+        internal set
+        {
+            if (_transaction is null) { _state = value; }
+            else { _transaction.State = value; }
+        }
     }
 
     /// <summary>
@@ -142,7 +303,7 @@ public sealed class TransactionContext
     /// view's snapshot is the one fixed when it was pinned.
     /// </summary>
     public TransactionSnapshot Snapshot =>
-        _transaction is null && IsolationLevel == IsolationLevel.ReadCommitted && _state == TransactionState.Active
+        !IsStatementView && IsolationLevel == IsolationLevel.ReadCommitted && State == TransactionState.Active
             ? _manager.CaptureSnapshot(Sequence)
             : _beginSnapshot;
 
@@ -168,7 +329,32 @@ public sealed class TransactionContext
     /// for this; the decorators were deleted when the context became a sealed type (plan §6.1).
     /// </para>
     /// </remarks>
-    public TransactionContext PinStatementSnapshot() => new(_transaction ?? this, Snapshot);
+    public TransactionContext PinStatementSnapshot() => new(this, Snapshot, IsolationLevel, isStatementView: true);
+
+    // The manager holds its registration lock before this lifecycle latch, as for ClaimEnd.
+    // Replacement preserves the original begin snapshot and shares end/apply state with every
+    // earlier handle. Neither lock spans storage, an engine lock wait, or a coordinator lock.
+    internal TransactionContext ReplaceIsolationLevel(IsolationLevel isolationLevel)
+    {
+        lock (_endSync)
+        {
+            var owner = _transaction ?? this;
+            if ((owner._admission & endingFlag) != 0 || State != TransactionState.Active)
+            { throw new TransactionAbortedException(ErrorMessages.IsolationTransactionEnding); }
+            if ((owner._applying & applyMask) != 0)
+            { throw new TransactionAbortedException(ErrorMessages.IsolationStatementRunning); }
+            if ((owner._admission & partialUndoFlag) != 0)
+            { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
+            // Marker completion sets this bit before dropping its apply count, under
+            // this same latch. A replacement sees either that count or the live scope.
+            if ((owner._admission & liveScopesFlag) != 0)
+            { throw new ArgumentException(ErrorMessages.IsolationSavepointActive, "context"); }
+            var replacement = new TransactionContext(this, _beginSnapshot, isolationLevel, isStatementView: false);
+            // Existing manager -> context latch order publishes the exact current reference.
+            Volatile.Write(ref owner._drained, replacement);
+            return replacement;
+        }
+    }
 
     /// <summary>
     /// Claims the end of this context for one commit, rollback or abort. Exactly
@@ -177,21 +363,27 @@ public sealed class TransactionContext
     /// writer's versions or log records.
     /// </summary>
     /// <returns>True for the one caller that claimed the end.</returns>
-    internal bool TryClaimEnd()
+    internal bool TryClaimEnd(bool allowPendingUndo = true)
     {
         if (_transaction is not null)
         {
-            return _transaction.TryClaimEnd();
+            return _transaction.TryClaimEnd(allowPendingUndo);
         }
 
         lock (_endSync)
         {
-            if (_ending)
+            if (!allowPendingUndo && (_admission & partialUndoFlag) != 0)
+            { throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending); }
+            if ((_admission & endingFlag) != 0)
             {
                 return false;
             }
 
-            _ending = true;
+            _admission |= endingFlag;
+            // Ending supersedes the retry fence. Clear it under this existing latch, even
+            // when whole undo will be deferred; no new lock is added to ordinary ends.
+            _admission = (byte)(_admission & ~partialUndoFlag);
+            if ((_admission & undoControlFlag) != 0) { Monitor.PulseAll(_endSync); }
             return true;
         }
     }
@@ -201,21 +393,56 @@ public sealed class TransactionContext
     /// Every admitted apply is paired with <see cref="ExitApply"/>.
     /// </summary>
     /// <returns>True when the apply may run.</returns>
-    internal bool TryEnterApply()
+    internal bool TryEnterApply() => TryEnterApply(out _);
+
+    internal bool TryEnterApply(out bool pendingUndo, Action? waitingForUndoControl = null,
+        CancellationToken cancellationToken = default)
     {
         if (_transaction is not null)
         {
-            return _transaction.TryEnterApply();
+            return _transaction.TryEnterApply(out pendingUndo, waitingForUndoControl, cancellationToken);
         }
 
         lock (_endSync)
         {
-            if (_ending || State != TransactionState.Active)
+            while (true)
             {
-                return false;
+                // Decide the refusal under the same latch as admission. An end always
+                // wins over a pending retry, including a deferred writer still in _active.
+                pendingUndo = false;
+                if ((_admission & endingFlag) != 0 || State != TransactionState.Active) { return false; }
+                pendingUndo = (_admission & partialUndoFlag) != 0;
+                if (pendingUndo) { return false; }
+                if ((_admission & undoControlFlag) == 0) { break; }
+
+                // Create/release are short, memory-only controls and never need the apply
+                // gate held by this waiter. Recheck end/pending after every wake-up.
+                // Count the waiter before releasing the latch: back-to-back controls
+                // must yield to a statement that already waited for one.
+                IncrementApplyCount();
+                try
+                {
+                    waitingForUndoControl?.Invoke();
+                    while ((_admission & undoControlFlag) != 0 &&
+                        (_admission & endingFlag) == 0 && State == TransactionState.Active)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        // Only memory-control contention polls; ordinary applies retain
+                        // their existing allocation and cancellation-check cost.
+                        Monitor.Wait(_endSync, 50);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                catch
+                {
+                    ExitApply();
+                    throw;
+                }
+                // The latch stays held from dropping the wait count through admission.
+                ExitApply();
             }
 
-            _applying++;
+            IncrementApplyCount();
             return true;
         }
     }
@@ -223,11 +450,11 @@ public sealed class TransactionContext
     /// <summary>
     /// Ends one admitted statement apply and wakes an end waiting for the last one.
     /// </summary>
-    internal void ExitApply()
+    internal void ExitApply(bool undoControl = false)
     {
         if (_transaction is not null)
         {
-            _transaction.ExitApply();
+            _transaction.ExitApply(undoControl);
             return;
         }
 
@@ -235,10 +462,15 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
-            if (--_applying == 0 && _drained is not null)
+            if (undoControl)
             {
-                drained = _drained;
-                _drained = null;
+                _admission = (byte)(_admission & ~undoControlFlag);
+                Monitor.PulseAll(_endSync);
+            }
+            if ((Interlocked.Decrement(ref _applying) & applyMask) == 0 && _drained is TaskCompletionSource signal)
+            {
+                drained = signal;
+                Volatile.Write(ref _drained, signal.Task.AsyncState);
             }
         }
 
@@ -251,9 +483,10 @@ public sealed class TransactionContext
     /// </summary>
     /// <returns>A task that completes when no apply of the context is running.</returns>
     /// <remarks>
-    /// The wait observes no token and is bounded: an apply runs inside the
-    /// coordinator's apply gate, where nothing it awaits may actually wait (the gate's
-    /// own invariant). A started rollback therefore still always completes.
+    /// The wait observes no token. It drains statements, memory-only controls and admitted
+    /// rollback-to operations. A rollback-to retains admission while building its lookup
+    /// and waiting uncancellably for the database apply gate, so a root end can wait behind
+    /// another writer's statement. Inside a physical apply, model lock waits are forbidden.
     /// </remarks>
     internal Task WaitForAppliesAsync()
     {
@@ -264,13 +497,17 @@ public sealed class TransactionContext
 
         lock (_endSync)
         {
-            if (_applying == 0)
+            if ((_applying & applyMask) == 0)
             {
                 return Task.CompletedTask;
             }
 
-            _drained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            return _drained.Task;
+            if (_drained is not TaskCompletionSource signal)
+            {
+                signal = new TaskCompletionSource(_drained, TaskCreationOptions.RunContinuationsAsynchronously);
+                Volatile.Write(ref _drained, signal);
+            }
+            return signal.Task;
         }
     }
 

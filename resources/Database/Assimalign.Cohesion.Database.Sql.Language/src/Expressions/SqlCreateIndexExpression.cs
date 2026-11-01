@@ -6,7 +6,7 @@ using Assimalign.Cohesion.Database.Language;
 
 /// <summary>
 /// Represents a parsed CREATE INDEX statement:
-/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [, ...])</c>.
+/// <c>CREATE [UNIQUE] INDEX [IF NOT EXISTS] name ON table (column [ASC | DESC] [NULLS FIRST | LAST] [, ...]) [WHERE predicate]</c>.
 /// </summary>
 public sealed class SqlCreateIndexExpression : SqlQueryExpression
 {
@@ -15,17 +15,21 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
     /// </summary>
     /// <param name="indexName">The name of the index being created.</param>
     /// <param name="table">The table the index is created on.</param>
+    /// <param name="keyOrders">Effective per-column directions and NULL placement.</param>
     /// <param name="columns">The ordered key column names.</param>
     /// <param name="isUnique">Whether UNIQUE was specified.</param>
     /// <param name="ifNotExists">Whether IF NOT EXISTS was specified.</param>
+    /// <param name="predicate">The optional row-local index predicate.</param>
     /// <param name="text">The raw statement text.</param>
     /// <param name="location">The source location.</param>
     internal SqlCreateIndexExpression(
         string indexName,
         SqlTableReference table,
         IReadOnlyList<string> columns,
+        IReadOnlyList<SqlIndexKeyOrder> keyOrders,
         bool isUnique,
         bool ifNotExists,
+        SqlExpression? predicate,
         string? text,
         Location? location)
         : base(SqlQueryCommandType.Create, text, location)
@@ -33,8 +37,10 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
         IndexName = indexName;
         Table = table;
         Columns = columns;
+        KeyOrders = keyOrders;
         IsUnique = isUnique;
         IfNotExists = ifNotExists;
+        Predicate = predicate;
     }
 
     /// <summary>
@@ -52,6 +58,9 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
     /// </summary>
     public IReadOnlyList<string> Columns { get; }
 
+    /// <summary>Gets the effective order of each key column.</summary>
+    public IReadOnlyList<SqlIndexKeyOrder> KeyOrders { get; }
+
     /// <summary>
     /// Gets whether the index enforces key uniqueness.
     /// </summary>
@@ -61,4 +70,7 @@ public sealed class SqlCreateIndexExpression : SqlQueryExpression
     /// Gets whether IF NOT EXISTS was specified.
     /// </summary>
     public bool IfNotExists { get; }
+
+    /// <summary>Gets the optional predicate; only rows for which it is TRUE are indexed.</summary>
+    public SqlExpression? Predicate { get; }
 }

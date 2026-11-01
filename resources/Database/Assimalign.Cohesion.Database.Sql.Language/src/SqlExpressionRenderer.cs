@@ -31,17 +31,33 @@ namespace Assimalign.Cohesion.Database.Sql.Language;
 /// carries an error renders, but need not parse back to itself.
 /// </para>
 /// </remarks>
-public static class SqlExpressionRenderer
+public static partial class SqlExpressionRenderer
 {
-    /// <summary>Renders an ALTER COLUMN TYPE statement as canonical SQL without a terminator.</summary>
+    /// <summary>Renders an ALTER COLUMN TYPE, identity or ADD CONSTRAINT operation as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
-    /// <returns>The target type, optional collation and original-row conversion.</returns>
+    /// <returns>The canonical type alteration, identity or ADD CONSTRAINT operation.</returns>
     /// <exception cref="ArgumentNullException">The query is null.</exception>
-    /// <exception cref="NotSupportedException">The action is not ALTER COLUMN TYPE.</exception>
+    /// <exception cref="NotSupportedException">The action is not a supported alteration.</exception>
     /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
     public static string Render(SqlAlterTableExpression query)
     {
         ArgumentNullException.ThrowIfNull(query);
+        if (query.Action is SqlAlterAddConstraintAction addConstraint)
+        {
+            return "ALTER TABLE " + SequenceName(query.Table) + " ADD " + Render(addConstraint.Constraint);
+        }
+        if (query.Action is SqlAlterIdentityAction identity)
+        {
+            return "ALTER TABLE " + SequenceName(query.Table) + " ALTER COLUMN " + Identifier(identity.ColumnName) + " " +
+                (identity.Operation switch
+                {
+                    "ADD" => "ADD GENERATED " + (identity.Identity!.IsAlways ? "ALWAYS" : "BY DEFAULT") + " AS IDENTITY" +
+                        (identity.Identity.Options.Count == 0 ? "" : " (" + SequenceOptions(identity.Identity.Options).TrimStart() + ")"),
+                    "DROP" => "DROP IDENTITY" + (identity.IfExists ? " IF EXISTS" : ""),
+                    "SET GENERATED" => "SET GENERATED " + (identity.IsAlways == true ? "ALWAYS" : "BY DEFAULT"),
+                    _ => (identity.IsAlways is null ? "" : "SET GENERATED " + (identity.IsAlways == true ? "ALWAYS " : "BY DEFAULT ")) + string.Join(" ", identity.Options.Select(option => (option.Name == "RESTART" ? "" : "SET ") + SequenceOptions([option]).TrimStart())),
+                });
+        }
         if (query.Action is not SqlAlterColumnTypeAction change)
         {
             throw new NotSupportedException(ErrorMessages.AlterTypeRenderingRequired);
@@ -51,6 +67,30 @@ public static class SqlExpressionRenderer
             " TYPE " + AlterTypeTarget(change.Column) + (change.Column.CollationName is { } collation ? " COLLATE " + Identifier(collation) : "") +
             (change.UsingExpression is { } conversion ? " USING " + Render(conversion) : "");
     }
+
+    /// <summary>Renders CREATE INDEX, including its optional predicate, as canonical SQL.</summary>
+    /// <param name="query">The parsed index declaration.</param>
+    /// <returns>The canonical statement without a terminator.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The predicate exceeds the available stack.</exception>
+    /// <exception cref="NotSupportedException">The predicate contains an unsupported expression.</exception>
+    public static string Render(SqlCreateIndexExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return "CREATE " + (query.IsUnique ? "UNIQUE " : "") + "INDEX " +
+            (query.IfNotExists ? "IF NOT EXISTS " : "") + Identifier(query.IndexName) +
+            " ON " + SequenceName(query.Table) + " (" + string.Join(", ", query.Columns.Select((column, i) => Identifier(column) + (query.KeyOrders[i] switch
+            {
+                SqlIndexKeyOrder.AscendingNullsFirst => " NULLS FIRST",
+                SqlIndexKeyOrder.DescendingNullsFirst => " DESC",
+                SqlIndexKeyOrder.DescendingNullsLast => " DESC NULLS LAST",
+                _ => "",
+            }))) + ")" +
+            (query.Predicate is null ? "" : " WHERE " + Render(query.Predicate));
+    }
+
+    private static void AppendOverride(StringBuilder builder, SqlIdentityOverride value)
+    { if (value != SqlIdentityOverride.None) { builder.Append(value == SqlIdentityOverride.User ? " OVERRIDING USER VALUE" : " OVERRIDING SYSTEM VALUE"); } }
 
     private static string AlterTypeTarget(SqlColumnDefinition column)
     {
@@ -75,7 +115,7 @@ public static class SqlExpressionRenderer
 
     // Words that are not profile keywords or functions but that a parser rule reads by spelling
     // in some position: the LIKE escape clause, IS UNKNOWN, and NULLS FIRST/LAST.
-    private static readonly string[] _positionalWords = ["ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
+    private static readonly string[] _positionalWords = ["ROLLUP", "CUBE", "ESCAPE", "UNKNOWN", "BOTH", "LEADING", "TRAILING", "NULLS"];
 
     /// <summary>Renders TRUNCATE as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
@@ -160,6 +200,48 @@ public static class SqlExpressionRenderer
         return Select(query);
     }
 
+    /// <summary>Renders an INSERT, including WITH and query sources, as canonical SQL without a terminator.</summary>
+    /// <param name="query">The parsed statement.</param>
+    /// <returns>The canonical statement text.</returns>
+    /// <exception cref="ArgumentNullException">The query is null.</exception>
+    /// <exception cref="NotSupportedException">The tree cannot be represented by the dialect.</exception>
+    /// <exception cref="InsufficientExecutionStackException">The thread has insufficient stack.</exception>
+    public static string Render(SqlInsertExpression query)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ThrowIfTooDeep(query.NestingDepth);
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("INSERT INTO ").Append(Table(query.Table));
+        if (query.Columns is { } columns)
+        { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+        AppendOverride(builder, query.Overriding);
+        if (query.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
+        else if (query.SelectSource is { } source) { builder.Append(' ').Append(Select(source)); }
+        else
+        {
+            builder.Append(" VALUES ").Append(string.Join(", ", query.Values!.Select(row =>
+                "(" + string.Join(", ", row.Select(Expression)) + ")")));
+        }
+        if (query.OnConflict is { } conflict)
+        {
+            builder.Append(" ON CONFLICT");
+            if (conflict.Columns.Count > 0)
+            { builder.Append(" (").Append(string.Join(", ", conflict.Columns.Select(Identifier))).Append(')'); }
+            if (conflict.ConstraintName is { } constraint) { builder.Append(" ON CONSTRAINT ").Append(Identifier(constraint)); }
+            if (conflict.TargetWhere is { } targetWhere) { builder.Append(" WHERE ").Append(Expression(targetWhere)); }
+            if (conflict.Action == SqlOnConflictAction.DoNothing) { builder.Append(" DO NOTHING"); }
+            else
+            {
+                builder.Append(" DO UPDATE SET ").Append(string.Join(", ", conflict.Assignments.Select(assignment =>
+                    Identifier(assignment.ColumnName) + " = " + Expression(assignment.Value))));
+                if (conflict.Where is { } where) { builder.Append(" WHERE ").Append(Expression(where)); }
+            }
+        }
+        AppendDmlTail(builder, null, query.Returning);
+        return builder.ToString();
+    }
+
     /// <summary>Renders an UPDATE, including FROM sources, as canonical SQL without a terminator.</summary>
     /// <param name="query">The parsed statement.</param>
     /// <returns>The canonical statement text.</returns>
@@ -189,7 +271,9 @@ public static class SqlExpressionRenderer
     {
         ArgumentNullException.ThrowIfNull(query);
         ThrowIfTooDeep(query.NestingDepth);
-        var builder = new StringBuilder("MERGE INTO ");
+        var builder = new StringBuilder();
+        AppendCommonTables(builder, query.CommonTables);
+        builder.Append("MERGE INTO ");
         builder.Append(Table(query.Table));
         AppendSources(builder, [query.Source], " USING ");
         builder.Append(" ON ").Append(Expression(query.Condition));
@@ -213,6 +297,7 @@ public static class SqlExpressionRenderer
                 case SqlMergeAction.Insert:
                     builder.Append("INSERT");
                     if (action.Columns is { } columns) { builder.Append(" (").Append(string.Join(", ", columns.Select(Identifier))).Append(')'); }
+                    AppendOverride(builder, action.Overriding);
                     if (action.IsDefaultValues) { builder.Append(" DEFAULT VALUES"); }
                     else { builder.Append(" VALUES (").Append(string.Join(", ", action.Values!.Select(Expression))).Append(')'); }
                     break;
@@ -275,10 +360,18 @@ public static class SqlExpressionRenderer
 
     private static string Node(SqlExpression expression) => expression switch
     {
+        SqlGroupingSetExpression group => (group.Kind switch
+        {
+            SqlGroupingSetKind.Sets => "GROUPING SETS ",
+            SqlGroupingSetKind.Rollup => "ROLLUP ",
+            SqlGroupingSetKind.Cube => "CUBE ",
+            _ => "",
+        }) + "(" + List(group.Items) + ")",
         SqlLogicalExpression logical => Logical(logical),
         SqlBinaryExpression binary => Binary(binary),
         SqlUnaryExpression unary => Unary(unary),
         SqlLiteralExpression literal => Literal(literal),
+        SqlNextValueExpression next => "NEXT VALUE FOR " + SequenceName(next.Sequence),
         SqlDefaultExpression => "DEFAULT",
         SqlColumnReferenceExpression column => Column(column),
         SqlParameterExpression parameter => parameter.ParameterName,
@@ -286,6 +379,7 @@ public static class SqlExpressionRenderer
         SqlDistinctExpression distinct => Operand(distinct.Left, concatLevel) +
             (distinct.IsNegated ? " IS NOT DISTINCT FROM " : " IS DISTINCT FROM ") + Operand(distinct.Right, comparisonLevel),
         SqlBooleanTestExpression test => Operand(test.Operand, concatLevel) + (test.IsNegated ? " IS NOT " : " IS ") + test.TruthValue.ToString().ToUpperInvariant(),
+        SqlIsJsonExpression json => Operand(json.Operand, concatLevel) + (json.IsNegated ? " IS NOT JSON " : " IS JSON ") + json.Kind.ToString().ToUpperInvariant(),
         SqlIsNullExpression isNull => Operand(isNull.Operand, concatLevel) + (isNull.IsNegated ? " IS NOT NULL" : " IS NULL"),
         SqlBetweenExpression between => Operand(between.Operand, concatLevel) + (between.IsNegated ? " NOT BETWEEN " : " BETWEEN ") +
             Operand(between.Low, concatLevel) + " AND " + Operand(between.High, concatLevel),
@@ -293,14 +387,18 @@ public static class SqlExpressionRenderer
         SqlQuantifiedComparisonExpression quantified => Operand(quantified.Operand, predicateLevel) + " " +
             OperatorText(quantified.Operator) + " " + quantified.Quantifier.ToString().ToUpperInvariant() +
             " (" + Select(quantified.Subquery) + ")",
-        SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsNegated ? " NOT LIKE " : " LIKE ") +
+        SqlLikeExpression like => Operand(like.Operand, concatLevel) + (like.IsCaseInsensitive
+            ? like.IsNegated ? " NOT ILIKE " : " ILIKE "
+            : like.IsNegated ? " NOT LIKE " : " LIKE ") +
             Operand(like.Pattern, collateLevel) + (like.Escape is null ? "" : " ESCAPE " + Operand(like.Escape, collateLevel)),
         SqlCollateExpression collate => Operand(collate.Operand, collateLevel) + " COLLATE " + collate.CollationName,
-        SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 => function.FunctionName,
-        SqlFunctionCallExpression function when function.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Arguments[0] is SqlLiteralExpression field && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0
+        SqlFunctionCallExpression function when SqlUnsupportedVocabulary.IsNiladicFunction(function.FunctionName) && function.Arguments.Count == 0 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null => function.FunctionName,
+        SqlFunctionCallExpression function when function.FunctionName.Equals("EXTRACT", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Arguments[0] is SqlLiteralExpression field && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null
             => "EXTRACT(" + field.Value + " FROM " + Expression(function.Arguments[1]) + ")",
-        SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0
+        SqlFunctionCallExpression function when function.FunctionName.Equals("POSITION", StringComparison.OrdinalIgnoreCase) && function.Arguments.Count == 2 && function.Quantifier == SqlSetQuantifier.Default && function.OrderBy.Count == 0 && function.Filter is null
             => "POSITION(" + Operand(function.Arguments[0], concatLevel) + " IN " + Expression(function.Arguments[1]) + ")",
+        SqlWindowExpression window => AggregateCall(window.Function, window: true) + (window.NullTreatment == SqlWindowNullTreatment.Default ? "" : window.NullTreatment == SqlWindowNullTreatment.Ignore ? " IGNORE NULLS" : " RESPECT NULLS") + " OVER " +
+            (window.WindowName is not null ? Identifier(window.WindowName) : "(" + WindowSpecification(window.Specification!) + ")"),
         SqlFunctionCallExpression function => AggregateCall(function),
         SqlCaseExpression caseExpression => Case(caseExpression),
         SqlCastExpression cast => "CAST(" + Expression(cast.Operand) + " AS " + CastTarget(cast.TargetType) + ")",
@@ -309,10 +407,38 @@ public static class SqlExpressionRenderer
         _ => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlExpressionRendererNodeNotSupported, expression.GetType().Name)),
     };
 
+    private static string WindowIdentifier(string name) => name.ToUpperInvariant() is "ROWS" or "RANGE" or "GROUPS" or "EXCLUDE"
+        ? "\"" + name + "\"" : Identifier(name);
+
+    private static string WindowSpecification(SqlWindowSpecification specification) => string.Join(" ", new[]
+    {
+        specification.ExistingWindow is null ? "" : WindowIdentifier(specification.ExistingWindow),
+        specification.PartitionBy.Count == 0 ? "" : "PARTITION BY " + List(specification.PartitionBy),
+        specification.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", specification.OrderBy.Select(Ordering)),
+        specification.Frame is null ? "" : specification.Frame.Mode.ToString().ToUpperInvariant() +
+            " BETWEEN " + FrameBound(specification.Frame.Start) + " AND " + FrameBound(specification.Frame.End) + Exclusion(specification.Frame.Exclusion),
+    }.Where(part => part.Length > 0));
+
+    private static string Exclusion(SqlWindowExclusion exclusion) => exclusion switch
+    {
+        SqlWindowExclusion.CurrentRow => " EXCLUDE CURRENT ROW",
+        SqlWindowExclusion.Group => " EXCLUDE GROUP",
+        SqlWindowExclusion.Ties => " EXCLUDE TIES",
+        _ => "",
+    };
+
+    private static string FrameBound(SqlWindowFrameBound bound) => bound.Kind switch
+    {
+        SqlWindowFrameBoundKind.UnboundedPreceding => "UNBOUNDED PRECEDING",
+        SqlWindowFrameBoundKind.UnboundedFollowing => "UNBOUNDED FOLLOWING",
+        SqlWindowFrameBoundKind.CurrentRow => "CURRENT ROW",
+        _ => Expression(bound.Offset!) + (bound.Kind == SqlWindowFrameBoundKind.Preceding ? " PRECEDING" : " FOLLOWING"),
+    };
+
     private static string Ordering(SqlOrderByColumn key) => Expression(key.Expression) + (key.IsDescending ? " DESC" : "") +
         (key.NullPlacement switch { SqlNullPlacement.First => " NULLS FIRST", SqlNullPlacement.Last => " NULLS LAST", _ => "" });
 
-    private static string AggregateCall(SqlFunctionCallExpression call)
+    private static string AggregateCall(SqlFunctionCallExpression call, bool window = false)
     {
         string quantifier = call.Quantifier switch { SqlSetQuantifier.Distinct => "DISTINCT ", SqlSetQuantifier.All => "ALL ", _ => "" };
         string ordering = call.OrderBy.Count == 0 ? "" : "ORDER BY " + string.Join(", ", call.OrderBy.Select(key =>
@@ -323,12 +449,15 @@ public static class SqlExpressionRenderer
         // With no WITHIN GROUP keys it must stay delimited on a round trip.
         bool specialForm = SqlUnsupportedVocabulary.IsNiladicFunction(call.FunctionName) ||
             call.FunctionName.ToUpperInvariant() is "EXTRACT" or "POSITION" or "SUBSTRING" or "TRIM";
-        string name = (listaggName && !listagg) || (specialForm &&
-            (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0))
+        bool nativeWindow = window && (Contains(_windowFunctions, call.FunctionName) ||
+            call.FunctionName.ToUpperInvariant() is "PERCENT_RANK" or "CUME_DIST");
+        string name = nativeWindow ? call.FunctionName.ToUpperInvariant() : (listaggName && !listagg) || (specialForm &&
+            (call.Quantifier != SqlSetQuantifier.Default || call.OrderBy.Count > 0 || call.Filter is not null))
             ? "\"" + call.FunctionName + "\"" : FunctionName(call.FunctionName);
         return name + "(" + quantifier + Arguments(call.Arguments) +
             (!listagg && ordering.Length > 0 ? " " + ordering : "") + ")" +
-            (listagg ? " WITHIN GROUP (" + ordering + ")" : "");
+            (listagg ? " WITHIN GROUP (" + ordering + ")" : "") +
+            (call.Filter is null ? "" : " FILTER (WHERE " + Expression(call.Filter) + ")");
     }
 
     /// <summary>The precedence level the parser assigns the node.</summary>
@@ -344,13 +473,17 @@ public static class SqlExpressionRenderer
             Operator: SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or
                 SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
         } => comparisonLevel,
-        SqlIsNullExpression or SqlDistinctExpression or SqlBooleanTestExpression => isLevel,
+        SqlIsNullExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression => isLevel,
         SqlQuantifiedComparisonExpression => comparisonLevel,
         SqlBetweenExpression or SqlInExpression or SqlLikeExpression => predicateLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract } => additiveLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => concatLevel,
         SqlBinaryExpression { Operator: SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } => multiplicativeLevel,
+        SqlBinaryExpression { Operator: SqlBinaryOperator.BitwiseAnd or SqlBinaryOperator.BitwiseOr
+            or SqlBinaryOperator.BitwiseXor or SqlBinaryOperator.ShiftLeft or SqlBinaryOperator.ShiftRight
+            or SqlBinaryOperator.JsonAccess or SqlBinaryOperator.JsonTextAccess } => concatLevel,
         SqlBinaryExpression binary => throw new NotSupportedException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionRendererLevelNotSupported, binary.Operator)),
+        SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } => concatLevel,
         SqlUnaryExpression => unaryLevel,
         SqlCollateExpression => collateLevel,
         _ => primaryLevel,
@@ -404,6 +537,13 @@ public static class SqlExpressionRenderer
         SqlBinaryOperator.Divide => "/",
         SqlBinaryOperator.Modulo => "%",
         SqlBinaryOperator.Concat => "||",
+        SqlBinaryOperator.BitwiseAnd => "&",
+        SqlBinaryOperator.BitwiseOr => "|",
+        SqlBinaryOperator.BitwiseXor => "#",
+        SqlBinaryOperator.ShiftLeft => "<<",
+        SqlBinaryOperator.ShiftRight => ">>",
+        SqlBinaryOperator.JsonAccess => "->",
+        SqlBinaryOperator.JsonTextAccess => "->>",
         SqlBinaryOperator.Equal => "=",
         SqlBinaryOperator.NotEqual => "<>",
         SqlBinaryOperator.LessThan => "<",
@@ -422,6 +562,13 @@ public static class SqlExpressionRenderer
             // plain EXISTS, or to an operand that starts with one, would fold into it.
             string operand = Operand(unary.Operand, notLevel);
             return "NOT " + (operand.StartsWith("EXISTS (", StringComparison.Ordinal) ? "(" + operand + ")" : operand);
+        }
+
+        if (unary.Operator == SqlUnaryOperator.BitwiseNot)
+        {
+            // An equal-level operand needs grouping: ~(a & b), not ~a & b.
+            // Separate prefix operators so their spellings cannot become a regex operator.
+            return "~" + Operand(unary.Operand, additiveLevel);
         }
 
         string sign = unary.Operator switch
@@ -600,11 +747,16 @@ public static class SqlExpressionRenderer
         }
         if (select.GroupBy.Count > 0)
         {
-            builder.Append(" GROUP BY ").Append(List(select.GroupBy));
+            builder.Append(select.IsGroupByDistinct ? " GROUP BY DISTINCT " : " GROUP BY ").Append(List(select.GroupBy));
         }
         if (select.Having is not null)
         {
             builder.Append(" HAVING ").Append(Expression(select.Having));
+        }
+        if (select.Windows.Count > 0)
+        {
+            builder.Append(" WINDOW ").Append(string.Join(", ", select.Windows.Select(window =>
+                Identifier(window.Name) + " AS (" + WindowSpecification(window.Specification) + ")")));
         }
         AppendQueryTail(builder, select);
         return builder.ToString();
@@ -614,7 +766,7 @@ public static class SqlExpressionRenderer
     {
         if (definitions.Count > 0)
         {
-            builder.Append("WITH ");
+            builder.Append(definitions[0].IsRecursiveScope ? "WITH RECURSIVE " : "WITH ");
             for (int i = 0; i < definitions.Count; i++)
             {
                 if (i > 0) { builder.Append(", "); }
@@ -730,7 +882,7 @@ public static class SqlExpressionRenderer
     /// Spells a function name bare when the bare word parses as a call to it: a builtin
     /// function, or a plain identifier. <c>CAST</c> and every other keyword are delimited,
     /// because the bare keyword starts its own construct, and so are the window function names,
-    /// whose bare call the parser rejects.
+    /// whose ordinary call retains its quoted spelling; window expressions render OVER separately.
     /// </summary>
     private static string FunctionName(string name)
     {

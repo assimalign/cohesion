@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client.Tests;
 
 /// <summary>
 /// Verifies parse strictness (#1101) through the SQL wire protocol: a character outside the
-/// dialect and the <c>~</c> operator are parse failures that execute nothing and keep the
+/// dialect and the infix regex <c>~</c> operator are parse failures that execute nothing and keep the
 /// connection usable.
 /// </summary>
 public sealed class SqlParseStrictnessWireTests
@@ -19,9 +19,11 @@ public sealed class SqlParseStrictnessWireTests
     [InlineData("SELECT * FROM users ?", "CS00003")]
     [InlineData("SELECT id FROM users WHERE score = ?", "CS00003")]
     [InlineData("DELETE FROM users ?", "CS00003")]
+    [InlineData("# DELETE FROM users", "CS00003")]
     [InlineData("UPDATE users SET score = 0 #", "CS00003")]
-    [InlineData("SELECT ~score FROM users", "CK00001")]
-    [InlineData("SELECT ~NULL", "CK00001")]
+    [InlineData("SELECT score ~ 'x' FROM users", "CK00001")]
+    [InlineData("SELECT NULL ~ 'x'", "CK00001")]
+    [InlineData("SELECT ~~1", "CK00001")]
     [InlineData("DELETE FROM users WHERE name ~ 'a'", "CK00001")]
     public async Task ExecuteAsync_StrictnessViolation_ShouldReportParseFailureWithoutMutation(string statement, string code)
     {

@@ -64,7 +64,12 @@ public sealed partial class GraphDatabase
         {
             T result;
             try { result = await action(operation).ConfigureAwait(false); }
-            finally { operation.Updates.Dispose(); }
+            finally
+            {
+                // Execution has stopped. Keep lease cleanup on this flow in the existing bracket.
+                try { operation.Updates.Dispose(); }
+                finally { operation.ReleaseMerge(); }
+            }
             await operation.CompleteAsync().ConfigureAwait(false);
             return result;
         }
@@ -88,6 +93,8 @@ public sealed partial class GraphDatabase
     private Exception TranslateStatementFailure(Exception error) => TranslateKernelFailure(error) switch
     {
         var translated when !ReferenceEquals(translated, error) => translated,
+        _ when error is System.Collections.Generic.KeyNotFoundException => new DatabaseException(ErrorMessages.StatementKeyMissing,
+            [new Types.Diagnostic { Code = "CG05031", Message = ErrorMessages.StatementKeyMissing, Severity = Types.DiagnosticSeverity.Error }], error),
         _ when error is InvalidOperationException => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "CG03003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
         // A label expression or predicate nested deeper than this thread's stack: the walks
@@ -107,6 +114,7 @@ public sealed partial class GraphDatabase
     /// <returns>The translated failure, or <paramref name="error"/> itself.</returns>
     internal Exception TranslateKernelFailure(Exception error) => error switch
     {
+        _ when DatabaseFailure.TranslateUndoFailure(error) is { } undo => undo,
         DatabaseOfflineException or DatabaseTransactionCommitUnconfirmedException
             or DatabaseTransactionAbortedException or DatabaseTransactionDeadlockException => error,
         DatabaseException { Diagnostics.Count: > 0 } => error,
@@ -128,9 +136,8 @@ public sealed partial class GraphDatabase
         _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsConflict: true }
             => new DatabaseTransactionAbortedException(error.Message, [new Types.Diagnostic
             { Code = "CG04007", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
-        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsCallerError: true }
-            => new DatabaseException(error.Message, [new Types.Diagnostic
-            { Code = "CG03003", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
+        _ when DatabaseFailure.Find<GraphCatalogException>(error) is { IsCallerError: true } catalog
+            => new DatabaseException(error.Message, catalog.Diagnostics, error),
         _ => error,
     };
 

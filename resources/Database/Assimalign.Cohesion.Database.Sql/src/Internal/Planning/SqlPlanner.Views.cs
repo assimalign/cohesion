@@ -50,7 +50,7 @@ internal sealed partial class SqlPlanner
         finalPlanner.ViewDefinitionBinding = finalBinding;
         var finalPlan = finalPlanner.PlanOnce(frozen);
         var calls = SqlViewQuery.Nodes(frozen).OfType<SqlFunctionCallExpression>()
-            .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)).Select(call => finalBinding.Calls[call]).ToArray();
+            .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !IsGrouping(call)).Select(call => finalBinding.Calls[call]).ToArray();
         var view = new SqlCatalogView(schema, existing?.Name ?? create.View.TableName, canonical, output,
             finalBinding.Tables.ToArray(), finalBinding.Dependencies.Concat(calls).ToArray(), calls);
         _parsedViews.Add(view, new ParsedView(frozen));
@@ -110,7 +110,7 @@ internal sealed partial class SqlPlanner
                     { throw new SqlPlanningException("CS01009", ErrorMessages.ViewFunctionMissing); }
                     var query = _parsedViews.GetValue(view, value => new ParsedView(SqlPersistedExpression.LoadQuery(value.Definition, "view " + value.Schema + "." + value.Name))).Query;
                     var functionNodes = SqlViewQuery.Nodes(query).OfType<SqlFunctionCallExpression>()
-                        .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName)).ToArray();
+                        .Where(call => !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) && !IsGrouping(call)).ToArray();
                     if (functionNodes.Length != view.FunctionCalls.Count || functionNodes.Where((call, index) =>
                         !view.FunctionCalls[index].StartsWith("F:" + SqlObjectIdentity.Quote(call.FunctionName.ToUpperInvariant()) + "(", StringComparison.Ordinal)).Any())
                     { throw ViewError(ErrorMessages.ViewRoundTrip); }
@@ -122,12 +122,17 @@ internal sealed partial class SqlPlanner
                     var columns = planner.BindDerivedOutput(child, view.Name, view.Columns.Select(column => column.Name).ToArray(), query).Columns;
                     if (columns.Count != view.Columns.Count || columns.Where((column, index) => !SameViewOutput(column, view.Columns[index])).Any())
                     { throw new SqlPlanningException("CS01009", ErrorMessages.ViewContractChanged); }
-                    return new ViewPlan(child, columns, planner.ViewDefinitionBinding.SystemRelations);
+                    return new ViewPlan(child, columns, planner.ViewDefinitionBinding.SystemRelations, planner._commonTableState?.HasRecursion == true);
                 });
                 plans.Entries.Add(view, entry);
             }
         }
         var bound = entry.Get(_cancellationToken);
+        if (bound.HasRecursion)
+        {
+            (_commonTableState ??= new CommonTableState(new(ReferenceEqualityComparer.Instance))).HasRecursion = true;
+            (_queryScopes ??= new()).DeferQueryEvaluation = true;
+        }
         // Re-enter the existing bind-time capture seam even when the immutable body plan
         // is cached. The image is always the caller's statement/transaction image.
         foreach (var system in bound.SystemRelations) { ResolveRelationCore(system, null); }
@@ -284,7 +289,7 @@ internal sealed partial class SqlPlanner
 
     private static SqlPlanningException ViewError(string message) => new("CS03033", message);
     private sealed record ParsedView(SqlQueryBodyExpression Query);
-    internal sealed record ViewPlan(SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, IReadOnlyList<SqlTableReference> SystemRelations);
+    internal sealed record ViewPlan(SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, IReadOnlyList<SqlTableReference> SystemRelations, bool HasRecursion);
     [global::System.Diagnostics.DebuggerDisplay("ViewPlans")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanner.ViewPlans.DebugView))]
     internal sealed class ViewPlans

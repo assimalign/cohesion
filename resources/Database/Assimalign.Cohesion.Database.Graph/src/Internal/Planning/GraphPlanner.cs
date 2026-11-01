@@ -20,7 +20,13 @@ internal sealed partial class GraphPlanner
     private readonly TransactionSnapshot _snapshot;
     private IReadOnlyDictionary<string, object?>? _parameters;
     private Dictionary<GqlNamedFunctionCallExpression, GraphFunction>? _functions;
-    private Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>? _nativeExpressions;
+    // Ordinary statements retain the original single cache reference and object size.
+    private object? _nativeExpressions;
+    private ReductionPlanningState ReductionState => _nativeExpressions as ReductionPlanningState ??
+        (ReductionPlanningState)(_nativeExpressions = new ReductionPlanningState(_nativeExpressions as Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>));
+    private CorrelatedPlanningState CorrelatedState => _nativeExpressions as CorrelatedPlanningState ??
+        (CorrelatedPlanningState)(_nativeExpressions = new CorrelatedPlanningState(_nativeExpressions));
+    private GraphReductionWork? ReductionWork => (_nativeExpressions as ReductionPlanningState)?.Work;
 
     /// <summary>Initializes a new instance of the <see cref="GraphPlanner"/> class.</summary>
     /// <param name="database">The graph database whose catalog and store resolve labels, relationship types, and indexes.</param>
@@ -43,16 +49,38 @@ internal sealed partial class GraphPlanner
     /// <param name="paths">Whether path-request projection shape takes precedence over duplicate column names.</param>
     /// <param name="token">Cancellation observed while validating and indexing expression structure.</param>
     /// <param name="normalizedParameters">Whether these are the statement's already captured bindings for replanning.</param>
+    /// <param name="resultShapes">Optional composite-only output shape collection.</param>
+    /// <param name="inputShapes">The projected bindings passed from an earlier NEXT segment.</param>
+    /// <param name="tokens">Optional statement-wide token resolution shared by composite operands.</param>
     /// <returns>The plan.</returns>
     /// <exception cref="DatabaseException">The statement is invalid (<c>CG05001</c>, <c>CG03003</c>, <c>CG01015</c>).</exception>
-    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false)
+    internal GraphPlan Plan(GqlQueryExpression query, IReadOnlyDictionary<string, object?>? parameters = null, bool paths = false, CancellationToken token = default, bool normalizedParameters = false, List<GraphBindingShape>? resultShapes = null, IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null, GraphTokenResolver? tokens = null)
     {
+        using var ownedTokens = tokens is null ? new GraphTokenResolver(_database.Catalog, _snapshot) : null;
+        tokens ??= ownedTokens!;
         try
         {
             token.ThrowIfCancellationRequested();
             _parameters = normalizedParameters ? parameters : ParameterBindings.Normalize(parameters, name => new GraphPlanningException(
                 "CG01014", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ParameterCollision, name), query.Location));
-            return PlanCore(query, paths, token);
+            if (_nativeExpressions is ReductionPlanningState previous) { previous.Work = null; }
+            if (_nativeExpressions is CorrelatedPlanningState correlated) { correlated.Subplans = null; correlated.Anti = null; }
+            GraphPlan? plan = null;
+            try { plan = PlanCore(query, paths, token, resultShapes: resultShapes, inputShapes: inputShapes, tokens: tokens); }
+            catch (GraphPlanningException) when (query.Text is null && _nativeExpressions is CorrelatedPlanningState { Subplans: not null })
+            {
+                // An unbound programmatic occurrence can report a scope error using a plan
+                // from another occurrence. Only the independently bound pass is authoritative.
+            }
+            if (query.Text is null && _nativeExpressions is CorrelatedPlanningState { Subplans: not null } bindingState)
+            {
+                // Discover EXISTS during the ordinary validation walk. Queries without it
+                // retain their exact planning path, allocations and malformed-AST refusals.
+                bindingState.Subplans = null; bindingState.Anti = null; bindingState.Work = null;
+                resultShapes?.Clear();
+                return PlanCore(query, paths, token, boundStages: GraphLexicalOccurrences.Bind(query.Stages, token), resultShapes: resultShapes, inputShapes: inputShapes, tokens: tokens);
+            }
+            return plan!;
         }
         catch (GraphPlanningException exception) when (exception.Diagnostics[0].Start is null && query.Location is not null)
         {
@@ -60,15 +88,24 @@ internal sealed partial class GraphPlanner
         }
     }
 
-    private GraphPlan PlanCore(GqlQueryExpression statement, bool pathsRequest, CancellationToken token)
+    private GraphPlan PlanCore(GqlQueryExpression statement, bool pathsRequest, CancellationToken token, CorrelationScope? correlation = null,
+        IReadOnlyList<GqlStage>? boundStages = null, List<GraphBindingShape>? resultShapes = null,
+        IReadOnlyDictionary<string, GraphBindingShape>? inputShapes = null, GraphTokenResolver? tokens = null, bool statementWrites = false)
     {
         if (_parameters is not null) { _parameters = new Dictionary<string, object?>(_parameters, StringComparer.Ordinal); }
         var query = statement;
-        var stages = statement.Stages;
+        var stages = boundStages ?? statement.Stages;
         var planned = new List<GraphStagePlan>();
+        IReadOnlyList<GraphBindingShape>? compositeResultShapes = null;
+
         var deletedVariables = new HashSet<string>(StringComparer.Ordinal);
         var shapes = new Dictionary<string, GraphBindingShape>(StringComparer.Ordinal);
-        bool writes = stages.Any(stage => stage is GqlInsertStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage);
+        bool writes = statementWrites || stages.Any(stage => stage is GqlInsertStage or GqlMergeStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage);
+        bool hasComposite = false;
+        for (int i = 0; i < stages.Count; i++) { hasComposite |= stages[i] is GqlCompositeStage; }
+        if (hasComposite) { ValidateCompositeReadOnly(statement, token); }
+        var compositeWarnings = hasComposite ? new List<Diagnostic>() : null;
+        int reportedWarnings = 0;
         if (pathsRequest && writes)
         { throw new GraphPlanningException("CG05001", ErrorMessages.PathProjectionRequired, statement.Location); }
         var snapshotted = new HashSet<string>(StringComparer.Ordinal);
@@ -84,10 +121,30 @@ internal sealed partial class GraphPlanner
         var projectedEntities = new HashSet<string>(StringComparer.Ordinal);
         var projections = new List<GraphProjectionPlan>();
         var clauses = new List<GraphMatchClausePlan>();
-        var tokens = new GraphTokenResolver(_database.Catalog, _snapshot);
+        tokens ??= correlation?.Tokens ?? new GraphTokenResolver(_database.Catalog, _snapshot);
         bool matchesNothing = false;
         bool optional = false;
         bool forValue = false;
+        if (correlation is not null)
+        {
+            foreach (var pair in correlation.Variables) { variables.Add(pair.Key, pair.Value); }
+            foreach (var pair in correlation.Shapes) { shapes.Add(pair.Key, pair.Value); }
+            boundVariables.UnionWith(correlation.Variables.Keys);
+            mandatoryVariables.UnionWith(correlation.Mandatory);
+            groupVariables.UnionWith(correlation.Groups);
+        }
+        if (inputShapes is not null)
+        {
+            foreach (var pair in inputShapes)
+            {
+                variables.Add(pair.Key, ToBindingKind(pair.Value.EntityKinds[0].Kind));
+                shapes.Add(pair.Key, pair.Value);
+                declarations.Add(pair.Key);
+                boundVariables.Add(pair.Key);
+                if (!pair.Value.EntityKinds[0].Optional) { mandatoryVariables.Add(pair.Key); }
+                if (pair.Value.Group) { groupVariables.Add(pair.Key); }
+            }
+        }
         if (statement.MatchClauses is null)
         { throw new GraphPlanningException("CG05001", ErrorMessages.MatchClausePathsRequired, statement.Location); }
         if (stages.Count == 0 || statement.OrderBy is null || stages[^1] is GqlReturnStage { IsWith: true })
@@ -101,6 +158,35 @@ internal sealed partial class GraphPlanner
                 GqlSetStage { Items: null or { Count: 0 } } or GqlRemoveStage { Items: null or { Count: 0 } } or
                 GqlReturnStage { Projections: null } or GqlReturnStage { IsWith: false, Predicate: not null })
             { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location ?? statement.Location); }
+            if (stage is GqlCompositeStage compositeStage)
+            {
+                if (stageIndex != 0 && stages[stageIndex - 1] is not GqlNextStage)
+                { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                var shared = ReductionState.SharedWork ??= ReductionState.Work ?? new GraphReductionWork(token);
+                var composite = PlanComposite(new GqlQueryExpression(compositeStage.Query, stage.Location), _parameters,
+                    pathsRequest && stageIndex == stages.Count - 1, token, CompositeInputShapes(), shared, tokens);
+                compositeWarnings!.AddRange(tokens.Warnings.Skip(reportedWarnings));
+                reportedWarnings = tokens.Warnings.Count;
+                ClearScope();
+                for (int i = 0; i < composite.Projections.Count; i++)
+                {
+                    var projection = composite.Projections[i];
+                    if (projection.BindingName is not { } name) { continue; }
+                    if (!variables.TryAdd(name, ToBindingKind(projection.Kind)))
+                    { throw new GraphPlanningException("CG01015", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.DuplicateResultColumn, name), stage.Location); }
+                    declarations.Add(name); boundVariables.Add(name);
+                    shapes.Add(name, composite.Shapes[i]);
+                    if (!projection.Optional) { mandatoryVariables.Add(name); }
+                    if (composite.Shapes[i].Group) { groupVariables.Add(name); }
+                }
+                var output = composite.Projections.Select(projection => projection with
+                    { Expression = new GqlVariableExpression(projection.BindingName ?? projection.Name) }).ToArray();
+                planned.Add(new GraphCompositeStagePlan(compositeStage,
+                    new GraphPlan(statement, []) { Projections = output, Parameters = _parameters, Warnings = composite.Warnings }, composite));
+                if (stageIndex == stages.Count - 1) { compositeResultShapes = composite.Shapes; }
+                continue;
+            }
             query = StageQuery(stage, statement.Location);
             orderAliases = null;
             orderProjections = null;
@@ -112,33 +198,32 @@ internal sealed partial class GraphPlanner
             optional = false;
             switch (stage)
             {
-                case GqlSetStage set:
-                    foreach (var item in set.Items)
+                case GqlMergeStage merge:
+                    if (merge.Path is null || merge.OnCreate is null || merge.OnMatch is null)
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                    if (merge.Path.Relationships is not null && merge.Path.Relationships.Where(edge => edge?.Variable is not null)
+                        .GroupBy(edge => edge.Variable, StringComparer.Ordinal).Any(group => group.Count() > 1))
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                    // Neo4j SemanticPatternCheck.scala:670 and ClauseConverters.scala:519,885:
+                    // update relationships are declarations; reused nodes must be bare variables.
+                    foreach (var edge in merge.Path.Relationships ?? [])
                     {
-                        if (item is null || string.IsNullOrWhiteSpace(item.Variable))
-                        { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
-                        RequireVariable(item.Variable, entity: true);
-                        switch (item)
-                        {
-                            case GqlSetPropertyItem property when !string.IsNullOrWhiteSpace(property.Property) && property.Value is not null:
-                                ValidateExpression(property.Value);
-                                break;
-                            case GqlSetPropertiesItem map when map.Properties is not null:
-                                foreach (var pair in map.Properties)
-                                {
-                                    if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
-                                    { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location); }
-                                    ValidateExpression(pair.Value);
-                                }
-                                break;
-                            case GqlSetLabelsItem labels when labels.Labels is { Count: > 0 } && labels.Labels.All(name => !string.IsNullOrWhiteSpace(name)):
-                                if (variables[item.Variable] != BindingKind.Node)
-                                { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, item.Location); }
-                                foreach (string name in labels.Labels) { tokens.IntroduceLabel(name); }
-                                break;
-                            default: throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location);
-                        }
+                        if (edge?.Variable is { } name && variables.ContainsKey(name))
+                        { throw new GraphPlanningException("CG03007", ErrorMessages.MergeRelationshipDeclared, stage.Location); }
                     }
+                    var mergeNodes = new HashSet<string>(variables.Keys, StringComparer.Ordinal);
+                    foreach (var node in merge.Path.Nodes ?? [])
+                    {
+                        if (node?.Variable is not { } name || mergeNodes.Add(name)) { continue; }
+                        if (node.Labels is { Count: > 0 } || node.LabelExpression is not null || node.Properties is { Count: > 0 })
+                        { throw new GraphPlanningException("CG03006", ErrorMessages.MergeNodeDeclared, stage.Location); }
+                    }
+                    Validate(merge.Path, creating: true, new HashSet<string>(variables.Keys, StringComparer.Ordinal), merging: true);
+                    ValidateSet(merge.OnCreate, merge);
+                    ValidateSet(merge.OnMatch, merge);
+                    break;
+                case GqlSetStage set:
+                    ValidateSet(set.Items, stage);
                     break;
                 case GqlRemoveStage remove:
                     foreach (var item in remove.Items)
@@ -178,9 +263,9 @@ internal sealed partial class GraphPlanner
                 case GqlNextStage:
                     if (stageIndex == 0 || stageIndex == stages.Count - 1 ||
                         stages[stageIndex - 1] is GqlReturnStage { IsWith: true } ||
-                        stages[stageIndex - 1] is not GqlReturnStage && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage))
+                        stages[stageIndex - 1] is not (GqlReturnStage or GqlCompositeStage) && !stages.Take(stageIndex).Reverse().TakeWhile(item => item is not GqlNextStage).Any(item => item is GqlInsertStage or GqlMergeStage or GqlDeleteStage or GqlSetStage or GqlRemoveStage))
                     { throw new GraphPlanningException("CG05001", ErrorMessages.NextSegmentInvalid, stage.Location); }
-                    if (stages[stageIndex - 1] is not GqlReturnStage) { ClearScope(); }
+                    if (stages[stageIndex - 1] is not (GqlReturnStage or GqlCompositeStage)) { ClearScope(); }
                     break;
             }
             foreach (var clause in query.MatchClauses)
@@ -209,6 +294,12 @@ internal sealed partial class GraphPlanner
                 foreach (var path in clause.Paths)
                 { if (!Validate(path, creating: false, declared: true, incomingPrefilterScope: incomingPrefilterScope)) { clauseMatchesNothing = true; } }
                 ValidateExpression(clause.Predicate);
+                if (correlation?.Owner is GqlPatternComprehensionExpression && clause.Predicate is { } collectionFilter)
+                {
+                    var filterKind = KnownFunctionKind(collectionFilter, false);
+                    if (filterKind != GraphFunctionKind.Unknown && (filterKind & GraphFunctionKind.Boolean) == 0)
+                    { throw new GraphPlanningException("CG02013", ErrorMessages.BooleanRequired, collectionFilter.Location); }
+                }
                 bool selective = clause.Paths.Any(path => path.Selector is not null);
                 // A post-selection WHERE cannot constrain the search, including through
                 // an index anchor or a catalog-based matches-nothing shortcut.
@@ -226,22 +317,22 @@ internal sealed partial class GraphPlanner
                         selection = new GraphPathSelectionPlan(selector, shape, path.Mode ?? GqlPathMode.Trail, startVariables, endVariables,
                             startVariables.Concat(endVariables).Where(boundVariables.Contains).Distinct(StringComparer.Ordinal).ToArray());
                     }
-                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token, sourceOnly: selection is not null)) { Shape = shape, Selection = selection });
+                    paths.Add(new GraphPathPlan(path, ChooseAnchor(shape, anchors, boundVariables, token, sourceOnly: selection is not null, merging: stage is GqlMergeStage)) { Shape = shape, Selection = selection });
                     foreach (var binding in shape.Bindings())
                     { if (!groupVariables.Contains(binding.Name)) { boundVariables.Add(binding.Name); } }
                 }
                 clauses.Add(new GraphMatchClausePlan(paths, clause.Predicate, optional,
-                    declarations.Skip(firstDeclaration).ToArray(), clauseMatchesNothing));
-                matchesNothing |= !optional && clauseMatchesNothing;
+                    declarations.Skip(firstDeclaration).ToArray(), stage is GqlMergeStage ? false : clauseMatchesNothing));
+                matchesNothing |= stage is not GqlMergeStage && !optional && clauseMatchesNothing;
             }
             optional = false;
             // INSERT maps see only the incoming scope, independently of creation order.
             var insertScope = stage is GqlInsertStage ? new HashSet<string>(variables.Keys, StringComparer.Ordinal) : null;
             foreach (var path in query.Creates) { Validate(path, creating: true, insertScope); }
             foreach (var variable in query.DeleteVariables) { RequireVariable(variable, entity: true); }
-            if (stage is GqlInsertStage)
+            if (stage is GqlInsertStage or GqlMergeStage)
             {
-                foreach (var path in query.Creates)
+                foreach (var path in stage is GqlMergeStage merging ? new[] { merging.Path } : query.Creates)
                 {
                     foreach (var node in path.Nodes)
                     {
@@ -250,7 +341,8 @@ internal sealed partial class GraphPlanner
                     }
                     foreach (var edge in path.Relationships)
                     {
-                        tokens.IntroduceRelationshipType(GraphLabelEvaluator.InsertType(edge));
+                        if (stage is not GqlMergeStage || edge.Type is not null || edge.LabelExpression is not null)
+                        { tokens.IntroduceRelationshipType(GraphLabelEvaluator.InsertType(edge)); }
                         if (edge.Variable is { } edgeVariable) { boundVariables.Add(edgeVariable); }
                     }
                 }
@@ -302,7 +394,9 @@ internal sealed partial class GraphPlanner
             }
             if (query.OrderBy is null || projections.Count == 0 && (query.OrderBy.Count != 0 || query.Offset is not null || query.Limit is not null))
             { throw new GraphPlanningException("CG05001", ErrorMessages.SortShapeInvalid, query.Location); }
-            grouping = GraphGrouping.Plan(query, projections, token, key => ValidateExpression(key), _database.Engine.Functions);
+            grouping = GraphGrouping.Plan(query, projections, token, key => ValidateExpression(key), _database.Engine.Functions, (_nativeExpressions as CorrelatedPlanningState)?.Subplans);
+            if (_nativeExpressions is ReductionPlanningState reductionState)
+            { reductionState.Variables = variables; reductionState.Shapes = shapes; }
             orderAliases = new Dictionary<string, int>(StringComparer.Ordinal);
             orderProjections = new Dictionary<GqlExpression, int>(new GraphExpressionShape(token));
             var shadowed = new HashSet<string>(StringComparer.Ordinal);
@@ -336,7 +430,7 @@ internal sealed partial class GraphPlanner
                 if (item?.Expression is null || !Enum.IsDefined(item.Direction) || !Enum.IsDefined(item.NullOrdering))
                 { throw new GraphPlanningException("CG05001", ErrorMessages.SortShapeInvalid, query.Location); }
                 ValidateExpression(item.Expression, allowAggregates: grouping is not null, ordering: true);
-                if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases, groupedExpressions); }
+                if (grouping is not null) { grouping.Scope.Validate(item.Expression, orderAliases, groupedExpressions, subplans: (_nativeExpressions as CorrelatedPlanningState)?.Subplans); }
                 int projectionIndex = item.Expression is GqlVariableExpression alias && orderAliases.TryGetValue(alias.Variable, out int aliased)
                     ? aliased : orderProjections.TryGetValue(item.Expression, out int projectedIndex) ? projectedIndex : -1;
                 sortKeys.Add(new GraphSortKeyPlan(item, projectionIndex));
@@ -400,34 +494,63 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
+        compositeWarnings?.AddRange(tokens.Warnings.Skip(reportedWarnings));
         var final = planned[^1].Plan;
+        if (resultShapes is not null)
+        {
+            if (compositeResultShapes is not null) { resultShapes.AddRange(compositeResultShapes); }
+            else { foreach (var projection in final.Projections) { resultShapes.Add(Shape(projection.Expression)); } }
+        }
         return final with
         {
             Query = statement,
             MatchClauses = planned.SelectMany(stage => stage.Plan.MatchClauses).ToArray(),
             MatchesNothing = planned.Any(stage => stage.Plan.MatchesNothing),
-            Stages = planned.AsReadOnly(), Writes = writes,
+            // Correlated plans execute reads; the enclosing write classification only
+            // governs warning analysis, not their execution/affected-count contract.
+            Stages = planned.AsReadOnly(), Writes = writes && correlation is null,
             Parameters = _parameters,
-            Warnings = writes ? [] : tokens.Warnings,
+            Warnings = writes ? [] : compositeWarnings is not null ? compositeWarnings.AsReadOnly() : tokens.Warnings,
+            FunctionBindings = (_nativeExpressions as CorrelatedPlanningState)?.Subplans is { } subplans
+                ? new GraphCorrelatedBindings(_functions is null ? FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty : _functions, subplans, (_nativeExpressions as CorrelatedPlanningState)?.Anti)
+                : _functions is null ? FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty : _functions,
         };
 
         void ClearScope()
         { variables.Clear(); declarations.Clear(); shapes.Clear(); mandatoryVariables.Clear(); boundVariables.Clear(); groupVariables.Clear(); }
 
+        Dictionary<string, GraphBindingShape> CompositeInputShapes()
+        {
+            var incoming = new Dictionary<string, GraphBindingShape>(StringComparer.Ordinal);
+            foreach (var variable in variables)
+            {
+                token.ThrowIfCancellationRequested();
+                var expression = new GqlVariableExpression(variable.Key);
+                var shape = shapes.TryGetValue(variable.Key, out var recorded) ? recorded : Shape(expression);
+                // Ordinary scalar shapes do not represent a named path at their root.
+                // Import the binding's proven kind separately from its value shape.
+                var kinds = (GraphEntityShape[])shape.EntityKinds.Clone();
+                kinds[0] = new(ProjectionKind(expression), !mandatoryVariables.Contains(variable.Key));
+                incoming.Add(variable.Key, shape with { EntityKinds = kinds });
+            }
+            return incoming;
+        }
+
         bool MayReturn(GqlExpression expression, bool entity, int accesses = 0) => GraphValueExpressions.MayReturn(expression, _parameters, entity,
             (name, depth, entities) => shapes.TryGetValue(name, out var shape)
                 ? depth < shape.Entities.Length && (entities ? shape.Entities[depth] : shape.Composites[depth])
-                : entities && depth == 0, accesses, call => ResolveFunction(call).ReturnType, NativeExpression);
+                : entities && depth == 0, accesses, call => ResolveFunction(call).ReturnType, NativeExpression, ReductionWork is null ? null : new(ReductionWork));
 
         bool IsGroup(GqlExpression expression, int accesses = 0, bool ordering = false) => GraphValueExpressions.IsGroup(expression,
             // ORDER BY aliases shadow incoming names even inside result-preserving wrappers.
             // Resolve each alias expression in the incoming scope, not against other aliases.
             (name, depth) => ordering && orderAliases is not null && orderAliases.TryGetValue(name, out int index)
                 ? IsGroup(projections[index].Expression, depth)
-                : shapes.TryGetValue(name, out var shape) && depth < shape.Groups.Length && shape.Groups[depth], accesses, NativeExpression);
+                : shapes.TryGetValue(name, out var shape) && depth < shape.Groups.Length && shape.Groups[depth], accesses, NativeExpression, ReductionWork is null ? null : new(ReductionWork));
 
         GraphBindingShape Shape(GqlExpression expression, int accesses = 0)
         {
+            if (ReductionWork is not null) { return ReductionShape(expression, accesses); }
             var entities = new bool[GraphValueCodec.MaxDepth + 2];
             var composites = new bool[entities.Length];
             var scalars = new bool[entities.Length];
@@ -448,6 +571,41 @@ internal sealed partial class GraphPlanner
                     (name, depth) => shapes.TryGetValue(name, out var shape) ? depth < shape.Scalars.Length && shape.Scalars[depth]
                         : variables.TryGetValue(name, out var kind) && kind is BindingKind.Node or BindingKind.Relationship && depth == 1,
                     i + accesses, call => ResolveFunction(call).ReturnType, NativeExpression);
+                if (!entities[i] && !composites[i]) { break; }
+            }
+            return new GraphBindingShape(entities, composites, scalars, kinds, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null)
+            { Groups = groups, ValueKind = accesses == 0 ? KnownFunctionKind(expression, false) : GraphFunctionKind.Unknown, ResultNullable = accesses == 0 ? ResultNullable(expression) : null };
+        }
+
+        GraphBindingShape ReductionShape(GqlExpression expression, int accesses)
+        {
+            // Keep the ordinary Shape path and its closure layout unchanged.
+            var analysis = new GraphReductionAnalysis(ReductionWork!);
+            Func<GqlNamedFunctionCallExpression, GraphFunctionType> functionType = call =>
+            { analysis.Visit(call); return ResolveFunction(call).ReturnType; };
+            Func<string, int, bool> group = (name, depth) => shapes.TryGetValue(name, out var shape) && depth < shape.Groups.Length && shape.Groups[depth];
+            Func<string, int, bool, bool> possible = (name, depth, entity) => shapes.TryGetValue(name, out var shape)
+                ? depth < shape.Entities.Length && (entity ? shape.Entities[depth] : shape.Composites[depth]) : entity && depth == 0;
+            Func<string, int, GraphEntityShape> entityKind = (name, depth) =>
+                shapes.TryGetValue(name, out var shape) && depth < shape.EntityKinds.Length ? shape.EntityKinds[depth]
+                : depth == 0 && variables.TryGetValue(name, out var kind) && kind is BindingKind.Node or BindingKind.Relationship
+                    ? new GraphEntityShape(kind == BindingKind.Node ? GraphProjectionKind.Node : GraphProjectionKind.Relationship, !mandatoryVariables.Contains(name)) : default;
+            Func<string, int, bool> scalar = (name, depth) => shapes.TryGetValue(name, out var shape) ? depth < shape.Scalars.Length && shape.Scalars[depth]
+                : variables.TryGetValue(name, out var kind) && kind is BindingKind.Node or BindingKind.Relationship && depth == 1;
+            var entities = new bool[GraphValueCodec.MaxDepth + 2];
+            var composites = new bool[entities.Length];
+            var scalars = new bool[entities.Length];
+            var kinds = new GraphEntityShape[entities.Length];
+            var groups = new bool[entities.Length];
+            for (int i = 0; i < entities.Length; i++)
+            {
+                token.ThrowIfCancellationRequested();
+                int depth = i + accesses;
+                groups[i] = GraphValueExpressions.IsGroup(expression, group, depth, NativeExpression, analysis);
+                entities[i] = GraphValueExpressions.MayReturn(expression, _parameters, true, possible, depth, functionType, NativeExpression, analysis);
+                composites[i] = GraphValueExpressions.MayReturn(expression, _parameters, false, possible, depth, functionType, NativeExpression, analysis);
+                kinds[i] = GraphValueExpressions.EntityShape(expression, entityKind, depth, token, functionType, NativeExpression, analysis);
+                scalars[i] = GraphValueExpressions.IsKnownScalar(expression, _parameters, scalar, depth, functionType, NativeExpression, analysis);
                 if (!entities[i] && !composites[i]) { break; }
             }
             return new GraphBindingShape(entities, composites, scalars, kinds, accesses == 0 ? ExpressionType(expression) : DatabaseType.Null)
@@ -530,25 +688,66 @@ internal sealed partial class GraphPlanner
                 GraphFunctionKind.Path => GraphProjectionKind.Path,
                 _ => MayReturn(call, entity: true) ? GraphProjectionKind.EntityValue : GraphProjectionKind.Scalar,
             },
-            GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression or
+            GqlListExpression or GqlPatternComprehensionExpression or GqlListComprehensionExpression or GqlListSliceExpression or GqlReduceExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression or
                 GqlMemberExpression or GqlPropertyExpression or GqlSubscriptExpression or GqlAggregateExpression => MayReturn(expression, entity: true) ? GraphProjectionKind.EntityValue : GraphProjectionKind.Scalar,
             GqlLiteralExpression or GqlParameterExpression or GqlCastExpression or
                 GqlBinaryExpression or GqlLogicalExpression or GqlUnaryExpression or
-                GqlIsNullExpression or GqlTruthTestExpression or GqlInExpression or
+                GqlIsNullExpression or GqlTruthTestExpression or GqlInExpression or GqlExistsExpression or GqlListPredicateExpression or
                 GqlStringPredicateExpression or GqlLabeledPredicate => GraphProjectionKind.Scalar,
             _ => throw new GraphPlanningException("CG05001", ErrorMessages.ProjectionUnsupported, expression.Location),
         };
 
+        void ValidateSet(IReadOnlyList<GqlSetItem> items, GqlStage stage)
+        {
+            foreach (var item in items)
+            {
+                if (item is null || string.IsNullOrWhiteSpace(item.Variable))
+                { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, stage.Location); }
+                RequireVariable(item.Variable, entity: true);
+                switch (item)
+                {
+                    case GqlSetPropertyItem property when !string.IsNullOrWhiteSpace(property.Property) && property.Value is not null:
+                        ValidateExpression(property.Value);
+                        break;
+                    case GqlSetPropertiesItem map when map.Properties is not null:
+                        foreach (var pair in map.Properties)
+                        {
+                            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
+                            { throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location); }
+                            ValidateExpression(pair.Value);
+                        }
+                        break;
+                    case GqlSetLabelsItem labels when labels.Labels is { Count: > 0 } && labels.Labels.All(name => !string.IsNullOrWhiteSpace(name)):
+                        if (variables[item.Variable] != BindingKind.Node)
+                        { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, item.Location); }
+                        foreach (string name in labels.Labels) { tokens.IntroduceLabel(name); }
+                        break;
+                    default: throw new GraphPlanningException("CG05001", ErrorMessages.StageUnsupported, item.Location);
+                }
+            }
+        }
+
         void Declare(GqlPathPattern path, bool creating)
         {
             token.ThrowIfCancellationRequested();
-            var shape = GraphPathShape.Create(path, creating, parsed: statement.Text is not null);
+            var shape = GraphPathShape.Create(path, creating, parsed: statement.Text is not null || (_nativeExpressions as CorrelatedPlanningState)?.Correlation?.Parsed == true);
             pathShapes[path] = shape;
             if (path.Variable is { } variable)
             {
-                if (creating || !variables.TryAdd(variable, BindingKind.Path))
+                if ((_nativeExpressions as CorrelatedPlanningState)?.Correlation is { } scope && scope.Variables.ContainsKey(variable))
+                {
+                    var argumentKind = scope.Variables[variable];
+                    if (argumentKind != BindingKind.Path && (argumentKind != BindingKind.Value ||
+                        scope.Shapes.TryGetValue(variable, out var argumentShape) && argumentShape.Scalars[0] && argumentShape.ValueKind != GraphFunctionKind.Null))
+                    { throw new GraphPlanningException("CG01019", ErrorMessages.CorrelatedBindingConflict, query.Location); }
+                    variables[variable] = BindingKind.Path;
+                    scope.Used.Add(variable);
+                    scope.PatternArguments[variable] = GraphProjectionKind.Path;
+                }
+                else if (creating || !variables.TryAdd(variable, BindingKind.Path))
                 { throw new GraphPlanningException("CG03003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphPlannerPlanCoreGraphPlanning, variable), query.Location); }
-                declarations.Add(variable);
+                if ((_nativeExpressions as CorrelatedPlanningState)?.Correlation?.Variables.ContainsKey(variable) != true)
+                { declarations.Add(variable); }
                 if (!optional) { mandatoryVariables.Add(variable); }
             }
             for (int i = 0; i < shape.Nodes.Count; i++)
@@ -580,7 +779,7 @@ internal sealed partial class GraphPlanner
         }
         // Returns false when a MATCH pattern requires a name the database does not have.
         bool Validate(GqlPathPattern path, bool creating, IReadOnlySet<string>? propertyScope = null, bool declared = false,
-            IReadOnlySet<string>? incomingPrefilterScope = null)
+            IReadOnlySet<string>? incomingPrefilterScope = null, bool merging = false)
         {
             if (!declared) { Declare(path, creating); }
             bool satisfiable = true;
@@ -607,7 +806,10 @@ internal sealed partial class GraphPlanner
                 }
                 if (item.Shape.Edge is { } edge)
                 {
-                    bool valid = ValidateRelationship(edge, creating, tokens);
+                    bool valid = ValidateRelationship(edge, creating && !merging, tokens);
+                    if (merging &&
+                        string.IsNullOrWhiteSpace(edge.LabelExpression is null ? edge.Type : (edge.LabelExpression as GqlLabelName)?.Name))
+                    { throw new GraphPlanningException("CG05001", ErrorMessages.ValidateRelationshipGraphPlanning3, query.Location); }
                     if (item.Required) { satisfiable &= valid; }
                     ValidatePatternProperties(edge.Properties, item.Group);
                     ValidatePrefilter(edge.Predicate, item.Locals);
@@ -626,7 +828,16 @@ internal sealed partial class GraphPlanner
                 if (group && properties is { Count: > 0 } && properties.Values.Any(expression => expression is not null && GraphValueExpressions.ReferencesAny(expression,
                     propertyGroups ??= shapes.Where(binding => binding.Value.Groups.Any(value => value)).Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal), token)))
                 { throw new GraphPlanningException("CG03003", ErrorMessages.GroupPropertyReference, query.Location); }
-                ValidateStageProperties(properties!, creating, propertyScope, prefilterScope);
+                if (merging && properties is not null)
+                {
+                    foreach (var expression in properties.Values)
+                    {
+                        if (expression is GqlLiteralExpression literal) { GraphPlanExecutor.ValidateMergeProperty(literal.Value, expression.Location); }
+                        else if (expression is GqlParameterExpression parameter)
+                        { GraphPlanExecutor.ValidateMergeProperty(GraphExpressionEvaluator.Parameter(parameter, _parameters), expression.Location); }
+                    }
+                }
+                ValidateStageProperties(properties!, creating, propertyScope, prefilterScope, merging);
             }
 
             void ValidatePrefilter(GqlExpression? predicate, IReadOnlyList<(string Name, bool Node)> locals)
@@ -651,12 +862,13 @@ internal sealed partial class GraphPlanner
             }
         }
         void ValidateStageProperties(IReadOnlyDictionary<string, GqlExpression> properties, bool creating, IReadOnlySet<string>? propertyScope,
-            IReadOnlySet<string>? variableScope = null)
+            IReadOnlySet<string>? variableScope = null, bool merging = false)
         {
             if (properties is null) { throw new GraphPlanningException("CG05001", ErrorMessages.PropertyScalarRequired, query.Location); }
             var introduced = creating ? new HashSet<string>(variables.Keys.Where(name => !propertyScope!.Contains(name)), StringComparer.Ordinal) : null;
-            foreach (var expression in properties.Values)
+            foreach (var property in properties)
             {
+                var expression = property.Value;
                 if (expression is null) { throw new GraphPlanningException("CG05001", ErrorMessages.PropertyScalarRequired, query.Location); }
                 if (creating && GraphValueExpressions.ReferencesAny(expression, introduced!, token))
                 { throw new GraphPlanningException("CG05001", ErrorMessages.InsertPropertyScope, expression.Location); }
@@ -665,14 +877,24 @@ internal sealed partial class GraphPlanner
                 {
                     if (MayReturn(expression, true) || MayReturn(expression, false) ||
                         (KnownFunctionKind(expression, false) & (GraphFunctionKind.Date | GraphFunctionKind.Timestamp)) != 0)
-                    { throw new GraphPlanningException("CG03003", ErrorMessages.PropertyScalarRequired, expression.Location); }
+                    { throw new GraphPlanningException(merging ? "CG03004" : "CG03003", merging ? ErrorMessages.MergePropertyInvalid : ErrorMessages.PropertyScalarRequired, expression.Location); }
                 }
+                if (!writes) { tokens.CheckProperty(property.Key); }
             }
             ValidateProperties(properties, creating);
         }
         void Bind(string? variable, BindingKind kind)
         {
             if (variable is null) { return; }
+            if ((_nativeExpressions as CorrelatedPlanningState)?.Correlation is { } scope && scope.Variables.TryGetValue(variable, out var argumentKind))
+            {
+                scope.Used.Add(variable);
+                scope.PatternArguments[variable] = kind == BindingKind.Node ? GraphProjectionKind.Node : GraphProjectionKind.Relationship;
+                if (argumentKind != kind && (argumentKind != BindingKind.Value || scope.Shapes.TryGetValue(variable, out var argumentShape) && argumentShape.Scalars[0] && argumentShape.ValueKind != GraphFunctionKind.Null))
+                { throw new GraphPlanningException("CG01019", ErrorMessages.CorrelatedBindingConflict, query.Location); }
+                // An unknown value remains an argument, with its entity kind checked per row.
+                if (argumentKind == BindingKind.Value) { variables[variable] = kind; }
+            }
             if (groupVariables.Contains(variable))
             { throw new GraphPlanningException("CG03003", ErrorMessages.GroupBindingConflict, query.Location); }
             if (variables.TryGetValue(variable, out var previous) && previous != kind)
@@ -687,14 +909,19 @@ internal sealed partial class GraphPlanner
             if (variable is null || !variables.TryGetValue(variable, out var kind)) { throw new GraphPlanningException(variable is not null && deletedVariables.Contains(variable) ? "CG03003" : "CG05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphPlannerPlanCoreGraphPlanning3, variable), query.Location); }
             if (entity && kind is BindingKind.Path or BindingKind.Value)
             { throw new GraphPlanningException("CG03003", ErrorMessages.EntityBindingRequired, query.Location); }
+            if ((_nativeExpressions as CorrelatedPlanningState)?.Correlation is { } scope && scope.Variables.ContainsKey(variable) && !scope.Shadowed.Contains(variable))
+            { scope.Used.Add(variable); }
             return kind;
         }
         // Walks the predicate with an explicit stack, in source order: an AND chain of any length
         // and parentheses of any depth validate without recursion, as Neo4j's n-ary Ands carry
-        // any number of predicates. Only evaluation recurses, and it checks the stack (CG05008).
+        // any number of predicates. Entering a lexical comprehension scope checks the stack.
         void ValidateExpression(GqlExpression? root, bool allowAggregates = false, bool ordering = false,
-            IReadOnlySet<string>? variableScope = null)
+            IReadOnlySet<string>? variableScope = null, IReadOnlySet<string>? iterators = null,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput = null)
         {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (ordering) { orderInput ??= (variables, shapes); }
             if (root is null) { return; }
             var pending = new Stack<(GqlExpression? Expression, GqlExpression? Function)>();
             pending.Push((root, null));
@@ -702,25 +929,34 @@ internal sealed partial class GraphPlanner
             {
                 token.ThrowIfCancellationRequested();
                 var (expression, function) = item;
-                if (ordering && orderProjections is not null && expression is not null)
+                if (ordering && orderProjections is not null && expression is not null &&
+                    (iterators is null || !GraphValueExpressions.ReferencesAny(expression, iterators, token)))
                 {
                     if (orderProjections.ContainsKey(expression)) { continue; }
                     string? referenced = expression switch
                     {
                         GqlVariableExpression variable => variable.Variable,
                         GqlPropertyExpression property => property.Variable,
+                        GqlMemberExpression { Operand: GqlVariableExpression owner } => owner.Variable,
                         GqlLabeledPredicate labeled => labeled.Variable,
                         _ => null,
                     };
                     if (referenced is not null && orderAliases!.TryGetValue(referenced, out int aliasIndex))
                     {
                         var alias = projections[aliasIndex];
-                        if (expression is GqlPropertyExpression && alias.Kind == GraphProjectionKind.Path)
+                        string? propertyName = expression switch
+                        { GqlPropertyExpression property => property.Property, GqlMemberExpression member => member.Member, _ => null };
+                        if (propertyName is not null && alias.Kind == GraphProjectionKind.Path)
                         { throw new GraphPlanningException("CG03003", ErrorMessages.SortPathProperty, expression.Location); }
-                        if (expression is GqlPropertyExpression && alias.Kind == GraphProjectionKind.Scalar && Shape(alias.Expression).Scalars[0])
+                        if (propertyName is not null && alias.Kind == GraphProjectionKind.Scalar && Shape(alias.Expression).Scalars[0])
                         { throw new GraphPlanningException("CG03003", ErrorMessages.MemberBindingRequired, expression.Location); }
-                        if (expression is GqlPropertyExpression && Shape(alias.Expression).Group)
+                        if (propertyName is not null && Shape(alias.Expression).Group)
                         { throw new GraphPlanningException("CG03003", ErrorMessages.MemberBindingRequired, expression.Location); }
+                        if (!writes && propertyName is not null &&
+                            (alias.Kind is GraphProjectionKind.Node or GraphProjectionKind.Relationship ||
+                             alias.Kind == GraphProjectionKind.EntityValue &&
+                             IsEntityPropertyOwner(alias.Expression, false)))
+                        { tokens.CheckProperty(propertyName, expression.Location); }
                         if (expression is GqlLabeledPredicate labeled)
                         {
                             if (labeled.LabelExpression is null || alias.Kind is not (GraphProjectionKind.Node or GraphProjectionKind.Relationship or GraphProjectionKind.EntityValue))
@@ -744,7 +980,7 @@ internal sealed partial class GraphPlanner
                     GqlLabeledPredicate labeled => labeled.Variable,
                     _ => null,
                 };
-                if (reference is not null && variableScope is not null && !variableScope.Contains(reference) && variables.ContainsKey(reference))
+                if (reference is not null && iterators?.Contains(reference) != true && variableScope is not null && !variableScope.Contains(reference) && variables.ContainsKey(reference))
                 { throw new GraphPlanningException("CG01016", string.Format(System.Globalization.CultureInfo.CurrentCulture,
                     ErrorMessages.SelectivePrefilterPeerBinding, reference), expression!.Location); }
                 if (function is not null && reference is not null && !variables.ContainsKey(reference))
@@ -756,6 +992,8 @@ internal sealed partial class GraphPlanner
                 {
                     case GqlNamedFunctionCallExpression call:
                         GraphFunction registered = ResolveFunction(call);
+                        if (registered is GraphAggregateFunction && iterators is not null)
+                        { throw new GraphPlanningException("CG05024", ErrorMessages.IteratorAggregateInvalid, call.Location); }
                         if (!registered.AcceptsArity(call.Arguments.Count) ||
                             registered is GraphAggregateFunction && !allowAggregates ||
                             registered is GraphScalarFunction && call.Distinct ||
@@ -765,7 +1003,7 @@ internal sealed partial class GraphPlanner
                         {
                             for (int i = 0; i < call.Arguments.Count; i++)
                             {
-                                var kind = KnownFunctionKind(call.Arguments[i], ordering);
+                                var kind = KnownFunctionKind(call.Arguments[i], ordering, iterators);
                                 if (kind != GraphFunctionKind.Unknown && (kind & registered.Parameters[i].Kind) == 0)
                                 { throw new GraphPlanningException("CG03003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, call.Name, i + 1), call.Arguments[i].Location); }
                             }
@@ -773,19 +1011,21 @@ internal sealed partial class GraphPlanner
                         foreach (var argument in call.Arguments.Reverse()) { pending.Push((argument, call)); }
                         break;
                     case GqlFunctionCallExpression call:
-                        ValidateFunction(call, ordering);
+                        ValidateFunction(call, ordering, iterators);
                         function = call;
                         foreach (var argument in call.Arguments.Reverse()) { pending.Push((argument, function)); }
                         break;
                     case GqlCastExpression cast:
                         function = cast;
                         if (!Enum.IsDefined(cast.Target)) { throw new GraphPlanningException("CG05001", ErrorMessages.CastValueInvalid, cast.Location); }
-                        if ((KnownFunctionKind(cast.Operand, ordering) & (GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Path | GraphFunctionKind.List | GraphFunctionKind.Map)) != 0 ||
-                            KnownFunctionKind(cast.Operand, ordering) == GraphFunctionKind.Boolean && cast.Target is GqlCastType.Int32 or GqlCastType.Int64 or GqlCastType.Float32 or GqlCastType.Float64 or GqlCastType.Decimal)
+                        if ((KnownFunctionKind(cast.Operand, ordering, iterators) & (GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Path | GraphFunctionKind.List | GraphFunctionKind.Map)) != 0 ||
+                            KnownFunctionKind(cast.Operand, ordering, iterators) == GraphFunctionKind.Boolean && cast.Target is GqlCastType.Int32 or GqlCastType.Int64 or GqlCastType.Float32 or GqlCastType.Float64 or GqlCastType.Decimal)
                         { throw new GraphPlanningException("CG03003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, "CAST", 1), cast.Location); }
                         pending.Push((cast.Operand, function));
                         break;
                     case GqlAggregateExpression aggregate:
+                        if (iterators is not null)
+                        { throw new GraphPlanningException("CG05024", ErrorMessages.IteratorAggregateInvalid, aggregate.Location); }
                         if (!allowAggregates || !Enum.IsDefined(aggregate.Function) ||
                             aggregate.Operand is null && (aggregate.Function != GqlAggregateFunction.Count || aggregate.Distinct))
                         { throw new GraphPlanningException("CG05001", ErrorMessages.AggregatePlacement, aggregate.Location); }
@@ -809,10 +1049,10 @@ internal sealed partial class GraphPlanner
                         { ((Dictionary<string, object?>)_parameters!)[parameter.Name] = GraphCompositeValues.Snapshot(bound, parameter.Location); }
                         break;
                     case GqlPropertyExpression property:
-                        ValidateMemberOwner(property.Variable, property);
+                        ValidateMemberOwner(property.Variable, property, property.Property);
                         break;
                     case GqlMemberExpression { Operand: GqlVariableExpression owner } member:
-                        ValidateMemberOwner(owner.Variable, member);
+                        ValidateMemberOwner(owner.Variable, member, member.Member);
                         break;
                     case GqlBinaryExpression { Operator: "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%" or "||" } binary:
                         pending.Push((binary.Right, function));
@@ -826,6 +1066,10 @@ internal sealed partial class GraphPlanner
                         if (logical.Operands is null || logical.Operands.Count < 2)
                         { throw new GraphPlanningException("CG05001", ErrorMessages.GraphPlannerPlanCoreGraphPlanning5, expression?.Location); }
                         for (int i = logical.Operands.Count - 1; i >= 0; i--) { pending.Push((logical.Operands[i], function)); }
+                        break;
+                    case GqlUnaryExpression { Operator: "NOT", Operand: GqlExistsExpression anti } unary:
+                        (CorrelatedState.Anti ??= new(ReferenceEqualityComparer.Instance)).Add(anti);
+                        pending.Push((unary.Operand, function));
                         break;
                     case GqlUnaryExpression { Operator: "NOT" or "+" or "-" } unary:
                         pending.Push((unary.Operand, function));
@@ -843,7 +1087,32 @@ internal sealed partial class GraphPlanner
                     case GqlMemberExpression member:
                         if (IsGroup(member.Operand, ordering: ordering))
                         { throw new GraphPlanningException("CG03003", ErrorMessages.MemberBindingRequired, member.Location); }
+                        if (!writes &&
+                            IsEntityPropertyOwner(member.Operand, ordering, iterators))
+                        { tokens.CheckProperty(member.Member, member.Location); }
                         foreach (var child in GraphValueExpressions.Children(member).Reverse()) { pending.Push((child, function)); }
+                        break;
+                    case GqlReduceExpression reduce:
+                        ValidateReduction(reduce, allowAggregates, ordering, variableScope, iterators, orderInput);
+                        break;
+                    case GqlPatternComprehensionExpression pattern:
+                        ValidatePatternComprehension(pattern, ordering, variableScope, iterators, orderInput);
+                        break;
+                    case GqlExistsExpression exists:
+                        ValidateExists(exists, ordering, variableScope, iterators, orderInput);
+                        break;
+                    case GqlListPredicateExpression predicate:
+                        ValidateListPredicate(predicate, allowAggregates, ordering, variableScope, iterators, orderInput);
+                        break;
+                    case GqlListComprehensionExpression comprehension:
+                        ValidateComprehension(comprehension, allowAggregates, ordering, variableScope, iterators, orderInput);
+                        break;
+                    case GqlListSliceExpression slice:
+                        if (slice.From is null && slice.To is null)
+                        { throw new GraphPlanningException("CG00012", ErrorMessages.SliceBoundRequired, slice.Location); }
+                        ValidateSliceBound(slice.From, ordering, iterators);
+                        ValidateSliceBound(slice.To, ordering, iterators);
+                        foreach (var child in GraphValueExpressions.Children(slice).Reverse()) { pending.Push((child, function)); }
                         break;
                     case GqlListExpression or GqlMapExpression or GqlCaseExpression or GqlCoalesceExpression or
                         GqlNullIfExpression or GqlSubscriptExpression:
@@ -863,9 +1132,267 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
+        void ValidatePatternComprehension(GqlPatternComprehensionExpression expression, bool ordering,
+            IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            if (expression.Pattern is null || expression.Projection is null || expression.Pattern.Selector is not null || expression.Pattern.Mode is not null ||
+                expression.Pattern.Nodes is null || expression.Pattern.Relationships is null or { Count: 0 } ||
+                expression.Pattern.Elements?.Any(element => element is GqlParenthesizedPathPattern) == true ||
+                GraphGrouping.ContainsAggregate(expression.Projection, _database.Engine.Functions, token))
+            { throw GraphValueExpressions.InvalidPattern(expression); }
+            var state = CorrelatedState;
+            state.Subplans ??= new(ReferenceEqualityComparer.Instance);
+            if (state.Subplans.ContainsKey(expression)) { return; }
+            state.Subplans.Add(expression, PlanCorrelated(expression,
+                new GqlQueryExpression([new GqlMatchClause([expression.Pattern], expression.Predicate, false)], [], [], false,
+                    [new GqlProjection(expression.Projection)], expression.Location), ordering, variableScope, iterators, orderInput));
+        }
+
+        void ValidateExists(GqlExistsExpression exists, bool ordering, IReadOnlySet<string>? variableScope,
+            IReadOnlySet<string>? iterators, (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            if (exists.MatchClauses is null || exists.MatchClauses.Count == 0 ||
+                exists.MatchClauses.Any(clause => clause?.Paths is null || clause.Paths.Count == 0))
+            { throw new GraphPlanningException("CG05027", ErrorMessages.CorrelatedPlanRequired, exists.Location); }
+            var state = CorrelatedState;
+            state.Subplans ??= new(ReferenceEqualityComparer.Instance);
+            if (state.Subplans.ContainsKey(exists)) { return; }
+            state.Subplans.Add(exists, PlanCorrelated(exists,
+                new GqlQueryExpression(exists.MatchClauses, [], [], false, [], exists.Location), ordering, variableScope, iterators, orderInput));
+        }
+        // A consumer supplies the inner query and owner expression; correlation, scope checking
+        // and ordinary pattern planning live here once for EXISTS and future collection forms.
+        GraphCorrelatedSubplan PlanCorrelated(GqlExpression owner, GqlQueryExpression innerQuery, bool ordering,
+            IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            var state = CorrelatedState;
+            var scope = new CorrelationScope(variables, shapes, mandatoryVariables, groupVariables, tokens, owner,
+                statement.Text is not null || state.Correlation?.Parsed == true);
+            if (ordering && (query.SetQuantifier == GqlSetQuantifier.Distinct || query.GroupBy is not null ||
+                projections.Any(projection => GraphGrouping.ContainsAggregate(projection.Expression, _database.Engine.Functions, token))))
+            {
+                foreach (var name in scope.Variables.Keys.ToArray())
+                {
+                    bool visible = iterators?.Contains(name) == true || projectedEntities.Contains(name);
+                    if (visible) { continue; }
+                    scope.Variables.Remove(name); scope.Shapes.Remove(name); scope.Mandatory.Remove(name); scope.Groups.Remove(name);
+                }
+            }
+            if (ordering && orderAliases is not null)
+            {
+                foreach (var alias in orderAliases)
+                {
+                    if (iterators?.Contains(alias.Key) == true) { continue; }
+                    scope.Variables[alias.Key] = ToBindingKind(projections[alias.Value].Kind);
+                    var currentVariables = variables;
+                    var currentShapes = shapes;
+                    try
+                    {
+                        if (orderInput is { } input) { variables = input.Variables; shapes = input.Shapes; }
+                        scope.Shapes[alias.Key] = Shape(projections[alias.Value].Expression);
+                    }
+                    finally { variables = currentVariables; shapes = currentShapes; }
+                    if (scope.Shapes[alias.Key].Group) { scope.Groups.Add(alias.Key); } else { scope.Groups.Remove(alias.Key); }
+                    if (!projections[alias.Value].Optional) { scope.Mandatory.Add(alias.Key); } else { scope.Mandatory.Remove(alias.Key); }
+                }
+            }
+            // The optional path name declares a fresh local binding.
+            if (owner is GqlPatternComprehensionExpression { Pattern.Variable: { } localPath })
+            { scope.Variables.Remove(localPath); scope.Shapes.Remove(localPath); scope.Mandatory.Remove(localPath); scope.Groups.Remove(localPath); }
+            var previous = state.Correlation;
+            GraphPlan inner;
+            try
+            {
+                state.Correlation = scope;
+                inner = PlanCore(innerQuery, false, token, scope, statementWrites: writes);
+            }
+            finally { state.Correlation = previous; }
+            foreach (var name in scope.Used)
+            {
+                if (variableScope is not null && !variableScope.Contains(name) && iterators?.Contains(name) != true)
+                { throw new GraphPlanningException("CG01016", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.SelectivePrefilterPeerBinding, name), owner.Location); }
+                if (previous?.Variables.ContainsKey(name) == true && !previous.Shadowed.Contains(name)) { previous.Used.Add(name); }
+            }
+            return new GraphCorrelatedSubplan(inner, scope.Used.Order(StringComparer.Ordinal).ToArray(), scope.PatternArguments, previous?.Owner);
+
+        }
+        void ValidateSliceBound(GqlExpression? bound, bool ordering, IReadOnlySet<string>? iterators)
+        {
+            // Neo4j checks known expression types semantically, while parameters use its
+            // runtime numeric conversion (which also accepts/truncates floating values).
+            if (bound is null or GqlParameterExpression) { return; }
+            var kind = SliceBoundKind(bound, ordering, iterators);
+            if (kind != GraphFunctionKind.Unknown && (kind & GraphFunctionKind.Integral) == 0 ||
+                bound is GqlLiteralExpression { Value: not null } literal && GraphValueComparer.IsNumber(literal.Value) &&
+                (Convert.ToDecimal(literal.Value, System.Globalization.CultureInfo.InvariantCulture) < int.MinValue ||
+                 Convert.ToDecimal(literal.Value, System.Globalization.CultureInfo.InvariantCulture) > int.MaxValue))
+            { throw new GraphPlanningException("CG02014", ErrorMessages.ListOperationInvalid, bound.Location); }
+        }
+        GraphFunctionKind SliceBoundKind(GqlExpression expression, bool ordering, IReadOnlySet<string>? iterators)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            if (expression is GqlParameterExpression) { return GraphFunctionKind.Unknown; }
+            if (expression is GqlUnaryExpression { Operator: "+" or "-" } unary)
+            { return SliceBoundKind(unary.Operand, ordering, iterators); }
+            if (expression is GqlBinaryExpression { Operator: "+" or "-" or "*" or "/" or "%" } binary)
+            {
+                var left = SliceBoundKind(binary.Left, ordering, iterators);
+                var right = SliceBoundKind(binary.Right, ordering, iterators);
+                if (left == GraphFunctionKind.NonIntegral || right == GraphFunctionKind.NonIntegral)
+                { return GraphFunctionKind.NonIntegral; }
+                if (left == GraphFunctionKind.Integral && right == GraphFunctionKind.Integral)
+                { return GraphFunctionKind.Integral; }
+            }
+            return KnownFunctionKind(expression, ordering, iterators);
+        }
+        GraphBindingShape CollectionShape(GqlExpression expression, int accesses, bool ordering, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            if (!ordering || orderAliases is null || orderInput is null) { return Shape(expression, accesses); }
+            ReductionState.Variables = orderInput.Value.Variables;
+            ReductionState.Shapes = orderInput.Value.Shapes;
+            var currentVariables = variables;
+            var currentShapes = shapes;
+            try
+            {
+                // Projection expressions belong to the original incoming scope, even when
+                // an enclosing collection has since shadowed one of their input names.
+                variables = orderInput.Value.Variables;
+                shapes = orderInput.Value.Shapes;
+                var aliases = orderAliases.Where(pair => iterators?.Contains(pair.Key) != true)
+                    .Select(pair => (Name: pair.Key, Kind: projections[pair.Value].Kind, Shape: Shape(projections[pair.Value].Expression))).ToArray();
+                variables = new(currentVariables, StringComparer.Ordinal);
+                shapes = new(currentShapes, StringComparer.Ordinal);
+                foreach (var alias in aliases)
+                {
+                    variables[alias.Name] = ToBindingKind(alias.Kind);
+                    shapes[alias.Name] = alias.Shape;
+                }
+                return Shape(expression, accesses);
+            }
+            finally { variables = currentVariables; shapes = currentShapes; }
+        }
+        void ValidateReduction(GqlReduceExpression expression, bool allowAggregates, bool ordering,
+            IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            ReductionState.Work ??= ReductionState.SharedWork ?? new(token);
+            _ = GraphValueExpressions.Children(expression).ToArray();
+            ValidateExpression(expression.List, allowAggregates, ordering, variableScope, iterators, orderInput);
+            ValidateReductionSource(expression.List, ordering, iterators);
+            ValidateExpression(expression.Initial, allowAggregates, ordering, variableScope, iterators, orderInput);
+            var element = CollectionShape(expression.List, 1, ordering, iterators, orderInput);
+            var accumulator = CollectionShape(expression, 0, ordering, iterators, orderInput);
+            ValidateCollectionBody(expression.Variable, element, expression.Body, null, expression.Accumulator, accumulator,
+                ordering, variableScope, iterators, orderInput);
+        }
+        void ValidateListPredicate(GqlListPredicateExpression expression, bool allowAggregates, bool ordering,
+            IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            _ = GraphValueExpressions.Children(expression).ToArray();
+            ValidateExpression(expression.List, allowAggregates, ordering, variableScope, iterators, orderInput);
+            ValidateReductionSource(expression.List, ordering, iterators);
+            ValidateCollectionBody(expression.Variable, CollectionShape(expression.List, 1, ordering, iterators, orderInput), expression.Predicate, expression.Predicate,
+                null, null, ordering, variableScope, iterators, orderInput);
+        }
+        void ValidateReductionSource(GqlExpression expression, bool ordering, IReadOnlySet<string>? iterators)
+        {
+            var kind = KnownFunctionKind(expression, ordering, iterators);
+            if (kind != GraphFunctionKind.Unknown && (kind & GraphFunctionKind.List) == 0)
+            { throw new GraphPlanningException("CG02015", ErrorMessages.ReductionListRequired, expression.Location); }
+        }
+        void ValidateCollectionBody(string variable, GraphBindingShape element, GqlExpression body, GqlExpression? predicate,
+            string? accumulator, GraphBindingShape? accumulatorShape, bool ordering, IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            var pending = new Stack<GqlExpression>();
+            pending.Push(body);
+            while (pending.TryPop(out var value))
+            {
+                token.ThrowIfCancellationRequested();
+                if (value is GqlAggregateExpression || value is GqlNamedFunctionCallExpression named && ResolveFunction(named) is GraphAggregateFunction)
+                { throw new GraphPlanningException("CG05025", ErrorMessages.ReductionBodyInvalid, value.Location); }
+                foreach (var child in GraphValueExpressions.Children(value)) { pending.Push(child); }
+            }
+            var outerVariables = variables;
+            var outerShapes = shapes;
+            variables = new(variables, StringComparer.Ordinal);
+            shapes = new(shapes, StringComparer.Ordinal);
+            var inner = iterators is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(iterators, StringComparer.Ordinal);
+            inner.Add(variable);
+            variables[variable] = ToBindingKind(element.EntityKinds[0].Kind);
+            shapes[variable] = element;
+            if (accumulator is not null)
+            {
+                inner.Add(accumulator);
+                variables[accumulator] = ToBindingKind(accumulatorShape!.EntityKinds[0].Kind);
+                shapes[accumulator] = accumulatorShape;
+            }
+            var iteratorCorrelation = (_nativeExpressions as CorrelatedPlanningState)?.Correlation;
+            bool shadowsVariable = iteratorCorrelation?.Shadowed.Add(variable) == true;
+            bool shadowsAccumulator = accumulator is not null && iteratorCorrelation?.Shadowed.Add(accumulator) == true;
+            try
+            {
+                ValidateExpression(body, ordering: ordering, variableScope: variableScope, iterators: inner, orderInput: orderInput);
+                if (predicate is not null)
+                {
+                    var kind = KnownFunctionKind(predicate, ordering, inner);
+                    if (kind != GraphFunctionKind.Unknown && (kind & GraphFunctionKind.Boolean) == 0)
+                    { throw new GraphPlanningException("CG02013", ErrorMessages.BooleanRequired, predicate.Location); }
+                }
+            }
+            finally
+            {
+                variables = outerVariables; shapes = outerShapes;
+                if (shadowsVariable) { iteratorCorrelation!.Shadowed.Remove(variable); }
+                if (shadowsAccumulator) { iteratorCorrelation!.Shadowed.Remove(accumulator!); }
+            }
+        }
+        void ValidateComprehension(GqlListComprehensionExpression expression, bool allowAggregates, bool ordering,
+            IReadOnlySet<string>? variableScope, IReadOnlySet<string>? iterators,
+            (Dictionary<string, BindingKind> Variables, Dictionary<string, GraphBindingShape> Shapes)? orderInput)
+        {
+            if (string.IsNullOrEmpty(expression.Variable))
+            { throw new GraphPlanningException("CG01017", ErrorMessages.IteratorNameRequired, expression.Location); }
+            if (expression.List is null)
+            { throw new GraphPlanningException("CG05001", ErrorMessages.MembershipListRequired, expression.Location); }
+            ValidateExpression(expression.List, allowAggregates, ordering, variableScope, iterators, orderInput);
+            var element = CollectionShape(expression.List, 1, ordering, iterators, orderInput);
+            var outerVariables = variables;
+            var outerShapes = shapes;
+            variables = new(variables, StringComparer.Ordinal);
+            shapes = new(shapes, StringComparer.Ordinal);
+            var inner = iterators is null ? new HashSet<string>(StringComparer.Ordinal) : new HashSet<string>(iterators, StringComparer.Ordinal);
+            inner.Add(expression.Variable);
+            variables[expression.Variable] = ToBindingKind(element.EntityKinds[0].Kind);
+            shapes[expression.Variable] = element;
+            var iteratorCorrelation = (_nativeExpressions as CorrelatedPlanningState)?.Correlation;
+            bool shadowsVariable = iteratorCorrelation?.Shadowed.Add(expression.Variable) == true;
+            try
+            {
+                ValidateExpression(expression.Predicate, ordering: ordering, variableScope: variableScope, iterators: inner, orderInput: orderInput);
+                if (expression.Predicate is not null)
+                {
+                    var kind = KnownFunctionKind(expression.Predicate, ordering, inner);
+                    if (kind != GraphFunctionKind.Unknown && (kind & GraphFunctionKind.Boolean) == 0)
+                    { throw new GraphPlanningException("CG02013", ErrorMessages.BooleanRequired, expression.Predicate.Location); }
+                }
+                ValidateExpression(expression.Projection, ordering: ordering, variableScope: variableScope, iterators: inner, orderInput: orderInput);
+            }
+            finally
+            {
+                variables = outerVariables; shapes = outerShapes;
+                if (shadowsVariable) { iteratorCorrelation!.Shadowed.Remove(expression.Variable); }
+            }
+        }
         GqlExpression? NativeExpression(GqlNamedFunctionCallExpression call)
         {
-            if (_nativeExpressions is not null && _nativeExpressions.TryGetValue(call, out var cached)) { return cached; }
+            var cache = _nativeExpressions is ReductionPlanningState state ? state.Native : _nativeExpressions as Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>;
+            if (cache?.TryGetValue(call, out var cached) == true) { return cached; }
             GqlExpression? expression = ResolveFunction(call) switch
             {
                 GraphNativeScalarFunction scalar => new GqlFunctionCallExpression(scalar.Identity, call.Arguments, call.Location),
@@ -873,7 +1400,13 @@ internal sealed partial class GraphPlanner
                     call.Arguments.FirstOrDefault(), call.Distinct, call.Location),
                 _ => null,
             };
-            (_nativeExpressions ??= new(ReferenceEqualityComparer.Instance)).Add(call, expression); return expression;
+            if (cache is null)
+            {
+                cache = new(ReferenceEqualityComparer.Instance);
+                if (_nativeExpressions is ReductionPlanningState current) { current.Native = cache; }
+                else { _nativeExpressions = cache; }
+            }
+            cache.Add(call, expression); return expression;
         }
         GraphFunction ResolveFunction(GqlNamedFunctionCallExpression call)
         {
@@ -881,7 +1414,7 @@ internal sealed partial class GraphPlanner
             var function = _database.Engine.Functions.Resolve(call);
             (_functions ??= new(ReferenceEqualityComparer.Instance)).Add(call, function); return function;
         }
-        void ValidateFunction(GqlFunctionCallExpression call, bool ordering)
+        void ValidateFunction(GqlFunctionCallExpression call, bool ordering, IReadOnlySet<string>? iterators)
         {
             if (!GraphScalarFunctions.ValidArity(call))
             { throw new GraphPlanningException("CG05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionArity, GraphScalarFunctions.Name(call.Function)), call.Location); }
@@ -889,12 +1422,12 @@ internal sealed partial class GraphPlanner
             if (call.Arguments.Any(argument => argument is GqlLiteralExpression { Value: null } || argument is GqlParameterExpression p && GraphExpressionEvaluator.Parameter(p, _parameters) is null)) { return; }
             for (int i = 0; i < call.Arguments.Count; i++)
             {
-                var kind = KnownFunctionKind(call.Arguments[i], ordering);
+                var kind = KnownFunctionKind(call.Arguments[i], ordering, iterators);
                 if (kind != GraphFunctionKind.Unknown && (kind & GraphScalarFunctions.Argument(call.Function, i)) == 0)
                 { throw new GraphPlanningException("CG03003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FunctionKind, GraphScalarFunctions.Name(call.Function), i + 1), call.Arguments[i].Location); }
             }
         }
-        GraphFunctionKind KnownFunctionKind(GqlExpression expression, bool ordering)
+        GraphFunctionKind KnownFunctionKind(GqlExpression expression, bool ordering, IReadOnlySet<string>? iterators = null)
         {
             switch (expression)
             {
@@ -911,7 +1444,7 @@ internal sealed partial class GraphPlanner
                 case GqlAggregateExpression aggregate:
                     return aggregate.Function == GqlAggregateFunction.CollectList ? GraphFunctionKind.List
                         : aggregate.Function is GqlAggregateFunction.Count or GqlAggregateFunction.Sum or GqlAggregateFunction.Avg ? GraphFunctionKind.Number : GraphFunctionKind.Unknown;
-                case GqlLogicalExpression or GqlIsNullExpression or GqlTruthTestExpression or GqlInExpression or GqlStringPredicateExpression or GqlLabeledPredicate:
+                case GqlLogicalExpression or GqlIsNullExpression or GqlTruthTestExpression or GqlInExpression or GqlExistsExpression or GqlListPredicateExpression or GqlStringPredicateExpression or GqlLabeledPredicate:
                     return GraphFunctionKind.Boolean;
                 case GqlUnaryExpression unary: return unary.Operator == "NOT" ? GraphFunctionKind.Boolean : GraphFunctionKind.Number;
                 case GqlBinaryExpression binary: return binary.Operator switch
@@ -919,11 +1452,22 @@ internal sealed partial class GraphPlanner
                     "=" or "<>" or "!=" or "<" or "<=" or ">" or ">=" => GraphFunctionKind.Boolean,
                     "-" or "*" or "/" or "%" => GraphFunctionKind.Number, "||" => GraphFunctionKind.String, _ => GraphFunctionKind.Unknown,
                 };
-                case GqlListExpression: return GraphFunctionKind.List;
+                case GqlListExpression or GqlPatternComprehensionExpression or GqlListComprehensionExpression or GqlListSliceExpression: return GraphFunctionKind.List;
                 case GqlMapExpression: return GraphFunctionKind.Map;
+                case GqlReduceExpression reduce: return ReductionKind(reduce, ordering, iterators);
                 case GqlVariableExpression variable:
-                    if (ordering && orderAliases?.TryGetValue(variable.Variable, out int index) == true)
-                    { return KnownFunctionKind(projections[index].Expression, false); }
+                    if (ordering && iterators?.Contains(variable.Variable) != true && orderAliases?.TryGetValue(variable.Variable, out int index) == true)
+                    {
+                        var currentVariables = variables;
+                        var currentShapes = shapes;
+                        try
+                        {
+                            variables = (_nativeExpressions as ReductionPlanningState)?.Variables ?? currentVariables;
+                            shapes = (_nativeExpressions as ReductionPlanningState)?.Shapes ?? currentShapes;
+                            return KnownFunctionKind(projections[index].Expression, false);
+                        }
+                        finally { variables = currentVariables; shapes = currentShapes; }
+                    }
                     if (shapes.TryGetValue(variable.Variable, out var shape))
                     {
                         if (shape.Group) { return GraphFunctionKind.List; }
@@ -947,16 +1491,93 @@ internal sealed partial class GraphPlanner
                         shapes.TryGetValue(name, out var shape) && depth < shape.EntityKinds.Length ? shape.EntityKinds[depth]
                         : depth == 0 && variables.TryGetValue(name, out var kind) && kind is BindingKind.Node or BindingKind.Relationship
                             ? new GraphEntityShape(kind == BindingKind.Node ? GraphProjectionKind.Node : GraphProjectionKind.Relationship, !mandatoryVariables.Contains(name))
-                            : default, 0, token, call => ResolveFunction(call).ReturnType, NativeExpression).Kind;
+                            : default, 0, token, call => ResolveFunction(call).ReturnType, NativeExpression, ReductionWork is null ? null : new(ReductionWork)).Kind;
                     return entity == GraphProjectionKind.Node ? GraphFunctionKind.Node : entity == GraphProjectionKind.Relationship ? GraphFunctionKind.Relationship : GraphFunctionKind.Unknown;
             }
         }
-        void ValidateMemberOwner(string variable, GqlExpression expression)
+        GraphFunctionKind ReductionKind(GqlReduceExpression expression, bool ordering, IReadOnlySet<string>? iterators,
+            Dictionary<string, GraphFunctionKind>? outer = null)
+        {
+            System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+            GraphFunctionKind Analyze(GqlExpression value, Dictionary<string, GraphFunctionKind>? scope)
+            {
+                token.ThrowIfCancellationRequested();
+                ReductionWork?.Visit(value);
+                System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+                if (value is GqlLiteralExpression { Value: null }) { return GraphFunctionKind.Null; }
+                if (value is GqlVariableExpression variable && scope?.TryGetValue(variable.Variable, out var kind) == true) { return kind; }
+                if (value is GqlReduceExpression reduce) { return ReductionKind(reduce, ordering, iterators, scope); }
+                if (value is GqlCaseExpression or GqlCoalesceExpression)
+                { return Union(GraphValueExpressions.ResultChildren(value), scope); }
+                if (value is GqlNullIfExpression nullIf) { return Analyze(nullIf.Left, scope); }
+                if (value is GqlBinaryExpression { Operator: "+" } binary)
+                {
+                    var left = Analyze(binary.Left, scope);
+                    var right = Analyze(binary.Right, scope);
+                    if (left == GraphFunctionKind.Null || right == GraphFunctionKind.Null) { return GraphFunctionKind.Null; }
+                    if (left != GraphFunctionKind.Unknown && right != GraphFunctionKind.Unknown &&
+                        ((left | right) & ~(GraphFunctionKind.Number | GraphFunctionKind.Null)) == 0) { return GraphFunctionKind.Number; }
+                }
+                return KnownFunctionKind(value, ordering, iterators);
+            }
+            GraphFunctionKind Union(IEnumerable<GqlExpression> values, Dictionary<string, GraphFunctionKind>? scope)
+            {
+                var result = GraphFunctionKind.Null;
+                foreach (var value in values)
+                {
+                    // NULL contributes no non-NULL kind; unknown must absorb the union.
+                    var kind = Analyze(value, scope);
+                    if (kind == GraphFunctionKind.Unknown) { return kind; }
+                    result |= kind;
+                }
+                return result;
+            }
+            var current = Analyze(expression.Initial, outer);
+            var inner = outer is null ? new Dictionary<string, GraphFunctionKind>(StringComparer.Ordinal) : new(outer, StringComparer.Ordinal);
+            inner[expression.Variable] = expression.List is GqlListExpression { Items.Count: > 0 } list ? Union(list.Items, outer) : GraphFunctionKind.Unknown;
+            while (true)
+            {
+                token.ThrowIfCancellationRequested();
+                inner[expression.Accumulator] = current;
+                var body = Analyze(expression.Body, inner);
+                var next = current == GraphFunctionKind.Unknown || body == GraphFunctionKind.Unknown ? GraphFunctionKind.Unknown : current | body;
+                if (next == current) { return current & ~GraphFunctionKind.Null; }
+                current = next;
+            }
+        }
+        // Only unresolved names need this additional proof. Conditional entity results can
+        // combine nodes and relationships without having one exact projection kind.
+        bool IsEntityPropertyOwner(GqlExpression expression, bool ordering, IReadOnlySet<string>? iterators = null)
+        {
+            if (expression is not (GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression))
+            { return IsEntityKind(KnownFunctionKind(expression, ordering, iterators)); }
+            var pending = new Stack<GqlExpression>();
+            pending.Push(expression);
+            bool entity = false;
+            while (pending.TryPop(out var value))
+            {
+                token.ThrowIfCancellationRequested();
+                if (value is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression)
+                {
+                    foreach (var child in GraphValueExpressions.ResultChildren(value)) { pending.Push(child); }
+                    continue;
+                }
+                var kind = KnownFunctionKind(value, ordering, iterators);
+                if (kind == GraphFunctionKind.Null) { continue; }
+                if (!IsEntityKind(kind)) { return false; }
+                entity = true;
+            }
+            return entity;
+        }
+        void ValidateMemberOwner(string variable, GqlExpression expression, string property)
         {
             var kind = RequireVariable(variable);
             if (kind == BindingKind.Path || kind == BindingKind.Value &&
                 shapes.TryGetValue(variable, out var shape) && (shape.Scalars[0] || shape.Group))
             { throw new GraphPlanningException("CG03003", ErrorMessages.MemberBindingRequired, expression.Location); }
+            if (!writes && (kind is BindingKind.Node or BindingKind.Relationship ||
+                shapes.TryGetValue(variable, out var entityShape) && IsEntityKind(entityShape.ValueKind)))
+            { tokens.CheckProperty(property, expression.Location); }
         }
         // A labeled predicate tests a node's labels or a relationship's type; a path has neither.
         // Its names resolve against the catalog of the variable's kind, as a pattern's do. It is a
@@ -1141,7 +1762,33 @@ internal sealed partial class GraphPlanner
         return true;
     }
 
+    [System.Diagnostics.DebuggerDisplay("CorrelationScope")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(CorrelationScope.DebugView))]
+    private sealed class CorrelationScope
+    {
+        internal CorrelationScope(Dictionary<string, BindingKind> variables, Dictionary<string, GraphBindingShape> shapes,
+            HashSet<string> mandatory, HashSet<string> groups, GraphTokenResolver tokens, GqlExpression owner, bool parsed)
+        { Variables = new(variables, StringComparer.Ordinal); Shapes = new(shapes, StringComparer.Ordinal); Mandatory = new(mandatory, StringComparer.Ordinal); Groups = new(groups, StringComparer.Ordinal); Tokens = tokens; Owner = owner; Parsed = parsed; }
+        internal Dictionary<string, BindingKind> Variables { get; }
+        internal Dictionary<string, GraphBindingShape> Shapes { get; }
+        internal HashSet<string> Mandatory { get; }
+        internal HashSet<string> Groups { get; }
+        internal GraphTokenResolver Tokens { get; }
+        internal GqlExpression Owner { get; }
+        internal bool Parsed { get; }
+        internal HashSet<string> Used { get; } = new(StringComparer.Ordinal);
+        // A name in Variables refers to the imported binding only while no local iterator
+        // shadows it. Nested subplans may consume the local but must not propagate it outward.
+        internal HashSet<string> Shadowed { get; } = new(StringComparer.Ordinal);
+        internal Dictionary<string, GraphProjectionKind> PatternArguments { get; } = new(StringComparer.Ordinal);
+        private sealed class DebugView { public DebugView(CorrelationScope value) { } }
+    }
+
     private enum BindingKind { Node, Relationship, Path, Value }
+
+    private static bool IsEntityKind(GraphFunctionKind kind)
+        => (kind & (GraphFunctionKind.Node | GraphFunctionKind.Relationship)) != 0 &&
+            (kind & ~(GraphFunctionKind.Node | GraphFunctionKind.Relationship | GraphFunctionKind.Null)) == 0;
 
     private static BindingKind ToBindingKind(GraphProjectionKind kind) => kind switch
     { GraphProjectionKind.Node => BindingKind.Node, GraphProjectionKind.Relationship => BindingKind.Relationship, GraphProjectionKind.Path => BindingKind.Path, _ => BindingKind.Value };
@@ -1149,6 +1796,7 @@ internal sealed partial class GraphPlanner
     private static GqlQueryExpression StageQuery(GqlStage stage, Assimalign.Cohesion.Database.Language.Location? location) => stage switch
     {
         GqlMatchStage match => new([match.Clause], [], [], false, [], location ?? stage.Location),
+        GqlMergeStage merge => new([new GqlMatchClause([merge.Path], null, false)], [], [], false, [], location ?? stage.Location),
         GqlInsertStage insert => new([], null, insert.Paths, [], false, [], location ?? stage.Location),
         GqlDeleteStage delete => new([], null, [], delete.Variables, delete.Detach, [], location ?? stage.Location),
         GqlReturnStage project => new([], null, [], [], false, project.Projections, location ?? stage.Location)
@@ -1174,7 +1822,7 @@ internal sealed partial class GraphPlanner
     // at every eligible position. Equality seeks win ties, then source-ordered node/type candidates.
     // Neo4j's labelScanLeafPlanner reads HasLabels selections for pattern nodes
     // (labelScanLeafPlanner.scala:45-46, :73-78).
-    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables, CancellationToken token, bool sourceOnly = false)
+    private GraphAnchor ChooseAnchor(GraphPathShape shape, AnchorSources sources, IReadOnlySet<string> boundVariables, CancellationToken token, bool sourceOnly = false, bool merging = false)
     {
         for (int i = 0; i < (sourceOnly ? 1 : shape.Nodes.Count); i++)
         {
@@ -1190,6 +1838,7 @@ internal sealed partial class GraphPlanner
             { return new GraphAnchor(i, shape.Nodes[i].SelectMany(node => node.Labels).FirstOrDefault(), null, null); }
         }
         GraphAnchor? scan = null;
+        GraphAnchor? rowSeek = null;
         long scanCost = long.MaxValue;
         for (int i = 0; i < (sourceOnly ? 1 : shape.Nodes.Count); i++)
         {
@@ -1212,7 +1861,7 @@ internal sealed partial class GraphPlanner
                     }
                     continue;
                 }
-                var inline = FirstValues(node.Properties);
+                var inline = FirstValues(node.Properties, merging);
                 var equalities = sources.GetEqualities(node.Variable);
                 if (inline.Count == 0 && equalities.Count == 0) { continue; }
                 var indexes = sources.GetIndexedKeys();
@@ -1224,6 +1873,8 @@ internal sealed partial class GraphPlanner
                     string? bestKey = null;
                     ulong bestIndex = 0;
                     FirstValue best = new(int.MaxValue, null!);
+                    string? rowKey = null;
+                    FirstValue rowValue = new(int.MaxValue, null!);
                     foreach (var index in keys)
                     {
                         string key = index.Key;
@@ -1233,7 +1884,15 @@ internal sealed partial class GraphPlanner
                         if (inline.TryGetValue(key, out var property)) { candidate = property; }
                         else if (equalities.TryGetValue(key, out var equality)) { candidate = new(inline.Count + equality.Position, equality.Value); }
                         else { continue; }
+                        if (candidate.Value is GqlExpression && candidate.Position < rowValue.Position)
+                        { rowKey = key; rowValue = candidate; }
                         if (candidate.Position < best.Position) { best = candidate; bestKey = key; bestIndex = index.Id; }
+                    }
+                    // An earlier constant indexed property must not hide a usable row seek.
+                    if (rowKey is not null)
+                    {
+                        rowSeek ??= new GraphAnchor(i, label, rowKey, rowValue.Value) { EstimatedRows = 1 };
+                        continue;
                     }
                     if (bestKey is not null)
                     {
@@ -1246,6 +1905,10 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
+        // Published counts exclude statement-local creations and replacements. A zero-count
+        // label or type scan is therefore no bound on a row-dependent MERGE probe's cost.
+        // Keep the first eligible row seek ahead of every scan, regardless of estimates.
+        if (rowSeek is not null) { return rowSeek; }
         // Only outer singleton edges can seed a path. Repeated bodies may match zero times;
         // anchoring on one of their postings would lose those matches.
         for (int i = 0; !sourceOnly && i < shape.Segments.Count; i++)
@@ -1288,12 +1951,16 @@ internal sealed partial class GraphPlanner
     }
 
     /// <summary>Each key's first non-null inline value and its position among the node's non-null values.</summary>
-    private Dictionary<string, FirstValue> FirstValues(IReadOnlyDictionary<string, GqlExpression> properties)
+    private Dictionary<string, FirstValue> FirstValues(IReadOnlyDictionary<string, GqlExpression> properties, bool rowValues = false)
     {
         var values = new Dictionary<string, FirstValue>(StringComparer.Ordinal);
         foreach (var property in properties)
         {
-            if (property.Value is not (GqlLiteralExpression or GqlParameterExpression)) { continue; }
+            if (property.Value is not (GqlLiteralExpression or GqlParameterExpression))
+            {
+                if (rowValues) { values.TryAdd(property.Key, new FirstValue(values.Count, property.Value)); }
+                continue;
+            }
             var value = GraphExpressionEvaluator.Scalar(property.Value, _parameters);
             if (value is not null) { values.TryAdd(property.Key, new FirstValue(values.Count, value)); }
         }
@@ -1418,6 +2085,34 @@ internal sealed partial class GraphPlanner
             {
                 _ = value;
             }
+        }
+    }
+
+    [System.Diagnostics.DebuggerDisplay("ReductionPlanningState")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(ReductionPlanningState.DebugView))]
+    private class ReductionPlanningState
+    {
+        internal Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>? Native;
+        internal Dictionary<string, BindingKind>? Variables;
+        internal Dictionary<string, GraphBindingShape>? Shapes;
+        internal GraphReductionWork? Work;
+        internal GraphReductionWork? SharedWork;
+        internal ReductionPlanningState(Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>? native) { Native = native; }
+        private sealed class DebugView { public DebugView(ReductionPlanningState value) { } }
+    }
+
+    // Only statements with correlated subplans pay for this state. Reduction-only planning
+    // keeps its native-expression cache without a correlated registry.
+    private sealed class CorrelatedPlanningState : ReductionPlanningState
+    {
+        internal Dictionary<GqlExpression, GraphCorrelatedSubplan>? Subplans;
+        internal CorrelationScope? Correlation;
+        internal HashSet<GqlExpression>? Anti;
+        internal CorrelatedPlanningState(object? previous)
+            : base(previous is ReductionPlanningState reduction ? reduction.Native : previous as Dictionary<GqlNamedFunctionCallExpression, GqlExpression?>)
+        {
+            if (previous is ReductionPlanningState state)
+            { Variables = state.Variables; Shapes = state.Shapes; Work = state.Work; SharedWork = state.SharedWork; }
         }
     }
 

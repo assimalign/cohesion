@@ -6,4 +6,5 @@ internal enum SqlBindingContext
     Table,
     Function,
     Domain,
+    IndexPredicate,
 }

@@ -30,7 +30,30 @@ await Check("RETURN developer_twice(21)", [[42L]]);
 await Check("FOR v IN [1,2,2,NULL] RETURN developer_sum(v), developer_sum(DISTINCT v), count(*)", [[5L,3L,4L]]);
 await Check("FOR v IN [] RETURN developer_sum(v),sum(v)", [[0L,0L]]);
 await Check("RETURN abs(-7),char_length('A😀B')", [[7L,3L]]);
+await Check("RETURN [x IN [1,2,3] WHERE x>1 | x*2][-1], size([1,2,3][..-1]), size([x IN [] | x])", [[6L,2L,0L]]);
+await Check("LET x=99 RETURN [x IN [1,2] | [x IN [x+10] | x][0]][1]+x", [[111L]]);
+await Check("RETURN reduce(a=0,x IN [1,2,3] | a*10+x),reduce(a=42,x IN [] | 1/0),reduce(a=1/0,x IN NULL | a) IS NULL", [[123L,42L,1L]]);
+await Check("RETURN all(x IN [] WHERE TRUE),any(x IN [] WHERE TRUE),none(x IN [] WHERE TRUE),single(x IN [] WHERE TRUE)", [[1L,0L,1L,0L]]);
+await Check("RETURN all(x IN [TRUE,NULL] WHERE x) IS NULL,any(x IN [NULL,TRUE] WHERE x),single(x IN [NULL,TRUE,TRUE] WHERE x)", [[1L,1L,0L]]);
+await Check("RETURN reduce(a=0,x IN [1,2] | a+reduce(a=x,x IN [x] | a+x)),reduce(a=0,x IN [1,2] | toInteger(toString(x)))", [[6L,2L]]);
+await Check("INSERT (a:ComprehensionProperty {k:[x IN [1] | x+10][0]}) SET a.k=[x IN [a.k] | x+10][0] RETURN a.k", [[21L]]);
+await Check("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0] RETURN count(*)", [[3L]]);
+await Check("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,coalesce(n.m,0) ORDER BY n.k", [[2L,11L,21L],[4L,12L,0L]]);
 await Check("RETURN 7", [[7L]]);
+await Check("FOR x IN [1,1] RETURN x UNION FOR x IN [1,2] RETURN x", [[1L],[2L]]);
+await Check("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L],[2L]]);
+await Check("FOR x IN [1,1,2] RETURN x EXCEPT ALL RETURN 1 AS x", [[1L],[2L]]);
+await Check("FOR x IN [1,1,2] RETURN x EXCEPT DISTINCT RETURN 1 AS x", [[2L]]);
+await Check("FOR x IN [1,1,2] RETURN x INTERSECT ALL FOR x IN [1,1,1] RETURN x", [[1L],[1L]]);
+await Check("FOR x IN [1,1,2] RETURN x INTERSECT RETURN 1 AS x", [[1L]]);
+await Check("RETURN 1 AS x OTHERWISE RETURN 1/0 AS x", [[1L]]);
+await Check("FOR x IN [] RETURN x OTHERWISE FOR x IN [7,7] RETURN x NEXT RETURN x+1 AS x", [[8L],[8L]]);
+await Check("RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x", [[10L],[20L]]);
+await Check("(RETURN 1 AS x) UNION ALL (RETURN 2 AS x) NEXT (RETURN x*10 AS x) NEXT RETURN x+1 AS x", [[11L],[21L]]);
+await Check("RETURN 1 AS x UNION ALL (RETURN 1 AS x UNION ALL RETURN 2 AS x)", [[1L],[1L],[2L]]);
+await Check("FOR x IN [1,1,1] MERGE (n:MergeSmoke {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]]);
+await Check("MATCH (a:MergeSmoke {id:1}) MERGE (a)-[r:MergeEdge]-(b:MergeSmoke {id:2}) ON CREATE SET r.hit=1 ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[1L]]);
+await Check("MERGE (:MergeSmoke {id:2})-[r:MergeEdge]-(:MergeSmoke {id:1}) ON MATCH SET r.hit=r.hit+1 RETURN r.hit", [[2L]]);
 await Check("INSERT (a:W {k:1}) SET a.k=2 RETURN a.k", [[2L]]);
 await session.ExecuteAsync("MATCH (a:W) DELETE a", cancellationToken: CancellationToken.None);
 checks++;
@@ -41,7 +64,16 @@ await Check("FOR x IN $xs FOR y IN $xs WITH x,y ORDER BY x DESC,y DESC OFFSET 2 
 await Check("FOR x IN $xs RETURN count(DISTINCT x),min(x),max(x)", [[317L, 0L, 316L]]);
 await Check("FOR x IN [2,1,2] RETURN DISTINCT x ORDER BY x", [[1L], [2L]]);
 await session.ExecuteAsync("INSERT (a:N {k:1})-[:T]->(b:N {k:2})-[:T]->(:N {k:3})", cancellationToken: CancellationToken.None);
+await Check("LET x=TRUE MATCH (n:N {k:1}) RETURN x AS old ORDER BY all(x IN [n] WHERE old)", [[1L]]);
+await Check("LET x=TRUE MATCH (n:N {k:1}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[1L]]);
+await Check("LET x=[TRUE] MATCH (n:N {k:1}) RETURN x[0] AS old ORDER BY all(x IN [n] WHERE old)", [[1L]]);
+await Check("MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN size([r IN rs | type(r)]), [n IN [a,b] | n.k][1]", [[2L,3L]]);
+await Check("RETURN 0 AS x UNION ALL ((MATCH p=ANY SHORTEST (a:N)-[:T]->(b:N) RETURN count(*) AS x))", [[0L],[2L]]);
 await Check("MATCH (a:N)-[:T]->(b:N) RETURN a.k,b.k ORDER BY a.k", [[1L, 2L], [2L, 3L]]);
+await Check("MATCH (a:N) RETURN a.k,EXISTS { MATCH (a)-[:T]->(b) } ORDER BY a.k", [[1L,1L],[2L,1L],[3L,0L]]);
+await Check("MATCH (a:N) WHERE NOT EXISTS { (a)-[:T]->() } RETURN a.k", [[3L]]);
+await Check("MATCH (a:N) WHERE any(x IN [a] WHERE EXISTS { (x)->(b) WHERE EXISTS { (b)->() } }) RETURN a.k", [[1L]]);
+await Check("OPTIONAL MATCH (a:AbsentExists) RETURN EXISTS { (a)->() }, NOT EXISTS { (a)->() }", [[0L,1L]]);
 {
     var paths = (GraphPathsQueryResult)await session.ExecuteAsync(GraphPathsQueryRequest.FromGql(
         "MATCH p=(a:N {k:1})-[:T]->+(b:N) RETURN p LIMIT 1"), CancellationToken.None);
@@ -62,7 +94,21 @@ await Refuse(new() { WorkUnits = 3 }, "CG05004");
 await Refuse(new() { MemoryBytes = 1024 }, "CG05020");
 await Refuse(new() { WorkUnits = 0 }, "CG08021");
 await Check("RETURN 7", [[7L]]);
+await Check("FOR x IN [1,1] RETURN x UNION FOR x IN [1,2] RETURN x", [[1L],[2L]]);
+await Check("RETURN 1 AS x UNION ALL (RETURN 1 AS x UNION ALL RETURN 2 AS x)", [[1L],[1L],[2L]]);
 await session.ExecuteAsync("INSERT (s:ModeLoop)-[:LOOP]->(s)", cancellationToken: CancellationToken.None);
+await using (var pattern = (DatabaseResultSet)await session.ExecuteAsync("MATCH (a:N {k:1}) RETURN [x IN [a] | size([p=(x)-[:T]->(b) | size(nodes(p))])]", cancellationToken: CancellationToken.None))
+{
+    int rows = 0;
+    await foreach (var row in pattern.GetRowsAsync(CancellationToken.None))
+    {
+        if (row.GetValue(0) is not object?[] { Length: 1 } list || !Equals(list[0], 1L))
+        { throw new InvalidOperationException("Pattern comprehension AOT scalar projection failed."); }
+        rows++;
+    }
+    if (rows != 1) { throw new InvalidOperationException("Pattern comprehension AOT row count failed."); }
+    checks++;
+}
 await Check("MATCH WALK (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[4L]]);
 await Check("MATCH TRAIL (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[2L]]);
 await Check("MATCH SIMPLE (a:ModeLoop)-[:LOOP]->{0,3}(b) RETURN count(*)", [[2L]]);
@@ -102,6 +148,91 @@ checks++;
 if (await database.FindShortestDistanceAsync(session, shortestSearch with { Target = shortestStart.Id }, CancellationToken.None) != 0)
 { throw new InvalidOperationException("Zero shortest distance smoke mismatch."); }
 checks++;
+foreach (var (expression, code) in new[]
+{
+    ("[1][..]", "CG00012"),
+    ("[1][1.5..]", "CG02014"),
+    ("[x IN [] WHERE 1]", "CG02013"),
+    ("all(x IN [] WHERE 1)", "CG02013"),
+    ("reduce(a=0,x IN 1 | a)", "CG02015"),
+    ("all(x IN [] WHERE reduce(a=1,y IN [] | a))", "CG02013"),
+    ("any(x IN reduce(a=1,y IN [] | a) WHERE TRUE)", "CG02015"),
+    ("reduce(a=0,x IN [] | sum(x))", "CG05025"),
+    ("reduce(x=0,x IN [] | x)", "CG01018"),
+})
+{
+    foreach (string prefix in new[] { "RETURN ", "EXPLAIN RETURN " })
+    {
+        bool refused = false;
+        try { await session.ExecuteAsync(prefix + expression, cancellationToken: CancellationToken.None); }
+        catch (DatabaseException error) when (error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == code)
+        { refused = true; }
+        if (!refused) { throw new InvalidOperationException(); }
+        checks++;
+    }
+}
+var schema = GraphSchema.Open(database, session);
+Guid schemaLabel = Guid.NewGuid();
+await schema.SaveLabelAsync(new(schemaLabel, "SchemaSmoke"), CancellationToken.None);
+await schema.CreateConstraintAsync(new(schemaLabel, "schema_type", "p", Assimalign.Cohesion.Database.Types.DatabaseType.Int64), CancellationToken.None);
+await schema.CreateConstraintAsync(new(schemaLabel, "schema_exists", "p"), CancellationToken.None);
+await schema.CreateIndexAsync("SchemaSmoke", "schema_index", "p", CancellationToken.None);
+await Check("INSERT (n:SchemaSmoke {p:1}) RETURN n.p", [[1L]]);
+foreach (string query in new[] { "INSERT (:SchemaSmoke)", "MATCH (n:SchemaSmoke) SET n.p='bad'", "MATCH (n:SchemaSmoke) REMOVE n.p" })
+{
+    bool refused = false;
+    try { await session.ExecuteAsync(query, cancellationToken: CancellationToken.None); }
+    catch (DatabaseException error) when (error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == "CG03003") { refused = true; }
+    if (!refused) { throw new InvalidOperationException("Named constraint AOT enforcement failed."); }
+    checks++;
+}
+if ((await schema.GetConstraintsAsync(CancellationToken.None)).Count != 2 ||
+    (await schema.FindIndexAsync("schema_index", CancellationToken.None))?.LabelId != schemaLabel)
+{ throw new InvalidOperationException("Named schema AOT discovery failed."); }
+checks++;
+await schema.DropConstraintAsync("schema_exists", CancellationToken.None);
+await session.ExecuteAsync("MATCH (n:SchemaSmoke) REMOVE n.p", cancellationToken: CancellationToken.None);
+await schema.DropConstraintAsync("schema_type", CancellationToken.None);
+await schema.DropIndexAsync("schema_index", CancellationToken.None);
+await session.ExecuteAsync("CREATE INDEX ddl_index FOR (n:FreshDdl) ON (n.p)", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("CREATE CONSTRAINT ddl_required FOR (n:FreshDdl) REQUIRE n.p IS NOT NULL", cancellationToken: CancellationToken.None);
+await using (var shown = (DatabaseResultSet)await session.ExecuteAsync("SHOW CONSTRAINTS", cancellationToken: CancellationToken.None))
+{
+    int rows = 0;
+    await foreach (var row in shown.GetRowsAsync(CancellationToken.None))
+    {
+        if (!Equals(row.GetValue(4), "ddl_required") || !Equals(row.GetValue(7), true))
+        { throw new InvalidOperationException("Schema DDL AOT SHOW mismatch."); }
+        rows++;
+    }
+    if (rows != 1) { throw new InvalidOperationException("Schema DDL AOT row count mismatch."); }
+    checks++;
+}
+await session.ExecuteAsync("DROP CONSTRAINT ddl_required", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("DROP INDEX ddl_index", cancellationToken: CancellationToken.None);
+await session.ExecuteAsync("DROP LABEL FreshDdl", cancellationToken: CancellationToken.None);
+
+if ((await schema.GetConstraintsAsync(CancellationToken.None)).Count != 0 ||
+    await schema.FindIndexAsync("schema_index", CancellationToken.None) is not null)
+{ throw new InvalidOperationException("Named schema AOT drop failed."); }
+checks++;
+await using (var warned = (DatabaseResultSet)await session.ExecuteAsync(
+    "MATCH (n:SchemaSmoke) WHERE n.aot_unknown IS NULL RETURN n.aot_unknown ORDER BY n.aot_unknown", cancellationToken: CancellationToken.None))
+{
+    if (warned.Diagnostics.Count != 1 || warned.Diagnostics[0].Code != "CG01023" ||
+        warned.Diagnostics[0].Severity != Assimalign.Cohesion.Database.Types.DiagnosticSeverity.Warning)
+    { throw new InvalidOperationException("Unknown property AOT diagnostics failed."); }
+    checks++;
+}
+await using (var known = (DatabaseResultSet)await session.ExecuteAsync(
+    "MATCH (n:SchemaSmoke) RETURN n.p, {p:1}.aot_unknown", cancellationToken: CancellationToken.None))
+{
+    if (known.Diagnostics.Count != 0) { throw new InvalidOperationException("Known property/map AOT diagnostics failed."); }
+    checks++;
+}
+foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:1})", "SAVEPOINT duplicate", "INSERT (:SavepointNative {n:2})", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT (:SavepointNative {n:3})", "RELEASE parent", "COMMIT" })
+{ await session.ExecuteAsync(command, cancellationToken: CancellationToken.None); }
+await Check("MATCH (n:SavepointNative) RETURN n.n", [[3L]]);
 Console.WriteLine($"Graph NativeAOT: {checks}/{checks} checks passed.");
 
 async Task Check(string query, long[][] expected)

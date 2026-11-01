@@ -49,7 +49,8 @@ public sealed class GqlKeywordDispositionTests
         ["WITH"] = Parses("MATCH (a) WITH a RETURN a"),
         ["SET"] = Parses("MATCH (a) SET a.x = 1"),
         ["REMOVE"] = Parses("MATCH (a) REMOVE a.x"),
-        ["MERGE"] = Rejects("MERGE (n)", "MERGE"),
+        ["MERGE"] = Parses("MERGE (n)"),
+        ["ON"] = Parses("MERGE (n) ON CREATE SET n.x = 1 ON MATCH SET n.x = 2"),
         ["ORDER"] = Parses("MATCH (a) RETURN a ORDER BY a.x"),
         ["BY"] = Parses("MATCH (a) RETURN a ORDER BY a.x"),
         ["GROUP"] = Parses("MATCH (a) RETURN a.x, count(*) AS n GROUP BY a.x"),
@@ -63,8 +64,11 @@ public sealed class GqlKeywordDispositionTests
         ["LET"] = Parses("MATCH (a) LET x = a.y RETURN x"),
         ["UNWIND"] = Parses("UNWIND [1, 2] AS a RETURN a"),
         ["FOREACH"] = Rejects("MATCH (a) FOREACH (x IN [1] | SET a.y = x)", "FOREACH"),
-        ["UNION"] = Rejects("MATCH (a) RETURN a UNION MATCH (b) RETURN b", "UNION"),
-        ["DISTINCT"] = Parses("MATCH (a) RETURN DISTINCT a.name"),
+        ["UNION"] = Parses("RETURN 1 AS x UNION RETURN 2 AS x"),
+        ["EXCEPT"] = Parses("RETURN 1 AS x EXCEPT RETURN 2 AS x"),
+        ["INTERSECT"] = Parses("RETURN 1 AS x INTERSECT RETURN 2 AS x"),
+        ["OTHERWISE"] = Parses("RETURN 1 AS x OTHERWISE RETURN 2 AS x"),
+        ["DISTINCT"] = Parses("RETURN 1 AS x UNION DISTINCT RETURN 2 AS x"),
         ["ALL"] = Parses("MATCH (a) RETURN ALL a.name"),
         ["ANY"] = Parses("MATCH ANY (a)-[]->(b) RETURN a"),
         ["SHORTEST"] = Parses("MATCH SHORTEST 2 (a)-[]->(b) RETURN a"),
@@ -77,11 +81,11 @@ public sealed class GqlKeywordDispositionTests
         ["CONTAINS"] = Parses("MATCH (a) WHERE a.name CONTAINS 'A' RETURN a"),
         // ISO <is label expression> (#1139 flipped the #1101 pin); IS NULL and truth tests execute since #1140.
         ["IS"] = Parses("MATCH (n IS A) RETURN n"),
-        ["EXISTS"] = Rejects("MATCH (a) WHERE EXISTS { (a)-[]->(b) } RETURN a", "EXISTS"),
+        ["EXISTS"] = Parses("MATCH (a) WHERE EXISTS { (a)-[]->(b) } RETURN a"),
         ["LIKE"] = Rejects("MATCH (a) WHERE a.name LIKE 'A%' RETURN a", "LIKE"),
         ["BETWEEN"] = Rejects("MATCH (a) WHERE a.x BETWEEN 1 AND 2 RETURN a", "BETWEEN"),
-        ["NONE"] = Rejects("MATCH (a) WHERE NONE(a.tags) RETURN a", "NONE"),
-        ["SINGLE"] = Rejects("MATCH (a) WHERE SINGLE(a.tags) RETURN a", "SINGLE"),
+        ["NONE"] = Parses("RETURN none(x IN [1,2] WHERE x < 0)"),
+        ["SINGLE"] = Parses("RETURN single(x IN [1,2] WHERE x = 1)"),
         ["CASE"] = Parses(caseExpression),
         ["WHEN"] = Parses(caseExpression),
         ["THEN"] = Parses(caseExpression),
@@ -105,6 +109,8 @@ public sealed class GqlKeywordDispositionTests
         ["TRANSACTION"] = Parses("BEGIN TRANSACTION"),
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),
+        ["SAVEPOINT"] = Parses("SAVEPOINT scope"),
+        ["RELEASE"] = Parses("RELEASE SAVEPOINT scope"),
         ["FINISH"] = Rejects("MATCH (a) FINISH", "FINISH"),
         ["NEXT"] = Parses("MATCH (a) RETURN a NEXT MATCH (b) RETURN b"),
         ["FOR"] = Parses("FOR x IN [1, 2] RETURN x"),
@@ -116,7 +122,7 @@ public sealed class GqlKeywordDispositionTests
         ["PERCENTILE_DISC"] = Rejects("MATCH (a) RETURN PERCENTILE_DISC(a.age, 0.5)", "PERCENTILE_DISC"),
         ["DATABASE"] = Rejects("CREATE DATABASE d", "DATABASE"),
         ["SCHEMA"] = Rejects("CREATE SCHEMA s", "SCHEMA"),
-        ["INDEX"] = Rejects("CREATE INDEX ix", "INDEX"),
+        ["INDEX"] = Parses("CREATE INDEX ix FOR (n:N) ON (n.p)"),
         ["CATALOG"] = Rejects("CREATE CATALOG c", "CATALOG"),
         // ISO/IEC 39075 delete, path and edge constructs
         ["NODETACH"] = Rejects("MATCH (n) NODETACH DELETE n", "NODETACH DELETE"),
@@ -137,7 +143,7 @@ public sealed class GqlKeywordDispositionTests
         ["TOFLOATLIST"] = Rejects("RETURN toFloatList(1)", "FUNCTION toFloatList"),
         ["TOBOOLEANLIST"] = Rejects("RETURN toBooleanList(1)", "FUNCTION toBooleanList"),
         ["ID"] = Rejects("RETURN id(1)", "FUNCTION id (use element_id)"),
-        ["REDUCE"] = Rejects("RETURN reduce(1)", "FUNCTION reduce"),
+        ["REDUCE"] = Parses("RETURN reduce(a=0,x IN [1,2] | a+x)"),
         ["DATE"] = Rejects("RETURN date(1)", "FUNCTION date"),
         ["DATETIME"] = Rejects("RETURN datetime(1)", "FUNCTION datetime"),
         ["DURATION"] = Rejects("RETURN duration(1)", "FUNCTION duration"),
@@ -303,6 +309,9 @@ public sealed class GqlKeywordDispositionTests
             .Concat(GqlTransactionVocabulary.Spellings)
             .Concat(Enum.GetNames<GqlPathMode>())
             .Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
+            .Append("REDUCE") // Lexical binding form; not an ordinary scalar function.
+            .Append("ON") // Contextual MERGE branch prefix; ordinary variable spelling stays valid.
+            .Concat(new[] { "EXCEPT", "INTERSECT", "OTHERWISE" }) // Contextual query conjunctions.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 

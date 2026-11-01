@@ -514,6 +514,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
         if (error is DatabaseException { Diagnostics: [{ Code: "CS06041" }, ..] }) { return error; }
         return error switch
         {
+            _ when DatabaseFailure.TranslateUndoFailure(error) is { } undo => undo,
             _ when DatabaseFailure.IsStorageFailure(error) => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "CS06041", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
             _ => error,
@@ -647,6 +648,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override void DisposeCore()
     {
+        _catalog.CloseAllocation();
         TableReclamation.Stop();
         _schemaProvisioner.StopDeferredAsync().AsTask().GetAwaiter().GetResult();
         // An offline database closes without writing anything (#1243): both file sets are
@@ -681,6 +683,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// <inheritdoc />
     protected override async ValueTask DisposeAsyncCore()
     {
+        _catalog.CloseAllocation();
         TableReclamation.Stop();
         await _schemaProvisioner.StopDeferredAsync().ConfigureAwait(false);
         // See DisposeCore: an offline database closes without writing anything (#1243).

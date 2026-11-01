@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Graph.Catalog;
 using Assimalign.Cohesion.Database.Language;
@@ -10,9 +11,9 @@ using Assimalign.Cohesion.Database.Graph.Storage;
 namespace Assimalign.Cohesion.Database.Graph.Internal;
 
 /// <summary>
-/// Resolves the label and relationship-type names a statement reads against the catalog at the
-/// statement's snapshot, each name once, and records a warning for every name the database does
-/// not have (#1228). A read never fails on an unknown name: no node carries a label the catalog
+/// Resolves the label, relationship-type and entity-property names a statement reads against the catalog at the
+/// statement's snapshot and records one warning per name the database does
+/// not have (#1228, #1249). A read never fails on an unknown name: no node carries a label the catalog
 /// lacks and no relationship has such a type, so the name simply matches nothing, as in Neo4j,
 /// whose token resolution leaves an unresolved name out of the semantic table without an error
 /// (<c>cypher-planner/.../compiler/planner/ResolveTokens.scala:80-105</c>) and whose
@@ -28,12 +29,17 @@ namespace Assimalign.Cohesion.Database.Graph.Internal;
 /// records one notification per mention position in a set; pattern names carry no source position
 /// here, so a name is reported once per kind, at its first mention, with the span of the labeled
 /// predicate that names it when it is first named there.
+/// Entity properties use <c>CG01023</c>, once per ordinal name across the read-only statement;
+/// callers prove the receiver is an entity before checking the database-wide property directory.
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("GraphTokenResolver")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Graph.Internal.GraphTokenResolver.DebugView))]
-internal sealed class GraphTokenResolver
+internal sealed class GraphTokenResolver : IDisposable
 {
+    private static readonly ConcurrentBag<TokenWarnings> _propertyStates = new();
     private static readonly string _errorUnknownRelationshipTypeDiagnostic = Resources.UnknownRelationshipTypeDiagnostic;
+
+    private static readonly string _unknownPropertyDiagnostic = Resources.UnknownPropertyDiagnostic;
 
     private static readonly string _errorTokenResolverUnknownLabelDiagnostic = Resources.TokenResolverUnknownLabelDiagnostic;
 
@@ -43,11 +49,14 @@ internal sealed class GraphTokenResolver
     /// <summary>The warning code for a relationship type the database does not have.</summary>
     internal const string UnknownRelationshipTypeCode = "CG01011";
 
+    /// <summary>The warning code for an entity property unknown database-wide.</summary>
+    internal const string UnknownPropertyCode = "CG01023";
+
     private readonly GraphCatalog _catalog;
     private readonly TransactionSnapshot _snapshot;
     private readonly Dictionary<string, bool> _labels = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _types = new(StringComparer.Ordinal);
-    private List<Diagnostic>? _warnings;
+    private TokenWarnings? _warnings;
 
     /// <summary>Initializes a new instance of the <see cref="GraphTokenResolver"/> class.</summary>
     /// <param name="catalog">The catalog whose definitions the names resolve against.</param>
@@ -62,7 +71,7 @@ internal sealed class GraphTokenResolver
     /// Gets a warning for each unknown name, in first-mention order, or an empty list when every
     /// name resolved.
     /// </summary>
-    internal IReadOnlyList<Diagnostic> Warnings => _warnings is null ? [] : _warnings.AsReadOnly();
+    internal IReadOnlyList<Diagnostic> Warnings => _warnings?.Items?.AsReadOnly() ?? (IReadOnlyList<Diagnostic>)[];
 
     internal void IntroduceLabel(string name) => _labels[name] = true;
     internal void IntroduceRelationshipType(string name) => _types[name] = true;
@@ -77,7 +86,7 @@ internal sealed class GraphTokenResolver
         {
             known = _catalog.FindLabel(name, _snapshot) is not null;
             _labels.Add(name, known);
-            if (!known) { (_warnings ??= []).Add(UnknownLabel(name, location)); }
+            if (!known) { (State.Items ??= []).Add(UnknownLabel(name, location)); }
         }
         return known;
     }
@@ -92,9 +101,46 @@ internal sealed class GraphTokenResolver
         {
             known = _catalog.FindRelationshipType(name, _snapshot) is not null;
             _types.Add(name, known);
-            if (!known) { (_warnings ??= []).Add(UnknownRelationshipType(name, location)); }
+            if (!known) { (State.Items ??= []).Add(UnknownRelationshipType(name, location)); }
         }
         return known;
+    }
+
+    // Resolution and warning admission share one statement-local result per ordinal name.
+    // Known-only state is borrowed and returned after planning, retaining the ordinary
+    // resolver layout and warmed read allocations. Warning lists outlive their resolver.
+    internal void CheckProperty(string name, Location? location = null)
+    {
+        _catalog.BeforePropertyCheck?.Invoke();
+        if (HasPropertyKey(name)) { return; }
+        var warnings = State;
+        if (!(warnings.Reported ??= new(StringComparer.Ordinal)).Add(name)) { return; }
+        (warnings.Items ??= []).Add(Create(UnknownPropertyCode,
+            string.Format(System.Globalization.CultureInfo.CurrentCulture, _unknownPropertyDiagnostic, GraphLabelEvaluator.Shorten(name)), location));
+    }
+
+    internal bool HasPropertyKey(string name)
+    {
+        var properties = State.Properties;
+        if (!properties.TryGetValue(name, out bool known))
+        {
+            known = _catalog.HasPropertyKey(name, _snapshot);
+            properties.Add(name, known);
+        }
+        return known;
+    }
+
+    private TokenWarnings State => _warnings ??= _propertyStates.TryTake(out var state) ? state : new();
+
+    public void Dispose()
+    {
+        var state = _warnings;
+        _warnings = null;
+        // A diagnostic carrier may retain Items.AsReadOnly(); never clear or lend that state.
+        // Bound retained pooled capacity when a statement mentions many distinct keys.
+        if (state is null || state.Items is not null || state.Properties.Count > 1_024) { return; }
+        state.Properties.Clear();
+        _propertyStates.Add(state);
     }
 
     /// <summary>Creates the <c>CG01010</c> warning for a label the database does not have.</summary>
@@ -121,6 +167,16 @@ internal sealed class GraphTokenResolver
         Line = location?.StartLine ?? 1,
         Location = location is null ? null : DiagnosticLocation.Absolute,
     };
+
+    [System.Diagnostics.DebuggerDisplay("TokenWarnings")]
+    [System.Diagnostics.DebuggerTypeProxy(typeof(TokenWarnings.DebugView))]
+    private sealed class TokenWarnings
+    {
+        internal List<Diagnostic>? Items { get; set; }
+        internal Dictionary<string, bool> Properties { get; } = new(StringComparer.Ordinal);
+        internal HashSet<string>? Reported { get; set; }
+        private sealed class DebugView { public DebugView(TokenWarnings value) { } }
+    }
 
     private sealed class DebugView
     {

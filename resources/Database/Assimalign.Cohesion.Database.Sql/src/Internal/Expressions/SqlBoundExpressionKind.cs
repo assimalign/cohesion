@@ -12,6 +12,9 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary><see cref="SqlBoundOuterColumn"/>: a value in an enclosing query's evaluation frame.</summary>
     OuterColumn,
 
+    /// <summary><see cref="SqlBoundGrouping"/>: a mask in its owning outer query's grouped frame.</summary>
+    Grouping,
+
     /// <summary><see cref="SqlBoundSlot"/>: a grouping key, an aggregate's result or a completed output column, by ordinal.</summary>
     Slot,
 
@@ -26,6 +29,9 @@ internal enum SqlBoundExpressionKind : byte
 
     /// <summary>NULLIF and EXTRACT evaluator forms.</summary>
     SpecialForm,
+
+    /// <summary>A session sequence operation.</summary>
+    Sequence,
 
     /// <summary><see cref="SqlBoundLogical"/>: an <c>AND</c> or <c>OR</c> chain.</summary>
     Logical,
@@ -57,7 +63,7 @@ internal enum SqlBoundExpressionKind : byte
     /// <summary>A scalar ANY, SOME or ALL subquery comparison.</summary>
     QuantifiedComparison,
 
-    /// <summary><see cref="SqlBoundLike"/>: <c>[NOT] LIKE</c>.</summary>
+    /// <summary><see cref="SqlBoundLike"/>: <c>[NOT] LIKE</c> or <c>[NOT] ILIKE</c>.</summary>
     Like,
 
     /// <summary><see cref="SqlBoundCase"/>: a searched or simple <c>CASE</c>.</summary>
@@ -80,4 +86,13 @@ internal enum SqlBoundExpressionKind : byte
 
     /// <summary><see cref="SqlBoundDomainArgument"/>: domain coercion before a function's STRICT dispatch.</summary>
     DomainArgument,
+
+    /// <summary><see cref="SqlBoundBitwise"/>: an integer bitwise operation and its bound width.</summary>
+    Bitwise,
+
+    /// <summary>A validated JSON member or array element extraction.</summary>
+    JsonAccess,
+
+    /// <summary>A JSON validity and kind predicate.</summary>
+    IsJson,
 }

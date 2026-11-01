@@ -9,4 +9,10 @@ public enum OqlTransactionCommand
     Commit,
     /// <summary>Rolls back the session's explicit transaction.</summary>
     Rollback,
+    /// <summary>Create a named undo scope.</summary>
+    Savepoint,
+    /// <summary>Release a named undo scope and descendants.</summary>
+    ReleaseSavepoint,
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    RollbackToSavepoint,
 }

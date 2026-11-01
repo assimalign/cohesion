@@ -52,6 +52,19 @@ internal sealed partial class SqlPlanExecutor
         // immutable catalog snapshot as the statement, including FK targets.
         var catalog = statement.RequireCatalogSnapshot();
         string database = statement.DatabaseName;
+        if (view.Name == "SEQUENCES")
+        {
+            foreach (var sequence in catalog.Sequences)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var options = sequence.Options;
+                string Text(long value) => value.ToString(CultureInfo.InvariantCulture);
+                yield return [database, sequence.Schema, sequence.Name, SystemDataType(options.Type),
+                    options.Type == DatabaseType.Int8 ? 8L : options.Type == DatabaseType.Int16 ? 16L : options.Type == DatabaseType.Int32 ? 32L : 64L,
+                    2L, 0L, Text(options.Start), Text(options.Minimum), Text(options.Maximum), Text(options.Increment), options.Cycle ? "YES" : "NO"];
+            }
+            yield break;
+        }
         if (view.Name == "SCHEMATA")
         {
             foreach (var schema in catalog.Namespaces)
@@ -97,6 +110,7 @@ internal sealed partial class SqlPlanExecutor
                     for (int ordinal = 0; ordinal < table.Columns.Count; ordinal++)
                     {
                         var column = table.Columns[ordinal];
+                        var sequence = column.Identity is null ? null : catalog.Sequences.FirstOrDefault(sequence => sequence.IsIdentity && sequence.OwnerTableId == table.ObjectId && string.Equals(sequence.OwnerColumn, column.Name, StringComparison.OrdinalIgnoreCase));
                         yield return
                         [
                             database, table.Schema, table.Name, column.Name, (long)ordinal + 1,
@@ -107,11 +121,11 @@ internal sealed partial class SqlPlanExecutor
                             SystemDateTimePrecision(column.Type.Type),
                             column.Identity is null ? "NO" : "YES",
                             column.Identity is { } identity ? identity.IsAlways ? "ALWAYS" : "BY DEFAULT" : null,
-                            column.Identity?.Start.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity?.Increment.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : SqlPlanner.IdentityTypeBounds(column.Type.Type, column.Identity.Increment).Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            column.Identity is null ? null : "NO",
+                            sequence?.Options.Start.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence?.Options.Increment.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence?.Options.Maximum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence?.Options.Minimum.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                            sequence is null ? null : sequence.Options.Cycle ? "YES" : "NO",
                         ];
                     }
                     break;
@@ -174,16 +188,8 @@ internal sealed partial class SqlPlanExecutor
                             database, table.Schema, constraint.Name,
                             referencedConstraint is null ? null : database,
                             referencedConstraint is null ? null : referencedTable!.Schema,
-                            referencedConstraint, "NONE", "RESTRICT",
-                            constraint.OnDelete switch
-                            {
-                                SqlCatalogReferentialAction.Cascade => "CASCADE",
-                                SqlCatalogReferentialAction.Restrict => "RESTRICT",
-                                SqlCatalogReferentialAction.NoAction => "NO ACTION",
-                                SqlCatalogReferentialAction.SetNull => "SET NULL",
-                                SqlCatalogReferentialAction.SetDefault => "SET DEFAULT",
-                                _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
-                            },
+                            referencedConstraint, "NONE", ReferentialActionText(constraint.OnUpdate),
+                            ReferentialActionText(constraint.OnDelete),
                         ];
                     }
                     break;
@@ -203,7 +209,10 @@ internal sealed partial class SqlPlanExecutor
                             yield return
                             [
                                 database, table.Schema, table.Name, index.Name, index.ColumnNames[ordinal], (long)ordinal + 1,
-                                index.IsUnique ? "YES" : "NO", index.IsPrimaryKey ? "YES" : "NO",
+                                index.IsUnique ? "YES" : "NO", index.IsPrimaryKey ? "YES" : "NO", index.Predicate,
+                                ((int)index.KeyOrders[ordinal] & 2) != 0 ? "DESC" : null,
+                                index.KeyOrders[ordinal] == SqlCatalogIndexKeyOrder.AscendingNullsFirst ? "FIRST" :
+                                    index.KeyOrders[ordinal] == SqlCatalogIndexKeyOrder.DescendingNullsLast ? "LAST" : null,
                             ];
                         }
                     }
@@ -314,7 +323,7 @@ internal sealed partial class SqlPlanExecutor
             }
             yield return (name, table.PrimaryKeyColumns, true);
         }
-        foreach (var index in indexes.Where(index => index.IsUnique))
+        foreach (var index in indexes.Where(index => index.IsUnique && index.Predicate is null))
         {
             yield return (index.Name, index.ColumnNames, index.IsPrimaryKey);
         }
@@ -403,4 +412,14 @@ internal sealed partial class SqlPlanExecutor
         DatabaseType.Time or DatabaseType.DateTime or DatabaseType.DateTimeOffset => 7,
         _ => null,
     };
+    private static string ReferentialActionText(SqlCatalogReferentialAction action) => action switch
+    {
+        SqlCatalogReferentialAction.Cascade => "CASCADE",
+        SqlCatalogReferentialAction.Restrict => "RESTRICT",
+        SqlCatalogReferentialAction.NoAction => "NO ACTION",
+        SqlCatalogReferentialAction.SetNull => "SET NULL",
+        SqlCatalogReferentialAction.SetDefault => "SET DEFAULT",
+        _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
+    };
+
 }

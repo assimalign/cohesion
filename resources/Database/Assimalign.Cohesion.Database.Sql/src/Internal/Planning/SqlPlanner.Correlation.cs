@@ -68,13 +68,22 @@ internal sealed partial class SqlPlanner
         // A repeated complete group key reads its retained value, so its children bind over
         // source rows just as the original key does. A matching subquery alone is insufficient.
         if (SubqueryRoots(select).Any(expression => WithinRepeatedGroupKey(expression))) { return scope; }
-        return new SqlCorrelationScope(scope.Id, scope.Local, scope.Parent, select.GroupBy);
+        var groupingKeys = select.GroupBy.Any(key => key is SqlGroupingSetExpression)
+            ? GroupingKeys(select.GroupBy).Distinct(new GroupExpressionComparer(this, scope.Local)).ToArray() : select.GroupBy;
+        List<SqlBoundGrouping>? groupingCalls = null;
+        if (_queryScopes!.HasGroupingCalls)
+        {
+            var calls = (_queryScopes.GroupingCalls ??= new());
+            if (!calls.TryGetValue(select, out groupingCalls)) { calls.Add(select, groupingCalls = []); }
+        }
+        return new SqlCorrelationScope(scope.Id, scope.Local, scope.Parent, groupingKeys, groupingCalls)
+        { Bindings = scope.Bindings };
 
         bool WithinRepeatedGroupKey(SqlExpression expression)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
             if (!ContainsNode(expression, source)) { return false; }
-            foreach (var key in select.GroupBy)
+            foreach (var key in GroupingKeys(select.GroupBy))
             {
                 try
                 {

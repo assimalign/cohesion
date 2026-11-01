@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
@@ -14,8 +15,21 @@ internal sealed partial class SqlPlanner
         foreach (var expression in SubquerySources(select))
         {
             if (expression is SqlFunctionCallExpression call && IsAggregate(call) &&
-                AggregateLevel(call, new List<SqlSelectExpression?> { select }) > 0)
+                AggregateLevel(call, new List<SqlSelectExpression?> { select }) is > 0 and var level)
             {
+                // parse_agg.c:646-690,1327-1334: a subquery aggregate whose arguments
+                // belong to an outer recursive level is an aggregate of that level.
+                if (_commonTableState?.HasRecursion == true)
+                {
+                    var owner = OuterScope;
+                    for (int index = 1; index < level && owner is not null; index++) { owner = owner.Parent; }
+                    var recursive = owner?.Bindings?.FirstOrDefault(binding => binding.Source.Derived?.IsRecursiveReference == true)?.Source.Derived;
+                    if (recursive is not null)
+                    {
+                        throw new SqlPlanningException("CS01061", string.Format(CultureInfo.CurrentCulture,
+                            ErrorMessages.CteRecursiveAggregate, recursive.Name), call.Location);
+                    }
+                }
                 throw new SqlUnsupportedQueryException(ErrorMessages.OuterOnlyAggregate, location: call.Location);
             }
         }
@@ -26,11 +40,12 @@ internal sealed partial class SqlPlanner
     // Inspect namespace names before grouped-row substitution or child planning:
     // arguments of an aggregate of a grouped level may read its ungrouped source
     // columns (parse_agg.c:1385-1405). This walk never plans a derived body or sublink.
-    private int AggregateLevel(SqlFunctionCallExpression call, List<SqlSelectExpression?> scopes)
+    private int AggregateLevel(SqlFunctionCallExpression call, List<SqlSelectExpression?> scopes, SqlExpression? argument = null)
     {
         int minimum = int.MaxValue;
         bool unresolved = false;
-        foreach (var argument in Children(call)) { Visit(argument, 0); }
+        if (argument is not null) { Visit(argument, 0); }
+        else { foreach (var child in Children(call)) { Visit(child, 0); } }
         return unresolved ? -1 : minimum == int.MaxValue ? 0 : minimum;
 
         void Visit(SqlExpression expression, int depth)

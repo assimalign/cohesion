@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Execution.Internal;
 using Assimalign.Cohesion.Database.Graph.Language;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 using Assimalign.Cohesion.Database.Graph.Protocol;
@@ -24,6 +25,11 @@ internal static partial class GraphPlanExecutor
         {
             if (error.Code == GraphStatementTooComplex.ParserCode) { throw GraphStatementTooComplex.FromParse(error); }
             throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GraphQueryRequestFromGqlDatabaseParse, error.Code, error.Message), statement.Diagnostics);
+        }
+        if (statement.GqlExpression.Composite is not null)
+        {
+            var composite = new GraphPlanner(database, operation.Context.Snapshot).PlanComposite(statement.GqlExpression, parameters, paths, token);
+            return await ExecuteCompositeAsync(database, operation, composite, token, paths, scalarsOnly, compositeValues).ConfigureAwait(false);
         }
         if (paths && statement.GqlExpression.CatalogSurface is not null)
         { throw new GraphPlanningException("CG05001", ErrorMessages.PathProjectionRequired, statement.GqlExpression.Location); }
@@ -51,7 +57,14 @@ internal static partial class GraphPlanExecutor
         { throw new GraphPlanningException("CG05001", ErrorMessages.ExecuteScalarRequired, plan.Query.Location); }
         if (plan.Writes)
         {
-            await database.LockWriterAsync(operation, token).ConfigureAwait(false);
+            try { await database.LockWriterAsync(operation, token).ConfigureAwait(false); }
+            catch (TransactionAbortedException) when (plan.Stages.Any(static stage => stage.Stage is GqlMergeStage))
+            {
+                // MERGE also waits here before its first stage and lazy tracker exist.
+                database.Coordinator.LockManager.ReleaseAll(operation.Context.Sequence);
+                operation.EnsureMergeActive();
+                throw;
+            }
             // Bindings have already been normalized and snapshotted. Re-normalizing would strip
             // another sigil from an unused key such as "$$unused" and can invent a collision.
             plan = new GraphPlanner(database, operation.Context.Snapshot).Plan(statement.GqlExpression, parameters, paths, token, normalizedParameters: true);
@@ -92,6 +105,15 @@ internal static partial class GraphPlanExecutor
                 case GqlLetStage or GqlFilterStage or GqlForStage:
                     await ReplaceBindingsAsync(StreamStageAsync(plan.Stages[stageIndex], StreamBindingsAsync(bindings, token),
                         layout, budget, operation, parameters, token)).ConfigureAwait(false);
+                    break;
+                case GqlMergeStage merge:
+                    // Capturing affected in a callback allocates a closure for ordinary queries too.
+                    var mergeCount = new System.Runtime.CompilerServices.StrongBox<long>();
+                    await ReplaceBindingsAsync(StreamMergeAsync(database, operation, merge,
+                        stagePlan.MatchClauses[0].Paths[0], bindings, budget, parameters,
+                        mergeCount, token)).ConfigureAwait(false);
+                    affected += mergeCount.Value;
+                    operation.Updates.RefreshMergeBindings(bindings, token, bindingMemory);
                     break;
                 case GqlInsertStage insertion:
                     foreach (var binding in bindings)
@@ -200,11 +222,11 @@ internal static partial class GraphPlanExecutor
     private sealed record DeferredProperty(GqlExpression Expression, object? Value, bool Exists, DeferredProperty? Previous);
 
     private static DeferredProperty? DeferProperties(IReadOnlyDictionary<string, GqlExpression> expected,
-        IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, DeferredProperty? deferred)
+        IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, DeferredProperty? deferred, GraphCorrelatedBindings? correlated)
     {
         foreach (var property in expected)
         {
-            if (!GraphValueExpressions.ReferencesUnbound(property.Value, bindings)) { continue; }
+            if (!GraphValueExpressions.ReferencesUnbound(property.Value, bindings, correlated)) { continue; }
             bool exists = actual.TryGetValue(property.Key, out var value);
             deferred = new DeferredProperty(property.Value, value, exists, deferred);
         }
@@ -254,7 +276,7 @@ internal static partial class GraphPlanExecutor
         return true;
     }
     private static bool PropertiesMatch(IReadOnlyDictionary<string, GqlExpression> expected, IReadOnlyDictionary<string, object?> actual, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters, bool deferUnbound = false)
-        => expected.All(item => deferUnbound && GraphValueExpressions.ReferencesUnbound(item.Value, bindings) ||
+        => expected.All(item => deferUnbound && GraphValueExpressions.ReferencesUnbound(item.Value, bindings, context.Operation?.FunctionBindings as GraphCorrelatedBindings) ||
             actual.TryGetValue(item.Key, out var value) && GraphExpressionEvaluator.Equal(GraphExpressionEvaluator.PropertyScalar(item.Value, bindings, context, parameters), value));
 
     private static async ValueTask<long> CreateAsync(GraphDatabase database, GraphOperation operation, GqlPathPattern path,

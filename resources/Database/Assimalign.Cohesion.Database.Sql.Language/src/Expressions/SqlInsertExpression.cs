@@ -9,7 +9,10 @@ using Assimalign.Cohesion.Database.Language;
 /// </summary>
 public sealed class SqlInsertExpression : SqlQueryExpression
 {
-    /// <summary>Gets the statement's non-recursive WITH definitions, in declaration order.</summary>
+    /// <summary>Gets the explicit identity assignment policy.</summary>
+    public SqlIdentityOverride Overriding { get; internal set; }
+
+    /// <summary>Gets the statement's WITH definitions, in declaration order.</summary>
     public IReadOnlyList<SqlCommonTableExpression> CommonTables { get; internal set; } = [];
 
     /// <summary>

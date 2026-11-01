@@ -20,7 +20,7 @@ public class OqlLanguageProfileTests
         profile.Keywords.ToArray().ShouldContain("ON");
         profile.Functions.ToArray().ShouldContain("COUNT");
         profile.Functions.ToArray().ShouldContain("META");
-        foreach (string word in new[] { "KEY", "VALUES", "INTO" }) { profile.Keywords.ToArray().ShouldNotContain(word); }
+        foreach (string word in new[] { "KEY", "VALUES", "INTO", "NULLS", "INCLUDE" }) { profile.Keywords.ToArray().ShouldNotContain(word); }
     }
 
     [Theory]
@@ -35,6 +35,8 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Returning)]
     [InlineData(OqlClauses.Values)]
     [InlineData(OqlClauses.Select)]
+    [InlineData(OqlClauses.Subquery)]
+    [InlineData(OqlClauses.Exists)]
     [InlineData(OqlClauses.Distinct)]
     [InlineData(OqlClauses.SelectValue)]
     [InlineData(OqlClauses.ObjectConstructor)]
@@ -43,8 +45,14 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.FirstComprehension)]
     [InlineData(OqlClauses.Explain)]
     [InlineData(OqlClauses.From)]
+    [InlineData(OqlClauses.DerivedFrom)]
+    [InlineData(OqlClauses.ExpressionFrom)]
     [InlineData(OqlClauses.Unnest)]
     [InlineData(OqlClauses.LeftUnnest)]
+    [InlineData(OqlClauses.Join)]
+    [InlineData(OqlClauses.LeftJoin)]
+    [InlineData(OqlClauses.Nest)]
+    [InlineData(OqlClauses.LeftNest)]
     [InlineData(OqlClauses.Any)]
     [InlineData(OqlClauses.Every)]
     [InlineData(OqlClauses.Where)]
@@ -53,6 +61,7 @@ public class OqlLanguageProfileTests
     [InlineData(OqlClauses.Like)]
     [InlineData(OqlClauses.Case)]
     [InlineData(OqlClauses.GroupBy)]
+    [InlineData(OqlClauses.GroupAs)]
     [InlineData(OqlClauses.Having)]
     [InlineData(OqlClauses.OrderBy)]
     [InlineData(OqlClauses.Limit)]
@@ -73,7 +82,7 @@ public class OqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(OqlClauses.Subquery)]
+    [InlineData("ON KEYS")]
     public void Instance_UnimplementedClause_IsNotSupported(string clause)
     {
         OqlLanguageProfile.Instance.Supports(clause).ShouldBeFalse();

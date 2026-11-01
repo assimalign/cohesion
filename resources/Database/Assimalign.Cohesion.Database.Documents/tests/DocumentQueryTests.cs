@@ -251,12 +251,13 @@ public sealed partial class DocumentQueryTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    [Theory]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Ordered string index ranges match ordinal UTF-16 for supplementary characters (#1632)")]
     [InlineData("score >= @minimum", "\uD800\uDC00")]
     [InlineData("score < @minimum", "\uE000")]
     [InlineData("score = @minimum", "\uD800\uDC00")]
-    public async Task String_index_order_matches_ordinal_utf16_for_supplementary_characters(string predicate, string minimum)
+    public async Task Execute_StringIndexOrder_ShouldMatchOrdinalUtf16Async(string predicate, string minimum)
     {
+        // Arrange
         await using var engine = DocumentDatabaseEngine.Create("document-engine", new());
         var database = await engine.CreateDatabaseAsync("test");
         await using var session = await database.CreateSessionAsync();
@@ -269,8 +270,13 @@ public sealed partial class DocumentQueryTests
         var parameters = new Dictionary<string, object?> { ["minimum"] = minimum };
         string query = $"SELECT score FROM items WHERE {predicate} ORDER BY score";
         var before = await RowsAsync(session, query, parameters);
+        // Act
         await session.ExecuteAsync("CREATE INDEX by_score ON items (score)");
-        (await PlanAsync(database, query, parameters)).Access.ShouldBeOfType<DocumentIndexPath>();
+        // Assert
+        var access = (await PlanAsync(database, query, parameters)).Access.ShouldBeOfType<DocumentOrderingPath>();
+        access.Input.ShouldBeOfType<DocumentIndexPath>().Index.Name.ShouldBe("by_score");
+        access.Consumed.ShouldNotBeNull().Path.Index.Name.ShouldBe("by_score");
+        access.Consumed.Ordering.Eligible.ShouldBeTrue();
         var after = await RowsAsync(session, query, parameters);
         after.Select(row => row.GetString(0)).ShouldBe(before.Select(row => row.GetString(0)));
         after.ShouldNotBeEmpty();

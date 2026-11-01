@@ -92,6 +92,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     // Catalog DEFAULT binding resolves calls without executing application code.
     private readonly bool _foldConstants;
+    private bool _validatingIgnoredIdentityInput;
 
     /// <summary>
     /// What this scope's static typing keeps beyond its binding inputs, created only when a scope
@@ -169,6 +170,16 @@ internal sealed partial class SqlExpressionEvaluator
 
     // Grouping and ordering already resolved these nodes to completed value slots.
     internal bool IsBoundValue(SqlExpression expression) => _valueOrdinals?.ContainsKey(expression) == true;
+    internal SqlBoundGrouping? OuterGrouping(SqlFunctionCallExpression call)
+    {
+        for (var scope = _typing?.OuterScope; scope is not null; scope = scope.Parent)
+        {
+            if (scope.GroupingCalls is null) { continue; }
+            foreach (var grouping in scope.GroupingCalls)
+            { if (ReferenceEquals(grouping.Call, call)) { return grouping; } }
+        }
+        return null;
+    }
     internal bool HasOutputValues => _projectionSources is not null;
     internal bool IsOutputValue(SqlExpression expression) => _projectionSources?.ContainsKey(expression) == true;
 
@@ -290,6 +301,9 @@ internal sealed partial class SqlExpressionEvaluator
         {
             case SqlBoundExpressionKind.OuterColumn:
                 return EvaluateOuter((SqlBoundOuterColumn)expression, copySharedBinary);
+            case SqlBoundExpressionKind.Grouping:
+                var grouping = (SqlBoundGrouping)expression;
+                return _subqueryValues!.FindScope(grouping.Scope).Row![grouping.Ordinal];
             case SqlBoundExpressionKind.Column:
                 int columnOrdinal = ((SqlBoundColumn)expression).Ordinal;
                 return copySharedBinary ? DeliverColumn(row, columnOrdinal) : row[columnOrdinal];
@@ -301,6 +315,12 @@ internal sealed partial class SqlExpressionEvaluator
                 return Deliver(((SqlBoundConstant)expression).Value, copySharedBinary);
             case SqlBoundExpressionKind.Binary:
                 return EvaluateBinary((SqlBoundBinary)expression, row);
+            case SqlBoundExpressionKind.Bitwise:
+                return EvaluateBitwise((SqlBoundBitwise)expression, row);
+            case SqlBoundExpressionKind.JsonAccess:
+                return EvaluateJsonAccess((SqlBoundJsonAccess)expression, row);
+            case SqlBoundExpressionKind.IsJson:
+                return EvaluateIsJson((SqlBoundIsJson)expression, row);
             case SqlBoundExpressionKind.Logical:
                 return EvaluateLogical((SqlBoundLogical)expression, row);
             case SqlBoundExpressionKind.Call:
@@ -320,6 +340,13 @@ internal sealed partial class SqlExpressionEvaluator
             case SqlBoundExpressionKind.IsNull:
                 var isNull = (SqlBoundIsNull)expression;
                 return Box(EvaluateCore(isNull.Operand, row) is null != isNull.IsNegated);
+            case SqlBoundExpressionKind.Sequence:
+                var sequence = (SqlBoundSequence)expression;
+                object? name = sequence.Arguments.Length == 0 ? null : EvaluateCore(sequence.Arguments[0], row);
+                object? value = sequence.Arguments.Length < 2 ? null : EvaluateCore(sequence.Arguments[1], row);
+                object? called = sequence.Arguments.Length < 3 ? _true : EvaluateCore(sequence.Arguments[2], row);
+                return (SqlSequenceExecution.Current ?? throw new SqlPlanningException("CS03076", ErrorMessages.SequencePlanningUnsupported))
+                    .Evaluate(sequence.Operation, name, value, called, row);
             case SqlBoundExpressionKind.SpecialForm:
                 return EvaluateSpecialForm((SqlBoundSpecialForm)expression, row, copySharedBinary);
             case SqlBoundExpressionKind.Coalesce:
@@ -377,7 +404,7 @@ internal sealed partial class SqlExpressionEvaluator
         RuntimeHelpers.EnsureSufficientExecutionStack();
         // PostgreSQL functions.c:491 and typecmds.c:3609 use Param and CoerceToDomainValue,
         // neither of which is a Var for parse_expr.c:1163. The binding site supplies that distinction.
-        if (_bindingContext != SqlBindingContext.Table) { return false; }
+        if (_bindingContext is not (SqlBindingContext.Table or SqlBindingContext.IndexPredicate)) { return false; }
         return expression is SqlColumnReferenceExpression || SqlPlanner.Children(expression).Any(ReferencesTableColumn);
     }
 
@@ -543,6 +570,17 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlCollationCandidate FindCollationCore(SqlExpression expression, bool bound)
     {
+        if (expression is SqlIsJsonExpression) { return default; }
+        if (expression is SqlBinaryExpression json && SqlJsonAccess.IsOperator(json.Operator))
+        { return json.Operator == SqlBinaryOperator.JsonTextAccess ? FindCollation(json.Right, bound) : default; }
+        if (expression is SqlWindowExpression window)
+        {
+            var args = window.Function.Arguments;
+            if (_functions.Catalog.IsAggregate(window.Function.FunctionName)) { return FindCollation(window.Function, bound); }
+            return window.Function.FunctionName.ToUpperInvariant() is "LAG" or "LEAD" or "FIRST_VALUE" or "LAST_VALUE" or "NTH_VALUE" && args.Count > 0
+                ? SqlCollationCandidate.Fold(FindCollation(args[0], bound), args.Count > 2 ? FindCollation(args[2], bound) : default) : default;
+        }
+        if (expression is SqlFunctionCallExpression grouping && SqlStandardLibrary.IsGrouping(grouping.FunctionName)) { return default; }
         if (_projectionSources is not null && _projectionSources.TryGetValue(expression, out var source))
         {
             return source.ColumnOrdinal is int ordinal ? ColumnCollation(ordinal) : FindCollation(source.Expression, bound);
@@ -883,6 +921,22 @@ internal sealed partial class SqlExpressionEvaluator
         }
     }
 
+    private object? EvaluateBitwise(SqlBoundBitwise expression, object?[] row)
+    {
+        var left = EvaluateCore(expression.Left, row);
+        var right = expression.Right is null ? null : EvaluateCore(expression.Right, row);
+        if (left is null || expression.Right is not null && right is null) { return null; }
+        try
+        {
+            return expression.Right is null ? SqlBitwise.Not(left, expression.Type, expression.Location)
+                : SqlBitwise.Binary(expression.Operator, left, right!, expression.Type, expression.Location);
+        }
+        catch (ArithmeticException exception)
+        {
+            throw SqlEvaluationException.FromArithmetic(exception).At(expression.Location);
+        }
+    }
+
     private object? EvaluateUnary(SqlBoundUnary unary, object?[] row)
     {
         object? operand = EvaluateCore(unary.Operand, row);
@@ -1119,7 +1173,7 @@ internal sealed partial class SqlExpressionEvaluator
         try
         {
             var compiled = expression.Compiled ?? SqlLikePattern.Compile(LikeText(pattern), LikeText(escape), _cancellationToken);
-            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken, out _, _beforeLikeMatch);
+            bool matches = compiled.Match(LikeText(SqlCharacter.Output(value)), collation, _cancellationToken, out _, _beforeLikeMatch, expression.IsCaseInsensitive);
             return Box(matches != expression.IsNegated);
         }
         catch (SqlPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)

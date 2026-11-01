@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -89,6 +90,25 @@ internal static class Program
         finally { await coordinator.RollbackAsync(reader, CancellationToken.None); }
     }
 
+    private static async Task RunKeyJoinsAsync(DocumentConnection connection, CancellationToken cancellationToken = default)
+    {
+        await connection.CreateCollectionAsync("join_items", cancellationToken);
+        await connection.QueryAsync("INSERT INTO join_items (KEY, VALUE) VALUES ('a',{n:1}), ('b',{n:2})", cancellationToken: cancellationToken);
+        var joined = await connection.QueryAsync("SELECT META(a).id AS a, META(b).id AS b FROM join_items AS a JOIN join_items AS b ON META(b).id = META(a).id ORDER BY a.n", cancellationToken: cancellationToken);
+        Check(joined.Count == 2 && joined.All(row => Equals(row[0], row[1])), "key JOIN metadata");
+        var missing = await connection.QueryAsync("SELECT b, META(b).id AS id FROM [1] AS a LEFT JOIN join_items AS b ON META(b).id = 'absent'", cancellationToken: cancellationToken);
+        Check(missing.Single().IsMissing(0) && missing.Single().IsMissing(1), "LEFT JOIN MISSING binding and metadata");
+        var nest = await connection.QueryAsync("SELECT RAW b FROM ['a','absent',NULL] AS k LEFT NEST join_items AS b ON META(b).id = k", cancellationToken: cancellationToken);
+        Check(nest.Documents[0].GetArrayLength() == 1 && nest.Documents[1].GetArrayLength() == 0 && nest.Documents[2].ValueKind == JsonValueKind.Null, "LEFT NEST scalar and unknown keys");
+        var star = await connection.QueryAsync("SELECT b.* FROM [1] AS a JOIN join_items AS b ON META(b).id = 'b'", cancellationToken: cancellationToken);
+        Check(star.Documents.Single().GetProperty("n").GetInt32() == 2, "qualified joined star");
+        var correlated = await connection.QueryAsync("SELECT RAW (SELECT RAW b.n FROM [1] AS s JOIN join_items AS b ON META(b).id = META(a).id) FROM join_items AS a ORDER BY a.n", cancellationToken: cancellationToken);
+        Check(correlated.Documents.Select(row => row[0].GetInt32()).SequenceEqual(new[] { 1, 2 }), "correlated key join");
+        var plan = await connection.QueryAsync("EXPLAIN SELECT * FROM [1] AS a NEST join_items AS b ON META(b).id = 'a'", cancellationToken: cancellationToken);
+        Check(plan.Documents.Any(row => row.GetProperty("operator").GetString() == "KeyNest"), "key join EXPLAIN");
+        Check(await connection.ExecuteAsync("DROP COLLECTION join_items", cancellationToken: cancellationToken) == 0, "key join collection cleanup");
+    }
+
     private static async Task RunAsync(bool tcp)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -112,6 +132,8 @@ internal static class Program
         builder.Functions.Add(DocumentAggregateFunction.Create<decimal, decimal, decimal>("rank_total",
             () => 0m, (state, value) => state + value, state => state));
         builder.Functions.Add(new HasValueFunction());
+        using var developerJson = JsonDocument.Parse(new string('[', 256) + "0" + new string(']', 256), new JsonDocumentOptions { MaxDepth = 256 });
+        builder.Functions.Add(DocumentScalarFunction.Create<decimal, DocumentValue>("deep_value", _ => DocumentValue.FromJson(developerJson.RootElement)));
         await using var engine = await builder.BuildAsync(token);
         var database = await engine.OpenDatabaseAsync("documents", token);
         await using (var session = await database.CreateSessionAsync(token))
@@ -133,6 +155,13 @@ internal static class Program
         });
         await using (var connection = await client.ConnectAsync(token))
         {
+            await connection.CreateCollectionAsync("savepoint_native", token);
+            foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT INTO savepoint_native (KEY,VALUE) VALUES ('one', {n:1})", "SAVEPOINT duplicate", "INSERT INTO savepoint_native (KEY,VALUE) VALUES ('two', {n:2})", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT INTO savepoint_native (KEY,VALUE) VALUES ('three', {n:3})", "RELEASE parent", "COMMIT" })
+            { await connection.ExecuteAsync(command, cancellationToken: token); }
+            var savedScope = await connection.QueryAsync("SELECT n FROM savepoint_native", cancellationToken: token);
+            Check(savedScope.Count == 1, "named savepoint result count");
+            Check(Convert.ToInt64(savedScope[0][0]) == 3L, "named savepoint duplicate/release/undo/commit");
+            await connection.DropCollectionAsync("savepoint_native", token);
             Check(await connection.ExecuteAsync("BEGIN", cancellationToken: token) == 0, "wire begin");
             Check(await connection.ExecuteAsync("ROLLBACK", cancellationToken: token) == 0, "wire rollback");
             Check(await connection.ExecuteAsync("CREATE COLLECTION items", cancellationToken: token) == 0, "create collection");
@@ -140,6 +169,7 @@ internal static class Program
             Check(await connection.GetCollectionAsync("items", token) == "items", "get collection");
             var saved = await connection.PutAsync("items", "one", "{\"name\":\"東京\",\"score\":3,\"nested\":[1,null]}"u8.ToArray(), cancellationToken: token);
             Check(saved.Version.Value > 0, "put version");
+            await RunKeyJoinsAsync(connection, token);
             var functions = (await connection.QueryAsync("SELECT LOWER('A') AS s, ROUND(-2.5) AS n, ROUND(4.9999999999999999999999999999,-1) AS edge, MILLIS_TO_STR(0) AS d, TYPE(score) AS t, ARRAY_LENGTH(nested) AS a, IFMISSING(absent,1) AS c, LENGTH('😀a') AS l FROM items", cancellationToken: token)).Single();
             Check((string)functions["s"]! == "a", "scalar string");
             Check((decimal)functions["n"]! == -3m, "scalar rounding");
@@ -149,8 +179,84 @@ internal static class Program
             Check(functions["a"] is long arrayLength && arrayLength == 2, "scalar array Int64");
             Check((decimal)functions["c"]! == 1m, "scalar conditional");
             Check(functions["l"] is long length && length == 2, "scalar code points Int64");
+            var subqueries = await connection.QueryAsync("SELECT (SELECT RAW name FROM items) AS names, EXISTS (SELECT RAW name FROM items) AS present FROM items", cancellationToken: token);
+            Check(subqueries.Count > 0 && ((JsonElement)subqueries[0][0]!).GetArrayLength() == subqueries.Count && Equals(subqueries[0][1], true), "nested SELECT arrays and EXISTS");
+            var subqueryIn = await connection.QueryAsync("SELECT name FROM items WHERE name IN (SELECT RAW name FROM items)", cancellationToken: token);
+            Check(subqueryIn.Count == subqueries.Count, "IN SELECT RAW");
+            var correlated = await connection.QueryAsync("SELECT d.name, (SELECT RAW d.name FROM [1] AS v) AS names FROM items d", cancellationToken: token);
+            Check(correlated.All(row => ((JsonElement)row[1]!)[0].GetString() == (string?)row[0]), "correlated expression arrays");
+            var correlatedIdentity = await connection.QueryAsync("SELECT (SELECT RAW META(d).id FROM [1] AS v) FROM items d", cancellationToken: token);
+            Check(correlatedIdentity.All(row => ((JsonElement)row[0]!)[0].ValueKind == JsonValueKind.String), "correlated stored metadata");
+            var correlatedFrom = await connection.QueryAsync("SELECT d.name, (SELECT RAW v FROM [d.name] AS v) AS names FROM items d", cancellationToken: token);
+            Check(correlatedFrom.All(row => ((JsonElement)row[1]!)[0].GetString() == (string?)row[0]), "correlated FROM");
+            await connection.CreateCollectionAsync("nested_writes", token);
+            await connection.QueryAsync("INSERT INTO nested_writes (KEY k, VALUE v) SELECT 'a' AS k, {n:1, names:(SELECT RAW name FROM items)} AS v FROM [1] AS d", cancellationToken: token);
+            var nestedUpdate = await connection.QueryAsync("UPDATE nested_writes d SET n = 2 WHERE EXISTS (SELECT RAW v FROM [d.n] AS v) RETURNING (SELECT RAW s.n FROM nested_writes s) AS before", cancellationToken: token);
+            Check(((JsonElement)nestedUpdate.Single()[0]!).GetRawText() == "[1]", "DML statement-start nested reads");
+            var nestedDelete = await connection.QueryAsync("DELETE FROM nested_writes d WHERE n IN (SELECT RAW s.n FROM nested_writes s) RETURNING n", cancellationToken: token);
+            Check(Equals(nestedDelete.Single()[0], 2m), "DELETE nested predicate");
+            Check(await connection.ExecuteAsync("DROP COLLECTION nested_writes", cancellationToken: token) == 0, "nested DML collection cleanup");
+            var lazySubquery = await connection.QueryAsync("SELECT COALESCE(1, (SELECT RAW 1/0 FROM items)) AS n FROM items LIMIT 1", cancellationToken: token);
+            Check(lazySubquery.Count == 1 && Equals(lazySubquery[0][0], 1m), "lazy nested SELECT");
+            using (var deep = JsonDocument.Parse(new string('[', 255) + "0" + new string(']', 255), new JsonDocumentOptions { MaxDepth = 256 }))
+            {
+                var parameters = new Dictionary<string, object?> { ["deep"] = deep.RootElement };
+                foreach (string query in new[] {
+                    "SELECT (SELECT RAW @deep FROM items LIMIT 1) AS v FROM items LIMIT 1",
+                    "SELECT *, 1 AS w FROM items d UNNEST (SELECT RAW @deep FROM items LIMIT 1) AS v LIMIT 1",
+                    "SELECT *, 1 AS w FROM items d UNNEST [@deep] AS v LIMIT 1",
+                    "SELECT [@deep, 1/0], (SELECT RAW name FROM items) AS v FROM items LIMIT 1" })
+                {
+                    try
+                    {
+                        await connection.QueryAsync(query, parameters, token);
+                        throw new InvalidOperationException("Overdeep subquery projection succeeded.");
+                    }
+                    catch (DocumentClientException error)
+                    { Check(error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == "CD05015" && error.Diagnostics[0].Start is not null, "located subquery depth"); }
+                }
+                var reusable = await connection.QueryAsync("SELECT RAW (SELECT RAW @deep FROM items LIMIT 1) FROM items LIMIT 1", parameters, token);
+                Check(reusable.Count == 1 && connection.IsOpen, "depth refusal preserves session and RAW depth boundary");
+                foreach (string operand in new[] { "[@deep]", "(SELECT RAW @deep FROM items LIMIT 1)" })
+                {
+                    var star = await connection.QueryAsync("SELECT * FROM items d UNNEST " + operand + " AS v LIMIT 1", parameters, token);
+                    Check(star.Count == 1 && star.Documents[0].GetProperty("v").ValueKind == JsonValueKind.Array, "lone star depth boundary");
+                }
+            }
+            foreach (string predicate in new[] { "", " WHERE EXISTS (SELECT RAW 1 FROM items)" })
+            {
+                try
+                {
+                    await connection.QueryAsync("SELECT deep_value(1) AS v FROM items" + predicate, cancellationToken: token);
+                    throw new InvalidOperationException("Overdeep developer JSON projection succeeded.");
+                }
+                catch (DocumentClientException error)
+                { Check(error.Diagnostics.Count == 1 && error.Diagnostics[0].Code == "CD05015" && error.Diagnostics[0].Start == 7, "located developer JSON depth"); }
+                var raw = await connection.QueryAsync("SELECT RAW deep_value(1) FROM items", cancellationToken: token);
+                Check(raw.Count == 1 && connection.IsOpen, "developer JSON RAW boundary and session reuse");
+            }
             var count = await connection.QueryAsync("SELECT COUNT(*) AS n FROM items", cancellationToken: token);
             Check(count.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Int64 && count.Single()[0] is long number && number == 1, "COUNT Int64");
+            var aggregates = (await connection.QueryAsync(
+                "SELECT COUNT(DISTINCT score) AS c, SUM(DISTINCT score) AS s, AVG(ALL score) AS a, MIN(DISTINCT score) AS lo, MAX(ALL score) AS hi, ARRAY_AGG(DISTINCT nested) AS ar, BOOL_AND(score > 0) AS ba, BOOL_OR(score > 0) AS bo, EVERY(EVERY x IN nested SATISFIES x IS VALUED END) AS e, STDDEV(score) AS sd, VARIANCE(score) AS va FROM items HAVING COUNT(DISTINCT score) > 0",
+                cancellationToken: token)).Single();
+            Check(aggregates[0] is 1L && aggregates[1] is 3m && aggregates[2] is 3m && aggregates[3] is 3m && aggregates[4] is 3m, "aggregate quantifiers");
+            Check(aggregates[5] is System.Text.Json.JsonElement aggregateArray && aggregateArray.GetArrayLength() == 1 && aggregateArray[0][1].ValueKind == System.Text.Json.JsonValueKind.Null, "ARRAY_AGG DISTINCT owned JSON");
+            Check(aggregates[6] is true && aggregates[7] is true && aggregates[8] is false, "Boolean aggregates and quantified EVERY");
+            Check(aggregates[9] is 0m && aggregates[10] is 0m, "sample singleton statistics");
+            var groupBindings = await connection.QueryAsync("SELECT key, g, FIRST r.d.name FOR r IN g END AS first_name, ARRAY r.t FOR r IN g END AS elements FROM items d LEFT UNNEST d.nested t GROUP BY d.score AS key GROUP AS g HAVING ANY r IN g SATISFIES r.d.score = 3 END ORDER BY ARRAY_LENGTH(g)", cancellationToken: token);
+            Check(groupBindings.Count == 1 && groupBindings[0][0] is 3m && groupBindings[0][2] is "東京", "GROUP AS aliases FIRST HAVING ORDER BY");
+            var bindingArray = (System.Text.Json.JsonElement)groupBindings[0][1]!;
+            Check(bindingArray.GetArrayLength() == 2 && bindingArray.EnumerateArray().All(value => value.GetProperty("key").GetDecimal() == 3m && value.GetProperty("d").GetProperty("name").GetString() == "東京"), "GROUP AS binding wrappers include aliases");
+            Check(((System.Text.Json.JsonElement)groupBindings[0][3]!).GetArrayLength() == 2, "GROUP AS ARRAY comprehension");
+            var emptyGroup = await connection.QueryAsync("SELECT g FROM items WHERE FALSE GROUP BY TRUE GROUP AS g", cancellationToken: token);
+            Check(emptyGroup.Count == 0 && emptyGroup.Columns[0].Type == Assimalign.Cohesion.Database.Types.DatabaseType.Json, "GROUP AS empty metadata");
+            var groupPlan = await connection.QueryAsync("EXPLAIN SELECT g FROM items GROUP BY 1/0 AS key GROUP AS g", cancellationToken: token);
+            Check(groupPlan.Documents.Any(value => value.GetProperty("detail").ValueKind == System.Text.Json.JsonValueKind.String && value.GetProperty("detail").GetString() == "group_as=g; group_aliases=key"), "GROUP AS nonexecuting EXPLAIN");
+            var tinyStatistic = await connection.QueryAsync("SELECT STDDEV(v) FROM items UNNEST [1e-20,2e-20] v", cancellationToken: token);
+            Check(tinyStatistic[0][0] is 7.0710678e-21m, "sample statistic avoids intermediate underflow");
+            var wideStatistic = await connection.QueryAsync("SELECT VARIANCE(v) AS v, STDDEV(v) AS s FROM items UNNEST [-2e14,2e14,0] v", cancellationToken: token);
+            Check(wideStatistic[0][0] is 4e28m && wideStatistic[0][1] is 2e14m, "sample statistic avoids intermediate overflow");
             var registered = await connection.QueryAsync(
                 "SELECT lower_tag('READY') AS tag, has_value(absent) AS missing_value, has_value(NULL) AS null_value, has_value(score) AS valued FROM items",
                 cancellationToken: token);
@@ -196,6 +302,39 @@ internal static class Program
             Check(synthetic.IsDocumentQuery && synthetic.Documents.Count == 2 && synthetic.Documents[0].GetProperty("d").GetProperty("name").GetString() == "東京" &&
                 synthetic.Documents[0].GetProperty("t").GetInt32() == 1, "UNNEST synthetic documents");
             Check((await connection.QueryAsync("SELECT SUM(score) AS total FROM items HAVING SUM(score) > 0", cancellationToken: token))[0][0] is 3m, "aggregate");
+            Check(await connection.ExecuteAsync("CREATE COLLECTION ordering", cancellationToken: token) == 0, "ordering collection");
+            await connection.ExecuteAsync("INSERT INTO ordering (KEY, VALUE) VALUES ('m', {}), ('n', {'v':NULL}), ('v', {'v':1})", cancellationToken: token);
+            (string Suffix, string Expected)[] orderings =
+            [
+                ("ASC NULLS FIRST", "m,n,v"), ("ASC NULLS LAST", "v,m,n"),
+                ("DESC NULLS FIRST", "n,m,v"), ("DESC NULLS LAST", "v,n,m"),
+            ];
+            foreach (var ordering in orderings)
+            {
+                var ordered = await connection.QueryAsync($"SELECT META().id AS id, v AS k FROM ordering ORDER BY k {ordering.Suffix}", cancellationToken: token);
+                Check(string.Join(',', ordered.Select(row => (string)row.GetValue(0)!)) == ordering.Expected, "NULLS " + ordering.Suffix);
+            }
+            await connection.ExecuteAsync("CREATE INDEX ordering_ix ON ordering (v INCLUDE MISSING)", cancellationToken: token);
+            var orderingPlan = await connection.QueryAsync("EXPLAIN SELECT META().id FROM ordering ORDER BY v DESC", cancellationToken: token);
+            Check(orderingPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "IndexOrderCandidate" &&
+                document.GetProperty("detail").GetString()!.Contains("consumed=True; sort=elided", StringComparison.Ordinal)), "ordered index consumption");
+            var orderedPage = await connection.QueryAsync("SELECT META().id FROM ordering ORDER BY v DESC LIMIT 1 OFFSET 1", cancellationToken: token);
+            Check(orderedPage.Count == 1 && orderedPage.Single().GetValue(0) is "n", "ordered index early page");
+            Check(await connection.ExecuteAsync("DROP COLLECTION ordering", cancellationToken: token) == 0, "ordering cleanup");
+            var derivedSource = await connection.QueryAsync("SELECT d.score FROM (SELECT score FROM items) d ORDER BY d.score DESC LIMIT 1", cancellationToken: token);
+            Check(derivedSource.Count == 1, "derived source ordered page");
+            var expressionSource = await connection.QueryAsync("SELECT RAW v FROM [1,NULL,{n:2}] AS v", cancellationToken: token);
+            Check(expressionSource.Count == 3 && expressionSource.Documents[0].GetInt32() == 1 &&
+                expressionSource.Documents[1].ValueKind == JsonValueKind.Null && expressionSource.Documents[2].GetProperty("n").GetInt32() == 2, "expression source values");
+            Check((await connection.QueryAsync("SELECT RAW v FROM MISSING AS v", cancellationToken: token)).Count == 0, "missing source empty");
+            using var sourceParameter = JsonDocument.Parse("[1,2]");
+            var parameterSource = await connection.QueryAsync("SELECT RAW v FROM @p AS v",
+                new Dictionary<string, object?> { ["p"] = sourceParameter.RootElement }, token);
+            Check(parameterSource.Documents.Select(document => document.GetInt32()).SequenceEqual([1, 2]), "parameter array source");
+            Check((await connection.QueryAsync("SELECT * FROM [1] AS v", cancellationToken: token)).Documents.Single().GetRawText() == "{\"v\":1}", "expression source star");
+            Check((await connection.QueryAsync("SELECT META(v).id AS id FROM [1] AS v", cancellationToken: token)).Single()[0] is null, "expression source metadata");
+            var derivedPlan = await connection.QueryAsync("EXPLAIN SELECT d.score FROM (SELECT score FROM items) d", cancellationToken: token);
+            Check(derivedPlan.Documents.Any(document => document.GetProperty("operator").GetString() == "DerivedSource"), "derived source explain");
             Check(await connection.ExecuteAsync("CREATE INDEX by_score ON items (score)", cancellationToken: token) == 0, "index create");
             var explained = await connection.QueryAsync("EXPLAIN SELECT score FROM items WHERE score >= 2", cancellationToken: token);
             Check(explained.IsDocumentQuery && explained.Documents.Any(document =>
@@ -343,6 +482,7 @@ internal static class Program
             Check((await connection.GetCollectionsAsync(token)).Count == 0, "drop collection");
             await connection.CreateCollectionAsync("reset", token);
             await connection.ExecuteAsync("BEGIN", cancellationToken: token);
+            await connection.ExecuteAsync("SAVEPOINT pooled", cancellationToken: token);
             await connection.PutAsync("reset", "pending", "{}"u8.ToArray(), cancellationToken: token);
         }
         var sessionId = server.Sessions.Single().Id;

@@ -16,7 +16,7 @@ public class GqlLanguageProfileTests
         profile.Language.ShouldBe("GQL");
         profile.IsCaseSensitive.ShouldBeFalse();
         profile.Keywords.ToArray().ShouldContain("MATCH");
-        profile.Functions.ToArray().ShouldBe(["element_id", "elementId", "labels", "type", "properties", "keys", "startNode", "endNode", "path_length", "length", "nodes", "edges", "relationships", "lower", "toLower", "upper", "toUpper", "trim", "substring", "replace", "char_length", "character_length", "size", "abs", "ceil", "ceiling", "floor", "round", "sqrt", "ln", "log", "mod", "toString", "toInteger", "toFloat", "toBoolean", "current_date", "current_timestamp", "cast", "count", "sum", "avg", "min", "max", "collect_list", "collect"]);
+        profile.Functions.ToArray().ShouldBe(["element_id", "elementId", "labels", "type", "properties", "keys", "startNode", "endNode", "path_length", "length", "nodes", "edges", "relationships", "lower", "toLower", "upper", "toUpper", "trim", "substring", "replace", "char_length", "character_length", "size", "abs", "ceil", "ceiling", "floor", "round", "sqrt", "ln", "log", "mod", "toString", "toInteger", "toFloat", "toBoolean", "current_date", "current_timestamp", "cast", "reduce", "count", "sum", "avg", "min", "max", "collect_list", "collect"]);
     }
 
     [Theory]
@@ -32,9 +32,15 @@ public class GqlLanguageProfileTests
     [InlineData(GqlClauses.Offset)]
     [InlineData(GqlClauses.Skip)]
     [InlineData(GqlClauses.Limit)]
+    [InlineData(GqlClauses.Exists)]
     [InlineData(GqlClauses.Case)]
+    [InlineData(GqlClauses.ListComprehension)]
+    [InlineData(GqlClauses.ListSlice)]
+    [InlineData(GqlClauses.Reduce)]
+    [InlineData(GqlClauses.ListPredicate)]
     [InlineData(GqlClauses.Create)]
     [InlineData(GqlClauses.Insert)]
+    [InlineData(GqlClauses.Merge)]
     [InlineData(GqlClauses.Delete)]
     [InlineData(GqlClauses.DetachDelete)]
     [InlineData(GqlClauses.Where)]
@@ -70,15 +76,13 @@ public class GqlLanguageProfileTests
     public void Profile_AdvertisesOnlyExecutableClauses()
     {
         GqlLanguageProfile.Instance.Clauses.ShouldBe([
-            GqlClauses.Match, GqlClauses.QuantifiedPath, GqlClauses.PathMode, GqlClauses.PathSelector, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.Next, GqlClauses.With, GqlClauses.GroupBy, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Case, GqlClauses.Create, GqlClauses.Insert,
-            GqlClauses.Set, GqlClauses.Remove, GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Filter, GqlClauses.Let, GqlClauses.For, GqlClauses.Unwind, GqlClauses.Show,
+            GqlClauses.Match, GqlClauses.QuantifiedPath, GqlClauses.PathMode, GqlClauses.PathSelector, GqlClauses.OptionalMatch, GqlClauses.Explain, GqlClauses.Return, GqlClauses.SetOperation, GqlClauses.UnionDistinct, GqlClauses.UnionAll, GqlClauses.Except, GqlClauses.ExceptDistinct, GqlClauses.ExceptAll, GqlClauses.Intersect, GqlClauses.IntersectDistinct, GqlClauses.IntersectAll, GqlClauses.Otherwise, GqlClauses.Next, GqlClauses.With, GqlClauses.GroupBy, GqlClauses.OrderBy, GqlClauses.Offset, GqlClauses.Skip, GqlClauses.Limit, GqlClauses.Exists, GqlClauses.Case, GqlClauses.ListComprehension, GqlClauses.PatternComprehension, GqlClauses.ListSlice, GqlClauses.Reduce, GqlClauses.ListPredicate, GqlClauses.Create, GqlClauses.Insert, GqlClauses.Merge,
+            GqlClauses.Set, GqlClauses.Remove, GqlClauses.Delete, GqlClauses.DetachDelete, GqlClauses.Where, GqlClauses.Filter, GqlClauses.Let, GqlClauses.For, GqlClauses.Unwind, GqlClauses.Show, GqlClauses.Savepoint, GqlClauses.ReleaseSavepoint, GqlClauses.RollbackToSavepoint, GqlClauses.CreateIndex, GqlClauses.DropIndex, GqlClauses.CreateConstraint, GqlClauses.DropConstraint, GqlClauses.CreateLabel, GqlClauses.DropLabel, GqlClauses.CreateRelationshipType, GqlClauses.DropRelationshipType,
             GqlClauses.LabelExpression]);
     }
 
     [Theory]
     [InlineData(GqlClauses.MandatoryMatch)]
-    [InlineData(GqlClauses.Merge)]
-    [InlineData(GqlClauses.SetOperation)]
     [InlineData(GqlClauses.Call)]
     public void FutureClauses_AreNotAdvertised(string clause)
     {

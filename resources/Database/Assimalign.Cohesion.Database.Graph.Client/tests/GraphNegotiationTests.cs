@@ -38,7 +38,7 @@ public sealed class GraphNegotiationTests
         agreement.Version.ShouldBe(new(2, minor));
         agreement.Capabilities.Contains("diagnostics").ShouldBe(diagnostics);
         if (minor == 0) { ready.Payload.IsEmpty.ShouldBeTrue(); }
-        await ExecuteAsync("MATCH (a)->(b) MERGE (d) RETURN a UNION MATCH (c) RETURN c");
+        await ExecuteAsync("MATCH (a)->(b) CALL foo() RETURN a HAVING TRUE");
         if (diagnostics)
         {
             var diagnostic = await ReadAsync();
@@ -54,7 +54,11 @@ public sealed class GraphNegotiationTests
         {
             var warning = await ReadAsync();
             warning.Type.ShouldBe(ProtocolMessageType.Diagnostics);
-            ProtocolDiagnosticsMessage.Decode(warning.Payload.Span).Entries.ShouldHaveSingleItem().Code.ShouldBe("CG01010");
+            var entries = ProtocolDiagnosticsMessage.Decode(warning.Payload.Span).Entries;
+            entries.Count.ShouldBe(2);
+            entries.ShouldContain(item => item.Code == "CG01010");
+            entries.ShouldContain(item => item.Code == "CG01023");
+            entries.ShouldAllBe(item => item.Severity == ProtocolDiagnosticSeverity.Warning);
         }
         (await ReadAsync()).Type.ShouldBe((ProtocolMessageType)GraphProtocolMessageType.ResultComplete);
         await SendAsync(ProtocolMessageType.Ping, ReadOnlyMemory<byte>.Empty);

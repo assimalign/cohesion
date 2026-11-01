@@ -19,8 +19,8 @@ public static class SqlLanguageProfile
         "SET", "VALUES", "INTO", "RETURNING",
         "FUNCTION", "DOMAIN", "RETURNS", "RETURN", "IMMUTABLE", "STABLE", "VOLATILE", "STRICT", "CALLED", "INPUT",
         // DDL
-        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "VIEW", "IF",
-        "ADD", "COLUMN",
+        "CREATE", "DROP", "TRUNCATE", "ALTER", "TABLE", "INDEX", "SEQUENCE", "VIEW", "IF",
+        "ADD", "COLUMN", "SERIAL", "BIGSERIAL", "SMALLSERIAL", "OVERRIDING", "MINVALUE", "MAXVALUE", "CYCLE", "CACHE", "RESTART",
         "PRIMARY", "KEY", "FOREIGN", "REFERENCES",
         "CONSTRAINT", "DEFAULT", "CHECK", "UNIQUE", "COLLATE",
         "CASCADE", "RESTRICT",
@@ -29,7 +29,7 @@ public static class SqlLanguageProfile
         "CROSS", "FULL", "NATURAL", "ON", "USING",
         // Clauses and modifiers
         "AS", "GROUP", "BY", "ORDER", "ASC", "DESC",
-        "HAVING", "LIMIT", "OFFSET", "FETCH", "NEXT",
+        "HAVING", "FILTER", "LIMIT", "OFFSET", "FETCH", "NEXT",
         "ONLY", "ROWS", "DISTINCT", "ALL", "TOP",
         // Set operations
         "UNION", "INTERSECT", "EXCEPT",
@@ -53,6 +53,10 @@ public static class SqlLanguageProfile
     [
         // Aggregate
         "COUNT", "SUM", "AVG", "MIN", "MAX", "STRING_AGG", "LISTAGG",
+        "BOOL_AND", "BOOL_OR", "EVERY", "STDDEV", "STDDEV_SAMP", "STDDEV_POP", "VARIANCE", "VAR_SAMP", "VAR_POP",
+        "GROUPING", "GROUPING_ID",
+        // Window functions
+        "ROW_NUMBER", "RANK", "DENSE_RANK", "PERCENT_RANK", "CUME_DIST", "NTILE", "LAG", "LEAD", "FIRST_VALUE", "LAST_VALUE", "NTH_VALUE",
         // Null handling
         "COALESCE", "NULLIF",
         // Type
@@ -65,6 +69,8 @@ public static class SqlLanguageProfile
         "ABS", "ROUND", "FLOOR", "CEILING", "CEIL", "POWER", "SQRT", "MOD", "SIGN", "EXP", "LN", "LOG10",
         // Temporal
         "CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP", "LOCALTIME", "LOCALTIMESTAMP", "NOW", "EXTRACT", "DATE_TRUNC",
+        // Sequences
+        "NEXTVAL", "CURRVAL", "SETVAL", "LASTVAL",
         // UUID
         "GEN_RANDOM_UUID",
     ];
@@ -85,7 +91,18 @@ public static class SqlLanguageProfile
         SqlClauses.CreateTableAs,
         SqlClauses.CreateSchema,
         SqlClauses.Identity,
+        SqlClauses.AlterIdentity,
+        SqlClauses.Serial,
+        SqlClauses.Overriding,
+        SqlClauses.OwnedBy,
+        SqlClauses.CreateSequence,
+        SqlClauses.AlterSequence,
+        SqlClauses.DropSequence,
+        SqlClauses.NextValue,
+        SqlClauses.DiscardAll,
         SqlClauses.CreateIndex,
+        SqlClauses.PartialIndex,
+        SqlClauses.IndexKeyOrder,
         SqlClauses.AlterTable,
         SqlClauses.DropTable,
         SqlClauses.Truncate,
@@ -98,7 +115,19 @@ public static class SqlLanguageProfile
         SqlClauses.Using,
         SqlClauses.Where,
         SqlClauses.GroupBy,
+        SqlClauses.GroupingSets,
+        SqlClauses.Rollup,
+        SqlClauses.Cube,
+        SqlClauses.Filter,
         SqlClauses.Having,
+        SqlClauses.Over,
+        SqlClauses.Partition,
+        SqlClauses.Window,
+        SqlClauses.WindowRows,
+        SqlClauses.WindowRange,
+        SqlClauses.WindowGroups,
+        SqlClauses.WindowExclude,
+        SqlClauses.WindowNullTreatment,
         SqlClauses.OrderBy,
         SqlClauses.Limit,
         SqlClauses.Offset,
@@ -111,12 +140,14 @@ public static class SqlLanguageProfile
         SqlClauses.Subquery,
         SqlClauses.QuantifiedComparison,
         SqlClauses.Cte,
+        SqlClauses.Recursive,
         SqlClauses.Case,
         SqlClauses.Cast,
         SqlClauses.Collate,
         SqlClauses.Constraint,
         SqlClauses.ForeignKey,
         SqlClauses.References,
+        SqlClauses.OnUpdate,
         SqlClauses.Check,
         SqlClauses.UniqueConstraint,
         SqlClauses.Cascade,
@@ -125,14 +156,19 @@ public static class SqlLanguageProfile
         SqlClauses.SetDefault,
         SqlClauses.NoAction,
         SqlClauses.Begin,
+        SqlClauses.IsolationLevel,
+        SqlClauses.SetTransaction,
         SqlClauses.Commit,
         SqlClauses.Rollback,
+        SqlClauses.Savepoint,
+        SqlClauses.ReleaseSavepoint,
+        SqlClauses.RollbackToSavepoint,
         SqlClauses.Transaction,
     ];
 
     /// <summary>
     /// Gets the SQL language profile, including MERGE actions, BY SOURCE, RETURNING,
-    /// repeated-target detection and EXPLAIN. Clauses awaiting execution are excluded.
+    /// repeated-target detection, EXPLAIN and demand-driven WITH RECURSIVE fixpoints.
     /// </summary>
     public static QueryLanguageProfile Instance { get; } = new(
         "SQL",

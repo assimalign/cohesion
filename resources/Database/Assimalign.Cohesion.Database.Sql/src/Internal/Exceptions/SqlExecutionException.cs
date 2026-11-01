@@ -35,6 +35,7 @@ internal sealed class SqlExecutionException : DatabaseException
     internal const string InsufficientPrivilegeCode = "CS03066";
     internal const string StatementMemoryBudgetCode = "CS05067";
     internal const string DmlMultipleSourceMatchesCode = "CS05068";
+    internal const string ReferentialAssignmentConflictCode = "CS05085";
 
     internal SqlExecutionException(string code, string message, Exception? innerException = null, Location? location = null)
         : base(message, [new Diagnostic
@@ -51,8 +52,20 @@ internal sealed class SqlExecutionException : DatabaseException
         _location = location;
     }
 
+    internal static SqlExecutionException ReferentialAssignmentConflict(string constraint, string schema, string table, string column)
+        => new(ReferentialAssignmentConflictCode, string.Format(System.Globalization.CultureInfo.CurrentCulture,
+            ErrorMessages.UpdateActionConflict, constraint, schema, table, column));
+
     internal SqlExecutionException At(Location? location) => Diagnostics[0].Start is not null || location is null
         ? this : new(Diagnostics[0].Code!, Message, InnerException ?? this, location);
+
+    internal static DatabaseTransactionAbortedException SerializationFailure(TransactionAbortedException cause)
+        => new(cause.Message, [new Diagnostic
+        {
+            Code = SerializationFailureCode,
+            Message = cause.Message,
+            Severity = DiagnosticSeverity.Error,
+        }], cause);
 
     internal static DatabaseTransactionDeadlockException Deadlock(TransactionDeadlockException cause)
         => new(cause.Message, [new Diagnostic

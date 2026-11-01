@@ -22,6 +22,12 @@ using Assimalign.Cohesion.Database.Storage;
 /// The public members are non-virtual: they check their arguments and call the protected
 /// cores, which a leaf implements.
 /// </para>
+/// <para>
+/// Adapters recorded while undo markers are live must compare and hash equal by logical
+/// index identity. The undo duplicate lookup calls Equals and GetHashCode outside the
+/// database apply gate: neither may depend on mutable state protected by that gate.
+/// Use immutable identity or stable latch identity.
+/// </para>
 /// </remarks>
 // Deviates from the repo interface-first rule per design decision: Database engines are concrete-first — abstract bases with protected cores and sealed model leaves (owner, 2026-10-04; database-area.md).
 public abstract class RecordVersionIndex
@@ -66,6 +72,12 @@ public abstract class RecordVersionIndex
         ArgumentNullException.ThrowIfNull(transaction);
         return ClearDeleterCoreAsync(transaction, key, entryReference, writer, cancellationToken);
     }
+
+    internal void StatementRolledBack() => OnStatementRolledBackCore();
+
+    /// <summary>Compensates model-owned memory after the containing physical statement rolls back.</summary>
+    /// <remarks>Index adapters need no action; reversible maintenance adapters restore their before-image idempotently.</remarks>
+    protected internal virtual void OnStatementRolledBackCore() { }
 
     /// <summary>
     /// Erases the entry when its writer stamp is <paramref name="writer"/> (see <see cref="EraseAsync"/>).

@@ -248,11 +248,6 @@ internal sealed partial class SqlPlanExecutor
             throw new SqlExecutionException(SqlExecutionException.DuplicateColumnCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecutionColumnExists, plan.Column.Name));
         }
 
-        if (plan.Column.Identity is not null && Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
-        {
-            throw SqlPlanningException.IdentityViolation(plan.Column.Name, ErrorMessages.IdentityBackfillForbidden);
-        }
-
         // Validate even on an empty table: publishing an unusable default would
         // defer the failure until a later INSERT. No catalog or row writes occur
         // until every default and existing-row constraint has been checked.
@@ -263,9 +258,10 @@ internal sealed partial class SqlPlanExecutor
             var expression = SqlPersistedExpression.Load(column.DefaultLiteral, "ADD COLUMN DEFAULT");
             var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation,
                 functions: _definitions.Functions, cancellationToken: cancellationToken);
-            SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls);
-            SqlPersistedExpression.Bind(expression, scope, declaring: true);
-            var volatility = DefaultVolatility(expression, scope);
+            bool sequenceDefault = SqlSequenceDefault.IsCandidate(expression);
+            if (!sequenceDefault)
+            { SqlDefinitionBinder.PinCalls(expression, scope, column.DefaultFunctionCalls); SqlPersistedExpression.Bind(expression, scope, declaring: true); }
+            var volatility = sequenceDefault ? SqlFunctionVolatility.Volatile : DefaultVolatility(expression, scope);
             if (volatility == SqlFunctionVolatility.Volatile &&
                 Scan(table, statement, cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
             {
@@ -333,6 +329,27 @@ internal sealed partial class SqlPlanExecutor
                 (statement.ScriptReceipt is null ? _catalog.AddColumnAsync(plan.Schema, plan.Name, column, cancellationToken) : _catalog.AddColumnAsync(plan.Schema, plan.Name, column, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false), replacement, CancellationToken.None);
             return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
         }
+        if (column.Identity is not null)
+        {
+            var extraIndexes = plan.Constraints.Select((definition, index) => (definition, index))
+                .Where(item => item.definition.Kind is SqlConstraintKind.Unique or SqlConstraintKind.PrimaryKey)
+                .Select(item => new SqlCatalogIndex(table.ObjectId, ConstraintName(replacement, item.definition, item.index),
+                    item.definition.Columns, true, table.Owner, table.OwningSchema, item.definition.Kind == SqlConstraintKind.PrimaryKey)).ToArray();
+            SqlCatalogTable? prepared = null;
+            await RewriteTableAsync(table, statement, cancellationToken,
+                (_, id) => prepared = new SqlCatalogTable(id, replacement.Schema, replacement.Name, columns,
+                    replacement.PrimaryKeyColumns, replacement.Owner, replacement.OwningSchema, replacement.Constraints),
+                values =>
+                {
+                    var converted = new object?[columns.Length];
+                    values.CopyTo(converted, 0);
+                    converted[^1] = CoerceForColumn(SqlSequenceExecution.Current!.AllocatePreparedIdentity(_catalog.IdentitySequence(prepared!.ObjectId, column.Name)), column);
+                    ValidateRows(replacement, [converted], statement, cancellationToken, checksOnly: true);
+                    return converted;
+                }, (built, indexes) => ValidateRewriteReferences(built, indexes, parents.Values, column.Name, statement, cancellationToken),
+                definitionChange: true, additionalIndexes: extraIndexes).ConfigureAwait(false);
+            return new SqlQueryResult(DatabaseResultStatus.Success, 0);
+        }
         // Backfill is logical: missing trailing fields resolve from the immutable
         // replacement metadata. Existing row bytes and MVCC stamps never change;
         // one durable catalog publication makes the complete addition visible.
@@ -395,7 +412,7 @@ internal sealed partial class SqlPlanExecutor
 
     private void EnsureCanDropIndex(SqlCatalogTable table, SqlCatalogIndex index)
     {
-        if (index.IsUnique && (index.IsPrimaryKey ||
+        if (index.Predicate is null && index.IsUnique && (index.IsPrimaryKey ||
             IncomingReferences(table).Any(reference => SameConstraintColumns(reference.Constraint.ReferencedColumns!, index.ColumnNames))))
         {
             throw new SqlExecutionException(SqlExecutionException.DependentObjectsCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ConstraintIndexDependent, index.Name));

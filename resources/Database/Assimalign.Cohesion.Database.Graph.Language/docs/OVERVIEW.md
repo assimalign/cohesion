@@ -22,13 +22,16 @@ null extension, WALK/TRAIL/SIMPLE/ACYCLIC modes (implicit TRAIL), quantified rel
 `-[r:T|U]->`, every directed ISO edge in full and abbreviated form (`->`, `<-`, `-`, `<->`), scalar
 Boolean, arithmetic, null/truth, list-membership and string filters and labeled predicates (`n IS NOT LABELED A`, `n:A|B`),
 core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
-CASE, COALESCE, NULLIF, list/map literals and parameters, subscripts and map/entity property access,
+CASE, COALESCE, NULLIF, correlated EXISTS/NOT EXISTS braced patterns, list/map literals and parameters, lexical list comprehensions, correlated pattern collections, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended list slices,
+subscripts and map/entity property access,
 LET and FILTER, FOR (Cypher UNWIND), RETURN ... NEXT and Cypher WITH,
+read-only UNION, EXCEPT and INTERSECT (DISTINCT or ALL), whole-result lazy OTHERWISE,
+with isolated operands; composite conjunctions bind more tightly than NEXT,
 RETURN expressions and aliases, DISTINCT/ALL, RETURN * and standalone RETURN,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
 ORDER BY with ASC/DESC and NULLS FIRST/LAST, OFFSET (Cypher SKIP) and LIMIT,
 `INSERT`, `CREATE` as an insertion compatibility extension, SET/REMOVE properties and node labels,
-literal-map replacement and D3 merge (`+=`), and restricted or
+literal-map replacement and D3 merge (`+=`), whole-pattern MERGE with ON CREATE/ON MATCH SET, and restricted or
 cascading deletion. Unsupported features, including the undirected tilde edges, produce
 `CK00001`; malformed supported syntax produces stable `GQL` diagnostics, and a Cypher arrow such
 as `(a)-->(b)`, which GQL reads as a comment, produces `CG00008`. The parser does not throw for
@@ -37,7 +40,7 @@ limit: `:A:B:...`, `A|B|...` and AND/OR/XOR runs are each one n-ary node of any 
 parentheses nest as deep as the parsing thread's stack allows; deeper text reports `CG00009`
 instead of overflowing it.
 
-Named path assignment is supported only in `MATCH`. The engine's path request API projects one
+Named path assignment is supported in `MATCH` and locally in pattern comprehensions. The engine's path request API projects one
 bound node, relationship or named path; deleting a path variable or accessing a path property is
 rejected by binding. Path results retain the actual traversal entities rather than scalar rows.
 
@@ -54,6 +57,9 @@ bindings stream and an unordered LIMIT can stop upstream work; final results rem
 This changes no grammar or wire bytes; remote execution uses the server engine ceilings.
 
 Standalone BEGIN [TRANSACTION] / START TRANSACTION, COMMIT and ROLLBACK parse into GqlTransactionCommand and run through the existing session transaction API, including over Execute (#1540, #1725).
+Named SAVEPOINT, RELEASE [SAVEPOINT] and ROLLBACK TO [SAVEPOINT] execute as Cohesion
+extensions with nested PostgreSQL scopes (#1726). See [DIALECT.md](DIALECT.md) for name
+lookup, retained rollback targets and the model's whole-transaction failure rule.
 
 ## Graph diagnostic conventions (#1470)
 

@@ -10,20 +10,39 @@ versioned UTF-8 JSON documents. Each session is bound to one database. The engin
 supports document CRUD, OQL queries, KEY/VALUE INSERT and UPSERT, SET/UNSET UPDATE, DELETE and collection/index DDL, secondary B+Tree indexes,
 snapshot and read-committed transactions, durable file or in-memory storage, and a wire server.
 
-OQL executes 34 SQL++ scalar functions, including Unicode string operations, exact math,
+OQL accepts ALL/DISTINCT aggregate arguments and ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY,
+STDDEV and VARIANCE alongside COUNT/SUM/AVG/MIN/MAX. Retained distinct values and arrays consume
+the statement memory budget, shared with SELECT source/group staging, GROUP AS wrappers and DML pending buffers. Scratch reservations release at expression and sort boundaries. GROUP BY supports term aliases; GROUP AS retains input binding wrappers for projection, HAVING, ordering and ARRAY/FIRST or quantified expressions. OQL executes 34 SQL++ scalar functions, including Unicode string operations, exact math,
 UTC date conversion, type/array tests and short-circuit conditionals. Clock functions share the
 transaction-start instant. COUNT and string/array lengths and positions return Int64 long values,
 with matching wire column types; the language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md)
 records the full contract. LIMIT/OFFSET page stored and system queries after grouping, DISTINCT
 and ordering. Counts accept literals or parameters through Int64.MaxValue; invalid values carry
-CD00007. Column types remain independent of the page, including empty results.
+CD00007. LIMIT 0 returns planned column metadata after static validation and skips all sources
+and blocking stages. Other stored and system pages retain full-result column types, including
+empty results; expression and derived sources infer theirs over the selected page.
+INNER/LEFT key JOIN and NEST use statement-snapshot document lookups with a bounded statement
+cache capped at one eighth of the statement memory grant, per-source metadata and synthetic stars.
+NEST returns zero/one-element arrays, with MISSING for unknown keys on LEFT NEST. Every SELECT
+source in a joined statement requires an explicit alias; general predicates and UPDATE/DELETE
+source joins remain deferred.
 INNER/LEFT UNNEST expands array elements into scoped rows before WHERE, grouping and paging.
-ANY/SOME/EVERY and array-value IN query arrays without expansion. A star with UNNEST returns
+ANY/SOME/EVERY and array-value IN query arrays without expansion. Expression SELECTs
+return arrays on a shared nested execution context; EXISTS and IN (SELECT RAW ...) compose with
+SELECT expressions. Derived FROM streams inner rows; expression sources accept arrays,
+parameters and subqueries. Their stars wrap the source alias, and META returns NULL without a
+stored identity. Correlated queries and FROM sources execute per row, including in DML; nested reads see statement-start data. Uncached arrays have expression ownership, and all depths share work/memory bounds. A star with UNNEST returns
 synthetic objects keyed by variable names; an ordinary star preserves the stored document.
 CREATE INDEX admits one DISTINCT ARRAY path projection with an optional restricted WHEN among
 scalar keys. Matching ANY and direct UNNEST sources use deduplicated document candidates while
 retaining full predicate residuals and UNNEST multiplicity. DESIGN and DIALECT state the measured
 selective fetch bound and its limit for unfiltered multi-field predicates.
+
+Proven scalar index order serves ORDER BY forward or reverse and elides sorting. INCLUDE MISSING
+supports ORDER BY alone; sparse indexes require a predicate rejecting leading MISSING. Complete
+equal-key buckets retain document identity ties. Fixed result types, including SELECT *, permit early LIMIT/OFFSET;
+projections needing full-result type inference retain complete reads. DESIGN and DIALECT state
+the eligibility and fallback rules.
 
 `DocumentDatabaseServer.Create(engine, options)` or `engineBuilder.AddServer(options => ...)`
 serves OQL and document/collection commands on a consumer-supplied listener. Each authenticated

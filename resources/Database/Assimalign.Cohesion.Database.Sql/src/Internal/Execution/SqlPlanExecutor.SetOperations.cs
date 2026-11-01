@@ -15,6 +15,8 @@ internal sealed partial class SqlPlanExecutor
         SqlStatementContext statement, CancellationToken cancellationToken)
     {
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        using var recursiveScratch = RecursiveState is null ? null : new SqlWindowMemory(statement.Metrics,
+            _definitions.StatementMemoryBudget, statementBudgetOnly: true);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var comparer = new GroupKeyComparer(plan.Projections.Select(projection => projection.Collation.Resolve(_subqueryValues)).ToArray());
         var rows = new List<object?[]>();
@@ -34,7 +36,7 @@ internal sealed partial class SqlPlanExecutor
             foreach (var row in right)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                counts.TryGetValue(row, out int count);
+                if (!counts.TryGetValue(row, out int count)) { recursiveScratch?.Reserve(64); }
                 counts[row] = count + 1;
             }
             var seen = plan.IsAll ? null : new HashSet<object?[]>(comparer);
@@ -46,7 +48,7 @@ internal sealed partial class SqlPlanExecutor
                 counts.TryGetValue(row, out int count);
                 if (plan.IsAll && count > 0) { counts[row] = count - 1; }
                 bool include = plan.Operator == SqlSetOperator.Intersect ? count > 0 : count == 0;
-                if (include && (seen is null || seen.Add(row))) { rows.Add(row); }
+                if (include && (seen is null || seen.Add(row))) { recursiveScratch?.Reserve(64); rows.Add(row); }
             }
         }
         return MaterializeSelect(rows, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset, false, evaluator, null, cancellationToken);
@@ -78,7 +80,12 @@ internal sealed partial class SqlPlanExecutor
                 {
                     converted[i] = SqlTemporalArithmetic.Promote(evaluator.Evaluate(conversions[i], values), plan.Projections[i].Type);
                 }
-                if (seen is null || seen.Add(converted)) { rows.Add(converted); }
+                if (seen is null || seen.Add(converted))
+                {
+                    if (RecursiveState is not null && SqlWindowMemory.For(statement.Metrics) is { } memory)
+                    { memory.Retain(converted); memory.Reserve(32); }
+                    rows.Add(converted);
+                }
             }
             return rows;
         }

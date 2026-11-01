@@ -10,9 +10,11 @@ enumerates and drops logical databases, opens database-bound sessions, and imple
 node, relationship and traversal operations of `GraphDatabase`. A session executes the bounded GQL
 subset, including WALK/TRAIL/SIMPLE/ACYCLIC path modes (implicit TRAIL), quantified paths with ISO {m,n}/+/* and Cypher *m..n, group lists, source-ordered MATCH/OPTIONAL MATCH with null extension, named scalar/list/map parameters, Boolean/arithmetic WHERE and RETURN expressions,
 core element/string/math functions, CAST, Cypher conversions, transaction-start CURRENT_DATE/CURRENT_TIMESTAMP,
-CASE, COALESCE, NULLIF, list/map constructors and field/index access,
+CASE, COALESCE, NULLIF, correlated EXISTS/NOT EXISTS braced patterns, list/map constructors, lexical list comprehensions, correlated pattern collections, ordered reduce, ALL/ANY/NONE/SINGLE list predicates, open-ended slices and field/index access,
 SET/REMOVE scalar properties and node labels through MVCC replacements, literal-map replacement and merge,
 COUNT, SUM, AVG, MIN, MAX and COLLECT_LIST (Cypher collect), with implicit or ISO GROUP BY,
+read-only UNION, EXCEPT and INTERSECT (DISTINCT or ALL), lazy whole-result OTHERWISE,
+with shared snapshots/budgets and combined bindings passed to NEXT,
 RETURN DISTINCT/ALL, star, aliases and standalone RETURN, ORDER BY with explicit null placement,
 OFFSET/SKIP and LIMIT, described in [Graph.Language](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md).
 
@@ -46,7 +48,9 @@ EXPLAIN with endpoint-pair partitions and separate search prefilters
 under the statement work/memory budgets; see [selector execution](DESIGN.md#gql-path-selectors-execution-1734-gq-sp2sp3).
 
 `GraphSchema.Open` supplies session-bound label/type discovery, property metadata, ownership
-enforcement and node-property index creation. `AddGraph(name, graph => ...)` captures
+enforcement, database-wide node-property index names and independently named type/existence
+constraints. Named constraints validate existing data and share enforcement with property metadata;
+index/constraint drops preserve snapshot visibility. Catalog v2 refuses earlier catalogs. `AddGraph(name, graph => ...)` captures
 construction through `IDatabaseApplicationBuilder` and returns that builder. At Build the callback
 configures the sealed `GraphDatabaseEngineBuilder`: its `Options` (copied at build), the databases
 it declares (`AddDatabase(name)`: opened or created by the build, never dropped while declared), a
@@ -240,6 +244,13 @@ format arguments use the current culture. Cancellation and abort templates used 
 cleanup are cached before reuse. Error identities remain separate from message text where a
 structured diagnostic carrier exists. Standard .NET guards retain their argument names and exception types.
 Shared Engine source uses the consuming assembly's generated accessor through the internal `EngineErrorMessages` binding; no public resource accessor or cross-assembly internal access is introduced.
+
+## Whole-pattern MERGE (#1735)
+
+MERGE matches one complete fixed path or creates all its unbound parts, then runs ON MATCH or
+ON CREATE SET. It supports bound nodes/relationships, undirected matching, writer overlays and
+retryable stale-Snapshot detection through pattern locks. See the language DIALECT and this
+project's DESIGN for validation, counts, concurrency and EXPLAIN behavior.
 
 ## Graph diagnostic conventions (#1470)
 

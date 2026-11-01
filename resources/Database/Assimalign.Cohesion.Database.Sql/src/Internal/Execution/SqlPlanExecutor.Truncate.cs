@@ -75,6 +75,7 @@ internal sealed partial class SqlPlanExecutor
         // own storage bracket is innermost. Reclamation waits for transaction AND statement
         // pins, so cancellation/rollback cannot expose pages while this flow still uses them.
         var previous = targets.Values.OrderBy(table => table.ObjectId).ToArray();
+        var ownedGrants = await LockOwnedSequencesAsync(previous, statement, cancellationToken).ConfigureAwait(false);
         for (int index = 0; index < previous.Length; index++)
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
@@ -90,6 +91,7 @@ internal sealed partial class SqlPlanExecutor
             EnsureSameIdentity(previous[index], current);
             previous[index] = current;
         }
+        VerifyOwnedSequences(previous, ownedGrants, statement);
         await ReplaceTableStorageAsync(previous, named, null, null, copyRows: false, plan.Expression.RestartIdentity,
             SqlObjectIdentity.Table(plan.Expression.Tables[0].Table.SchemaName ?? SqlPlanner.DefaultSchema, plan.Expression.Tables[0].Table.TableName),
             statement, cancellationToken).ConfigureAwait(false);

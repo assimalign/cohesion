@@ -1,8 +1,232 @@
 # Assimalign.Cohesion.Database.Transactions — Design
 
+## Owned savepoint controls (#1726, XT-4)
+
+TransactionCoordinator exposes non-virtual controls over a new sealed TransactionSavepoint token.
+The token owns its coordinator, exact current context and internal marker; foreign, stale,
+released or ended tokens retain CK04008. The wrapper is allocated before kernel admission, so
+an allocation failure cannot orphan a marker. Kernel creation also unwinds its marker if lock
+or model registration fails. This is the common kernel consumer surface for all models. Existing internal marker identities remain internal. GetUndoFailureCode supplies their
+structured CK04 identity without message parsing, and IsPartialUndoPending reads the shared
+lifecycle's existing flag without taking another monitor. The root transaction supplies names
+and the session read fence. Markers remain in memory; storage stays at format 4.
+
+Linked model probes now call this surface instead of UnsafeAccessor for create/release/undo and
+failure classification. Only physical-batch fault/reader observation remains a test-only accessor.
+Named SQL/OQL/GQL tests cover duplicate lookup, descendant lifetime, retry, root-end/disposal
+races, lock waiter wakeup and cancellation. The copied-live crash-image/reader-progress scenarios
+now execute named controls. Root end releases every marker through the existing lifecycle.
+
+The optional rollback scope-discard notification updates attempt-owned state exactly once after
+kernel revalidation; refused attempts do not notify. No exception metadata is used. Consumers
+must keep this notification nonthrowing and nonreentrant. TransactionContext.Current resolves
+the latest kernel-issued replacement so consumers can compare reference identity. Its reference shares the existing
+drain slot; an in-flight drain retains it in Task.AsyncState and restores it before notification.
+No unmarked context gains a field, lock or allocation.
+
+ApplyMemoryChange admits reversible memory changes without writer-log enrollment or a storage
+bracket. It records an existing RecordVersionIndex before-image before mutation and restores its
+memory hook in reverse ledger order. Memory entries split physical undo batches so callbacks run
+outside brackets. A memory-only suffix requires neither the apply gate nor any physical undo
+bracket, while lifecycle admission still makes ends drain it. The source establishes admission,
+ledger and model-monitor order. This kernel seam is shared by scope-aware memory consumers;
+Graph uses it for MERGE bookkeeping. Physical statements retain their existing allocation shape.
+
+## Isolation configuration (#1012)
+
+Isolation replacement refuses a context with live savepoint tokens, even at the same level, with ArgumentException. Releasing the final scope permits replacement again. Registration precedes the context latch. Marker completion updates a live-scope bit in the existing admission byte under that latch before dropping its apply count, so replacement sees either the running control or its live scopes. Ledger and lock-table monitors are released before taking the latch. A refused replacement leaves every token usable (#1726).
+
+ReplaceIsolationLevel returns an immutable replacement context with the same id, sequence and
+begin snapshot. Earlier handles and statement views share one end/apply lifecycle. Registration
+changes under manager lock before coordinator tracking; those locks are never nested. The context
+end latch follows manager lock, as in ClaimEnd. Stale and untracked handles, running statement
+applies and ending transactions each have a distinct TransactionAbortedException message.
+Statement views and pins are ArgumentException caller errors. The manager refuses READ COMMITTED
+to fixed visibility unless an active pin registered before the transaction still retains its begin
+floor; a late or released pin cannot restore pruned data. Registration, pin removal and prune-bound
+evaluation share the manager lock. Callers exclude data statements and transaction ends, retain a
+begin snapshot pin while READ COMMITTED may still change to Snapshot, and release it when
+configuration closes. This takes no new engine locks, writes no log records and changes no
+lifecycle rates or formats. Statement-view and snapshot-pin kind share one byte so replacement
+support preserves the context's existing aligned size, including auto-commit contexts and
+per-statement pins. Successful changes emit event 20 TransactionIsolationChanged with the effective
+level; idempotent replacements emit no change event. Snapshot pins stay registered for pruning but
+move neither the transaction gauge nor the rates.
+
 ## Intent
 
 One transaction substrate for five engines. ACID is the platform's defining requirement (area `DESIGN.md` R1), so the machinery that provides it — MVCC snapshots, commit ordering, locking, WAL binding — lives in a kernel project no model owns. Engines *use* the manager; sessions *expose* the resulting `DatabaseTransaction` from the contract root.
+
+## In-memory undo markers (#1726, XT-2)
+
+The coordinator's internal `CreateUndoMarkerAsync`, `ReleaseUndoMarkerAsync` and
+`RollbackToUndoMarkerAsync` are the substrate for later named scopes. Named language/session admission is provided by XT-4; the kernel itself owns no names. An opaque marker records a position in the combined ordered ledger of
+row creates, row tombstones, index creates and index tombstones. Maintenance implemented through
+those index undo adapters participates in the same ordering; model-owned maintenance now
+participates through XT-3 adapters. Distinct markers at the same position remain distinct
+scopes. Release discards
+the target and its descendants while retaining their effects. Rollback discards descendants,
+undoes the suffix in reverse order and retains the target for reuse. Earlier same-writer
+tombstones survive repeated deletion records: undo builds a set of suffix tombstones, then
+removes matches from the retained prefix. It allocates no lookup and visits no prefix entry
+for an empty or tombstone-free suffix; lookup memory is bounded by suffix tombstones. All
+prefix work runs outside both the version-store monitor and the database apply gate, so
+other writers can apply statements and commit during duplicate lookup construction.
+Index keys compare by bytes. Every `RecordVersionIndex` recorded under markers must compare
+equal and hash equal by logical index across adapter instances. `BTreeRecordVersionIndex`
+supplies that equality, as do the Graph and Documents IndexUndo adapters.
+This follows PostgreSQL's
+release-to-target and rollback/restart semantics (`src/backend/access/transam/xact.c:4595-4607,
+4707-4733`, rechecked locally); name resolution belongs to XT-4.
+
+Rollback-to takes transaction admission through the manager registration lock and context
+end latch before building its duplicate lookup or acquiring the coordinator apply gate.
+Create and release only acquire transaction admission through those two
+monitors: they never queue on the apply gate or run a deferred checkpoint. Admission excludes
+that transaction's current apply and end; a packed control bit excludes later applies, and
+the existing apply count makes a root end drain an admitted control. The monitors are released
+before storage or index work. Marker validation before admission is optimistic: release can
+invalidate that token without taking the gate. The store revalidates before installing its
+pending target; a refusal there clears only a retry fence newly set by this attempt. An
+existing incomplete undo keeps its fence. Create/release and admitted rollback-to exclude
+every second control through the same end latch. The version-store monitor follows admission and never spans
+storage/page/index latches or prefix scans. Model monitors acquired by undo adapters must
+never span transaction admission or an apply-gate wait; callbacks run after store/page latches
+are released. An admitted undo increments the existing apply count,
+so root rollback and disposal drain it before undoing the prefix or releasing locks. Commit
+cannot claim the end while partial undo is pending. Other transactions continue to exclude the
+root writer throughout every physical batch: its creates are invisible and its tombstones do
+not hide older committed records. Its registration and snapshot horizons remain in place,
+including across checkpoints and concurrent purge. Same-transaction operations are serialized
+by the session; they must not read or mutate concurrently with a control.
+
+Undo uses at most 64 ledger effects per physical bracket. A completed bracket is removed from
+the ledger only after commit; a failed bracket restores its own pages and leaves that suffix
+available for retry. The root stays Active but refuses writes, marker creation/release,
+isolation replacement and commit after incomplete undo. It admits only retry of that same
+target, any earlier marker (including one at the same position), or whole-transaction
+rollback/disposal. A successful deeper undo clears the pending state. PostgreSQL likewise
+searches parent savepoints from a failed subtransaction and restarts the selected target
+(`src/backend/access/transam/xact.c:4663-4733`). A fenced statement receives
+`TransactionUndoException` CK04009 while the transaction remains Active and retryable.
+Statement admission decides its refusal inside the existing end latch: ending/ended takes
+precedence over pending undo and reports `TransactionAbortedException`. Statements wait on
+that latch for a memory-only create/release, counting their wait in admission so later controls
+cannot starve them. The contention path polls cancellation while the control remains in flight.
+An empty rollback suffix completes without the apply gate. Root ends drain admitted rollback-to
+lookup and gate waits, which can wait behind another writer. The ordinary apply path adds no cancellation check, lock or allocation.
+The root end claim clears the pending retry bit under its existing latch, including when
+physical whole undo will be deferred; the ending bit remains authoritative. Storage faults retain the existing offline
+rule. Cancellation is checked before admission; once admitted, lookup construction and the
+physical gate wait cannot interrupt undo. After physical undo, the lock journal restores each
+pre-marker holding and wakes newly grantable queues; failed undo retains every lock.
+
+Markers allocate only on use. Each statement registers a writer and an unset position in
+the store while holding the existing apply gate; its first ledger record captures the position
+under Record's existing monitor. No extra monitor is taken at statement entry, even before
+the first marker. Commit checks pending undo inside TryClaimEnd's existing end-latch hold,
+under the manager registration lock, instead of acquiring that latch a second time. Thus
+never-marked transactions take no additional statement/commit lock relative to c3dc498bf.
+After physical statement rollback its failed suffix is discarded, including before the first
+marker, so stale same-writer slot references cannot affect a later scope. Root completion
+removes marker state. Marker controls alone neither enroll a read-only writer nor append any
+lifecycle record. The context's pending and ending bits share the former end boolean's byte, preserving its
+aligned size. A separate pending boolean added eight bytes per statement pin and tripped the
+SQL Release allocation guards; packing the flags keeps the existing budgets. No per-context
+object, delegate or collection is added to transactions that never set a marker.
+
+If a statement's memory compensation fails after bracket rollback, the complete suffix stays
+in the ledger and CK04009 fences writes and commit until rollback-to or whole rollback repairs
+it. The statement reports CK04009 with an AggregateException containing the original statement
+failure followed by the compensation failure, preserving both exception objects. A commit already
+draining that statement rechecks the fence without another ordinary-path
+latch acquisition and returns its end claim to the still-active writer. Created-version undo
+reuses the confirmed stamp-read bytes for catalog unlink on partial and full rollback; it never
+copies a second SQL row or document/blob chunk just to invoke an unused observer.
+Returning the claim is serialized with manager disposal; if disposal has already begun, the
+draining commit owns whole rollback instead, so disposal cannot lose an active writer. That commit
+reports TransactionAbortedException after the writer becomes Faulted; CK04009 is reserved for the
+still-active writer whose end claim was returned.
+
+Markers have no durable identities. Partial undo uses the existing physical WAL operations and
+root-writer stamps. A later root commit makes the remaining prefix and preceding undo durable
+in journal order; without a root commit, recovery scrubs every remaining effect of that writer,
+including after a crash mid-undo or checkpoint truncation. The substrate needs no format
+change: storage stays at format 4. Record, page, WAL, journal-frame and recovery layouts are
+unchanged; markers and ledger positions exist only in memory.
+
+The internal structured `TransactionUndoException.Code` carries these substrate conditions
+separately from its resource-backed message:
+
+| Code | Condition |
+|---|---|
+| CK04008 | Foreign, released, discarded or ended marker; foreign/stale context, statement view or snapshot pin |
+| CK04009 | Partial undo is running/incomplete, or a statement/control/end prevents control admission |
+| CK04010 | An open write stream prevents marker control |
+| CK04011 | The transaction already has 65,535 open write streams |
+
+Tests use real slotted pages/WAL and a record-backed index undo adapter under all five storage
+model tags. They cover nested scopes, statement failure and slot reuse, cancellation, retry,
+root rollback/disposal drain, retained locks, read-only markers, crash after undo with/without
+commit, every whole/torn physical write during multi-batch undo, and reader/purge overlap driven
+by progress counters. XT-3's model suites also exercise real adapters, pinned readers,
+write-after-undo reuse and copied live crash images.
+
+### Lock scopes and model maintenance (#1726, XT-3)
+
+Lock markers use a lazy per-writer grant journal under the lock-table monitor. Each changed
+mode mask remembers its preceding mask and first-grant stamp. Same-mode regrants do no journal
+lookup or append, so journal size follows distinct resources and mode changes.
+Reverse undo restores the exact pre-marker mask, releasing newly acquired resources and key
+locks and reverting upgrades while preserving earlier holdings. Release retains the journal
+when an enclosing marker remains, transferring the child grants to that scope; last release
+transfers all grants to the root. End drops the journal; the last marked owner's release or end
+resets the journal directory to null and restores the lookup-free grant path. The waits-for graph continues to be
+read from the current table and queue; undo schedules every affected queue before notifying
+waiters outside the monitor. Unused owner-directory entries are removed during suffix undo.
+This follows PostgreSQL resource-owner count removal and reassignment in
+src/backend/storage/lmgr/lock.c:2633-2723,2727-2805, and savepoint restart in
+src/backend/access/transam/xact.c:4620-4733 (rechecked locally).
+
+The code beside LockManager.CreateUndoMarker establishes the admission, apply, ledger,
+lock-table and page-latch order, including failed undo, concurrent release, root end and disposal.
+Untracking and model end cleanup verify the context's manager before using its sequence,
+so rejected foreign/null lifecycle arguments cannot affect a local marked writer.
+Owner operations and lock requests are serialized with controls by the model session. Other
+owners can grant, queue, cancel, time out or end while undo runs. No lock-table monitor spans
+storage, manager admission, an await or notification. No version-store monitor spans model
+maintenance callbacks. Memory before-images run through the existing RecordVersionIndex
+maintenance seam and restore idempotently; failed physical statements compensate them in
+reverse before discarding their ledger suffix. Whole-writer undo now uses the same reverse
+order so these adapters also compose with root abort and retry.
+
+Anonymous controls on TransactionRecordSpace remain internal. XT-4 exposes the owned
+TransactionSavepoint controls on the coordinator and protected non-virtual named controls on
+root sessions. Linked model probes use that surface; batch observation stays test-only.
+Shipped code adds no reflection or friend assembly. Models
+retain their before-images only for marked writers and repair only affected identities. This
+keeps a small undo independent of the database's full catalog or graph population.
+
+An open Documents or Blob write stream refuses create, release and rollback-to with CK04010.
+No marker can bisect an in-place chunk next-pointer update or a stream's buffered memory. Stream
+registration uses the high word of the existing apply counter; its low word continues to drain
+statement/control admission. Atomic counter updates and a full control-side store/load fence
+make stream registration and marker admission mutually exclusive without a new context field,
+allocation or monitor acquisition on ordinary stream registration. Completion, cancellation and
+failure release the registration exactly once. Ending/ended contexts report aborted even when
+the stream count is saturated. Stream end validates its owner and uses a checked CAS decrement:
+an unpaired end throws InvalidOperationException without underflowing the packed count.
+Same-owner stream/control operations remain
+session-serialized. The existing lifecycle callback restores no stream state.
+
+XT-4 supplies named scopes, the owned token and structured classification, language/session
+integration and the aborted-block read fence described above. The substrate refuses writes and
+commit after incomplete undo; the root session also refuses reads until successful retry or
+whole rollback. XT-5 expands cross-model failure, recovery, cancellation and pool conformance.
+
+Reader probes pause after a physical undo batch releases its page latches and require a read
+to start and finish within that same interval. Every model completes both pinned Snapshot and
+fresh READ COMMITTED reads there; a mutex serializing readers against undo fails the probe.
 
 ## Why MVCC (and not lock-based isolation)
 
@@ -1287,7 +1511,7 @@ interfaces: they re-implemented `IStorage.Checkpoint` and
 `Storage.Checkpoint`, `Storage.ReserveTransactionSequence` and
 `StorageJournal.AppendRollback` are non-virtual, and a test cannot hand `Storage` a journal
 of its own, so the interception moved to the type that makes the calls
-(`database-area.md`, "Test doubles"). The coordinator carries four internal hooks, reached
+(`database-area.md`, "Test doubles"). The coordinator carries the following internal hooks, reached
 only through this package's `InternalsVisibleTo` grant to its own tests:
 
 | Hook | Where it runs | Used for |
@@ -1296,10 +1520,16 @@ only through this package's `InternalsVisibleTo` grant to its own tests:
 | `SequenceReserved()` | in the manager's sequence allocator, after the storage reserved the sequence and before the context returns | a begin that reached the coordinator while a checkpoint holds the append gate (the reader may now finish; its first apply waits) |
 | `BeforeContextTrackedAsync(TransactionContext context)` | after manager registration, before coordinator tracking, with neither lock held | pause begin while disposal aborts its context and clears the coordinator table (#1351) |
 | `BeforeAbortRecord(long sequence)` | inside the `try` of the abort record's append, before the journal append; a throw rejects the record | a lost abort record on a storage that stays online |
+| `UndoMarkerValidated()` | after optimistic rollback-to validation, before control admission | release on another flow invalidates the marker before the admitted recheck |
+| `UndoControlAdmitted()` | after create/release admission, before its marker mutation | a concurrent statement waits; a second control is refused |
 
-Each is `null` unless a test sets it and runs once per checkpoint, sequence reservation,
-context begin or abort record, never per row. Each rewritten test asserts that its hook fired: the
+Each is `null` unless a test sets it and runs once per corresponding operation, never per row.
+The manager's `ApplyWaitingForUndoControl()` hook records a statement reaching its memory-control
+wait under the context end latch. Each rewritten test asserts that its hook fired: the
 `Checkpoint` helper of the rollback tests starts its capture unset and requires it set.
+The manager's internal FailedCompensationDrained hook runs after the drain observes the fence and
+before disposal arbitration, with neither manager nor context latch held. The disposal race test
+requires exactly one callback and verifies the aborted state and released holdings.
 
 **Stream-level triggers cover the rest.** #1252 made every journal append a write into a
 user-space buffer, so a failed journal write now happens at a drain, and a failed drain
@@ -1321,7 +1551,7 @@ all five engines. The explicit transaction a session runs is the root's
 explicit transaction and one per autocommit statement. In every model, statement snapshot pins
 use `BeginSnapshotPinAsync` and end through `RollbackAsync`. Their immutable kind is assigned
 under the manager lock before active-table insertion (#1351), preserving the snapshot/prune
-ordering described above. Pins remain in the current-transactions gauge but move none of the
+ordering described above. Pins remain registered for pruning but move neither the current-transactions gauge nor the
 three transaction rates and emit none of the Verbose begin, commit or rollback events, including
 when disposal aborts them. Real transaction rollbacks and failures still count. The conventions
 every Database source shares (failure payloads, `Start`/`Stop` endings) are in the area's
@@ -1370,6 +1600,7 @@ events check `EventKeywords.None`.
 | 17 | `DeferredCheckpointFailed` | Warning | — | `database`, `exceptionType`, `exceptionMessage` | the same, when it failed; the next `TryCheckpoint` throws the failure and its worker reports it (root event 1) |
 | 18 | `VersionPurgePass` | Verbose | Purge | `database`, `versionsPurged`, `durationMilliseconds` | `TransactionCoordinator.RunVersionPurgePass`, when the pass ran to its end (a retry failure it rethrows included) |
 | 19 | `LockWaitBlocked` | Warning | — | `database`, `transactionSequence`, `resource`, `mode`, `durationMilliseconds`, `blockers` | `LockManager`, once per wait still queued when the slow-lock-wait threshold passes, from a one-shot timer the wait arms only while a listener takes warnings (#1390). `blockers` names each transaction the request waits for: a holder as `<sequence>:<modes held>` (modes joined by `+`), the owner of a conflicting request queued ahead of it as `<sequence>:queued <mode>`. Each is followed by what that transaction has queued itself: `" waiting for <mode> on <resource> (<its blockers>)"`, one level deep, so a cycle of two shows in one report and each waiter of a longer chain reports its own step. Bounded (#1390 review): 16 blockers, 4 queued requests of each and 4 blockers of each of those, the rest counted as `... (+N more)` and ` and N more requests` |
+| 20 | `TransactionIsolationChanged` | Verbose | Transactions | `database`, `transactionSequence`, `isolationLevel` | successful `ReplaceIsolationLevel`, only when the effective level changes; no rate or gauge transition |
 
 **Lock waits.** Only a request that queues writes 7 and 8; one the table grants at once, one it
 refuses and a deadlock victim never wait. 7 and 8 are a `Start`/`Stop` pair on one flow
@@ -1415,15 +1646,15 @@ reads exact values.
 
 | Counter | Kind | Transition |
 | --- | --- | --- |
-| `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync` or `BeginSnapshotPinAsync`, including pins); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
+| `current-transactions` | gauge | +1 when the coordinator tracks a context (`BeginAsync`, excluding pins); −1 once per context when it stops: `UntrackEnded`, which only the end that removes the context reaches, or `DisposeAsync`, for each context its disposal still held |
 | `transactions-per-second` | rate | a tracked context other than a snapshot pin begins |
 | `commits-per-second` | rate | a context other than a snapshot pin ends `Committed` (an unconfirmed commit included) |
 | `rollbacks-per-second` | rate | a context other than a snapshot pin ends rolled back or aborted, including an aborted commit or disposal's abort |
 | `total-deadlocks` | total | each deadlock victim (event 6) |
 | `lock-waits-per-second` | rate | each queued request (event 7) |
 
-The transaction rates exclude snapshot pins; the gauge includes every open context, so it still
-exposes a leaked pin. A pin keeps its ordinary manager registration, sequence, fixed snapshot,
+The transaction rates and gauge exclude snapshot pins. GetOpenContexts and PruneBound still
+expose retained pin registrations. A pin keeps its ordinary manager registration, sequence, fixed snapshot,
 end claim and lock release. It writes no journal lifecycle records (#1280); registered statement
 snapshots without kernel contexts are outside #1351. The lock counters count every lock manager.
 The transaction rates move once at a non-pin kernel transaction's begin and once at its end,
@@ -1468,13 +1699,16 @@ arms the `LockWaitBlocked` timer only while a listener takes the source's warnin
 
 - No distributed transactions / two-phase commit — single-node ACID first.
 - No lock escalation policy in the contract — an implementation concern.
-- No savepoints in the MVP surface — add to `TransactionContext` when a model needs them.
+- Named SQL/OQL/GQL savepoints use the XT-2/XT-3 memory-only undo and lock substrate (XT-4).
 
 ## AOT posture
 
 Static composition, contracts and value objects; `FrozenSet<ulong>` for the active
 set. The shared composition and engine adapters use ordinary calls and BCL
 synchronization. No reflection, dynamic code generation, or `Microsoft.Extensions.*`.
+Foreign marker tests use owned coordinator savepoint tokens; only the batch-observer setter
+retains a test-only UnsafeAccessor. Lock-journal tests read a nullable internal
+count snapshot through this project's existing test grant; the ordinary grant path does not read it.
 The event source writes only strings, integers and doubles, which bind to the trim-safe
 `WriteEvent` overloads; a NativeAOT application receives its events only with
 `<EventSourceSupport>true</EventSourceSupport>`, and nothing depends on delivery.

@@ -47,16 +47,33 @@ public sealed class DocumentReturningBudgetTests
     [InlineData("DELETE", 1024, true)]
     [InlineData("INSERT", 2048, true)]
     [InlineData("DELETE", 2048, true)]
+    [InlineData("UPDATE", 1024, true)]
+    [InlineData("UPSERT", 1024, true)]
+    [InlineData("UPDATE", 2048, true)]
+    [InlineData("UPSERT", 2048, true)]
     [InlineData("INSERT", 1024, false)]
     [InlineData("DELETE", 1024, false)]
     [InlineData("INSERT", 2048, false)]
     [InlineData("DELETE", 2048, false)]
+    [InlineData("UPDATE", 1024, false)]
+    [InlineData("UPSERT", 1024, false)]
+    [InlineData("UPDATE", 2048, false)]
+    [InlineData("UPSERT", 2048, false)]
     public async Task ExecuteAsync_ExactReturningBudget_ShouldCountEachOwnedRepresentationOnce(string verb, int size, bool fits)
     {
         // Arrange: metadata = 208; row storage = 224; clone = 128 + UTF-8 + four 12-byte tokens;
         // original whole-image bytes are retained once alongside that independent clone.
         long perRow = 224 + 128 + size + 4 * 12 + size;
-        long budget = 208 + 2 * perRow - (fits ? 0 : 1);
+        // Pending buffers share the grant (#1755). IDs have five characters; INSERT/
+        // UPSERT retain the key set and encoded bytes, UPDATE its patched bytes,
+        // DELETE only identities. Pin the combined peak, still to the exact byte.
+        long pendingPerRow = verb switch
+        {
+            "INSERT" or "UPSERT" => 192 + 5 * 2 + 32 + size,
+            "UPDATE" => 160 + 5 * 2 + size,
+            _ => 96 + 5 * 2,
+        };
+        long budget = 208 + 2 * (perRow + pendingPerRow) - (fits ? 0 : 1);
         await using var engine = DocumentDatabaseEngine.Create("budget", new() { StatementMemoryBudget = budget });
         var database = await engine.CreateDatabaseAsync("test", CancellationToken.None);
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
@@ -64,10 +81,16 @@ public sealed class DocumentReturningBudgetTests
         var target = (await session.GetCollectionAsync("items", CancellationToken.None)).ShouldNotBeNull();
         var original = await target.GetAsync(session, "00000", CancellationToken.None);
 
+        // VALUES isolates pending/RETURNING ownership; SELECT staging has separate regressions.
+        using var json = System.Text.Json.JsonDocument.Parse(Content(size));
+        var parameters = new System.Collections.Generic.Dictionary<string, object?> { ["v"] = json.RootElement };
+        string statement = verb is "INSERT" or "UPSERT"
+            ? verb + " INTO items (KEY, VALUE) VALUES ('00000',@v),('00001',@v) RETURNING *"
+            : verb == "UPDATE" ? "UPDATE items SET text = text RETURNING *" : Statement(verb);
         // Act / Assert
         if (fits)
         {
-            await using var result = (await session.ExecuteAsync(Statement(verb), cancellationToken: CancellationToken.None))
+            await using var result = (await session.ExecuteAsync(statement, parameters, CancellationToken.None))
                 .ShouldBeAssignableTo<DatabaseResultSet>();
             result.AffectedCount.ShouldBe(2);
             int count = 0;
@@ -77,7 +100,7 @@ public sealed class DocumentReturningBudgetTests
         else
         {
             var failure = await Should.ThrowAsync<DatabaseException>(async () =>
-                await session.ExecuteAsync(Statement(verb), cancellationToken: CancellationToken.None));
+                await session.ExecuteAsync(statement, parameters, CancellationToken.None));
             failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CD05018");
             foreach (string id in new[] { "00000", "00001" })
             {

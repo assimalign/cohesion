@@ -271,6 +271,11 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.StatementMemoryBudget),
                 options.StatementMemoryBudget, ErrorMessages.OptionPositiveRequirement);
         }
+        if (options.StatementWorkBudget <= 0)
+        {
+            throw DatabaseEngineOptionChecks.Refuse(engine, nameof(options.StatementWorkBudget),
+                options.StatementWorkBudget, ErrorMessages.OptionPositiveRequirement);
+        }
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.CheckpointInterval, engine, nameof(options.CheckpointInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.PageWriteBackInterval, engine, nameof(options.PageWriteBackInterval));
         DatabaseEngineOptionChecks.ThrowIfNotPositive(options.MaintenanceInterval, engine, nameof(options.MaintenanceInterval));

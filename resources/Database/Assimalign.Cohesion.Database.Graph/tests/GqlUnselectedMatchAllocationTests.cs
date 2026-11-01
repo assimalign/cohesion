@@ -8,9 +8,11 @@ using Xunit;
 using Xunit.Abstractions;
 
 using Assimalign.Cohesion.Database.Graph.Internal;
+using Assimalign.Cohesion.Database.Graph.Tests.TestObjects;
 
 namespace Assimalign.Cohesion.Database.Graph.Tests;
 
+[Collection(nameof(GraphConcurrencyCollection))]
 public sealed class GqlUnselectedMatchAllocationTests
 {
     private readonly ITestOutputHelper _output;

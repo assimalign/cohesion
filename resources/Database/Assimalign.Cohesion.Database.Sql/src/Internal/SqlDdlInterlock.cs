@@ -5,9 +5,9 @@ using System.Threading.Tasks;
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 /// <summary>
-/// Prevents session DDL from interleaving with a complete schema apply. Admission fails
-/// immediately instead of waiting outside the transaction lock manager's deadlock graph.
-/// Ordinary DDL statements may still run concurrently with one another.
+/// Prevents session DDL from interleaving with a complete schema apply. Ordinary conflicting
+/// admission refuses immediately; sequence DDL and fully reserved apply steps may wait for
+/// metadata after their object grants. Definition leases never span object-lock waits.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlDdlInterlock")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlDdlInterlock.DebugView))]
@@ -49,26 +49,43 @@ internal sealed class SqlDdlInterlock
         }
     }
 
-    // Deferred steps already own their complete ordered table reservation. Definition
-    // DDL never waits for locks under its lease, so waiting here cannot close a cycle.
-    internal async ValueTask<IDisposable> EnterMetadataAsync(bool definition, CancellationToken cancellationToken)
+    // All sequence/schema object grants precede this lease. Definition DDL never waits
+    // for an object grant under its lease, so this wait cannot close a hidden cycle.
+    internal static Action<CancellationTokenSource?>? MetadataWaitStarting { get; set; }
+
+    internal async ValueTask<IDisposable> EnterMetadataAsync(bool definition, CancellationToken cancellationToken,
+        TimeSpan lockTimeout = default)
     {
-        while (true)
+        CancellationTokenSource? timeout = null;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            Task changed;
-            lock (_sync)
+            while (true)
             {
-                if (!_definitionStatement && (!definition || _metadataStatements == 0))
+                cancellationToken.ThrowIfCancellationRequested();
+                timeout?.Token.ThrowIfCancellationRequested();
+                Task changed;
+                lock (_sync)
                 {
-                    _metadataStatements++;
-                    _definitionStatement = definition;
-                    return new MetadataLease(this);
+                    if (!_definitionStatement && (!definition || _metadataStatements == 0))
+                    {
+                        _metadataStatements++;
+                        _definitionStatement = definition;
+                        return new MetadataLease(this);
+                    }
+                    changed = (_metadataChanged ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
                 }
-                changed = (_metadataChanged ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
+                if (timeout is null && lockTimeout != TimeSpan.Zero)
+                {
+                    timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    timeout.CancelAfter(lockTimeout);
+                }
+                MetadataWaitStarting?.Invoke(timeout);
+                await changed.WaitAsync(timeout?.Token ?? cancellationToken).ConfigureAwait(false);
             }
-            await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && timeout?.IsCancellationRequested == true)
+        { throw SqlTimeoutException.Lock(exception, null); }
+        finally { timeout?.Dispose(); }
     }
 
     [global::System.Diagnostics.DebuggerDisplay("MetadataLease")]

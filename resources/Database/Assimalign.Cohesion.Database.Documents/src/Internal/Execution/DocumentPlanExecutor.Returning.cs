@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Documents.Language;
 using Assimalign.Cohesion.Database.Documents.Protocol;
@@ -31,19 +32,20 @@ internal static partial class DocumentPlanExecutor
         private readonly List<EvaluatedRow> _rows = [];
         private readonly DatabaseColumn[] _columns;
         private readonly DocumentRowWriter _writer;
-        private long _bytes;
+        private readonly DocumentAggregateMemory _memory;
 
         internal ReturningRows(DocumentDatabase database, DocumentOperation operation, DocumentLogicalPlan plan,
-            IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+            IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken, DocumentNestedExecutionContext? nested = null)
         {
             _plan = plan;
             _operation = operation;
             _cancellationToken = cancellationToken;
             _limit = database.Engine.EngineOptions.StatementMemoryBudget;
+            _memory = operation.GetStatementMemory(cancellationToken);
             _wholeDocument = plan.Projections.Count == 1 && plan.Projections[0].Expression is OqlStarExpression;
             _evaluator = new DocumentExpressionEvaluator(plan.Query.Alias, parameters, cancellationToken,
                 transactionStart: operation.TransactionStart, functions: database.Engine.Functions, databaseName: database.Name,
-                resultClause: "RETURNING");
+                resultClause: "RETURNING", operation: nested is null ? null : operation, nested: nested);
             Charge(128L + plan.Projections.Count * 64L);
             long headerBytes = 5;
             foreach (var projection in plan.Projections)
@@ -58,7 +60,7 @@ internal static partial class DocumentPlanExecutor
             _writer = new DocumentRowWriter();
         }
 
-        internal void Add(Document document)
+        internal async ValueTask AddAsync(Document document, DocumentNestedExecutionContext? nested)
         {
             _operation.EnsureActive();
             _cancellationToken.ThrowIfCancellationRequested();
@@ -70,7 +72,11 @@ internal static partial class DocumentPlanExecutor
             for (int index = 0; index < values.Length; index++)
             {
                 _cancellationToken.ThrowIfCancellationRequested();
-                var value = _evaluator.EvaluateProjection(_plan.Projections[index].Expression, context, null, _plan.Query.IsValue);
+                long before = _memory.Bytes - (nested?.RetainedBytes ?? 0);
+                object? value;
+                try { value = nested is null ? _evaluator.EvaluateProjection(_plan.Projections[index].Expression, context, null, DocumentRowWriter.WritesBareValue(_plan.Query)) :
+                    await _evaluator.EvaluateProjectionAsync(_plan.Projections[index].Expression, context, null, DocumentRowWriter.WritesBareValue(_plan.Query), nested).ConfigureAwait(false); }
+                finally { if (nested is not null) { _memory.Release(_memory.Bytes - nested.RetainedBytes - before); } }
                 if (_plan.Query.IsValue && value is DocumentMissing) { value = null; }
                 Charge(value switch
                 {
@@ -87,7 +93,7 @@ internal static partial class DocumentPlanExecutor
             // Depth was checked while counting JSON tokens. Preflight serialization while
             // rollback is still possible, preserving every other failure's own identity.
             var row = new DocumentQueryResult.DocumentQueryRow(values, rawContent, _plan.Query.IsValue || _wholeDocument);
-            if (_writer.Write(row, _columns, _plan.Query.IsValue || _wholeDocument).Length > ProtocolFrameHeader.MaxPayloadLength)
+            if (_writer.Write(row, _columns, DocumentRowWriter.WritesBareValue(_plan.Query), _plan.Query.Location, "RETURNING").Length > ProtocolFrameHeader.MaxPayloadLength)
             { throw new DocumentPlanningException("CD05016", ErrorMessages.ResultTooLarge, _plan.Query.Location); }
             // Evaluated JSON values own their clones. Do not retain a disposed JsonDocument
             // or an unprojected image through the row's evaluation context.
@@ -127,12 +133,11 @@ internal static partial class DocumentPlanExecutor
 
         private void Charge(long bytes)
         {
-            if (bytes > _limit - _bytes)
+            if (!_memory.TryCharge(bytes))
             {
                 throw new DocumentPlanningException("CD05018", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.ReturningMemoryExceeded, _limit), _plan.Query.Location);
             }
-            _bytes += bytes;
         }
 
         private sealed class DebugView

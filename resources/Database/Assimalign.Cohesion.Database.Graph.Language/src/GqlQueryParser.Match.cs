@@ -1,27 +1,26 @@
 using System.Collections.Generic;
 using Assimalign.Cohesion.Database.Language;
+using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Graph.Language;
 
 public sealed partial class GqlQueryParser
 {
-    private GqlQueryExpression ParseQuery()
+    private GqlQueryExpression ParseQuery(bool hasInput = false)
     {
         var start = Current;
         var stages = new List<GqlStage>();
         bool segmentWrites = false;
-        bool hasNamedBinding = false;
+        bool hasNamedBinding = hasInput;
         while (!Failed && Current.Type is not (TokenType.Eof or TokenType.Semicolon))
         {
             var clauseStart = Current;
-            if (Take("NEXT"))
+            if (Is("NEXT"))
             {
-                if (stages.Count == 0 || stages[^1] is GqlNextStage or GqlReturnStage { IsWith: true } || stages[^1] is not GqlReturnStage && !segmentWrites || Current.Type is TokenType.Eof or TokenType.Semicolon)
-                { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid, clauseStart); break; }
-                if (stages[^1] is not GqlReturnStage) { hasNamedBinding = false; }
-                stages.Add(new GqlNextStage(Span(clauseStart, Previous)));
-                segmentWrites = false;
-                continue;
+                if (stages.Count == 0 || stages[^1] is GqlReturnStage { IsWith: true } ||
+                    stages[^1] is not GqlReturnStage && !segmentWrites)
+                { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid, Current); }
+                break;
             }
             if (stages.Count != 0 && stages[^1] is GqlReturnStage { IsWith: false }) { break; }
             if (Is("MATCH") || Is("OPTIONAL"))
@@ -33,6 +32,26 @@ public sealed partial class GqlQueryParser
                 if (!Failed && Take("WHERE")) { predicate = ParsePredicate(); }
                 hasNamedBinding |= HasNamedBinding(paths);
                 stages.Add(new GqlMatchStage(new GqlMatchClause(paths, predicate, optional), Span(clauseStart, Previous)));
+            }
+            else if (Take("MERGE"))
+            {
+                var paths = ParsePatterns();
+                if (!Failed && paths.Count != 1) { Error("CG00002", ErrorMessages.MergeSinglePath, clauseStart); }
+                var onCreate = new List<GqlSetItem>();
+                var onMatch = new List<GqlSetItem>();
+                while (!Failed && Take("ON"))
+                {
+                    var branch = Current;
+                    bool create = Take("CREATE");
+                    if (!create) { Expect("MATCH"); }
+                    Expect("SET");
+                    if (Failed) { break; }
+                    var set = ParseSet(branch);
+                    (create ? onCreate : onMatch).AddRange(set.Items);
+                }
+                hasNamedBinding |= HasNamedBinding(paths);
+                if (!Failed) { stages.Add(new GqlMergeStage(paths[0], onCreate.AsReadOnly(), onMatch.AsReadOnly(), Span(clauseStart, Previous))); }
+                segmentWrites = true;
             }
             else if (Is("CREATE") || Is("INSERT"))
             {
@@ -54,49 +73,7 @@ public sealed partial class GqlQueryParser
             }
             else if (Take("SET"))
             {
-                var items = new List<GqlSetItem>();
-                do
-                {
-                    var startItem = Current;
-                    string variable = Identifier();
-                    if (Take(TokenType.Dot))
-                    {
-                        string property = Identifier(allowKeyword: true);
-                        Expect(TokenType.Equals, "'='");
-                        if (Current.Type is TokenType.LeftBrace or TokenType.LeftBracket) { _ = ParseScalar(); break; }
-                        var value = ParsePredicate();
-                        if (!Failed) { RejectCompositePropertyLiteral(value); }
-                        items.Add(new GqlSetPropertyItem(variable, property, value, Span(startItem, Previous)));
-                    }
-                    else if (Is("IS") || Current.Type == TokenType.Colon)
-                    {
-                        bool colon = Take(TokenType.Colon);
-                        if (!colon) { Advance(); }
-                        var labels = new List<string> { Identifier(allowKeyword: true) };
-                        while (!Failed && colon && Take(TokenType.Colon)) { labels.Add(Identifier(allowKeyword: true)); }
-                        items.Add(new GqlSetLabelsItem(variable, labels.AsReadOnly(), colon, Span(startItem, Previous)));
-                    }
-                    else
-                    {
-                        bool merge = Current.Type == TokenType.Unrecognized && Current.Text == "+=";
-                        if (merge) { Advance(); } else { Expect(TokenType.Equals, "'=', '+=', '.', ':' or IS"); }
-                        if (Failed) { break; }
-                        if (Current.Type != TokenType.LeftBrace)
-                        {
-                            if (Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
-                            else { Unsupported("WHOLE-MAP EXPRESSION", Current); }
-                            break;
-                        }
-                        var properties = ParseProperties();
-                        if (!Failed)
-                        {
-                            foreach (var value in properties.Values)
-                            { RejectCompositePropertyLiteral(value); if (Failed) { break; } }
-                        }
-                        items.Add(new GqlSetPropertiesItem(variable, properties, merge, Span(startItem, Previous)));
-                    }
-                } while (!Failed && Take(TokenType.Comma));
-                stages.Add(new GqlSetStage(items.AsReadOnly(), Span(clauseStart, Previous)));
+                stages.Add(ParseSet(clauseStart));
                 segmentWrites = true;
             }
             else if (Take("REMOVE"))
@@ -145,7 +122,7 @@ public sealed partial class GqlQueryParser
                 string variable;
                 GqlExpression list;
                 if (unwind)
-                { list = ParsePredicate(); Expect("AS"); variable = Identifier(); }
+                { list = ParsePredicate(); Expect("AS"); variable = Failed ? string.Empty : Identifier(); }
                 else
                 { Advance(); variable = Identifier(); Expect("IN"); list = ParsePredicate(); }
                 stages.Add(new GqlForStage(variable, list, unwind, Span(clauseStart, Previous)));
@@ -167,7 +144,7 @@ public sealed partial class GqlQueryParser
                 GqlExpression? limit = null;
                 var quantifier = GqlSetQuantifier.All;
                 if (Take("DISTINCT")) { quantifier = GqlSetQuantifier.Distinct; }
-                else { Take("ALL"); }
+                else { TakeSetQuantifierAll(); }
                 returnStar = Take(TokenType.Asterisk);
                 if (returnStar && !hasNamedBinding)
                 { Error("CG00002", ErrorMessages.GqlQueryParserParseQueryVoid2, Previous); }
@@ -237,11 +214,19 @@ public sealed partial class GqlQueryParser
         return new GqlQueryExpression(stages.AsReadOnly(), Span(start, Previous));
     }
 
-    private void RejectCompositePropertyLiteral(GqlExpression value)
+    private void RejectCompositePropertyValue(GqlExpression value)
     {
-        // Parentheses do not turn a list/map literal into a computed scalar value.
-        if (value is GqlListExpression or GqlMapExpression)
-        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("LIST OR MAP LITERAL IN PROPERTY VALUE", Profile.Language, value.Location ?? Span(Current, Current))); }
+        // Decide from the completed expression: indexing/field access can produce a scalar.
+        if (value is GqlListExpression or GqlMapExpression or GqlPatternComprehensionExpression or GqlListComprehensionExpression or GqlListSliceExpression)
+        {
+            var location = value.Location ?? Span(Current, Current);
+            _diagnostics.Add(new Diagnostic
+            {
+                Code = "CK00001", Severity = DiagnosticSeverity.Error, Location = DiagnosticLocation.Absolute,
+                Message = value is GqlMapExpression ? ErrorMessages.MapPropertyUnsupported : ErrorMessages.ListPropertyUnsupported,
+                Start = location.Start, End = location.End, Line = location.StartLine,
+            });
+        }
     }
 
     private GqlExpression ParsePageValue()
@@ -286,4 +271,45 @@ public sealed partial class GqlQueryParser
         }
         return text.ToString();
     }
+    private GqlSetStage ParseSet(Lexeme clauseStart)
+    {
+        var items = new List<GqlSetItem>();
+        do
+        {
+            var startItem = Current;
+            string variable = Identifier();
+            if (Take(TokenType.Dot))
+            {
+                string property = Identifier(allowKeyword: true);
+                Expect(TokenType.Equals, "'='");
+                var value = ParsePredicate();
+                if (!Failed) { RejectCompositePropertyValue(value); }
+                items.Add(new GqlSetPropertyItem(variable, property, value, Span(startItem, Previous)));
+            }
+            else if (Is("IS") || Current.Type == TokenType.Colon)
+            {
+                bool colon = Take(TokenType.Colon);
+                if (!colon) { Advance(); }
+                var labels = new List<string> { Identifier(allowKeyword: true) };
+                while (!Failed && colon && Take(TokenType.Colon)) { labels.Add(Identifier(allowKeyword: true)); }
+                items.Add(new GqlSetLabelsItem(variable, labels.AsReadOnly(), colon, Span(startItem, Previous)));
+            }
+            else
+            {
+                bool merge = Current.Type == TokenType.Unrecognized && Current.Text == "+=";
+                if (merge) { Advance(); } else { Expect(TokenType.Equals, "'=', '+=', '.', ':' or IS"); }
+                if (Failed) { break; }
+                if (Current.Type != TokenType.LeftBrace)
+                {
+                    if (Current.Type == TokenType.Parameter) { RejectUnsupportedParameter("WHOLE-MAP PARAMETER"); }
+                    else { Unsupported("WHOLE-MAP EXPRESSION", Current); }
+                    break;
+                }
+                var properties = ParseProperties();
+                items.Add(new GqlSetPropertiesItem(variable, properties, merge, Span(startItem, Previous)));
+            }
+        } while (!Failed && Take(TokenType.Comma));
+        return new GqlSetStage(items.AsReadOnly(), Span(clauseStart, Previous));
+    }
+
 }

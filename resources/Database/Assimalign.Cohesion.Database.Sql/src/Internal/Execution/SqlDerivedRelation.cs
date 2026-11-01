@@ -10,6 +10,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed record SqlDerivedRelation(string Name, SqlPlan Query, IReadOnlyList<SqlCatalogColumn> Columns, bool IsCorrelated = false)
 {
     internal bool IsCommonTable { get; init; }
+    internal bool IsRecursiveReference { get; init; }
     internal SqlCatalogView? CatalogView { get; init; }
 
     private sealed class DebugView

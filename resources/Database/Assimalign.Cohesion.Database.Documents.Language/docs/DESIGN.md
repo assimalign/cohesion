@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Documents.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+OqlTransactionExpression carries the parser-owned decoded SavepointName and canonical quoted
+rendering. Its public constructor retains the enum/location surface; a named control without
+a parsed name refuses construction, rather than turning into a whole rollback.
+SAVEPOINT, RELEASE and ROLLBACK TO are standalone controls; optional WORK/TRAN/TRANSACTION
+remain accepted before TO. The words stay contextual. Three profile clauses advance together
+with positive/malformed and keyword-disposition corpora. Names are ordinal; duplicate stacking
+and RELEASE follow the PostgreSQL owner decision rather than Couchbase duplicate replacement.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+The parser and renderer corpus covers both TO forms with no modifier or WORK, TRAN and TRANSACTION (Couchbase ROLLBACK TRANSACTION syntax).
+
 The package owns the document model's OQL grammar, statement and expression trees, diagnostics,
 and conformance corpus. `OqlQueryParser` derives from the shared `QueryParser` and declares
 `OqlLanguageProfile.Instance` as its profile. The shared `TokenLexer` provides tokenization;
@@ -14,6 +26,37 @@ existing double-quoted name syntax. See Database.Language DESIGN for the scanner
 The OQL name is retained, but the language basis is SQL++ for JSON, following Couchbase
 SQL++ for Query. The executable subset below is the dialect contract; it does not claim
 complete SQL++ support. MISSING and NULL are separate values (#1126, owner D2/D2a).
+
+## Operator conformance (#1731)
+
+The [dialect precedence table](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records
+all supported operators. IS presence tests now bind above comparison, IN, BETWEEN, LIKE and
+ESCAPE operands, adopting Couchbase's boundary and changing earlier unparenthesized results.
+The shared predicate tier remains otherwise unchanged. Parser and execution conformance cover
+each IS operand boundary. The added string operator || lowers to CONCAT with its existing kind
+validation; IS [NOT] DISTINCT FROM retains explicit top-level unknown handling and structural
+value equality. Vocabulary rows and the MISSING/NULL/value matrix pin both additions. These spellings use
+existing tokens and introduce no keyword reservations.
+
+| Operator vocabulary | Syntax tree | Execution contract |
+| --- | --- | --- |
+| String concatenation: &#124;&#124; | CONCAT call with two arguments | Existing CONCAT kind and unknown rules |
+| IS DISTINCT FROM | Binary expression | FALSE only for definite SQL++ equality after top-level unknown handling |
+| IS NOT DISTINCT FROM | Binary expression | SQL++ equality after top-level unknown handling |
+
+## SQL operator isolation (#1721)
+
+JSON access isolation (#1722) pins -> and ->> as the existing RightArrow and
+GreaterThan tokens. SQL alone joins them; GQL relationship arrows and OQL comparisons
+retain their grammar, and both languages still refuse SQL JSON access expressions.
+
+The shared lexer is unchanged. The operator corpus pins # as Unrecognized, ~, &, |
+and paired angle brackets as their existing tokens, with SQL bitwise syntax still refused.
+GQL additionally pins :A|B, :A&B, ! and <-, ->, <--, -->, <-[ boundaries.
+Profile conformance also pins :: as ColonColon, separated
+colons as individual Colon tokens, and `~~*` and `!~~*` as individual tilde/bang/asterisk tokens.
+SQL casts do not become expression syntax here; adjacent colons preserve the existing
+parser refusal and GQL label grammar. No language vocabulary or persisted text changes.
 
 ## Less-than followed by minus (#1647)
 
@@ -56,7 +99,9 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | --- | --- | --- |
 | `BEGIN` | Yes | Session transaction start; START requires WORK, TRAN or TRANSACTION |
 | `COMMIT` | Yes | Optional WORK, TRAN or TRANSACTION |
-| `ROLLBACK` | Yes | Optional WORK, TRAN or TRANSACTION; savepoints remain deferred |
+| `ROLLBACK` | Yes | Optional WORK, TRAN or TRANSACTION; optional TO [SAVEPOINT] name |
+| `SAVEPOINT` | Yes | Named scopes, newest duplicate wins; requires an explicit block |
+| `RELEASE [SAVEPOINT]` | Yes | Cohesion extension; releases the target and descendants |
 | `SELECT` | Yes | One or more projected expressions, optional `AS` labels; a lone `*` returns the stored document |
 | `DISTINCT` | Yes | Optional quantifier directly after SELECT; ALL is the default |
 | `SELECT VALUE` | Yes | One bare expression; RAW is a synonym |
@@ -73,7 +118,11 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `RETURNING` | Yes | Affected-image expressions with optional AS labels, or one RAW/VALUE expression, on all four writes |
 | `OPTIONS` | No | INSERT/UPSERT header element; one CK00001 at OPTIONS, including directly after KEY; no TTL or version precondition in T1 |
 | `VALUES` | Yes | One or more parenthesized key/value pairs for INSERT or UPSERT |
-| `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST bindings |
+| `FROM` | Yes | One collection or reserved `COHESION_SCHEMA` source, optional iteration variable, then ordered UNNEST/JOIN/NEST bindings |
+| `DERIVED FROM` | Yes | Parenthesized SELECT, required alias, optional AS; streams its rows into the outer pipeline |
+| `EXPRESSION FROM` | Yes | Expression with outer captures inside subqueries; AS before an explicit alias; arrays expand and MISSING supplies no rows |
+| `JOIN` / `LEFT JOIN` | Yes | Scalar right-hand document-key equality, with explicit source aliases |
+| `NEST` / `LEFT NEST` | Yes | The same key lookup, binding arrays; unknown keys follow the lookup-NEST table |
 | `UNNEST` | Yes | Optional INNER; one row per array element, chainable |
 | `LEFT UNNEST` | Yes | Optional OUTER; preserves empty and non-array inputs with a MISSING variable |
 | `WHERE` | Yes | Scalar comparison and Boolean document filtering |
@@ -83,9 +132,10 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `BETWEEN` | Yes | Inclusive same-scalar-kind range, optionally NOT |
 | `LIKE` | Yes | Ordinal string patterns, optionally NOT, with Unicode scalar wildcards and ESCAPE |
 | `CASE` | Yes | Searched and simple conditional expressions, including aggregate arguments |
-| `GROUP BY` | Yes | One or more grouping expressions |
+| `GROUP BY` | Yes | One or more grouping expressions, optionally aliased with or without AS |
+| `GROUP AS` | Yes | Array of input binding wrappers, including group-term aliases |
 | `HAVING` | Yes | Group filtering, including aggregate calls |
-| `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC` |
+| `ORDER BY` | Yes | One or more expressions, each optionally `ASC` or `DESC`, then `NULLS FIRST` or `LAST` |
 | `LIMIT` | Yes | Non-negative signed Int64 integer literal or parameter, applied after ordering |
 | `OFFSET` | Yes | Non-negative signed Int64 integer literal or parameter; either order with LIMIT |
 | `FETCH` | No | The SQL FETCH FIRST spelling is not adopted; one CK00001 at FETCH |
@@ -93,7 +143,8 @@ Lexical recognition preserves the established vocabulary so rejected constructs 
 | `DROP COLLECTION` | Yes | One database-local collection, optionally `IF EXISTS` |
 | `CREATE INDEX` | Yes | 1..32 ordered scalar paths or one DISTINCT ARRAY key; scalar-only UNIQUE; IF NOT EXISTS |
 | `DROP INDEX` | Yes | One named index in one collection, optional IF EXISTS; ON is required |
-| `SUBQUERY` | No | A nested `SELECT` reports this capability name at the inner keyword, including UPDATE SET/WHERE, DELETE and INSERT/UPSERT VALUES, with or without EXPLAIN |
+| `SUBQUERY` | Yes | Parenthesized SELECT returns an array; lexical correlation and DML expression positions execute |
+| `EXISTS` | Yes | Unary collection operator; arrays test nonemptiness, MISSING propagates, other inputs give NULL |
 | `MERGE` | No (pin) | SQL++ merge; stays a pin with no T1 item lifting it, and #1101 owns it |
 
 `OqlFunctions.All` is the public, immutable standard-function metadata consumed by the
@@ -111,6 +162,9 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 | COUNT | 1, including * | Int64 | Skip both; * counts input rows; empty input gives 0 |
 | SUM, AVG | 1 | Decimal | Skip both; empty valued input gives NULL |
 | MIN, MAX | 1 | Argument type | Skip both; empty valued input gives NULL |
+| ARRAY_AGG | 1 | Json | Skip MISSING; include NULL; empty/all-MISSING gives NULL |
+| BOOL_AND, BOOL_OR, EVERY | 1 | Boolean | Skip NULL/MISSING and non-Booleans; empty gives NULL |
+| STDDEV, VARIANCE | 1 | Decimal | Skip NULL/MISSING and nonnumbers; empty gives NULL; singleton zero |
 | LOWER, UPPER | 1 | String | Propagate |
 | LENGTH | 1 | Int64 | Propagate |
 | SUBSTR | 2..3 | String | Propagate |
@@ -137,7 +191,7 @@ argument. Aggregate placement and grouped scalar arguments are validated by the 
 | IFNULL | 2..N | Selected | First non-NULL, including MISSING; otherwise NULL |
 
 The conditional rules follow [Couchbase](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/condfununknown.html).
-ARRAY_AGG, REGEXP_LIKE, REGEXP_REPLACE and REGEXP_POSITION are deliberately deferred and report
+REGEXP_LIKE, REGEXP_REPLACE and REGEXP_POSITION are deliberately deferred and report
 one CK00001 in call position. Unknown function names instead report CD00008 after their
 arguments are parsed, avoiding secondary syntax diagnostics. Retired ODMG constructs retain
 their positional refusals. Calls never become planner constants or index seek bounds, and
@@ -148,6 +202,32 @@ an omitted or negative count replaces all, following the
 [Couchbase string-function contract](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/stringfun.html#replace).
 A fractional count gives the engine type diagnostic CD02008. Plain arity errors name only
 the invalid count; the CD00006 COUNT-star explanation appears only for an actual star operand.
+
+### Aggregate extensions (#1729, OQ-G1)
+
+OqlCallExpression retains an OqlAggregateQuantifier (None, All or Distinct). The explicit ALL
+spelling survives parsing; binding equivalence treats it like omitted ALL. EVERY(...) uses
+OqlCallExpression, while EVERY v IN ... SATISFIES ... END remains OqlQuantifiedExpression,
+including inside an aggregate argument. Function tokens remain usable as names. Quantifier
+syntax uses CD00011, direct-AST binding uses CD01029, and existing arity/context/value/budget
+identities remain in use. The [dialect](DIALECT.md#aggregate-quantifiers-and-native-aggregates-1729-oq-g1)
+records every input rule, equality, statistic, memory estimate and no-order promise. Parser and
+engine conformance corpora cover all eleven names and both transports. Native aggregate retention shares the statement counter with SELECT source/group staging (#1753); scratch reservations release at expression and sort boundaries. GROUP AS wrappers use the same reservation owner.
+
+### GROUP AS and group-term aliases (#1729, OQ-G2)
+
+OqlSelectExpression retains parallel GroupAliases and optional GroupAs metadata with the existing
+GroupBy list. Ordinary nodes have no additional instance fields or metadata allocation; optional
+metadata follows the list through planner copies. Terms accept `expr [AS] alias`; GROUP AS requires
+at least one GROUP BY term (CD00012). Binding validates direct-AST list shape, nonempty names and
+collisions with other group/FROM/UNNEST declarations (CD01030). A group array is a post-group
+binding and cannot supply an aggregate's row input (CD01031). Inner ARRAY/FIRST and quantified
+variables retain their own lexical identity. LETTING remains a named CK00001 refusal.
+The [dialect](DIALECT.md#group-as-and-group-term-aliases-1729-oq-g2) records wrapper shape,
+empty/MISSING behavior, visibility and budget lifetimes. Parser, engine conformance, InMemory/TCP
+and NativeAOT checks cover these contracts without a new disk or wire format.
+Alias retention charges shared key representations once while preserving binding overhead and
+separate charges for independently owned values, wrappers and the final array.
 
 ### Array index keys (#1530)
 
@@ -173,12 +253,12 @@ expression. OQL accepts these spellings, requiring FROM and rejecting VALUE alia
 multiple expressions. VALUE and RAW are reserved: use `"value"`, `"raw"` or `d.value` for fields.
 After AS, a projection label accepts reserved words, following PostgreSQL ColLabel
 (`src/backend/parser/gram.y:17638,18042-18046` in the reference clone). DISTINCT and ALL retain
-their positional capability refusal everywhere except directly after a clause-head SELECT (and after a dot).
+their positional capability refusal except directly after a clause-head SELECT or at a call's
+argument head (and after a dot). The call parser and engine binder enforce aggregate-only use.
 A property or projection label named select does not open a SELECT clause. The AS-label exemption
 applies only within a SELECT list; reserved unsupported FROM and INSERT aliases retain CK00001.
-COUNT(DISTINCT x) remains one CK00001 naming COUNT(DISTINCT). Function-position names in the
-recognized-unsupported table receive that same single refusal for DISTINCT/ALL:
-ARRAY_AGG(DISTINCT x) and ARRAY_AGG(ALL x) name ARRAY_AGG(DISTINCT) and ARRAY_AGG(ALL).
+Recognized-unsupported function names still receive one CK00001 with their optional
+quantifier included in the named construct.
 Computed member names and path access on constructor results remain deferred.
 Member colons remain delimiters even without whitespace: `{a:DISTINCT}` receives the positional
 capability refusal, while `:distinct` in an operand keeps the parameter-form syntax diagnostic.
@@ -197,7 +277,7 @@ this language has no separate expression renderer. RAW/VALUE enforces one non-st
 without an alias. Named projections reuse SELECT's expression parsing and reserved AS labels.
 RETURNING stays contextual: destinations, properties, output bindings and aliases keep that name.
 The recognized-vocabulary row remains for contextual coverage and unsupported prefix/SELECT use.
-The capability scan recognizes nested SELECT in RETURNING as SUBQUERY, including INSERT VALUES.
+The capability scan admits nested SELECT in RETURNING and INSERT/UPSERT VALUES.
 
 The engine binds only the target image (alias or implicit collection binding), validates scalar
 contexts before writes, and uses SELECT projection names/types and JSON semantics. Aggregate
@@ -210,6 +290,34 @@ parser, in-process execution and both transports. No disk or frame format change
 Older clients can reject the successful completion after an autocommit write has committed,
 so retrying may repeat the write; disconnect rolls back explicit uncommitted work. The dialect
 states both outcomes beside the compatibility contract, and permanent wire probes cover them.
+
+## ORDER BY null placement (#1730)
+
+Each term accepts `expr [ASC | DESC] [NULLS FIRST | LAST]`, including projection aliases,
+multiple terms and LIMIT/OFFSET. ASC is the omitted direction. The omitted placement is FIRST
+for ASC and LAST for DESC. FIRST/LAST moves the whole MISSING/NULL block; direction controls
+its internal order: ASC keeps MISSING before NULL, DESC keeps NULL before MISSING. Thus the
+older “MISSING before NULL” wording means the ascending base order, not every direction.
+This follows the pinned [Couchbase table](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/orderby.adoc#L64-L99).
+Values retain Boolean, number, ordinal string, array and object order (reversed for DESC).
+Equal query keys retain ordinal document identity, independent of direction; later ORDER BY
+terms precede that tie break. NULLS stays contextual, so existing fields named nulls remain valid.
+Malformed NULLS options give located CD00013; an invalid direct-AST placement gives CD01032.
+The capability scan defers ALL and DISTINCT immediately after NULLS to the ordering parser,
+so they receive CD00013 at that option, like a numeric option or end of input. A second LAST
+after NULLS FIRST retains CK00001 at LAST, outside the completed placement suffix.
+No new sorting bound or budget diagnostic is introduced; retained sorting still uses CD05018.
+
+| Term | First to last |
+|---|---|
+| ASC / ASC NULLS FIRST | MISSING, NULL, values ascending |
+| ASC NULLS LAST | values ascending, MISSING, NULL |
+| DESC / DESC NULLS LAST | values descending, NULL, MISSING |
+| DESC NULLS FIRST | NULL, MISSING, values descending |
+
+OqlOrdering retains OqlNullPlacement (Default/First/Last) through alias rewriting. OQL has no
+general AST renderer; parsed source text remains intact and EXPLAIN renders direction and
+written NULLS suffixes. The lexical profile keeps NULLS and INCLUDE contextual.
 
 ### LIMIT and OFFSET (#1129)
 
@@ -232,7 +340,10 @@ numbers outside the decimal domain, become CD00007 for paging. Direct AST counts
 No new shared public member or visibility grant is required; the two assemblies keep the message
 locally, with equality covered by planner/parser tests.
 
-Paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY. INSERT and UPSERT SELECT
+Unless LIMIT is zero, paging follows WHERE, grouping/HAVING, projection, DISTINCT and ORDER BY.
+LIMIT 0 preserves eager static validation, then returns no rows with planned column names and
+types before opening any stored, system, expression or derived source or running a blocking stage.
+This also applies to an inner derived SELECT's own zero limit. INSERT and UPSERT SELECT
 sources use the same final page. UPDATE/DELETE LIMIT and OFFSET remain CK00001, naming the
 statement and clause (for example, DELETE LIMIT). INSERT/UPSERT VALUES paging names
 INSERT VALUES LIMIT, UPSERT VALUES OFFSET, or the corresponding clause. RETURNING as an implicit source alias may precede paging.
@@ -251,14 +362,14 @@ a name:
 
 - **Anywhere** (reserved unsupported SQL++ vocabulary): every occurrence except a path segment after a dot or an explicit SELECT-list AS label. All
   are lexer keywords or functions.
-- **Clause** (statements and clauses of other languages, including FETCH, NEST and WITHIN):
+- **Clause** (statements and clauses of other languages, including FETCH and WITHIN):
   the first word of the statement, or directly after the end of an operand. Names, literals,
   parameters, closing delimiters and ASC/DESC end operands. FETCH FIRST is one unsupported
   spelling at FETCH; FIRST is exempt only directly after a FETCH in construct position.
   ALL is an invalid paging count only after an actual LIMIT/OFFSET clause head; path segments
   such as c.fetch and c.limit grant no exemption to a following FIRST or ALL. These words remain
-  identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c NEST
-  reports NEST, while FROM c AS nest keeps it a name. LIMIT and OFFSET execute and are
+  identifiers elsewhere. A Clause word cannot be an implicit FROM alias: FROM c WITHIN
+  reports WITHIN, while FROM c AS within keeps it a name. JOIN and NEST are parsed in SELECT source clauses. LIMIT and OFFSET execute and are
   reserved; use quoted names or path segments such as d.limit. SELECT a AS limit still parses.
 - **Statement** (`DEFINE`, `MERGE` and the enabled `UPSERT` coverage entry): only the first word of the
   statement. UPSERT bypasses refusal through OqlClauses.Upsert; its table entry retains contextual
@@ -268,7 +379,7 @@ a name:
   unsupported at the statement prefix or after SELECT. Other identifier positions retain
   `returning`, including an implicit FROM alias before the end or another clause. The final
   grammar owns the trailing projection; it does not reserve the spelling globally.
-- **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, `ARRAY_AGG`, and the deferred REGEXP functions):
+- **Function** (`ELEMENT`, `FLATTEN`, `LISTTOSET`, `STRUCT`, `LIST`, `BAG`, `TYPEOF`, and the deferred REGEXP functions):
   only immediately before `(`. Elsewhere these spellings are ordinary identifiers.
 - **Quantifiers**: `EVERY`, `ANY` or `SOME` followed by `name IN` opens a supported predicate.
   The scan skips the binding IN and still scans the collection and SATISFIES expression for
@@ -389,7 +500,7 @@ one require an explicit alias. An inferred duplicate spans the final path-name t
 bracket-string paths and parenthesized paths. UNNEST, INNER, LEFT, OUTER, EVERY and SATISFIES are contextual,
 preserving existing fields and AS-less aliases named every or satisfies. END was already
 reserved. ANY and SOME retain their existing reservations. UNNEST in UPDATE/DELETE, FLATTEN calls,
-JOIN, NEST, WITHIN and ANY AND EVERY remain CK00001.
+general JOIN/NEST predicates, UPDATE/DELETE source joins, WITHIN and ANY AND EVERY remain CK00001.
 UPDATE/DELETE reject UNNEST only where their grammar expects a clause; a field named unnest
 in SATISFIES remains an expression. MERGE INTO in a CASE result under SATISFIES reports the
 single MERGE construct before its internal mutation tokens are scanned.
@@ -413,7 +524,7 @@ superseding the original issue's three-valued element table. IN uses structural 
 with a match winning over a NULL element. A MISSING operand on either side gives MISSING;
 a NULL or non-array right operand gives NULL. Cohesion retains NULL for `NULL IN []`,
 diverging from [Couchbase coll_in.go:57-71](https://github.com/couchbase/query/blob/master/expression/coll_in.go#L57-L71).
-Aggregates are forbidden inside UNNEST operands and quantified expressions. META accepts
+Aggregates are forbidden inside UNNEST operands. Quantified collections and predicates inherit aggregate permission from SELECT, HAVING and ORDER BY and evaluate with the enclosing group; nested aggregates remain forbidden. META accepts
 only the stored FROM binding; META on an inner variable is an error even if it shadows FROM.
 
 ### ARRAY and FIRST comprehensions (#1728)
@@ -434,7 +545,7 @@ without visiting later elements; with no qualifying element it returns MISSING. 
 MISSING input, and return NULL for NULL or non-array input. The
 [dialect](DIALECT.md#array-and-first-comprehensions-1728) records the reference and defaults.
 All child expressions participate in parameter/numeric, function, aggregate and metadata
-validation even for empty input. As with quantifiers, aggregates inside a comprehension are
+validation even for empty input. Aggregates inside a comprehension are
 refused; a comprehension may be an aggregate argument. Closed comprehensions and quantified
 predicates are constant for VALUES/constructor validation when all paths bind local variables;
 registered calls remain nonconstant. No rendering, wire or storage contract changes.
@@ -448,17 +559,91 @@ CASE, nested ARRAY/FIRST and ANY/SOME/EVERY are skipped as complete expressions 
 the enclosing FOR, including within WHEN. Dotted members, AS labels and object keys are names;
 they do not open or close expression scopes. ARRAY()/FIRST() retain their dedicated CK00001 refusal.
 
+## Expression subqueries (#1731, OQ-Q1)
+
+OqlSubqueryExpression is a sealed AST leaf retaining its OqlSelectExpression and full
+parenthesized span. EXISTS uses OqlUnaryExpression with operator EXISTS, preserving ordinary
+NOT composition. EXISTS has a precedence tier between IN and IS, below CONCAT/arithmetic and above
+comparisons, NOT, AND and OR. The `||` spelling lowers to the existing CONCAT call; IS [NOT]
+DISTINCT FROM retains its operator in OqlBinaryExpression and uses shared value equality.
+The retired EXISTS binding quantifier is recognized by its
+unnested colon; an ordinary `EXISTS x IN array` remains an IN expression. Qualified-star
+syntax retains its path in a unary `.*` node; joined SELECT projections execute it, while
+other qualified-star contexts keep their refusal. ParseSelect stops at its matching closing parenthesis; recursive expression
+parsing shares CD00005's 128-level limit. The capability scan admits nested SELECT in SELECT,
+INSERT, UPSERT, UPDATE and DELETE, including RETURNING. SELECT
+quantifiers and reserved labels retain their existing positional rules within nested scopes.
+IN with a direct SELECT requires RAW or VALUE (CD00014); an ordinary parenthesized expression
+keeps the existing value-list interpretation. Source Text remains the statement renderer;
+there is no separate OQL AST renderer. The engine renders nested plans in EXPLAIN.
+The [dialect](DIALECT.md#expression-subqueries-and-exists-1731-oq-q1) records every default,
+cache policy, scope, retention and deferred form. OqlSubqueryParserTests and the engine's
+advertised-clause corpus cover the syntax together with the runtime and transport suites.
+Correlation retains the resolved binding for index constraints, ordering proofs and META receiver
+equivalence. Captures are constants inside an invocation, and every enclosing grouped query still
+enforces group-key visibility (CD05001), including nested FROM and inner aggregate inputs.
+An enclosing aggregate may capture its source-row inputs; its GROUP AS binding remains unavailable
+there (CD01031). An absent alias uses the collection name only for nested captures and META
+receivers. Own paths retain field meaning, including group keys, DISTINCT equivalence and RAW
+ordering; captured group-key matching normalizes only the captured receiver. Metadata validation
+rejects UNNEST, comprehension and unknown receivers with CD05001 before evaluation.
+Local metadata alone permits identity paging, identified in EXPLAIN by identity_paging=True.
+ORDER BY's standalone alias substitution, direct grouped-row paths and nested projection-alias
+captures share one planning rule; reused source and UNNEST names keep local grouping restrictions.
+The engine parity and conformance corpora cover these scope distinctions alongside shadowing and group bindings.
+Subquery group-key equivalence includes free binding identity, retaining inner declarations that
+mask outer names while refusing a proof after an enclosing capture is shadowed.
+Per-element predicate/operand scratch has iteration lifetime, excluding live collections and
+statement caches. Object maps retain their live member results until serialization while releasing
+discarded member scratch; ARRAY/FIRST retain their existing streaming and lazy behavior.
+Constructors, ARRAY and FIRST retain their final returned representation until the consumer's
+iteration or row releases it, including when several constructed operands coexist.
+
+## FROM source expressions (#1731, OQ-Q2)
+
+OqlSelectExpression.Source holds an expression or OqlSubqueryExpression for FROM; null retains
+the collection-source representation. The existing collection storage slot holds either the
+collection name or expression, preserving ordinary SELECT node size. Collection is empty for an
+expression source, and logical-plan copies preserve Source. The parser permits optional AS for
+derived aliases, requires AS before generic explicit aliases, and diagnoses a missing derived
+alias with CD00015. Unnamed generic expressions without an implicit field name give CD01033
+at binding. The profile advertises DERIVED FROM and EXPRESSION FROM beside FROM, with live
+conformance cases. The [dialect](DIALECT.md#derived-and-expression-from-sources-1731-oq-q2)
+records the pinned Couchbase references, row semantics, star/metadata choices and execution defaults.
+The capability scan restores grouping state per SELECT scope, preserving contextual aliases such
+as LETTING after a grouped derived query.
+
+## Key source bindings (#1732)
+
+OqlSourceBindingExpression is a closed abstract AST family with nonvirtual expression, variable
+and preservation state. OqlUnnestExpression and OqlJoinExpression are sealed leaves. Bindings
+retains their evaluation order; Unnest remains the array-only view. SELECT's existing source slot
+holds an optional wrapper only for joined queries, preserving ordinary node size and allocations.
+The parser accepts only right-hand META(alias).id equality and keeps JOIN/NEST contextual.
+General forms, ON KEYS and UPDATE/DELETE source joins retain CK00001; explicit aliases avoid #1767.
+A joined statement requires aliases in every SELECT scope. The parser tracks actual join clauses
+and unaliased sources across recursive parsing, then resets this state for its next statement.
+The engine validates the same rule for direct ASTs before source planning. Metadata validation
+processes bindings in declaration order: UNNEST removes a shadowed captured receiver, while JOIN
+and NEST introduce their local receiver after validating the preceding key scope.
+The [dialect](DIALECT.md#key-join-and-nest-1732-oq-j1) records scalar/unknown keys, metadata,
+star shape, paging, cache/budget defaults and pinned SQL++ references. OqlKeyJoinParserTests,
+keyword disposition and the engine's profile-driven conformance corpus cover the four capabilities.
+
 ## Grammar, statement, and expression trees
 
 ```text
 statement    := (query | insert | upsert | update | delete | EXPLAIN (query | insert | upsert | update | delete) | create-collection | drop-collection | create-index | drop-index) [';']
 query        := SELECT [ALL | DISTINCT] select-kind from-clause
-                [WHERE expression] [GROUP BY expression (',' expression)*]
+                [WHERE expression] [GROUP BY expression [[AS] alias] (',' expression [[AS] alias])* [GROUP AS alias]]
                 [HAVING expression] [ORDER BY ordering (',' ordering)*]
                 [LIMIT count [OFFSET count] | OFFSET count [LIMIT count]]
 count        := ['+' | '-'] integer-literal | parameter
-from-clause  := FROM collection [AS? identifier] unnest*
+from-clause  := FROM (collection [AS? identifier] | subquery [AS] identifier | expression [AS identifier]) source-binding*
+source-binding := unnest | key-join
+key-join     := [INNER | LEFT [OUTER]] (JOIN | NEST) collection [AS] identifier ON META(identifier).id = expression
 unnest       := [INNER | LEFT [OUTER]] UNNEST expression [AS? identifier]
+aggregate-call := COUNT '(' '*' ')' | aggregate-name '(' [ALL | DISTINCT] expression ')'
 quantified-expression := (ANY | SOME | EVERY) identifier IN expression SATISFIES expression END
 comprehension := (ARRAY | FIRST) expression FOR identifier IN expression [WHEN expression] END
 select-kind  := projection (',' projection)* | (VALUE | RAW) expression
@@ -476,16 +661,20 @@ object       := '{' [(string | identifier) ':' expression (',' (string | identif
 metadata     := META '(' [identifier] ')' '.' (id | version)
 create-collection := CREATE COLLECTION [IF NOT EXISTS] collection
 drop-collection   := DROP COLLECTION [IF EXISTS] collection
-create-index := CREATE [UNIQUE] INDEX [IF NOT EXISTS] identifier ON collection '(' index-path (',' index-path)* ')'
+create-index := CREATE [UNIQUE] INDEX [IF NOT EXISTS] identifier ON collection '(' index-path [INCLUDE MISSING] (',' index-path)* ')'
 index-path   := (identifier | '[' string ']') ('.' identifier | '[' integer ']' | '[' string ']')*
 drop-index   := DROP INDEX [IF EXISTS] identifier ON collection
 collection   := identifier | COHESION_SCHEMA '.' identifier
 projection   := expression [AS label]
 label        := identifier | quoted-identifier | reserved-word
 array        := '[' [expression (',' expression)*] ']'
-ordering     := expression [ASC | DESC]
+ordering     := expression [ASC | DESC] [NULLS (FIRST | LAST)]
 path         := identifier ('.' identifier | '[' integer ']' | '[' string ']')*
 presence-test := expression IS [NOT] (NULL | MISSING | VALUED)
+distinctness  := expression IS [NOT] DISTINCT FROM expression
+concat       := expression '||' expression
+subquery     := '(' query ')'
+exists       := EXISTS expression
 membership   := expression [NOT] IN ('(' expression (',' expression)* ')' | expression)
 range-test   := expression [NOT] BETWEEN expression AND expression
 pattern-test := expression [NOT] LIKE expression [ESCAPE expression]
@@ -529,7 +718,8 @@ fractional precision and overflow report `CD02007` (SQLSTATE 22003) at the liter
 The parser reports malformed numeric syntax as `CD00004`; it adapts optional integer digits
 (`.5`) and leading zeros to JSON syntax without changing the number's value.
 
-Operator precedence, lowest first: `OR`, `AND`, comparisons, presence tests and IN/BETWEEN/LIKE, addition/subtraction,
+Operator precedence, lowest first: `OR`, `AND`, `NOT`, comparisons and IN/BETWEEN/LIKE,
+`EXISTS`, IS presence/distinctness tests, CONCAT (`||`), addition/subtraction,
 multiplication/division/remainder, unary signs. `NOT` binds around comparisons, so
 `NOT age < 18` means `NOT (age < 18)`. Comparison operators are `=`, `!=`, `<>`, `<`, `<=`, `>`,
 and `>=`; the AST normalizes `<>` to `!=`. Presence tests are unary `IS [NOT] NULL`,
@@ -544,7 +734,7 @@ inside either bound can still group a Boolean expression. CASE is a primary expr
 OqlInExpression retains either a nonempty Values list or an Array expression; even
 `x IN (d.tags)` compares x with the whole array as one structural item. The array operand
 parses above comparison precedence, so `x IN d.tags AND p` is a conjunction. A nested SELECT
-still names SUBQUERY, including inside SATISFIES.
+uses the approved RAW/VALUE array operand exception; a non-RAW direct SELECT gives CD00014.
 The other public nodes are OqlBetweenExpression, OqlLikeExpression and OqlCaseExpression.
 Negated predicates preserve unknown results. Structural equality returns NULL for otherwise equal
 arrays/objects containing NULL, so IN and simple CASE do not match them. A definite structural
@@ -612,6 +802,13 @@ The keyword-disposition corpus covers these identifiers both with and without th
 | `CD00008` | Unknown function name; standalone parsing or deferred engine binding |
 | `CD00009` | More than 32 index key paths, at the 33rd path |
 | `CD00010` | A duplicate variable within one FROM/UNNEST or quantifier binding list, at the repeated name |
+| `CD00011` | ALL/DISTINCT on a scalar or star call, at the quantifier |
+| `CD00013` | NULLS without FIRST or LAST, at the expected option |
+| `CD00014` | Direct IN subquery requires SELECT RAW or SELECT VALUE |
+| `CD00015` | Derived FROM subquery requires an alias |
+| `CD00016` | Every SELECT source in a joined statement requires an explicit alias |
+| `CD01033` | FROM expression requires an explicit alias or implicit field name |
+| `CD01034` | Unbound FROM expression variable; there is no implicit input-row scope |
 
 Every error has an absolute start/end span and source line. End-of-input errors use the source
 length for both offsets. A line breaks at LF, CR, NEL (U+0085), LS (U+2028) or PS (U+2029), and
@@ -675,7 +872,8 @@ accidental syntax or missing-collection error. Projection, filtering, grouping, 
 reuse ordinary SELECT syntax; no separate metadata API or statement class is introduced.
 The engine design documents the field shapes, snapshot visibility, and read-only rules.
 `CREATE DATABASE`,
-`DROP DATABASE`, `USE`, and transaction savepoints remain unsupported.
+`DROP DATABASE` and `USE` remain unsupported. Named transaction savepoints execute through
+the owning session as described above.
 Multiple statements per parse are rejected. Logical database creation and deletion remain
 engine-side C# operations.
 
@@ -724,7 +922,7 @@ overlapping targets and invalid stored results carry CD02016, CD01017 and CD0201
 respectively. The [dialect page](DIALECT.md) records the executable UPDATE contract.
 
 WHERE and SET values share ordinary parameter, numeric and META validation, and reject aggregates.
-Subqueries in either clause report CK00001 naming SUBQUERY at the inner SELECT, including under
+Subqueries in either clause are admitted, including under
 EXPLAIN. USE KEYS remains CK00001 at USE. ARRAY/FIRST comprehensions execute in SET and WHERE;
 UPDATE's separate SQL++ FOR mutation clause remains CK00001 at FOR.
 UPDATE's grammar itself refuses LIMIT and OFFSET, independently of SELECT capabilities. An update without RETURNING returns
@@ -758,7 +956,7 @@ version, including an unchanged value. SELECT sources materialize before writes,
 Repeated keys in one statement raise DocumentDuplicateKeyException and roll back the statement;
 last-writer-wins does not apply. Key/value validation, MISSING omission and complete-row binding
 are shared with INSERT. OPTIONS remains CK00001 at its token, and a nested
-SELECT in VALUES reports SUBQUERY. There is no statement-level version precondition in T1;
+SELECT in VALUES is admitted. There is no statement-level version precondition in T1;
 use PutAsync(expectedVersion) or UPDATE WHERE META().version = $v for optimistic replacement.
 EXPLAIN UPSERT describes Upsert or UpsertSelect without writing. The existing completion carries
 the affected count and optional RETURNING rows; no wire or persisted catalog shape changes.
@@ -801,7 +999,7 @@ CREATE INDEX retains Paths in source order, with Path as the first path. IsUniqu
 are explicit AST flags; DROP INDEX retains IfExists. Single-path constructors remain useful
 convenience forms. Quoted "if" stays an index name. Duplicate paths compare segment values, so
 `a`, `"a"` and `['a']` name the same key. Empty/duplicate paths, wildcards, expressions, ASC/DESC,
-partial WHERE and INCLUDE MISSING receive CD00002 at the invalid token. The engine enforces the
+partial WHERE receive CD00002 at the invalid token. The engine enforces the
 32-key cap on directly constructed ASTs with CD03022; text reports CD00009 at the 33rd key.
 ALL array keys receive one CK00001 from the key parser; DISTINCT ARRAY uses the restricted
 grammar above. Capability validation computes the balanced key-list token range once, so repeated
@@ -845,7 +1043,7 @@ NativeAOT compatible.
 
 Profile.Functions is the executable built-in set, checked by the engine's one function-
 coverage guard: every declared name has a passing live case and every live case has a
-declared name. OQL declares META, the five aggregates and 34 SQL++ scalars (#1137); the retired
+declared name. OQL declares META, eleven aggregates and 34 SQL++ scalars (#1137); the retired
 ODMG declarations and their temporary guard exemptions are gone. ABS is executable and leaves
 the recognized-unsupported table and keyword corpus. The function table is the declaration source.
 
@@ -853,6 +1051,66 @@ The root DatabaseException.Diagnostics carrier preserves the complete parser lis
 factories and session boundaries, including parsed typed requests. DatabaseParseException
 retains the existing first-error message and no error-recovery AST executes. Graph's path
 request factory shares this contract. Diagnostics remain plain Database.Types data.
+
+### INCLUDE MISSING and ordered index execution (#1632)
+
+`CREATE INDEX ix ON items (score INCLUDE MISSING, category)` includes leading-MISSING
+records using the existing v3 flag; INCLUDE is contextual. The suffix belongs inside the key
+list on the first scalar key, following [Couchbase](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/createindex.adoc#L317-L330).
+It is invalid on later keys or after the closing parenthesis. Direct AST leading-array definitions
+still receive CD03025. COHESION_SCHEMA.INDEXES exposes INCLUDE_MISSING and renders the suffix
+in PATH and PATHS[0], making the key list reusable as DDL. No format or wire bump is needed.
+
+EXPLAIN reports order_eligible and order_reason on the selected access and one
+IndexOrderCandidate per visible index, including ORDER BY-only candidates. Eligible candidates
+report forward/reverse direction, equality prefix, complete equal-key buckets and the document
+identity tie break. Ordinary sparse indexes need a mandatory predicate proving that leading
+MISSING cannot qualify. AND needs either proof, OR needs both; direct presence tests and direct
+comparisons are recognized. Calls and computed paths establish no proof. ORDER BY must match
+consecutive leading keys after optional equality-fixed keys, with one direction for varying keys.
+Nondefault null placement requires proof that both unknowns are excluded. Arrays, grouping,
+DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fallback reasons.
+
+Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
+comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
+one-entry/32-page existence probe checks complex tags on the first varying component, without
+fetching documents. A visible match stops immediately; an invisible first entry leaves the domain
+unproven. Incomplete probes and later varying components without a scalar proof report
+scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+Ordering reuses the ordinary access analysis; every structural and predicate proof runs before
+probing. Rejected ordinary plans allocate no EXPLAIN candidate graph.
+A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
+including all trailing physical components, before identity sorting and LIMIT termination.
+Execution consumes a proven scalar index in forward or reverse order and elides the result
+sort. The existing predicate chooser's eligible index wins; otherwise the first eligible index
+in ordinal name order wins. Intersections retain their identity merge and fallback sort.
+The catalog cursor uses the statement snapshot and releases every page/latch before returning
+metadata. It materializes one complete equal-ORDER-BY-prefix bucket, including trailing physical
+components, then emits that bucket in ascending document identity order in either scan direction.
+The full WHERE predicate filters this stream without changing its order. Bucket metadata, keys
+and identities charge the existing statement memory budget (CD05018); cancellation and failure
+release the cursor and reservations.
+
+With fixed projection types, LIMIT/OFFSET stop after OFFSET + LIMIT residual survivors. LIMIT 0
+opens no cursor. One next-bucket entry establishes completeness, and the B-tree may already have
+read ahead in its bounded batch. SELECT * has a fixed JSON type and stops early on a consumed
+ordered path. Projections needing result type inference still read all matching documents so
+column headers retain the existing full-result contract;
+their proven index order still elides sorting. EXPLAIN reports consumed=True; sort=elided on the
+selected access and candidate, early_paging, and paging_reason=result_type_inference when needed.
+VALUE/RAW ordering by its projected expression retains sorting unless MISSING is rejected,
+because projection promotes MISSING to NULL and changes equal-key ties (value_missing_becomes_null).
+Other candidates retain consumed=False and their eligibility/selection reason; the root describes
+sort retention and its reason. EXPLAIN remains nonexecuting and actual_rows remains NULL.
+
+Conformance compares 504 generated index/predicate/order combinations across eight paging
+windows (4,032 exact comparisons), with complete duplicate buckets, residual rejections,
+scalar extremes, MISSING/NULL, escaped strings and trailing coarse tags. Controlled concurrent
+insert/update/delete/index replacement tests cover autocommit, Snapshot and ReadCommitted,
+plus own writes, rollback and cancellation. InMemory/TCP and the NativeAOT consumer exercise
+consumption and paging without new API, wire or disk formats. Star paging regressions cover
+both directions and the 256 KiB statement budget; rejected-shape allocation guards cover complex
+values, mixed directions, unproven MISSING, later scalar domains and array indexes.
 
 ## Access estimates (#1527)
 

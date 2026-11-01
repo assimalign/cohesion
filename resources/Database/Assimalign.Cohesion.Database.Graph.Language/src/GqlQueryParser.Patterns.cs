@@ -329,9 +329,8 @@ public sealed partial class GqlQueryParser
                     string name = Identifier(allowKeyword: true);
                     Expect(TokenType.Colon, "':'");
                     if (Failed) { break; }
-                    if (Current.Type is TokenType.LeftBracket or TokenType.LeftBrace)
-                    { _ = ParseScalar(); break; }
                     var value = ParsePredicate();
+                    if (!Failed) { RejectCompositePropertyValue(value); }
                     if (!properties.TryAdd(name, value)) { Error("CG00006", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.GqlQueryParserParsePropertiesVoid, name), start); }
                 } while (!Failed && Take(TokenType.Comma));
             }

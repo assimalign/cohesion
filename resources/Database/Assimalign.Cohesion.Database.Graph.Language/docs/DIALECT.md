@@ -1,5 +1,128 @@
 # Cohesion GQL dialect
 
+## Named savepoints (#1726, XT-4)
+
+GQL accepts the SQL spellings SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK [WORK | TRANSACTION] TO
+[SAVEPOINT] name as Cohesion extensions to its ISO profile. Names preserve decoded identifier
+spelling and compare ordinally; quoted identifiers decode doubled quotes. Canonical rendering
+quotes the decoded name. The contextual grammar adds three profile clauses without adding lexer
+keywords or changing ordinary query object size: a named control reuses the existing standalone
+body slot. Controls are standalone and ExecutePaths refuses them as CG05001. Ordinary Graph
+statement failures still abort the entire transaction and retain CG04007; ROLLBACK TO cannot
+recover them, and only whole ROLLBACK recovers (owner, 2026-10-25).
+
+Duplicate names are allowed; the newest matching scope wins. RELEASE discards the named scope
+and every newer scope, retaining their effects. ROLLBACK TO undoes rows, index entries and scoped
+locks after its target, discards newer scopes and keeps the target for repeated rollback. The
+root transaction stays open and can continue work and commit. A matched MERGE that writes no
+data remains read-only even inside a savepoint: its bookkeeping requires no journal append,
+durability wait or physical undo bracket. Commands require an explicit
+transaction (CK04012); an unknown name is CK04013. Successful controls return affected count zero.
+Pre-canceled controls change nothing; admitted undo completes despite later cancellation.
+Incomplete undo reports Faulted transaction status and CK04009 for all work except rollback to
+the same or an outer retained scope, or whole ROLLBACK. Pool return rolls back and clears names.
+Failed named controls use the statement error translator; incomplete undo reports CK04009 with
+the translated cause and Ready E on the open connection. Offline, disposed and corruption errors
+keep precedence; corruption aborts the transaction.
+
+PostgreSQL nested-scope behavior follows the locally rechecked
+src/backend/access/transam/xact.c:4426-4498,4511-4607,4620-4733. Markers remain in memory and use
+the existing durable row/index operations; storage remains format 4. SavepointConformanceTests,
+NamedSavepointTests and NamedSavepointWireTests are the parser, in-process and InMemory/TCP
+conformance corpora. The named tests include injected undo failure, lock-wait wakeup and
+counter-driven non-parallel races against root rollback/disposal; adapter tests cover copied
+live crash images with and without the enclosing commit.
+
+Typed GraphSchema manages database-wide index/constraint names (#1738, GQ-D1). Named type
+and existence constraints are independently droppable; creation checks existing data and all
+entity writes enforce the effective rules. SHOW PROPERTY KEYS reports their combined type and
+required state; SHOW OBJECT OWNERSHIP includes named CONSTRAINT rows with parent ownership.
+The existing column contracts remain fixed. D2 adds the schema commands and transaction policy below. Duplicate names use CG03008, conflicting rules CG03009,
+invalid existing data CG03010 and an absent named drop CG01021. Graph catalog v1 refuses with
+CG06019; only v2 is read.
+
+A named constraint may repeat an identical unnamed property rule. The declarations are
+independent: dropping that constraint preserves the unnamed rule. Typed GetPropertyKeysAsync
+returns declared metadata only; SHOW PROPERTY KEYS continues to report effective rules.
+
+## Schema DDL (#1738, GQ-D2; #1249)
+
+Standalone commands run on the session's database:
+
+- `CREATE INDEX [name] [IF NOT EXISTS] FOR (n:Label) ON (n.property)`;
+- `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS NOT NULL`;
+- `CREATE CONSTRAINT [name] [IF NOT EXISTS] FOR (n:Label) REQUIRE n.property IS :: type`;
+- constraint relationship patterns use `FOR ()-[r:TYPE]-()` and `REQUIRE r.property`, with
+  optional arrows (`()-[r:TYPE]->()`, `()<-[r:TYPE]-()`, `()<-[r:TYPE]->()`); rendering
+  normalizes all forms to the undirected pattern;
+- `DROP INDEX name [IF EXISTS]` and `DROP CONSTRAINT name [IF EXISTS]`;
+- Cohesion definition extensions `CREATE LABEL name [IF NOT EXISTS]`,
+  `CREATE RELATIONSHIP TYPE name [IF NOT EXISTS]`, and their `DROP ... [IF EXISTS]` forms.
+
+Types are BOOLEAN (alias BOOL), INT8, INT16, INT32, INT64 (aliases INTEGER and INT),
+FLOAT32, FLOAT64 (alias FLOAT), DECIMAL and STRING. Type rules allow absent/NULL properties;
+existence rules require non-NULL. Matching uses the stored scalar type without coercion.
+These spellings follow the approved Neo4j-style DDL surface, with Cohesion's existing scalar
+storage types. INTEGER/INT mean Int64 here; CAST retains its documented Int32 meaning.
+UNIQUE, composite constraints/indexes, relationship property indexes, closed graph types and
+unsupported constraint types refuse with CK00001 naming the form. A mismatched FOR variable is CG01022.
+No DDL parameters, query composition or EXPLAIN are admitted; identifiers retain ordinary quoting.
+
+Cohesion refuses every schema write inside an explicit transaction with structured CG04025,
+including typed GraphSchema writes and conditional no-ops. This is a Cohesion policy: Neo4j
+only forbids mixing schema and data writes in one transaction. A refused admitted statement
+aborts the explicit transaction; rollback restores session use. Typed argument checks precede
+admission and leave an explicit transaction usable. Auto-commit DDL owns one transaction,
+including token discovery, validation, physical indexes and catalog publication.
+
+Schema statements validate GraphQueryLimits inside their admitted operation (CG08021 for
+invalid limits). Owner validation scans and index backfill consume the statement work budget
+(CG05004); cursor buffers and retained backfill entries share its memory budget (CG05020).
+Exhaustion rolls back the rule, name reservation and every newly discovered token. Typed
+schema writes use the engine's statement limits.
+
+Indexes discover missing label/property tokens. Text constraints discover missing label/type/property
+tokens. A refused or failed creation leaves none of its new tokens. Discovered properties are
+untyped metadata and remain known after dropping the last rule. No graph entity is inserted.
+IF NOT EXISTS suppresses an existing rule of the same kind with that name, or an equivalent
+rule over the same owner/property/type, even with another name; a cross-kind name collision
+still reports CG03008 and incompatible rules CG03009. IF EXISTS suppresses an absent drop.
+A real create/drop reports affected count 1, a conditional no-op 0. Nonempty definitions
+cannot be dropped (CG03003); dropping an empty definition removes its child rules and indexes.
+
+Generated names are `index_<sha256>` or `constraint_<sha256>`, with all 64 lowercase hexadecimal
+digest characters. SHA-256 hashes UTF-8 concatenated fields, each prefixed by its invariant
+UTF-8 byte length and a colon: object kind (Index/Constraint), owner kind (node/relationship),
+owner name, property name, and canonical type enum name (or exists). Variable names, aliases,
+whitespace and IF NOT EXISTS do not affect identity. Explicit names and schema-rule lookup
+remain ordinal and case-sensitive across the shared database-wide namespace.
+
+SHOW CONSTRAINTS returns DATABASE_NAME, DEFINITION_TYPE, DEFINITION_ID, DEFINITION_NAME,
+CONSTRAINT_NAME, PROPERTY_KEY, DATA_TYPE and IS_REQUIRED, ordered by label name then constraint
+name, followed by relationship type name then constraint name. Other SHOW column contracts
+stay fixed. Graph catalog v2 and graph format 5 remain unchanged.
+
+Read-only statements warn with structured CG01023 for each distinct, ordinal, statically named
+entity property unknown database-wide (#1249, GQ-D3). This includes MATCH node/relationship
+property-map keys and entity fields in RETURN, WHERE and ORDER BY, including aliases, lexical
+collections, correlated patterns, NEXT and composite operands. A name known on any label or
+relationship type, or stored by an unlabeled entity or on a schema-owned definition, suppresses the
+warning, even when absent on the entity being read. Parenthesized and typed member accesses in
+ORDER BY use the projected alias's type, including when it shadows an incoming binding. Missing map
+fields, dynamic subscripts (`n[$key]` or `n['key']`) and writing statements do not warn. Values,
+row counts and explicit transaction state retain their normal behavior. EXPLAIN reports these
+warnings too. Each warning carries the property name and, when available, the first field-access
+span; pattern map keys and unlocated typed ASTs have no span. Diagnostics are available on typed
+results and through the negotiated wire Diagnostics channel. Property discovery follows the
+statement snapshot and rolls back with its write; removing a value retains discovery across reopen.
+Writing statements skip this analysis inside correlated reads as well as in the outer query.
+
+SQL operator isolation (#1721): shared tokenization of ::, separated/adjacent colons and
+`~~*`, `!~~*`, #, ~, &, |, << and >> is unchanged. SQL bitwise forms and postfix
+casts remain outside this language's scalar grammar;
+Label colons retain their existing meaning. The corpus pins :A|B, :A&B, ! and
+<- / -> / <-- / --> / <-[ token boundaries, preserving label and arrow parsing.
+
 The target is ISO/IEC 39075:2024 with the subset and extensions recorded in [DESIGN.md](DESIGN.md).
 The supported-clause matrix there is authoritative; RETURN projects value expressions,
 named bindings or all bindings with `*`.
@@ -37,6 +160,84 @@ Catalog write conflicts abort with `CG04007`; disposal during execution or at th
 statement's lifetime guard reports `CG09019`. These are ExecutionFailure responses and
 leave the wire session ready. An aborted explicit transaction requires rollback before
 further statements. The engine's `GraphEngineFailureWireTests` supplies the fault corpus.
+
+## Composite queries: UNION, EXCEPT, INTERSECT and OTHERWISE
+
+`query UNION query` removes structurally equal rows; `query UNION ALL query` preserves all
+occurrences. Equality is the same as RETURN DISTINCT, including NULLs, numeric equivalence,
+list order, map entries, entity identities and ordered path identities. Chains associate left;
+parentheses group operands as a Cohesion extension. Every conjunction binds more tightly than NEXT:
+`RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x` returns 10 and 20.
+NEXT inside a parenthesized operand stays within that group. Each NEXT segment may itself be a
+composite; its operands receive the preceding segment's complete projected binding table.
+WITH remains local to its operand.
+Each operand starts with an isolated copy of the NEXT segment's incoming scope, must be read-only (CG05029), and must return matching
+case-sensitive column names/order/count (CG01020) and compatible shapes (CG02017). Numeric kinds
+are compatible and NULL accepts any kind. Proven kinds are checked before execution, unknown kinds
+when rows arrive. Collection contents retain the existing heterogeneous value contract. Mixing
+UNION and UNION ALL, including inside groups, is CG00016; a missing operand is CG00015.
+
+ORDER BY and OFFSET/SKIP/LIMIT apply to the RETURN of their operand. A tail after the last RETURN
+pages only that operand. A suffix after a grouped composite is CK00001; no global composite page
+is admitted. UNION's default is distinct; explicit UNION DISTINCT is accepted and renders as UNION.
+UNION and UNION DISTINCT may mix; either mixed with UNION ALL is CG00016, even across other
+conjunctions or groups. EXCEPT and INTERSECT default to DISTINCT; explicit DISTINCT renders as
+the bare operator. ALL uses multiset counts under the same structural row equality:
+
+| Operator | Copies of a row with left count m and right count n |
+| --- | --- |
+| EXCEPT / EXCEPT DISTINCT | 1 when m > 0 and n = 0, otherwise 0 |
+| EXCEPT ALL | max(m - n, 0) |
+| INTERSECT / INTERSECT DISTINCT | 1 when m > 0 and n > 0, otherwise 0 |
+| INTERSECT ALL | min(m, n) |
+
+EXCEPT/INTERSECT keep eligible occurrences from the start of the left result, preserving their
+original values and relative order; DISTINCT keeps the first representative. They read the left
+operand before the right and validate runtime shapes on both, even when the result is provably
+empty. No result escapes before completion. OTHERWISE returns the entire left result, including
+duplicates and NULL rows, when it contains any row. Only an empty left result evaluates the right;
+a left error propagates. This whole-result, lazy fallback is a Cohesion contract with no Neo4j
+precedent. Both operands are still planned and statically admitted. OTHERWISE has no quantifier.
+
+ISO GQL's composite-expression grammar puts UNION, EXCEPT, INTERSECT and OTHERWISE at the same
+precedence, left-associative; it admits mixed conjunctions with a local quantifier on each set
+operator. For example, A OTHERWISE B UNION ALL C means (A OTHERWISE B) UNION ALL C, and
+A UNION B INTERSECT C means (A UNION B) INTERSECT C. Parentheses change that tree.
+EXCEPT/INTERSECT DISTINCT and ALL may mix; the retained UNION-mode refusal above is a Cohesion
+restriction following the owner decision and Neo4j. The language DESIGN cites the grammar evidence.
+
+Every operand is planned and statically wire-admitted before any operand executes. All read one
+statement snapshot and share work/memory limits and cancellation. UNION distinct state is charged
+to that budget (CG05030); EXCEPT/INTERSECT retained frames, rows and hash counts use CG05032.
+Every hash visit and every row forwarded through UNION ALL or OTHERWISE consumes work at each
+visited operator in a mixed tree, including visits that discard duplicates. Output/operand memory
+and work retain CG05020/CG05004. UNION ALL has no
+distinct table or intermediate materialized operand result. Final results materialize under the
+existing API contract. Column names come from the first operand. Types widen across every
+operand's numeric kinds, NULL is neutral, and dynamic values use the existing unknown type.
+Nullability covers skipped branches too; unresolved static nullability is conservatively nullable.
+This reconciliation includes a composite ending a NEXT chain. Carried path variables retain their
+path kind in every operand; path member access is CG03003 before reading data. Quoted display
+names bind later references and star by their decoded variable names.
+Negotiated value encoding accounts for values from all operands. EXPLAIN retains grouping and shows every operand and its
+correlated subplans. The #1662 entity-list wire gate is checked for every operand, including empty
+ones, before execution. No disk or wire format changes are needed.
+
+## EXISTS and NOT EXISTS
+
+EXISTS { MATCH pattern [WHERE predicate] ... } and EXISTS { pattern [, pattern] [WHERE predicate] }
+return TRUE on the first inner row and FALSE on no rows. NOT EXISTS negates that Boolean.
+Explicit blocks permit the same successive MATCH and OPTIONAL MATCH clauses as an outer query.
+Outer variables, enclosing EXISTS locals and list iterators correlate; new inner names do not
+escape. A NULL outer entity in a pattern position matches nothing. Inner reads share the
+statement snapshot, own writes, cancellation and work/memory budgets. EXISTS is available in
+WHERE, CASE, projections, ORDER BY, comprehensions and list predicates.
+
+Full query bodies (RETURN, WITH, NEXT, UNION, CALL, ordering, paging and writes), parenthesized
+EXISTS, COUNT/COLLECT blocks and bare pattern predicates are CK00001. Empty/unbraced EXISTS
+uses CG00013; incompatible static/runtime pattern arguments use CG01019/CG02016. A malformed
+hand-built body or absent bound subplan uses CG05027. EXPLAIN includes SemiApply/AntiSemiApply,
+the inner plan and correlated names. These scalar results use existing InMemory/TCP framing.
 
 ## MATCH and OPTIONAL MATCH
 
@@ -185,6 +386,50 @@ seek_direction, type_filter, physical=visited_candidates, viable=accepted_hops a
 physical_limit=1000000. These describe counting rules; EXPLAIN executes no hops and has no
 runtime totals. The engine's GqlProfileExecutionTests EXPLAIN corpus pins this description.
 
+## MERGE (#1735)
+
+`MERGE path (ON (CREATE | MATCH) SET ...)*` matches the complete fixed path for
+each incoming row. Every complete match receives ON MATCH; when none exists, it creates every
+unbound node and relationship and runs ON CREATE once. An existing partial path does not supply
+unbound parts. Bind node variables with an earlier MATCH to reuse existing identities. A repeated
+or already-bound node must be a bare variable without labels or properties (CG03006, including
+EXPLAIN). Repeated unbound node variables create one node and may form a self-loop. Relationship
+variables must be newly declared by MERGE (CG03007 for an incoming declaration, including EXPLAIN);
+a relationship variable cannot occur twice within the same MERGE path (CG05001).
+
+Each clause takes one path; use successive MERGE clauses for separate decisions. Either branch
+order is accepted, with repeated branches; each kind's SET items append in source order and
+rendering preserves that order within each kind. Multiple paths are CG00002.
+Property maps evaluate once per input row against the incoming scope. Equalities must be finite,
+non-null storage scalars. The parser first reads each complete property expression: direct
+list/map literals, comprehensions and unindexed slices retain CK00001; indexed scalar results
+are accepted. Other proven or evaluated invalid equalities use CG03004; supplied parameters
+retain their ordinary binding validation. Row-dependent equalities seek an available property
+index with each row's evaluated value, ahead of label or relationship-type scans even when
+their published count is zero; a dropped index falls back to a scan. A runtime NULL bound
+node or absent bound node uses CG03005. MERGE does not
+modify a bound entity to make the pattern fit. Nodes require creation-compatible label conjunctions;
+relationships need exactly one type. Fixed either-direction relationships match either
+stored orientation; creation uses the source's left-to-right order. Incoming arrows reverse that order.
+
+Earlier MERGE creations and SET changes are visible to later input rows and stages through writer
+overlays. Both branches use ordinary SET's item ordering, schema validation, NULL removal, no-op
+and affected-count rules. ON CREATE may supply Required properties: existence validation runs
+after that branch, and an entity still missing a Required property refuses with CG03003 and
+rolls back the statement. Created entities count once; changed pre-existing entities count once
+per statement. An empty input produces no decision or creation. RETURN/WITH/NEXT compose normally;
+EXPLAIN shows Merge, OnCreate and OnMatch without executing the probes or mutations. ExecutePaths
+refuses MERGE before mutation. Variable-length and quantified update patterns remain refused.
+
+Every decision uses the database writer lock followed by a logical pattern lock. Snapshot checks
+the complete pattern against the latest committed view and reports retryable CG04024 if a decided
+match changes/disappears or a decided creation gains a committed match. ReadCommitted refreshes
+and re-matches after serialization. Pattern locks remain transaction-owned until commit/rollback;
+any failed statement aborts its explicit transaction. Session or statement end while the database
+is live reports CK04002, including writer, parent and pattern lock waits and late grants.
+Database disposal takes precedence and reports CG09019, including engine shutdown during
+UNWIND MERGE. No disk or wire version changes.
+
 ## SET and REMOVE
 
 SET and REMOVE are source-ordered stages after an incoming clause. Leading SET/REMOVE is
@@ -205,8 +450,7 @@ use INSERT's catalog discovery and schema validation; later MATCH stages see the
 
 Only literal whole maps are supported: `$p` and `properties(other)` as whole-map operands
 are CK00001. Literal composite properties, including parenthesized literals, are CK00001; computed composite property values
-are CG03003. MERGE, including both ON CREATE SET and ON MATCH SET, remains one CK00001
-naming MERGE. `+=` must touch; GQL combines it into one operator token without changing the
+are CG03003. MERGE uses the same SET items in its two branches. `+=` must touch; GQL combines it into one operator token without changing the
 shared lexer. SHOW remains read-only (CG00007).
 
 Affected counts include created entities plus distinct changed pre-existing entities. An entity
@@ -265,7 +509,7 @@ WITH supports GROUP BY, ORDER BY, OFFSET/SKIP, LIMIT and WHERE. Without DISTINCT
 
 NEXT requires RETURN on a read segment, and cannot trail a statement. A modifying segment without RETURN passes one empty binding and no variables to NEXT. INSERT and DELETE run in source order; deleted variables leave scope (a later reference is CG03003). Statements see their own writes, so INSERT (:T {k:1}) MATCH (t:T) RETURN t.k works even for a new label. INSERT maps evaluate scalar expressions against each row, enabling FOR name IN $names INSERT (:Person {name:name}); composite properties remain unsupported.
 
-LET/FOR cannot rebind a name in scope (CG03003). Dropped or unaliased variables are unbound (CG05001). Standalone ordering/page stages remain CK00001, including after the new clauses. Immediate RETURN after DELETE remains CK00001. FOREACH, CALL, NEXT YIELD and UNION remain excluded. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
+LET/FOR cannot rebind a name in scope (CG03003). Dropped or unaliased variables are unbound (CG05001). Standalone ordering/page stages remain CK00001, including after the new clauses. Immediate RETURN after DELETE remains CK00001. FOREACH, CALL and NEXT YIELD remain excluded; UNION combines complete read-only operands. Read stages stream owned slot bindings; mutation target tables materialize within the shared memory budget. The final projection alone drives scalar/composite wire admission; read-only composed entity/path results use ExecutePaths, while any write stage rejects a path request.
 
 ## Aggregates and GROUP BY
 
@@ -392,7 +636,7 @@ CURRENT_DATE, CURRENT_TIMESTAMP, CURRENT_TIME, LOCAL_TIME and LOCAL_TIMESTAMP ar
 words: every unquoted binding site is CG00002; quoted names bind and are referenced quoted.
 CAST is contextual: followed by `(` it starts CAST; elsewhere it is an identifier, as in
 `MATCH (cast:Movie) RETURN cast.title`.
-Recognized unsupported calls (reduce, temporal constructors, head/last/tail/reverse/range,
+Recognized unsupported calls (temporal constructors, head/last/tail/reverse/range,
 ELEMENTS, CARDINALITY, LTRIM/RTRIM/BTRIM, LEFT/RIGHT, LOG10 and Cypher
 toStringList/toIntegerList/toFloatList/toBooleanList) keep CK00001 in call position, preserving variables such as date.
 CURRENT_TIME/LOCAL_TIME/LOCAL_TIMESTAMP and procedures/CALL also remain CK00001.
@@ -411,8 +655,7 @@ Parameters accept IList (object arrays and List<long>, excluding binary byte[]) 
 IReadOnlyDictionary<string, object?> maps, and preserve scalar element types. Results use
 object arrays and read-only ordinal maps. Negative indexes count from the end; out-of-range
 indexes and missing fields yield NULL. {k:{j:1}}.k.j and $m.k access fields; $l[0] indexes
-a list. Invalid index/key/container types use CG02013. Stored a.b.c, comprehensions and
-slicing remain CK00001. INSERT/CREATE composite properties stay unsupported: syntax is
+a list. Invalid index/key/container types use CG02013. Stored a.b.c remains CK00001. INSERT/CREATE composite properties stay unsupported: syntax is
 CK00001 naming graph storage, parameters are CG03003. (n $props) remains CK00001.
 
 Equality is structural and three-valued: differing lengths/key sets or a FALSE field yields
@@ -433,6 +676,92 @@ Wire composite values require graph.composite-values under existing protocol 2.1
 Without it, projections that may return composites fail statically with CG07016 before writer locking and parameters are
 refused locally. The codec bounds are depth 64, 65536 total values and 16777216 bytes.
 Malformed components are ProtocolViolation. Path result encoding is unchanged.
+
+## Pattern comprehensions
+
+`[ [p =] (a)-[r:T]->(b) [WHERE predicate] | projection ]` returns one ordered list per
+outer row, retaining duplicate matches and NULL projections. It accepts nonempty relationship
+chains and the existing ISO/Cypher relationship quantifiers. All MATCH directions accept
+ISO postfix quantifiers on both bracketed and abbreviated connectors (`->`, `<-`, `-`, `<->`),
+including `->{1,2}`, `->+` and `->*`. The optional path name binds the
+whole matched path locally and can shadow an outer name. Other existing pattern names
+correlate; new names stay local. NULL correlated entities and zero matches return `[]`.
+WHERE keeps TRUE only. Projection is required and cannot aggregate over the inner matches.
+Pattern collections can nest and appear in RETURN, WHERE, scalar SET values, aggregate operands,
+list comprehensions, list predicates and reduce. Existing limits, cancellation and scalar-only
+property storage apply. EXPLAIN shows CollectApply, its correlated names and inner projection.
+Scalar lists use negotiated composite values; entity-valued lists remain refused until #1662.
+Path modes, selectors, parenthesized quantified groups, map comprehensions and allReduce are
+outside this form. See [reference semantics](DESIGN.md#pattern-comprehensions-1736-gq-c3).
+
+## List comprehensions and slices
+
+`[x IN list [WHERE predicate] [| projection]]` preserves source order. The source evaluates
+once in the outer scope; x shadows an outer name only in the filter/projection, including nested
+comprehensions. Missing projection keeps each element. WHERE keeps only TRUE and skips projection
+for FALSE/NULL. A NULL list returns NULL; an empty list returns []. Names and parameters still
+validate before execution. Known non-Boolean filters fail planning with CG02013 even for
+empty/NULL sources and under EXPLAIN; unknown filter types retain runtime validation.
+Aggregates can supply the source; body aggregates fail CG05024.
+
+Slices `list[from..to]`, `list[from..]` and `list[..to]` use inclusive start,
+exclusive end and omitted zero/list-length defaults. Negative bounds count from the end; bounds
+clamp, and reversed ranges give []. Explicit NULL bounds or NULL sources give NULL. Planning
+rejects both omitted bounds (CG00012) and known non-integer bound types (CG02014), even under
+EXPLAIN. Dynamic numeric bounds truncate toward zero then require Int32 range, matching Neo4j
+runtime conversion. Invalid list sources or bounds
+are CG02014; filters require Boolean/NULL (CG02013).
+
+Scalar projections over entity groups/path lists, such as `[r IN rs | r.w]`, cross Execute.
+Entity-valued results retain the existing static gate until #1662. Scalar lists require the
+existing protocol 2.1 graph.composite-values negotiation. Each visited element/copy consumes
+statement work (CG05004); every materialized list and nested result shares the memory grant
+(CG05020). Constructed-value bounds retain CG02013, and failure rolls back writes.
+
+Pattern comprehensions collect correlated matches as described below; map comprehensions and
+allReduce remain outside this plan. See [reference semantics and shape propagation](DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
+
+## Reduce and list predicates
+
+The Cypher binding forms `reduce(acc = init, x IN list | expression)` and
+`all|any|none|single(x IN list WHERE predicate)` execute in any value position, including
+WHERE, RETURN, aggregate operands, comprehensions, scalar property values and MERGE actions.
+WHERE is required for each list predicate. ALL as a projection/aggregate set quantifier
+remains separate from `all(...)`. At a set-quantifier position, a top-level WHERE identifies
+the list predicate; `RETURN ALL (1+2)` and `count(ALL (x IN [1]))` keep their previous meaning.
+
+The source evaluates once in the enclosing scope. Reduce evaluates its seed once after a
+non-NULL source, then visits elements in order, assigning each body result to the accumulator.
+A NULL source returns NULL without evaluating the seed or body. An empty list returns the
+seed. The accumulator may change type, including to a list/map or NULL. The iterator and
+accumulator shadow outer names only inside the body; they have distinct, case-sensitive names.
+Nested binding forms restore the enclosing values. All names and parameters validate during
+planning even when no body will execute. Aggregates may supply a source or seed; body aggregates
+are CG05025. Missing/empty declarations or identical reduce names are CG01018.
+
+| Predicate | Empty list | Decisive result | Otherwise |
+| --- | --- | --- | --- |
+| all | TRUE | First FALSE returns FALSE | NULL if any test is NULL, else TRUE |
+| any | FALSE | First TRUE returns TRUE | NULL if any test is NULL, else FALSE |
+| none | TRUE | First TRUE returns FALSE | NULL if any test is NULL, else TRUE |
+| single | FALSE | Second TRUE returns FALSE, including after NULL | NULL if any test is NULL, else exactly one TRUE |
+
+Every predicate returns NULL for a NULL list. A NULL element is passed to the predicate;
+`x IS NULL` can therefore return TRUE. Tests must produce Boolean or NULL. Known non-Boolean
+tests fail planning with CG02013, including empty/NULL inputs and EXPLAIN; unknown types are
+checked only for visited elements. Non-list sources use CG02015, during planning when known
+and otherwise at evaluation. Malformed binding bodies/quantifier ASTs use CG05025.
+
+Each visited element consumes statement work (CG05004). Sources and the current accumulator
+remain charged while nested expressions run; replacement releases the previous accumulator.
+Nested expressions share the memory grant (CG05020), and failures release ownership and roll
+back writes. EXPLAIN validates and describes the forms without invoking expressions.
+
+Scalar reductions over entity groups, such as `reduce(s=0,r IN rs | s+r.w)`, cross Execute.
+Shape analysis includes both the seed and possible repeated body results, so an empty source
+cannot bypass entity-result admission. Entity-valued wire results retain the existing gate
+until #1662. Scalar lists/maps use the existing protocol 2.1 capability; no wire or disk change
+is introduced. See [design and local reference evidence](DESIGN.md#reduce-and-list-predicates-1736-gq-c2).
 
 ## Named scalar parameters
 
@@ -455,7 +784,8 @@ NULL/TRUE/FALSE/UNKNOWN, numeric + - * /, % (Cypher MOD spelling), `||`, string 
 labeled predicates and parentheses. IN [items], STARTS WITH, ENDS WITH and CONTAINS
 are Cohesion extensions. String predicates are ordinal, case-sensitive and UNKNOWN unless
 both operands are strings. IN accepts a list-valued expression, including parameters. LIKE, BETWEEN, =~,
-EXISTS, quantified predicates and nested property access remain CK00001; IN (1, 2)
+parenthesized EXISTS, quantified predicates and nested property access remain CK00001;
+the [braced EXISTS and NOT EXISTS forms](#exists-and-not-exists) are supported. IN (1, 2)
 is CG00002 naming a list value.
 
 WHERE keeps TRUE only. Logical operators use three-valued logic. Incomparable non-null values
@@ -565,9 +895,9 @@ the copy before decoding; this adds no syntax, SQLSTATE or format version. Valid
 `START TRANSACTION`, `COMMIT` and `ROLLBACK` are standalone ISO statements, including over Execute.
 `BEGIN [TRANSACTION]` is a standalone alias of START TRANSACTION (#1725, owner decision 2026-10-25).
 Both use Snapshot; embedded callers retain typed Snapshot/ReadCommitted transaction APIs.
-A failed explicit transaction refuses work until rollback. Savepoints, transaction options,
+A failed explicit transaction refuses work until rollback. Named savepoints follow the contract above; transaction options,
 EXPLAIN controls and multi-statement text are unsupported. ExecutePaths cannot control transactions.
-WORK, TRAN, READ ONLY/READ WRITE, isolation levels and deferrability retain CG00002;
+WORK outside ROLLBACK TO, TRAN, READ ONLY/READ WRITE, isolation levels and deferrability retain CG00002;
 the optional TRANSACTION word adds no transaction options. Keywords are case-insensitive,
 comments may separate words, and one terminal semicolon is optional.
 
@@ -616,3 +946,13 @@ Engine requests admit named calls and resolve them against the executing catalog
 name retains CG00010 but now fails during binding/execution: the wire category is ExecutionFailure,
 and no StatementParseFailed event is raised. Standalone parsers retain unknown-name parse
 diagnostics. This changes error categorization, with no frame-layout or protocol-version change.
+
+ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
+including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).
+
+Reduce propagates a conservative union of seed and body result kinds through accumulator
+feedback. A union containing no Boolean is CG02013 in a predicate, and one containing no list
+is CG02015 as a source, including empty inputs and EXPLAIN. Unknown kinds retain runtime
+validation. Reduce shape/type planning observes cancellation and a fixed statement cap of
+65,536 visited nodes or closure steps, with structured CG05026 on exhaustion. This planning
+cap is independent of the execution memory/work limits.

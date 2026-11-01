@@ -9,7 +9,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 internal abstract record SqlPlan
 {
-    // Set once before publication, including cached view bodies. Child plans inherit the
-    // executing statement's token; no token is retained in a cached plan.
+    // Set once before publication, including cached view bodies.
     internal bool ContainsLike { get; set; }
+    internal bool ContainsRecursion { get; set; }
+    internal bool ContainsSequences => this is SqlSequenceScopePlan;
+    internal SqlSequenceUsage? SequenceUsage => (this as SqlSequenceScopePlan)?.Usage;
 }

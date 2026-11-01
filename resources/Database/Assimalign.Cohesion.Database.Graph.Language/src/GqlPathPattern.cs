@@ -17,7 +17,7 @@ public sealed record GqlPathPattern(IReadOnlyList<GqlNodePattern> Nodes,
     /// </summary>
     public IReadOnlyList<GqlPathElement>? Elements { get; init; }
 
-    /// <summary>Gets the optional variable bound to the complete MATCH path.</summary>
+    /// <summary>Gets the optional variable bound to the complete MATCH path or locally within a pattern comprehension.</summary>
     public string? Variable { get; init; }
 
     /// <summary>Gets the optional outer MATCH selector. Omission preserves exhaustive matching.</summary>

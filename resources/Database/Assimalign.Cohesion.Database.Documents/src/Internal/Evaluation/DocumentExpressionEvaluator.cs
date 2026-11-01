@@ -31,7 +31,7 @@ internal sealed partial class DocumentExpressionEvaluator
     private readonly Dictionary<OqlLikeExpression, int[]> _likePatterns = new();
     private readonly IReadOnlyDictionary<string, object?>? _parameters;
     private readonly Dictionary<string, object?> _normalizedParameters = new(StringComparer.Ordinal);
-    private Dictionary<(OqlExpression, int), (bool Constant, object? Value)>? _constructors;
+    private EvaluationState? _state;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentExpressionEvaluator"/> class.
@@ -43,7 +43,10 @@ internal sealed partial class DocumentExpressionEvaluator
     /// <param name="transactionStart">The UTC instant captured before the executing transaction began.</param>
     /// <param name="starSourceName">The FROM object member name for a synthetic UNNEST star, or null for a stored star.</param>
     /// <param name="resultClause">The result clause named by constructor-depth diagnostics.</param>
-    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default, string resultClause = "SELECT")
+    /// <param name="operation">The executing statement that owns retained-value accounting, or null during planning.</param>
+    /// <param name="nested">The nested statement context, or null on the ordinary evaluator path.</param>
+    /// <param name="sourceName">The local source binding name used when exporting a correlated scope.</param>
+    public DocumentExpressionEvaluator(string? alias, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken = default, string? writeVerb = null, DateTimeOffset? transactionStart = null, string? starSourceName = null, DocumentFunctionCatalog? functions = null, DatabaseName databaseName = default, string resultClause = "SELECT", DocumentOperation? operation = null, DocumentNestedExecutionContext? nested = null, string? sourceName = null)
     {
         _functions = functions ?? DocumentFunctionCatalog.Standard;
         _databaseName = databaseName;
@@ -51,6 +54,8 @@ internal sealed partial class DocumentExpressionEvaluator
         _starSourceName = starSourceName;
         _writeVerb = writeVerb;
         _resultClause = resultClause;
+        _state = nested is not null ? new NestedEvaluationState(operation, nested.Bindings, sourceName ?? alias) :
+            operation is null ? null : new EvaluationState(operation);
         _transactionStart = transactionStart;
         _cancellationToken = cancellationToken;
         _parameters = parameters;
@@ -67,14 +72,14 @@ internal sealed partial class DocumentExpressionEvaluator
                 OqlMissingExpression => DocumentMissing.Instance,
                 OqlParameterExpression parameter => Parameter(parameter.Name),
                 OqlStarExpression => Star(document),
-                OqlMetaExpression meta => meta.Member == "id" ? document.Id : (decimal)document.Version,
+                OqlMetaExpression meta => ReadMetadata(meta, document),
                 OqlArrayExpression or OqlObjectExpression => Construct(expression, document, group),
                 OqlPathExpression path => ReadPath(path, document),
                 OqlUnaryExpression unary => Unary(unary.Operator, Evaluate(unary.Operand, document, group)),
                 OqlBinaryExpression binary => Binary(binary, document, group),
                 OqlInExpression membership => In(membership, document, group),
                 OqlComprehensionExpression comprehension => Comprehend(comprehension, document, group),
-                OqlQuantifiedExpression quantified => Quantify(quantified, document),
+                OqlQuantifiedExpression quantified => Quantify(quantified, document, group),
                 OqlBetweenExpression between => Between(between, document, group),
                 OqlLikeExpression like => Like(like, document, group),
                 OqlCaseExpression conditional => Case(conditional, document, group),
@@ -95,14 +100,26 @@ internal sealed partial class DocumentExpressionEvaluator
     internal object? EvaluateProjection(OqlExpression expression, DocumentEvaluationContext document,
         IReadOnlyList<DocumentEvaluationContext>? group, bool bareValue)
     {
-        // Named projection frames add one object level around the constructed value.
+        // The caller uses the row writer's bare-value rule, including lone stars.
         _constructorMaxDepth = bareValue ? 256 : 255;
-        try { return Evaluate(expression, document, group); }
+        try
+        {
+            var value = Evaluate(expression, document, group);
+            // Functions and paths can supply JSON without a local constructor.
+            // RETURNING counts complete JSON tokens before serialization and owns CD05019.
+            if (_resultClause == "SELECT")
+            { DocumentJsonValue.ValidateDepth(value, _constructorMaxDepth, resultClause: _resultClause, cancellationToken: _cancellationToken); }
+            return value;
+        }
+        catch (DocumentPlanningException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
+        { throw exception.At(expression.Location); }
         finally { _constructorMaxDepth = 256; }
     }
 
     internal bool Matches(OqlExpression? expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group = null)
         => expression is null || Truth(Evaluate(expression, document, group)) is true;
+
+    internal DocumentAggregateMemory Memory => (_state ??= new EvaluationState(null)).GetMemory(_cancellationToken);
 
     // Check every reference and original JSON number before planning, including skipped
     // Boolean branches and expressions over empty inputs.
@@ -112,6 +129,9 @@ internal sealed partial class DocumentExpressionEvaluator
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (expression)
         {
+            case OqlSubqueryExpression subquery:
+                ValidateInputs(subquery.Query);
+                break;
             case OqlComprehensionExpression or OqlQuantifiedExpression or OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in DocumentPlanner.PredicateChildren(expression)) { ValidateInputs(child); }
                 break;
@@ -157,9 +177,10 @@ internal sealed partial class DocumentExpressionEvaluator
                 foreach (var member in obj.Members) { ValidateInputs(member.Value); }
                 break;
             case OqlSelectExpression select:
+                ValidateInputs(select.Source);
                 _ = PagingCount(select.Limit, "LIMIT");
                 _ = PagingCount(select.Offset, "OFFSET");
-                foreach (var binding in select.Unnest) { ValidateInputs(binding.Collection); }
+                foreach (var binding in select.Bindings) { ValidateInputs(binding.Expression); }
                 foreach (var projection in select.Projections) { ValidateInputs(projection.Expression); }
                 ValidateInputs(select.Predicate);
                 foreach (var key in select.GroupBy) { ValidateInputs(key); }
@@ -190,16 +211,16 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private object Construct(OqlExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
-        _constructors ??= new();
+        var constructors = (_state ??= new EvaluationState(null)).Constructors ??= new();
         var key = (expression, _constructorMaxDepth);
-        bool known = _constructors.TryGetValue(key, out var cached);
+        bool known = constructors.TryGetValue(key, out var cached);
         if (known && cached.Constant) { return cached.Value!; }
         bool constant = known ? cached.Constant : DocumentPlanner.IsConstant(expression);
         object value = expression is OqlArrayExpression array
             ? DocumentJsonValue.Array(array.Elements.Select(element => Evaluate(element, document, group)), _writeVerb, _constructorMaxDepth, _resultClause)
             : DocumentJsonValue.Object(((OqlObjectExpression)expression).Members.Select(member =>
                 new KeyValuePair<string, object?>(member.Key, Evaluate(member.Value, document, group))), _writeVerb, _constructorMaxDepth, _resultClause);
-        if (!known) { _constructors.Add(key, (constant, constant ? value : null)); }
+        if (!known) { constructors.Add(key, (constant, constant ? value : null)); }
         return value;
     }
 
@@ -223,7 +244,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             frames.Push(frame);
         }
-        foreach (var frame in frames) { members.Add(new(frame.Name, frame.Value)); }
+        foreach (var frame in frames) { members.Add(new(frame.Name, frame.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : frame.Value)); }
         return DocumentJsonValue.Object(members, _writeVerb, _constructorMaxDepth);
     }
 
@@ -231,8 +252,7 @@ internal sealed partial class DocumentExpressionEvaluator
         IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var value = Evaluate(expression.Collection, document, group);
-        if (value is DocumentMissing) { return value; }
-        if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
+        if (!TryCollection(value, out var array, out var unknown)) { return unknown; }
         if (expression.IsFirst)
         {
             foreach (var item in array.EnumerateArray())
@@ -253,43 +273,63 @@ internal sealed partial class DocumentExpressionEvaluator
                 var inner = document.Bind(expression.Variable, ReadJson(item));
                 if (!Matches(expression.Predicate, inner, group)) { continue; }
                 var mapped = Evaluate(expression.Projection, inner, group);
-                if (mapped is not DocumentMissing) { yield return mapped; }
+                if (KeepMapped(expression, mapped)) { yield return mapped; }
             }
         }
     }
 
-    private object? Quantify(OqlQuantifiedExpression expression, DocumentEvaluationContext document)
+    private static bool TryCollection(object? value, out JsonElement array, out object? unknown)
     {
-        var value = Evaluate(expression.Collection, document);
-        if (value is DocumentMissing) { return value; }
-        if (value is not JsonElement { ValueKind: JsonValueKind.Array } array) { return null; }
+        array = value is JsonElement { ValueKind: JsonValueKind.Array } json ? json : default;
+        unknown = value is DocumentMissing ? value : null;
+        return array.ValueKind == JsonValueKind.Array;
+    }
+
+    private static bool? QuantifiedResult(OqlQuantifiedExpression expression, object? value)
+        => (Truth(value) is true) != expression.IsEvery ? !expression.IsEvery : null;
+
+    private static bool KeepMapped(OqlComprehensionExpression expression, object? value)
+        => expression.IsFirst || value is not DocumentMissing;
+
+    private object? Quantify(OqlQuantifiedExpression expression, DocumentEvaluationContext document,
+        IReadOnlyList<DocumentEvaluationContext>? group)
+    {
+        var value = Evaluate(expression.Collection, document, group);
+        if (!TryCollection(value, out var array, out var unknown)) { return unknown; }
         // Couchbase expression/coll_any.go and coll_every.go test sv.Truth(), so
         // NULL/MISSING element results are not true; only the collection propagates them.
         foreach (var item in array.EnumerateArray())
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            bool truth = Truth(Evaluate(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)))) is true;
-            if (truth != expression.IsEvery) { return !expression.IsEvery; }
+            if (QuantifiedResult(expression, Evaluate(expression.Predicate, document.Bind(expression.Variable, ReadJson(item)), group)) is bool result) { return result; }
         }
         return expression.IsEvery;
     }
 
     private object? ReadPath(OqlPathExpression path, DocumentEvaluationContext document)
     {
-        int start = path.Segments.Count > 0 && _alias is not null &&
-            string.Equals(path.Segments[0].Name, _alias, StringComparison.Ordinal) ? 1 : 0;
+        int start = path.Segments.Count > 0 && (_alias ?? (_state as NestedEvaluationState)?.SourceName) is string alias &&
+            string.Equals(path.Segments[0].Name, alias, StringComparison.Ordinal) ? 1 : 0;
         var current = document.Content;
-        if (document.Bindings is not null && path.Segments.Count > 0)
+        DocumentVariableBinding? found = null;
+        if (path.Segments.Count > 0)
         {
             for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
+            { if (frame.Name == path.Segments[0].Name) { found = frame; break; } }
+            if (found is null && start == 0)
             {
-                if (frame.Name != path.Segments[0].Name) { continue; }
-                start = 1;
-                if (frame.Value is not JsonElement json)
-                { return start == path.Segments.Count ? frame.Value : DocumentMissing.Instance; }
-                current = json;
-                break;
+                for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
+                { if (frame.Name == path.Segments[0].Name) { found = frame; break; } }
             }
+        }
+        if (found is not null)
+        {
+            start = 1;
+            object? value = found.Value is DocumentEvaluationContext source ? ReadJson(source.Content) : found.Value;
+            if (value is DocumentMissing) { return DocumentMissing.Instance; }
+            if (value is not JsonElement json)
+            { return start == path.Segments.Count ? value : DocumentMissing.Instance; }
+            current = json;
         }
         for (int i = start; i < path.Segments.Count; i++)
         {
@@ -305,6 +345,30 @@ internal sealed partial class DocumentExpressionEvaluator
             }
         }
         return ReadJson(current);
+    }
+
+    private object? ReadMetadata(OqlMetaExpression expression, DocumentEvaluationContext document)
+    {
+        var source = document;
+        // With no nested scope or alias, planning has already checked the implicit
+        // collection receiver. There is no outer binding to resolve on this path.
+        if (expression.Arguments.Count == 1 && expression.Arguments[0] is OqlPathExpression { Segments.Count: 1 } path &&
+            path.Segments[0].Name is string name && name != (_alias ?? (_state as NestedEvaluationState)?.SourceName) &&
+            (_alias is not null || _state is NestedEvaluationState))
+        {
+            DocumentVariableBinding? found = null;
+            for (var frame = document.Bindings; frame is not null; frame = frame.Parent)
+            { if (frame.Name == name) { found = frame; break; } }
+            if (found is null)
+            {
+                for (var frame = (_state as NestedEvaluationState)?.Outer; frame is not null; frame = frame.Parent)
+                { if (frame.Name == name) { found = frame; break; } }
+            }
+            if (found?.Value is DocumentMissing missing && !ReferenceEquals(missing, DocumentMissing.Instance))
+            { return DocumentMissing.Instance; }
+            source = found?.Value is DocumentEvaluationContext captured ? captured : default;
+        }
+        return source.Id is null ? null : expression.Member == "id" ? source.Id : (decimal)source.Version;
     }
 
     internal static object? Normalize(object? value)
@@ -381,27 +445,43 @@ internal sealed partial class DocumentExpressionEvaluator
     private object? Binary(OqlBinaryExpression expression, DocumentEvaluationContext document, IReadOnlyList<DocumentEvaluationContext>? group)
     {
         var left = Evaluate(expression.Left, document, group);
-        if (expression.Operator is "AND" or "OR") { left = Truth(left); }
-        if (expression.Operator == "AND" && left is false) { return false; }
-        if (expression.Operator == "OR" && left is true) { return true; }
-        var right = Evaluate(expression.Right, document, group);
-        if (expression.Operator is "AND" or "OR") { right = Truth(right); }
-        if (expression.Operator == "AND")
+        if (ShortCircuitBinary(expression.Operator, ref left)) { return left is true; }
+        return ApplyBinary(expression.Operator, left, Evaluate(expression.Right, document, group));
+    }
+
+    private static bool ShortCircuitBinary(string operation, ref object? left)
+    {
+        if (operation is "AND" or "OR") { left = Truth(left); }
+        return operation == "AND" && left is false || operation == "OR" && left is true;
+    }
+
+    private object? ApplyBinary(string operation, object? left, object? right)
+    {
+        if (operation is "AND" or "OR") { right = Truth(right); }
+        if (operation == "AND")
         {
             if (right is false) { return false; }
             if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
             return left is true && right is true ? true : null;
         }
-        if (expression.Operator == "OR")
+        if (operation == "OR")
         {
             if (right is true) { return true; }
             if (left is null || right is null) { return null; }
             if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
             return left is false && right is false ? false : null;
         }
+        if (operation is "IS DISTINCT FROM" or "IS NOT DISTINCT FROM")
+        {
+            // Couchbase expression/func_distinct.go:51-73,134-156: the top-level
+            // unknown cases are definite; otherwise consume SQL++ value equality.
+            object? equal = left is DocumentMissing || right is DocumentMissing ? left is DocumentMissing && right is DocumentMissing :
+                left is null || right is null ? left is null && right is null : Equal(left, right);
+            return operation == "IS NOT DISTINCT FROM" ? equal : equal is not true;
+        }
         if (left is DocumentMissing || right is DocumentMissing) { return DocumentMissing.Instance; }
         if (left is null || right is null) { return null; }
-        return expression.Operator switch
+        return operation switch
         {
             "=" => Equal(left, right),
             "!=" or "<>" => Unary("NOT", Equal(left, right)),
@@ -414,12 +494,14 @@ internal sealed partial class DocumentExpressionEvaluator
             "*" => Number(left) * Number(right),
             "/" => Number(right) == 0 ? throw new DocumentPlanningException("CD02006", ErrorMessages.ExpressionEvaluatorBinaryFailure) : Number(left) / Number(right),
             "%" => Number(right) == 0 ? throw new DocumentPlanningException("CD02006", ErrorMessages.ExpressionEvaluatorBinaryFailure2) : Number(left) % Number(right),
-            _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorBinaryFailure3, expression.Operator)),
+            _ => throw new DocumentPlanningException("CD05001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExpressionEvaluatorBinaryFailure3, operation)),
         };
     }
 
     private static object? Unary(string operation, object? value) => operation switch
     {
+        ".*" => value,
+        "EXISTS" => value is DocumentMissing ? value : value is JsonElement { ValueKind: JsonValueKind.Array } array ? array.GetArrayLength() > 0 : null,
         "IS MISSING" => value is DocumentMissing,
         "IS NOT MISSING" => value is not DocumentMissing,
         "IS VALUED" => value is not null and not DocumentMissing,
@@ -435,17 +517,73 @@ internal sealed partial class DocumentExpressionEvaluator
 
     private object? Aggregate(OqlCallExpression call, DocumentAggregateFunction function, IReadOnlyList<DocumentEvaluationContext> group)
     {
-        var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
-        var accumulator = function.CreateAccumulator(in context);
+        string name = function.Name.ToString().ToUpperInvariant();
+        var memory = Memory;
         bool star = call.Arguments.Count == 1 && call.Arguments[0] is OqlStarExpression;
-        foreach (var document in group)
+        var seen = DistinctValues(call);
+        long before = memory.Bytes;
+        object? result;
+        try
         {
-            _cancellationToken.ThrowIfCancellationRequested();
-            var values = star ? Array.Empty<object?>() : call.Arguments.Select(argument => Evaluate(argument, document)).ToArray();
-            var arguments = new DocumentArguments(values, in context);
-            accumulator.Add(in arguments);
+            var accumulator = CreateAggregate(function, name, memory, seen is not null);
+            foreach (var document in group)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                var values = star ? Array.Empty<object?>() : call.Arguments.Select(argument => Evaluate(argument, document)).ToArray();
+                AddAggregate(function, name, accumulator, seen, values, memory);
+            }
+            result = RetainAggregateResult(name, accumulator.Finish().Value, memory);
         }
-        return accumulator.Finish().Value;
+        finally { memory.Release(memory.Bytes - before); }
+        // The independent JSON result outlives the input list, until the enclosing
+        // expression transfers its output or discards its scratch values.
+        return RetainAggregateResult(name, result, memory);
+    }
+
+    private void AddAggregate(DocumentAggregateFunction function, string name, DocumentAggregateAccumulator accumulator,
+        SortedSet<object?>? seen, object?[] values, DocumentAggregateMemory memory)
+    {
+        if (seen is not null)
+        {
+            object? value = values[0];
+            // ARRAY_AGG admits NULL. All other native aggregates ignore both
+            // unknowns; custom aggregates retain their declared unknown policy.
+            if (function.NullBehavior == DocumentNullBehavior.PropagateMissingOrNull && value is null or DocumentMissing ||
+                function is DocumentBuiltinAggregateFunction && (name == "ARRAY_AGG" && value is DocumentMissing ||
+                name is "STDDEV" or "VARIANCE" && value is not (decimal or long) ||
+                name is "BOOL_AND" or "BOOL_OR" or "EVERY" && value is not bool))
+            { return; }
+            if (value is not (null or DocumentMissing) && !function.AcceptsArgument(0, FunctionKind(value))) { return; }
+            if (seen.Contains(value)) { return; }
+            memory!.Retain(value);
+            seen.Add(value);
+        }
+        var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
+        var arguments = new DocumentArguments(values, in context);
+        accumulator.Add(in arguments);
+    }
+
+    private SortedSet<object?>? DistinctValues(OqlCallExpression call)
+        => call.Quantifier == OqlAggregateQuantifier.Distinct
+            ? new(Comparer<object?>.Create((left, right) => Compare(left, right, _cancellationToken))) : null;
+
+    private DocumentAggregateAccumulator CreateAggregate(DocumentAggregateFunction function, string name,
+        DocumentAggregateMemory memory, bool distinct)
+    {
+        // Native transition state is bounded independently of the input count.
+        memory.Charge(name is "STDDEV" or "VARIANCE" ? 768 : 256);
+        var context = new DocumentFunctionContext(_databaseName, _cancellationToken, _transactionStart);
+        var accumulator = function is DocumentBuiltinAggregateFunction native
+            ? native.CreateAccumulator(in context, memory, _writeVerb, _constructorMaxDepth, _resultClause)
+            : function.CreateAccumulator(in context);
+        if (distinct) { memory.Charge(128); }
+        return accumulator;
+    }
+
+    private static object? RetainAggregateResult(string name, object? result, DocumentAggregateMemory memory)
+    {
+        if (name == "ARRAY_AGG" && result is not null) { memory.Retain(result); }
+        return result;
     }
 
     internal static decimal Number(object value) => value switch { decimal number => number, long number => number,
@@ -454,8 +592,9 @@ internal sealed partial class DocumentExpressionEvaluator
 
     // Total order for grouping and sorting. Predicates only compare ranges within
     // a scalar kind; ordering can still deterministically place mixed shapes.
-    internal static int Compare(object? left, object? right)
+    internal static int Compare(object? left, object? right, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         left = left is JsonElement leftJson ? ReadJson(leftJson) : Normalize(left);
         right = right is JsonElement rightJson ? ReadJson(rightJson) : Normalize(right);
         int kindOrder = Kind(left).CompareTo(Kind(right));
@@ -466,9 +605,25 @@ internal sealed partial class DocumentExpressionEvaluator
             (bool a, bool b) => a.CompareTo(b),
             (decimal a, decimal b) => a.CompareTo(b),
             (string a, string b) => StringComparer.Ordinal.Compare(a, b),
-            (JsonElement a, JsonElement b) => CompareComposite(a, b),
+            (JsonElement a, JsonElement b) => CompareComposite(a, b, cancellationToken),
             _ => 0,
         };
+    }
+
+    // FIRST/LAST moves the nullish block. Direction still reverses MISSING vs NULL,
+    // matching Couchbase orderby.adoc:85-99 and the owner's 2026-10-25 decision.
+    internal static int CompareOrdered(object? left, object? right, OqlOrdering order)
+    {
+        if (order.NullPlacement != OqlNullPlacement.Default)
+        {
+            static bool Nullish(object? value) => value is null or DocumentMissing or
+                JsonElement { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined };
+            bool leftNullish = Nullish(left), rightNullish = Nullish(right);
+            if (leftNullish != rightNullish)
+            { return leftNullish == (order.NullPlacement == OqlNullPlacement.First) ? -1 : 1; }
+        }
+        int comparison = Compare(left, right);
+        return order.Descending ? -comparison : comparison;
     }
 
     private static int Kind(object? value) => value switch
@@ -483,7 +638,7 @@ internal sealed partial class DocumentExpressionEvaluator
         _ => throw new DocumentPlanningException("CD02008", ErrorMessages.ExpressionEvaluatorKindFailure),
     };
 
-    private static int CompareComposite(JsonElement left, JsonElement right)
+    private static int CompareComposite(JsonElement left, JsonElement right, CancellationToken cancellationToken)
     {
         if (left.ValueKind == JsonValueKind.Array)
         {
@@ -491,7 +646,7 @@ internal sealed partial class DocumentExpressionEvaluator
             foreach (var item in left.EnumerateArray())
             {
                 if (!rightItems.MoveNext()) { return 1; }
-                int comparison = Compare(item, rightItems.Current);
+                int comparison = Compare(item, rightItems.Current, cancellationToken);
                 if (comparison != 0) { return comparison; }
             }
             return left.GetArrayLength().CompareTo(right.GetArrayLength());
@@ -502,7 +657,7 @@ internal sealed partial class DocumentExpressionEvaluator
         {
             int nameComparison = StringComparer.Ordinal.Compare(leftProperties[i].Name, rightProperties[i].Name);
             if (nameComparison != 0) { return nameComparison; }
-            int valueComparison = Compare(leftProperties[i].Value, rightProperties[i].Value);
+            int valueComparison = Compare(leftProperties[i].Value, rightProperties[i].Value, cancellationToken);
             if (valueComparison != 0) { return valueComparison; }
         }
         return leftProperties.Length.CompareTo(rightProperties.Length);

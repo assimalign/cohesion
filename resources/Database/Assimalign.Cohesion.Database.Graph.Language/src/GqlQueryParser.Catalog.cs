@@ -13,6 +13,7 @@ public sealed partial class GqlQueryParser
         else if (Take("RELATIONSHIP")) { Expect("TYPES"); surface = GqlCatalogSurface.RelationshipTypes; }
         else if (Take("PROPERTY")) { Expect("KEYS"); surface = GqlCatalogSurface.PropertyKeys; }
         else if (Take("INDEXES")) { surface = GqlCatalogSurface.Indexes; }
+        else if (Take("CONSTRAINTS")) { surface = GqlCatalogSurface.Constraints; }
         else if (Take("OBJECT")) { Expect("OWNERSHIP"); surface = GqlCatalogSurface.ObjectOwnership; }
         else { Unsupported("SHOW " + Current.Text, Current); }
         return new GqlQueryExpression([], null, [], [], false, [], Span(start, Previous)) { CatalogSurface = surface };

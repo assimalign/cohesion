@@ -22,6 +22,8 @@ public sealed partial class OqlQueryParser : QueryParser
     private bool[] _comprehensionTails = [];
     private int _position;
     private int _depth;
+    private bool _hasKeyJoin;
+    private int _unaliasedSource;
 
     /// <summary>Initializes an OQL parser.</summary>
     /// <param name="options">Optional shared analyzer configuration.</param>
@@ -56,6 +58,8 @@ public sealed partial class OqlQueryParser : QueryParser
         _parameterFormPositions.Clear();
         _position = 0;
         _depth = 0;
+        _hasKeyJoin = false;
+        _unaliasedSource = -1;
         int line = 1;
         int scanned = 0;
         while (lexer.MoveNext())
@@ -138,7 +142,7 @@ public sealed partial class OqlQueryParser : QueryParser
                 expression = EmptyExpression();
             }
         }
-        else if (Is("BEGIN") || Is("START") || Is("COMMIT") || Is("ROLLBACK"))
+        else if (Is("BEGIN") || Is("START") || Is("COMMIT") || Is("ROLLBACK") || Is("SAVEPOINT") || Is("RELEASE"))
         {
             expression = ParseTransaction();
         }
@@ -204,6 +208,16 @@ public sealed partial class OqlQueryParser : QueryParser
             }
         }
 
+        if (!Failed && _hasKeyJoin && _unaliasedSource >= 0)
+        {
+            foreach (var token in _tokens)
+            {
+                if (token.Start != _unaliasedSource) { continue; }
+                Error("CD00016", ErrorMessages.JoinAliasesRequired, token);
+                break;
+            }
+        }
+
         // '?' still binds nothing. Only an operand receives the parameter-form message;
         // names, paths and trailing positions keep lexical strictness's generic message.
         foreach (var token in _tokens)
@@ -243,19 +257,18 @@ public sealed partial class OqlQueryParser : QueryParser
     {
         List<(string, Lexeme)> result = [];
         int statementStart = IsWord(_tokens[0], "EXPLAIN") ? 1 : 0;
-        bool statementWithoutQuery = statementStart < _tokens.Count &&
-            (IsWord(_tokens[statementStart], "DELETE") || IsWord(_tokens[statementStart], "UPDATE") || IsWord(_tokens[statementStart], "CREATE") ||
-                IsWord(_tokens[statementStart], "DROP"));
         var (updateHeaderEnd, updateClause) = FindUpdateClause(statementStart);
-        bool selected = false;
-        bool returningList = false;
+        bool hasGroupBy = false;
         int parentheses = 0;
         bool inSelectList = false;
         int selectHead = -2;
+        Stack<(int Depth, bool InSelectList, int SelectHead, bool HasGroupBy)>? selectScopes = null;
+        int callQuantifier = -2;
         int fetchHead = -2;
         int pagingHead = -2;
         int openQuantifiers = 0;
         var expressionScopes = new Stack<bool>();
+        HashSet<int>? existsBindings = null;
         var (indexKeyStart, indexKeyEnd) = FindIndexKeyRange();
         for (int index = 0; index < _tokens.Count; index++)
         {
@@ -266,7 +279,17 @@ public sealed partial class OqlQueryParser : QueryParser
             }
 
             if (token.Type == TokenType.LeftParen) { parentheses++; }
-            else if (token.Type == TokenType.RightParen) { parentheses--; }
+            else if (token.Type == TokenType.RightParen)
+            {
+                parentheses--;
+                if (selectScopes is { Count: > 0 } && selectScopes.Peek().Depth > parentheses)
+                {
+                    var enclosing = selectScopes.Pop();
+                    inSelectList = enclosing.InSelectList;
+                    selectHead = enclosing.SelectHead;
+                    hasGroupBy = enclosing.HasGroupBy;
+                }
+            }
 
             if (token.Type is not (TokenType.Keyword or TokenType.Function or TokenType.Identifier))
             {
@@ -289,7 +312,10 @@ public sealed partial class OqlQueryParser : QueryParser
             if (index > statementStart && (index < updateHeaderEnd || index == updateClause)) { continue; }
             // An unsupported source expansion owns the remainder of UPDATE. Syntax parsing
             // locates it after the destination, rather than guessing from expression names.
-            if (index == updateHeaderEnd && updateClause < 0 && IsUnnestClause(index)) { break; }
+            if (index == updateHeaderEnd && updateClause < 0 && (IsUnnestClause(index) || IsJoinClause(index))) { break; }
+
+            // The ORDER BY parser owns NULLS options, including malformed quantifiers.
+            if (value is "FIRST" or "LAST" or "ALL" or "DISTINCT" && index > 0 && IsWord(_tokens[index - 1], "NULLS")) { continue; }
 
             // FETCH FIRST is one unsupported spelling. LIMIT ALL is an invalid count.
             // Only a recognized clause head owns the next word; a path or alias does not.
@@ -299,10 +325,20 @@ public sealed partial class OqlQueryParser : QueryParser
             if (value is ("ALL" or "DISTINCT" or "ARRAY" or "FOR" or "IN" or "END") && indexKeyStart >= 0 && index > indexKeyStart && index < indexKeyEnd) { continue; }
             if (value == "UNIQUE" && index == 1 && IsIndexStatement("CREATE")) { continue; }
 
-            // DISTINCT/ALL are legal only directly after SELECT, including INSERT/UPSERT SELECT.
+            // DISTINCT in an IS [NOT] DISTINCT FROM predicate is an operator suffix.
+            if (value == "DISTINCT" && index > 0 && (IsWord(_tokens[index - 1], "IS") ||
+                index > 1 && IsWord(_tokens[index - 1], "NOT") && IsWord(_tokens[index - 2], "IS"))) { continue; }
+            if (IsDistinctFromToken(index)) { continue; }
+
+            // SELECT and call-head quantifiers are parsed by their respective grammar rules.
             if (openQuantifiers == 0 && value is "DISTINCT" or "ALL")
             {
                 if (index == selectHead + 1) { continue; }
+                if (index == callQuantifier + 1 || index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
+                    _tokens[index - 2].Type is TokenType.Function or TokenType.Identifier or TokenType.QuotedIdentifier &&
+                    (!OqlUnsupportedVocabulary.TryFind(_tokens[index - 2].Text.ToUpperInvariant(), out var deferred) ||
+                        deferred.Position != OqlWordPosition.Function))
+                { callQuantifier = index; continue; }
                 bool function = index > 1 && _tokens[index - 1].Type == TokenType.LeftParen &&
                     (_tokens[index - 2].Type == TokenType.Function ||
                         OqlUnsupportedVocabulary.TryFind(_tokens[index - 2].Text.ToUpperInvariant(), out var unsupportedFunction) &&
@@ -322,7 +358,6 @@ public sealed partial class OqlQueryParser : QueryParser
             if (value == "RETURNING" && index > statementStart && parentheses == 0 && EndsOperand(index - 1) &&
                 !IsWord(_tokens[index - 1], "INTO") && !IsWord(_tokens[index - 1], "FROM") && !IsWord(_tokens[index - 1], "AS"))
             {
-                returningList = true;
                 inSelectList = true;
             }
 
@@ -392,9 +427,11 @@ public sealed partial class OqlQueryParser : QueryParser
                 break;
             }
 
-            // EXISTS is supported only in the positional DDL modifier. Keep malformed
+            // EXISTS is an expression operator and a positional DDL modifier. Keep malformed
             // modifiers on the syntax path too (CREATE COLLECTION IF EXISTS reports NOT).
-            if (value == "EXISTS" && IsDdlExistenceToken(index))
+            if (value == "EXISTS" && (IsDdlExistenceToken(index) ||
+                !IsWord(_tokens[statementStart], "CREATE") && !IsWord(_tokens[statementStart], "DROP") &&
+                index > statementStart && !IsExistsBindingQuantifier(index, ref existsBindings)))
             {
                 continue;
             }
@@ -421,16 +458,11 @@ public sealed partial class OqlQueryParser : QueryParser
             }
             if (value == "SELECT")
             {
-                // Only SELECT statements and INSERT/UPSERT SELECT have a query of their own.
-                // A SELECT inside an expression is nested even when it is the first one.
-                if (statementWithoutQuery || selected || parentheses > 0 || returningList)
-                {
-                    result.Add((OqlClauses.Subquery, token));
-                }
-
-                selected = true;
+                if (parentheses > 0)
+                { (selectScopes ??= new()).Push((parentheses, inSelectList, selectHead, hasGroupBy)); }
                 selectHead = index;
                 inSelectList = true;
+                hasGroupBy = false;
                 continue;
             }
 
@@ -440,6 +472,16 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
+            if (value == "GROUP" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "AS"))
+            {
+                AddUnsupported(result, OqlClauses.GroupAs, token);
+                continue;
+            }
+            if (value == "GROUP" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "BY")) { hasGroupBy = true; }
+            // LETTING is a deferred grouping clause, but remains an ordinary field or
+            // FROM/UNNEST binding name before that clause, including implicit aliases.
+            if (value == "LETTING" && index > statementStart && !hasGroupBy) { continue; }
+
             // ODMG's quantifiers, FOR ALL x IN e: p and EXISTS x IN e: p, bind with IN too.
             if (value == "FOR" && index + 1 < _tokens.Count && IsWord(_tokens[index + 1], "ALL") &&
                 IsQuantifierBinding(index + 2))
@@ -448,9 +490,9 @@ public sealed partial class OqlQueryParser : QueryParser
                 index += 3;
                 continue;
             }
-            if (value == "EXISTS" && IsQuantifierBinding(index + 1))
+            if (value == "EXISTS" && IsExistsBindingQuantifier(index, ref existsBindings))
             {
-                AddUnsupported(result, "EXISTS", token);
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("EXISTS binding quantifier", Profile.Language, Span(token, token)));
                 index += 2;
                 continue;
             }
@@ -471,7 +513,13 @@ public sealed partial class OqlQueryParser : QueryParser
                 if (value == "LIMIT") { continue; }
             }
 
-            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value != "RETURNING")
+            if (value == "EXISTS")
+            {
+                _diagnostics.Add(QueryDiagnostics.UnsupportedClause("EXISTS", Profile.Language, Span(token, token)));
+                break;
+            }
+            if (value is "JOIN" or "NEST" && selectHead >= statementStart) { continue; }
+            if (!OqlUnsupportedVocabulary.TryFind(value, out var word) || Supports(word.Construct) && value is not ("RETURNING" or "JOIN" or "NEST"))
             {
                 continue;
             }
@@ -495,6 +543,9 @@ public sealed partial class OqlQueryParser : QueryParser
                 continue;
             }
 
+            if (value is "JOIN" or "NEST")
+            { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(value + " in UPDATE or DELETE", Profile.Language, Span(token, token))); break; }
+
             // UNION ALL and UNION DISTINCT are one set operation, not a set operation plus the
             // ALL or DISTINCT word.
             var reported = token;
@@ -515,11 +566,6 @@ public sealed partial class OqlQueryParser : QueryParser
                 break;
             }
 
-            // Each operand of a set operation starts its own SELECT, which is not a subquery.
-            if (value is "UNION" or "INTERSECT" or "EXCEPT")
-            {
-                selected = false;
-            }
         }
         return result;
     }
@@ -587,10 +633,45 @@ public sealed partial class OqlQueryParser : QueryParser
                 // for this comprehension's binding. The reverse pass already classified it.
                 next = delimiters.TryPeek(out int end) && IsWord(_tokens[end], "END") ? delimiters.Pop() + 1 : _tokens.Count;
             }
+            bool distinctFrom = IsDistinctFromToken(index);
             bool stop = token.Type is TokenType.Comma or TokenType.Semicolon or TokenType.Eof or TokenType.RightParen ||
-                expressionWord && (IsWord(token, "FROM") || IsWord(token, "AS") || IsWord(token, "END"));
+                expressionWord && (IsWord(token, "FROM") && !distinctFrom || IsWord(token, "AS") || IsWord(token, "END"));
             _comprehensionTails[index] = !stop && (IsWord(token, "FOR") || next < _tokens.Count && _comprehensionTails[next]);
         }
+    }
+
+    private bool IsDistinctFromToken(int index) => index > 1 && IsWord(_tokens[index], "FROM") &&
+        IsWord(_tokens[index - 1], "DISTINCT") && (IsWord(_tokens[index - 2], "IS") ||
+        index > 2 && IsWord(_tokens[index - 2], "NOT") && IsWord(_tokens[index - 3], "IS"));
+
+    private bool IsExistsBindingQuantifier(int index, ref HashSet<int>? bindings)
+    {
+        if (!IsQuantifierBinding(index + 1)) { return false; }
+        bindings ??= FindExistsBindingQuantifiers();
+        return bindings.Contains(index);
+    }
+
+    private HashSet<int> FindExistsBindingQuantifiers()
+    {
+        // Classify colon-bearing ODMG bindings once, in linear work, before the
+        // recursive parser applies its depth limit. Object/parameter scopes inside
+        // balanced delimiters do not turn unary EXISTS followed by IN into a binding.
+        var result = new HashSet<int>();
+        var scopes = new Stack<bool>();
+        bool colon = false;
+        for (int index = _tokens.Count - 1; index >= 0; index--)
+        {
+            var token = _tokens[index];
+            if (token.Type is TokenType.RightParen or TokenType.RightBracket or TokenType.RightBrace)
+            { scopes.Push(colon); colon = false; }
+            else if (token.Type is TokenType.LeftParen or TokenType.LeftBracket or TokenType.LeftBrace)
+            { colon = scopes.TryPop(out bool enclosing) && enclosing; }
+            else if (token.Type == TokenType.Colon) { colon = true; }
+            else if (token.Type is TokenType.Comma or TokenType.Semicolon or TokenType.Eof ||
+                IsWord(token, "FROM") && !IsDistinctFromToken(index) || IsWord(token, "AND") || IsWord(token, "OR")) { colon = false; }
+            else if (colon && IsWord(token, "EXISTS") && IsQuantifierBinding(index + 1)) { result.Add(index); }
+        }
+        return result;
     }
 
     /// <summary>

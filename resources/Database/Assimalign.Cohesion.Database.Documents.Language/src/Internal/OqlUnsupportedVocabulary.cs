@@ -21,6 +21,7 @@ internal static class OqlUnsupportedVocabulary
         new("DEFINE", "DEFINE", OqlWordPosition.Statement),
         new("ELEMENT", "ELEMENT", OqlWordPosition.Function),
         new("FLATTEN", "FLATTEN", OqlWordPosition.Function),
+        // Enabled as a collection operator; retained for reserved non-expression positions.
         new("EXISTS", "EXISTS", OqlWordPosition.Anywhere),
         new("FOR", "FOR", OqlWordPosition.Anywhere),
         new("SOME", "SOME", OqlWordPosition.Anywhere),
@@ -41,7 +42,6 @@ internal static class OqlUnsupportedVocabulary
         new("KNOWN", "KNOWN", OqlWordPosition.Anywhere),
         new("UNKNOWN", "UNKNOWN", OqlWordPosition.Anywhere),
         // Deferred SQL++ function families; their names remain usable as fields.
-        new("ARRAY_AGG", "ARRAY_AGG", OqlWordPosition.Function),
         new("REGEXP_LIKE", "REGEXP_LIKE", OqlWordPosition.Function),
         new("REGEXP_REPLACE", "REGEXP_REPLACE", OqlWordPosition.Function),
         new("REGEXP_POSITION", "REGEXP_POSITION", OqlWordPosition.Function),
@@ -63,8 +63,10 @@ internal static class OqlUnsupportedVocabulary
         new("START", OqlClauses.Begin, OqlWordPosition.Statement),
         new("COMMIT", OqlClauses.Commit, OqlWordPosition.Clause),
         new("ROLLBACK", OqlClauses.Rollback, OqlWordPosition.Clause),
-        new("SAVEPOINT", "SAVEPOINT", OqlWordPosition.Statement),
+        new("SAVEPOINT", OqlClauses.Savepoint, OqlWordPosition.Statement),
+        new("RELEASE", OqlClauses.ReleaseSavepoint, OqlWordPosition.Statement),
         new("WITH", "WITH", OqlWordPosition.Clause),
+        new("LETTING", "LETTING", OqlWordPosition.Clause),
         new("JOIN", "JOIN", OqlWordPosition.Clause),
         new("NEST", "NEST", OqlWordPosition.Clause),
         new("UNION", "UNION", OqlWordPosition.Clause),

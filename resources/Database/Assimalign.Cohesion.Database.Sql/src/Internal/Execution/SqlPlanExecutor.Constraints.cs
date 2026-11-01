@@ -22,8 +22,10 @@ internal sealed partial class SqlPlanExecutor
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure3 = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure3;
 
     private static readonly string _errorEnsureSnapshotSeesCascadeRowFailure = ErrorMessages.EnsureSnapshotSeesCascadeRowFailure;
+    private static readonly string _updateActionRowUnavailable = ErrorMessages.UpdateActionRowUnavailable;
+    private static readonly string _updateActionSnapshotConflict = ErrorMessages.UpdateActionSnapshotConflict;
 
-    private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values);
+    private sealed record SqlConstraintDelete(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location, object?[] Values, object?[]? EffectiveValues = null);
     [global::System.Diagnostics.DebuggerDisplay("SqlConstraintUpdate")]
     [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlPlanExecutor.SqlConstraintUpdate.DebugView))]
     private sealed record SqlConstraintUpdate(SqlCatalogTable Table, (PageId PageId, int SlotIndex) Location,
@@ -31,6 +33,7 @@ internal sealed partial class SqlPlanExecutor
     {
         // Referential actions fill this only after every assignment to the final row is known.
         internal byte[] NewVersion { get; set; } = [];
+        internal IReadOnlyDictionary<ulong, long>? SequenceValues { get; set; }
 
         private sealed class DebugView
         {
@@ -463,6 +466,11 @@ internal sealed partial class SqlPlanExecutor
         var bound = _definitions.Get(key.Table);
         foreach (var metadata in preparedIndexes ?? _catalog.GetIndexes(key.Table.ObjectId))
         {
+            if (metadata.Predicate is not null)
+            {
+                var restrictions = key.Ordinals.Select(ordinal => (SqlBoundExpression)new SqlBoundIsNull(new SqlBoundColumn(ordinal), true)).ToArray();
+                if (SqlPredicateImplication.Prove(_definitions.GetIndexPredicate(key.Table, metadata), restrictions) is null) { continue; }
+            }
             int[] ordinals = bound.GetKey(metadata.ColumnNames).Ordinals;
             var mapping = new List<int>();
             foreach (int ordinal in ordinals)
@@ -497,7 +505,7 @@ internal sealed partial class SqlPlanExecutor
         var lookup = ConstraintLookup(key, statement);
         statement.Metrics.AccessPath = lookup.AccessPath;
         IEnumerable<((PageId PageId, int SlotIndex) Location, object?[] Values)> candidates;
-        if (lookup.Metadata is { } metadata)
+        if (lookup.Metadata is { } metadata && (metadata.Predicate is null || !keys.Contains(null)))
         {
             var equalityValues = new object?[lookup.PrefixKeyOrdinals.Length];
             for (int ordinal = 0; ordinal < equalityValues.Length; ordinal++) { equalityValues[ordinal] = keys[lookup.PrefixKeyOrdinals[ordinal]]; }
@@ -527,6 +535,28 @@ internal sealed partial class SqlPlanExecutor
     {
         if (metrics is not null) { metrics.ConstraintKeyComparisons++; }
         return left is null || right is null ? left is null && right is null : SqlExpressionEvaluator.Compare(left, right, collation) == 0;
+    }
+
+    // Action eligibility follows the stored row representation, independently of key
+    // matching (PostgreSQL ri_triggers.c:4237-4250, datum_image_eq). Reuse the row
+    // codec so CHAR padding, temporal offsets and numeric encodings follow storage too.
+    private static bool ReferencedKeyChanged(SqlBoundConstraintKey key, object?[] oldValues, object?[] newValues,
+        SqlStatementMetrics metrics)
+    {
+        foreach (int ordinal in key.Ordinals)
+        {
+            if (oldValues[ordinal] is null) { return false; } // MATCH SIMPLE: no old referenced key
+        }
+        var oldImage = new DatabaseKeyWriter();
+        var newImage = new DatabaseKeyWriter();
+        foreach (int ordinal in key.Ordinals)
+        {
+            metrics.ConstraintKeyComparisons++;
+            var type = key.Table.Columns[ordinal].Type.Type;
+            SqlRowCodec.AppendValue(oldImage, type, oldValues[ordinal]);
+            SqlRowCodec.AppendValue(newImage, type, newValues[ordinal]);
+        }
+        return !oldImage.WrittenSpan.SequenceEqual(newImage.WrittenSpan);
     }
 
     private static object? SafeValue(object?[] values)
@@ -698,6 +728,9 @@ internal sealed partial class SqlPlanExecutor
 
                 foreach (var match in matches)
                 {
+                    // Pending parents are already exclusively owned by this statement.
+                    // Synthetic MERGE insert locations never name a storage row.
+                    if (updates?.ContainsKey((parent.ObjectId, SqlRecordLocation.Pack(match.Location.PageId, match.Location.SlotIndex))) == true) { continue; }
                     if (references is null)
                     {
                         // A visible parent deleted after this snapshot cannot authorize a new child.
@@ -714,22 +747,32 @@ internal sealed partial class SqlPlanExecutor
     private void ValidateParentUpdate(SqlCatalogTable table, object?[] oldValues, object?[] newValues,
         SqlStatementContext statement, CancellationToken cancellationToken,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete>? deletions = null,
-        SqlConstraintUpdates? updates = null)
+        SqlConstraintUpdates? updates = null, bool restrictOnly = false)
     {
         foreach (var reference in IncomingReferences(table, statement, cancellationToken))
         {
             var (child, constraint) = reference;
+            if (restrictOnly && constraint.OnUpdate != SqlCatalogReferentialAction.Restrict) { continue; }
+            // Keep ordinary parent validation's matching-key projection and comparison
+            // policy. Only the stored-image predicate decides whether an action fires.
             var keys = reference.ParentKey.Read(oldValues);
-            if (keys.Any(value => value is null))
-            {
-                continue;
-            }
+            if (keys.Any(value => value is null)) { continue; }
             bool changed = reference.ParentKey.Ordinals.Select((ordinal, i) => !ValuesEqual(newValues[ordinal], keys[i],
                 reference.ParentKey.Collations[i], statement.Metrics)).Any(value => value);
+            if (!ReferencedKeyChanged(reference.ParentKey, oldValues, newValues, statement.Metrics)) { continue; }
+            if (constraint.OnUpdate == SqlCatalogReferentialAction.Restrict)
+            {
+                // Immediate RESTRICT observes existing children and never substitutes
+                // another final parent (ri_triggers.c:897-904,945-955).
+                if (FindConstraintRows(reference.ChildKey, keys, statement,
+                    cancellationToken, ConstraintCurrentSnapshot(statement)).Any())
+                { throw Violation(child, constraint, keys); }
+                continue;
+            }
+            if (restrictOnly || constraint.OnUpdate != SqlCatalogReferentialAction.NoAction) { continue; }
             // A different replacement may retain the old referenced key (a swap). Only
             // removing that key from the final parent state can orphan an incoming child.
-            if (changed && updates?.Find(reference.ParentKey, keys,
-                statement.Metrics, cancellationToken).Any() == true) { continue; }
+            if (changed && updates is not null && HasPendingParent(reference.ParentKey, keys, updates, deletions, statement.Metrics, cancellationToken)) { continue; }
             if (changed && FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
                 deletions, updates, ConstraintCurrentSnapshot(statement)).Any())
             {
@@ -768,10 +811,11 @@ internal sealed partial class SqlPlanExecutor
     /// </remarks>
     private async Task CollectCascadeDeletesAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, object?[] values,
         Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions, HashSet<ulong> scannedTables,
-        List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
+        List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlConstraintUpdates? finalRows = null)
     {
         var root = await EnterCascadeRowAsync(table, location, values, arrivedBy: null, deletions, scannedTables, released,
-            statement, cancellationToken).ConfigureAwait(false);
+            statement, cancellationToken, finalRows).ConfigureAwait(false);
         if (root is null)
         {
             return; // an earlier target's cascade already reached this row
@@ -786,7 +830,7 @@ internal sealed partial class SqlPlanExecutor
             // rows (a wide fan-out into a table with no cascading references does no
             // further lookup). Checking each step makes every step cancellable.
             cancellationToken.ThrowIfCancellationRequested();
-            if (!TryNextCascadeRow(frame, deletions, statement, cancellationToken, out var edge, out var match))
+            if (!TryNextCascadeRow(frame, deletions, statement, cancellationToken, out var edge, out var match, finalRows))
             {
                 path.Pop(); // every row below this one is collected
                 continue;
@@ -798,7 +842,7 @@ internal sealed partial class SqlPlanExecutor
             }
 
             var next = await EnterCascadeRowAsync(edge.Child, match.Location, match.Values, edge.Constraint, deletions, scannedTables,
-                released, statement, cancellationToken).ConfigureAwait(false);
+                released, statement, cancellationToken, finalRows).ConfigureAwait(false);
             if (next is not null)
             {
                 path.Push(next);
@@ -817,9 +861,13 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async ValueTask<SqlCascadeFrame?> EnterCascadeRowAsync(SqlCatalogTable table, (PageId PageId, int SlotIndex) location,
         object?[] values, SqlCatalogConstraint? arrivedBy, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
-        HashSet<ulong> scannedTables, List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken)
+        HashSet<ulong> scannedTables, List<SqlParentReference> released, SqlStatementContext statement, CancellationToken cancellationToken,
+        SqlConstraintUpdates? finalRows = null)
     {
-        if (!deletions.TryAdd((table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex)), new(table, location, values)))
+        var key = (table.ObjectId, SqlRecordLocation.Pack(location.PageId, location.SlotIndex));
+        object?[] stored = values;
+        if (finalRows is not null && finalRows.TryGet(key, out var pending) && pending.OldValues.Length != 0) { stored = pending.OldValues; }
+        if (!deletions.TryAdd(key, new(table, location, stored, values)))
         {
             return null;
         }
@@ -830,11 +878,12 @@ internal sealed partial class SqlPlanExecutor
             memory.Reserve(256); // deletion record, dictionary growth and cascade work
         }
 
-        await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false);
+        if (location.PageId.Value >= 0)
+        { await AcquireRowWriteLocksAsync(statement, table.ObjectId, [location], cancellationToken, cascade: true).ConfigureAwait(false); }
 
         // A child row was found in latest state, which can be newer than a snapshot fixed at the
         // transaction's begin; a target of the statement itself was found through that snapshot.
-        if (arrivedBy is not null)
+        if (arrivedBy is not null && location.PageId.Value >= 0)
         {
             EnsureSnapshotSeesCascadeRow(table, location, statement);
         }
@@ -845,10 +894,12 @@ internal sealed partial class SqlPlanExecutor
             await AcquireReferenceIntentLocksAsync(table, statement, cancellationToken, cascade: true).ConfigureAwait(false);
         }
 
-        // Deleting the row releases every reference it holds. The edge it was
-        // reached by is excluded: that parent row is in the deletion set and is
-        // already exclusively locked by this statement.
-        CollectReleasedReferences(table, [values], released, statement, cancellationToken, skip: arrivedBy);
+        // Deleting the row releases every stored reference. Skip the arrival edge
+        // only when its values are also the stored values: a pending MERGE update
+        // may have moved the child to this parent from a different, unlocked one.
+        if (location.PageId.Value >= 0)
+        { CollectReleasedReferences(table, [stored], released, statement, cancellationToken,
+            skip: ReferenceEquals(stored, values) ? arrivedBy : null); }
 
         // The incoming references are read after the row and its table are locked,
         // exactly where the recursive walk read them.
@@ -915,10 +966,11 @@ internal sealed partial class SqlPlanExecutor
     /// <param name="location">The child row's location, exclusively locked by the statement.</param>
     /// <param name="statement">The executing statement.</param>
     /// <param name="action">The referential action named by a snapshot conflict.</param>
+    /// <param name="updating">Whether to name ON UPDATE and retain the coded serialization failure.</param>
     /// <exception cref="TransactionAbortedException">The transaction's snapshot does not see the child version's writer, or the version is gone.</exception>
     /// <exception cref="StorageCorruptionException">The slot holds a record too short for its version stamps (#1362).</exception>
     private void EnsureSnapshotSeesCascadeRow(SqlCatalogTable table, (PageId PageId, int SlotIndex) location, SqlStatementContext statement,
-        string action = "CASCADE")
+        string action = "CASCADE", bool updating = false)
     {
         if (statement.Transaction.IsolationLevel == IsolationLevel.ReadCommitted)
         {
@@ -928,8 +980,10 @@ internal sealed partial class SqlPlanExecutor
         statement.Metrics.RecordRowRead();
         if (!_storage.TryReadRecord(location.PageId, location.SlotIndex, table.ObjectId, out var record))
         {
-            throw new TransactionAbortedException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure, table.Schema, table.Name, action));
+            var conflict = new TransactionAbortedException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, updating ? _updateActionRowUnavailable : _errorEnsureSnapshotSeesCascadeRowFailure, table.Schema, table.Name, action));
+            if (updating) { throw SqlExecutionException.SerializationFailure(conflict); }
+            throw conflict;
         }
 
         if (record.Length < SqlRowCodec.StampHeaderSize)
@@ -942,8 +996,10 @@ internal sealed partial class SqlPlanExecutor
         var (writer, _) = SqlRowCodec.ReadStamps(record.Span);
         if (!statement.Snapshot.IsVisible(writer))
         {
-            throw new TransactionAbortedException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorEnsureSnapshotSeesCascadeRowFailure3, table.Schema, table.Name, action, writer));
+            var conflict = new TransactionAbortedException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, updating ? _updateActionSnapshotConflict : _errorEnsureSnapshotSeesCascadeRowFailure3, table.Schema, table.Name, action, writer));
+            if (updating) { throw SqlExecutionException.SerializationFailure(conflict); }
+            throw conflict;
         }
     }
 
@@ -982,7 +1038,7 @@ internal sealed partial class SqlPlanExecutor
     private bool TryNextCascadeRow(SqlCascadeFrame frame, Dictionary<(ulong ObjectId, ulong Location), SqlConstraintDelete> deletions,
         SqlStatementContext statement, CancellationToken cancellationToken,
         out SqlBoundReference edge,
-        out ((PageId PageId, int SlotIndex) Location, object?[] Values) match)
+        out ((PageId PageId, int SlotIndex) Location, object?[] Values) match, SqlConstraintUpdates? finalRows = null)
     {
         while (true)
         {
@@ -1019,8 +1075,9 @@ internal sealed partial class SqlPlanExecutor
                 continue;
             }
 
-            frame.Matches = CollectConstraintMatches(FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
-                ConstraintCurrentSnapshot(statement)), statement);
+            frame.Matches = CollectConstraintMatches(finalRows is null
+                ? FindConstraintRows(reference.ChildKey, keys, statement, cancellationToken, ConstraintCurrentSnapshot(statement))
+                : FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken, deletions, finalRows, ConstraintCurrentSnapshot(statement)), statement);
             frame.Match = 0;
         }
     }
@@ -1041,11 +1098,16 @@ internal sealed partial class SqlPlanExecutor
                 {
                     continue;
                 }
-                var keys = reference.ParentKey.Read(deletion.Values);
+                var keys = reference.ParentKey.Read(deletion.EffectiveValues ?? deletion.Values);
                 if (keys.Any(value => value is null))
                 {
                     continue;
                 }
+                // NO ACTION permits a replacement parent key in this statement. RESTRICT
+                // retains its immediate referenced-row refusal (ri_triggers.c:944-959).
+                if (constraint.OnDelete == SqlCatalogReferentialAction.NoAction &&
+                    FinalConstraintRows(reference.ParentKey, keys, statement, cancellationToken,
+                        deletions, updates, ConstraintCurrentSnapshot(statement)).Any()) { continue; }
                 foreach (var match in FinalConstraintRows(reference.ChildKey, keys, statement, cancellationToken,
                     deletions, updates, ConstraintCurrentSnapshot(statement)))
                 {
@@ -1073,7 +1135,7 @@ internal sealed partial class SqlPlanExecutor
             var indexes = GetLiveIndexes(group.First().Table, statement);
             foreach (var row in group)
             {
-                CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes);
+                CollectUniqueKeyHashes(indexes, row.Table, row.Values, hashes, cancellationToken);
             }
 
             await AcquireUniqueKeyLocksAsync(statement, group.Key, hashes, cancellationToken, cascade: true).ConfigureAwait(false);
@@ -1140,6 +1202,9 @@ internal sealed partial class SqlPlanExecutor
         new SqlCheckSyntax(table, scope, declaring: false, retyping: retyping, previousScope: previousScope).Validate(expression, requireBoolean: true);
         return scope.BindPredicate(expression);
     }
+
+    internal static void ValidatePersistedPredicate(SqlExpression expression, SqlCatalogTable table, SqlExpressionEvaluator scope)
+        => new SqlCheckSyntax(table, scope, declaring: false).Validate(expression, requireBoolean: true);
 
     private static string ConstraintName(SqlCatalogTable table, SqlConstraintDefinition definition, int ordinal)
         => SqlConstraintDeclaration.Name(table.Name, definition, ordinal);
@@ -1232,7 +1297,7 @@ internal sealed partial class SqlPlanExecutor
                 }
             }
             bool unique = (self && SameConstraintColumns(parent.PrimaryKeyColumns, definition.ReferencedColumns)) ||
-                _catalog.GetIndexes(parent.ObjectId).Any(index => index.IsUnique && SameConstraintColumns(index.ColumnNames, definition.ReferencedColumns)) ||
+                _catalog.GetIndexes(parent.ObjectId).Any(index => index.IsUnique && index.Predicate is null && SameConstraintColumns(index.ColumnNames, definition.ReferencedColumns)) ||
                 (self && definitions.Any(d => d.Kind is SqlConstraintKind.Unique or SqlConstraintKind.PrimaryKey && SameConstraintColumns(d.Columns, definition.ReferencedColumns)));
             if (!unique)
             {
@@ -1241,6 +1306,14 @@ internal sealed partial class SqlPlanExecutor
 
             result.Add(new SqlCatalogConstraint(name, SqlCatalogConstraintKind.Reference, definition.Columns, schema, referenced.TableName,
                 definition.ReferencedColumns, onDelete: definition.OnDelete switch
+                {
+                    SqlReferentialAction.Restrict => SqlCatalogReferentialAction.Restrict,
+                    SqlReferentialAction.Cascade => SqlCatalogReferentialAction.Cascade,
+                    SqlReferentialAction.NoAction => SqlCatalogReferentialAction.NoAction,
+                    SqlReferentialAction.SetNull => SqlCatalogReferentialAction.SetNull,
+                    SqlReferentialAction.SetDefault => SqlCatalogReferentialAction.SetDefault,
+                    _ => throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.DeleteActionUnknown),
+                }, onUpdate: definition.OnUpdate switch
                 {
                     SqlReferentialAction.Restrict => SqlCatalogReferentialAction.Restrict,
                     SqlReferentialAction.Cascade => SqlCatalogReferentialAction.Cascade,
@@ -1385,7 +1458,7 @@ internal sealed partial class SqlPlanExecutor
                 SqlLogicalExpression => true,
                 SqlBinaryExpression binary => binary.Operator is SqlBinaryOperator.Equal or SqlBinaryOperator.NotEqual or SqlBinaryOperator.LessThan or SqlBinaryOperator.GreaterThan or SqlBinaryOperator.LessOrEqual or SqlBinaryOperator.GreaterOrEqual,
                 SqlUnaryExpression unary => unary.Operator == SqlUnaryOperator.Not,
-                SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
+                SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlLikeExpression => true,
                 SqlLiteralExpression literal => literal.LiteralType is SqlLiteralType.Boolean or SqlLiteralType.Null
                     || SqlExpressionEvaluator.TryBooleanLiteral(literal, out _),
                 SqlColumnReferenceExpression column => _table.Columns[FindColumnOrdinal(_table, column.ColumnName)].Type.Type == DatabaseType.Boolean,

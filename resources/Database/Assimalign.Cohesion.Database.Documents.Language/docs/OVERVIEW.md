@@ -5,19 +5,23 @@ expression trees. It provides `OqlLanguageProfile`, stable `OqlClauses` names, `
 `OqlQueryStatement`, `OqlTransactionExpression`, `OqlTransactionCommand`, `OqlTransactionIsolation`,
 `OqlSelectExpression`, `OqlInsertExpression`, `OqlUpsertExpression`, `OqlUpdateExpression`, `OqlUpdateAssignment`, `OqlDeleteExpression`, `OqlMetaExpression`, `OqlObjectExpression`, `OqlCreateCollectionExpression`, `OqlDropCollectionExpression`,
 `OqlCreateIndexExpression`, `OqlDropIndexExpression`, and expression nodes
-for projection, filtering, grouping, aggregates, ordering, nested properties, and array access.
-One immutable standard-function table declares META, five aggregates and 34 SQL++ scalars, with
-native parse-time arity checks and static result types used by native registrations. The standalone
+for projection, filtering, grouping, aggregates, ordering, nested properties, and array access. GROUP BY terms accept aliases with or without AS; GROUP AS retains binding-wrapper arrays, including group-term aliases, for SELECT, HAVING and ORDER BY. LETTING remains unavailable.
+One immutable standard-function table declares META, eleven aggregates and 34 SQL++ scalars, with
+ALL/DISTINCT aggregate metadata, native parse-time arity checks and static result types used by native registrations. The standalone
 parser default reports CD00008 for unknown calls; engine requests defer additional named calls to
 the executing engine's function catalog.
-BEGIN/START, COMMIT and ROLLBACK execute on in-process and wire sessions. Snapshot is the default;
+BEGIN/START, COMMIT, ROLLBACK and named SAVEPOINT/RELEASE/ROLLBACK TO execute on in-process and wire sessions. Snapshot is the default;
 explicit SNAPSHOT and READ COMMITTED are supported. Wire sessions negotiate transaction status;
 pool return rolls back open or failed work and discards peers that cannot certify a clean session.
 OQL collection/index DDL is refused in an explicit transaction (CD04105). See DIALECT.md for
-exact spellings, fault recovery and the deferred savepoint forms.
+exact spellings, fault recovery and named savepoint scope semantics.
 SELECT LIMIT/OFFSET accept signed integer literals or parameters in either order, with non-negative
 Int64 values and CD00007 for invalid counts. LIMIT and OFFSET are reserved field names; quoting
 or a preceding dot keeps them usable, and AS labels still accept them.
+Key-only INNER/LEFT JOIN and NEST use right-hand META(alias).id equality and require explicit
+aliases on every source. They compose with subqueries, grouping, paging and synthetic/qualified
+stars. Bindings retains the ordered OqlUnnestExpression/OqlJoinExpression AST family; DIALECT
+records the lookup-NEST unknown-key table and deferred general predicates.
 Chainable INNER/LEFT UNNEST, ANY/SOME/EVERY ... SATISFIES ... END and array-value IN execute.
 `OqlSelectExpression.Unnest`, `OqlUnnestExpression` and `OqlQuantifiedExpression` retain the
 bindings. The new words remain contextual; END retains its existing reservation. See the
@@ -37,8 +41,9 @@ var query = statement.OqlExpression;
 ```
 
 The package references only the shared `Assimalign.Cohesion.Database.Language` package. The
-Documents engine supplies catalog binding, planning, and execution. Queries and index DDL address
-one collection in the session's database. `CREATE COLLECTION [IF NOT EXISTS]`,
+Documents engine supplies catalog binding, planning, and execution. Collection sources and index DDL address
+database-local collections in the session's database; derived and expression sources compose further SELECTs.
+`CREATE COLLECTION [IF NOT EXISTS]`,
 `DROP COLLECTION [IF EXISTS]`, `CREATE INDEX`, and `DROP INDEX` use the same
 parse-plan-execute path as `SELECT`. `INSERT INTO ... (KEY, VALUE) VALUES` and INSERT SELECT
 create externally keyed documents. UPSERT uses the same forms to insert or wholly replace. `META([alias]).id` and `.version` expose stored identities
@@ -50,7 +55,10 @@ DELETE returns the pre-image; the other writes return the stored post-image. Pro
 serialization or budget failure rolls back writes before any results are exposed.
 USE KEYS, OBJECT transformations, multiple bindings, position variables, WITHIN and UPDATE/DELETE LIMIT remain deferred.
 `DEFINE` is recognized statement-initially, and `ELEMENT` / `FLATTEN` in call position, to
-produce `CK00001`; all three remain usable field names. Subqueries remain unsupported.
+produce `CK00001`; all three remain usable field names. SELECT expression subqueries return arrays; EXISTS and IN (SELECT RAW ...) execute.
+Derived FROM requires an alias with optional AS. Expression sources iterate arrays,
+parameters and subqueries; their explicit aliases require AS. OqlSelectExpression.Source retains
+the FROM expression. Lexical correlation and subqueries in DML execute; see DIALECT.md.
 MISSING has its own AST node, distinct from NULL, and `IS [NOT] MISSING` / `IS [NOT] VALUED`
 are executable presence predicates. NIL remains a NULL synonym.
 

@@ -14,9 +14,13 @@
   <data name="GqlQueryParserParseCoreVoid7" xml:space="preserve"><value>Unexpected character '?'; it is not part of GQL.</value></data>
   <data name="GqlQueryParserFindUnsupportedVoid" xml:space="preserve"><value>Unknown function '{0}'.</value></data>
   <data name="GqlQueryParserExpectVoid" xml:space="preserve"><value>Expected {0}.</value></data>
+  <data name="SchemaVariableMismatch" xml:space="preserve"><value>The schema property must reference the variable declared by FOR.</value></data>
+  <data name="SchemaIndexParentheses" xml:space="preserve"><value>ON requires a parenthesized property reference.</value></data>
   <data name="GqlQueryParserIdentifierVoid" xml:space="preserve"><value>An identifier cannot be empty.</value></data>
   <data name="GqlQueryParserIdentifierVoid2" xml:space="preserve"><value>Expected an identifier.</value></data>
   <data name="GqlQueryParserHasStackToNestVoid" xml:space="preserve"><value>The statement nests deeper than the stack available to the parser on this thread; reduce the nesting of its parentheses or run it on a thread with a larger stack.</value></data>
+  <data name="PatternComprehensionRequired" xml:space="preserve"><value>A pattern comprehension requires a nonempty path and a projection after |.</value></data>
+  <data name="ExistsBodyRequired" xml:space="preserve"><value>EXISTS requires a nonempty graph pattern in braces.</value></data>
   <data name="GqlQueryParserParseExpressionVoid" xml:space="preserve"><value>Comparison predicates cannot be chained; use AND or parentheses.</value></data>
   <data name="GqlQueryParserParseExpressionVoid2" xml:space="preserve"><value>Expected NULL, TRUE, FALSE or UNKNOWN after IS [NOT].</value></data>
   <data name="GqlQueryParserParseExpressionVoid3" xml:space="preserve"><value>IN requires a list value, such as the [...] list form.</value></data>
@@ -24,8 +28,8 @@
   <data name="GqlQueryParserParseScalarVoid" xml:space="preserve"><value>Expected a named parameter after $ or @.</value></data>
   <data name="GqlQueryParserParseLiteralVoid" xml:space="preserve"><value>Integer literal is outside the signed 64-bit range.</value></data>
   <data name="GqlQueryParserParseLiteralVoid2" xml:space="preserve"><value>Floating-point literal is invalid or outside the finite double range.</value></data>
-  <data name="GqlQueryParserParseLiteralVoid3" xml:space="preserve"><value>List-valued properties are unsupported by graph storage.</value></data>
-  <data name="GqlQueryParserParseLiteralVoid4" xml:space="preserve"><value>Map-valued properties are unsupported by graph storage.</value></data>
+  <data name="ListPropertyUnsupported" xml:space="preserve"><value>List-valued properties are unsupported by graph storage.</value></data>
+  <data name="MapPropertyUnsupported" xml:space="preserve"><value>Map-valued properties are unsupported by graph storage.</value></data>
   <data name="GqlQueryParserParseLiteralVoid5" xml:space="preserve"><value>Expected a scalar literal.</value></data>
   <data name="GqlQueryParserParseFunctionVoid" xml:space="preserve"><value>Function {0} does not accept a set quantifier.</value></data>
   <data name="GqlQueryParserParseFunctionVoid2" xml:space="preserve"><value>Function {0} requires {1} to {2} arguments.</value></data>
@@ -38,6 +42,8 @@
   <data name="GqlQueryParserParseLabelPrimaryVoid2" xml:space="preserve"><value>Expected a label name, '%' or '(' after '!'; '!' negates one label, '%' or parenthesized expression.</value></data>
   <data name="GqlQueryParserParseLabelPrimaryVoid3" xml:space="preserve"><value>Expected a label name, '%', '!' or '('.</value></data>
   <data name="QueryParserParseLabeledPredicateVoid" xml:space="preserve"><value>Repeated ':' labels are a node-pattern convenience; write n:A&amp;B in a predicate.</value></data>
+  <data name="MergeSinglePath" xml:space="preserve"><value>MERGE requires exactly one complete path.</value></data>
+  <data name="CompositeOperandRequired" xml:space="preserve"><value>A composite operation requires a query operand.</value></data>
   <data name="GqlQueryParserParseQueryVoid" xml:space="preserve"><value>NEXT requires a RETURN or data-modifying segment and a following segment.</value></data>
   <data name="GqlQueryParserParseQueryVoid2" xml:space="preserve"><value>RETURN * requires at least one named binding.</value></data>
   <data name="GqlQueryParserParseQueryVoid3" xml:space="preserve"><value>Expected FIRST or LAST after NULLS.</value></data>

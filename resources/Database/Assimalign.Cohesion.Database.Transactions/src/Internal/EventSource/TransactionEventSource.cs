@@ -79,7 +79,7 @@ internal sealed class TransactionEventSource : EventSource
         public const EventKeywords Purge = (EventKeywords)0x8;
     }
 
-    /// <summary>The open coordinator contexts, including snapshot pins.</summary>
+    /// <summary>The open coordinator transactions, excluding snapshot pins.</summary>
     internal long CurrentTransactions => Volatile.Read(ref _currentTransactions);
 
     /// <summary>The coordinator transactions begun since process start, excluding snapshot pins.</summary>
@@ -104,13 +104,13 @@ internal sealed class TransactionEventSource : EventSource
     /// Counts a transaction the coordinator began tracking: the opening transition of the
     /// <c>current-transactions</c> gauge.
     /// </summary>
-    /// <param name="context">The tracked context; snapshot pins enter only the gauge.</param>
+    /// <param name="context">The tracked context; snapshot pins move no counters.</param>
     [NonEvent]
     public void TransactionTracked(TransactionContext context)
     {
-        Interlocked.Increment(ref _currentTransactions);
         if (!context.IsSnapshotPin)
         {
+            Interlocked.Increment(ref _currentTransactions);
             Interlocked.Increment(ref _totalTransactions);
         }
     }
@@ -119,16 +119,16 @@ internal sealed class TransactionEventSource : EventSource
     /// Counts a transaction the coordinator stopped tracking because it ended: the closing
     /// transition of the <c>current-transactions</c> gauge.
     /// </summary>
-    /// <param name="context">The ended context; snapshot pins leave the gauge without moving a rate.</param>
+    /// <param name="context">The ended context; snapshot pins move no counters.</param>
     [NonEvent]
     public void TransactionUntracked(TransactionContext context)
     {
-        Interlocked.Decrement(ref _currentTransactions);
-
         if (context.IsSnapshotPin)
         {
             return;
         }
+
+        Interlocked.Decrement(ref _currentTransactions);
 
         if (context.State == TransactionState.Committed)
         {
@@ -148,6 +148,14 @@ internal sealed class TransactionEventSource : EventSource
         {
             TransactionBegun(storage.Name, (long)context.Sequence.Value, context.IsolationLevel.ToString());
         }
+    }
+
+    /// <summary>Writes the effective level after an admitted isolation change.</summary>
+    [NonEvent]
+    public void TransactionIsolationChanged(Storage.Storage storage, TransactionContext context)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Transactions))
+        { TransactionIsolationChanged(storage.Name, (long)context.Sequence.Value, context.IsolationLevel.ToString()); }
     }
 
     /// <summary>Writes that a database committed a transaction.</summary>
@@ -386,6 +394,10 @@ internal sealed class TransactionEventSource : EventSource
             VersionPurgePass(storage.Name, versionsPurged, Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds);
         }
     }
+
+    [Event(20, Level = EventLevel.Verbose, Keywords = Keywords.Transactions, Message = "Database '{0}' configured transaction {1} ({2}).")]
+    private void TransactionIsolationChanged(string database, long transactionSequence, string isolationLevel)
+        => WriteEvent(20, database, transactionSequence, isolationLevel);
 
     [Event(1, Level = EventLevel.Verbose, Keywords = Keywords.Transactions, Message = "Database '{0}' began transaction {1} ({2}).")]
     private void TransactionBegun(string database, long transactionSequence, string isolationLevel)

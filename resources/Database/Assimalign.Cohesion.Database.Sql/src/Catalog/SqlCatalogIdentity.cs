@@ -1,5 +1,7 @@
 using System;
 
+using Assimalign.Cohesion.Database.Sql.Internal;
+
 namespace Assimalign.Cohesion.Database.Sql.Catalog;
 
 /// <summary>Immutable identity generation metadata. Counter state is stored separately.</summary>
@@ -17,6 +19,11 @@ public sealed class SqlCatalogIdentity
         Start = start;
         Increment = increment;
     }
+
+    // Declaration options travel with this facet until the owned sequence is staged.
+    // Persisted options belong to the sequence record.
+    [global::System.Diagnostics.DebuggerBrowsable(global::System.Diagnostics.DebuggerBrowsableState.Never)]
+    internal SqlSequenceOptions? Options { get; init; }
 
     /// <summary>Gets whether explicit assignments are forbidden.</summary>
     public bool IsAlways { get; }

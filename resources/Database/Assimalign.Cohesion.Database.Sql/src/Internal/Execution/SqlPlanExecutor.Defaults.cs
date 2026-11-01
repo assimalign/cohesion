@@ -101,6 +101,11 @@ internal sealed partial class SqlPlanExecutor
         SqlFunctionEnvironment functions, Collation collation, CancellationToken cancellationToken, bool declaring = false)
     {
         var expression = SqlPersistedExpression.Load(column.DefaultLiteral!, subject);
+        if (SqlSequenceDefault.IsCandidate(expression))
+        {
+            ulong sequenceId = SqlSequenceDefault.ValidateIdentity(expression, column.DefaultFunctionCalls);
+            return new SqlBoundDefault(new SqlBoundSequence(expression is SqlNextValueExpression ? "NEXT VALUE FOR" : "NEXTVAL", [new SqlBoundConstant(checked((long)sequenceId))]), column, true);
+        }
         if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
         {
             return new SqlBoundConstant(null);

@@ -59,6 +59,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 {
     private readonly Storage _storage;
     private readonly StorageJournal _journal;
+    private readonly TransactionRecordSpace _records;
     private readonly TransactionManager _manager;
     private readonly LockManager _lockManager;
     private readonly RecordSpaceVersionStore _versionStore;
@@ -66,7 +67,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private readonly Func<TransactionSequence, CancellationToken, ValueTask<long>>? _indexPruner;
 
-    // True in the async flow of a statement apply that holds the apply gate, which is not
+    // True in the async flow of a statement apply or undo control holding the apply gate, which is not
     // reentrant: a checkpoint asked for from inside the apply is refused instead of waiting for
     // the gate its own caller holds.
     private readonly AsyncLocal<bool> _insideApply = new();
@@ -125,6 +126,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(records);
         _storage = storage;
         _journal = journal;
+        _records = records;
         _indexPruner = indexPruner;
 
         // Fully qualified: the coordinator's LockManager property shadows the
@@ -390,9 +392,43 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     public ValueTask<TransactionContext> BeginAsync(IsolationLevel isolationLevel, CancellationToken cancellationToken = default) =>
         BeginAsync(isolationLevel, isSnapshotPin: false, cancellationToken);
 
+    /// <summary>Replaces an unused transaction's isolation context, preserving its identity and begin snapshot.</summary>
+    /// <param name="context">The current context, with no statement applies running.</param>
+    /// <param name="isolationLevel">The new isolation level.</param>
+    /// <returns>The replacement context. Earlier handles share its lifecycle.</returns>
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The level is undefined.</exception>
+    /// <exception cref="ArgumentException">The context is a statement view or snapshot pin, has live savepoint tokens, or a change from READ COMMITTED to fixed visibility has no active begin-time snapshot pin.</exception>
+    /// <exception cref="TransactionAbortedException">The context is stale, untracked, ending or has a running statement apply.</exception>
+    /// <exception cref="ObjectDisposedException">The manager was disposed.</exception>
+    /// <remarks>
+    /// The caller excludes data statements and transaction ends, and retains a begin-time snapshot
+    /// pin while READ COMMITTED remains configurable. The manager enforces that a pin registered
+    /// before the transaction still protects its begin floor when selecting fixed visibility. It protects historical versions if the
+    /// caller subsequently selects Snapshot. Release it after configuration or at transaction end.
+    /// No engine locks are acquired. Manager registration precedes coordinator tracking, with no
+    /// nested locks; the manager protects the new horizon before the coordinator publishes it.
+    /// </remarks>
+    public TransactionContext ReplaceIsolationLevel(TransactionContext context, IsolationLevel isolationLevel)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (isolationLevel is not (IsolationLevel.Snapshot or IsolationLevel.ReadCommitted or IsolationLevel.Serializable))
+        { throw new ArgumentOutOfRangeException(nameof(isolationLevel)); }
+        var replacement = _manager.ReplaceIsolationLevel(context, isolationLevel);
+        lock (_sync)
+        {
+            // Disposal may already have untracked the shared lifecycle. Never re-enroll it.
+            if (_openContexts.ContainsKey(context.Sequence.Value))
+            { _openContexts[context.Sequence.Value] = replacement; }
+        }
+        if (context.IsolationLevel != isolationLevel)
+        { TransactionEventSource.Log.TransactionIsolationChanged(_storage, replacement); }
+        return replacement;
+    }
+
     /// <summary>
     /// Begins a snapshot pin that holds the version-pruning horizon for one statement.
-    /// It remains tracked by the current-transactions gauge, but contributes no transaction
+    /// It remains registered for pruning, but contributes no current-transactions gauge or transaction
     /// begin, commit or rollback rate and writes no Verbose transaction lifecycle events.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
@@ -514,6 +550,230 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
     }
 
+    /// <summary>Creates a memory-only undo scope on an active transaction.</summary>
+    /// <param name="context">The current lifecycle context owned by this coordinator.</param>
+    /// <param name="cancellationToken">Observed before admission; admitted controls complete.</param>
+    /// <returns>The owned scope token.</returns>
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
+    public async ValueTask<TransactionSavepoint> CreateSavepointAsync(TransactionContext context, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        // Allocate the wrapper before admitting its kernel marker: an allocation failure must
+        // never leave an anonymous scope that its caller cannot release.
+        var savepoint = new TransactionSavepoint(this, context);
+        savepoint.Marker = await CreateUndoMarkerAsync(context, cancellationToken).ConfigureAwait(false);
+        return savepoint;
+    }
+
+    /// <summary>Releases an undo scope and every newer scope, retaining their effects.</summary>
+    /// <param name="context">The current lifecycle context.</param>
+    /// <param name="savepoint">The scope owned by this coordinator and transaction.</param>
+    /// <param name="cancellationToken">Observed before admission.</param>
+    /// <returns>A task representing completion.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
+    public ValueTask ReleaseSavepointAsync(TransactionContext context, TransactionSavepoint savepoint, CancellationToken cancellationToken = default)
+        => ReleaseUndoMarkerAsync(context, RequireSavepoint(context, savepoint), cancellationToken);
+
+    /// <summary>Undoes effects after a scope, discarding descendants and retaining the target.</summary>
+    /// <param name="context">The current lifecycle context.</param>
+    /// <param name="savepoint">The owned target; after incomplete undo only this or an outer scope is admitted.</param>
+    /// <param name="cancellationToken">Observed before admission; admitted undo completes.</param>
+    /// <param name="scopesDiscarded">Optional attempt-local notification after descendants are discarded.
+    /// It must not throw or call back into the coordinator. It runs once for an admitted attempt,
+    /// including an attempt whose undo later fails, and never for a refused attempt.</param>
+    /// <returns>A task representing completion.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <exception cref="Exception">An undo refusal classified by <see cref="GetUndoFailureCode"/>.</exception>
+    public async ValueTask RollbackToSavepointAsync(TransactionContext context, TransactionSavepoint savepoint,
+        CancellationToken cancellationToken = default, Action? scopesDiscarded = null)
+    {
+        var marker = RequireSavepoint(context, savepoint);
+        await RunUndoControlAsync(context, marker, rollback: true, release: false, cancellationToken,
+            scopesDiscarded).ConfigureAwait(false);
+    }
+
+    /// <summary>Classifies a kernel undo refusal without parsing message text.</summary>
+    /// <param name="exception">The failure to classify.</param>
+    /// <returns>The structured CK04 code, or null for another failure.</returns>
+    public static string? GetUndoFailureCode(Exception exception)
+        => TransactionRecordSpace.GetUndoFailureCode(exception);
+
+    /// <summary>Gets whether incomplete undo fences reads, writes and commit for this context.</summary>
+    /// <param name="context">The context whose shared lifecycle is inspected.</param>
+    /// <returns>True while undo needs retry or whole rollback.</returns>
+    /// <exception cref="ArgumentNullException">The context is null.</exception>
+    public static bool IsPartialUndoPending(TransactionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.PartialUndoPending;
+    }
+
+    private TransactionUndoMarker RequireSavepoint(TransactionContext context, TransactionSavepoint savepoint)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(savepoint);
+        if (!ReferenceEquals(this, savepoint.Coordinator) || !ReferenceEquals(context, savepoint.Context))
+        { throw new TransactionUndoException("CK04008", ErrorMessages.UndoMarkerInvalid); }
+        return savepoint.Marker;
+    }
+
+    // Anonymous backend controls remain internal behind the owned coordinator surface.
+    internal ValueTask<TransactionUndoMarker> CreateUndoMarkerAsync(TransactionContext context, CancellationToken cancellationToken = default)
+        => RunUndoControlAsync(context, null, rollback: false, release: false, cancellationToken);
+
+    internal async ValueTask ReleaseUndoMarkerAsync(TransactionContext context, TransactionUndoMarker marker, CancellationToken cancellationToken = default)
+        => _ = await RunUndoControlAsync(context, marker, rollback: false, release: true, cancellationToken).ConfigureAwait(false);
+
+    internal async ValueTask RollbackToUndoMarkerAsync(TransactionContext context, TransactionUndoMarker marker, CancellationToken cancellationToken = default)
+        => _ = await RunUndoControlAsync(context, marker, rollback: true, release: false, cancellationToken).ConfigureAwait(false);
+
+    // Deterministic admission seams for the owning test assembly.
+    internal Action? UndoMarkerValidated { get; set; }
+    internal Action? UndoControlAdmitted { get; set; }
+
+    private async ValueTask<TransactionUndoMarker> RunUndoControlAsync(TransactionContext context, TransactionUndoMarker? marker,
+        bool rollback, bool release, CancellationToken cancellationToken, Action? scopeDiscarded = null)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (rollback || release) { ArgumentNullException.ThrowIfNull(marker); }
+        ThrowIfInsideApply();
+        if (!rollback)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var owner = _manager.EnterUndoControl(context, out _);
+            try
+            {
+                UndoControlAdmitted?.Invoke();
+                if (release)
+                {
+                    bool anyMarkers = _versionStore.ReleaseMarker(context.Sequence, marker!);
+                    _lockManager.ReleaseUndoMarkers(context.Sequence, anyMarkers);
+                    context.MarkUndoScopes(anyMarkers);
+                    _records.UndoScopesChanged(context.Sequence, anyMarkers, _versionStore);
+                }
+                else
+                {
+                    marker = _versionStore.CreateMarker(context.Sequence);
+                    try
+                    {
+                        _lockManager.CreateUndoMarker(context.Sequence, marker);
+                        context.MarkUndoScopes();
+                        _records.UndoScopesChanged(context.Sequence, true, _versionStore);
+                    }
+                    catch
+                    {
+                        // A failed registration must not strand a marker whose token was
+                        // never returned. Model hooks are exception-atomic on creation;
+                        // release/end notifications are nonthrowing lifecycle cleanup.
+                        bool anyMarkers = _versionStore.ReleaseMarker(context.Sequence, marker);
+                        _lockManager.ReleaseUndoMarkers(context.Sequence, anyMarkers);
+                        context.MarkUndoScopes(anyMarkers);
+                        _records.UndoScopesChanged(context.Sequence, anyMarkers, _versionStore);
+                        throw;
+                    }
+                }
+                return marker!;
+            }
+            finally { owner.ExitApply(undoControl: true); }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        // Release does not take the apply gate. Validate optimistically, then revalidate
+        // under admitted control before starting undo; a release can win between them.
+        _versionStore.ValidateMarker(context.Sequence, marker!);
+        UndoMarkerValidated?.Invoke();
+        cancellationToken.ThrowIfCancellationRequested();
+        var undoOwner = _manager.EnterUndoControl(context, out bool undoWasPending, rollback: true);
+        try
+        {
+            try
+            {
+                _versionStore.BeginRollbackToMarker(context.Sequence, marker!);
+                scopeDiscarded?.Invoke();
+            }
+            catch
+            {
+                // Validation failed before the store installed Pending or did any undo.
+                // Only this attempt's newly installed retry fence may be removed.
+                if (!undoWasPending) { undoOwner.CompletePartialUndo(); }
+                throw;
+            }
+
+            if (!_versionStore.BuildRollbackLookup(context.Sequence, marker!))
+            {
+                // Exclusive writer admission makes a memory-only or empty suffix independent of the gate.
+                await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                _lockManager.RollbackToUndoMarker(context.Sequence, marker!);
+                undoOwner.CompletePartialUndo();
+                return marker!;
+            }
+            // Admission freezes this writer's ledger and end before prefix work. Other
+            // writers retain the apply gate until physical undo actually needs it.
+            await _applyGate.WaitAsync().ConfigureAwait(false);
+            _insideApply.Value = true;
+            try
+            {
+                await _versionStore.RollbackToMarkerUnderGateAsync(context.Sequence, marker!).ConfigureAwait(false);
+                _lockManager.RollbackToUndoMarker(context.Sequence, marker!);
+                undoOwner.CompletePartialUndo();
+                return marker!;
+            }
+            finally
+            {
+                try
+                {
+                    if (Volatile.Read(ref _checkpointDeferred) != 0) { RunDeferredCheckpoint(); }
+                }
+                finally
+                {
+                    _insideApply.Value = false;
+                    _applyGate.Release();
+                }
+            }
+        }
+        finally { undoOwner.ExitApply(undoControl: true); }
+    }
+
+    /// <summary>Applies reversible transaction-owned memory without enrolling a durable writer.</summary>
+    /// <typeparam name="T">The change result.</typeparam>
+    /// <param name="context">The transaction or its statement view; callers serialize its operations.</param>
+    /// <param name="undo">An idempotent memory before-image restored through its statement-rollback hook.</param>
+    /// <param name="change">The memory change. It must not perform storage I/O or wait for lock-table grants.</param>
+    /// <param name="cancellationToken">Observed before admission.</param>
+    /// <returns>The change result.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="TransactionAbortedException">The transaction is ending or ended.</exception>
+    /// <exception cref="TransactionUndoException"><paramref name="context"/> belongs to another transaction manager (CK04008),
+    /// or incomplete undo fences the transaction.</exception>
+    /// <exception cref="OperationCanceledException">Canceled before admission.</exception>
+    /// <remarks>The before-image is recorded before mutation and retained until scope or whole undo.
+    /// No storage bracket, journal record or durability wait is created.</remarks>
+    public T ApplyMemoryChange<T>(TransactionContext context, RecordVersionIndex undo, Func<T> change,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(undo);
+        ArgumentNullException.ThrowIfNull(change);
+        if (!ReferenceEquals(context.Manager, _manager))
+        { throw new TransactionUndoException("CK04008", ErrorMessages.UndoContextInvalid); }
+        cancellationToken.ThrowIfCancellationRequested();
+        // Lock order: manager/context admission (released) -> ledger (released) -> model.
+        // No ledger monitor spans a model callback, and no model monitor spans admission.
+        // The apply count makes ends drain this memory change.
+        var owner = _manager.EnterApply(context, cancellationToken, enrollWriter: false);
+        try
+        {
+            _versionStore.RecordMemoryUndo(context.Sequence, undo);
+            return change();
+        }
+        finally { owner.ExitApply(); }
+    }
+
     /// <summary>
     /// Applies a statement's physical mutations: acquires the apply gate (one
     /// writer statement applies at a time — page conflicts cannot exist), opens
@@ -568,6 +828,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// applied after the rollback's undo would carry a sequence every snapshot then
     /// reads as committed, and nothing would ever undo it.
     /// </exception>
+    /// <exception cref="TransactionUndoException">
+    /// CK04009: partial undo is running or incomplete. Failed statement compensation retains
+    /// the statement and repair failures in an inner <see cref="AggregateException"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">Gate acquisition or a wait for a memory-only undo control was canceled.</exception>
+    /// <remarks>Waits for the database apply gate and any admitted marker create or release.</remarks>
     public async ValueTask<T> ApplyStatementAsync<T>(
         TransactionContext context,
         Func<StorageTransaction, ValueTask<T>> apply,
@@ -585,11 +851,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
             // Admission under the gate: a statement queued on the gate when its
             // transaction's end began is refused, and an end waits for the one
             // admitted apply of its context to exit before it undoes or commits.
-            var owner = _manager.EnterApply(context);
+            var owner = _manager.EnterApply(context, cancellationToken);
 
             try
             {
                 var bracket = _storage.BeginTransaction();
+                _versionStore.BeginStatement(context.Sequence);
 
                 lock (_sync)
                 {
@@ -602,8 +869,9 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                     bracket.Commit(awaitDurability: durable);
                     return result;
                 }
-                catch
+                catch (Exception statementFailure)
                 {
+                    bool restoring = bracket.IsActive;
                     if (bracket.IsActive)
                     {
                         try
@@ -626,10 +894,21 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                         }
                     }
 
+                    if (restoring)
+                    {
+                        try { _versionStore.DiscardStatementSuffix(context.Sequence); }
+                        catch (Exception repairFailure)
+                        {
+                            owner.MarkPartialUndoPending();
+                            throw new TransactionUndoException("CK04009", ErrorMessages.PartialUndoPending,
+                                new AggregateException(statementFailure, repairFailure));
+                        }
+                    }
                     throw;
                 }
                 finally
                 {
+                    _versionStore.EndStatement();
                     lock (_sync)
                     {
                         _statementBrackets.Remove(context.Sequence.Value);
@@ -643,13 +922,15 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
-            if (Volatile.Read(ref _checkpointDeferred) != 0)
+            try
             {
-                RunDeferredCheckpoint();
+                if (Volatile.Read(ref _checkpointDeferred) != 0) { RunDeferredCheckpoint(); }
             }
-
-            _insideApply.Value = false;
-            _applyGate.Release();
+            finally
+            {
+                _insideApply.Value = false;
+                _applyGate.Release();
+            }
         }
     }
 
@@ -1083,6 +1364,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         }
         finally
         {
+            List<TransactionContext>? markedEnds = null;
             lock (_sync)
             {
                 _statementBrackets.Clear();
@@ -1092,10 +1374,13 @@ public sealed class TransactionCoordinator : IAsyncDisposable
                 foreach (var context in _openContexts.Values)
                 {
                     TransactionEventSource.Log.TransactionUntracked(context);
+                    if (context.HadUndoMarkers) { (markedEnds ??= new()).Add(context); }
                 }
 
                 _openContexts.Clear();
             }
+            if (markedEnds is not null)
+            { foreach (var context in markedEnds) { _records.TransactionEnded(context); } }
         }
     }
 
@@ -1114,6 +1399,11 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     // keeps bounding the prune and its statement bracket stays resolvable.
     private void UntrackEnded(TransactionContext context)
     {
+        // A rejected foreign end may have the same sequence as a local writer. Only
+        // this manager's contexts can drive tracking or model-ledger cleanup. Preserve
+        // the manager's argument failure too when a public end receives null.
+        if (context is null || !ReferenceEquals(context.Manager, _manager)) { return; }
+        if (context.State != TransactionState.Active && context.HadUndoMarkers) { _records.TransactionEnded(context); }
         if (context.State == TransactionState.Active)
         {
             return;

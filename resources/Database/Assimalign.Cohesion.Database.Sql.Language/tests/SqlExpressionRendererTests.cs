@@ -71,6 +71,10 @@ public sealed class SqlExpressionRendererTests
         ["qty NOT BETWEEN -1 AND (1 + 1)", "qty NOT BETWEEN -1 AND 1 + 1"],
         ["qty BETWEEN 1 AND 10 AND flag", "qty BETWEEN 1 AND 10 AND flag"],
         ["name LIKE 'a%'", "name LIKE 'a%'"],
+        ["name ilike 'A%'", "name ILIKE 'A%'"],
+        ["name not ilike 'A!%' escape '!'", "name NOT ILIKE 'A!%' ESCAPE '!'"],
+        ["-qty::int", "-CAST(qty AS INT)"],
+        ["qty::text::int", "CAST(CAST(qty AS TEXT) AS INT)"],
         ["name NOT LIKE '_b%'", "name NOT LIKE '_b%'"],
         ["name LIKE ('a' || '%')", "name LIKE ('a' || '%')"],
         ["name LIKE 'A%' COLLATE case_insensitive", "name LIKE 'A%' COLLATE case_insensitive"],
@@ -181,17 +185,14 @@ public sealed class SqlExpressionRendererTests
         // Assert
         rendered.ShouldBe(canonical);
         SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(declared));
-        if (written != "~qty")
-        {
-            diagnostics.ShouldBeEmpty();
-        }
+        diagnostics.ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: unsupported quoted calls retain their rejection and recovery tree")]
-    [InlineData("\"rank\"(1)", "NULL")]
-    [InlineData("\"row_number\"()", "NULL")]
-    [InlineData("\"rank\"(\"rank\") = 1", "NULL = 1")]
-    public void Render_UnsupportedQuotedCall_ShouldRetainDiagnosticAndRecoveryTree(string written, string canonical)
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: quoted value-function calls retain their binding tree")]
+    [InlineData("\"first_value\"(1)", "\"first_value\"(1)")]
+    [InlineData("\"last_value\"()", "\"last_value\"()")]
+    [InlineData("\"first_value\"(\"first_value\") = 1", "\"first_value\"(\"first_value\") = 1")]
+    public void Render_QuotedValueCall_ShouldRetainBindingTree(string written, string canonical)
     {
         // Arrange
         var declared = ParseSelectColumn(written, out var errors);
@@ -201,10 +202,7 @@ public sealed class SqlExpressionRendererTests
         var reloaded = ParseSelectColumn(rendered, out var reloadErrors);
 
         // Assert
-        var diagnostic = errors.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("CK00001");
-        diagnostic.Start.ShouldBe(7);
-        diagnostic.End.ShouldBe(7 + written.IndexOf('('));
+        errors.ShouldBeEmpty();
         rendered.ShouldBe(canonical);
         reloadErrors.ShouldBeEmpty();
         SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(declared));
@@ -212,21 +210,20 @@ public sealed class SqlExpressionRendererTests
 
     /// <summary>
     /// Quoted uppercase and mixed-case window-like names remain distinct calls and stay delimited;
-    /// lowercase built-in names retain their unsupported-call diagnostic and recovery expression.
+    /// lowercase built-in names retain their call tree for required-OVER binding.
     /// </summary>
     /// <param name="name">A window-like function name.</param>
-    /// <param name="supported">Whether its quoted spelling lies outside the unsupported vocabulary.</param>
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Renderer: quoted window-like calls respect identifier case")]
-    [InlineData("ROW_NUMBER", true)]
-    [InlineData("rank", false)]
-    [InlineData("Dense_Rank", true)]
-    [InlineData("lead", false)]
-    [InlineData("lag", false)]
-    [InlineData("first_value", false)]
-    [InlineData("last_value", false)]
-    [InlineData("nth_value", false)]
-    [InlineData("ntile", false)]
-    public void Render_WindowFunctionNamedCall_ShouldRespectQuotedCase(string name, bool supported)
+    [InlineData("ROW_NUMBER")]
+    [InlineData("rank")]
+    [InlineData("Dense_Rank")]
+    [InlineData("lead")]
+    [InlineData("lag")]
+    [InlineData("first_value")]
+    [InlineData("last_value")]
+    [InlineData("nth_value")]
+    [InlineData("ntile")]
+    public void Render_WindowFunctionNamedCall_ShouldRespectQuotedCase(string name)
     {
         // Arrange
         var declared = ParseSelectColumn($"\"{name}\"(qty)", out var errors);
@@ -236,19 +233,8 @@ public sealed class SqlExpressionRendererTests
         var reloaded = ParseSelectColumn(rendered, out var reloadErrors);
 
         // Assert
-        if (supported)
-        {
-            errors.ShouldBeEmpty();
-            rendered.ShouldBe($"\"{name}\"(qty)");
-        }
-        else
-        {
-            var diagnostic = errors.ShouldHaveSingleItem();
-            diagnostic.Code.ShouldBe("CK00001");
-            diagnostic.Start.ShouldBe(7);
-            diagnostic.End.ShouldBe(9 + name.Length);
-            rendered.ShouldBe("NULL");
-        }
+        errors.ShouldBeEmpty();
+        rendered.ShouldBe($"\"{name}\"(qty)");
         reloadErrors.ShouldBeEmpty();
         SqlTreeDump.Dump(reloaded).ShouldBe(SqlTreeDump.Dump(declared));
     }

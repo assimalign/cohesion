@@ -74,6 +74,37 @@ SQL syntax uses `CS00001`–`CS00099`. `CS00009` is the informational note for a
 statement semicolon; it does not refuse parsing or execution. `CS00100` is retired and reserved:
 the migration described it as a profile refusal, but the parser used it for this note.
 Recognized unsupported clauses use `CK00001`.
+Foreign-key ON UPDATE execution (#1723, SQ-F2) adds CS05085 for different action origins
+proposing conflicting stored values. A same-parent-row/constraint revisit replaces its earlier
+proposal; actions match the statement's completed direct assignments. Every referential closure,
+including plain UPDATE, upsert and DELETE, obeys CS05067's retained-memory budget.
+RESTRICT uses the existing CS03039 FK violation immediately; NO ACTION checks statement-end state.
+Update-action snapshot conflicts retain CS04064 (40001) through the existing serialization condition. Malformed/duplicate
+action syntax retains CS00003; malformed catalog action metadata retains CS06059, unsupported
+table extensions CS06060, and earlier SQL record-space formats CS06041. Compiled v8 is refused as the
+existing InvalidDocument schema.format condition.
+ILIKE and postfix casts (#1721, SQ-O1) allocate no diagnostic identity. ILIKE reuses
+CS02034 for malformed ESCAPE and CS05040 for the existing linguistic work budget.
+Postfix casts use the existing CAST CS02 conditions; malformed suffixes use CS00003.
+Regex, SIMILAR TO and deferred operators retain CK00001; ^ names exponentiation.
+
+Sequence session reset (#1717) reuses CS04070 for DISCARD inside BEGIN and CK07002 for malformed
+two-byte statement Ready (I/T/E plus 0/1 retained state). Host timeout reset values survive DISCARD;
+clean Ready certification avoids a reset exchange. No new diagnostic identity is allocated.
+
+Identity integration corrections (#1717) preserve CS02002 for allocator exhaustion, including
+column-context wrapping, and CS04067 for an identity incarnation removed during planning.
+CS06061 remains a persisted sequence metadata failure; live/retired owner collisions retain
+their existing catalog refusal, and admission is read-only even on malformed images. OVERRIDING
+USER performs binding and assignment checks before discarding an input, retaining their existing
+diagnostics. Unknown literals under CAST retain CS02022 (22P02) for invalid text; existing
+constant-fold failures also propagate before discard. Typed numeric casts and volatile inputs
+that are discarded are not executed.
+CS05067 also bounds rewrite/backfill chunk rows and conversion buffers; refusal leaves the old
+table published and releases retained charges. Hidden sequence names/snapshots, conditional DML
+grants, allocation reductions and metadata precision corrections add no diagnostic, persisted
+format or wire change.
+
 SQL UPDATE ... FROM and DELETE ... USING execute (#1714). Multiple source associations for
 one UPDATE target report CS05068 before any mutation; DELETE deduplicates physical targets.
 Quantified comparisons (#1718) reuse CS01015 for name binding, CS02055 for incompatible
@@ -97,6 +128,9 @@ structured-carrier messages remain unprefixed.
 | SQL0007 | CS00007 | Language/syntax |
 | SQL0008 | CS00008 | Language/syntax |
 | SQL0100 / CS00100 (retired) | CS00009 | Language/syntax — omitted semicolon (Information) |
+| New (#1720, SQ-H2 fixes) | CS00010 | Language/syntax — GROUPING SETS inside ROLLUP or CUBE (42601) |
+| New (#1526, SQ-W1) | CS00011 | Window function argument count or call modifier (42601) |
+| New (#1012, SQ-I1) | CS00012 | Malformed or incomplete transaction isolation mode (42601) |
 | COHSQLE005 | CS01005 | Binding/names |
 | COHSQLE006 | CS01006 | Binding/names |
 | COHSQLE008 | CS01008 | Binding/names |
@@ -112,8 +146,22 @@ structured-carrier messages remain unprefixed.
 | COHSQLE051 | CS01051 | Binding/names |
 | COHSQLE052 | CS01052 | Binding/names |
 | New (#1715, SQ-M1) | CS01053 | Binding/names — merge_action() outside MERGE RETURNING |
+| New (#1719, SQ-R1) | CS01054 | Binding/names — Recursive definition lacks a top-level anchor UNION [ALL] recursive term (42P19) |
+| New (#1719, SQ-R1) | CS01055 | Binding/names — Recursive reference in the anchor (42P19) |
+| New (#1719, SQ-R1) | CS01056 | Binding/names — Recursive reference inside a scalar, IN, quantified or EXISTS subquery (42P19) |
+| New (#1719, SQ-R1) | CS01057 | Binding/names — Recursive reference on the nullable side of an outer join (42P19) |
+| New (#1719, SQ-R1) | CS01058 | Binding/names — Recursive reference under INTERSECT ALL (42P19) |
+| New (#1719, SQ-R1) | CS01059 | Binding/names — Recursive reference in a prohibited EXCEPT operand (42P19) |
+| New (#1719, SQ-R1) | CS01060 | Binding/names — Recursive term has more than one self-reference (42P19) |
+| New (#1719, SQ-R1) | CS01061 | Binding/names — Aggregate at the query level containing a recursive reference (42P19) |
+| New (#1720, SQ-H2) | CS01062 | Binding/grouping — GROUPING argument is not a grouping expression of the associated query level (42803) |
+| New (#1720, SQ-H2) | CS01063 | Binding/grouping — GROUPING requires 1–31 non-star expression arguments (54023) |
+| New (#1526, SQ-W1) | CS01064 | Duplicate WINDOW name (42P20) |
+| New (#1526, SQ-W1) | CS01065 | Unknown window or forward WINDOW reference (42704) |
+| New (#1526, SQ-W1) | CS01066 | Copied window overrides PARTITION BY/ORDER BY or copies an explicit frame (42P20) |
+| New (#1722, SQ-N1) | CS01067 | Invalid JSON access or IS JSON operand signature (42883) |
 | COHSQLE001 | CS02001 | Values/types |
-| COHSQLE002 | CS02002 | Values/types |
+| COHSQLE002 | CS02002 | Values/types — identity or standalone sequence range exhaustion (#1717) |
 | COHSQLE003 | CS02003 | Values/types |
 | COHSQLE010 | CS02010 | Values/types |
 | COHSQLE011 | CS02011 | Values/types |
@@ -128,6 +176,22 @@ structured-carrier messages remain unprefixed.
 | COHSQLE062 | CS02062 | Values/types |
 | COHSQLE063 | CS02063 | Values/types |
 | New (#1447) | CS02064 | Values/types — ALTER COLUMN TYPE old value, USING result or dependent DEFAULT has no assignment cast (42804) |
+| New (#1719, SQ-R1) | CS02065 | Values/types — Recursive anchor, recursive output or declared column-list width mismatch (42601) |
+| New (#1719, SQ-R1) | CS02066 | Values/types — Recursive UNION changes the anchor type, domain or type modifiers; cast hint (42804) |
+| New (#1719, SQ-R1) | CS02067 | Values/types — Recursive UNION changes or conflicts with the anchor collation; COLLATE hint (42P21) |
+| New (#1526, SQ-W1) | CS02068 | Non-integer navigation offset or bucket count (42804) |
+| New (#1526, SQ-W1) | CS02069 | Incompatible navigation value and default types (42804) |
+| New (#1526, SQ-W2) | CS02070 | Noninteger ROWS frame offset (42804) |
+| New (#1526, SQ-W2) | CS02071 | NULL frame offset (22004) |
+| New (#1526, SQ-W2) | CS02072 | Negative frame offset (22013) |
+| New (#1526, SQ-W2) | CS02073 | Noninteger NTH_VALUE index (42804) |
+| New (#1526, SQ-W3) | CS02074 | Unsupported RANGE offset ordering-key domain (0A000) |
+| New (#1526, SQ-W3) | CS02075 | Incompatible RANGE offset domain (0A000) |
+| New (#1526, SQ-W3) | CS02076 | Negative or NaN RANGE offset (22013) |
+| New (#1721, SQ-O2) | CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
+| New (#1722, SQ-N1) | CS02078 | Malformed JSON access or assignment input, invalid Unicode/UTF-8 or depth over 128 (22032) |
+| New (#1722, SQ-N1) | CS02079 | JSON kind cannot convert to the requested numeric or Boolean scalar (22023) |
+| New (#1722, SQ-N1) | CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
 | COHSQLE024 | CS03024 | Schema/constraints |
 | COHSQLE025 | CS03025 | Schema/constraints |
 | COHSQLE027 | CS03027 | Schema/constraints |
@@ -150,6 +214,23 @@ structured-carrier messages remain unprefixed.
 | COHSQLE066 | CS03066 | Schema/constraints |
 | New (#1716) | CS03067 | Schema/constraints — TRUNCATE omits a required referencing table (0A000) |
 | New (#1716) | CS03068 | Schema/catalog — CTAS output names are missing, blank, duplicate or have the wrong width (42601) |
+| New (#1717) | CS03069 | Schema/catalog — invalid resolved sequence options (22023) |
+| New (#1717) | CS03070 | Schema/catalog — occupied sequence/table/view relation name (42P07) |
+| New (#1717) | CS03071 | Schema/catalog — sequence namespace is absent (3F000) |
+| New (#1717) | CS03072 | Schema/catalog — sequence definition exceeds the record limit (54000) |
+| New (#1717, SQ-S2) | CS03073 | Schema/catalog — sequence name or object identity is absent (42P01) |
+| New (#1717, SQ-S2) | CS03074 | Schema/catalog — sequence operation in a persisted expression or declared provisioning script is unsupported (0A000) |
+| New (#1717, SQ-S2) | CS03075 | Schema/catalog — setval value is outside the sequence bounds (22003) |
+| New (#1717, SQ-S2) | CS03076 | Schema/expression — sequence value in an unsupported evaluation context, including NEXT VALUE FOR in RETURNING, or detached from execution (0A000) |
+| New (#1717, SQ-S2) | CS03077 | Schema/expression — malformed sequence reference or runtime sequence-call argument (22023) |
+| New (#1717, SQ-S3) | CS03078 | Schema/identity — ADD GENERATED requires NOT NULL (55000) |
+| New (#1717, SQ-S3) | CS03079 | Schema/identity — column has no identity (55000) |
+| New (#1717, SQ-S3) | CS03080 | Schema/dependency — sequence required by identity or column default (2BP01) |
+| New (#1717, SQ-S3) | CS03081 | Schema/ownership — invalid sequence OWNED BY target or identity ownership change (55000) |
+| New (#1630, SQ-P1) | CS03082 | Partial predicate on a primary key (42P16) |
+| New (#1630, SQ-P1) | CS03083 | Type change of a column read by a partial-index predicate (0A000) |
+| New (#1630, SQ-P1) | CS03084 | Inconsistent index predicate text/dependency metadata (42P17) |
+| New (#1631, SQ-K1) | CS03085 | Invalid per-column index key orders or directed primary-key metadata (42P17) |
 | COHSQLP001 | CS03101 | Schema/constraints |
 | COHSQLP002 | CS03102 | Schema/constraints |
 | COHSQLP003 | CS03103 | Schema/constraints |
@@ -171,10 +252,18 @@ structured-carrier messages remain unprefixed.
 | COHSQLT005 | CS04005 | Transactions/locking |
 | COHSQLT006 | CS04006 | Transactions/locking |
 | COHSQLE021 | CS04021 | Transactions/locking |
-| COHSQLE044 | CS04044 | Transactions/locking |
-| COHSQLE064 | CS04064 | Transactions/locking |
+| COHSQLE044 | CS04044 | Transactions/locking — lock timeout, including sequence DDL waiting for a definition lease |
+| COHSQLE064 | CS04064 | Transactions/locking — serialization failure, including a concurrently changed MERGE target under Snapshot (#1715) |
 | New (w11 review) | CS04065 | Transactions/locking — hard deadlock (`40P01`) |
 | New (#1716) | CS04066 | Transactions/locking — TRUNCATE inside an explicit transaction (25001) |
+| New (#1717) | CS04067 | Transactions/locking — dropped or replaced sequence incarnation, or live referential default requires an unplanned sequence grant (40001) |
+| New (#1717, SQ-S2) | CS04068 | Transactions/session state — currval is undefined for this sequence in this session (55000) |
+| New (#1717, SQ-S2) | CS04069 | Transactions/session state — lastval is undefined or its sequence was dropped (55000) |
+| New (#1717, SQ-S2 fix) | CS04070 | Transactions/session state — DISCARD ALL inside an explicit transaction (25001) |
+| New (#1012, SQ-I1) | CS04071 | SET TRANSACTION outside a transaction block: Warning with successful no-op (25000) |
+| New (#1012, SQ-I1) | CS04072 | SET TRANSACTION after the first data statement or during an operation (25001) |
+| New (#1012, SQ-I1) | CS04073 | SERIALIZABLE text transaction isolation is unsupported (0A000) |
+| New (#1726, XT-4) | CS04074 | SET TRANSACTION inside an active named savepoint (25001) |
 | COHSQLE004 | CS05004 | Execution/budgets |
 | COHSQLE007 | CS05007 | Execution/budgets |
 | COHSQLE013 | CS05013 | Execution/budgets |
@@ -187,17 +276,47 @@ structured-carrier messages remain unprefixed.
 | COHSQLE045 | CS05045 | Execution/budgets |
 | COHSQLE057 | CS05057 | Execution/budgets |
 | COHSQLE060 | CS05060 | Execution/budgets |
-| COHSQLE067 | CS05067 | Execution/budgets |
+| COHSQLE067 | CS05067 | Execution/budgets — retained statement memory, including recursive working/intermediate ranges, shared CTE buffers and DISTINCT state (#1719), grouping-set state, rewrite/backfill chunks and plain DELETE CASCADE closures (about 840 B per two-column row; default 64 MiB caps the closure at about 79,900 rows; the 100,000-row chain needs about 84 MB and a larger StatementMemoryBudget); sequence sorting follows ordinary, uncharged sort accounting |
 | New (#1714) | CS05068 | Execution/budgets — UPDATE target matched by multiple source associations (before writes) |
 | New (#1525, SQ-J1) | CS05069 | Execution/budgets — direct RIGHT, FULL or parenthesized joined DML source would require a different target-outer execution tree |
 | New (#1525, SQ-J2) | CS05070 | Execution/capabilities — FULL JOIN lacks a safe mandatory hash equality or has an unproven ON evaluation |
 | New (#1715, SQ-M1) | CS05071 | Action planning — MERGE WHEN follows an unconditional clause of the same match kind |
+| New (#1720, SQ-H1) | CS05072 | Execution/placement — FILTER on a non-aggregate call (42809) |
+| New (#1720, SQ-H1) | CS05073 | Execution/placement — same-scope aggregate in FILTER (42803) |
+| New (#1720, SQ-H2) | CS05074 | Execution/placement — GROUPING outside grouped output, or in grouping/aggregate inputs (42803) |
+| New (#1720, SQ-H2) | CS05075 | Execution/expansion — more than 4096 grouping sets before DISTINCT (54001) |
+| New (#1526, SQ-W1) | CS05076 | Window function placement or missing OVER (42P20) |
+| New (#1526, SQ-W1) | CS05077 | Nested window function (42P20) |
+| New (#1526, SQ-W1) | CS05078 | Non-positive NTILE bucket count (22014) |
+| New (#1526, SQ-W1) | CS05079 | Window state exceeds statement memory grant (54000) |
+| New (#1526, SQ-W2) | CS05080 | Invalid frame boundary categories (42P20) |
+| New (#1526, SQ-W2) | CS05081 | Row variable, aggregate or window in frame offset (42P20) |
+| New (#1526, SQ-W2) | CS05082 | Nonpositive NTH_VALUE index (22016) |
+| New (#1526, SQ-W2) | CS05083 | OVER on a scalar function (42809) |
+| New (#1526, SQ-W2 fixes) | CS05084 | Window frame recomputation exceeds 1,000,000 candidate input visits per statement (54000) |
+| New (#1723, SQ-F2) | CS05085 | Execution — conflicting replacement of one column through referential actions (27000) |
+| New (#1526, SQ-W3) | CS05086 | Offset RANGE requires exactly one ORDER BY key (42P20) |
+| New (#1526, SQ-W3) | CS05087 | GROUPS requires ORDER BY (42P20) |
+| New (#1526, SQ-W3) | CS05088 | NULL treatment on a function other than LAG/LEAD/FIRST_VALUE/LAST_VALUE/NTH_VALUE (42601) |
+| New (#1719, SQ-R2 reader fix) | CS05090 | Execution/internal invariant — a CTE opens more readers than its plan counted (XX000) |
+| New (#1630, SQ-P1) | CS05091 | Prohibited expression or non-immutable function in a partial-index predicate (42P17) |
+| New (#1630, SQ-P2) | CS05092 | Non-row-local ON CONFLICT inference predicate |
 | COHSQLE041 | CS06041 | Storage/durability |
 | COHSQLE058 | CS06058 | Storage/durability |
 
 SQLSTATE meanings remain those in [the SQL dialect](../../Assimalign.Cohesion.Database.Sql.Language/docs/DIALECT.md); the Cohesion identities changed, not ISO/PostgreSQL SQLSTATE values.
 
 ## Documents migration
+
+OQL null placement (#1730) adds CD00013 for a malformed NULLS suffix and CD01032 for an
+invalid directly constructed placement. Existing CD05018 still bounds sorting; #1632 ordering
+proof probes fall back on exhaustion and add no execution failure or format change.
+
+OQL aggregate quantifiers and native aggregates (#1729, OQ-G1) add CD00011 for a scalar/star
+quantifier and CD01029 for an invalid directly constructed call quantifier. Existing CD02007
+covers a statistical result outside the decimal domain, CD02008 preserves SUM/AVG nonnumber refusal, CD05001 covers
+aggregate placement and CD05018 covers the same statement retained-memory exhaustion condition
+for DISTINCT sets and ARRAY_AGG as for RETURNING. No disk or wire identity changes.
 
 OQL ARRAY/FIRST comprehensions (#1728) reuse CD00002/CD00005 for malformed/deep syntax,
 CD01005 for missing parameters, CD02006/CD02007/CD02008 for scalar failures and CD05001 for
@@ -225,6 +344,12 @@ payload accepts rows plus a matching affected count without capability negotiati
 | OQL0008 | CD00008 | Language/syntax |
 | OQL0009 | CD00009 | Language/syntax |
 | OQL0010 | CD00010 | Language/syntax |
+| New (#1729, OQ-G1) | CD00011 | Language/syntax — ALL/DISTINCT on a scalar or star call |
+| New (#1729, OQ-G2) | CD00012 | Language/syntax — GROUP AS without preceding GROUP BY terms |
+| New (#1730) | CD00013 | Language/syntax — NULLS without FIRST or LAST |
+| New (#1731, OQ-Q1) | CD00014 | Language/syntax — direct IN subquery requires SELECT RAW or SELECT VALUE |
+| New (#1731, OQ-Q2) | CD00015 | Language/syntax — derived FROM subquery has no alias |
+| New (#1732) | CD00016 | Language/syntax — a statement containing JOIN/NEST has a SELECT source without an explicit alias |
 | COHDOC002 | CD01002 | Binding/names |
 | COHDOC003 | CD01003 | Binding/names |
 | COHDOC005 | CD01005 | Binding/names |
@@ -236,6 +361,13 @@ payload accepts rows plus a matching affected count without capability negotiati
 | New (#1727) | CD01026 | Binding/names — empty RETURNING output name in a directly constructed AST |
 | New (#1728) | CD01027 | Binding/names — empty comprehension variable in a directly constructed AST |
 | New (#1530, OQ-I2) | CD01028 | Binding/names — array index projection or WHEN path is not rooted in its element variable |
+| New (#1729, OQ-G1) | CD01029 | Binding/names — invalid aggregate quantifier or target in a directly constructed call AST |
+| New (#1729, OQ-G2) | CD01030 | Binding/names — invalid grouping alias declaration, shape or collision with FROM/UNNEST |
+| New (#1729, OQ-G2) | CD01031 | Binding/names — GROUP AS referenced in an aggregate's row input |
+| New (#1730) | CD01032 | Binding/names — invalid null placement in a direct ordering AST |
+| New (#1731, OQ-Q2) | CD01033 | Binding/names — FROM expression has no explicit alias or implicit field name |
+| New (#1731, OQ-Q2) | CD01034 | Binding/names — unbound variable in a FROM expression without an input-row scope |
+| New (#1732) | CD01035 | Binding/names — unbound/self/forward key source reference, missing joined alias, or ambiguous/invalid joined META receiver |
 | COHDOC006 | CD02006 | Values/types |
 | COHDOC007 | CD02007 | Values/types |
 | COHDOC008 | CD02008 | Values/types |
@@ -246,6 +378,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC021 | CD02021 | Values/types |
 | COHDOC026 | CD02026 | Values/types |
 | New (#1530, OQ-I2) | CD02027 | Values/types — array index WHEN constant is not a supported scalar literal |
+| New (#1732) | CD02028 | Values/types — JOIN/NEST key is neither a string, NULL nor MISSING (arrays unsupported) |
 | COHDOC010 | CD03010 | Schema/constraints |
 | COHDOC011 | CD03011 | Schema/constraints |
 | COHDOC012 | CD03012 | Schema/constraints |
@@ -259,7 +392,7 @@ payload accepts rows plus a matching affected count without capability negotiati
 | COHDOC004 | CD04004 | Transactions/locking |
 | COHDBD001 | CD04101 | Transactions/locking |
 | COHDOC001 | CD05001 | Execution/budgets |
-| COHDOC015 | CD05015 | Execution/budgets |
+| COHDOC015 | CD05015 | Execution/budgets — constructor, SELECT projection or result formatter depth, including its row wrapper (#1731) |
 | COHDBD002 | CD06102 | Storage/durability |
 | COHDBD003 | CD06103 | Storage/durability |
 | COHDBD004 | CD06104 | Storage/durability |
@@ -289,27 +422,63 @@ transaction-state diagnostics; it allocates no new identity. These changes add n
 | GQL0009 | CG00009 | Language/syntax |
 | GQL0010 | CG00010 | Language/syntax |
 | New (#1734) | CG00011 | Language/syntax — SHORTEST selector requires a positive Int64 literal count |
+| New (#1736, GQ-C1 fixes) | CG00012 | Language/syntax — list slice omits both bounds; rejected during planning |
+| New (#1537, GQ-E1) | CG00013 | Language/syntax — EXISTS omits its nonempty braced pattern |
+| New (#1736, GQ-C3) | CG00014 | Language — pattern comprehension requires a nonempty path and projection |
+| New (#1737, GQ-Q1) | CG00015 | A composite operation is missing its query operand |
+| New (#1737, GQ-Q1) | CG00016 | UNION and UNION ALL are mixed within one composite tree |
 | COHDBG002 | CG01002 | Binding/names |
 | COHDBG010 | CG01010 | Binding/names |
 | COHDBG011 | CG01011 | Binding/names |
 | COHDBG014 | CG01014 | Binding/names |
 | COHDBG015 | CG01015 | Binding/names |
 | New (#1734) | CG01016 | Binding/names — path search prefilter references a binding introduced by a peer path in the same MATCH, with or without an explicit selector |
+| New (#1736, GQ-C1) | CG01017 | Binding/names — missing/empty comprehension iterator declaration in a hand-built AST |
+| New (#1736, GQ-C2) | CG01018 | Binding/names — missing reduce/list-predicate declaration or identical accumulator and iterator names |
+| New (#1537, GQ-E1) | CG01019 | Binding/names — outer binding has a proven incompatible correlated pattern kind |
+| New (#1737, GQ-Q1) | CG01020 | Composite operand column names, order or count differ |
+| New (#1738, GQ-D1) | CG01021 | Binding/names — named index or constraint to drop is absent |
+| New (#1738, GQ-D2) | CG01022 | Binding/names — schema property references a variable other than its FOR declaration |
+| New (#1249, #1738, GQ-D3) | CG01023 | Warning — statically named entity property is unknown database-wide in a read-only statement |
 | COHDBG009 | CG02009 | Values/types |
 | COHDBG013 | CG02013 | Values/types |
+| New (#1736, GQ-C1) | CG02014 | Values/types — invalid list-operation source or numeric slice-bound kind/range |
+| New (#1736, GQ-C2) | CG02015 | Values/types — reduce or list predicate source is neither list nor NULL |
+| New (#1537, GQ-E1) | CG02016 | Values/types — runtime correlated argument has an incompatible entity kind |
+| New (#1737, GQ-Q1) | CG02017 | Composite operand result shapes are incompatible |
 | COHDBG003 | CG03003 | Schema/constraints |
+| New (#1735, GQ-M2) | CG03004 | Constraints — MERGE equality is null, non-finite or non-scalar |
+| New (#1735, GQ-M2) | CG03005 | Constraints — bound MERGE node is null, absent or incompatible with its node pattern |
+| New (#1735, GQ-M2 fixes) | CG03006 | Constraints — repeated or already-bound MERGE node has labels or properties |
+| New (#1735, GQ-M2 fixes) | CG03007 | Constraints — MERGE relationship variable is already declared before the clause |
+| New (#1738, GQ-D1) | CG03008 | Schema — database-wide index/constraint name is already used |
+| New (#1738, GQ-D1) | CG03009 | Constraints — duplicate constraint kind or incompatible property type rule |
+| New (#1738, GQ-D1) | CG03010 | Constraints — existing data violates a newly created named constraint |
 | COHDBG007 | CG04007 | Transactions/locking |
 | COHDBG022 | CG04022 | Transactions/locking |
 | COHDBG023 | CG04023 | Transactions/locking |
+| New (#1735, GQ-M1) | CG04024 | Transactions/locking — retryable stale Snapshot MERGE pattern decision |
+| New (#1738, GQ-D2) | CG04025 | Transactions — schema DDL inside an explicit transaction (Cohesion policy) |
 | COHDBG001 | CG05001 | Execution/budgets |
 | COHDBG004 | CG05004 | Execution/budgets — physical work or qualifying 65th hop, including selector search |
 | COHDBG008 | CG05008 | Execution/budgets |
 | COHDBG020 | CG05020 | Execution/budgets — retained statement memory, including selector history and output |
 | New (#1536) | CG05022 | Execution — selected shortest-path record is absent while reconstruction's operation remains active |
+| New (#1735, GQ-M1) | CG05023 | Execution — invalid bound MERGE pattern lock identity |
+| New (#1736, GQ-C1) | CG05024 | Execution — aggregate inside a list comprehension predicate or projection |
+| New (#1736, GQ-C2) | CG05025 | Execution — malformed reduce/list-predicate body or aggregate inside that body |
+| New (#1736, GQ-C2) | CG05026 | Planning — reduce shape/type analysis exceeds 65,536 visited nodes or closure steps |
+| New (#1537, GQ-E1) | CG05027 | Execution — malformed or missing correlated subplan or missing argument |
+| New (#1736, GQ-C3) | CG05028 | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
+| New (#1737, GQ-Q1) | CG05029 | A composite query contains a modifying operand |
+| New (#1737, GQ-Q1) | CG05030 | UNION duplicate-elimination state exceeds the statement memory budget |
+| New (#1737, GQ-Q1 fixes) | CG05031 | Internal statement lookup unexpectedly lacks its key; original cause is retained |
+| New (#1737, GQ-Q2) | CG05032 | EXCEPT or INTERSECT retained frames/rows/hash state exceeds the statement memory budget |
 | COHDBG006 | CG06006 | Storage/durability |
 | COHDBG012 | CG06012 | Storage/durability |
 | COHDBG017 | CG06017 | Storage/durability |
 | COHDBG018 | CG06018 | Storage/durability |
+| New (#1738, GQ-D1) | CG06019 | Format — graph catalog record version differs from v2; recreate database, no legacy reader |
 | COHDBG005 | CG07005 | Protocol/transport |
 | COHDBG016 | CG07016 | Protocol/transport |
 | COHDBG021 | CG08021 | Configuration |
@@ -370,25 +539,33 @@ and invariant exceptions and lower child-root typed failures retain their docume
 | CK03001 | Logical database or storage already exists | — |
 | CK03002 | Logical database is absent | — |
 | CK04001 | Requested isolation level is unsupported | — |
-| CK04002 | Statement operation has already completed | — |
+| CK04002 | Statement operation has already completed; MERGE includes session end during writer/parent/pattern waits or late grants while the database is live (database disposal retains CG09019) | — |
 | CK04003 | Active statement apply bracket is absent | — |
 | CK04004 | Session already has an active transaction | — |
 | CK04005 | Transaction has already ended | — |
 | CK04006 | Transaction commit or rollback is in progress | — |
 | CK04007 | Running operation prevents transaction commit | — |
+| CK04008 | Undo marker is foreign, released, discarded or ended; undo control context is foreign, stale, a statement view or a snapshot pin (#1726) | — |
+| CK04009 | Partial undo or failed statement memory compensation is running or incomplete, or a statement/control/end prevents control admission; retry its target or an earlier marker, or roll back the transaction (#1726) | — |
+| CK04010 | An open write stream prevents undo marker creation, release or rollback-to (#1726) | — |
+| CK04011 | A transaction has reached the supported limit of 65,535 open write streams (#1726) | — |
+| CK04012 | Savepoint control requires an explicit transaction with an owned kernel binding (#1726) | — |
+| CK04013 | The named savepoint does not exist in the current transaction (#1726) | — |
 | CK06004 | Interrupted creation/drop left an orphan directory | — |
 | CK06005 | Physical data or catalog file set is absent | — |
 | CK07003 | Session operations overlap | — |
 | CK07004 | Session is closed | — |
 | CS06059 | Persisted SQL catalog metadata is malformed | XX001 |
 | CS06060 | SQL catalog metadata format/version is unsupported | 0A000 |
+| CS06061 | Sequence catalog definition, reservation or ownership is malformed | XX001 |
 | CD04102 | Catalog snapshot conflict | — |
 | CD04103 | Expected document version differs | — |
 | CD04104 | No explicit document transaction is open for COMMIT or ROLLBACK (#1725) | — |
 | CD04105 | OQL collection/index DDL inside an explicit transaction (#1725) | — |
 | CD05016 | Result byte/frame limit exceeded | — |
-| CD05018 | RETURNING retained result exceeds the statement memory budget (#1727) | — |
+| CD05018 | Retained SELECT sources/groups, ordered candidate buckets, key-lookup caches, native aggregate state/values, DML pending buffers or RETURNING results exceed the statement memory budget (#1632, #1727, #1729, #1753, #1755) | — |
 | CD05019 | Serialized RETURNING value exceeds 256 levels, including the named projection wrapper (#1727) | — |
+| CD05020 | Shared expression/lookup work budget exhausted across a statement's subqueries, expression sources and key joins (#1731, #1732) | — |
 | CD07001 | Session belongs to another database | — |
 | CD07002 | Text transaction control requires the negotiated transaction-status capability (#1725) | — |
 | CD09001 | Collection handle is stale | — |

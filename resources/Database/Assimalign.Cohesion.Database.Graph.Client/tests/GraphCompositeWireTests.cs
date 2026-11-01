@@ -14,6 +14,67 @@ namespace Assimalign.Cohesion.Database.Graph.Client.Tests;
 
 public sealed class GraphCompositeWireTests
 {
+    [Theory(DisplayName = "Cohesion Test [Graph.Client] - Comprehensions: scalar entity-list projections cross Execute over both transports")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task QueryAsync_ComprehensionsAndSlices_ShouldPreserveScalarAdmissionAsync(bool tcp)
+    {
+        // Arrange
+        await using var harness = await GraphClientTestHarness.StartAsync(tcp);
+        await using var connection = await harness.Client.ConnectAsync(harness.Token);
+        await connection.ExecuteAsync("INSERT (:N {k:1})-[:T {w:2}]->(:N {k:2})-[:T {w:3}]->(:N {k:3})", cancellationToken: harness.Token);
+        Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
+        // Act / Assert
+        foreach (string source in new[]
+        {
+            "MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN [r IN rs | r.w]",
+            "MATCH p=(a:N {k:1})-[:T]->{2}(b) RETURN [r IN relationships(p) | r.w]",
+            "MATCH (a:N {k:1})-[rs:T]->{2}(b) WITH [r IN rs | {w:r.w}] AS values RETURN [v IN values | v.w]",
+            "MATCH (a:N {k:1})-[rs:T]->{2}(b) RETURN [r IN rs[0..] | [r IN [r] | r.w][0]]",
+        })
+        {
+            var row = (await connection.QueryAsync(source, cancellationToken: harness.Token)).ShouldHaveSingleItem();
+            row[0].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { 2L, 3L });
+        }
+        var nodes = (await connection.QueryAsync("MATCH p=(a:N {k:1})-[:T]->{2}(b) RETURN [n IN nodes(p)[1..] | n.k]", cancellationToken: harness.Token)).ShouldHaveSingleItem();
+        nodes[0].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { 2L, 3L });
+        var parameters = new Dictionary<string, object?> { ["xs"] = new object?[] { 1L, null, 3L }, ["from"] = -2L };
+        var values = (await connection.QueryAsync("RETURN [x IN $xs WHERE x IS NOT NULL | x*2], $xs[$from..], [x IN NULL | x], [1][..NULL]", parameters, harness.Token)).ShouldHaveSingleItem();
+        values[0].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { 2L, 6L });
+        values[1].ShouldBeOfType<object?[]>().ShouldBe(new object?[] { null, 3L });
+        values[2].ShouldBeNull(); values[3].ShouldBeNull();
+        foreach (string expression in new[] { "[r IN rs | r]", "[r IN rs WHERE FALSE]", "rs[0..]", "[r IN rs | {r:r}]" })
+        {
+            var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(
+                "MATCH (a:N {k:1})-[rs:T]->{2}(b) INSERT (:Unwritten) RETURN " + expression, cancellationToken: harness.Token));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG05001");
+        }
+        var badBound = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync("INSERT (:Unwritten) RETURN [1]['x'..]", cancellationToken: harness.Token));
+        badBound.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CG02014");
+        foreach (var (query, code) in new[]
+        {
+            ("RETURN [1][..]", "CG00012"),
+            ("EXPLAIN RETURN [1][1.5..]", "CG02014"),
+            ("RETURN [x IN [] WHERE 1]", "CG02013"),
+            ("EXPLAIN RETURN [x IN NULL WHERE 1]", "CG02013"),
+            ("MERGE (n:Rejected {k:[x IN [1] | x]})", "CK00001"),
+        })
+        {
+            var error = await Should.ThrowAsync<GraphClientException>(async () => await connection.QueryAsync(query, cancellationToken: harness.Token));
+            error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
+        }
+        await connection.ExecuteAsync("UNWIND [1,2,1] AS k MERGE (n:CollectionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0]", cancellationToken: harness.Token);
+        var merged = await connection.QueryAsync("MATCH (n:CollectionMerge) RETURN n.k,n.c,n.m ORDER BY n.k", cancellationToken: harness.Token);
+        merged.Count.ShouldBe(2);
+        merged[0].ToArray().ShouldBe(new object?[] { 2L, 11L, 21L });
+        merged[1].ToArray().ShouldBe(new object?[] { 4L, 12L, null });
+        (await connection.QueryAsync("RETURN all(x IN [] WHERE TRUE)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(true);
+        (await connection.QueryAsync("MATCH (n:Unwritten) RETURN count(*)", cancellationToken: harness.Token)).ShouldHaveSingleItem()[0].ShouldBe(0L);
+        var explain = await connection.QueryAsync("EXPLAIN MATCH (a)-[rs]->{2}(b) RETURN [r IN rs | r.w]", cancellationToken: harness.Token);
+        explain.ShouldNotBeEmpty();
+        harness.Server.Sessions.ShouldHaveSingleItem().Id.ShouldBe(session);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Graph.Client] - Composite values: malformed request parameters are protocol violations")]
     [InlineData(0)]
     [InlineData(1)]
@@ -96,7 +157,7 @@ public sealed class GraphCompositeWireTests
         channel.SetAgreement(ProtocolReadyMessage.Decode(ready.Payload.Span));
         Guid session = harness.Server.Sessions.ShouldHaveSingleItem().Id;
         // Act
-        foreach (string statement in new[] { "MATCH (a)-[r:T*0]->(b) RETURN r", "MATCH (a)-[r]->{1,3}(b) RETURN r", "MATCH ((x)->(y)){1,3} RETURN *", "MATCH (a)-[r]->{1,3}(b) WITH r RETURN r", "LET l = [1,2] RETURN l", "LET l = [[1]] FOR x IN l RETURN x", "LET l = [1] WITH l RETURN l", "RETURN [1] AS l NEXT RETURN l", "RETURN [1,NULL]", "RETURN {k:1}", "INSERT (:Unwritten) RETURN [1]", "INSERT (:Unwritten) RETURN {k:1}" })
+        foreach (string statement in new[] { "MATCH (a)-[r:T*0]->(b) RETURN r", "MATCH (a)-[r]->{1,3}(b) RETURN r", "MATCH ((x)->(y)){1,3} RETURN *", "MATCH (a)-[r]->{1,3}(b) WITH r RETURN r", "LET l = [1,2] RETURN l", "LET l = [[1]] FOR x IN l RETURN x", "LET l = [1] WITH l RETURN l", "RETURN [1] AS l NEXT RETURN l", "RETURN [1,NULL]", "RETURN NULL AS x UNION RETURN [1] AS x", "RETURN NULL AS x UNION ALL MATCH (n:Missing) RETURN [n] AS x", "RETURN {k:1}", "INSERT (:Unwritten) RETURN [1]", "INSERT (:Unwritten) RETURN {k:1}" })
         {
             await Execute(statement);
             var failure = await Read();

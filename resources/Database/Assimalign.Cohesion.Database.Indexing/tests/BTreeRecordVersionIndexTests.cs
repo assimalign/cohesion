@@ -15,6 +15,36 @@ namespace Assimalign.Cohesion.Database.Indexing.Tests;
 /// </summary>
 public sealed class BTreeRecordVersionIndexTests
 {
+    [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Record version index: bindings compare and hash by logical tree, including reattached handles")]
+    public async Task Equals_SeparateBindings_ShouldUseLogicalIndexIdentity()
+    {
+        // Arrange
+        await using var harness = new IndexTestHarness();
+        var setup = await harness.BeginAsync();
+        var index = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_first", IndexKind.BTree, false));
+        var different = await harness.IndexManager.CreateIndexAsync(setup, 1, new IndexDefinition("ix_second", IndexKind.BTree, false));
+        await harness.CommitAsync(setup);
+        var reattached = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = harness.Storage,
+            TransactionSource = harness.GetStorageTransaction,
+            ExistingIndexes = harness.IndexManager.ExportRegistrations()
+        });
+        var first = BTreeRecordVersionIndex.Create(index);
+        var second = BTreeRecordVersionIndex.Create(index);
+        reattached.TryGetIndex(1, "ix_first", out var attachedIndex).ShouldBeTrue();
+        var attached = BTreeRecordVersionIndex.Create(attachedIndex);
+
+        // Act / Assert
+        first.Equals(second).ShouldBeTrue();
+        second.Equals(first).ShouldBeTrue();
+        first.GetHashCode().ShouldBe(second.GetHashCode());
+        first.Equals(attached).ShouldBeTrue();
+        first.GetHashCode().ShouldBe(attached.GetHashCode());
+        first.Equals(BTreeRecordVersionIndex.Create(different)).ShouldBeFalse();
+        first.Equals(null).ShouldBeFalse();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Database.Indexing] - Record version index: the factory is the only way in and refuses a null index")]
     public void Create_NullIndex_ShouldThrowAndExposeNoPublicConstructor()
     {

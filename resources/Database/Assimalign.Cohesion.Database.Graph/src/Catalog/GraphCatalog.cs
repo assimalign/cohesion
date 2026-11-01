@@ -37,9 +37,13 @@ public sealed class GraphCatalog
     private readonly Dictionary<(byte Kind, Guid Parent, string Name), List<Reference>> _versions = new();
     private readonly Dictionary<Guid, HashSet<(byte Kind, string Name)>> _definitions = new();
     private readonly Dictionary<(byte Kind, Guid Parent), SortedSet<string>> _children = new();
+    private readonly Dictionary<string, HashSet<(byte Kind, Guid Parent)>> _schemaNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<Reference>> _propertyNames = new(StringComparer.Ordinal);
 
     // Per-instance fault/record-visit seam, reached only by this model's tests.
     internal Action? BeforeRecordRead { get; set; }
+    internal Action? BeforePropertyCheck { get; set; }
+    internal Action<string>? BeforePropertyKeyLookup { get; set; }
     internal Action? BeforeDirectoryKeyVisit { get; set; }
 
     private GraphCatalog(GraphStorage storage, TransactionCoordinator coordinator)
@@ -64,7 +68,34 @@ public sealed class GraphCatalog
             var (writer, _) = RecordVersionStamp.ReadStamps(unit.Data.Span);
             catalog.Add(record, new Reference(unit.PageId, unit.SlotIndex, writer, record.Id));
         }
+        storage.CatalogVersionUndone = catalog.CreatedVersionUndone;
         return catalog;
+    }
+
+    private void CreatedVersionUndone(PageId page, int slot, ReadOnlyMemory<byte> bytes)
+    {
+        if (bytes.Length < 18 || bytes.Span[17] != GraphCatalogCodec.FormatVersion) { return; }
+        var record = GraphCatalogCodec.Decode(bytes.Span, page, slot);
+        var key = (record.Kind, record.Parent, record.Name);
+        lock (_sync)
+        {
+            if (!_versions.TryGetValue(key, out var versions)) { return; }
+            for (int i = versions.Count - 1; i >= 0; i--)
+            {
+                if (versions[i].PageId == page && versions[i].SlotIndex == slot) { RemoveStaleReference(key, versions, i); }
+            }
+        }
+    }
+
+    // Run before logical recovery can scrub any catalog record, including abandoned v1 records.
+    internal static void EnsureFormat(GraphStorage storage)
+    {
+        using var iterator = storage.GetUnitIterator(0);
+        while (iterator.MoveNext())
+        {
+            var unit = iterator.Current;
+            GraphCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
+        }
     }
 
     /// <summary>Finds a visible label by its ordinal name.</summary>
@@ -125,7 +156,7 @@ public sealed class GraphCatalog
     /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
     public ValueTask SaveLabelAsync(GraphLabelMetadata label, TransactionContext context, CancellationToken cancellationToken = default)
-        => SaveDefinitionAsync(new CatalogRecord(Label: label), context, cancellationToken);
+        => SaveDefinitionAsync(new CatalogRecord(label: label), context, cancellationToken);
 
     /// <summary>Creates or alters a relationship type definition in the supplied transaction.</summary>
     /// <param name="relationshipType">The complete definition.</param>
@@ -137,7 +168,7 @@ public sealed class GraphCatalog
     /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The existing definition is owned by a schema.</exception>
     public ValueTask SaveRelationshipTypeAsync(GraphRelationshipTypeMetadata relationshipType, TransactionContext context, CancellationToken cancellationToken = default)
-        => SaveDefinitionAsync(new CatalogRecord(RelationshipType: relationshipType), context, cancellationToken);
+        => SaveDefinitionAsync(new CatalogRecord(relationshipType: relationshipType), context, cancellationToken);
 
     /// <summary>Drops a label and its property/index metadata in the supplied transaction.</summary>
     /// <param name="id">The stable definition identity.</param>
@@ -157,13 +188,74 @@ public sealed class GraphCatalog
     public ValueTask DeleteRelationshipTypeAsync(Guid id, TransactionContext context, CancellationToken cancellationToken = default)
         => DeleteDefinitionAsync(2, id, context, cancellationToken);
 
-    /// <summary>Lists a definition's property keys in ordinal name order.</summary>
+    /// <summary>Lists a definition's property keys and effective named/unnamed constraints in ordinal name order.</summary>
     /// <param name="definitionId">The label or relationship-type identity.</param>
     /// <param name="snapshot">The visibility snapshot.</param>
     /// <returns>The visible property definitions.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
     public IReadOnlyList<GraphPropertyKeyMetadata> GetPropertyKeys(Guid definitionId, TransactionSnapshot snapshot)
+    {
+        var declared = GetDeclaredPropertyKeys(definitionId, snapshot);
+        lock (_sync)
+        {
+            if (!_children.ContainsKey((5, definitionId))) { return declared; }
+        }
+        var constraints = GetConstraints(definitionId, snapshot);
+        if (constraints.Count == 0) { return declared; }
+        var properties = declared.ToDictionary(item => item.Name, StringComparer.Ordinal);
+        foreach (var constraint in constraints)
+        {
+            var property = properties.GetValueOrDefault(constraint.PropertyKey,
+                new GraphPropertyKeyMetadata(definitionId, constraint.PropertyKey));
+            properties[constraint.PropertyKey] = property with
+            {
+                Type = constraint.Type ?? property.Type,
+                Required = property.Required || constraint.Type is null,
+            };
+        }
+        return properties.Values.OrderBy(item => item.Name, StringComparer.Ordinal).ToArray();
+    }
+
+    internal IReadOnlyList<GraphPropertyKeyMetadata> GetDeclaredPropertyKeys(Guid definitionId, TransactionSnapshot snapshot)
         => List(3, definitionId, snapshot).Select(item => item.Record.Property!.Value).ToArray();
+
+    // Tokens describe names a definition has had, independently of a particular entity's
+    // current values. Consult the writer stamps already loaded by Add, without decoding
+    // metadata or scanning definitions on the read path. Undone versions leave this directory.
+    internal bool HasPropertyKey(string name, TransactionSnapshot snapshot)
+    {
+        BeforePropertyKeyLookup?.Invoke(name);
+        lock (_sync)
+        {
+            if (!_propertyNames.TryGetValue(name, out var versions)) { return false; }
+            foreach (var version in versions)
+            {
+                if (snapshot.IsVisible(version.Writer)) { return true; }
+            }
+            return false;
+        }
+    }
+
+    // Entity records persist string keys, rather than separate property-token identities.
+    // Reuse kind-3 catalog records for discoveries without a mutable definition. A fresh
+    // private identity keeps them outside every definition's metadata and avoids reserving
+    // a public GUID or adding a second registry/record format. Add and undo maintain the
+    // same database-wide name directory as declared keys.
+    internal ValueTask DiscoverPropertyKeyAsync(string name, TransactionContext context, CancellationToken token)
+    {
+        if (HasPropertyKey(name, context.Snapshot)) { return default; }
+        return SaveAsync(new CatalogRecord(property: new GraphPropertyKeyMetadata(Guid.NewGuid(), name)),
+            null, context, token);
+    }
+
+    internal void EnsurePropertyKeyCompatible(GraphPropertyKeyMetadata property, TransactionSnapshot snapshot)
+    {
+        if (property.Type is { } type && GetConstraints(property.DefinitionId, snapshot)
+            .Any(item => item.PropertyKey == property.Name && item.Type is { } expected && expected != type))
+        {
+            throw ConstraintConflict(property.Name);
+        }
+    }
 
     /// <summary>Creates or alters property metadata on an existing mutable definition.</summary>
     /// <param name="property">The complete property definition.</param>
@@ -171,16 +263,17 @@ public sealed class GraphCatalog
     /// <param name="cancellationToken">Cancels the mutation.</param>
     /// <returns>A task representing the mutation.</returns>
     /// <exception cref="ArgumentException">The property metadata is invalid.</exception>
-    /// <exception cref="GraphCatalogException">The owning definition is absent.</exception>
+    /// <exception cref="GraphCatalogException">The owning definition is absent, or a named type rule conflicts (CG03009).</exception>
     /// <exception cref="GraphElementTooLargeException">The encoded catalog record exceeds one slotted-page record.</exception>
     /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
     public ValueTask SavePropertyKeyAsync(GraphPropertyKeyMetadata property, TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
-        var record = new CatalogRecord(Property: property);
+        var record = new CatalogRecord(property: property);
         GraphCatalogCodec.Validate(record);
         RequireMutableDefinition(property.DefinitionId, context.Snapshot, "ALTER");
         EnsureParentUnchanged(property.DefinitionId, context);
+        EnsurePropertyKeyCompatible(property, Latest(context));
         return SaveAsync(record, EnsureUnchanged(3, property.DefinitionId, property.Name, context), context, cancellationToken);
     }
 
@@ -208,6 +301,104 @@ public sealed class GraphCatalog
     public IReadOnlyList<GraphIndexMetadata> GetIndexes(Guid labelId, TransactionSnapshot snapshot)
         => List(4, labelId, snapshot).Select(item => item.Record.Index!.Value).ToArray();
 
+    /// <summary>Finds an index by its database-wide, ordinal name.</summary>
+    /// <param name="name">The schema-rule name.</param>
+    /// <param name="snapshot">The visibility snapshot.</param>
+    /// <returns>The visible index, or null when absent or a constraint owns the name.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="GraphCatalogException">Persisted metadata is malformed.</exception>
+    public GraphIndexMetadata? FindIndex(string name, TransactionSnapshot snapshot)
+        => FindSchemaRule(name, snapshot)?.Record.Index;
+
+    /// <summary>Lists all database indexes in ordinal name order.</summary>
+    /// <param name="snapshot">The visibility snapshot.</param>
+    /// <returns>The visible indexes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    public IReadOnlyList<GraphIndexMetadata> GetIndexes(TransactionSnapshot snapshot)
+        => List(4, null, snapshot).Select(item => item.Record.Index!.Value).ToArray();
+
+    /// <summary>Finds a constraint by its database-wide, ordinal name.</summary>
+    /// <param name="name">The schema-rule name.</param>
+    /// <param name="snapshot">The visibility snapshot.</param>
+    /// <returns>The visible constraint, or null when absent or an index owns the name.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="GraphCatalogException">Persisted metadata is malformed.</exception>
+    public GraphConstraintMetadata? FindConstraint(string name, TransactionSnapshot snapshot)
+        => FindSchemaRule(name, snapshot)?.Record.Constraint;
+
+    /// <summary>Lists all database constraints in ordinal name order.</summary>
+    /// <param name="snapshot">The visibility snapshot.</param>
+    /// <returns>The visible constraints.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    public IReadOnlyList<GraphConstraintMetadata> GetConstraints(TransactionSnapshot snapshot)
+        => List(5, null, snapshot).Select(item => item.Record.Constraint!.Value).ToArray();
+
+    /// <summary>Lists constraints belonging to one definition in ordinal name order.</summary>
+    /// <param name="definitionId">The owning label or relationship-type identity.</param>
+    /// <param name="snapshot">The visibility snapshot.</param>
+    /// <returns>The visible constraints.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="snapshot"/> is null.</exception>
+    public IReadOnlyList<GraphConstraintMetadata> GetConstraints(Guid definitionId, TransactionSnapshot snapshot)
+        => List(5, definitionId, snapshot).Select(item => item.Record.Constraint!.Value).ToArray();
+
+    /// <summary>Creates an independently named type or existence constraint.</summary>
+    /// <param name="constraint">The constraint definition.</param>
+    /// <param name="context">The active transaction; the caller holds the database writer lock and validates existing data.</param>
+    /// <param name="cancellationToken">Cancels the mutation.</param>
+    /// <returns>Completion of the mutation.</returns>
+    /// <exception cref="ArgumentException">The metadata is invalid.</exception>
+    /// <exception cref="GraphCatalogException">The name is taken, the owner is missing, a constraint conflicts, or the snapshot is stale.</exception>
+    /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
+    /// <exception cref="GraphElementTooLargeException">The encoded metadata exceeds one record.</exception>
+    public async ValueTask CreateConstraintAsync(GraphConstraintMetadata constraint, TransactionContext context, CancellationToken cancellationToken = default)
+    {
+        EnsureActive(context);
+        var record = new CatalogRecord(constraint: constraint);
+        GraphCatalogCodec.Validate(record);
+        RequireMutableDefinition(constraint.DefinitionId, context.Snapshot, "ALTER");
+        EnsureParentUnchanged(constraint.DefinitionId, context);
+        EnsureSchemaNameAvailable(record, context, allowExisting: false);
+        var latest = Latest(context);
+        if (GetConstraints(constraint.DefinitionId, latest).Any(item => item.PropertyKey == constraint.PropertyKey &&
+            (item.Type is null) == (constraint.Type is null)) ||
+            constraint.Type is { } type && GetPropertyKeys(constraint.DefinitionId, latest)
+                .Any(item => item.Name == constraint.PropertyKey && item.Type is { } expected && expected != type))
+        {
+            throw ConstraintConflict(constraint.PropertyKey);
+        }
+        EnsureUnchanged(5, constraint.DefinitionId, constraint.Name, context);
+        // A constraint introduces a known property key, independently of the rule's lifetime.
+        // Keep unnamed rules untouched, and roll back new key discovery with a failed creation.
+        if (Find(3, constraint.DefinitionId, constraint.PropertyKey, context.Snapshot) is null)
+        {
+            await SavePropertyKeyAsync(new GraphPropertyKeyMetadata(constraint.DefinitionId, constraint.PropertyKey),
+                context, cancellationToken).ConfigureAwait(false);
+        }
+        await SaveAsync(record, null, context, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Tombstones a named constraint without changing other constraints or property metadata.</summary>
+    /// <param name="name">The database-wide constraint name.</param>
+    /// <param name="context">The active transaction whose caller holds the database writer lock.</param>
+    /// <param name="cancellationToken">Cancels the mutation.</param>
+    /// <returns>Completion of the mutation; absent constraints are unchanged.</returns>
+    /// <exception cref="GraphCatalogException">The snapshot is stale.</exception>
+    /// <exception cref="DatabaseObjectLockedException">The owning definition is schema-owned.</exception>
+    public ValueTask DeleteConstraintAsync(string name, TransactionContext context, CancellationToken cancellationToken = default)
+    {
+        EnsureActive(context);
+        var prior = FindSchemaRule(name, context.Snapshot);
+        var latest = FindSchemaRule(name, Latest(context));
+        if (prior?.Reference != latest?.Reference) { throw Conflict(); }
+        if (prior?.Record.Constraint is not { } constraint) { return ValueTask.CompletedTask; }
+        RequireMutableDefinition(constraint.DefinitionId, context.Snapshot, "ALTER");
+        EnsureParentUnchanged(constraint.DefinitionId, context);
+        return DeleteAsync([prior], context, cancellationToken);
+    }
+
+    private static GraphCatalogException ConstraintConflict(string property)
+        => new("CG03009", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ConstraintConflict, property)) { IsCallerError = true };
+
     /// <summary>Publishes named index metadata alongside the physical graph-store index.</summary>
     /// <param name="index">The complete index definition.</param>
     /// <param name="context">The active transaction that also owns the physical index change.</param>
@@ -220,7 +411,7 @@ public sealed class GraphCatalog
     public ValueTask SaveIndexAsync(GraphIndexMetadata index, TransactionContext context, CancellationToken cancellationToken = default)
     {
         EnsureActive(context);
-        var record = new CatalogRecord(Index: index);
+        var record = new CatalogRecord(index: index);
         GraphCatalogCodec.Validate(record);
         RequireMutableDefinition(index.LabelId, context.Snapshot, "ALTER", labelOnly: true);
         EnsureParentUnchanged(index.LabelId, context);
@@ -230,6 +421,7 @@ public sealed class GraphCatalog
             throw new GraphCatalogException("CG03003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.CatalogIndexPropertyMismatch,
                 index.Name, previous.PropertyKey)) { IsCallerError = true };
         }
+        EnsureSchemaNameAvailable(record, context, allowExisting: true);
         return SaveAsync(record, prior, context, cancellationToken);
     }
 
@@ -303,7 +495,7 @@ public sealed class GraphCatalog
         }
         RefuseSchemaOwner(previous.Record, "DROP");
         var records = new List<Found?> { previous };
-        foreach (byte childKind in new byte[] { 3, 4 })
+        foreach (byte childKind in new byte[] { 3, 4, 5 })
         {
             var children = List(childKind, id, context.Snapshot);
             var latestChildren = List(childKind, id, latestSnapshot);
@@ -319,6 +511,33 @@ public sealed class GraphCatalog
     private TransactionSnapshot Latest(TransactionContext context)
         => new(context.Sequence, TransactionSequence.None, new TransactionSequence(ulong.MaxValue),
             _coordinator.GetOpenContexts().Where(item => item.State == TransactionState.Active).Select(item => item.Sequence));
+
+    private Found? FindSchemaRule(string name, TransactionSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(snapshot);
+        lock (_sync)
+        {
+            if (!_schemaNames.TryGetValue(name, out var routes)) { return null; }
+            foreach (var route in routes.ToArray())
+            {
+                if (Find(route.Kind, route.Parent, name, snapshot) is { } found) { return found; }
+            }
+            return null;
+        }
+    }
+
+    private void EnsureSchemaNameAvailable(CatalogRecord record, TransactionContext context, bool allowExisting)
+    {
+        var previous = FindSchemaRule(record.Name, context.Snapshot);
+        var latest = FindSchemaRule(record.Name, Latest(context));
+        if (previous?.Reference != latest?.Reference) { throw Conflict(); }
+        if (latest is { } found && (!allowExisting || found.Record.Kind != record.Kind || found.Record.Parent != record.Parent))
+        {
+            throw new GraphCatalogException("CG03008", string.Format(CultureInfo.CurrentCulture,
+                ErrorMessages.SchemaNameDuplicate, record.Name)) { IsCallerError = true };
+        }
+    }
 
     private Found? EnsureUnchanged(byte kind, Guid parent, string name, TransactionContext context)
     {
@@ -426,6 +645,16 @@ public sealed class GraphCatalog
         }
         _versions[key] = versions;
         versions.Add(reference);
+        if (record.Kind == 3)
+        {
+            if (!_propertyNames.TryGetValue(record.Name, out var properties)) { _propertyNames[record.Name] = properties = []; }
+            properties.Add(reference);
+        }
+        if (record.Kind is 4 or 5)
+        {
+            if (!_schemaNames.TryGetValue(record.Name, out var routes)) { _schemaNames[record.Name] = routes = []; }
+            routes.Add((record.Kind, record.Parent));
+        }
         if (record.Kind <= 2)
         {
             if (!_definitions.TryGetValue(record.Id, out var keys))
@@ -474,6 +703,11 @@ public sealed class GraphCatalog
     {
         var removed = versions[index];
         versions.RemoveAt(index);
+        if (key.Kind == 3 && _propertyNames.TryGetValue(key.Name, out var properties))
+        {
+            properties.Remove(removed);
+            if (properties.Count == 0) { _propertyNames.Remove(key.Name); }
+        }
         if (key.Kind <= 2 && !versions.Any(item => item.Id == removed.Id) &&
             _definitions.TryGetValue(removed.Id, out var keys))
         {
@@ -483,6 +717,11 @@ public sealed class GraphCatalog
         if (versions.Count == 0)
         {
             _versions.Remove(key);
+            if (key.Kind is 4 or 5 && _schemaNames.TryGetValue(key.Name, out var routes))
+            {
+                routes.Remove((key.Kind, key.Parent));
+                if (routes.Count == 0) { _schemaNames.Remove(key.Name); }
+            }
             var parent = (key.Kind, key.Parent);
             if (_children.TryGetValue(parent, out var names))
             {

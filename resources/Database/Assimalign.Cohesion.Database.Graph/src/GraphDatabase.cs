@@ -82,11 +82,24 @@ public sealed partial class GraphDatabase : DatabaseInstance
         // Indexing owns the B-tree page format (#1194) and checks each tree's root
         // page as it attaches the tree. That happens inside the store's open, after
         // the recovery scrub has written to the database, so the check runs here
-        // first: a database whose indexes this engine cannot read is refused before
-        // anything is written to it.
+        // first: a database whose indexes or catalog this engine cannot read is refused before
+        // any logical write. Physical journal redo runs first until Storage #1744 is fixed.
         try
         {
             GraphStore.EnsureIndexFormat(storage);
+            GraphCatalog.EnsureFormat(storage);
+        }
+        catch (GraphCatalogException exception)
+        {
+            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (exception.Diagnostics is [{ Code: "CG06019" }, ..])
+            {
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.DatabaseOpenRefused, name, exception.Message);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = "CG06019", Message = message, Severity = DiagnosticSeverity.Error }], exception);
+            }
+            throw new DatabaseException(exception.Message, exception.Diagnostics, exception);
         }
         catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
         {
@@ -505,8 +518,13 @@ public sealed partial class GraphDatabase : DatabaseInstance
             label => Catalog.FindLabel(label, operation.Context.Snapshot)!.Value.Id, StringComparer.Ordinal);
 
     internal async ValueTask ValidateNodeAsync(GraphOperation operation, IReadOnlyList<string> labels,
-        IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token, bool deferRequired = false)
     {
+        if (labels.Count == 0 && properties is not null)
+        {
+            foreach (var property in properties)
+            { await Catalog.DiscoverPropertyKeyAsync(property.Key, operation.Context, token).ConfigureAwait(false); }
+        }
         foreach (string label in labels)
         {
             var metadata = Catalog.FindLabel(label, operation.Context.Snapshot);
@@ -516,7 +534,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
                 metadata = new GraphLabelMetadata(Guid.NewGuid(), label);
                 await Catalog.SaveLabelAsync(metadata.Value, operation.Context, token).ConfigureAwait(false);
             }
-            await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
+            await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token, deferRequired).ConfigureAwait(false);
         }
     }
 
@@ -529,7 +547,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     }
 
     internal async ValueTask<Guid> ValidateRelationshipAsync(GraphOperation operation, string type,
-        IReadOnlyDictionary<string, object?>? properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?>? properties, CancellationToken token, bool deferRequired = false)
     {
         var metadata = Catalog.FindRelationshipType(type, operation.Context.Snapshot);
         if (metadata != Catalog.FindRelationshipType(type, LatestSnapshot(operation.Context))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
@@ -538,7 +556,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
             metadata = new GraphRelationshipTypeMetadata(Guid.NewGuid(), type);
             await Catalog.SaveRelationshipTypeAsync(metadata.Value, operation.Context, token).ConfigureAwait(false);
         }
-        await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token).ConfigureAwait(false);
+        await ValidatePropertiesAsync(metadata.Value.Id, properties, operation, token, deferRequired).ConfigureAwait(false);
         return metadata.Value.Id;
     }
 
@@ -546,7 +564,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
     internal static GraphRelationship Materialize(StoredGraphRelationship relationship)
         => new(new GraphRelationshipId(relationship.Id), relationship.Type, new GraphNodeId(relationship.SourceId), new GraphNodeId(relationship.TargetId), relationship.Properties);
 
-    private async ValueTask ValidatePropertiesAsync(Guid definition, IReadOnlyDictionary<string, object?>? properties, GraphOperation operation, CancellationToken token)
+    private async ValueTask ValidatePropertiesAsync(Guid definition, IReadOnlyDictionary<string, object?>? properties, GraphOperation operation, CancellationToken token, bool deferRequired = false)
     {
         var keys = Catalog.GetPropertyKeys(definition, operation.Context.Snapshot);
         if (!keys.SequenceEqual(Catalog.GetPropertyKeys(definition, LatestSnapshot(operation.Context)))) { DatabaseTransactionAbortedException.ThrowGraphConflict(); }
@@ -554,9 +572,11 @@ public sealed partial class GraphDatabase : DatabaseInstance
         {
             object? value = null;
             bool present = properties?.TryGetValue(key.Name, out value) == true && value is not null;
-            if (key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
+            if (!deferRequired && key.Required && !present || present && key.Type is { } type && type != TypeOf(value))
             {
-                throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name));
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ValidatePropertiesAsyncDatabase, key.Name);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = "CG03003", Message = message, Severity = DiagnosticSeverity.Error }]);
             }
         }
         // Discovery records untyped keys; explicitly supplied metadata can constrain them.
@@ -572,6 +592,10 @@ public sealed partial class GraphDatabase : DatabaseInstance
                 if (!schemaOwned.Value)
                 {
                     await Catalog.SavePropertyKeyAsync(new GraphPropertyKeyMetadata(definition, property.Key), operation.Context, token).ConfigureAwait(false);
+                }
+                else
+                {
+                    await Catalog.DiscoverPropertyKeyAsync(property.Key, operation.Context, token).ConfigureAwait(false);
                 }
             }
         }

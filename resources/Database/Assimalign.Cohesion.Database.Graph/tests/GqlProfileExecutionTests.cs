@@ -77,6 +77,8 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Match] =
             [
+                new("MATCH (a:Person {never_seen:1}) RETURN a.name", []),
+                new("MATCH (a:Person {name:'Alice'}) WHERE a.never_seen IS NULL RETURN a.never_seen ORDER BY a.never_seen", [[null]]),
                 new("MATCH (a:Person|Robot) RETURN a.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
                 new("MATCH (a:Person&Robot) RETURN a.name", []),
                 new("MATCH (a:Person) MATCH (a)-[:KNOWS]->(b) RETURN a.name, b.name", [["Alice", "Bob"]]),
@@ -118,14 +120,57 @@ public sealed class GqlProfileExecutionTests
                 Mutation("MATCH (a:Person) OPTIONAL MATCH (a)-[r:KNOWS]->(b) DELETE r", 1,
                     new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [])),
             ],
+            [GqlClauses.Exists] =
+            [
+                new("MATCH (a:Person) WHERE NOT EXISTS { MATCH (a)-[:KNOWS]->() } RETURN a.name ORDER BY a.name", [["Bob"],["Isolated"]]),
+                new("MATCH (a:Person) RETURN a.name, EXISTS { (a)-[:KNOWS]->(b) WHERE b.age < $age } ORDER BY a.name", [["Alice",true],["Bob",false],["Isolated",false]], Parameters: new Dictionary<string, object?> { ["age"] = 18L }),
+                new("OPTIONAL MATCH (a:MissingExists) RETURN EXISTS { (a)->() }, NOT EXISTS { (a)->() }", [[false,true]]),
+                new("MATCH (a:Person) WHERE any(x IN [a] WHERE EXISTS { (x)->() }) RETURN a.name", [["Alice"]]),
+            ],
             [GqlClauses.Case] =
             [
                 new("MATCH (a:Person {name: 'Alice'}) RETURN CASE WHEN a.age = 42 THEN a.name ELSE 'other' END", [["Alice"]]),
                 new("RETURN CASE 1 WHEN 1.0 THEN 'match' ELSE 'other' END", [["match"]]),
                 new("RETURN COALESCE(NULL, 5), NULLIF(42, 42)", [[5L, null]]),
             ],
+            [GqlClauses.Reduce] =
+            [
+                new("RETURN reduce(a=0,x IN [1,2,3] | a+x)", [[6L]]),
+                new("RETURN all(x IN [1] WHERE reduce(a=1,y IN [1] | TRUE))", [[true]]),
+                new("RETURN reduce(a=42,x IN [] | 1/0), reduce(a=42,x IN NULL | a+x)", [[42L, null]]),
+                new("MATCH (a:Person) WHERE reduce(s=0,x IN [a.age,1] | s+x) > 40 RETURN a.name", [["Alice"]]),
+            ],
+            [GqlClauses.ListPredicate] =
+            [
+                new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY all(x IN [n] WHERE old)", [[true]]),
+                new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY all(x IN [n] WHERE all(y IN old WHERE y))", [[new object?[] { true }]]),
+                new("RETURN all(x IN [] WHERE TRUE), any(x IN [] WHERE TRUE), none(x IN [] WHERE TRUE), single(x IN [] WHERE TRUE)", [[true, false, true, false]]),
+                new("RETURN all(x IN [TRUE,NULL] WHERE x), any(x IN [FALSE,NULL] WHERE x), none(x IN [FALSE,NULL] WHERE x), single(x IN [TRUE,NULL] WHERE x)", [[null, null, null, null]]),
+                new("MATCH (a:Person) WHERE any(x IN [a.age] WHERE x > 40) RETURN a.name", [["Alice"]]),
+            ],
+            [GqlClauses.PatternComprehension] =
+            [
+                new("MATCH (a:Person {name:'Alice'}) RETURN [(a)-[:KNOWS]->(b) | b.name]", [[new object?[] { "Bob" }]]),
+                new("RETURN [p=(:Person {name:'Alice'})-[:KNOWS]->(b) WHERE b.age < 18 | size(nodes(p))]", [[new object?[] { 2L }]]),
+                new("OPTIONAL MATCH (a:MissingPattern) RETURN [(a)->(b) | b.name]", [[Array.Empty<object?>()]]),
+                new("RETURN [p=(a)->{1,2}(b) | path_length(p)]", [[new object?[] { 1L, 1L }]]),
+                new("RETURN [p=(a)<-+(b) | path_length(p)]", [[new object?[] { 1L, 1L }]]),
+                new("RETURN [p=(a)<->*(b) WHERE path_length(p)>0 | path_length(p)]", [[new object?[] { 1L, 1L, 1L, 1L }]]),
+            ],
+            [GqlClauses.ListComprehension] =
+            [
+                new("RETURN [x IN [1,2,3] WHERE x > 1 | x * 2]", [[new object?[] { 4L, 6L }]]),
+                new("RETURN [x IN NULL | x], [x IN [] WHERE NULL]", [[null, Array.Empty<object?>()]]),
+            ],
+            [GqlClauses.ListSlice] =
+            [
+                new("RETURN [1,2,3][-2..], [1,2,3][..-1], [1,2,3][1..2]",
+                    [[new object?[] { 2L, 3L }, new object?[] { 1L, 2L }, new object?[] { 2L }]]),
+            ],
             [GqlClauses.Set] =
             [
+                Mutation("MATCH (a:Person {name:[x IN ['Alice'] | x][0]}) SET a.age=[x IN [a.age] | x+1][0]", 1,
+                    new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[43L]])),
                 Mutation("MATCH (a:Person {name:'Alice'}) SET a.age=43", 1,
                     new ExecutionCase("MATCH (a:Person {name:'Alice'}) RETURN a.age", [[43L]])),
                 Mutation("MATCH (a:Person {name:'Alice'}) SET a:Admin", 1,
@@ -142,6 +187,20 @@ public sealed class GqlProfileExecutionTests
                 Mutation("MATCH ()-[r:KNOWS]->() REMOVE r.weight", 1,
                     new ExecutionCase("MATCH ()-[r:KNOWS]->() RETURN r.weight", [[null]])),
             ],
+            [GqlClauses.SetOperation] =
+            [
+                new("RETURN 1 AS x UNION RETURN 1 AS x", [[1L]]),
+                new("FOR x IN [1,1,2] RETURN x EXCEPT RETURN -1 AS x UNION RETURN 2 AS x", [[1L], [2L]], Physical: 17),
+            ],
+            [GqlClauses.UnionDistinct] = [new("RETURN 1 AS x UNION DISTINCT RETURN 1.0 AS x UNION RETURN 2 AS x", [[1L], [2L]])],
+            [GqlClauses.UnionAll] = [new("RETURN 1 AS x UNION ALL RETURN 1 AS x", [[1L], [1L]])],
+            [GqlClauses.Except] = [new("FOR x IN [1,1,2,NULL] RETURN x EXCEPT RETURN 2 AS x", [[1L], [null]])],
+            [GqlClauses.ExceptDistinct] = [new("FOR x IN [1,1,2] RETURN x EXCEPT DISTINCT RETURN 2 AS x", [[1L]])],
+            [GqlClauses.ExceptAll] = [new("FOR x IN [1,1,2] RETURN x EXCEPT ALL RETURN 1 AS x", [[1L], [2L]])],
+            [GqlClauses.Intersect] = [new("FOR x IN [1,1,2] RETURN x INTERSECT RETURN 1 AS x", [[1L]])],
+            [GqlClauses.IntersectDistinct] = [new("FOR x IN [1,1,2] RETURN x INTERSECT DISTINCT RETURN 1 AS x", [[1L]])],
+            [GqlClauses.IntersectAll] = [new("FOR x IN [1,1,2] RETURN x INTERSECT ALL FOR x IN [1,1,1] RETURN x", [[1L], [1L]])],
+            [GqlClauses.Otherwise] = [new("FOR x IN [] RETURN x OTHERWISE RETURN 2 AS x", [[2L]], Physical: 2)],
             [GqlClauses.Return] =
             [
                 new("RETURN [10,20,30][-1], {k:{j:1}}.k.j, [1] IN [[1]], [NULL] = [NULL]", [[30L, 1L, true, null]]),
@@ -165,6 +224,9 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Next] =
             [
+                new("RETURN 1 AS x UNION ALL RETURN 2 AS x NEXT RETURN x*10 AS x", [[10L], [20L]]),
+                new("LET \"a\"=1 RETURN \"a\" UNION ALL LET \"a\"=2 RETURN \"a\" NEXT RETURN \"a\"*10 AS y", [[10L], [20L]]),
+                new("RETURN null AS k NEXT RETURN k AS x UNION ALL RETURN k AS x", [[null], [null]]),
                 new("LET x = $value RETURN x NEXT RETURN x + 1 AS y", [[6L]], Parameters: new Dictionary<string, object?> { ["value"] = 5L }),
             ],
             [GqlClauses.With] =
@@ -197,6 +259,10 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.OrderBy] =
             [
+                new("MATCH (a:Person {name:'Alice'}) WITH {a:1} AS a ORDER BY (a).never_seen RETURN a.a ORDER BY a.a", [[1L]]),
+                new("LET a={a:1} MATCH (m:Person {name:'Alice'}) WITH m AS a ORDER BY (a).never_seen RETURN a.name ORDER BY a.name", [["Alice"]]),
+                new("LET x=TRUE MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE old | 1][0]", [[true]]),
+                new("LET x=[TRUE] MATCH (n:Person {name:'Alice'}) RETURN x AS old ORDER BY [x IN [n] WHERE all(y IN old WHERE y) | 1][0]", [[new object?[] { true }]]),
                 new("MATCH (a:Person) RETURN a.name ORDER BY a.age", [["Bob"], ["Isolated"], ["Alice"]]),
             ],
             [GqlClauses.Offset] =
@@ -224,6 +290,7 @@ public sealed class GqlProfileExecutionTests
             ],
             [GqlClauses.Insert] =
             [
+                new("INSERT (n:ComprehensionProperty {k:[x IN [1] | x+10][0]}) RETURN n.k", [[11L]], 1),
                 Mutation("INSERT (: \"L\"\"X\" {\"p\"\"q\": 7})-[:\"T\"\"Y\"]->()", 3,
                     new ExecutionCase("MATCH (\"a\"\"b\":\"L\"\"X\")-[:\"T\"\"Y\"]->() RETURN \"a\"\"b\".\"p\"\"q\" AS \"c\"\"d\"", [[7L]])),
                 new("INSERT (:Person {name: $name})", [], 1,
@@ -233,6 +300,20 @@ public sealed class GqlProfileExecutionTests
                     new ExecutionCase("MATCH (a:Person {name: 'Cara'}) RETURN a.name", [["Cara"]])),
                 Mutation("MATCH (a:Person {name: 'Bob'}), (b:Person {name: 'Isolated'}) INSERT (a)<-[:KNOWS {weight: 3}]-(b)", 1,
                     new ExecutionCase("MATCH (a:Person {name: 'Isolated'})-[r:KNOWS]->(b) RETURN b.name, r.weight", [["Bob", 3L]])),
+            ],
+            [GqlClauses.Merge] =
+            [
+                Mutation("UNWIND [1,2,1] AS k MERGE (n:ComprehensionMerge {k:[x IN [k] | x*2][0]}) ON CREATE SET n.c=[x IN [k] | x+10][0] ON MATCH SET n.m=[x IN [k] | x+20][0]", 2,
+                    new ExecutionCase("MATCH (n:ComprehensionMerge) RETURN n.k,n.c,n.m ORDER BY n.k", [[2L,11L,21L],[4L,12L,null]])),
+                new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age = n.age + 1 RETURN n.age", [[43L]], 1),
+                new("MERGE (n:Person {name:'Alice'}) ON MATCH SET n.age=n.age+1 ON MATCH SET n.age=n.age+2 RETURN n.age", [[45L]], 1),
+                new("MERGE (n:MergeRepeat) ON CREATE SET n.x=1 ON CREATE SET n.x=n.x+2 RETURN n.x", [[3L]], 1),
+                new("MERGE (n:MergeLoop {id:1})-[:SELF]->(n) RETURN n.id", [[1L]], 2),
+                Mutation("MERGE (n:Person {name:'New'}) ON CREATE SET n.age = 9", 1,
+                    new ExecutionCase("MATCH (n:Person {name:'New'}) RETURN n.age", [[9L]])),
+                new("FOR x IN [1,1,1] MERGE (n:MergeRow {id:x}) ON CREATE SET n.hits=1 ON MATCH SET n.hits=n.hits+1 RETURN n.hits", [[3L],[3L],[3L]], 1),
+                Mutation("MERGE (:Person {name:'Alice'})-[:NEW_EDGE]-(:Person {name:'Bob'})", 3,
+                    new ExecutionCase("MATCH (n:Person {name:'Alice'}) RETURN count(*)", [[2L]])),
             ],
             [GqlClauses.Delete] =
             [
@@ -303,10 +384,26 @@ public sealed class GqlProfileExecutionTests
                 new("MATCH (a:Person) WHERE a:Missing OR a.age = 42 RETURN a.name", [["Alice"]]),
                 new("MATCH (a:Person) WHERE NOT a:Missing RETURN a.name", [["Alice"], ["Bob"], ["Isolated"]]),
             ],
+            [GqlClauses.Savepoint] = [new("SAVEPOINT scope", [], 0,
+                [Mutation("ROLLBACK TO scope", 0), Mutation("COMMIT", 0)], Setup: ["BEGIN"])],
+            [GqlClauses.ReleaseSavepoint] = [new("RELEASE SAVEPOINT scope", [], 0,
+                [Mutation("COMMIT", 0), new("MATCH (n:SavepointProof) RETURN n.n", [[1L]])],
+                Setup: ["BEGIN", "SAVEPOINT scope", "INSERT (:SavepointProof {n:1})"])],
+            [GqlClauses.RollbackToSavepoint] = [new("ROLLBACK TO SAVEPOINT scope", [], 0,
+                [Mutation("COMMIT", 0), new("MATCH (n:SavepointProof) RETURN count(*)", [[0L]])],
+                Setup: ["BEGIN", "SAVEPOINT scope", "INSERT (:SavepointProof {n:1})"])],
             [GqlClauses.Show] =
             [
                 new("SHOW LABELS", [["audit", _personLabelId, "Person"], ["audit", _robotLabelId, "Robot"]]),
             ],
+            [GqlClauses.CreateIndex] = [Mutation("CREATE INDEX ix FOR (n:Fresh) ON (n.p)", 1)],
+            [GqlClauses.DropIndex] = [Mutation("DROP INDEX ix IF EXISTS", 0)],
+            [GqlClauses.CreateConstraint] = [Mutation("CREATE CONSTRAINT c FOR (n:Fresh) REQUIRE n.p IS NOT NULL", 1)],
+            [GqlClauses.DropConstraint] = [Mutation("DROP CONSTRAINT c IF EXISTS", 0)],
+            [GqlClauses.CreateLabel] = [Mutation("CREATE LABEL Fresh", 1)],
+            [GqlClauses.DropLabel] = [Mutation("DROP LABEL Fresh IF EXISTS", 0)],
+            [GqlClauses.CreateRelationshipType] = [Mutation("CREATE RELATIONSHIP TYPE Fresh", 1)],
+            [GqlClauses.DropRelationshipType] = [Mutation("DROP RELATIONSHIP TYPE Fresh IF EXISTS", 0)],
             [GqlClauses.LabelExpression] =
             [
                 new("MATCH (n:Person|Robot) RETURN n.name", [["Alice"], ["Bob"], ["Isolated"], ["Robo"]]),
@@ -348,6 +445,33 @@ public sealed class GqlProfileExecutionTests
                 await ExecuteAndVerifyAsync(session, executionCase, clause, token);
             }
         }
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Graph] - SHOW corpus: named constraints project effective property rules and independent identities")]
+    public async Task Profile_NamedConstraintShowCorpus_ShouldExposeEffectiveMetadataAsync()
+    {
+        // Arrange
+        await using var engine = GraphDatabaseEngine.Create("schema-corpus", new());
+        var database = await engine.CreateDatabaseAsync("audit");
+        await using var session = await database.CreateSessionAsync();
+        var schema = GraphSchema.Open(database, session);
+        await schema.SaveLabelAsync(new(_personLabelId, "Person"));
+        await schema.CreateConstraintAsync(new(_personLabelId, "age_type", "age", Types.DatabaseType.Int64));
+        await schema.CreateConstraintAsync(new(_personLabelId, "age_exists", "age"));
+        var corpus = new ExecutionCase[]
+        {
+            new("SHOW PROPERTY KEYS", [["audit", "LABEL", _personLabelId, "Person", "age", "Int64", true]]),
+            new("SHOW OBJECT OWNERSHIP", [
+                ["audit", "LABEL", _personLabelId, "Person", "LABEL", "Person", "Adhoc", null],
+                ["audit", "LABEL", _personLabelId, "Person", "PROPERTY KEY", "age", "Adhoc", null],
+                ["audit", "LABEL", _personLabelId, "Person", "CONSTRAINT", "age_exists", "Adhoc", null],
+                ["audit", "LABEL", _personLabelId, "Person", "CONSTRAINT", "age_type", "Adhoc", null]]),
+        };
+        // Act / Assert
+        foreach (var item in corpus) { await ExecuteAndVerifyAsync(session, item, GqlClauses.Show, CancellationToken.None); }
+        await schema.DropConstraintAsync("age_exists");
+        await ExecuteAndVerifyAsync(session, new("SHOW PROPERTY KEYS",
+            [["audit", "LABEL", _personLabelId, "Person", "age", "Int64", false]]), GqlClauses.Show, CancellationToken.None);
     }
 
     /// <summary>Demonstrates that a newly advertised clause cannot silently escape the execution matrix.</summary>
@@ -419,6 +543,7 @@ public sealed class GqlProfileExecutionTests
             ["toBoolean"] = new("RETURN toBoolean('true')", [[true]]),
             ["current_date"] = new("RETURN CURRENT_DATE=CURRENT_DATE", [[true]]),
             ["current_timestamp"] = new("RETURN CURRENT_TIMESTAMP=CURRENT_TIMESTAMP", [[true]]),
+            ["reduce"] = new("RETURN reduce(a=0,x IN [1,2,3] | a+x)", [[6L]]),
             ["cast"] = new("RETURN CAST('42' AS INTEGER)", [[42]]),
             ["count"] = new("MATCH (a:Person) RETURN count(a)", [[3L]]),
             ["sum"] = new("MATCH (a:Person) RETURN sum(a.age)", [[89L]]),
@@ -477,6 +602,22 @@ public sealed class GqlProfileExecutionTests
 
     private static bool UsesClause(string clause, GqlQueryExpression query) => clause switch
     {
+        GqlClauses.SetOperation or GqlClauses.UnionDistinct => query.Composite is { Operator: GqlCompositeOperator.Union },
+        GqlClauses.UnionAll => query.Composite is { Operator: GqlCompositeOperator.UnionAll },
+        GqlClauses.Except or GqlClauses.ExceptDistinct => query.Composite is { Operator: GqlCompositeOperator.Except },
+        GqlClauses.ExceptAll => query.Composite is { Operator: GqlCompositeOperator.ExceptAll },
+        GqlClauses.Intersect or GqlClauses.IntersectDistinct => query.Composite is { Operator: GqlCompositeOperator.Intersect },
+        GqlClauses.IntersectAll => query.Composite is { Operator: GqlCompositeOperator.IntersectAll },
+        GqlClauses.Otherwise => query.Composite is { Operator: GqlCompositeOperator.Otherwise },
+        GqlClauses.CreateIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: false },
+        GqlClauses.DropIndex => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Index, Drop: true },
+        GqlClauses.CreateConstraint => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Constraint, Drop: false },
+        GqlClauses.DropConstraint => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Constraint, Drop: true },
+        GqlClauses.CreateLabel => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Label, Drop: false },
+        GqlClauses.DropLabel => query.SchemaCommand is { Kind: GqlSchemaObjectKind.Label, Drop: true },
+        GqlClauses.CreateRelationshipType => query.SchemaCommand is { Kind: GqlSchemaObjectKind.RelationshipType, Drop: false },
+        GqlClauses.DropRelationshipType => query.SchemaCommand is { Kind: GqlSchemaObjectKind.RelationshipType, Drop: true },
+        GqlClauses.Merge => query.Stages.Any(stage => stage is GqlMergeStage),
         GqlClauses.Set => query.Stages.Any(stage => stage is GqlSetStage),
         GqlClauses.Remove => query.Stages.Any(stage => stage is GqlRemoveStage),
         GqlClauses.QuantifiedPath => query.MatchClauses.SelectMany(clause => clause.Paths).SelectMany(PatternPaths).Any(path => path.Relationships.Any(edge => edge.Quantifier is not null) || path.Elements?.Any(element => element is GqlParenthesizedPathPattern { Quantifier: not null }) == true),
@@ -485,7 +626,15 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Explain => query.IsExplain,
         GqlClauses.Match => query.MatchClauses.Any(clause => !clause.Optional),
         GqlClauses.OptionalMatch => query.MatchClauses.Any(clause => clause.Optional),
+        GqlClauses.Exists => query.Text?.Contains("EXISTS", StringComparison.OrdinalIgnoreCase) == true,
         GqlClauses.Case => query.Projections.Any(item => item.Expression is GqlCaseExpression or GqlCoalesceExpression or GqlNullIfExpression),
+        GqlClauses.Reduce => query.Text?.Contains("reduce(", StringComparison.OrdinalIgnoreCase) == true,
+        GqlClauses.ListPredicate => query.Projections.Any(projection => projection.Expression is GqlListPredicateExpression) ||
+            query.OrderBy.Any(order => order.Expression is GqlListPredicateExpression) ||
+            query.Text?.Contains("any(", StringComparison.OrdinalIgnoreCase) == true,
+        GqlClauses.PatternComprehension => query.Projections.Any(item => item.Expression is GqlPatternComprehensionExpression),
+        GqlClauses.ListComprehension => query.Projections.Any(item => item.Expression is GqlListComprehensionExpression),
+        GqlClauses.ListSlice => query.Projections.Any(item => item.Expression is GqlListSliceExpression),
         GqlClauses.Let => query.Stages.Any(stage => stage is GqlLetStage),
         GqlClauses.Filter => query.Stages.Any(stage => stage is GqlFilterStage),
         GqlClauses.For => query.Stages.Any(stage => stage is GqlForStage { IsUnwind: false }),
@@ -503,6 +652,9 @@ public sealed class GqlProfileExecutionTests
         GqlClauses.Delete => query.DeleteVariables.Count != 0 && !query.DetachDelete,
         GqlClauses.DetachDelete => query.DeleteVariables.Count != 0 && query.DetachDelete,
         GqlClauses.Where => query.MatchClauses.Any(clause => clause.Predicate is not null),
+        GqlClauses.Savepoint => query.TransactionCommand == GqlTransactionCommand.Savepoint,
+        GqlClauses.ReleaseSavepoint => query.TransactionCommand == GqlTransactionCommand.ReleaseSavepoint,
+        GqlClauses.RollbackToSavepoint => query.TransactionCommand == GqlTransactionCommand.RollbackToSavepoint,
         GqlClauses.Show => query.CatalogSurface is not null,
         GqlClauses.LabelExpression => query.MatchClauses.SelectMany(clause => clause.Paths).Concat(query.Creates).Any(UsesLabelOperators) || query.MatchClauses.Any(clause => HasLabeledPredicate(clause.Predicate)),
         _ => false,
@@ -558,6 +710,8 @@ public sealed class GqlProfileExecutionTests
         string clause, CancellationToken cancellationToken)
     {
         string context = $"{clause}: {executionCase.Statement}";
+        foreach (string setup in executionCase.Setup ?? [])
+        { (await session.ExecuteAsync(setup, cancellationToken: cancellationToken)).Status.ShouldBe(DatabaseResultStatus.Success, context); }
         long postings = session.Database.Store.RelationshipTypeEntriesVisited;
         var result = await session.ExecuteAsync(executionCase.Statement, executionCase.Parameters, cancellationToken);
         result.Status.ShouldBe(DatabaseResultStatus.Success, context);
@@ -588,5 +742,5 @@ public sealed class GqlProfileExecutionTests
 
     private sealed record ExecutionCase(string Statement, object?[][] Rows, long? AffectedCount = null,
         ExecutionCase[]? Verification = null, IReadOnlyDictionary<string, object?>? Parameters = null, string[]? Columns = null,
-        long? Physical = null, long? Postings = null);
+        long? Physical = null, long? Postings = null, string[]? Setup = null);
 }

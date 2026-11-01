@@ -7,8 +7,10 @@ namespace Assimalign.Cohesion.Database.Sql.Schema;
 /// <summary>Describes a compiled secondary index.</summary>
 /// <param name="Name">The stable index name.</param>
 /// <param name="Columns">The ordered index columns.</param>
+/// <param name="Predicate">The optional SQL row predicate; validated by the engine before schema application.</param>
+/// <param name="KeyOrders">Effective per-column orders, or null for ASC NULLS LAST on every column.</param>
 /// <param name="IsUnique">Whether the index enforces uniqueness.</param>
-public sealed record CompiledSchemaIndex(string Name, IReadOnlyList<string> Columns, bool IsUnique = false)
+public sealed record CompiledSchemaIndex(string Name, IReadOnlyList<string> Columns, bool IsUnique = false, string? Predicate = null, IReadOnlyList<CompiledSchemaIndexKeyOrder>? KeyOrders = null)
 {
     /// <summary>
     /// What created this object. Objects from a compiled schema are
@@ -19,4 +21,8 @@ public sealed record CompiledSchemaIndex(string Name, IReadOnlyList<string> Colu
 
     /// <summary>Gets the immutable ordered index columns.</summary>
     public IReadOnlyList<string> Columns { get; } = CompiledSchemaSnapshots.Copy(Columns);
+
+    /// <summary>Gets the immutable effective per-column orders.</summary>
+    public IReadOnlyList<CompiledSchemaIndexKeyOrder> KeyOrders { get; } = CompiledSchemaSnapshots.Copy(
+        KeyOrders ?? new CompiledSchemaIndexKeyOrder[Columns.Count]);
 }

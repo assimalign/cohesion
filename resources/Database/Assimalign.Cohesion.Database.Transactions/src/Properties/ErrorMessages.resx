@@ -17,6 +17,7 @@
   <data name="LockManagerDeadlockFailure" xml:space="preserve"><value>Transaction {0} was chosen as the deadlock victim requesting {1} on {2}.</value></data>
   <data name="LockManagerFailEndedFailure" xml:space="preserve"><value>Transaction {0} ended while it waited for {1} on {2}; the request was not granted.</value></data>
   <data name="CoordinatorThrowIfInsideApplyFailure" xml:space="preserve"><value>A checkpoint or version purge cannot run inside a statement apply: the statement holds the apply gate maintenance waits for. Run maintenance after the statement completes.</value></data>
+  <data name="CommitAbortedByDisposal" xml:space="preserve"><value>Transaction {0} aborted: manager disposal began while commit drained a failed statement compensation.</value></data>
   <data name="TransactionManagerCommitAsyncFailure" xml:space="preserve"><value>Transaction {0} aborted: the commit record could not be written.</value></data>
   <data name="TransactionManagerEnterApplyFailure" xml:space="preserve"><value>Transaction {0} ended while its statement was running; the statement was not applied.</value></data>
   <data name="TransactionManagerClaimEndFailure" xml:space="preserve"><value>The transaction context was not created by this manager.</value></data>
@@ -24,4 +25,22 @@
   <data name="TransactionManagerClaimEndFailure3" xml:space="preserve"><value>Transaction {0} is already ending: its commit or rollback is running.</value></data>
   <data name="TransactionSnapshotArgument" xml:space="preserve"><value>Snapshot minimum cannot exceed its maximum.</value></data>
   <data name="LogUnconfirmedMessageFailure" xml:space="preserve"><value>Transaction {0} committed in this process, but its commit record could not be made durable, so its outcome is unknown: the failed flush took the storage offline, and nothing more is written to it. Reopen the database; its recovery keeps the commit if the record reached stable storage and discards it if not.</value></data>
+  <data name="IsolationStatementView" xml:space="preserve"><value>A statement view cannot configure transaction isolation; pass the current transaction context.</value></data>
+  <data name="WriteStreamLimitExceeded" xml:space="preserve">
+    <value>A transaction cannot have more than 65,535 open write streams.</value>
+  </data>
+  <data name="WriteStreamNotRegistered" xml:space="preserve"><value>No open write stream is registered for this transaction.</value></data>
+  <data name="UndoOpenWriteStream" xml:space="preserve">
+    <value>An open write stream prevents undo marker control.</value>
+  </data>
+  <data name="UndoMarkerInvalid" xml:space="preserve"><value>The undo marker is foreign, released, discarded or no longer active.</value></data>
+  <data name="UndoContextInvalid" xml:space="preserve"><value>Undo controls require this coordinator's current transaction context, not a statement view or snapshot pin.</value></data>
+  <data name="PartialUndoPending" xml:space="preserve"><value>A partial undo is running or incomplete, a statement or control is running, or the transaction is ending. Retry rollback to its target or an earlier marker, or roll back the whole transaction before further work.</value></data>
+  <data name="IsolationSnapshotPin" xml:space="preserve"><value>A snapshot pin cannot configure transaction isolation; pass the current transaction context.</value></data>
+  <data name="IsolationContextUntracked" xml:space="preserve"><value>The transaction context is untracked by this manager.</value></data>
+  <data name="IsolationHandleStale" xml:space="preserve"><value>The transaction handle is stale; pass the current replacement context.</value></data>
+  <data name="IsolationStatementRunning" xml:space="preserve"><value>A statement apply is running; transaction isolation cannot change.</value></data>
+  <data name="IsolationTransactionEnding" xml:space="preserve"><value>The transaction is ending or has ended; isolation cannot change.</value></data>
+  <data name="IsolationBeginPinRequired" xml:space="preserve"><value>Restoring fixed begin visibility from READ COMMITTED requires an active begin-time snapshot pin.</value></data>
+  <data name="IsolationSavepointActive" xml:space="preserve"><value>Isolation cannot change while savepoint tokens are live.</value></data>
 </root>

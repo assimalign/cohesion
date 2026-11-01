@@ -343,7 +343,8 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     /// <returns>A task that completes once the transaction is aborted, or at once.</returns>
     internal async ValueTask AbortTransactionAsync(Exception cause)
     {
-        if (CurrentTransaction is not { AcceptsStatements: true } transaction)
+        if (CurrentTransaction is not { } transaction ||
+            (!transaction.AcceptsStatements && !Assimalign.Cohesion.Database.Internal.DatabaseFailure.IsCorruption(cause)))
         {
             return;
         }
@@ -410,6 +411,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
     {
         _database.EnsureNotDisposed();
         _database.ThrowIfOffline();
+        if (request.Statement.OqlExpression is not OqlTransactionExpression { Command: OqlTransactionCommand.Rollback or OqlTransactionCommand.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         if (request.Statement.OqlExpression is OqlTransactionExpression transaction &&
             !request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
         {
@@ -418,6 +422,9 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
         return _database.RunAsync(this, operation =>
         {
             LastQueryDocumentsRead = 0;
+            LastQueryKeyLookups = 0;
+            LastQuerySubqueriesExecuted = 0;
+            LastQueryIndexEntriesRead = 0;
             // Preserve the typed seam's parse diagnostics before touching an error-recovery AST.
             foreach (var diagnostic in request.Statement.Diagnostics)
             {
@@ -450,11 +457,45 @@ public sealed class DocumentDatabaseSession : DatabaseLanguageSession<DocumentQu
 
     /// <summary>JSON documents read by the last admitted OQL statement, before its residual filter.</summary>
     internal long LastQueryDocumentsRead { get; set; }
+    internal long LastQueryKeyLookups { get; set; }
 
-    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(OqlTransactionExpression expression, CancellationToken cancellationToken)
+    internal long LastQuerySubqueriesExecuted { get; set; }
+    // Snapshot-visible entries advanced by the ordered catalog cursor, including
+    // stale references and the next bucket's boundary lookahead; excludes read-ahead.
+    internal long LastQueryIndexEntriesRead { get; set; }
+
+    // Dispatch before allocating an async frame, preserving ordinary control field counts.
+    private ValueTask<DatabaseResult> ExecuteTransactionControlAsync(OqlTransactionExpression expression, CancellationToken cancellationToken)
     {
         ThrowIfNotOpen();
         cancellationToken.ThrowIfCancellationRequested();
+        return expression.SavepointName is { } name
+            ? ExecuteSavepointControlAsync(expression, name, cancellationToken)
+            : ExecuteWholeTransactionControlAsync(expression, cancellationToken);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteSavepointControlAsync(OqlTransactionExpression expression, string name, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (expression.Command == OqlTransactionCommand.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else if (expression.Command == OqlTransactionCommand.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+        }
+        catch (Exception error)
+        {
+            var reported = Assimalign.Cohesion.Database.Internal.DatabaseFailure.TranslateSavepointFailure(
+                _database.TranslateFailure(error), CurrentTransaction?.Context);
+            // The fence is recoverable; corruption still aborts the writer (#1364).
+            await AbortTransactionAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+        return DocumentCommandResult.Success;
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteWholeTransactionControlAsync(OqlTransactionExpression expression, CancellationToken cancellationToken)
+    {
         if (expression.Command == OqlTransactionCommand.Begin)
         {
             try

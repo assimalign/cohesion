@@ -14,14 +14,21 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    private Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+        CancellationToken cancellationToken) => plan is SqlGroupingSetsPlan grouped
+            ? ExecuteGroupingSetsAsync(grouped, statement, cancellationToken)
+            : ExecutePlainGroupAsync(plan, statement, cancellationToken);
+
     /// <summary>
     /// Consumes a filtered relation, accumulates one state per group, then applies
     /// HAVING, ordering, projection and pagination to completed groups.
     /// </summary>
-    private async Task<DatabaseResult> ExecuteGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
+    private async Task<DatabaseResult> ExecutePlainGroupAsync(SqlGroupPlan plan, SqlStatementContext statement,
         CancellationToken cancellationToken)
     {
-        await using var input = (DatabaseResultSet)await ExecuteAsync(plan.Input, statement, cancellationToken).ConfigureAwait(false);
+        await using var input = (DatabaseResultSet)await (RecursiveState is null
+            ? ExecuteAsync(plan.Input, statement, cancellationToken)
+            : RecursiveGroupInputAsync(plan, statement, cancellationToken)).ConfigureAwait(false);
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var keys = plan.Keys;
         var aggregates = plan.Aggregates;
@@ -60,11 +67,19 @@ internal sealed partial class SqlPlanExecutor
             }
             if (!groups.TryGetValue(key, out var states))
             {
+                RecursiveScratch?.Retain(key);
                 states = CreateStates();
                 groups.Add(key, states);
             }
             for (int i = 0; i < states.Length; i++)
             {
+                if (aggregates[i].Filter is not null)
+                {
+                    // PostgreSQL execExpr.c:3719-3740: reject before arguments, subqueries,
+                    // DISTINCT tuples and ordering keys can execute or retain a value.
+                    await PrepareSubqueriesAsync(aggregates[i].Filter, row, statement, cancellationToken).ConfigureAwait(false);
+                    if (!evaluator.Matches(aggregates[i].Filter, row)) { continue; }
+                }
                 foreach (var argument in aggregates[i].Arguments)
                 {
                     await PrepareSubqueriesAsync(argument, row, statement, cancellationToken).ConfigureAwait(false);
@@ -78,20 +93,25 @@ internal sealed partial class SqlPlanExecutor
                 {
                     AddRow(state.Accumulator, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken, statement.TransactionStart);
                 }
-                else { AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken, statement.TransactionStart); }
+                else { AddAggregateInput(state, aggregates[i], aggregateCollations[i], evaluator, row, cancellationToken,
+                    statement.TransactionStart, RecursiveScratch, retainDistinct: RecursiveScratch is not null); }
             }
         }
 
         int projectionStart = keys.Count + aggregates.Count;
         var matches = new List<object?[]>();
+        var sequenceOrdering = !plan.IsDistinct && HasSequenceProjection(plan.Projections)
+            ? OrderingOutputSlots(plan.OrderBy, projectionStart) : null;
+        bool deferredSequence = sequenceOrdering is not null && plan.OrderBy.Count > 0 && !OrderingUsesSequence(plan.Projections, sequenceOrdering);
         bool correlatedOrdering = _subqueryValues is { HasCorrelatedQueries: true } && plan.OrderBy.Count > 0;
         var collected = new SqlRowCollector(plan.OrderBy, _subqueryValues,
             plan.IsDistinct ? null : plan.Limit, plan.IsDistinct ? null : plan.Offset, cancellationToken, statement.Metrics);
         Collation[]? projectionCollations = null;
         foreach (var (key, states) in groups)
         {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             cancellationToken.ThrowIfCancellationRequested();
-            if (!correlatedOrdering && collected.IsComplete) { break; }
+            if (!deferredSequence && !correlatedOrdering && collected.IsComplete) { break; }
             var row = new object?[projectionStart + plan.Projections.Count];
             key.CopyTo(row, 0);
             for (int i = 0; i < states.Length; i++)
@@ -114,13 +134,15 @@ internal sealed partial class SqlPlanExecutor
             {
                 continue;
             }
+            if (deferredSequence) { var retained = row[..projectionStart]; RecursiveScratch?.Retain(retained); matches.Add(retained); continue; }
             for (int i = 0; i < plan.Projections.Count; i++)
             {
                 await PrepareSubqueriesAsync(plan.Projections[i].Value, row, statement, cancellationToken).ConfigureAwait(false);
                 row[projectionStart + i] = NormalizeGroupValue(
                     evaluator.Evaluate(plan.Projections[i].Value!, row, copySharedBinary: true), plan.Projections[i].Type);
             }
-            if (correlatedOrdering) { matches.Add(row); }
+            if (sequenceOrdering is not null && collected.SkipSequenceOffset()) { continue; }
+            if (correlatedOrdering) { RecursiveScratch?.Retain(row); matches.Add(row); }
             else
             {
                 if (plan.IsDistinct)
@@ -135,6 +157,11 @@ internal sealed partial class SqlPlanExecutor
                 }
                 collected.Add(row[projectionStart..], orderingKeys);
             }
+        }
+        if (deferredSequence)
+        {
+            return await MaterializeSequenceSelectAsync(matches, plan.Projections, plan.OrderBy, plan.Limit, plan.Offset,
+                evaluator, statement, cancellationToken, null, sequenceOrdering!).ConfigureAwait(false);
         }
         if (correlatedOrdering)
         {
@@ -151,6 +178,7 @@ internal sealed partial class SqlPlanExecutor
         // One accumulator per group, per aggregate call, per statement, owned here and never shared.
         GroupAggregateState[] CreateStates()
         {
+            RecursiveScratch?.Reserve(128L + 128L * aggregates.Count);
             var states = new GroupAggregateState[aggregates.Count];
             for (int i = 0; i < states.Length; i++)
             {
@@ -197,8 +225,9 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
-    private static void AddAggregateInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
-        SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp)
+    private static long AddAggregateInput(GroupAggregateState state, SqlGroupAggregate aggregate, Collation collation,
+        SqlExpressionEvaluator evaluator, object?[] source, CancellationToken cancellationToken, DateTimeOffset transactionTimestamp,
+        SqlWindowMemory? windowMemory = null, bool retainDistinct = false)
     {
         var values = new SqlValue[aggregate.Arguments.Length];
         EvaluateArguments(aggregate, evaluator, source, values);
@@ -212,7 +241,7 @@ internal sealed partial class SqlPlanExecutor
         }
         // Keys are input expressions even for rows the transition function skips.
         if (aggregate.Function.NullBehavior == SqlNullBehavior.ReturnsNullOnNullInput && values.Any(value => value.IsNull) ||
-            aggregate.Function is SqlStringAggregateFunction && values[0].IsNull) { return; }
+            aggregate.Function is SqlStringAggregateFunction && values[0].IsNull) { return 0; }
         if (state.Distinct is not null)
         {
             if (state.Distinct.TryGetValue(tuple, out var previous))
@@ -223,14 +252,16 @@ internal sealed partial class SqlPlanExecutor
                 {
                     row.CopyTo(previous, 0);
                 }
-                return;
+                return 0;
             }
+            if (retainDistinct)
+            { windowMemory!.Retain(tuple); windowMemory.Retain(row); windowMemory.Reserve(64); }
             state.Distinct.Add(tuple, row);
         }
         if (state.Inputs is null)
         {
             state.Accumulator.AddResolved(new SqlArguments(values, aggregate.Database, collation, cancellationToken, transactionTimestamp));
-            return;
+            return 0;
         }
         if (aggregate.Function is SqlStringAggregateFunction)
         {
@@ -238,7 +269,12 @@ internal sealed partial class SqlPlanExecutor
             // Check while buffering, before sorting or allocating a group's output builder.
             SqlBuiltinScalarFunction.CheckLength(state.StringLength);
         }
+        // Charge the evaluated payload, including computed keys, before the buffer owns it.
+        // Allow for list growth, stable-sort tuples/indexes and the sort's key arrays.
+        long bytes = windowMemory is null ? 0 : 128L + row.Length * 16L + SqlHashJoinTable.RowBytes(row);
+        windowMemory?.Reserve(bytes);
         state.Inputs.Add(row);
+        return bytes;
     }
 
     private static int CompareAggregateInputs(object?[] left, object?[] right, SqlGroupAggregate aggregate, SqlExpressionEvaluator evaluator,

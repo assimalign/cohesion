@@ -209,12 +209,17 @@ internal static class SqlPersistedExpression
     /// <exception cref="SqlEvaluationException">A function call's arguments do not match its signature (<c>CS01006</c>).</exception>
     internal static void Bind(SqlExpression expression, SqlExpressionEvaluator evaluator, bool declaring = false)
     {
+        SqlSequenceExecution.RefusePersistedNode(expression);
         ArgumentNullException.ThrowIfNull(expression);
         ArgumentNullException.ThrowIfNull(evaluator);
         RuntimeHelpers.EnsureSufficientExecutionStack();
 
         switch (expression)
         {
+            case SqlWindowExpression:
+                throw new SqlPlanningException("CS05076", ErrorMessages.WindowPlacement, expression.Location);
+            case SqlFunctionCallExpression grouping when SqlStandardLibrary.IsGrouping(grouping.FunctionName):
+                throw new SqlPlanningException("CS05074", ErrorMessages.GroupingPlacement, grouping.Location);
             case SqlColumnReferenceExpression column:
                 evaluator.ResolveColumn(column);
                 break;
@@ -374,6 +379,9 @@ internal static class SqlPersistedExpression
     // SqlPlanner.Children. The counts and presence flags make that child sequence unambiguous.
     private static bool SameNode(SqlExpression left, SqlExpression right) => (left, right) switch
     {
+        (SqlWindowExpression a, SqlWindowExpression b) => a.NullTreatment == b.NullTreatment && Same(a.WindowName, b.WindowName) &&
+            AreEquivalent(a.Function, b.Function) && SameWindow(a.Specification, b.Specification),
+        (SqlGroupingSetExpression a, SqlGroupingSetExpression b) => a.Kind == b.Kind && a.Items.Count == b.Items.Count,
         (SqlLogicalExpression a, SqlLogicalExpression b) => a.Operator == b.Operator && a.Operands.Count == b.Operands.Count,
         (SqlBinaryExpression a, SqlBinaryExpression b) => a.Operator == b.Operator,
         (SqlUnaryExpression a, SqlUnaryExpression b) => a.Operator == b.Operator,
@@ -384,9 +392,10 @@ internal static class SqlPersistedExpression
         (SqlStarExpression, SqlStarExpression) => true,
         (SqlDistinctExpression a, SqlDistinctExpression b) => a.IsNegated == b.IsNegated,
         (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
+        (SqlIsJsonExpression a, SqlIsJsonExpression b) => a.IsNegated == b.IsNegated && a.Kind == b.Kind,
         (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
         (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
-        (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated,
+        (SqlLikeExpression a, SqlLikeExpression b) => a.IsNegated == b.IsNegated && a.IsCaseInsensitive == b.IsCaseInsensitive,
         (SqlInExpression a, SqlInExpression b) => a.IsNegated == b.IsNegated &&
             (a.Values is null) == (b.Values is null) && (a.Values?.Count ?? 0) == (b.Values?.Count ?? 0) &&
             SameQuery(a.Subquery, b.Subquery),
@@ -395,6 +404,7 @@ internal static class SqlPersistedExpression
             Same(a.FunctionName, b.FunctionName) && a.Arguments.Count == b.Arguments.Count &&
             (a.Quantifier == SqlSetQuantifier.Distinct) == (b.Quantifier == SqlSetQuantifier.Distinct) &&
             a.HasWithinGroupOrdering == b.HasWithinGroupOrdering &&
+            (a.Filter is null) == (b.Filter is null) &&
             SameList(a.OrderBy, b.OrderBy, (x, y) => x.IsDescending == y.IsDescending && x.NullPlacement == y.NullPlacement),
         (SqlCaseExpression a, SqlCaseExpression b) => (a.Input is null) == (b.Input is null) &&
             (a.ElseResult is null) == (b.ElseResult is null) && a.WhenClauses.Count == b.WhenClauses.Count,
@@ -413,7 +423,7 @@ internal static class SqlPersistedExpression
         if (left is null || right is null) { return left is null && right is null; }
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (left.GetType() != right.GetType() ||
-            !SameList(left.CommonTables, right.CommonTables, (a, b) => Same(a.Name, b.Name) &&
+            !SameList(left.CommonTables, right.CommonTables, (a, b) => a.IsRecursiveScope == b.IsRecursiveScope && Same(a.Name, b.Name) &&
                 SameList(a.Columns, b.Columns, Same) && SameQuery(a.Body, b.Body)) ||
             left.LimitSyntaxKind != right.LimitSyntaxKind ||
             !SameList(left.OrderBy, right.OrderBy, (a, b) => a.IsDescending == b.IsDescending && a.NullPlacement == b.NullPlacement && AreEquivalent(a.Expression, b.Expression)) ||
@@ -427,15 +437,24 @@ internal static class SqlPersistedExpression
         }
         var first = (SqlSelectExpression)left;
         var second = (SqlSelectExpression)right;
-        return first.IsDistinct == second.IsDistinct &&
+        return first.IsDistinct == second.IsDistinct && first.IsGroupByDistinct == second.IsGroupByDistinct &&
             SameList(first.Columns, second.Columns, (a, b) => Same(a.Alias, b.Alias) && AreEquivalent(a.Expression, b.Expression)) &&
             SameList(first.From, second.From, (a, b) => SameTable(a.Table, b.Table) &&
                 SameList(a.Joins, b.Joins, (x, y) => x.JoinType == y.JoinType && SameTable(x.Table, y.Table) &&
                     SameList(x.UsingColumns, y.UsingColumns, Same) && AreEquivalent(x.Condition, y.Condition))) &&
             AreEquivalent(first.Where, second.Where) &&
             SameList(first.GroupBy, second.GroupBy, AreEquivalent) &&
-            AreEquivalent(first.Having, second.Having);
+            AreEquivalent(first.Having, second.Having) && SameList(first.Windows, second.Windows,
+                (a,b) => Same(a.Name,b.Name) && SameWindow(a.Specification,b.Specification));
     }
+
+    private static bool SameWindow(SqlWindowSpecification? a, SqlWindowSpecification? b) => a is null || b is null
+        ? a is null && b is null : Same(a.ExistingWindow, b.ExistingWindow) && SameFrame(a.Frame, b.Frame) && SameList(a.PartitionBy, b.PartitionBy, AreEquivalent) &&
+            SameList(a.OrderBy, b.OrderBy, (x,y) => x.IsDescending == y.IsDescending && x.NullPlacement == y.NullPlacement && AreEquivalent(x.Expression,y.Expression));
+
+    private static bool SameFrame(SqlWindowFrame? a, SqlWindowFrame? b) => a is null || b is null ? a is null && b is null :
+        a.Mode == b.Mode && a.Exclusion == b.Exclusion && a.Start.Kind == b.Start.Kind && a.End.Kind == b.End.Kind &&
+        AreEquivalent(a.Start.Offset, b.Start.Offset) && AreEquivalent(a.End.Offset, b.End.Offset);
 
     private static bool SameTable(SqlRelationReference? left, SqlRelationReference? right)
         => left is null || right is null

@@ -30,7 +30,16 @@ internal static partial class GraphPlanExecutor
             token.ThrowIfCancellationRequested();
             var stage = plan.Stages[i];
             if (stage.Stage is GqlReturnStage && i == plan.Stages.Count - 1) { continue; }
-            if (stage.Stage is GqlMatchStage)
+            if (stage is GraphCompositeStagePlan composite)
+            {
+                if (i == plan.Stages.Count - 1)
+                {
+                    return await ExecuteCompositeAsync(database, operation, composite.Composite with { Warnings = plan.Warnings },
+                        token, paths, scalarsOnly, compositeValues, source).ConfigureAwait(false);
+                }
+                source = StreamCompositeBindingsAsync(database, operation, composite.Composite, source, token);
+            }
+            else if (stage.Stage is GqlMatchStage)
             {
                 foreach (var clause in stage.Plan.MatchClauses)
                 { source = StreamMatchClauseAsync(database, operation, clause, source, layout, budget, parameters, token); }
@@ -39,7 +48,7 @@ internal static partial class GraphPlanExecutor
             { source = StreamBoundaryAsync(stage.Plan, projection, source, layout, budget, operation, parameters, token); }
             else if (stage.Stage is GqlNextStage)
             {
-                if (i == 0 || plan.Stages[i - 1].Stage is not GqlReturnStage)
+                if (i == 0 || plan.Stages[i - 1].Stage is not (GqlReturnStage or GqlCompositeStage))
                 { source = ResetBindingAsync(source, layout, budget, token); }
             }
             else { source = StreamStageAsync(stage, source, layout, budget, operation, parameters, token); }
@@ -185,7 +194,7 @@ internal static partial class GraphPlanExecutor
                     var match = part.Cursor.Current;
                     var deferred = part.Deferred;
                     for (var property = match.Properties; property is not null; property = property.Previous)
-                    { deferred = DeferProperties(property.Expected, property.Actual, match.Bindings, deferred); }
+                    { deferred = DeferProperties(property.Expected, property.Actual, match.Bindings, deferred, operation.FunctionBindings as GraphCorrelatedBindings); }
                     int next = part.Index + 1;
                     if (next < clause.Paths.Count)
                     {

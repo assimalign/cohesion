@@ -1,5 +1,266 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## Savepoint grammar and rendering (#1726, XT-4)
+
+Transaction AST nodes retain the normalized SavepointName. The contextual parser and renderer
+accept standalone SAVEPOINT, RELEASE and ROLLBACK TO; the three adjacent profile clauses and
+complete-statement/execution corpora advance together. Core spelling follows ISO, optional
+SAVEPOINT follows PostgreSQL. Unquoted names fold to lowercase; quoted names preserve case.
+See DIALECT for scope lifetime, failure rules and the in-process/wire conformance corpus.
+The parser and renderer corpus covers both TO forms with no modifier or WORK and TRANSACTION (PostgreSQL src/backend/parser/gram.y:11414-11431,11483-11486).
+
+## Index key order grammar (#1631, SQ-K1)
+
+SqlCreateIndexExpression.KeyOrders retains effective per-column direction and NULL placement.
+The parser accepts ASC/DESC before NULLS FIRST/LAST, once each. Defaults follow PostgreSQL
+src/backend/commands/indexcmds.c:2255-2270: ASC NULLS LAST and DESC NULLS FIRST. Rendering
+omits default options. Constraint column lists retain their column-only grammar and coded
+syntax refusal (PostgreSQL src/backend/parser/gram.y:4321,8422-8495). The profile gains one
+clause; parser completeness and positive/negative and live execution corpora cover it. SQ-K1
+changes no ORDER BY grammar or result wire types. SQ-K3 adds engine order matching, forward/
+backward sort avoidance and order costing; the live index-order corpus now asserts both scan
+directions and zero retained sort rows (see DIALECT). NULL placement is ignored only for
+keys proven non-NULL by declarations, equality prefixes, mandatory local NULL rejection or a
+proven partial predicate. Strict comparison NULL rejection shares SQ-P2's rule, including
+parameter operands; OR/NOT and outer NULL extension provide no proof. The live corpus also
+covers default ORDER BY against default indexes on primary keys and filtered nullable keys. Catalog 32 and compiled v11 fence the
+persisted contract; earlier artifacts are refused, with no upgrade reader.
+
+
+The current record-space format is 32; index predicates are persisted by Sql, independently
+of this parser assembly. Earlier catalog formats are refused without conversion.
+
+
+## Partial index grammar (#1630, SQ-P1/SQ-P2)
+
+SqlCreateIndexExpression.Predicate retains the optional WHERE tree. The canonical statement
+renderer emits it after the ordered column list; scalar predicate rendering is unchanged.
+The profile adds CREATE INDEX WHERE beside CREATE INDEX (+1 clause). Parser completeness,
+positive/negative conformance and rendering cases advance together. CREATE INDEX subqueries
+reach engine predicate validation and fail with CS05091. They are never executable predicates.
+SQ-P2 adds conservative implication and proven access selection; see DIALECT.
+The execution conformance corpus covers bounded runtime cast slots, registration changes on
+reopen, and constraint/creation-order arbitration with deferred partial-predicate failures.
+It also covers JSON/JSONB runtime representations and domains, complete creation diagnostics,
+function-environment refresh, and bulk failure markers that retain no predicate exceptions.
+The execution conformance corpus also covers converted signed-zero join/DML bounds, unchanged
+ordinary plans around unused partial indexes, target-WHERE call validation, folded parameter
+provenance and representation-sensitive expression matching. Grammar and formats are unchanged.
+
+
+ON CONFLICT column targets retain TargetWhere independently of the action's Where. An optional
+predicate-pair payload reuses the existing action-WHERE reference slot, preserving old syntax
+object sizes and allocations. Parsing and
+canonical rendering round trip both predicates; expression/key-direction inference remains outside
+the declared grammar. SQL binding implements strong conservative implication, access selection and
+arbiter membership, described in DIALECT and Sql DESIGN. No profile clause or format bump is needed.
+
+## Foreign-key ON UPDATE metadata (#1723, SQ-F1)
+
+ON UPDATE accepts CASCADE, SET NULL, SET DEFAULT, RESTRICT and NO ACTION beside ON DELETE,
+in either order, once each. Both omitted SQL actions default independently to NO ACTION.
+Column REFERENCES, table FOREIGN KEY, ALTER ADD CONSTRAINT and ALTER ADD COLUMN retain the
+same normalized OnUpdate property. Malformed/repeated actions use the existing CS00003
+syntax diagnostic; action column lists retain CK00001. NO and ACTION stay contextual.
+The constraint renderer emits explicit ON DELETE then ON UPDATE actions, independently of
+source ordering, and ALTER ADD CONSTRAINT uses that renderer. The profile gains ON UPDATE
+(+1 clause); parser/completeness and live engine conformance cover metadata and action execution
+on every update path. PostgreSQL src/backend/parser/gram.y:4581-4689 supplies the ordering,
+default and action vocabulary. SQ-F2 executes the changing actions and distinguishes immediate
+RESTRICT from statement-end NO ACTION; see DIALECT. Actions match the completed direct child
+assignments; same-origin revisions converge, different-origin disagreements retain CS05085, and
+RETURNING preserves the direct row image before later actions (ri_triggers.c:1274-1313).
+Unchanged cells introduce no action proposal. Disagreements compare completed per-origin values,
+including first-pass DELETE SET origins, so composite-key intermediate states do not create false
+CS05085 failures and mixed DELETE/UPDATE actions cannot silently choose different replacements.
+
+## Window stage (#1526, SQ-W1/SQ-W2/SQ-W3)
+
+SqlWindowExpression holds a function and either OVER name or an inline SqlWindowSpecification.
+SqlNamedWindow retains declaration order and a specification's inherited name. The SELECT
+node stores named definitions in an optional payload over its existing grouping-list reference,
+so ordinary SELECT nodes keep their allocation size. The profile advertises eight ranking and
+navigation functions plus FIRST_VALUE/LAST_VALUE/NTH_VALUE, OVER, PARTITION, WINDOW,
+ROWS, RANGE, GROUPS and EXCLUDE, plus navigation/value-function NULL treatment. SqlWindowFrame and SqlWindowFrameBound retain explicit boundary
+kinds and offset expressions, participating in depth, canonical rendering and binding.
+The frame retains its exclusion and mode; SqlWindowExpression retains explicit NULL treatment.
+FROM FIRST/LAST retain CK00001 because the local PostgreSQL grammar does not implement them. Canonical built-in window names render unquoted, and named
+keys participate in view traversal, structural equivalence and child-subquery binding.
+
+Binding, stage placement, diagnostics and memory ownership are described in Sql DESIGN and
+[DIALECT.md](DIALECT.md). Parser, profile, keyword and completeness corpora advance together.
+Native order-insensitive frame aggregates ignore local ordering during evaluation; fallback
+recomputation shares the fixed 1,000,000-input-visit statement cap (CS05084). The corpus includes
+ordered/filtered moving frames, RANGE/GROUPS/exclusion membership and NULL treatment. Native
+moving states require arguments and FILTER without volatile calls or subqueries; otherwise
+frame-head movement restarts evaluation under CS05084
+(PostgreSQL executor/nodeWindowAgg.c:3002-3033).
+The profile adds three clauses (GROUPS, EXCLUDE, NULL treatment); the contextual unsupported
+word table removes GROUPS, EXCLUDE, IGNORE and RESPECT. Window-free AST layout is unchanged.
+PostgreSQL references: parser/parse_clause.c:2766-2902 and parser/parse_agg.c:879-994.
+
+## Owned identity syntax (#1717, SQ-S3)
+
+OVERRIDING USER inputs bind and pass assignment checks before their identity values are
+discarded, across VALUES, SELECT and MERGE. The dialect also records preserved restart state
+through identity type changes, bounded backfill refusal, hidden orphan names and snapshots,
+and the intentional inclusion of identity generators in INFORMATION_SCHEMA.SEQUENCES with
+8/16/32/64-bit precision. Existing diagnostic identities and grammar remain unchanged.
+If a live FK action introduces an unplanned SET DEFAULT sequence dependency, execution
+returns retryable CS04067 (40001) before evaluating that default or mutating rows so the caller can replan.
+Ignored VALUES and MERGE INSERT inputs also convert unknown literals under CAST and report
+existing constant-fold failures before discard; typed numeric casts and volatile inputs
+remain unevaluated. The parser corpus retains these CAST forms for engine validation.
+
+The identity AST retains explicit sequence options, SERIAL aliases lower to built-in integer
+BY DEFAULT identities, and ALTER identity actions are separate sealed leaves. INSERT and
+MERGE INSERT retain an explicit override enum, and sequence options retain structured owning
+table/column references. Renderer and capability profile cover the new forms; contextual
+names remain usable. The dialect records one identity per table, root constant sequence
+defaults, repeated-option limits and all owner choices. Catalog linkage and crash recovery
+belong to Sql; no compiled typed-schema declaration changed.
+
+## Sequence grammar (#1717, SQ-S2)
+
+NEXT VALUE FOR is selected only after lookahead recognizes all three words. Unquoted
+next remains a column, alias, table, and function-argument name in its ordinary positions.
+
+DISCARD ALL uses the session-control statement leaf and a distinct command kind. It is
+contextual at the command head, needs complete parsing, and travels over ordinary Execute.
+The engine refuses it inside a transaction and clears logical-session state otherwise.
+Its named profile capability and parser/live conformance cases cover that complete statement.
+
+NEXT VALUE FOR remains a parsed scalar leaf in RETURNING; the engine refuses that context
+with CS03076 before evaluation, following Microsoft's OUTPUT exclusion. nextval() retains
+PostgreSQL's separate per-row RETURNING evaluation. Persisted-expression checks visit each
+node once rather than recursively walking every node's subtree. Declared CHECK validation starts
+that walk once at the predicate root, including subqueries, to retain CS03074 for dependencies.
+
+Sequence outputs independent of ordering evaluate after sorting and before pagination, stopping
+after OFFSET + LIMIT. Every path projects qualifying OFFSET rows in their own row scopes before
+discarding them, consuming their
+sequence values. Rows rejected by WHERE/HAVING consume no projection values.
+GROUPING SETS, ROLLUP, CUBE and GROUPING() follow the same sequence row scopes and windows,
+including subtotal and empty groups; HAVING runs before projection.
+Unordered grouped and correlated inputs apply WHERE/HAVING, project each qualifying row immediately,
+discard OFFSET rows and stop at LIMIT, without deferred
+input retention or charges. Ordered deferral uses the ordinary uncharged sort collector on plain,
+correlated, grouped and grouping-set paths, including LIMIT and deep OFFSET pages. Plain and
+correlated retention is bounded by OFFSET + LIMIT when ordering collations are fixed; grouped and
+grouping-set deferral retains every group that passes HAVING, and deferred collations require full
+retention. Grouping-set group/aggregate state retains its existing statement-budget charge on
+both sequence and sequence-free paths; sequence deferral adds none.
+
+CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list preserving explicit NO bounds and bare RESTART. NEXT VALUE FOR is a scalar leaf; REGCLASS and its PostgreSQL suffix normalize to the existing cast AST. Sequence DDL and NEXT VALUE have independent profile gates and renderer round trips. Existing syntax identities reject malformed or duplicate options; OWNED BY is represented by its owning table and column, or NONE. Five advertised function signatures execute in SQL, with per-row standard sharing independent of nextval. The language and live SQL conformance tables cover all four new clauses; no storage or wire contract changes. See DIALECT for defaults and accepted exclusions.
+
+## Sequence catalog review (#1717)
+
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 32's
+sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
+existing kind; table-on-table collisions retain their existing identity. The engine conformance
+regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
+syntax is delivered by SQ-S2 as described above.
+
+## WITH RECURSIVE binding and fixpoints (#1719, SQ-R1/SQ-R2)
+
+WITH RECURSIVE declares visibility of every name throughout its WITH list. Acyclic
+entries bind in dependency order and keep ordinary reachable-only materialization.
+Unqualified self-references identify recursive entries; schema-qualified names still
+resolve in the catalog. Mutual recursion reports CK00001. A recursive entry requires
+an anchor UNION [ALL] recursive term and exactly one self-reference in the latter.
+The anchor fixes output names, width, types, modifiers, domains and collations before
+the recursive FROM binds. A complete column list renames the output. Unknown anchor
+NULL/string output becomes text. Overall UNION type/modifier and collation changes
+report CS02066 and CS02067 with cast/COLLATE hints; widths report CS02065.
+
+The recursive reference cannot appear in the anchor, in scalar/IN/EXISTS/quantified
+subqueries, on a nullable outer-join side, under INTERSECT ALL, or on either side of
+EXCEPT ALL or the right of EXCEPT DISTINCT. INTERSECT DISTINCT, the left of EXCEPT
+DISTINCT, preserved outer-join sides and derived FROM queries follow PostgreSQL's
+allowed forms. Aggregates at the level containing the reference are invalid;
+independent subquery aggregates remain allowed. Outer-only subquery aggregates
+owned by the recursive level also report CS01061, including projection, HAVING and
+ORDER BY subqueries over grouped recursive inputs (PostgreSQL
+`src/backend/parser/parse_agg.c:646-690,1327-1334`). Top-level recursive UNION ORDER BY,
+LIMIT/FETCH, OFFSET and FOR UPDATE/SHARE use CK00001. SEARCH/CYCLE, CREATE RECURSIVE
+VIEW, nested WITH and modifying CTE bodies remain CK00001.
+
+SQ-R2 executes the anchor once, then evaluates the recursive term over only the
+previous iteration's accepted rows until an iteration is empty. UNION ALL retains
+every row; UNION compares against every accepted row, with NULLs equal and the
+anchor's SQL collation and CHAR equality. Conversion to anchor types precedes
+membership checks. There is no implicit recursion-depth limit.
+
+CTE scans pull on demand. Each reader owns a position in one shared buffer; the
+furthest reader advances its producer. Working and intermediate tables are disjoint
+immutable ranges of that buffer. This avoids duplicate payload storage while
+preserving PostgreSQL's iteration boundaries. An outer LIMIT, EXISTS or scalar
+subquery can stop production early, including when a CTE has multiple readers.
+ORDER BY, grouping and INTERSECT/EXCEPT still need their complete inputs.
+Windows, sorts and set operations consume completed inputs; an unbounded
+blocking input exhausts StatementMemoryBudget with CS05067. Grouping of native
+COUNT, SUM and AVG consumes rows as they arrive and retains keys and aggregate
+state; other aggregates keep their accounted, completed inputs. Infinite pipelines
+with bounded retained state, such as COUNT or a top-K sort, require cancellation;
+there is no growing state for the memory budget to refuse. Correlated IN,
+ANY/SOME and ALL compare each row as it arrives and stop at the first decisive
+comparison; UNKNOWN remains undecided until completion (PostgreSQL
+`src/backend/executor/nodeSubplan.c:399-427`). Independent sets may materialize.
+Correlated slot ownership expires when its frame advances; independent cached
+results retain their statement lifetime.
+Single-pass scans reclaim consumed prefixes after all readers have passed them and
+the old working range has expired. Rescannable consumers retain history; UNION
+DISTINCT retains its membership set throughout production.
+
+The working/intermediate ranges, shared buffer, DISTINCT hash state and retained
+query scratch share StatementMemoryBudget (default 64 MiB). Reservations include
+container growth and reference-identity payload accounting; CS05067 refuses an
+over-budget recursive operation. Cancellation is checked on every produced or
+scanned row and at each iteration. All grants unwind on completion, early stop,
+refusal or cancellation. EXPLAIN shows RecursiveUnion and WorkTableScan;
+EXPLAIN ANALYZE adds iteration, accepted-row and candidate counters.
+
+Binding still defers count/seek and constant-fold evaluation once recursion is
+identified. Ordinary CREATE VIEW definitions containing WITH RECURSIVE freeze the
+anchor metadata, execute on demand and rebind after reopen. CREATE RECURSIVE VIEW
+remains excluded. No catalog, storage or wire format changes are needed.
+
+IsRecursiveScope records the list modifier on each AST definition, independently
+of whether it self-references. Binding retains the existing case-insensitive name
+rules, requires complete output-name lists and conservatively makes recursive
+columns nullable. Independent ready definitions retain declaration-order priority.
+Complete FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE and FOR KEY SHARE strengths
+are recognized only in the SELECT tail and refused with CK00001, including in
+subqueries and CTE bodies (PostgreSQL `src/backend/parser/gram.y:13119-13176,13803-13840`).
+Qualified identifiers and implicit aliases retain their ordinary parsing; incomplete
+strengths remain syntax errors. FOR is in the recognized-unsupported vocabulary and
+keyword-disposition corpus, without becoming a reserved identifier.
+
+Plain WITH before MERGE shares SELECT CTE binding and materialization. WITH RECURSIVE
+before MERGE refuses at the RECURSIVE token with CK00001, even for acyclic lists,
+following PostgreSQL `src/backend/parser/parse_merge.c:124-129`.
+
+References re-derived from the local PostgreSQL clone: src/backend/parser/parse_cte.c:
+345-400 (output checks and hints), 580-632 (unknown anchor output), 648-725 and 863-906
+(dependencies), 915-1019 (form/tails), 1027-1199 (references and joins), 1209-1277
+(set operands); parse_collate.c:807-860 (implicit default and conflicts);
+parse_agg.c:1327-1334 (aggregates); nodeRecursiveunion.c:68-167 (working-table fixpoint) and nodeCtescan.c:74-129 (shared read pointers and demand). No reference code is copied.
+
+| Code | Condition | PostgreSQL SQLSTATE |
+| --- | --- | --- |
+| CS01054 | Recursive definition lacks a top-level anchor UNION [ALL] recursive term | 42P19 |
+| CS01055 | Recursive reference in the anchor | 42P19 |
+| CS01056 | Recursive reference inside a scalar, IN, quantified or EXISTS subquery | 42P19 |
+| CS01057 | Recursive reference on the nullable side of an outer join | 42P19 |
+| CS01058 | Recursive reference under INTERSECT ALL | 42P19 |
+| CS01059 | Recursive reference in a prohibited EXCEPT operand | 42P19 |
+| CS01060 | Recursive term has more than one self-reference | 42P19 |
+| CS01061 | Aggregate at the query level containing a recursive reference | 42P19 |
+| CS02065 | Recursive anchor, recursive output or declared column-list width mismatch | 42601 |
+| CS02066 | Recursive UNION changes the anchor type, domain or type modifiers; cast hint | 42804 |
+| CS02067 | Recursive UNION changes or conflicts with the anchor collation; COLLATE hint | 42P21 |
+| CS05067 | Recursive tables, DISTINCT state or shared buffer exceed StatementMemoryBudget | 53200 |
+
 ## Joined-DML statement memory (#1715, #1751)
 
 DIALECT.md records CS05067 before writes when retained MERGE, UPDATE FROM or DELETE USING
@@ -7,13 +268,23 @@ inputs, associations or selected writes exceed StatementMemoryBudget. Hash build
 grant without a second charge for aliased payload. Syntax, AST and persisted formats are unchanged;
 the engine's joined-DML memory conformance cases cover refusal and under-budget execution.
 
-## MERGE execution (#1715, SQ-M2)
+## MERGE execution (#1715, SQ-M2/SQ-M3)
 
 DIALECT.md records ordered executable actions, BY SOURCE, old/new target RETURNING,
 merge_action(), repeated-target CS05036 and lazy action-owned subqueries. The existing AST,
 renderer and grammar are unchanged. Live clause conformance executes MERGE rather than
-measuring only EXPLAIN; SQL's design records transaction admission and SQ-M3's remaining
-concurrent-target rechecks and mixed-action final-state constraints.
+measuring only EXPLAIN; SQL's design records transaction admission, ReadCommitted target
+rechecks and mixed-action final-state foreign keys. The engine and InMemory/TCP corpora cover
+these semantics without changing the syntax or advertised clause count.
+The final-state corpus also checks old parent keys of directly updated rows removed by a
+cascade and immediate uniqueness before FK or SET action constraint failures, including
+NOT NULL, CHECK, domain and identity. Retained failures skip parent-row locking, preserving
+the statement's diagnostic when an earlier matched parent is stale. Actual target-version conflicts carry
+CS04064; shared RI cascade snapshot and matched-parent version checks, host-ended transactions
+and abandoned lock owners keep their ordinary uncoded abort. The review corpus pins both RI
+checks alongside the existing coded direct-target conflicts.
+The recorded two-session cascade corpus checks transaction-duration old-parent locks when a
+direct child update moves into a cascade, for both commit and rollback.
 
 ## ALTER TYPE domain rendering (#1447)
 
@@ -70,8 +341,9 @@ Visible source OLD/NEW names mask pseudo-relations. The profile now advertises U
 DELETE USING; DIALECT.md records pre-write CS05068 and physical-target DELETE deduplication.
 Joined execution uses target-outer predicate pushdown/costing, one materialization per CTE, and
 statement unwind before WITH/subquery wrappers. Both project overviews reflect executable support.
-DELETE's top-level USING source position recognizes keyword-spelled CTE references, while actual
-WITH RECURSIVE remains refused. Canonical rendering delimits ordinary OLD/NEW column qualifiers
+DELETE and MERGE's top-level USING source positions recognize keyword-spelled CTE
+references, including over, partition, window and natural in definitions and
+qualifiers, while WITH RECURSIVE now binds under #1719. Canonical rendering delimits ordinary OLD/NEW column qualifiers
 so a quoted identifier cannot become a RETURNING pseudo-relation on reparse.
 Bare RETURNING * follows PostgreSQL's visible namespace expansion: target columns, then sources
 in FROM/USING order with USING merges preserved and duplicate output names allowed. The engine
@@ -153,7 +425,7 @@ contextual. The latter uses the existing function-call AST and binds only in MER
 RETURNING, where Sql maps it to a text slot. It is not a standalone executable built-in.
 Grammar requires the action set appropriate to the match kind. Unreachable clauses,
 scopes, column/type validation and planning belong to Sql. DIALECT records the complete
-binding and executable action contract, including SQ-M3's remaining work. No persisted format changes.
+binding, executable action, target recheck and final-state FK contracts. No persisted format changes.
 USING shares UPDATE FROM's stored/system/view, aliased derived-query and supported join
 sources. At the top level a source CROSS JOIN leaves ON for MERGE; ordinary FROM parsing
 keeps its existing CROSS JOIN ON refusal. VALUES relations, table functions, LATERAL,
@@ -217,6 +489,28 @@ No profile clause or keyword is added. DIALECT.md specifies syntax, defaults and
 
 ## Aggregate modifiers and string aggregation (#1115)
 
+SQ-H2 (#1720) adds sealed SqlGroupingSetExpression leaves with ordered children and
+Composite/Sets/Rollup/Cube kind. SqlSelectExpression retains GROUP BY DISTINCT;
+empty composites represent (). Contextual recursive parsing shares nesting guards,
+and canonical rendering preserves composite units, nested elements and DISTINCT.
+GROUPING/GROUPING_ID use the existing call AST and bind to subtotal slots in Sql,
+including correlated calls owned by the arguments' outer query level. Parsing retains
+recursive grouping shapes; planning flattens composites/inner GROUPING SETS and
+refuses GROUPING SETS inside ROLLUP/CUBE with CS00010, following PostgreSQL
+parse_clause.c:2225–2235. ROLLUP/CUBE inside GROUPING SETS remains supported.
+The profile adds three grouping clauses and two function names; their former four
+unsupported-vocabulary rows leave. Parser, renderer and live conformance advance together.
+No public construction bridge, interface, catalog format or wire format is added.
+
+FILTER and Boolean/statistical aggregates (#1720, SQ-H1) extend this representation:
+SqlFunctionCallExpression.Filter retains the optional condition, including depth and source
+extent. Rendering, semantic child walks, aggregate-level correlation and persisted equality
+include it. FILTER adds one named clause and nine function names join the executable profile.
+The profile has 59 declared clauses, or 64 including the five documented exclusions.
+Aggregate windows and their FILTER execute; window calls inside FILTER fail placement binding. The catalog owns aggregate
+admission (CS05072 for FILTER on scalar calls); a same-scope aggregate in the condition is
+CS05073. Child queries bind independently. See DIALECT.md for types, NULLs and rounding.
+
 SqlFunctionCallExpression retains a SqlSetQuantifier and ordered input keys for every call;
 the engine catalog decides which calls are aggregates. Depth measurement, rendering and
 structural equality include the keys. LISTAGG WITHIN GROUP normalizes onto the same ordered
@@ -254,7 +548,7 @@ arguments retain a reusable CK00001 rejection; malformed forms use CS00003.
 Function tokens share identifier/qualifier parsing, so additions preserve ordinary names.
 
 The profile's Functions list contains only executable built-ins, including the CAST special
-form. Non-executing window functions remain in SqlUnsupportedVocabulary and report named CK00001 diagnostics. Bare datetime forms execute and cannot bind unquoted columns.
+form. Deferred frame modes and value modifiers remain in SqlUnsupportedVocabulary and report named CK00001 diagnostics. Bare datetime forms execute and cannot bind unquoted columns.
 The engine's single function-coverage guard requires a passing live case for every declaration.
 
 `SqlLanguageProfile.RecognizedUnsupportedVocabulary` exposes a read-only snapshot of spellings
@@ -424,13 +718,13 @@ DELETE TOP are recognized DML TOP exclusions with CK00001.
 PERCENT and TIES are contextual unsupported entries; their identifier quoting requires
 the engine format-19 gate. PostgreSQL gram.y:13537-13658 supplies the offset/fetch grammar.
 
-Non-recursive WITH (#1116) uses an ordered CommonTables list on each SELECT/INSERT/
-UPDATE/DELETE root and a sealed SqlCommonTableExpression leaf. This preserves the
+WITH (#1116, #1719) uses an ordered CommonTables list on each SELECT/INSERT/
+UPDATE/DELETE/MERGE root and a sealed SqlCommonTableExpression leaf. This preserves the
 existing command dispatch and exposes bodies without a wrapper statement variant.
 INSERT INTO ... WITH attaches the list to its SELECT source. Prefix parsing is
 separate from ordinary subquery parsing, so bodies never become SUBQUERY in WITH.
-The capability scan continues through the complete prefix and rejects recursive,
-nested, modifying, materialization-hint and SEARCH/CYCLE forms precisely. PostgreSQL
+The capability scan continues through the complete prefix and rejects nested,
+modifying, materialization-hint and SEARCH/CYCLE forms precisely. PostgreSQL
 src/backend/parser/parse_cte.c:214-229 supplies declaration-order visibility.
 
 FROM exposes one SqlFromItem join tree per comma item (#1109), preserving JOIN precedence
@@ -531,12 +825,12 @@ CK00001. ORDER BY aliases and ordinals count visible wildcard output after USING
   the engine resolves remaining domain names and reports a name it does not know. Which conversions a
   CAST may make is the engine's cast registry's question too, so every built-in type
   is a valid CAST target here.
-- **Recognized-but-unsupported tokens stay in the lexer tables.** `RECURSIVE`
-  and window functions are lexed so diagnostics can
-  say "unsupported" precisely rather than mis-parsing them as identifiers. Gateable
+- **Recognized clause tokens stay in the lexer tables.** `RECURSIVE` is now
+  advertised for binding; window clauses are lexed and parsed for their executable
+  stage, with named unsupported diagnostics for deferred FROM FIRST/LAST modifiers. Gateable
   names live in `SqlClauses`; supported names are present in `SqlLanguageProfile`,
-  while reserved future clauses such as recursive/nested CTEs, windows,
-  unsupported join forms remain absent. `ParseCore` scans a copy of its configured
+  including OVER/WINDOW/PARTITION, while NATURAL remains absent. Nested WITH and recursive
+  execution retain positional capability checks. `ParseCore` scans a copy of its configured
   lexer before recursive descent and attaches the first rejected clause to the
   statement, so analyzers observe `CK00001` with the token location and the `SQL`
   surface name. An actually unknown leading command still receives `CS00002`, even
@@ -584,11 +878,28 @@ its ordinary bare output alias before SET.
 
 ## Non-goals (current dialect)
 
-CORRESPONDING, recursive/nested or data-modifying CTEs, window functions, LATERAL,
-UPDATE SET subqueries, `ON UPDATE`,
-RETURNING subqueries/OLD/NEW/INTO, savepoints, isolation-level syntax, and cost-hint syntax.
+CORRESPONDING, nested or data-modifying CTEs,
+FROM FIRST/LAST, LATERAL,
+UPDATE SET subqueries,
+RETURNING subqueries/OLD/NEW/INTO and cost-hint syntax.
 Each is an additive dialect extension when its engine feature
 lands.
+
+## Isolation grammar (#1012)
+
+SqlTransactionExpression carries an ordered SqlTransactionIsolationLevel list preserving all four
+SQL spellings independently of the kernel mapping. Optional commas and repeated modes parse; the
+renderer emits canonical BEGIN or SET TRANSACTION with comma-separated modes. Both profile clauses
+have live execution cases. CS00012 identifies malformed isolation syntax. Runtime admission precedes DDL interlocks; outside a block SET returns success with Warning CS04071 and no default change, as documented in DIALECT. READ ONLY/READ WRITE and
+[NOT] DEFERRABLE retain CK00001 naming the complete form. SERIALIZABLE parses and execution inside a transaction block refuses
+it with CS04073. No reserved keywords or formats change. DIALECT records effective isolation,
+early SET timing and the begin-time snapshot difference from PostgreSQL. Active savepoint
+scopes refuse SET TRANSACTION with CS04074 (#1726).
+
+| Code | Condition | SQLSTATE |
+|---|---|---|
+| CS00012 | Malformed or incomplete transaction isolation mode | 42601 |
+
 
 ## Transactions and B7 extension points
 
@@ -616,18 +927,12 @@ asserts both forms rather than exempting transaction control from the common pol
 The PostgreSQL grammar maps START TRANSACTION to its start node and END to its
 commit node, with WORK/TRANSACTION sharing `opt_transaction`
 (`src/backend/parser/gram.y:11358-11365`, `11471-11485`, local reference clone).
-The family deliberately stops short of that broader grammar: END WORK and
-END TRANSACTION, transaction modes, AND [NO] CHAIN, ROLLBACK [WORK] TO
-[SAVEPOINT], BEGIN TRAN and named transactions, and COMMIT PREPARED remain
-`CS00003`. ABORT [WORK|TRANSACTION], SAVEPOINT, RELEASE, SET TRANSACTION, and
-PREPARE TRANSACTION remain `CS00002`. Recognition or recoding belongs to #1012.
-
-B7 anticipates **`SAVEPOINT <name>`**, **`ROLLBACK TO [SAVEPOINT] <name>`**,
-**`RELEASE [SAVEPOINT] <name>`**, and **`SET TRANSACTION ISOLATION LEVEL <level>`**.
-Those forms remain outside this family, reserved for #1012. The session owns
-exactly one root transaction through `DatabaseSession`, plus a defaulted value of
-the existing transaction coordinator's `IsolationLevel`. Savepoints can add scope
-markers within that transaction, and isolation syntax can set the carried value.
+The family retains CS00003 for END WORK/TRANSACTION, AND [NO] CHAIN, BEGIN TRAN or named
+transactions and COMMIT PREPARED. ABORT and PREPARE TRANSACTION retain CS00002. Named
+SAVEPOINT/RELEASE/ROLLBACK TO now use the normalized transaction AST (#1726). The session
+continues to own one root transaction; the root base owns its lazy stack of memory-only scopes.
+Isolation syntax configures that transaction before its first data statement and while no
+savepoint is active.
 
 ## Constraint normalization and persistence
 
@@ -651,7 +956,7 @@ INDEX` and `CompiledSchemaIndex(IsUnique: true)`. This keeps compiled schemas,
 SQL DDL, persistence, and concurrent uniqueness enforcement on one path.
 Foreign keys and checks remain constraint catalog records. `ON DELETE` accepts
 CASCADE, RESTRICT, NO ACTION, SET NULL and SET DEFAULT; an omitted action is NO ACTION.
-`ON UPDATE` stays outside the profile and reports `CK00001`.
+`ON UPDATE` accepts the same five actions in either order beside ON DELETE. The engine executes CASCADE/SET NULL/SET DEFAULT through the statement closure on every update path; RESTRICT is immediate and NO ACTION checks final state. Conflicting cascade assignments report CS05085.
 
 ## Canonical rendering (`SqlExpressionRenderer`)
 
@@ -695,10 +1000,10 @@ output (the rule is in [DIALECT.md](DIALECT.md#persisted-definitions-are-canonic
   or a name the lexer would not read as one word is quoted. Embedded `"` characters
   are doubled inside those delimiters. A node type the parser does not produce is
   refused with `NotSupportedException`. A called function name is bare when it is a builtin
-  or a plain word, except `CAST` and the nine window function names (`ROW_NUMBER`,
-  `RANK`, ...): a bare call to one of those parses as the window function, which the
-  dialect rejects, so an error-free tree that calls one named a delimited user
-  function and keeps the quotes (`"rank"(x)`).
+  or a plain word, except `CAST` and the reserved window function names. A window
+  expression emits its function unquoted together with OVER; an ordinary function
+  node with a reserved window name retains quotes. Ranking, navigation and value
+  functions require OVER at binding.
 - **The invariant is tested, not assumed.** `SqlExpressionRendererTests` pins the
   canonical spelling of every form a CHECK accepts, proves that parsing the output
   yields the same tree (positions aside; a CAST target's whitespace is normalized)
@@ -951,13 +1256,121 @@ The engine's view metadata contract is documented in DIALECT: complete common ty
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
 
+
+## JSON access (#1722, SQ-N1)
+
+The existing SqlBinaryExpression gains JsonAccess and JsonTextAccess operators at the
+left-associative generic-operator rung. SQL combines the existing RightArrow token
+with an immediately adjacent GreaterThan token for ->>; shared lexer/token/profile
+values and keyword reservations do not change. SqlIsJsonExpression carries one operand,
+negation and SqlJsonKind (default VALUE); its IS precedence and nesting use the existing
+predicate machinery. UNIQUE KEYS variants remain a named CK00001 capability refusal.
+
+The engine binds dedicated JSON leaves, retaining JSON/JSONB identity without widening
+ordinary bound-node layouts. All scalar walkers traverse the new predicate operand,
+including grouping, windows, correlation, persisted equivalence and definition checks.
+The engine resolves CASE/COALESCE alternatives through one scoped common-type path in JSON
+positions, records the selector overload, and folds adjacent bound arrows over one validated
+document. Source syntax and canonical rendering are unchanged. DIALECT.md records unknown
+literal coercion and the CS02080 declared-type mismatch refusal; the conformance corpus covers
+common selectors and JSON partial predicates.
+The shared reader validates complete input with strict UTF-8 and maximum depth 128;
+missing/wrong-container results, JSON null and SQL NULL remain distinct. The dialect
+specifies extraction, Unicode conversion and numeric/Boolean cast rules and PostgreSQL
+source anchors. JSONB storage, comparison and raw serialization remain unnormalized.
+Scalar JSONB roots follow the owner's non-array NULL rule at indexes 0/-1; the local
+PostgreSQL implementation instead indexes its internal raw-scalar wrapper there.
+
+Canonical rendering writes arrows and an explicit predicate kind. The persisted-format
+audit compared 12,951 accepted baseline statements at 311cdf224 with zero canonical
+changes and fixed points in both assemblies. Existing interpretation and stored syntax
+are unchanged; no format bump or compatibility reader is needed. Views, defaults and
+CHECK constraints containing the new forms round-trip across restart. JSON assignment
+admission now refuses malformed input; it does not rewrite existing row bytes.
+
+| Code | Condition |
+| --- | --- |
+| CS01067 | Invalid JSON access or IS JSON signature (42883) |
+| CS02078 | Invalid JSON access/assignment document, encoding, Unicode conversion or depth (22032) |
+| CS02079 | JSON kind cannot convert to the requested numeric/Boolean type (22023) |
+| CS02080 | Incompatible declared CASE/COALESCE alternatives in a JSON operand (42804) |
+
+The extraction oracle performs 10,240 comparisons over generated nested values,
+negative/boundary indexes, wrong containers, duplicate keys and Unicode escapes.
+Deterministic three-round allocation minima prove linear input-size allocation; existing
+Release query/DML guards protect non-JSON paths. No reflection, JsonSerializer, public
+interface, cross-assembly visibility grant or wire value type is introduced.
+
+## Integer bitwise operators (#1721, SQ-O2)
+
+The existing binary/unary nodes carry integer bitwise operations. All binary operators
+share the generic precedence level with concatenation; prefix ~ binds at that level
+below addition. Canonical rendering preserves these trees, with no changed old branch
+or identifier rule. SQL consumes # and adjacent shift-token pairs locally; the shared
+lexer, token values and other language profiles remain unchanged. PostgreSQL anchors:
+parser/gram.y:904-914,15368-15371 and include/catalog/pg_operator.dat:2274-2328.
+
+Binding accepts SMALLINT/INTEGER/BIGINT storage types and untyped NULL. AND, OR and
+XOR promote to the wider operand. Shifts take an INTEGER count (SMALLINT widens;
+BIGINT is refused) and return the left operand's type, matching PostgreSQL's catalog
+(include/catalog/pg_operator.dat:2286-2328; pg_cast.dat:23-24,33-36). CS02077 (42804)
+refuses invalid operands and count types before rows execute. Validation walks every
+CASE/COALESCE result alternative and supplied parameter, including nested wrappers.
+Explicit CAST inputs and selection conditions retain their ordinary conversion rules.
+
+An engine-owned SqlBoundBitwise leaf carries the resolved integer width through evaluation,
+including domain base types. Runtime CASE/COALESCE values convert to that width before
+all six operations; ordinary unary/binary nodes retain their allocation sizes. SMALLINT
+shifts compute in INTEGER and truncate, so SMALLINT and INTEGER counts wrap modulo 32;
+BIGINT operands use modulo 64. Right shifts are arithmetic and left-shift results wrap
+without overflow diagnostics (utils/adt/int.c:1449,1511,1520; int8.c:1255). Untyped NULL
+propagates NULL; two untyped NULLs default to INTEGER metadata.
+
+Views, defaults and CHECKs round-trip through reopen. No format or wire change is
+needed; 21,008 baseline canonical comparisons against 8ac5744fa are identical and
+reload with identical trees. Existing canonical expressions retain their interpretation. The engine oracle
+checks signed integer boundaries and every shift-count residue against independent .NET operators; all three
+profile corpora pin token isolation, including GQL labels and arrows.
+
+| Code | Condition |
+| --- | --- |
+| CS02077 | Invalid bitwise operand or non-INTEGER shift count (42804) |
+
+## ILIKE and postfix CAST (#1721, SQ-O1)
+
+ILIKE is contextual and adds IsCaseInsensitive to the existing LIKE AST, preserving the
+keyword/profile counts and old identifier quoting. LIKE and ILIKE share the predicate rung,
+ESCAPE operands, NULL behavior, nonassociativity and nesting guard. The matcher and effective
+collation semantics are specified in DIALECT.md and the SQL engine DESIGN.
+
+The postfix :: loop sits between ParsePrimary and unary signs; each left-associated cast
+uses Nest and the same target parser as CAST, including modifiers, aliases and quoted domains.
+It renders only as CAST, preserving every existing renderer precedence and canonical form.
+Direct +numeric remains a literal alias only when no postfix cast follows, preserving +1
+and ORDER BY +1 trees. Cast lookahead keeps +1::TEXT and + 1::TEXT at the sign rung,
+so both fail with CS02003 after casting, as unary minus does; +1::INT remains 1.
+Binary ILIKE follows LOWER(x) LIKE LOWER(p) with the engine's runtime ToLowerInvariant
+mapping: Σ differs from ς, ſ differs from s, É matches é and ΟΣ matches οσ.
+The other three collations extend PostgreSQL's nondeterministic-collation refusal with
+case-insensitive matching under their own equality. Invariant uses CompareOptions.IgnoreCase:
+ΟΣ matches ος, canonical é/é equivalence follows invariant equality, and İ differs from i
+while still matching _. The two index-backed insensitive transforms remain unchanged.
+PostgreSQL src/backend/parser/gram.y:904-914 supplies precedence; like.c:186-221 supplies
+determinism admission and lowercasing. The shared lexer is unchanged. All three language profiles
+pin ::, adjacent colons and ~~* token sequences; GQL labels retain their colon grammar.
+SQ-O2 consumes # in SQL syntax; ^ retains its named CK00001 lexical refusal as
+exponentiation (PostgreSQL src/include/catalog/pg_operator.dat:2119,2300). No public interface,
+diagnostic identity, format or wire layout is added.
+Persisted-expression equality and grouping identity distinguish LIKE from ILIKE. Existing
+persisted canonical text, including contextual ilike identifiers and REGCLASS casts, keeps its form.
+
 ## Distinct predicates, truth tests and LIKE ESCAPE (#1111)
 
 Dedicated SqlDistinctExpression and SqlBooleanTestExpression nodes retain negation;
 SqlTruthValue selects TRUE, FALSE or UNKNOWN. SqlLikeExpression adds an optional Escape
 operand. Depth accounting, canonical rendering and the complete tree dump include every
 operand. The parser uses PostgreSQL's IS/comparison/predicate/ESCAPE ladder and separates
-concatenation from addition; no named clause or keyword is added. ILIKE/SIMILAR are refused
+concatenation from addition; no named clause or keyword is added. SIMILAR is refused
 positionally, so ordinary identifier quoting stays unchanged. ISNULL/NOTNULL are likewise
 postfix capability refusals. Both list and subquery IN/NOT IN forms complete at the
 closing parenthesis and can feed another predicate (gram.y:15632-15668); binary
@@ -1047,3 +1460,7 @@ expressions. Its projection uses nonvirtual CommandType; Text is omitted because
 subclass can override that getter. Scalar-expression views expose existing syntax data without
 walking depth or diagnostics enumerations. Parser inspection does not advance lexers or initialize
 a language profile through its protected getter.
+
+DISCARD ALL restores the host timeout values captured before the session's first statement.
+Negotiated Ready carries transaction status and retained session state in two bytes; clean
+returns and user-discarded sessions require no extra reset exchange. See Protocol DESIGN (#1717).

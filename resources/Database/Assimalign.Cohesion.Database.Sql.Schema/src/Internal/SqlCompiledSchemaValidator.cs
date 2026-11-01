@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Sql.Language.Internal;
 using Assimalign.Cohesion.Database.Types;
@@ -219,11 +220,18 @@ internal static class SqlCompiledSchemaValidator
                     continue;
                 }
 
-                if (!Enum.IsDefined(constraint.OnDelete) ||
+                if (constraint.OnDelete is not (CompiledSchemaReferentialAction.Restrict or CompiledSchemaReferentialAction.Cascade) ||
                     (constraint.Kind == CompiledSchemaConstraintKind.Check && constraint.OnDelete != CompiledSchemaReferentialAction.Restrict))
                 {
                     Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.onDelete",
                         ErrorMessages.ValidatorValidateTableConstraintsVoid4);
+                }
+
+                if (!Enum.IsDefined(constraint.OnUpdate) ||
+                    (constraint.Kind == CompiledSchemaConstraintKind.Check && constraint.OnUpdate != CompiledSchemaReferentialAction.NoAction))
+                {
+                    Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{path}.onUpdate",
+                        ErrorMessages.UpdateActionInvalid);
                 }
 
                 if (constraint.Kind != CompiledSchemaConstraintKind.Check || constraint.Columns.Count > 0)
@@ -432,6 +440,11 @@ internal static class SqlCompiledSchemaValidator
                     ErrorMessages.SchemaValidatorValidateIndexesVoid3);
             }
 
+            if (declaration.KeyOrders.Count != declaration.Columns.Count || declaration.KeyOrders.Any(order => (uint)order > 3))
+            {
+                Add(errors, SqlSchemaValidationErrorCode.InvalidDocument, $"{indexPath}.keyOrders",
+                    ErrorMessages.IndexKeyOrderInvalid);
+            }
             ValidateMemberNames(declaration.Columns, columns, $"{indexPath}.columns", errors);
         }
     }

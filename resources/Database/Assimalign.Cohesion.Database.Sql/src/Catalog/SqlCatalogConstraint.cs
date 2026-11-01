@@ -19,6 +19,7 @@ public sealed class SqlCatalogConstraint
     /// renders from the parsed predicate. The catalog stores it as an opaque string.
     /// </param>
     /// <param name="checkFunctionCalls">Resolved normalized function signatures in expression preorder, retaining repeated calls.</param>
+    /// <param name="onUpdate">The action when a referenced parent key is updated; defaults to NO ACTION.</param>
     /// <param name="onDelete">The action when a referenced parent row is deleted.</param>
     /// <exception cref="ArgumentException">The definition is incomplete or inconsistent.</exception>
     public SqlCatalogConstraint(
@@ -30,12 +31,14 @@ public sealed class SqlCatalogConstraint
         IReadOnlyList<string>? referencedColumns = null,
         string? checkExpression = null,
         SqlCatalogReferentialAction onDelete = SqlCatalogReferentialAction.Restrict,
-        IReadOnlyList<string>? checkFunctionCalls = null)
+        IReadOnlyList<string>? checkFunctionCalls = null,
+        SqlCatalogReferentialAction onUpdate = SqlCatalogReferentialAction.NoAction)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(columns);
         if (kind is not SqlCatalogConstraintKind.Reference and not SqlCatalogConstraintKind.Check ||
-            onDelete is < SqlCatalogReferentialAction.Restrict or > SqlCatalogReferentialAction.SetDefault)
+            onDelete is < SqlCatalogReferentialAction.Restrict or > SqlCatalogReferentialAction.SetDefault ||
+            onUpdate is < SqlCatalogReferentialAction.Restrict or > SqlCatalogReferentialAction.SetDefault)
         {
             throw new ArgumentException(ErrorMessages.SqlCatalogConstraintArgument);
         }
@@ -50,7 +53,8 @@ public sealed class SqlCatalogConstraint
             }
         }
         else if (string.IsNullOrWhiteSpace(checkExpression) || referencedSchema is not null || referencedTable is not null ||
-                 referencedColumns is { Count: > 0 } || onDelete != SqlCatalogReferentialAction.Restrict)
+                 referencedColumns is { Count: > 0 } || onDelete != SqlCatalogReferentialAction.Restrict ||
+                 onUpdate != SqlCatalogReferentialAction.NoAction)
         {
             throw new ArgumentException(ErrorMessages.SqlCatalogConstraintArgument3);
         }
@@ -63,6 +67,7 @@ public sealed class SqlCatalogConstraint
         ReferencedColumns = Snapshot(referencedColumns ?? Array.Empty<string>());
         CheckExpression = checkExpression;
         OnDelete = onDelete;
+        OnUpdate = onUpdate;
         CheckFunctionCalls = Array.AsReadOnly((checkFunctionCalls ?? []).ToArray());
         if (CheckFunctionCalls.Any(string.IsNullOrWhiteSpace))
         {
@@ -92,6 +97,8 @@ public sealed class SqlCatalogConstraint
     public IReadOnlyList<string> CheckFunctionCalls { get; }
     /// <summary>Gets the action when a referenced parent row is deleted.</summary>
     public SqlCatalogReferentialAction OnDelete { get; }
+    /// <summary>Gets the action when a referenced parent key is updated; defaults to NO ACTION.</summary>
+    public SqlCatalogReferentialAction OnUpdate { get; }
 
     private static IReadOnlyList<string> Snapshot(IReadOnlyList<string> values)
     {

@@ -92,6 +92,8 @@ internal static partial class GraphPlanExecutor
             _memory = new GraphMemoryOwner(memory);
         }
         internal int Count => _states.Count;
+        internal void ReserveActive(long bytes, ref long activeBytes)
+        { _memory.Add(bytes); activeBytes += bytes; }
         internal void ReserveTasks(long bytes) => _memory.Add(bytes);
         internal void Push(PathState state)
         {
@@ -110,6 +112,9 @@ internal static partial class GraphPlanExecutor
         {
             long bytes = 384 + 80L * state.Bindings.Count + 48L * state.Used.Count + 128L * state.Groups.Count
                 + 64L * state.Nodes.Count + 80L * state.Relationships.Count;
+            // Named paths retain their GraphPath and two read-only collection wrappers.
+            // Node/relationship buffers are already covered by the state's inline accounting.
+            foreach (var binding in state.Bindings) { if (binding.Value is GraphPath) { bytes += 128; } }
             foreach (var values in state.Groups.Values) { bytes += 32 + 16L * values.Length; }
             for (var check = Predicates(state); check is not null; check = check.Previous)
             { bytes += 64 + (check.Locals is null ? 0 : 128 + 80L * check.Locals.Count); }
@@ -224,7 +229,17 @@ internal static partial class GraphPlanExecutor
                             if (plan is PathSearch && (state.Nodes[^1].Id.Value != ((PathSearch)plan).End ||
                                 ((PathSearch)plan).ExactLength && state.Relationships.Count != ((PathSearch)plan).HopLimit)) { break; }
                             if (plan.Pattern.Variable is { } pathVariable)
-                            { state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly())); }
+                            {
+                                if (state.Bindings.TryGetValue(pathVariable, out var existingPath))
+                                {
+                                    if (existingPath is not GraphPath boundPath || !SamePath(boundPath, state.Nodes, state.Relationships)) { break; }
+                                }
+                                else
+                                {
+                                    frontier.ReserveActive(128, ref stateBytes);
+                                    state.Bindings.Add(pathVariable, new GraphPath(state.Nodes.AsReadOnly(), state.Relationships.AsReadOnly()));
+                                }
+                            }
                             frontier.ResizeActive(state, ref stateBytes);
                             // Fixed chains retain the base matcher's source-ordered nodes, then edges,
                             // independently of the anchor. Repetitions retain reverse encounter order.
@@ -311,6 +326,20 @@ internal static partial class GraphPlanExecutor
                             // The same rule works when the right side runs before the left.
                             if (plan.Mode == GqlPathMode.Simple && state.Nodes.Count > 1 && state.Nodes[0].Id == state.Nodes[^1].Id)
                             { break; }
+                            if (plan is BoundPathSearch boundSearch)
+                            {
+                                if (state.Relationships.Count >= boundSearch.Value.Relationships.Count) { break; }
+                                budget.Consume();
+                                if (operation.Updates.FindRelationship(boundSearch.Value.Relationships[state.Relationships.Count].Id.Value) is not { } boundEdge) { break; }
+                                edgeTask = edgeTask with { Seed = boundEdge };
+                            }
+                            else if (operation.FunctionBindings is GraphCorrelatedBindings && edgeTask.Seed is null && edgeTask.Pattern.Variable is { } argument &&
+                                state.Bindings.TryGetValue(argument, out var argumentValue) && argumentValue is GraphRelationship argumentEdge)
+                            {
+                                budget.Consume();
+                                if (operation.Updates.FindRelationship(argumentEdge.Id.Value) is not { } boundEdge) { break; }
+                                edgeTask = edgeTask with { Seed = boundEdge };
+                            }
                             var incident = (edgeTask.Seed is { } seedEdge ? StreamSeedEdgeAsync(seedEdge, token)
                                 : operation.Updates.StreamIncidentAsync(state.Current.Id.Value,
                                 GraphLabelEvaluator.IncidentDirection(edgeTask.Pattern, edgeTask.Forward),

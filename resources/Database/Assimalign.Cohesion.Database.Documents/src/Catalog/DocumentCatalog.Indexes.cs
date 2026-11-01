@@ -328,6 +328,22 @@ public sealed partial class DocumentCatalog
             SeekRange(definition, equalityPrefix, lower, includeLower, upper, includeUpper),
             entryLimit: 512, pageLimit: 32, cancellationToken: cancellationToken);
 
+    // An existence probe over the first varying component's lossy tags, without
+    // reading document content. One visible match suffices; an invisible first entry
+    // conservatively leaves the domain unproven. No new cross-assembly probe API.
+    internal BTreeRangeCount ProbeComplexOrderKeys(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
+        TransactionSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        var prefix = DocumentIndexKeys.EncodePrefix(equalityPrefix).Encoded;
+        var start = new byte[prefix.Length + 1];
+        prefix.Span.CopyTo(start);
+        start[^1] = 6;
+        var end = (byte[])start.Clone();
+        end[^1] = 8;
+        return ResolveIndex(definition).CountRange(snapshot, new IndexKeyRange(new IndexKey(start), new IndexKey(end), true, false),
+            entryLimit: 1, pageLimit: 32, cancellationToken: cancellationToken);
+    }
+
     private static IndexKeyRange SeekRange(DocumentIndexMetadata definition, IReadOnlyList<object> equalityPrefix,
         object? lower, bool includeLower, object? upper, bool includeUpper)
     {
@@ -596,6 +612,9 @@ public sealed partial class DocumentCatalog
             _catalog = catalog;
             _metadata = metadata;
         }
+
+        public override bool Equals(object? obj) => obj is IndexUndo other && ReferenceEquals(_catalog, other._catalog) && _metadata.ObjectId == other._metadata.ObjectId;
+        public override int GetHashCode() => HashCode.Combine(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_catalog), _metadata.ObjectId);
 
         protected override ValueTask EraseCoreAsync(StorageTransaction transaction, ReadOnlyMemory<byte> key, ulong entryReference,
             TransactionSequence writer, CancellationToken cancellationToken)

@@ -27,11 +27,16 @@ public sealed partial class GqlQueryParser
             {
                 if (!HasStackToNest(Current)) { break; }
                 Advance();
-                if (Current.Type == TokenType.DotDot) { Unsupported("LIST SLICING", Current); break; }
-                var index = ParseExpression(0);
-                if (Current.Type == TokenType.DotDot) { Unsupported("LIST SLICING", Current); break; }
+                var index = Current.Type == TokenType.DotDot ? null : ParseExpression(0);
+                if (Take(TokenType.DotDot))
+                {
+                    var to = Current.Type == TokenType.RightBracket ? null : ParseExpression(0);
+                    Expect(TokenType.RightBracket, "']'");
+                    left = new GqlListSliceExpression(left, index, to, Span(start, Previous));
+                    continue;
+                }
                 Expect(TokenType.RightBracket, "']'");
-                left = new GqlSubscriptExpression(left, index, Span(start, Previous));
+                left = new GqlSubscriptExpression(left, index!, Span(start, Previous));
             }
             else if (Take(TokenType.Dot))
             {
@@ -51,14 +56,74 @@ public sealed partial class GqlQueryParser
         if (Current.Type != TokenType.RightBracket)
         {
             if ((Current.Type == TokenType.LeftParen || _position + 1 < _tokens.Count && _tokens[_position + 1].Type == TokenType.Equals) && HasComprehensionBar())
-            { Unsupported("PATTERN COMPREHENSION", Current); return new GqlListExpression(items); }
+            { return ParsePatternComprehension(start); }
             if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
                 _tokens[_position + 1].Text.Equals("IN", StringComparison.OrdinalIgnoreCase))
-            { Unsupported("LIST COMPREHENSION", Current); return new GqlListExpression(items); }
+            {
+                string variable = Identifier();
+                Expect("IN");
+                var list = ParseExpression(0);
+                GqlExpression? predicate = null;
+                GqlExpression? projection;
+                if (Take("WHERE")) { (predicate, projection) = ParseComprehensionBody(); }
+                else { projection = Take(TokenType.Pipe) ? ParseExpression(0) : null; }
+                Expect(TokenType.RightBracket, "']'");
+                return new GqlListComprehensionExpression(variable, list, predicate, projection, Span(start, Previous));
+            }
             do { items.Add(ParseExpression(0)); } while (!Failed && Take(TokenType.Comma));
         }
         Expect(TokenType.RightBracket, "']'");
         return new GqlListExpression(items, Span(start, Previous));
+    }
+
+    private (GqlExpression Predicate, GqlExpression? Projection) ParseComprehensionBody()
+    {
+        // A top-level label disjunction can share '|' with projection. Prefer a complete
+        // WHERE | projection parse, as Cypher25Parser.g4:714-716 does, then the filter-only
+        // form. Parenthesized label disjunctions never enter this candidate list.
+        var bars = new List<int>();
+        List<(int Position, Lexeme Token)>? arrows = null;
+        int depth = 0;
+        for (int i = _position; i < _tokens.Count; i++)
+        {
+            var type = _tokens[i].Type;
+            if (depth == 0 && type == TokenType.RightBracket) { break; }
+            if (depth == 0 && type == TokenType.Pipe) { bars.Add(i); }
+            if (_tokens[i].Text == "<-") { (arrows ??= []).Add((i, _tokens[i])); }
+            if (type is TokenType.LeftBracket or TokenType.LeftParen or TokenType.LeftBrace) { depth++; }
+            if (type is TokenType.RightBracket or TokenType.RightParen or TokenType.RightBrace) { depth--; }
+        }
+        int start = _position;
+        int diagnostics = _diagnostics.Count;
+        int outerBar = _collectionBar;
+        try
+        {
+            for (int i = bars.Count - 1; i >= 0; i--)
+            {
+                // Try the suffix first: rejected label bars then cost a short suffix probe,
+                // rather than reparsing an increasingly long label prefix for each bar.
+                _position = bars[i] + 1;
+                _collectionBar = outerBar;
+                var projection = ParseExpression(0);
+                int end = _position;
+                if (!Failed && Current.Type == TokenType.RightBracket)
+                {
+                    _position = start;
+                    _collectionBar = bars[i];
+                    var predicate = ParseExpression(0);
+                    if (!Failed && _position == bars[i]) { _position = end; return (predicate, projection); }
+                }
+                // Recognized unsupported syntax and the terminal stack guard must survive
+                // speculative parsing; neither should become a generic fallback syntax error.
+                if (_diagnostics.Count > diagnostics && _diagnostics[^1].Code is statementTooDeepCode or "CK00001") { return (projection, null); }
+                _position = start;
+                _diagnostics.RemoveRange(diagnostics, _diagnostics.Count - diagnostics);
+                if (arrows is not null) { foreach (var arrow in arrows) { _tokens[arrow.Position] = arrow.Token; } }
+            }
+            _collectionBar = outerBar;
+            return (ParseExpression(0), null);
+        }
+        finally { _collectionBar = outerBar; }
     }
 
     private bool HasComprehensionBar()
@@ -70,13 +135,32 @@ public sealed partial class GqlQueryParser
             if (depth == 0 && _tokens[i].Type == TokenType.Comma) { return false; }
             if (depth == 0 && i > _position && i + 1 < _tokens.Count && _tokens[i - 1].Type == TokenType.RightParen &&
                 _tokens[i].Type is TokenType.Minus or TokenType.LeftArrow or TokenType.RightArrow &&
-                _tokens[i + 1].Type is TokenType.LeftParen or TokenType.LeftBracket) { relationship = true; }
+                StartsComprehensionRelationship(i)) { relationship = true; }
             if (_tokens[i].Type is TokenType.LeftBracket or TokenType.LeftParen or TokenType.LeftBrace) { depth++; }
             if (_tokens[i].Type == TokenType.RightBracket && depth == 0) { break; }
             if (_tokens[i].Type is TokenType.RightBracket or TokenType.RightParen or TokenType.RightBrace) { depth--; }
             if (_tokens[i].Text == "|" && depth == 0) { return relationship; }
         }
         return false;
+    }
+
+    private bool StartsComprehensionRelationship(int index)
+    {
+        // Probe the pattern boundary; ParsePath owns quantifier validation. An abbreviated
+        // connector may end in a touching '>' and carry an ISO postfix before its next node.
+        int next = index + 1;
+        if (_tokens[index].Type == TokenType.LeftArrow && _tokens[next].Type == TokenType.GreaterThan && Adjacent(index, next))
+        { next++; }
+        if (next < _tokens.Count && _tokens[next].Type == TokenType.LeftBracket) { return true; }
+        if (next < _tokens.Count && _tokens[next].Type is TokenType.Plus or TokenType.Asterisk) { next++; }
+        else if (next < _tokens.Count && _tokens[next].Type == TokenType.LeftBrace)
+        {
+            next++;
+            while (next < _tokens.Count && _tokens[next].Type is TokenType.Integer or TokenType.Comma) { next++; }
+            if (next >= _tokens.Count || _tokens[next].Type != TokenType.RightBrace) { return false; }
+            next++;
+        }
+        return next < _tokens.Count && _tokens[next].Type == TokenType.LeftParen;
     }
 
     private GqlExpression ParseMap()

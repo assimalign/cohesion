@@ -25,4 +25,14 @@ public enum SqlQueryCommandType
     Truncate,
     /// <summary>Associate source rows with a target and select ordered actions.</summary>
     Merge,
+    /// <summary>Discard logical-session state outside a transaction.</summary>
+    Discard,
+    /// <summary>Configure the current transaction before its first data statement.</summary>
+    SetTransaction,
+    /// <summary>Create a named undo scope.</summary>
+    Savepoint,
+    /// <summary>Release a named undo scope and descendants.</summary>
+    ReleaseSavepoint,
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    RollbackToSavepoint,
 }

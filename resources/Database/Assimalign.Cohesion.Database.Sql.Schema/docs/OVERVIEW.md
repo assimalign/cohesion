@@ -1,5 +1,9 @@
 # Assimalign.Cohesion.Database.Sql.Schema — Overview
 
+CompiledSchemaConstraint exposes all five OnUpdate actions, defaulting to NoAction. The current v11
+document persists the action, optional index predicates and per-column key orders; migration equality includes each. Earlier artifacts are refused;
+rebuild artifacts and recreate affected databases (#1723, SQ-F1).
+
 Code-first objects are provisioned into the SQL namespace `dbo`. SQL `CREATE SCHEMA` creates
 other namespaces for SQL-authored objects; builders have no namespace-targeting option. A
 compiled schema's name identifies ownership independently of a table's SQL namespace (#1030).
@@ -7,7 +11,7 @@ compiled schema's name identifies ownership independently of a table's SQL names
 SQL's thin schema package provides one-step `SqlSchema.Compile`, the lower-level
 `SqlSchema.Create` with the opaque declaration it returns and its own `Compile()`, the
 sealed declaration builders, the standalone `SqlCompiledSchema` (format
-`cohesion/database-schema/v8`, its canonical document and SHA-256 computed once), its canonical
+`cohesion/database-schema/v11`, its canonical document and SHA-256 computed once), its canonical
 serializer, SQL migration planning and `SqlSchemaMigrationResult`. Both SDK build tooling and the
 SQL engine consume it; the Database area root holds no schema type.
 A retained `SqlSchema` keeps its compiled result, so reusing it in subsequent engine builds also
@@ -57,7 +61,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v11`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated
@@ -70,7 +74,7 @@ format with the current culture. Successful type validation adds no resource loo
 Assembly-local Defaults/Types resource bindings live under Internal while preserving their
 linked owning namespaces. SqlSchemaMigrationResult lives in ValueObjects with the same public
 namespace, positional properties and construction. Canonical documents, hashes and format
-cohesion/database-schema/v8 are unchanged.
+cohesion/database-schema/v11 are unchanged.
 
 ## Debugger inspection
 

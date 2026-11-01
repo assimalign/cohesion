@@ -82,10 +82,11 @@ public sealed partial class SqlCatalog
     private const int schemaStateChunkSize = 3 * 1024;
 
     // The version of a table record's trailing extension this catalog writes; it reads
-    // only the current version. Version 7 adds TYPE default assignment coercion;
+    // only the current version. Version 8 adds each constraint's ON UPDATE action;
+    // version 7 adds TYPE default assignment coercion;
     // version 6 adds frozen missing values; version 5 adds identity facets; version 3 adds the dropped columns' physical ordinals (#1241),
     // version 4 (data-storage format 7, phase E3) each column's domain name.
-    private const int tableExtensionVersion = 7;
+    private const int tableExtensionVersion = 8;
 
     private static readonly Encoding _strictUtf8 = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false,
@@ -98,6 +99,7 @@ public sealed partial class SqlCatalog
     private readonly object _sync = new();
     private ulong _nextObjectId = 1;
     private ulong _ddlGeneration;
+    private SqlCatalogSnapshot? _snapshot;
     private int _recordSpaceFormatVersion = 1;
     private Collation _defaultCollation = Collation.Binary;
     private (PageId PageId, int SlotIndex)? _counterLocation;
@@ -169,7 +171,9 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            return new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value), _views.Values.Select(slot => slot.Value));
+            // Captures contain immutable definitions. Share one until a committed definition
+            // or storage-owner publication invalidates it under this same catalog monitor.
+            return _snapshot ??= new SqlCatalogSnapshot(_tables.Values.Select(slot => slot.Table), _indexes.Values.Select(slot => slot.Index), _defaultCollation, _functions.Values.Select(slot => slot.Value), _domains.Values.Select(slot => slot.Value), _namespaces.Values.Select(slot => slot.Value), _views.Values.Select(slot => slot.Value)) { Sequences = _sequences.Count == 0 ? [] : Sequences };
         }
     }
 
@@ -224,7 +228,10 @@ public sealed partial class SqlCatalog
                 (intent is null ? _preparedTruncateOwners.Contains(objectId) : !ReferenceEquals(intent, location))) { return default; }
             using var transaction = _storage.BeginTransaction();
             _storage.DeleteRow(transaction, location.PageId, location.SlotIndex);
+            DefinitionSlot<SqlCatalogSequence>[] orphaned = _sequences.Count == 0 ? [] : _sequences.Values.Where(slot => slot.Value.OwnerTableId == objectId).ToArray();
+            foreach (var sequence in orphaned) { DeleteSequence(transaction, sequence); }
             transaction.Commit();
+            foreach (var sequence in orphaned) { RemoveSequence(sequence.Value); }
             _pendingReclamations.Remove(objectId);
             _truncateRetirementsPublishing.Remove(objectId);
             _preparedTruncateOwners.Remove(objectId);
@@ -251,11 +258,9 @@ public sealed partial class SqlCatalog
     {
         get
         {
-            lock (_sync)
-            {
-                ThrowIfOffline();
-                return _defaultCollation;
-            }
+            // Established before Open publishes the catalog and immutable thereafter.
+            ThrowIfOffline();
+            return _defaultCollation;
         }
     }
 
@@ -473,8 +478,9 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
+            if (RelationExists(schema, name))
             {
+                if (_sequences.ContainsKey((schema, name))) { throw RelationNameCollision(schema, name); }
                 throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, schema, name));
             }
 
@@ -486,7 +492,10 @@ public sealed partial class SqlCatalog
             using (var transaction = _storage.BeginTransaction())
             {
                 var location = _storage.InsertRow(transaction, EncodeTable(table));
-                CommitCatalogChange(transaction, checked(_nextObjectId + 1), publication, actualObject: SqlObjectIdentity.Table(schema, name), createsObject: true);
+                ulong next = checked(_nextObjectId + 1);
+                var owned = StageOwnedSequences(transaction, null, table, ref next);
+                CommitCatalogChange(transaction, next, publication, actualObject: SqlObjectIdentity.Table(schema, name), createsObject: true);
+                owned();
                 _tables[(schema, name)] = new TableSlot(table, location);
             }
 
@@ -595,7 +604,8 @@ public sealed partial class SqlCatalog
                 var reclamationLocation = _storage.InsertRow(transaction, slot.Table.ObjectId,
                     SqlReclamationRecord.Encode(slot.Table.ObjectId, schema, name));
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
-                DeleteIdentityCounter(transaction, slot.Table.ObjectId);
+                ulong next = _nextObjectId;
+                var owned = StageOwnedSequences(transaction, slot.Table, null, ref next);
 
                 foreach (var indexSlot in droppedIndexes)
                 {
@@ -609,16 +619,16 @@ public sealed partial class SqlCatalog
                 }
 
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(schema, name));
+                owned();
                 _registrationsLocation = registrationsLocation;
                 _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(reclamationLocation.PageId, reclamationLocation.SlotIndex));
             }
 
             _tables.Remove((schema, name));
-            _identityCounters.Remove(slot.Table.ObjectId);
 
             foreach (var indexSlot in droppedIndexes)
             {
-                _indexes.Remove((indexSlot.Index.TableObjectId, indexSlot.Index.Name));
+                RemoveIndexSlot((indexSlot.Index.TableObjectId, indexSlot.Index.Name));
             }
 
             if (droppedIndexes.Count > 0)
@@ -729,7 +739,7 @@ public sealed partial class SqlCatalog
     /// <returns>The updated table description.</returns>
     /// <exception cref="SqlCatalogException">
     /// The table or column does not exist; the column is part of the primary key, a
-    /// constraint or an index; it is the table's last column; or the definition, which keeps
+    /// constraint or an unconditional index; it is the table's last column; or the definition, which keeps
     /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
@@ -755,7 +765,7 @@ public sealed partial class SqlCatalog
     /// <returns>The updated table description.</returns>
     /// <exception cref="SqlCatalogException">
     /// The table or column does not exist; the column is part of the primary key, a
-    /// constraint or an index; it is the table's last column; or the definition, which keeps
+    /// constraint or an unconditional index; it is the table's last column; or the definition, which keeps
     /// every dropped column's physical ordinal, no longer fits one catalog record.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled before the write.</exception>
@@ -824,10 +834,11 @@ public sealed partial class SqlCatalog
                 }
             }
 
-            // An indexed column cannot be dropped: index entries key on the column's values.
+            // Preserve the existing unconditional-index key dependency refusal.
+            // Dependent partial indexes are retired atomically with the column below.
             foreach (var indexSlot in _indexes.Values)
             {
-                if (indexSlot.Index.TableObjectId == slot.Table.ObjectId &&
+                if (indexSlot.Index.TableObjectId == slot.Table.ObjectId && indexSlot.Index.Predicate is null &&
                     indexSlot.Index.ColumnNames.Any(column => string.Equals(column, columnName, StringComparison.OrdinalIgnoreCase)))
                 {
                     throw new SqlCatalogException("CS03056",
@@ -851,7 +862,10 @@ public sealed partial class SqlCatalog
             int[] dropped = [.. slot.Table.DroppedColumnOrdinals, slot.Table.GetPhysicalOrdinal(ordinal)];
             var updated = new SqlCatalogTable(slot.Table.ObjectId, schema, name, columns, slot.Table.PrimaryKeyColumns,
                 slot.Table.Owner, slot.Table.OwningSchema, slot.Table.Constraints, dropped);
-            ReplaceTable(slot, updated, publication);
+            var droppedIndexes = _indexes.Values.Where(index => index.Index.TableObjectId == slot.Table.ObjectId &&
+                index.Index.Predicate is not null && (index.Index.PredicateColumns.Contains(columnName, StringComparer.OrdinalIgnoreCase) ||
+                index.Index.ColumnNames.Contains(columnName, StringComparer.OrdinalIgnoreCase))).ToArray();
+            ReplaceTable(slot, updated, publication, droppedIndexes);
             return new ValueTask<SqlCatalogTable>(updated);
         }
     }
@@ -869,9 +883,20 @@ public sealed partial class SqlCatalog
             ThrowIfOffline();
             var result = new List<SqlCatalogIndex>();
 
+            // The persisted registration vector appends creations and retains survivors'
+            // order, unlike dictionary slots reused after DROP. Keep this order through
+            // reopen and storage rewrites, with a table-declared primary key first.
+            for (int ordinal = 0; ordinal < _registrations.Count; ordinal++)
+            {
+                var registration = _registrations[ordinal];
+                if (registration.ObjectId == tableObjectId &&
+                    _indexes.TryGetValue((tableObjectId, registration.Definition.Name), out var registered))
+                { result.Add(registered.Index); }
+            }
             foreach (var slot in _indexes.Values)
             {
-                if (slot.Index.TableObjectId == tableObjectId)
+                // Metadata-only catalog callers can publish descriptions before trees.
+                if (slot.Index.TableObjectId == tableObjectId && !result.Contains(slot.Index))
                 {
                     result.Add(slot.Index);
                 }
@@ -980,7 +1005,7 @@ public sealed partial class SqlCatalog
                     ErrorMessages.ConstraintNameExists, index.Name, table.Name));
             }
 
-            foreach (string column in index.ColumnNames)
+            foreach (string column in index.ColumnNames.Concat(index.PredicateColumns))
             {
                 if (table.FindColumn(column) is null)
                 {
@@ -995,7 +1020,7 @@ public sealed partial class SqlCatalog
                 var registrationsLocation = UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(mergedRegistrations));
                 CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Index(table.Schema, table.Name, index.Name), createsObject: true);
                 _registrationsLocation = registrationsLocation;
-                _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, location);
+                SetIndexSlot(new IndexSlot(index, location));
             }
 
             _registrations = mergedRegistrations;
@@ -1088,7 +1113,7 @@ public sealed partial class SqlCatalog
                 _registrationsLocation = registrationsLocation;
             }
 
-            _indexes.Remove((tableObjectId, name));
+            RemoveIndexSlot((tableObjectId, name));
             _registrations = remainingRegistrations;
             return default;
         }
@@ -1336,8 +1361,18 @@ public sealed partial class SqlCatalog
                         if (!_pendingReclamations.TryAdd(intent.ObjectId, new SqlReclamationIntent(unit.PageId, unit.SlotIndex))) { throw new System.IO.InvalidDataException(); }
                         _nextObjectId = Math.Max(_nextObjectId, intent.ObjectId + 1);
                         break;
-                    case identityCounterRecordKind:
-                        LoadIdentityCounter(ref reader, unit.PageId, unit.SlotIndex);
+                    case 16: // Retired table-owned identity counters are never read in format 30.
+                        throw new SqlCatalogException("CS06059", ErrorMessages.IdentityCounterMalformed);
+                    case sequenceRecordKind:
+                    case sequenceCounterRecordKind:
+                        try
+                        {
+                            if (kind == sequenceRecordKind) { LoadSequence(ref reader, (unit.PageId, unit.SlotIndex)); }
+                            else { LoadSequenceCounter(ref reader, (unit.PageId, unit.SlotIndex)); }
+                        }
+                        catch (Exception failure) when (failure is SqlCatalogException or DatabaseTypeException
+                            or ArgumentException or OverflowException or FormatException)
+                        { throw new SqlCatalogException("CS06061", ErrorMessages.SequenceRecordMalformed, failure); }
                         break;
                     case tableRecordKind:
                         var table = DecodeTable(ref reader);
@@ -1385,7 +1420,7 @@ public sealed partial class SqlCatalog
 
                     case indexRecordKind:
                         var index = DecodeIndex(ref reader);
-                        _indexes[(index.TableObjectId, index.Name)] = new IndexSlot(index, (unit.PageId, unit.SlotIndex));
+                        SetIndexSlot(new IndexSlot(index, (unit.PageId, unit.SlotIndex)));
                         break;
 
                     case schemaStateRecordKind:
@@ -1462,13 +1497,14 @@ public sealed partial class SqlCatalog
         }
 
         var tablesById = _tables.Values.ToDictionary(slot => slot.Table.ObjectId, slot => slot.Table);
-        ValidateIdentityCounters(tablesById);
-        ValidateViewDirectory(tablesById);
 
         if (_tables.Values.Any(slot => _pendingReclamations.ContainsKey(slot.Table.ObjectId)))
         {
             throw new System.IO.InvalidDataException();
         }
+
+        ValidateSequenceDirectory(tablesById);
+        ValidateViewDirectory(tablesById);
 
         if (schemaStateChunks.Count > 0)
         {
@@ -1528,20 +1564,33 @@ public sealed partial class SqlCatalog
         return null;
     }
 
-    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication)
+    private void ReplaceTable(TableSlot slot, SqlCatalogTable updated, SqlCatalogScriptPublication? publication, IReadOnlyList<IndexSlot>? droppedIndexes = null)
     {
         ValidateColumns(updated.Schema, updated.Name, updated.Columns, updated.PrimaryKeyColumns);
-        EnsureIdentityKept(slot.Table, updated);
         byte[] record = EncodeTable(updated);
 
         using (var transaction = _storage.BeginTransaction())
         {
             var location = UpsertRecord(transaction, slot.Location, record);
-            bool removedIdentity = !updated.Columns.Any(column => column.Identity is not null);
-            if (removedIdentity) { DeleteIdentityCounter(transaction, updated.ObjectId); }
-            CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
+            IReadOnlyList<BTreeIndexRegistration>? remaining = null;
+            if (droppedIndexes is { Count: > 0 })
+            {
+                remaining = _registrations.Where(registration => !droppedIndexes.Any(index =>
+                    index.Index.TableObjectId == registration.ObjectId && index.Index.Name.Equals(registration.Definition.Name, StringComparison.OrdinalIgnoreCase))).ToArray();
+                foreach (var index in droppedIndexes) { _storage.DeleteRow(transaction, index.Location.PageId, index.Location.SlotIndex); }
+            }
+            var registrationsLocation = remaining is null ? _registrationsLocation : UpsertRecord(transaction, _registrationsLocation, EncodeRegistrations(remaining));
+            ulong next = _nextObjectId;
+            var owned = StageOwnedSequences(transaction, slot.Table, updated, ref next);
+            CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(updated.Schema, updated.Name));
+            owned();
             _tables[(updated.Schema, updated.Name)] = new TableSlot(updated, location);
-            if (removedIdentity) { _identityCounters.Remove(updated.ObjectId); }
+            if (remaining is not null)
+            {
+                _registrations = remaining;
+                _registrationsLocation = registrationsLocation;
+                foreach (var index in droppedIndexes!) { RemoveIndexSlot((index.Index.TableObjectId, index.Index.Name)); }
+            }
         }
     }
 
@@ -1602,7 +1651,8 @@ public sealed partial class SqlCatalog
         }
         _counterLocation = location;
         _nextObjectId = identity;
-        _ddlGeneration = generation;
+        Volatile.Write(ref _ddlGeneration, generation);
+        _snapshot = null;
     }
 
     private (PageId PageId, int SlotIndex) PersistCounter(
@@ -1631,7 +1681,7 @@ public sealed partial class SqlCatalog
                 {
                     throw new SqlCatalogException("CS03053", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.IdentityMetadataInvalid, column.Name));
                 }
-                var (minimum, maximum) = IdentityBounds(column.Type.Type, identity.Increment);
+                var (minimum, maximum) = SqlSequenceOptions.IntegerBounds(column.Type.Type, identity: true);
                 if (hasIdentity || column.IsNullable || column.DefaultLiteral is not null || column.DomainName is not null ||
                     identity.Start < minimum || identity.Start > maximum)
                 {
@@ -1750,7 +1800,7 @@ public sealed partial class SqlCatalog
                 writer.AppendString(column, Collation.Binary);
             }
             AppendOptionalString(ref writer, constraint.CheckExpression);
-            writer.AppendInt8((sbyte)constraint.OnDelete);
+            writer.AppendInt8((sbyte)constraint.OnDelete).AppendInt8((sbyte)constraint.OnUpdate);
         }
         foreach (var column in table.Columns)
         {
@@ -1907,10 +1957,11 @@ public sealed partial class SqlCatalog
                 var referencedColumns = ReadColumnNames(ref reader);
                 string? expression = ReadOptionalString(ref reader);
                 var onDelete = (SqlCatalogReferentialAction)reader.ReadInt8();
+                var onUpdate = (SqlCatalogReferentialAction)reader.ReadInt8();
                 try
                 {
                     constraints.Add(new SqlCatalogConstraint(constraintName, kind, localColumns,
-                        referencedSchema, referencedTable, referencedColumns, expression, onDelete));
+                        referencedSchema, referencedTable, referencedColumns, expression, onDelete, onUpdate: onUpdate));
                 }
                 catch (ArgumentException exception)
                 {
@@ -1981,7 +2032,7 @@ public sealed partial class SqlCatalog
             var constraint = constraints[index];
             constraints[index] = new SqlCatalogConstraint(constraint.Name, constraint.Kind, constraint.Columns,
                 constraint.ReferencedSchema, constraint.ReferencedTable, constraint.ReferencedColumns,
-                constraint.CheckExpression, constraint.OnDelete, ReadFunctionCalls(ref reader, constraint.CheckExpression?.Length ?? 0));
+                constraint.CheckExpression, constraint.OnDelete, ReadFunctionCalls(ref reader, constraint.CheckExpression?.Length ?? 0), constraint.OnUpdate);
         }
         for (int index = 0; index < columns.Count; index++)
         {
@@ -2043,7 +2094,13 @@ public sealed partial class SqlCatalog
         }
 
         AppendOwnership(ref writer, index.Owner, index.OwningSchema);
-        writer.AppendInt32(1).AppendBoolean(index.IsPrimaryKey);
+        writer.AppendInt32(3).AppendBoolean(index.IsPrimaryKey);
+        AppendOptionalString(ref writer, index.Predicate);
+        writer.AppendInt32(index.PredicateColumns.Count);
+        foreach (string column in index.PredicateColumns) { writer.AppendString(column, Collation.Binary); }
+        writer.AppendInt32(index.PredicateFunctionCalls.Count);
+        foreach (string call in index.PredicateFunctionCalls) { writer.AppendString(call, Collation.Binary); }
+        foreach (var order in index.KeyOrders) { writer.AppendInt8((sbyte)order); }
         return writer.ToArray();
     }
 
@@ -2061,21 +2118,29 @@ public sealed partial class SqlCatalog
         }
 
         var (owner, owningSchema) = ReadOwnership(ref reader, allowTrailing: true);
-        bool isPrimaryKey = false;
-        if (!reader.IsAtEnd)
+        int version = reader.ReadInt32();
+        if (version != 3)
         {
-            int version = reader.ReadInt32();
-            if (version != 1)
-            {
-                throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
-            }
-            isPrimaryKey = reader.ReadBoolean();
+            throw new SqlCatalogException("CS06060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlCatalogDecodeIndexSqlCatalog, version));
         }
-        if (!reader.IsAtEnd || (isPrimaryKey && !isUnique))
+        bool isPrimaryKey = reader.ReadBoolean();
+        string? predicate = ReadOptionalString(ref reader);
+        int dependencies = reader.ReadInt32();
+        var predicateColumns = new List<string>();
+        for (int i = 0; i < dependencies; i++) { predicateColumns.Add(reader.ReadString(out _)); }
+        int calls = reader.ReadInt32();
+        var functionCalls = new List<string>();
+        for (int i = 0; i < calls; i++) { functionCalls.Add(reader.ReadString(out _)); }
+        var keyOrders = new SqlCatalogIndexKeyOrder[columnCount];
+        for (int i = 0; i < columnCount; i++) { keyOrders[i] = (SqlCatalogIndexKeyOrder)reader.ReadInt8(); }
+        if (keyOrders.Any(order => (uint)order > 3 || isPrimaryKey && order != SqlCatalogIndexKeyOrder.AscendingNullsLast) ||
+            !reader.IsAtEnd || dependencies < 0 || calls < 0 || (isPrimaryKey && (!isUnique || predicate is not null)) ||
+            predicate is null && (dependencies != 0 || calls != 0) || predicate is not null && string.IsNullOrWhiteSpace(predicate))
         {
             throw new SqlCatalogException("CS06059", ErrorMessages.SqlCatalogDecodeIndexSqlCatalog2);
         }
-        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey);
+        return new SqlCatalogIndex(tableObjectId, name, columns, isUnique, owner, owningSchema, isPrimaryKey,
+            predicate, predicateColumns, functionCalls, keyOrders);
     }
 
     private static void ValidateConstraints(SqlCatalogTable table)
@@ -2234,8 +2299,9 @@ public sealed partial class SqlCatalog
         lock (_sync)
         {
             ThrowIfOffline();
-            if (_tables.ContainsKey((schema, name)) || _views.ContainsKey(SqlObjectIdentity.View(schema, name)))
+            if (RelationExists(schema, name))
             {
+                if (_sequences.ContainsKey((schema, name))) { throw RelationNameCollision(schema, name); }
                 throw new SqlCatalogException("CS03049", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.RenameTableCollision, schema, name));
             }
             ValidateColumns(schema, name, columns, primaryKeyColumns);
@@ -2369,6 +2435,7 @@ public sealed partial class SqlCatalog
             {
                 throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog2, table.Schema, table.Name));
             }
+            if (SequenceNameExists(table.Schema, table.Name)) { throw RelationNameCollision(table.Schema, table.Name); }
             if (_views.ContainsKey(SqlObjectIdentity.View(table.Schema, table.Name))) { throw new SqlCatalogException("CS03033", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ViewExists, table.Schema, table.Name)); }
             if (existing is not null)
             {
@@ -2381,13 +2448,12 @@ public sealed partial class SqlCatalog
                 }
             }
             EnsurePhysicalLayoutKept(existing?.Table, table);
-            if (existing is not null) { EnsureIdentityKept(existing.Table, table); }
             ValidateColumns(table.Schema, table.Name, table.Columns, table.PrimaryKeyColumns);
             ValidateConstraints(table);
             var names = new HashSet<string>(table.Constraints.Select(constraint => constraint.Name), StringComparer.OrdinalIgnoreCase);
             foreach (SqlCatalogIndex index in GetIndexes(table.ObjectId))
             {
-                if (!names.Add(index.Name) || index.ColumnNames.Any(column => table.FindColumn(column) is null))
+                if (!names.Add(index.Name) || index.ColumnNames.Concat(index.PredicateColumns).Any(column => table.FindColumn(column) is null))
                 {
                     throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog3, index.Name));
                 }
@@ -2395,7 +2461,7 @@ public sealed partial class SqlCatalog
             foreach (SqlCatalogIndex index in indexes)
             {
                 if (index.TableObjectId != table.ObjectId || !names.Add(index.Name) ||
-                    index.ColumnNames.Any(column => table.FindColumn(column) is null))
+                    index.ColumnNames.Concat(index.PredicateColumns).Any(column => table.FindColumn(column) is null))
                 {
                     throw new SqlCatalogException("CS05060", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PublishTableCoreAsyncSqlCatalog4, index.Name, table.Schema, table.Name));
                 }
@@ -2413,7 +2479,10 @@ public sealed partial class SqlCatalog
                 var intent = _pendingReclamations[table.ObjectId];
                 _storage.DeleteRow(transaction, intent.PageId, intent.SlotIndex);
             }
-            CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
+            ulong next = _nextObjectId;
+            var owned = StageOwnedSequences(transaction, existing?.Table, table, ref next);
+            CommitCatalogChange(transaction, next, publication: publication, actualObject: SqlObjectIdentity.Table(table.Schema, table.Name), createsObject: !replaceExisting);
+            owned();
             if (prepared)
             {
                 _pendingReclamations.Remove(table.ObjectId);
@@ -2422,7 +2491,7 @@ public sealed partial class SqlCatalog
             _tables[(table.Schema, table.Name)] = new TableSlot(table, tableLocation);
             foreach (IndexSlot slot in slots)
             {
-                _indexes[(table.ObjectId, slot.Index.Name)] = slot;
+                SetIndexSlot(slot);
             }
             _registrationsLocation = registrationsLocation;
             _registrations = mergedRegistrations;

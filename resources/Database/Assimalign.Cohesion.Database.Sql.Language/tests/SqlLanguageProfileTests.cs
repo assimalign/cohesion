@@ -29,9 +29,19 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.UpdateFrom, "UPDATE t SET id=s.id FROM s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.DeleteUsing, "DELETE FROM t USING s WHERE t.id=s.id;")]
     [InlineData(SqlClauses.Delete, "DELETE FROM t;")]
+    [InlineData(SqlClauses.AlterIdentity, "ALTER TABLE t ALTER id RESTART;")]
+    [InlineData(SqlClauses.Serial, "CREATE TABLE t(id SERIAL);")]
+    [InlineData(SqlClauses.Overriding, "INSERT INTO t OVERRIDING USER VALUE VALUES(9);")]
+    [InlineData(SqlClauses.OwnedBy, "CREATE SEQUENCE s OWNED BY t.id;")]
+    [InlineData(SqlClauses.CreateSequence, "CREATE SEQUENCE s;")]
+    [InlineData(SqlClauses.AlterSequence, "ALTER SEQUENCE s RESTART;")]
+    [InlineData(SqlClauses.DropSequence, "DROP SEQUENCE s;")]
+    [InlineData(SqlClauses.NextValue, "SELECT NEXT VALUE FOR s;")]
     [InlineData(SqlClauses.Identity, "CREATE TABLE t (id INT IDENTITY);")]
     [InlineData(SqlClauses.CreateTable, "CREATE TABLE t (id INT);")]
     [InlineData(SqlClauses.CreateTableAs, "CREATE TABLE t (id) AS SELECT 1 WITH NO DATA;")]
+    [InlineData(SqlClauses.IndexKeyOrder, "CREATE INDEX ix ON t(id DESC NULLS LAST);")]
+    [InlineData(SqlClauses.PartialIndex, "CREATE INDEX ix ON t (id) WHERE id > 0;")]
     [InlineData(SqlClauses.CreateIndex, "CREATE INDEX ix_t_id ON t (id);")]
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]
     [InlineData(SqlClauses.DropTable, "DROP TABLE t;")]
@@ -42,7 +52,19 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.From, "SELECT * FROM t;")]
     [InlineData(SqlClauses.Join, "SELECT * FROM t JOIN u ON t.id = u.id;")]
     [InlineData(SqlClauses.Where, "SELECT * FROM t WHERE id = 1;")]
+    [InlineData(SqlClauses.Filter, "SELECT COUNT(*) FILTER (WHERE a > 0) FROM t;")]
+    [InlineData(SqlClauses.GroupingSets, "SELECT a FROM t GROUP BY GROUPING SETS ((a), ());")]
+    [InlineData(SqlClauses.Rollup, "SELECT a FROM t GROUP BY ROLLUP(a);")]
+    [InlineData(SqlClauses.Cube, "SELECT a FROM t GROUP BY CUBE(a);")]
     [InlineData(SqlClauses.GroupBy, "SELECT id FROM t GROUP BY id;")]
+    [InlineData(SqlClauses.Window, "SELECT RANK() OVER w WINDOW w AS();")]
+    [InlineData(SqlClauses.WindowRows, "SELECT SUM(v) OVER(ROWS 2 PRECEDING) FROM t;")]
+    [InlineData(SqlClauses.WindowGroups, "SELECT SUM(v) OVER(ORDER BY k GROUPS 1 PRECEDING) FROM t;")]
+    [InlineData(SqlClauses.WindowExclude, "SELECT SUM(v) OVER(ROWS CURRENT ROW EXCLUDE TIES) FROM t;")]
+    [InlineData(SqlClauses.WindowNullTreatment, "SELECT LAG(v) IGNORE NULLS OVER() FROM t;")]
+    [InlineData(SqlClauses.WindowRange, "SELECT SUM(v) OVER(RANGE UNBOUNDED PRECEDING) FROM t;")]
+    [InlineData(SqlClauses.Over, "SELECT RANK() OVER();")]
+    [InlineData(SqlClauses.Partition, "SELECT RANK() OVER(PARTITION BY a) FROM t;")]
     [InlineData(SqlClauses.Having, "SELECT id FROM t GROUP BY id HAVING COUNT(*) > 0;")]
     [InlineData(SqlClauses.OrderBy, "SELECT * FROM t ORDER BY id;")]
     [InlineData(SqlClauses.Fetch, "SELECT * FROM t FETCH NEXT 1 ROWS ONLY;")]
@@ -55,21 +77,28 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.Collate, "SELECT name FROM t WHERE name = 'Alice' COLLATE case_insensitive;")]
     [InlineData(SqlClauses.Constraint, "CREATE TABLE t (id INT, CONSTRAINT ck CHECK (id > 0));")]
     [InlineData(SqlClauses.ForeignKey, "CREATE TABLE t (parent_id INT, FOREIGN KEY (parent_id) REFERENCES parent(id));")]
+    [InlineData(SqlClauses.OnUpdate, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON UPDATE CASCADE);")]
     [InlineData(SqlClauses.References, "CREATE TABLE t (parent_id INT REFERENCES parent(id));")]
     [InlineData(SqlClauses.Check, "CREATE TABLE t (id INT CHECK (id > 0));")]
     [InlineData(SqlClauses.UniqueConstraint, "CREATE TABLE t (email TEXT UNIQUE);")]
     [InlineData(SqlClauses.Cascade, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE CASCADE);")]
     [InlineData(SqlClauses.Restrict, "CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE RESTRICT);")]
     [InlineData(SqlClauses.Begin, "BEGIN;")]
+    [InlineData(SqlClauses.IsolationLevel, "BEGIN ISOLATION LEVEL READ COMMITTED;")]
+    [InlineData(SqlClauses.SetTransaction, "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;")]
     [InlineData(SqlClauses.Begin, "START TRANSACTION;")]
     [InlineData(SqlClauses.Begin, "BEGIN WORK;")]
     [InlineData(SqlClauses.Commit, "COMMIT;")]
     [InlineData(SqlClauses.Commit, "END;")]
     [InlineData(SqlClauses.Commit, "COMMIT WORK;")]
+    [InlineData(SqlClauses.Savepoint, "SAVEPOINT a;")]
+    [InlineData(SqlClauses.ReleaseSavepoint, "RELEASE SAVEPOINT a;")]
+    [InlineData(SqlClauses.RollbackToSavepoint, "ROLLBACK TO SAVEPOINT a;")]
     [InlineData(SqlClauses.Rollback, "ROLLBACK;")]
     [InlineData(SqlClauses.Rollback, "ROLLBACK WORK;")]
     [InlineData(SqlClauses.Transaction, "BEGIN TRANSACTION;")]
     [InlineData(SqlClauses.Transaction, "COMMIT WORK;")]
+    [InlineData(SqlClauses.DiscardAll, "DISCARD ALL;")]
     public void Parse_ImplementedClause_IsDeclaredAndParses(string clause, string sql)
     {
         SqlLanguageProfile.Instance.Supports(clause).ShouldBeTrue();
@@ -107,10 +136,6 @@ public class SqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(SqlClauses.Window)]
-    [InlineData(SqlClauses.Recursive)]
-    [InlineData(SqlClauses.Over)]
-    [InlineData(SqlClauses.Partition)]
     [InlineData(SqlClauses.All)]
     [InlineData(SqlClauses.Natural)]
     public void Profile_UnsupportedClause_IsNotDeclared(string clause)
@@ -119,10 +144,6 @@ public class SqlLanguageProfileTests
     }
 
     [Theory]
-    [InlineData(SqlClauses.Window, "SELECT * FROM t WINDOW w AS ();")]
-    [InlineData(SqlClauses.Recursive, "WITH RECURSIVE cte AS (SELECT * FROM t) SELECT * FROM cte;")]
-    [InlineData(SqlClauses.Over, "SELECT ROW_NUMBER() OVER () FROM t;")]
-    [InlineData(SqlClauses.Partition, "SELECT ROW_NUMBER() PARTITION BY id FROM t;")]
     [InlineData(SqlClauses.All, "SELECT ALL id FROM t;")]
     [InlineData(SqlClauses.Natural, "SELECT * FROM t NATURAL JOIN u;")]
     public void Parse_UnsupportedClause_EmitsModelSpecificDiagnostic(string clause, string sql)
@@ -153,7 +174,7 @@ public class SqlLanguageProfileTests
         var options = new QueryParserOptions();
         options.Analyzers.Add(observer);
 
-        _ = new SqlQueryParser(options).Parse("SELECT * FROM t WINDOW w AS ();");
+        _ = new SqlQueryParser(options).Parse("SELECT NTH_VALUE(id,1) FROM LAST OVER (ORDER BY id GROUPS CURRENT ROW) FROM t;");
 
         observer.SawUnsupportedClause.ShouldBeTrue();
     }

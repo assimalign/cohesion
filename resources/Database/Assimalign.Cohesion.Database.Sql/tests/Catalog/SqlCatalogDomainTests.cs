@@ -80,7 +80,7 @@ public sealed class SqlCatalogDomainTests
         // Arrange
         using var storage = SqlStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "damaged");
         var record = TableRecordPrefix("damaged", ("id", false), ("note", true))
-            .AppendInt32(7).AppendInt32(0).AppendInt32(-1).AppendInt32(-1).AppendInt32(0);
+            .AppendInt32(8).AppendInt32(0).AppendInt32(-1).AppendInt32(-1).AppendInt32(0);
         record.AppendNull().AppendString(" ", Collation.Binary);
         Insert(storage, record.ToArray());
 

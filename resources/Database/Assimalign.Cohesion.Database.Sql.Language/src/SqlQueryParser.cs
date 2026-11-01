@@ -107,6 +107,13 @@ public sealed partial class SqlQueryParser : QueryParser
         bool skippedStrayCharacter = false;
         while (lexer.Current.Type == TokenType.Unrecognized)
         {
+            // # is an operator only inside an expression. Lexical preflight deliberately
+            // leaves it to SQL syntax, so recovery must still refuse it at the command head.
+            if (lexer.Current.Value.SequenceEqual("#"))
+            {
+                AddExpectedDiagnostic(ref lexer, ErrorMessages.SqlStatementSubject);
+                _sawUnrecognizedCharacter = true;
+            }
             skippedStrayCharacter = true;
             Advance(ref lexer);
         }
@@ -117,7 +124,20 @@ public sealed partial class SqlQueryParser : QueryParser
         string firstToken = CurrentText(ref lexer);
         SqlQueryExpression expression;
 
-        if (lexer.Current.Type == TokenType.Keyword)
+        if (IsWord(ref lexer, "SAVEPOINT") || IsWord(ref lexer, "RELEASE") || IsWord(ref lexer, "SET") && StartsSetTransaction(lexer))
+        {
+            expression = ParseTransaction(ref lexer);
+        }
+        else if (IsWord(ref lexer, "DISCARD"))
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.DiscardAll);
+            Advance(ref lexer);
+            if (!IsWord(ref lexer, "ALL")) { AddExpectedDiagnostic(ref lexer, "ALL"); }
+            else { Advance(ref lexer); }
+            expression = new SqlTransactionExpression(SqlQueryCommandType.Discard,
+                Location.Create(1, 1, firstTokenPosition, _lastTokenEnd));
+        }
+        else if (lexer.Current.Type == TokenType.Keyword)
         {
             var keyword = lexer.Current.Value;
 
@@ -298,28 +318,54 @@ public sealed partial class SqlQueryParser : QueryParser
     private SqlTransactionExpression ParseTransaction(ref TokenLexer lexer)
     {
         int start = lexer.Current.Position;
+        if (IsWord(ref lexer, "SAVEPOINT") || IsWord(ref lexer, "RELEASE"))
+        {
+            bool release = IsWord(ref lexer, "RELEASE");
+            RequireSchemaClause(ref lexer, release ? SqlClauses.ReleaseSavepoint : SqlClauses.Savepoint);
+            Advance(ref lexer);
+            if (release && IsWord(ref lexer, "SAVEPOINT")) { Advance(ref lexer); }
+            string name = ParseSavepointName(ref lexer);
+            return new SqlTransactionExpression(release ? SqlQueryCommandType.ReleaseSavepoint : SqlQueryCommandType.Savepoint,
+                Location.Create(1, 1, start, _lastTokenEnd), savepointName: name);
+        }
         bool isStart = IsWord(ref lexer, "START");
+        bool isSet = IsWord(ref lexer, "SET");
         bool isEnd = IsKeyword(ref lexer, "END");
-        var command = isStart || IsKeyword(ref lexer, "BEGIN")
+        var command = isSet ? SqlQueryCommandType.SetTransaction : isStart || IsKeyword(ref lexer, "BEGIN")
             ? SqlQueryCommandType.Begin
             : isEnd || IsKeyword(ref lexer, "COMMIT")
                 ? SqlQueryCommandType.Commit
                 : SqlQueryCommandType.Rollback;
         Advance(ref lexer);
-        if (isStart)
+        if (isStart || isSet)
         {
-            ExpectKeyword(ref lexer, "TRANSACTION", "TRANSACTION after START");
+            ExpectKeyword(ref lexer, "TRANSACTION", isSet ? "TRANSACTION after SET" : "TRANSACTION after START");
         }
         else if (!isEnd && (IsKeyword(ref lexer, "TRANSACTION") || IsWord(ref lexer, "WORK")))
         {
             Advance(ref lexer);
+        }
+        if (command == SqlQueryCommandType.Rollback && IsWord(ref lexer, "TO"))
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.RollbackToSavepoint);
+            Advance(ref lexer);
+            if (IsWord(ref lexer, "SAVEPOINT")) { Advance(ref lexer); }
+            string name = ParseSavepointName(ref lexer);
+            return new SqlTransactionExpression(SqlQueryCommandType.RollbackToSavepoint,
+                Location.Create(1, 1, start, _lastTokenEnd), savepointName: name);
+        }
+        var levels = new List<SqlTransactionIsolationLevel>();
+        if (command is SqlQueryCommandType.Begin or SqlQueryCommandType.SetTransaction)
+        {
+            if (isSet) { RequireSchemaClause(ref lexer, SqlClauses.SetTransaction); }
+            ParseTransactionModes(ref lexer, levels, isSet);
         }
         if (!IsAtEnd(ref lexer) && lexer.Current.Type != TokenType.Semicolon)
         {
             AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseTransactionVoid);
             ConsumeRemaining(ref lexer);
         }
-        return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd));
+        return new SqlTransactionExpression(command, Location.Create(1, 1, start, _lastTokenEnd), levels.ToArray());
     }
 
     /// <summary>
@@ -435,9 +481,10 @@ public sealed partial class SqlQueryParser : QueryParser
     /// literal, quoted identifier or block comment without its closing delimiter runs to
     /// the end of the text as one token, so the clause it swallowed vanished without a
     /// diagnostic: <c>DELETE FROM t /* WHERE id = 1;</c> deleted every row (#1068). A
-    /// character outside the dialect, such as <c>?</c>, <c>#</c> or a zero-width space,
+    /// character outside the dialect, such as <c>?</c> or a zero-width space,
     /// lexes as <see cref="TokenType.Unrecognized"/>. It used to lex as a one-character
-    /// identifier that the parser bound as an alias or a column (#1101).
+    /// identifier that the parser bound as an alias or a column (#1101). Deferred PostgreSQL
+    /// # and ^ symbols receive the existing unsupported-surface identity instead (#1721).
     /// </summary>
     private void RejectLexicalErrors(TokenLexer lexer)
     {
@@ -458,6 +505,16 @@ public sealed partial class SqlQueryParser : QueryParser
                 case TokenType.Comment when value.StartsWith("/*", StringComparison.Ordinal) && !IsTerminatedBlockComment(value):
                     AddSyntaxDiagnostic(position, position + 2,
                         ErrorMessages.SqlQueryParserRejectLexicalErrorsVoid3);
+                    break;
+                case TokenType.Unrecognized when value.SequenceEqual("#"):
+                    // SQL consumes this spelling as XOR; other language profiles keep their
+                    // existing lexical refusal and the shared token type stays unchanged.
+                    break;
+                case TokenType.Unrecognized when value.SequenceEqual("^"):
+                    _sawUnrecognizedCharacter = true;
+                    AddUnsupportedSurfaceDiagnostic(position, position + value.Length,
+                        string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DeferredOperator,
+                            "^ (exponentiation)"));
                     break;
                 case TokenType.Unrecognized:
                     _sawUnrecognizedCharacter = true;
@@ -635,6 +692,9 @@ public sealed partial class SqlQueryParser : QueryParser
         SqlCreateTableExpression => "CREATE TABLE",
         SqlCreateTableAsExpression => "CREATE TABLE AS",
         SqlCreateSchemaExpression => "CREATE SCHEMA",
+        SqlCreateSequenceExpression => SqlClauses.CreateSequence,
+        SqlAlterSequenceExpression => SqlClauses.AlterSequence,
+        SqlDropSequenceExpression => SqlClauses.DropSequence,
         SqlCreateViewExpression => "CREATE VIEW",
         SqlCreateIndexExpression => "CREATE INDEX",
         SqlDropTableExpression => "DROP TABLE",
@@ -652,8 +712,12 @@ public sealed partial class SqlQueryParser : QueryParser
             SqlQueryCommandType.Create => "CREATE",
             SqlQueryCommandType.Drop => "DROP",
             SqlQueryCommandType.Begin => "BEGIN",
+            SqlQueryCommandType.SetTransaction => "SET TRANSACTION",
             SqlQueryCommandType.Commit => "COMMIT",
             SqlQueryCommandType.Rollback => "ROLLBACK",
+            SqlQueryCommandType.Savepoint => "SAVEPOINT",
+            SqlQueryCommandType.ReleaseSavepoint => "RELEASE SAVEPOINT",
+            SqlQueryCommandType.RollbackToSavepoint => "ROLLBACK TO SAVEPOINT",
             _ => "SQL",
         },
     };
@@ -755,7 +819,7 @@ public sealed partial class SqlQueryParser : QueryParser
             return new SqlTableReference("?", null, null);
         }
 
-        if (IsNameToken(ref lexer))
+        if (IsNameToken(ref lexer) || !insertTarget && !dmlTarget && IsContextualCommonTableKeyword(ref lexer))
         {
             return ParseTableReference(ref lexer, insertTarget, dmlTarget || insertTarget);
         }
@@ -836,6 +900,8 @@ public sealed partial class SqlQueryParser : QueryParser
         else if (IsWord(ref lexer, "MERGE")) { statement = ParseMerge(ref lexer); }
         else if (IsWord(ref lexer, "UPDATE")) { statement = ParseUpdate(ref lexer); }
         else if (IsWord(ref lexer, "DELETE")) { statement = ParseDelete(ref lexer); }
+        else if (IsSequenceDdlHeader(lexer))
+        { statement = IsWord(ref lexer, "CREATE") ? ParseCreate(ref lexer) : IsWord(ref lexer, "ALTER") ? ParseAlterTable(ref lexer) : ParseDrop(ref lexer); }
         else
         {
             RequireSkippedConstruct(start, lexer.Current.Position + lexer.Current.Value.Length,
@@ -896,6 +962,7 @@ public sealed partial class SqlQueryParser : QueryParser
         else if (!IsAtEnd(ref lexer) && IsIdentifierOrKeyword(ref lexer) &&
                  !(insertTarget && IsWord(ref lexer, "OVERRIDING")) &&
                  !(dmlTarget && IsWord(ref lexer, "OUTPUT")) &&
+                 !TryReadSelectLockingStrength(lexer, out _) &&
                  !IsStatementBoundaryKeyword(ref lexer))
         {
             alias = CurrentIdentifierText(ref lexer);
@@ -914,6 +981,7 @@ public sealed partial class SqlQueryParser : QueryParser
         }
 
         var value = lexer.Current.Value;
+        if (IsContextualCommonTableKeyword(ref lexer) && TryPeekToken(lexer, out string qualifier, out _) && qualifier == ".") { return false; }
         if (value.Equals("LEFT", StringComparison.OrdinalIgnoreCase) || value.Equals("RIGHT", StringComparison.OrdinalIgnoreCase))
         {
             if (TryPeekToken(lexer, out string next, out _) && next == "(") { return false; }
@@ -969,6 +1037,7 @@ public sealed partial class SqlQueryParser : QueryParser
         string? firstToken = null;
         bool insertValues = false;
         bool dmlWhere = false;
+        bool createIndex = false;
         bool dmlStatement = false;
         bool returning = false;
         bool onConflictUpdate = false;
@@ -1026,7 +1095,12 @@ public sealed partial class SqlQueryParser : QueryParser
                 location = null!;
                 return false;
             }
+            if (IsWord(ref lexer, "SEQUENCE") && previousToken == firstToken &&
+                (firstToken.ToUpperInvariant() is "CREATE" or "ALTER" or "DROP"))
+            { clause = string.Empty; location = null!; return false; }
             createTable |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) && IsKeyword(ref lexer, "TABLE");
+            createIndex |= firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
+                previousToken is "CREATE" or "UNIQUE" && IsKeyword(ref lexer, "INDEX");
             if (firstToken.Equals("CREATE", StringComparison.OrdinalIgnoreCase) &&
                 (IsKeyword(ref lexer, "VIEW") || (createTable && IsKeyword(ref lexer, "AS") && fromScopes.Count == 0)))
             {
@@ -1070,13 +1144,14 @@ public sealed partial class SqlQueryParser : QueryParser
             if (!returning && IsKeyword(ref lexer, "WITH")) { inWithDefinitions = true; }
             if (withStatement && !onConflictUpdate && fromScopes.Count == 0 &&
                 (IsKeyword(ref lexer, "SELECT") || IsKeyword(ref lexer, "INSERT") ||
-                 IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
+                 IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE")))
             {
                 firstToken = token;
                 inWithDefinitions = false;
             }
-            if (inWithDefinitions && fromScopes.Count == 0 && IsNameToken(ref lexer) &&
-                (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ","))
+            if (inWithDefinitions && fromScopes.Count == 0 && IsCommonTableNameToken(ref lexer) &&
+                (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(previousToken, "RECURSIVE", StringComparison.OrdinalIgnoreCase) || previousToken == ","))
             {
                 (cteNames ??= new(StringComparer.OrdinalIgnoreCase)).Add(CurrentIdentifierText(ref lexer));
             }
@@ -1121,7 +1196,7 @@ public sealed partial class SqlQueryParser : QueryParser
                  IsKeyword(ref lexer, "USING") && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase)));
 
             dmlWhere |= fromScopes.Count == 0 && IsKeyword(ref lexer, "WHERE") &&
-                (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase));
+                (firstToken.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || createIndex);
 
             if (token.Equals("COLLATION", StringComparison.OrdinalIgnoreCase) &&
                 previousToken?.Equals("CREATE", StringComparison.OrdinalIgnoreCase) == true)
@@ -1172,7 +1247,7 @@ public sealed partial class SqlQueryParser : QueryParser
                 return true;
             }
             if (withStatement && previousToken == "(" &&
-                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE")))
+                (IsKeyword(ref lexer, "INSERT") || IsKeyword(ref lexer, "UPDATE") || IsKeyword(ref lexer, "DELETE") || IsKeyword(ref lexer, "MERGE")))
             {
                 clause = $"data-modifying CTE body ({token.ToUpperInvariant()})";
                 location = tokenLocation;
@@ -1201,14 +1276,6 @@ public sealed partial class SqlQueryParser : QueryParser
 
             if (lexer.Current.Type == TokenType.Keyword)
             {
-                if (token.Equals("UPDATE", StringComparison.OrdinalIgnoreCase) &&
-                    previousToken?.Equals("ON", StringComparison.OrdinalIgnoreCase) == true)
-                {
-                    clause = "ON UPDATE";
-                    location = Location.Create(1, 1, previousPosition, lexer.Current.Position + lexer.Current.Value.Length);
-                    return true;
-                }
-
                 if (token.Equals(SqlClauses.All, StringComparison.OrdinalIgnoreCase) &&
                     previousToken?.Equals(SqlClauses.Select, StringComparison.OrdinalIgnoreCase) == true)
                 {
@@ -1217,13 +1284,14 @@ public sealed partial class SqlQueryParser : QueryParser
                     return true;
                 }
 
-                bool cteIdentifier = cteNames?.Contains(CurrentIdentifierText(ref lexer)) == true && IsNameToken(ref lexer) &&
+                bool cteIdentifier = cteNames?.Contains(CurrentIdentifierText(ref lexer)) == true && IsCommonTableNameToken(ref lexer) &&
                     !(IsKeyword(ref lexer, "RECURSIVE") && string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase)) &&
                     (inWithDefinitions && fromScopes.Count == 0 &&
-                        (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
+                        (string.Equals(previousToken, "WITH", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(previousToken, "RECURSIVE", StringComparison.OrdinalIgnoreCase) || previousToken == ",") ||
                      string.Equals(previousToken, "FROM", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "USING", StringComparison.OrdinalIgnoreCase) &&
-                        fromScopes.Count == 0 && firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) ||
+                        fromScopes.Count == 0 && (firstToken.Equals("DELETE", StringComparison.OrdinalIgnoreCase) || firstToken.Equals("MERGE", StringComparison.OrdinalIgnoreCase)) ||
                      string.Equals(previousToken, "JOIN", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(previousToken, "AS", StringComparison.OrdinalIgnoreCase) ||
                      inFrom && previousToken == "," || previousToken == "." ||

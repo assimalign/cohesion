@@ -15,6 +15,7 @@ namespace Assimalign.Cohesion.Database.Documents.Language;
 /// </remarks>
 public static class OqlLanguageProfile
 {
+    // NULLS and INCLUDE are contextual suffixes, preserving existing field names.
     // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
     private static readonly string[] _keywords =
     [
@@ -47,6 +48,9 @@ public static class OqlLanguageProfile
         OqlClauses.Begin,
         OqlClauses.Commit,
         OqlClauses.Rollback,
+        OqlClauses.Savepoint,
+        OqlClauses.ReleaseSavepoint,
+        OqlClauses.RollbackToSavepoint,
         OqlClauses.CreateCollection,
         OqlClauses.DropCollection,
         OqlClauses.CreateIndex,
@@ -59,6 +63,7 @@ public static class OqlLanguageProfile
         OqlClauses.Returning,
         OqlClauses.Values,
         OqlClauses.Select,
+        OqlClauses.Subquery,
         OqlClauses.Distinct,
         OqlClauses.SelectValue,
         OqlClauses.ObjectConstructor,
@@ -67,16 +72,24 @@ public static class OqlLanguageProfile
         OqlClauses.FirstComprehension,
         OqlClauses.Explain,
         OqlClauses.From,
+        OqlClauses.DerivedFrom,
+        OqlClauses.ExpressionFrom,
+        OqlClauses.Join,
+        OqlClauses.LeftJoin,
+        OqlClauses.Nest,
+        OqlClauses.LeftNest,
         OqlClauses.Unnest,
         OqlClauses.LeftUnnest,
         OqlClauses.Where,
         OqlClauses.Any,
         OqlClauses.Every,
+        OqlClauses.Exists,
         OqlClauses.In,
         OqlClauses.Between,
         OqlClauses.Like,
         OqlClauses.Case,
         OqlClauses.GroupBy,
+        OqlClauses.GroupAs,
         OqlClauses.Having,
         OqlClauses.OrderBy,
         OqlClauses.Limit,

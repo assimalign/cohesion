@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Execution;
+using Assimalign.Cohesion.Database.Internal;
 using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
@@ -29,7 +30,7 @@ namespace Assimalign.Cohesion.Database.Sql;
 /// closed.", and disposal ends the open transaction as the session's teardown (a later commit of it
 /// reports <c>CS04005</c> naming the closure). This type supplies the model's work: the
 /// isolation-level and offline refusals of BEGIN, the statements, the SQL transaction-control
-/// statements (<c>BEGIN</c>, <c>COMMIT</c>, <c>ROLLBACK</c>) and the translation of the kernel's
+/// statements (<c>BEGIN</c>, <c>SET TRANSACTION</c>, <c>COMMIT</c>, <c>ROLLBACK</c>) and the translation of the kernel's
 /// exceptions at the model boundary.
 /// </para>
 /// <para>
@@ -67,6 +68,12 @@ namespace Assimalign.Cohesion.Database.Sql;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.SqlDatabaseSession.DebugView))]
 public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest>
 {
+    private SqlSequenceSessionState? _sequenceState;
+    internal SqlSequenceSessionState SequenceState => _sequenceState ??= new SqlSequenceSessionState();
+
+    internal bool HasRetainedState => _sequenceState is { Values.Count: > 0 } ||
+        _resetValuesCaptured && (_statementTimeout != _initialStatementTimeout || _lockTimeout != _initialLockTimeout);
+
     private readonly SqlDatabase _database;
     private readonly TransactionCoordinator _coordinator;
     private readonly SqlQueryExecutor _executor;
@@ -74,14 +81,17 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     private readonly string? _provisioningSchema;
     private readonly TransactionSequence? _ddlLockOwner;
 
-    // The isolation level of an auto-commit statement and of a BEGIN statement. The SQL
-    // isolation syntax (SET TRANSACTION ISOLATION LEVEL) that would change it is not implemented.
+    // BEGIN without options and every auto-commit statement use Snapshot. SET TRANSACTION
+    // configures only the current block, never the session or a pooled connection's default.
     private readonly IsolationLevel _isolationLevel = IsolationLevel.Snapshot;
     private SqlStatementMetrics? _lastStatementMetrics;
     private TimeSpan? _statementTimeout;
     private CancellationTokenSource? _statementTimer;
     private CancellationToken _statementCallerToken;
     private TimeSpan? _lockTimeout;
+    private bool _resetValuesCaptured;
+    private TimeSpan? _initialStatementTimeout;
+    private TimeSpan? _initialLockTimeout;
 
     /// <summary>Opens a session over a database.</summary>
     /// <param name="database">The database.</param>
@@ -132,6 +142,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// Gets or sets this session's statement execution timeout override. Null inherits the engine
     /// option; zero disables it. Changes apply to subsequent statements. A started commit always
     /// completes. Like execution, setting this property requires single-threaded session use.
+    /// DISCARD ALL restores the value configured before the session's first statement.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
     public TimeSpan? StatementTimeout
@@ -148,6 +159,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// Gets or sets this session's timeout override for each individual lock wait, including
     /// unique-index waits. Null inherits the engine option; zero disables it. Changes apply to
     /// subsequent statements and require single-threaded session use.
+    /// DISCARD ALL restores the value configured before the session's first statement.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative or exceeds int.MaxValue milliseconds.</exception>
     public TimeSpan? LockTimeout
@@ -223,40 +235,42 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 ErrorMessages.BeginTransactionCoreAsyncDatabase);
         }
 
-        // A snapshot and its retained storage bindings must fall on the same side of a
-        // TRUNCATE publication. No table lock or data apply gate is held while BEGIN waits.
-        await _database.Catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
+        TransactionContext? context = null;
+        TransactionContext? configurationPin = null;
         try
         {
-            var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
-            TransactionContext context;
+            // The pin only retains versions; it captures no catalog bindings. A TRUNCATE
+            // marker may publish after it: the context and catalog below are still captured
+            // together on the publication's later side, and see its replacement owner.
+            configurationPin = await _coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
+            await _database.Catalog.TruncateSnapshotGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 context = await _coordinator.BeginAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (_database.TranslateFailure(exception) is var offline && !ReferenceEquals(offline, exception))
-            {
-                throw offline;
-            }
-
-            try
-            {
                 return new SqlDatabaseTransaction(_coordinator, context, _database,
-                    isolationLevel == IsolationLevel.Snapshot ? _executor.CaptureCatalogSnapshot() : null, transactionStart);
+                    _executor.CaptureCatalogSnapshot(), transactionStart, configurationPin);
             }
-            catch
-            {
-                // Offline storage leaves recovery to abort this context (#1243). Cleanup
-                // must never replace the capture/construction failure that brought us here.
-                if (!_database.IsOffline)
-                {
-                    try { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); }
-                    catch (Exception) { /* Preserve the original capture/construction failure. */ }
-                }
-                throw;
-            }
+            finally { _database.Catalog.TruncateSnapshotGate.Release(); }
         }
-        finally { _database.Catalog.TruncateSnapshotGate.Release(); }
+        catch (Exception exception)
+        {
+            // Offline storage leaves recovery to abort these contexts. Cleanup preserves
+            // the original construction, catalog capture or canceled gate-wait failure.
+            if (!_database.IsOffline)
+            {
+                try { if (context is not null) { await _coordinator.RollbackAsync(context, CancellationToken.None).ConfigureAwait(false); } }
+                catch (Exception) { /* Preserve the original capture/construction failure. */ }
+                try { if (configurationPin is not null) { await _coordinator.RollbackAsync(configurationPin, CancellationToken.None).ConfigureAwait(false); } }
+                catch (Exception) { /* Preserve the original capture/construction failure. */ }
+            }
+            if (context is null)
+            {
+                var translated = _database.TranslateFailure(exception);
+                if (!ReferenceEquals(translated, exception)) { throw translated; }
+            }
+            throw;
+        }
     }
 
     /// <inheritdoc />
@@ -272,7 +286,16 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
     /// walk over the statement does.
     /// </remarks>
     protected override ValueTask<DatabaseResult> ExecuteCoreAsync(string statement, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
-        => ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken);
+    {
+        try { return ExecuteRequestAsync(SqlQueryRequest.FromSql(statement, parameters, _parserOptions, _database.Name), cancellationToken); }
+        catch (DatabaseException)
+        {
+            if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
+            _database.ThrowIfOffline();
+            ThrowIfPartialUndoPending();
+            throw;
+        }
+    }
 
     /// <summary>Executes one request with a receipt that cannot attach to any later session request.</summary>
     internal ValueTask<DatabaseResult> ExecuteScriptAsync(SqlQueryRequest request, SqlCatalogScriptPublication receipt, CancellationToken cancellationToken)
@@ -280,11 +303,26 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
     private ValueTask<DatabaseResult> ExecuteRequestAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt = null)
     {
+        if (_database.IsClosed) { ThrowIfFencedDatabaseDisposed(); }
+        if (!_resetValuesCaptured)
+        {
+            _initialStatementTimeout = _statementTimeout;
+            _initialLockTimeout = _lockTimeout;
+            _resetValuesCaptured = true;
+        }
         var statementTimeout = StatementTimeout ?? _database.Engine.EngineOptions.StatementTimeout;
         var lockTimeout = LockTimeout ?? _database.Engine.EngineOptions.LockTimeout;
         return request.Statement.SqlExpression is SqlTransactionExpression || (statementTimeout == TimeSpan.Zero && lockTimeout == TimeSpan.Zero)
             ? ExecuteUntimedRequestAsync(request, cancellationToken, scriptReceipt)
             : ExecuteTimedRequestAsync(request, statementTimeout, lockTimeout, cancellationToken, scriptReceipt);
+    }
+
+    private void ThrowIfFencedDatabaseDisposed()
+    {
+        // Preserve the existing CS04005 outcome for a transaction the kernel already ended.
+        // During the earlier disposed-admission window, a live retry fence cannot hide disposal.
+        if (CurrentTransaction is { } transaction && TransactionCoordinator.IsPartialUndoPending(transaction.Context))
+        { throw transaction.CreateStatementRefusal(); }
     }
 
     private async ValueTask<DatabaseResult> ExecuteTimedRequestAsync(SqlQueryRequest request, TimeSpan statementTimeout,
@@ -405,11 +443,11 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 failure = SqlExecutionException.FromPersisted(failure);
             }
         }
-        var located = LocateFailure(failure, location);
+        var located = LocateFailure(failure, location, expression is SqlTransactionExpression { SavepointName: not null });
         if (!ReferenceEquals(located, original)) { throw located; }
     }
 
-    private static DatabaseException LocateFailure(DatabaseException failure, Location? location)
+    private static DatabaseException LocateFailure(DatabaseException failure, Location? location, bool namedControl)
     {
         // The abort path retains this exact coded cause (#1364). Location attachment must not
         // substitute another exception for a storage failure already recorded on the transaction.
@@ -436,7 +474,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         { return new DatabaseObjectLockedException(ownership.ObjectName, ownership.OwningSchema, ownership.Operation, ownership.Message, located[0]); }
         if (failure is SqlCatalogException)
         { return new SqlCatalogException(located[0].Code!, failure.Message, failure, located[0]); }
-        return new DatabaseException(failure.Message, located, failure);
+        return new DatabaseException(failure.Message, located,
+            namedControl && failure.Diagnostics is [{ Code: "CK04009" }, ..] ? failure.InnerException : failure);
     }
 
     private void TraceStatementCompletion(SqlQueryRequest request, SqlStatementMetrics? previousMetrics)
@@ -487,30 +526,52 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             && !ReferenceEquals(metrics, previousMetrics);
 
     private ValueTask<DatabaseResult> ExecuteStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
-        => IsSelfCommitting(request) ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt) : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
+        => IsSelfCommitting(request) && CurrentTransaction is null
+            ? ExecuteMetadataStatementAsync(request, cancellationToken, scriptReceipt)
+            : ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt);
+
+    internal static Action? DefinitionLeaseEntered { get; set; }
 
     private async ValueTask<DatabaseResult> ExecuteMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
-        // DROP SCHEMA takes its definition lease in the executor, after all table locks.
+        using var metadata = await EnterMetadataStatementAsync(request, cancellationToken).ConfigureAwait(false);
+        return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
+    }
+
+    private async ValueTask<IDisposable?> EnterMetadataStatementAsync(SqlQueryRequest request, CancellationToken cancellationToken)
+    {
+        // Sequence DDL uses its object grants; unrelated metadata leases remain compatible.
+        if (request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression)
+        { return null; }
+        // DROP SCHEMA takes its definition lease in the executor, after sequence and table locks.
         if (request.Statement.SqlExpression is SqlDropSchemaExpression)
         {
             if (_ddlLockOwner is null) { _database.DdlInterlock.CheckDefinitionAdmission(_database.Name.ToString()); }
-            return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
+            return null;
         }
         bool definition = request.Statement.SqlExpression
             is SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
                 or SqlCreateSchemaExpression or SqlCreateViewExpression or SqlDropViewExpression;
-        using var metadata = _ddlLockOwner is not null
+        var metadata = _ddlLockOwner is not null
             ? await _database.DdlInterlock.EnterMetadataAsync(definition, cancellationToken).ConfigureAwait(false)
             : _database.DdlInterlock.EnterMetadata(_database.Name.ToString(), definition);
-        return await ExecuteStatementCoreAsync(request, cancellationToken, scriptReceipt).ConfigureAwait(false);
+        try { if (definition) { DefinitionLeaseEntered?.Invoke(); } }
+        catch
+        {
+            metadata.Dispose();
+            throw;
+        }
+        return metadata;
     }
 
     private async ValueTask<DatabaseResult> ExecuteStatementCoreAsync(SqlQueryRequest request, CancellationToken cancellationToken, SqlCatalogScriptPublication? scriptReceipt)
     {
+        if (request.Statement.SqlExpression is not SqlTransactionExpression { CommandType: SqlQueryCommandType.Rollback or SqlQueryCommandType.RollbackToSavepoint }
+            || request.Statement.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+        { ThrowIfPartialUndoPending(); }
         // Typed requests may be constructed directly from a parser result rather
         // than FromSql. Never execute an error-recovery AST (notably ROLLBACK TO
-        // must not become a full ROLLBACK while savepoints remain unsupported).
+        // must not become a full ROLLBACK when its name or suffix is malformed).
         foreach (var diagnostic in request.Statement.Diagnostics)
         {
             if (diagnostic.Severity == DiagnosticSeverity.Error)
@@ -540,21 +601,19 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             throw new DatabaseParseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ExecuteStatementCoreAsyncFailure, diagnostic.Code, diagnostic.Message), [diagnostic]);
         }
 
-        SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
-
         // Control commands bind to the session before an auto-commit context is
         // opened. Their result follows the ordinary query/wire diagnostic path.
         if (request.Statement.SqlExpression is SqlTransactionExpression control)
         {
             // Control requests bypass the executor, but their maps obey the same contract.
-            _ = SqlQueryExecutor.NormalizeParameters(request.Parameters);
+            if (control.SavepointName is null) { _ = SqlQueryExecutor.NormalizeParameters(request.Parameters); }
             _lastStatementMetrics = null;
             // Control commands have a fixed, zero-count completion, including COMMIT.
-            if (ResultPreparation is { } preparation)
+            if (control.SavepointName is null && ResultPreparation is { } preparation)
             {
                 await preparation.PrepareAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
             }
-            return await ExecuteTransactionControlAsync(control, cancellationToken).ConfigureAwait(false);
+            return await ExecuteTransactionControlAsync(control, request.Parameters, cancellationToken).ConfigureAwait(false);
         }
 
         // Inside an explicit transaction, the statement rides its context. A statement is
@@ -574,6 +633,10 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
             try
             {
+                await transaction.StartDataStatementAsync().ConfigureAwait(false);
+                using var metadata = IsSelfCommitting(request)
+                    ? await EnterMetadataStatementAsync(request, cancellationToken).ConfigureAwait(false) : null;
+                SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
                 if (request.Statement.SqlExpression is SqlTruncateExpression)
                 {
                     return TransactionDiagnostic("CS04066", ErrorMessages.TruncateExplicitTransaction);
@@ -643,6 +706,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
 
         // Auto-commit semantics: a one-statement manager transaction, so
         // visibility and conflict semantics are identical to the explicit path.
+        SqlSystemViews.EnsureReadOnly(request.Statement.SqlExpression);
         var transactionStart = (_database.Engine.EngineOptions.TimeProvider ?? TimeProvider.System).GetUtcNow();
         TransactionContext context;
         try
@@ -658,7 +722,9 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var scope = new SqlStatementContext(context, _coordinator, _provisioningSchema,
-                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation);
+                _database.Name.ToString(), null, _ddlLockOwner, ProvisioningProgress, scriptReceipt, transactionStart, _database.DdlInterlock, ResultPreparation,
+                request.Statement.SqlExpression is SqlAlterSequenceExpression or SqlDropSequenceExpression
+                    ? LockTimeout ?? _database.Engine.EngineOptions.LockTimeout : TimeSpan.Zero);
             _lastStatementMetrics = scope.Metrics;
             var result = await ExecuteDataOrExplainAsync(request, scope, cancellationToken).ConfigureAwait(false);
             if (scriptReceipt is { } receipt && !IsSelfCommitting(request) && result.Status == DatabaseResultStatus.Success)
@@ -704,7 +770,7 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
             {
                 return ExecuteSelfCommittingResultAsync(request, scope, cancellationToken);
             }
-            var execution = _executor.ExecuteAsync(request, scope, cancellationToken);
+            var execution = _executor.ExecuteAsync(request, scope, cancellationToken, this);
             // Reads encode during delivery. Embedded execution keeps its direct task path.
             return ResultPreparation is not null && request.Statement.SqlExpression.CommandType is
                 SqlQueryCommandType.Insert or SqlQueryCommandType.Update or SqlQueryCommandType.Delete or SqlQueryCommandType.Merge
@@ -724,15 +790,17 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         try
         {
             var plan = planner.Plan(explain.Statement, scope.Snapshot);
+            var sequenceUsage = plan.SequenceUsage;
+            if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
             var executor = new SqlPlanExecutor(_database.DataStorage, _database.Catalog, _database.IndexManager, _database.Definitions);
             plan = executor.Cost(plan, scope, cancellationToken);
             scope.Metrics.IsPlanned = true;
             if (explain.Analyze)
             {
                 scope.Metrics.BeginAnalysis();
-                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken);
+                return ExecuteExplainAnalyzeAsync(executor, plan, scope, request.Statement.Diagnostics, cancellationToken, sequenceUsage);
             }
-            var result = SqlPlanner.Describe(plan, request.Statement.Diagnostics);
+            var result = SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), request.Statement.Diagnostics);
             return Task.FromResult<DatabaseResult>(result);
         }
         catch (SqlUnsupportedQueryException exception)
@@ -741,17 +809,18 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         }
     }
 
-    private static async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
-        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken)
+    private async Task<DatabaseResult> ExecuteExplainAnalyzeAsync(SqlPlanExecutor executor, SqlPlan plan,
+        SqlStatementContext scope, IEnumerable<Diagnostic> diagnostics, CancellationToken cancellationToken, SqlSequenceUsage? sequenceUsage)
     {
-        await using var result = (DatabaseResultSet)await executor.ExecuteAsync(plan, scope, cancellationToken).ConfigureAwait(false);
+        await using var result = (DatabaseResultSet)await (sequenceUsage is not null ? _executor.ExecuteSequencesAsync(executor, plan, scope, this, cancellationToken, sequenceUsage)
+            : executor.ExecuteAsync(plan, scope, cancellationToken)).ConfigureAwait(false);
         // Drain the SELECT before returning its description; dispose its ordinary result on every exit.
         await foreach (var row in result.GetRowsAsync(cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
             for (int ordinal = 0; ordinal < row.FieldCount; ordinal++) { _ = row.GetValue(ordinal); }
         }
-        return SqlPlanner.Describe(plan, diagnostics, scope.Metrics);
+        return SqlPlanner.Describe(sequenceUsage is null ? plan : new SqlSequenceScopePlan(plan, sequenceUsage), diagnostics, scope.Metrics);
     }
 
     private static async Task<DatabaseResult> PrepareExecutionResultAsync(Task<DatabaseResult> execution,
@@ -764,12 +833,12 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         // CTAS prepares its row count after copying and before catalog publication.
         if (request.Statement.SqlExpression is SqlCreateTableAsExpression)
         {
-            return await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+            return await _executor.ExecuteAsync(request, scope, cancellationToken, this).ConfigureAwait(false);
         }
         // The remaining DDL statements return only a zero-count completion. Prepare that fixed
         // result before invoking the executor: catalog publication may commit inside execution.
         var prepared = await scope.PrepareResultAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false);
-        var result = await _executor.ExecuteAsync(request, scope, cancellationToken).ConfigureAwait(false);
+        var result = await _executor.ExecuteAsync(request, scope, cancellationToken, this).ConfigureAwait(false);
         return result.Status == DatabaseResultStatus.Success ? prepared : result;
     }
 
@@ -867,10 +936,72 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
         Location = DiagnosticLocation.Absolute,
     };
 
-    private async ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
+    // Dispatch before creating either async state machine: named failure translation must
+    // add no fields or allocations to an ordinary BEGIN/COMMIT/ROLLBACK control frame.
+    private ValueTask<DatabaseResult> ExecuteTransactionControlAsync(
+        SqlTransactionExpression control, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+        => control.SavepointName is { } name
+            ? ExecuteSavepointControlAsync(control, name, parameters, cancellationToken)
+            : ExecuteWholeTransactionControlAsync(control, cancellationToken);
+
+    private async ValueTask<DatabaseResult> ExecuteSavepointControlAsync(
+        SqlTransactionExpression control, string name, IReadOnlyDictionary<string, object?>? parameters, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _ = SqlQueryExecutor.NormalizeParameters(parameters);
+            if (ResultPreparation is { } preparation)
+            { await preparation.PrepareAsync(new SqlQueryResult(DatabaseResultStatus.Success, 0), cancellationToken).ConfigureAwait(false); }
+            if (control.CommandType == SqlQueryCommandType.Savepoint) { await CreateSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else if (control.CommandType == SqlQueryCommandType.ReleaseSavepoint) { await ReleaseSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+            else { await RollbackToSavepointAsync(name, cancellationToken).ConfigureAwait(false); }
+        }
+        catch (Exception error)
+        {
+            var reported = DatabaseFailure.TranslateSavepointFailure(_database.TranslateFailure(error), CurrentTransaction?.Context);
+            if (DatabaseFailure.IsStorageFailure(reported) && CurrentTransaction is { } failed)
+            {
+                failed.RecordStorageFailure(reported);
+                await failed.AbortStorageFailureAsync().ConfigureAwait(false);
+            }
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+        return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+    }
+
+    private async ValueTask<DatabaseResult> ExecuteWholeTransactionControlAsync(
         SqlTransactionExpression control, CancellationToken cancellationToken)
     {
         var transaction = CurrentTransaction;
+        bool serializable = control.IsolationLevels.Contains(SqlTransactionIsolationLevel.Serializable);
+        var isolationLevel = control.IsolationLevels.Count == 0 ? _isolationLevel : control.IsolationLevels[^1] switch
+        {
+            SqlTransactionIsolationLevel.RepeatableRead => IsolationLevel.Snapshot,
+            _ => IsolationLevel.ReadCommitted,
+        };
+        if (control.CommandType == SqlQueryCommandType.SetTransaction)
+        {
+            if (transaction is null)
+            {
+                return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0,
+                    [new Diagnostic { Code = "CS04071", Message = ErrorMessages.TransactionIsolationOutside, Severity = DiagnosticSeverity.Warning }]);
+            }
+            ThrowIfTransactionRefuses();
+            if (transaction.HasSavepointScope) { return TransactionDiagnostic("CS04074", ErrorMessages.TransactionIsolationSavepoint); }
+            if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
+            return transaction.TrySetIsolationLevel(isolationLevel)
+                ? new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0)
+                : TransactionDiagnostic("CS04072", ErrorMessages.TransactionIsolationLate);
+        }
+        if (control.CommandType == SqlQueryCommandType.Discard)
+        {
+            if (transaction is not null) { return TransactionDiagnostic("CS04070", ErrorMessages.DiscardInTransaction); }
+            _sequenceState = null;
+            _statementTimeout = _initialStatementTimeout;
+            _lockTimeout = _initialLockTimeout;
+            return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
+        }
         if (control.CommandType == SqlQueryCommandType.Begin)
         {
             if (transaction is not null)
@@ -881,7 +1012,8 @@ public sealed class SqlDatabaseSession : DatabaseLanguageSession<SqlQueryRequest
                 return TransactionDiagnostic("CS04001", ErrorMessages.TransactionControlAsyncDatabaseResult);
             }
 
-            await BeginTransactionAsync(_isolationLevel, cancellationToken).ConfigureAwait(false);
+            if (serializable) { return TransactionDiagnostic("CS04073", ErrorMessages.TransactionSerializable); }
+            await BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
         }
         else
         {

@@ -23,14 +23,23 @@ namespace Assimalign.Cohesion.Database.Documents;
 public sealed class DocumentDatabaseEngineOptions
 {
     /// <summary>
-    /// Gets or sets the maximum retained memory charged to a statement's RETURNING rows.
+    /// Gets or sets the maximum retained statement memory for SELECT sources, groups, results and aggregates, and RETURNING rows.
     /// Defaults to 64 MiB and must be positive. Charges include row storage, scalar values,
     /// JSON clones (128 bytes plus UTF-8 length plus 12 bytes per JSON token), and
     /// preserved whole-document bytes. A lone star retains one clone and one raw image;
     /// each representation is charged once. JSON measurement allocates no text copy.
+    /// Catalog identities, source row staging, group keys/membership, native accumulator state, DISTINCT sets and ARRAY_AGG additionally charge retained storage. Scratch arrays and sort keys release when their lifetimes end.
     /// Exhaustion fails the statement and rolls back its writes with CD05018.
     /// </summary>
     public long StatementMemoryBudget { get; set; } = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the maximum expression evaluations across all query depths of a statement
+    /// containing subqueries or expression sources. Defaults to ten million and must be positive.
+    /// Each reached expression consumes one unit; cache hits also consume a unit. Exhaustion
+    /// refuses the statement with CD05020 and rolls back its writes.
+    /// </summary>
+    public long StatementWorkBudget { get; set; } = 10_000_000;
 
     /// <summary>
     /// Gets or sets how commits reach stable storage. When unset, opening a
@@ -198,6 +207,7 @@ public sealed class DocumentDatabaseEngineOptions
     internal DocumentDatabaseEngineOptions Snapshot() => new()
     {
         StatementMemoryBudget = StatementMemoryBudget,
+        StatementWorkBudget = StatementWorkBudget,
         Durability = Durability,
         GroupCommitWindow = GroupCommitWindow,
         CheckpointInterval = CheckpointInterval,
@@ -226,6 +236,7 @@ public sealed class DocumentDatabaseEngineOptions
 
         public global::Assimalign.Cohesion.Database.Storage.StorageCommitDurability? Durability => _target.Durability;
         public long StatementMemoryBudget => _target.StatementMemoryBudget;
+        public long StatementWorkBudget => _target.StatementWorkBudget;
         public global::System.TimeSpan GroupCommitWindow => _target.GroupCommitWindow;
         public global::System.TimeSpan CheckpointInterval => _target.CheckpointInterval;
         public long CheckpointJournalSize => _target.CheckpointJournalSize;

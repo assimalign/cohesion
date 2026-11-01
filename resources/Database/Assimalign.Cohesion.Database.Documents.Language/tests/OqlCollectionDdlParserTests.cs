@@ -78,7 +78,6 @@ public sealed class OqlCollectionDdlParserTests
     [InlineData("CREATE DATASET c", "CREATE", 0)]
     [InlineData("ALTER COLLECTION c", "ALTER", 0)]
     [InlineData("CREATE COLLECTION c WITH {}", "WITH", 20)]
-    [InlineData("SELECT * FROM c WHERE EXISTS c.tags", "EXISTS", 22)]
     [InlineData("CREATE COLLECTION c EXISTS", "EXISTS", 20)]
     [InlineData("CREATE COLLECTION EXISTS", "EXISTS", 18)]
     [InlineData("SELECT COLLECTION(1, 2) FROM c", "COLLECTION", 7)]
@@ -92,7 +91,7 @@ public sealed class OqlCollectionDdlParserTests
         error.Code.ShouldBe("CK00001");
         error.Start.ShouldBe(offset);
         error.End.ShouldBe(offset + construct.Length);
-        error.Message!.ShouldContain($"The {construct} clause", Case.Sensitive);
+        error.Message!.ShouldContain(construct, Case.Sensitive);
     }
 
     private static OqlQueryStatement Parse(string text) =>

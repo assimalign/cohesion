@@ -10,6 +10,7 @@
   <data name="StatementInvalid" xml:space="preserve"><value>The OQL statement has error diagnostics.</value></data>
   <data name="StatementFailed" xml:space="preserve"><value>The document statement did not complete successfully.</value></data>
   <data name="ResultTooLarge" xml:space="preserve"><value>A document result exceeds the maximum frame size.</value></data>
+  <data name="NestedWorkExceeded" xml:space="preserve"><value>The statement exceeded its shared expression evaluation work budget.</value></data>
   <data name="ServerShuttingDown" xml:space="preserve"><value>The server is shutting down.</value></data>
   <data name="CollectionNameMissing" xml:space="preserve"><value>A collection name is required.</value></data>
   <data name="CollectionAlreadyExists" xml:space="preserve"><value>Collection '{0}' already exists.</value></data>
@@ -44,6 +45,7 @@
   <data name="NumberOutsideDecimalDomain" xml:space="preserve"><value>OQL numbers must fit the decimal scalar domain exactly, without rounding or underflow.</value></data>
   <data name="LikeEscapeInvalid" xml:space="preserve"><value>LIKE ESCAPE must be empty or one Unicode scalar.</value></data>
   <data name="LikeTrailingEscape" xml:space="preserve"><value>LIKE pattern must not end with the escape character.</value></data>
+  <data name="NullPlacementInvalid" xml:space="preserve"><value>The ORDER BY null placement is invalid.</value></data>
   <data name="DistinctOrderNotProjected" xml:space="preserve">
     <value>SELECT DISTINCT requires every ORDER BY expression to appear in the projection.</value>
   </data>
@@ -56,9 +58,17 @@
   <data name="ReturningNameInvalid" xml:space="preserve"><value>RETURNING projection names must not be empty.</value></data>
   <data name="ReturningDepthExceeded" xml:space="preserve"><value>RETURNING values must be nested no deeper than 256 levels, including the named projection object.</value></data>
   <data name="ReturningMemoryExceeded" xml:space="preserve"><value>RETURNING exceeds the statement memory budget of {0} bytes.</value></data>
+  <data name="AggregateMemoryExceeded" xml:space="preserve">
+    <value>Retained statement values exceed the statement memory budget of {0} bytes.</value>
+  </data>
+  <data name="AggregateQuantifierInvalid" xml:space="preserve">
+    <value>ALL or DISTINCT requires one non-star aggregate expression.</value>
+  </data>
   <data name="FunctionArgumentsInvalid" xml:space="preserve"><value>The OQL function name or argument count is not executable.</value></data>
   <data name="FunctionArgumentKindInvalid" xml:space="preserve"><value>The OQL function argument has an incompatible literal kind.</value></data>
   <data name="AggregateContextMissing" xml:space="preserve"><value>An aggregate requires a grouping context.</value></data>
+  <data name="GroupBindingInvalid" xml:space="preserve"><value>Grouping bindings require group terms and distinct nonempty names, separate from FROM and UNNEST bindings.</value></data>
+  <data name="GroupArrayAggregateInput" xml:space="preserve"><value>GROUP AS is not available in an aggregate's row input.</value></data>
   <data name="FunctionClockMissing" xml:space="preserve"><value>OQL clock functions require an executing transaction.</value></data>
   <data name="FunctionOutsideDomain" xml:space="preserve"><value>The OQL function argument is outside its domain.</value></data>
   <data name="FunctionStringTooLarge" xml:space="preserve"><value>The OQL function string exceeds 1,048,576 UTF-16 units.</value></data>
@@ -67,6 +77,7 @@
   <data name="IndexAlreadyExists" xml:space="preserve"><value>Index '{0}' already exists.</value></data>
   <data name="IndexDoesNotExist" xml:space="preserve"><value>Index '{0}' does not exist.</value></data>
   <data name="IndexKeyTooLarge" xml:space="preserve"><value>Indexed scalar encodes beyond the shared B+Tree 1024-byte key limit.</value></data>
+  <data name="OrderedIndexKeyMalformed" xml:space="preserve"><value>The ordered document index key is malformed or truncated.</value></data>
   <data name="IndexPathCount" xml:space="preserve"><value>An index requires between 1 and 32 key paths.</value></data>
   <data name="IndexPathsDuplicate" xml:space="preserve"><value>Index key paths must be distinct.</value></data>
   <data name="ArrayIndexExpressionInvalid" xml:space="preserve"><value>Array index keys require a document source path, an element path projection and a restricted element WHEN predicate.</value></data>
@@ -79,6 +90,11 @@
   <data name="IndexPredicateConstantInvalid" xml:space="preserve"><value>An array index predicate constant must be null, Boolean, integral, Decimal or String.</value></data>
   <data name="IndexPredicateTooLarge" xml:space="preserve"><value>An array index predicate must have at most 32 levels and 128 nodes.</value></data>
   <data name="BindingNameMissing" xml:space="preserve"><value>An OQL binding variable requires a nonempty name.</value></data>
+  <data name="JoinBindingInvalid" xml:space="preserve"><value>Key joins require distinct explicit aliases and key references to earlier source bindings.</value></data>
+  <data name="JoinMetadataInvalid" xml:space="preserve"><value>META in a joined query requires an explicit source alias and id or version.</value></data>
+  <data name="JoinKeyInvalid" xml:space="preserve"><value>A document join key must be a string, NULL or MISSING; key lists are not supported.</value></data>
+  <data name="FromSourceAliasRequired" xml:space="preserve"><value>A FROM expression requires an explicit alias or an implicit field name.</value></data>
+  <data name="FromVariableUnbound" xml:space="preserve"><value>Unbound FROM expression variable '{0}'.</value></data>
   <data name="ComprehensionBindingInvalid" xml:space="preserve">
     <value>A comprehension requires a nonempty variable name.</value>
   </data>
@@ -226,4 +242,5 @@
   <data name="FunctionUnknown" xml:space="preserve"><value>Unknown OQL function '{0}'.</value></data>
   <data name="FunctionArityInvalid" xml:space="preserve"><value>Invalid argument count for OQL function '{0}'.</value></data>
   <data name="TextTransactionStatusRequired" xml:space="preserve"><value>Text transaction control requires the negotiated transaction-status capability.</value></data>
+  <data name="QualifiedStarDeferred" xml:space="preserve"><value>Qualified star projections are not supported yet.</value></data>
 </root>

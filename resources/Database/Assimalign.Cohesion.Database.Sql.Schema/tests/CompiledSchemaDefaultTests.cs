@@ -41,7 +41,7 @@ public sealed class CompiledSchemaDefaultTests
     public void Serialize_AbsentDefault_ShouldPreserveCanonicalDocument()
     {
         // Arrange
-        const string document = "{\"format\":\"cohesion/database-schema/v8\",\"name\":\"defaults\",\"allowsDestructiveChanges\":false,\"types\":[],\"tables\":[{\"owner\":1,\"name\":\"items\",\"rowType\":\"Tests:Item\",\"columns\":[{\"name\":\"Value\",\"type\":4,\"isNullable\":true,\"maxLength\":null,\"precision\":null,\"scale\":null,\"customType\":null}],\"primaryKey\":null,\"indexes\":[],\"constraints\":[]}],\"principals\":[]}";
+        const string document = "{\"format\":\"cohesion/database-schema/v11\",\"name\":\"defaults\",\"allowsDestructiveChanges\":false,\"types\":[],\"tables\":[{\"owner\":1,\"name\":\"items\",\"rowType\":\"Tests:Item\",\"columns\":[{\"name\":\"Value\",\"type\":4,\"isNullable\":true,\"maxLength\":null,\"precision\":null,\"scale\":null,\"customType\":null}],\"primaryKey\":null,\"indexes\":[],\"constraints\":[]}],\"principals\":[]}";
 
         // Act
         SqlCompiledSchema restored = SqlCompiledSchemaSerializer.Deserialize(document);

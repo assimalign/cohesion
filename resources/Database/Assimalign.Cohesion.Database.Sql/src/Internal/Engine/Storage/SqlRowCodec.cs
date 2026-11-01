@@ -55,7 +55,8 @@ internal static class SqlRowCodec
     /// <summary>
     /// The format version of the database's data storage (rows and the index
     /// trees that share its file set) this engine reads and writes, persisted in
-    /// the catalog: 27 records TYPE default assignment coercion separately from ordinary defaults (#1447);
+    /// the catalog: 28 adds standalone sequences and shared durable allocation (#1717);
+    /// 27 records TYPE default assignment coercion separately from ordinary defaults (#1447);
     /// 26 fences changed temporal DEFAULT and frozen missing-value text (#1422);
     /// 25 admits distinct predicates, Boolean tests and LIKE ESCAPE in persisted SQL (#1111);
     /// 24 admits explicit NULL placement in persisted view query text (#1112);
@@ -89,7 +90,9 @@ internal static class SqlRowCodec
     /// There is no upgrade path (owner decisions of 2026-10-01 and 2026-10-02;
     /// upgrades are #1152).
     /// </summary>
-    internal const int RecordSpaceFormatVersion = 27;
+    // Format 30 adds foreign-key ON UPDATE metadata to table extension 8; rows and
+    // format-29 identity/owned-sequence records are unchanged (#1723, SQ-F1).
+    internal const int RecordSpaceFormatVersion = 32;
 
     /// <summary>
     /// The size of the fixed version-stamp header preceding the tuple payload.
@@ -250,10 +253,9 @@ internal static class SqlRowCodec
     /// collation and temporal values encode their <see cref="ToKeyIdentity"/>
     /// form, so for every key type except floating point two keys are byte-equal
     /// exactly when <see cref="SqlValueComparer"/> calls their values equal.
-    /// Floating keys keep the IEEE bytes, so positive and negative zero stay
-    /// distinct keys although SQL calls them equal; that is why the planner never
-    /// seeks a signed-zero equality or a floating range, and joins never seek
-    /// floating keys.
+    /// SqlIndexKeyEncoding then normalizes IEEE signed zeros and NaN to SQL
+    /// equality/order and applies the declared direction and NULL placement.
+    /// The planner retains its conservative floating seek admission.
     /// </summary>
     internal static void AppendKeyValue(DatabaseKeyWriter writer, DatabaseType type, object? value, Collation collation)
     {

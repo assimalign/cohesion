@@ -27,33 +27,82 @@ public sealed partial class OqlQueryParser
         } while (!value && !Failed && Take(TokenType.Comma));
         if (Failed) { return EmptyExpression(); }
         Expect("FROM");
-        string collection = CollectionName();
+        var sourceToken = Current;
+        bool collectionTerm = Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+            (_tokens[_position + 1].Type is not (TokenType.LeftParen or TokenType.LeftBracket or TokenType.Dot) ||
+                Is("COHESION_SCHEMA") || _depth == 0 && _tokens[_position + 1].Type == TokenType.Dot);
+        string collection = collectionTerm ? CollectionName() : string.Empty;
+        OqlExpression? source = collectionTerm ? null : ParseExpression();
         string? alias = null;
         if (Take("AS"))
         {
             alias = Identifier();
         }
-        else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsUnnestClause())
+        else if ((source is null or OqlSubqueryExpression) && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsReturningClause() && !IsSourceBindingClause())
         {
             alias = Identifier();
         }
+        if (!Failed && source is OqlSubqueryExpression && alias is null)
+        { Error("CD00015", ErrorMessages.DerivedSourceAliasRequired, sourceToken); }
+        bool explicitFromAlias = alias is not null;
+        if (!explicitFromAlias) { RecordUnaliasedSource(sourceToken); }
+        if (source is OqlPathExpression { Segments.Count: > 0 } sourcePath && alias is null)
+        { alias = sourcePath.Segments[^1].Name; }
 
         List<OqlUnnestExpression> unnest = [];
+        List<OqlSourceBindingExpression>? bindings = null;
+        List<Lexeme>? refusedJoins = null;
+        bool explicitAliases = explicitFromAlias;
         var variables = new HashSet<string>(StringComparer.Ordinal);
         variables.Add(alias ?? collection);
-        while (!Failed && IsUnnestClause())
+        while (!Failed && IsSourceBindingClause())
         {
             var bindingStart = Current;
             bool left = Take("LEFT");
             if (left) { Take("OUTER"); }
             else { Take("INNER"); }
+            if (Is("JOIN") || Is("NEST"))
+            {
+                _hasKeyJoin = true;
+                bindings ??= new List<OqlSourceBindingExpression>(unnest);
+                var joinToken = Current;
+                bool nest = Take("NEST");
+                if (!nest) { Expect("JOIN"); }
+                string capability = nest ? left ? OqlClauses.LeftNest : OqlClauses.Nest : left ? OqlClauses.LeftJoin : OqlClauses.Join;
+                if (!Supports(capability)) { _diagnostics.Add(QueryDiagnostics.UnsupportedClause(capability, Profile.Language, Span(joinToken, joinToken))); break; }
+                if (Current.Type is not (TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function))
+                { UnsupportedKeyJoin(joinToken, " right-hand expression source"); break; }
+                string name = CollectionName();
+                string? right = null;
+                if (Take("AS")) { right = Identifier(); }
+                else if (!Is("ON") && !IsSourceBindingClause() && Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function)
+                { right = Identifier(); }
+                bool on = Take("ON");
+                if (on && Is("KEYS")) { UnsupportedKeyJoin(joinToken, " ON KEYS"); break; }
+                if (!on) { Expect("ON"); }
+                var condition = ParseExpression();
+                if (condition is not OqlBinaryExpression { Operator: "=", Left: OqlMetaExpression { Member: "id", Arguments.Count: 1 } meta } equality ||
+                    meta.Arguments[0] is not OqlPathExpression { Segments.Count: 1 } receiver)
+                {
+                    if (Failed) { break; }
+                    (refusedJoins ??= []).Add(joinToken);
+                    continue;
+                }
+                if (!explicitAliases || string.IsNullOrEmpty(right))
+                { Error("CD00016", ErrorMessages.JoinAliasesRequired, joinToken); break; }
+                if (receiver.Segments[0].Name != right) { UnsupportedKeyJoin(joinToken); break; }
+                if (!variables.Add(right)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, joinToken); break; }
+                bindings.Add(new OqlJoinExpression(name, right, equality.Right, left, nest, Span(bindingStart, Previous)));
+                continue;
+            }
             Expect("UNNEST");
             var expression = ParseExpression();
             var variableToken = Current;
             string? variable = null;
-            if (Take("AS")) { variableToken = Current; variable = Identifier(); }
-            else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsUnnestClause() && !IsReturningClause())
-            { variable = Identifier(); }
+            bool explicitVariable = false;
+            if (Take("AS")) { variableToken = Current; variable = Identifier(); explicitVariable = true; }
+            else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsSourceBindingClause() && !IsReturningClause())
+            { variable = Identifier(); explicitVariable = true; }
             else if (expression is OqlPathExpression { Segments.Count: > 0 } path)
             {
                 variable = path.Segments[^1].Name;
@@ -64,15 +113,40 @@ public sealed partial class OqlQueryParser
             }
             if (!Failed && variable is null) { Error("CD00002", ErrorMessages.OqlQueryParserParseSelectVoid3, variableToken); }
             if (!Failed && !variables.Add(variable!)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, variableToken); }
-            unnest.Add(new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous)));
+            explicitAliases &= explicitVariable;
+            if (!explicitVariable) { RecordUnaliasedSource(variableToken); }
+            if (bindings is not null && !explicitVariable) { Error("CD00016", ErrorMessages.JoinAliasesRequired, variableToken); }
+            var expansion = new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous));
+            unnest.Add(expansion);
+            bindings?.Add(expansion);
         }
 
+        if (refusedJoins is not null) { foreach (var refused in refusedJoins) { UnsupportedKeyJoin(refused); } }
+        if (!Failed && Current.Type == TokenType.Comma)
+        { _diagnostics.Add(QueryDiagnostics.UnsupportedClause("comma-separated JOIN", Profile.Language, Span(Current, Current))); }
         OqlExpression? predicate = Take("WHERE") ? ParseExpression() : null;
         List<OqlExpression> groups = [];
+        List<string?>? groupAliases = null;
+        string? groupAs = null;
         if (Take("GROUP"))
         {
+            if (Is("AS")) { Error("CD00012", ErrorMessages.GroupAsRequiresBy, Previous); return EmptyExpression(); }
             Expect("BY");
-            do { groups.Add(ParseExpression()); } while (!Failed && Take(TokenType.Comma));
+            do
+            {
+                groups.Add(ParseExpression());
+                string? name = null;
+                if (Take("AS")) { name = Identifier(); }
+                else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function &&
+                    !Is("LETTING") && !Is("RETURNING")) { name = Identifier(); }
+                if (name is not null && groupAliases is null)
+                {
+                    groupAliases = [];
+                    for (int index = 1; index < groups.Count; index++) { groupAliases.Add(null); }
+                }
+                groupAliases?.Add(name);
+            } while (!Failed && Take(TokenType.Comma));
+            if (Take("GROUP")) { Expect("AS"); groupAs = Identifier(); }
         }
         OqlExpression? having = Take("HAVING") ? ParseExpression() : null;
         List<OqlOrdering> ordering = [];
@@ -88,7 +162,14 @@ public sealed partial class OqlQueryParser
                     Take("ASC");
                 }
 
-                ordering.Add(new OqlOrdering(expression, descending));
+                var placement = OqlNullPlacement.Default;
+                if (Take("NULLS"))
+                {
+                    if (Take("FIRST")) { placement = OqlNullPlacement.First; }
+                    else if (Take("LAST")) { placement = OqlNullPlacement.Last; }
+                    else { Error("CD00013", ErrorMessages.NullPlacementExpected, Current); }
+                }
+                ordering.Add(new OqlOrdering(expression, descending, placement));
             } while (!Failed && Take(TokenType.Comma));
         }
         OqlExpression? limit = null;
@@ -115,7 +196,25 @@ public sealed partial class OqlQueryParser
             else { offset = count; }
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
-            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly());
+            groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly(),
+            groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly());
+    }
+
+    private void UnsupportedKeyJoin(Lexeme token, string suffix = " general ON predicate")
+        => _diagnostics.Add(QueryDiagnostics.UnsupportedClause(token.Text.ToUpperInvariant() + suffix, Profile.Language, Span(token, token)));
+
+    private void RecordUnaliasedSource(Lexeme token)
+    {
+        if (_unaliasedSource < 0 || token.Start < _unaliasedSource) { _unaliasedSource = token.Start; }
+    }
+
+    private bool IsSourceBindingClause() => IsUnnestClause() || IsJoinClause(_position);
+
+    private bool IsJoinClause(int index)
+    {
+        if (IsWord(_tokens[index], "LEFT") || IsWord(_tokens[index], "INNER"))
+        { index++; if (IsWord(_tokens[index], "OUTER")) { index++; } }
+        return IsWord(_tokens[index], "JOIN") || IsWord(_tokens[index], "NEST");
     }
 
     private bool IsUnnestClause() => IsUnnestClause(_position);

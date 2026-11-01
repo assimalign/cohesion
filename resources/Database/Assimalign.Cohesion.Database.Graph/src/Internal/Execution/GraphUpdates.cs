@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Graph.Storage;
+using Assimalign.Cohesion.Database.Transactions;
 
 using Assimalign.Cohesion.Database.Graph.Protocol;
 
@@ -32,13 +33,28 @@ internal sealed class GraphUpdates : IDisposable
     private readonly HashSet<(bool Node, ulong Id)> _changed = [];
     private readonly Dictionary<(bool Node, ulong Id), object> _entityValues = [];
     private GraphMemoryOwner? _memory;
+    // Replace the MERGE-only read-view field with a lazy index cache; ordinary writes keep
+    // the same object size and allocate no index state. The read override lives on MERGE.
+    private Dictionary<(string Label, string Key), GraphOverlayIndex>? _nodeIndexes;
+
+    // The MERGE seam owns this scope; every overlay-aware read uses the selected store view.
+    internal TransactionSnapshot ReadSnapshot => _operation.MergeReadSnapshot ?? _operation.Context.Snapshot;
+    internal TransactionSnapshot? OverrideReadSnapshot(TransactionSnapshot? snapshot)
+    {
+        var previous = _operation.OverrideMergeReadSnapshot(snapshot);
+        // Type selections are view-dependent, including cached absence.
+        _typeSelections.Clear();
+        return previous;
+    }
+
+    internal void RefreshReadSnapshot() => _typeSelections.Clear();
 
     internal GraphUpdates(GraphDatabase database, GraphOperation operation) { _database = database; _operation = operation; }
 
     internal async ValueTask<GraphNode> CreateNodeAsync(IReadOnlyList<string> labels,
-        IReadOnlyDictionary<string, object?> properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?> properties, CancellationToken token, bool deferRequired = false)
     {
-        await _database.ValidateNodeAsync(_operation, labels, properties, token).ConfigureAwait(false);
+        await _database.ValidateNodeAsync(_operation, labels, properties, token, deferRequired).ConfigureAwait(false);
         var node = new GraphNode(new GraphNodeId((ulong)_database.DataStorage.ReserveTransactionSequence()),
             Array.AsReadOnly(labels.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()),
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
@@ -48,9 +64,9 @@ internal sealed class GraphUpdates : IDisposable
     }
 
     internal async ValueTask<GraphRelationship> CreateRelationshipAsync(GraphNodeId from, GraphNodeId to, string type,
-        IReadOnlyDictionary<string, object?> properties, CancellationToken token)
+        IReadOnlyDictionary<string, object?> properties, CancellationToken token, bool deferRequired = false)
     {
-        var typeId = await _database.ValidateRelationshipAsync(_operation, type, properties, token).ConfigureAwait(false);
+        var typeId = await _database.ValidateRelationshipAsync(_operation, type, properties, token, deferRequired).ConfigureAwait(false);
         _typeSelections.Clear();
         var edge = new GraphRelationship(new GraphRelationshipId((ulong)_database.DataStorage.ReserveTransactionSequence()), type, from, to,
             new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>(properties, StringComparer.Ordinal)));
@@ -84,20 +100,22 @@ internal sealed class GraphUpdates : IDisposable
 
     internal StoredGraphRelationship? FindRelationship(ulong id) => _relationships.TryGetValue(id, out var edge)
         ? new StoredGraphRelationship(id, edge.From.Value, edge.To.Value, edge.Type, edge.Properties)
-        : _database.Store.FindRelationship(id, _operation.Context.Snapshot);
+        : _database.Store.FindRelationship(id, ReadSnapshot);
     internal void DeletedNode(ulong id)
     {
-        if (_nodes.Remove(id, out var node)) { ForgetLabels(node); }
+        if (_nodes.Remove(id, out var node)) { UpdateIndexes(node, null); ForgetLabels(node); }
     }
     internal void DeletedRelationship(ulong id) => _relationships.Remove(id);
 
     internal StoredGraphNode? FindNode(ulong id) => _nodes.TryGetValue(id, out var node)
-        ? new StoredGraphNode(id, node.Labels, node.Properties) : _database.Store.FindNode(id, _operation.Context.Snapshot);
+        ? new StoredGraphNode(id, node.Labels, node.Properties) : _database.Store.FindNode(id, ReadSnapshot);
 
     private void RememberNode(GraphNode node, CancellationToken token = default)
     {
         AccountEntity(true, node.Id.Value, node, token);
-        if (_nodes.TryGetValue(node.Id.Value, out var previous)) { ForgetLabels(previous); }
+        GraphNode? previous = _nodes.TryGetValue(node.Id.Value, out var remembered) ? remembered : null;
+        UpdateIndexes(previous, node);
+        if (previous is { } prior) { ForgetLabels(prior); }
         _nodes[node.Id.Value] = node;
         foreach (string label in node.Labels)
         {
@@ -127,6 +145,7 @@ internal sealed class GraphUpdates : IDisposable
         _createdTypes.Clear(); _createdByType.Clear(); _typeSelections.Clear(); _created.Clear(); _changed.Clear(); _entityValues.Clear();
         _memory?.Dispose();
         _memory = null;
+        _nodeIndexes = null;
     }
 
     private void ForgetLabels(GraphNode node)
@@ -144,44 +163,64 @@ internal sealed class GraphUpdates : IDisposable
     internal IReadOnlyList<StoredGraphNode> GetNodes(string? label, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        var stored = label is null ? _database.Store.GetNodes(null, _operation.Context.Snapshot)
-            : _database.Store.ScanLabels([label], _operation.Context.Snapshot, token);
+        var stored = label is null ? _database.Store.GetNodes(null, ReadSnapshot)
+            : _database.Store.ScanLabels([label], ReadSnapshot, token);
         return MergeNodes(stored, label is null ? _nodes.Values : PendingNodes([label]));
     }
 
     internal IReadOnlyList<StoredGraphNode> GetUnionNodes(IReadOnlyList<string> labels, CancellationToken token)
-        => MergeNodes(_database.Store.ScanLabels(labels, _operation.Context.Snapshot, token), PendingNodes(labels));
+        => MergeNodes(_database.Store.ScanLabels(labels, ReadSnapshot, token), PendingNodes(labels));
 
     internal async IAsyncEnumerable<StoredGraphNode> StreamAnchorAsync(GraphAnchor anchor,
         GraphPlanExecutor.ExpansionBudget budget, [EnumeratorCancellation] CancellationToken token)
     {
         using var memory = new GraphMemoryOwner(budget.Memory);
-        memory.Add(32 + 16L * _nodes.Count);
-        var pending = _nodes.Values.Where(node =>
+        var index = anchor.Property is { } indexedKey && anchor.Label is { } indexedLabel
+            ? OverlayIndex(indexedLabel, indexedKey, budget, token) : null;
+        // Select the access path's postings before charging comparisons. Only a NodeScan
+        // visits unrelated labels; property residuals still charge every selected candidate.
+        IEnumerable<GraphNode> candidates = index is not null
+            ? (index.Added(anchor.Value) ?? []).Select(id => _nodes[id])
+            : _nodes.Count == 0 ? _nodes.Values
+            : anchor.UnionLabels is { } union ? PendingNodes(union, memory)
+            : anchor.Label is { } label ? (_nodeLabels.TryGetValue(label, out var ids) ? ids : []).Select(id => _nodes[id])
+            : _nodes.Values;
+        var selected = new List<GraphNode>();
+        memory.Add(32);
+        foreach (var node in candidates)
+        {
+            token.ThrowIfCancellationRequested();
+            budget.Consume();
+            if (
             (anchor.UnionLabels is { } labels ? node.Labels.Any(label => labels.Contains(label, StringComparer.Ordinal))
                 : anchor.Label is null || node.Labels.Contains(anchor.Label, StringComparer.Ordinal)) &&
             (anchor.Property is null || node.Properties.TryGetValue(anchor.Property, out var value) &&
-                GraphValueComparer.Instance.Equals(value, anchor.Value))).OrderBy(node => node.Id.Value).ToArray();
-        var snapshot = _operation.Context.Snapshot;
-        IAsyncEnumerable<StoredGraphNode> persisted = anchor.Property is { } property
+                GraphValueComparer.Instance.Equals(value, anchor.Value)))
+            { memory.Add(16); selected.Add(node); }
+        }
+        selected.Sort(static (left, right) => left.Id.Value.CompareTo(right.Id.Value));
+        var pending = selected;
+        var snapshot = ReadSnapshot;
+        // A Snapshot plan can retain an index dropped before the latest-view MERGE probe.
+        // Fall back under the same writer/pattern locks; the matcher retains all equalities.
+        bool useIndex = anchor.Property is not null && HasReadIndex(anchor.Label!, anchor.Property);
+        IAsyncEnumerable<StoredGraphNode> persisted = useIndex && anchor.Property is { } property
             ? _database.Store.StreamIndexAsync(anchor.Label!, property, anchor.Value, snapshot, token, budget.Consume, memory.Add)
             : StreamStored();
         int position = 0;
         await foreach (var stored in persisted.ConfigureAwait(false))
         {
-            while (position < pending.Length && pending[position].Id.Value <= stored.Id)
+            while (position < pending.Count && pending[position].Id.Value <= stored.Id)
             {
                 var node = pending[position++];
-                budget.Consume();
                 yield return new(node.Id.Value, node.Labels, node.Properties);
             }
             if (!_nodes.ContainsKey(stored.Id)) { yield return stored; }
         }
-        while (position < pending.Length)
+        while (position < pending.Count)
         {
             token.ThrowIfCancellationRequested();
             var node = pending[position++];
-            budget.Consume();
             yield return new(node.Id.Value, node.Labels, node.Properties);
         }
 
@@ -211,7 +250,7 @@ internal sealed class GraphUpdates : IDisposable
         }
         pending.Sort();
         int position = 0;
-        foreach (var stored in _database.Store.StreamRelationshipTypes(types, _operation.Context.Snapshot,
+        foreach (var stored in _database.Store.StreamRelationshipTypes(types, ReadSnapshot,
             token, Visit, memory.Add))
         {
             while (position < pending.Count && pending[position] <= stored.Id)
@@ -248,12 +287,16 @@ internal sealed class GraphUpdates : IDisposable
         }
     }
 
-    private IEnumerable<GraphNode> PendingNodes(IReadOnlyList<string> labels)
+    private IEnumerable<GraphNode> PendingNodes(IReadOnlyList<string> labels, GraphMemoryOwner? memory = null)
     {
         var selected = new HashSet<ulong>();
+        memory?.Add(128);
         foreach (string label in labels)
         {
-            if (_nodeLabels.TryGetValue(label, out var ids)) { selected.UnionWith(ids); }
+            if (_nodeLabels.TryGetValue(label, out var ids))
+            {
+                foreach (ulong id in ids) { if (selected.Add(id)) { memory?.Add(64); } }
+            }
         }
         return selected.Select(id => _nodes[id]);
     }
@@ -263,13 +306,38 @@ internal sealed class GraphUpdates : IDisposable
             .Concat(pending.Select(node => new StoredGraphNode(node.Id.Value, node.Labels, node.Properties)))
             .OrderBy(node => node.Id).ToArray();
 
-    internal async ValueTask<IReadOnlyList<StoredGraphNode>> SearchIndexAsync(string label, string key, object? value, CancellationToken token)
+    private bool HasReadIndex(string label, string key) => _operation.MergeReadSnapshot is null ||
+        _database.Store.HasIndex(label, key, ReadSnapshot);
+
+    private GraphOverlayIndex? OverlayIndex(string label, string key, GraphPlanExecutor.ExpansionBudget budget, CancellationToken token)
     {
-        var found = await _database.Store.SearchIndexAsync(label, key, value, _operation.Context.Snapshot, token).ConfigureAwait(false);
-        return found.Where(node => !_nodes.ContainsKey(node.Id))
-            .Concat(_nodes.Values.Where(node => node.Labels.Contains(label, StringComparer.Ordinal) &&
-                node.Properties.TryGetValue(key, out var actual) && GraphValueComparer.Instance.Equals(actual, value))
-                .Select(node => new StoredGraphNode(node.Id.Value, node.Labels, node.Properties))).OrderBy(node => node.Id).ToArray();
+        token.ThrowIfCancellationRequested();
+        // No overlay means no value lookup or extra work for ordinary indexed MATCH.
+        if (_nodes.Count == 0 && _nodeIndexes is null) { return null; }
+        budget.Consume(); // One lookup per probe once the statement has index changes.
+        if (_nodeIndexes is not null && _nodeIndexes.TryGetValue((label, key), out var existing)) { return existing; }
+        _nodeIndexes ??= [];
+        Charge(256);
+        var index = new GraphOverlayIndex();
+        foreach (var node in _nodes.Values)
+        {
+            token.ThrowIfCancellationRequested();
+            budget.Consume(); // Build once from earlier statement changes, never once per row.
+            index.Replace(label, key, null, node, Charge);
+        }
+        _nodeIndexes.Add((label, key), index);
+        return index;
+    }
+
+    private void UpdateIndexes(GraphNode? previous, GraphNode? current)
+    {
+        if (_nodeIndexes is null) { return; }
+        foreach (var entry in _nodeIndexes)
+        {
+            _operation.FunctionCancellation.ThrowIfCancellationRequested();
+            _operation.QueryBudget?.Consume();
+            entry.Value.Replace(entry.Key.Label, entry.Key.Key, previous, current, Charge);
+        }
     }
 
     internal Guid[]? SelectTypes(GqlRelationshipPattern pattern)
@@ -278,8 +346,8 @@ internal sealed class GraphUpdates : IDisposable
         {
             string? name = pattern.LabelExpression is GqlLabelName label ? label.Name : pattern.Type;
             types = pattern.LabelExpression is GqlLabelWildcard || pattern.LabelExpression is null && name is null ? null
-                : name is not null ? _database.Catalog.FindRelationshipType(name, _operation.Context.Snapshot) is { } type ? [type.Id] : []
-                : _database.Catalog.GetRelationshipTypes(_operation.Context.Snapshot)
+                : name is not null ? _database.Catalog.FindRelationshipType(name, ReadSnapshot) is { } type ? [type.Id] : []
+                : _database.Catalog.GetRelationshipTypes(ReadSnapshot)
                     .Where(type => GraphLabelEvaluator.Accepts(pattern, type.Name)).Select(type => type.Id).ToArray();
             _typeSelections.Add(pattern, types);
         }
@@ -293,7 +361,7 @@ internal sealed class GraphUpdates : IDisposable
         IReadOnlyCollection<Guid>? typeIds, CancellationToken token)
     {
         var result = new List<StoredGraphRelationship>();
-        await foreach (var edge in _database.Store.GetIncidentAsync(id, direction, typeIds, _operation.Context.Snapshot, token).ConfigureAwait(false))
+        await foreach (var edge in _database.Store.GetIncidentAsync(id, direction, typeIds, ReadSnapshot, token).ConfigureAwait(false))
         {
             token.ThrowIfCancellationRequested();
             result.Add(_relationships.TryGetValue(edge.Id, out var updated)
@@ -328,7 +396,7 @@ internal sealed class GraphUpdates : IDisposable
         token.ThrowIfCancellationRequested();
         using var memory = budget is null ? null : new GraphMemoryOwner(budget.Memory);
         memory?.Add(512);
-        var snapshot = _operation.Context.Snapshot;
+        var snapshot = ReadSnapshot;
         var selectedTypes = typeIds?.Distinct().ToArray();
         var directions = direction == GraphIncidentDirection.Both
             ? new[] { GraphIncidentDirection.Outgoing, GraphIncidentDirection.Incoming } : new[] { direction };
@@ -520,6 +588,26 @@ internal sealed class GraphUpdates : IDisposable
             foreach (string name in binding.Keys.ToArray())
             { binding[name] = Refresh(binding[name], touchedNodes, touchedRelationships, refreshed); }
             bindingMemory?.RetainValue(binding, token);
+        }
+    }
+
+    // MERGE applies a branch per input row. Refresh the complete output table afterward,
+    // so a later row's change also reaches earlier rows' nested aliases, as ordinary SET does.
+    internal void RefreshMergeBindings(List<Dictionary<string, object?>> bindings, CancellationToken token,
+        GraphMemoryOwner bindingMemory)
+    {
+        if (bindings.Count == 0 || _nodes.Count == 0 && _relationships.Count == 0) { return; }
+        using var memory = _operation.QueryBudget!.Memory.Reserve(128 + 64L * (_nodes.Count + _relationships.Count));
+        var nodes = _nodes.Keys.ToHashSet();
+        var relationships = _relationships.Keys.ToHashSet();
+        var refreshed = new Dictionary<object, object?>(ReferenceEqualityComparer.Instance);
+        foreach (var binding in bindings)
+        {
+            token.ThrowIfCancellationRequested();
+            bindingMemory.ReleaseValue(binding);
+            foreach (string name in binding.Keys.ToArray())
+            { binding[name] = Refresh(binding[name], nodes, relationships, refreshed); }
+            bindingMemory.RetainValue(binding, token);
         }
     }
 

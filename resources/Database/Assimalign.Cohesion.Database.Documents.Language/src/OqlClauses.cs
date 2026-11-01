@@ -15,6 +15,13 @@ public static class OqlClauses
     /// <summary>Rolls back the session's explicit transaction.</summary>
     public const string Rollback = "ROLLBACK";
 
+    /// <summary>Create a named undo scope.</summary>
+    public const string Savepoint = "SAVEPOINT";
+    /// <summary>Release a named undo scope and descendants.</summary>
+    public const string ReleaseSavepoint = "RELEASE SAVEPOINT";
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    public const string RollbackToSavepoint = "ROLLBACK TO SAVEPOINT";
+
     /// <summary>A <c>CREATE COLLECTION</c> statement.</summary>
     public const string CreateCollection = "CREATE COLLECTION";
 
@@ -75,6 +82,24 @@ public static class OqlClauses
     /// <summary>Introduces the source collections and iteration variables for a query.</summary>
     public const string From = "FROM";
 
+    /// <summary>Reads a parenthesized SELECT as a source with a required alias.</summary>
+    public const string DerivedFrom = "DERIVED FROM";
+
+    /// <summary>Iterates an uncorrelated expression as a source.</summary>
+    public const string ExpressionFrom = "EXPRESSION FROM";
+
+    /// <summary>Looks up a right-hand document by scalar key.</summary>
+    public const string Join = "JOIN";
+
+    /// <summary>Looks up a document, preserving unmatched inputs.</summary>
+    public const string LeftJoin = "LEFT JOIN";
+
+    /// <summary>Looks up a document into an array.</summary>
+    public const string Nest = "NEST";
+
+    /// <summary>Looks up a document array, preserving unmatched inputs.</summary>
+    public const string LeftNest = "LEFT NEST";
+
     /// <summary>Expands an array into inner rows.</summary>
     public const string Unnest = "UNNEST";
 
@@ -90,6 +115,9 @@ public static class OqlClauses
     /// <summary>Tests whether every array element satisfies a predicate.</summary>
     public const string Every = "EVERY ... SATISFIES";
 
+    /// <summary>Tests whether an array is nonempty, preserving MISSING.</summary>
+    public const string Exists = "EXISTS";
+
     /// <summary>Tests structural membership in an explicit value list or array value.</summary>
     public const string In = "IN";
 
@@ -104,6 +132,9 @@ public static class OqlClauses
 
     /// <summary>Groups values by one or more expressions.</summary>
     public const string GroupBy = "GROUP BY";
+
+    /// <summary>Retains each group's input binding wrappers as an array.</summary>
+    public const string GroupAs = "GROUP AS";
 
     /// <summary>Restricts grouped values by a predicate.</summary>
     public const string Having = "HAVING";

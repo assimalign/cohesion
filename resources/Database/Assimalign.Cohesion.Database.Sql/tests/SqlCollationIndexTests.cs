@@ -49,7 +49,8 @@ public sealed class SqlCollationIndexTests
         await Execute(session, "CREATE INDEX ix_exact ON exact(name)");
         (await Names(session, "SELECT name FROM exact WHERE 'alice' COLLATE case_insensitive = name COLLATE binary ORDER BY name"))
             .ShouldBe(new[] { "Alice", "alice" });
-        Metrics(session).AccessPath.ShouldBe("scan");
+        Metrics(session).AccessPath.ShouldBe("ordered:ix_exact:forward");
+        Metrics(session).PeakOrderedRows.ShouldBe(0);
         (await Names(session, "SELECT name FROM exact WHERE 'alice' COLLATE binary = name COLLATE case_insensitive"))
             .ShouldBe(new[] { "alice" });
         Metrics(session).AccessPath.ShouldBe("seek:ix_exact");
@@ -151,6 +152,7 @@ public sealed class SqlCollationIndexTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await Execute(session, "CREATE TABLE t (name TEXT COLLATE invariant)");
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE INDEX ix ON t(name)"))).Message.ShouldContain("not index-backed");
+        (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE INDEX ix ON t(name DESC NULLS LAST)"))).Message.ShouldContain("not index-backed");
         (await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad (name TEXT COLLATE invariant UNIQUE)"))).Message.ShouldContain("not index-backed");
         await Should.ThrowAsync<DatabaseException>(() => Execute(session, "CREATE TABLE bad_number (id INT COLLATE binary)"));
         database.Catalog.TryGetTable("dbo", "bad", out _).ShouldBeFalse();

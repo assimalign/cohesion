@@ -28,6 +28,10 @@ public sealed class OqlQueryParserTests
     }
 
     [Theory]
+    [InlineData("SELECT n = 1 IS NOT NULL, 1 = NULL IS NULL, 1 IN [1] IS NULL FROM items")]
+    [InlineData("SELECT 2 BETWEEN 1 AND 3 IS NOT NULL, 2 BETWEEN 1 IS NOT NULL AND 3 FROM items")]
+    [InlineData("SELECT 'abc' LIKE 'a%' IS NOT NULL, 'a%' LIKE 'a!%' ESCAPE '!' IS NOT NULL FROM items")]
+    [InlineData("SELECT 'a' || 'b', MISSING IS DISTINCT FROM NULL, NULL IS NOT DISTINCT FROM NULL FROM items")]
     [InlineData("SELECT * FROM people")]
     [InlineData("select * from people;")]
     [InlineData("SELECT p.name FROM people AS p WHERE p.age >= $age")]
@@ -46,6 +50,7 @@ public sealed class OqlQueryParserTests
     [InlineData("SELECT SUM(score), AVG(score), MIN(score), MAX(score), COUNT(score) FROM people")]
     [InlineData("SELECT country, COUNT(*) AS total FROM people GROUP BY country HAVING COUNT(*) > 1 ORDER BY total DESC")]
     [InlineData("SELECT region, age FROM people ORDER BY region ASC, age DESC")]
+    [InlineData("SELECT region, age FROM people ORDER BY region ASC NULLS LAST, age DESC NULLS FIRST")]
     [InlineData("/* outer /* nested */ comment */ SELECT name -- trailing comment\nFROM people;")]
     [InlineData("SELECT p.flatten, p.select, p.array FROM people p")]
     [InlineData("SELECT 'FLATTEN' AS \"DEFINE\" FROM people /* ELEMENT */")]
@@ -120,8 +125,7 @@ public sealed class OqlQueryParserTests
     [InlineData("DEFINE people AS SELECT * FROM people", "DEFINE", 0)]
     [InlineData("SELECT ELEMENT(address) FROM people", "ELEMENT", 7)]
     [InlineData("SELECT FLATTEN(address) FROM people", "FLATTEN", 7)]
-    [InlineData("SELECT (SELECT city FROM addresses) FROM people", "SUBQUERY", 8)]
-    [InlineData("SELECT ARRAY_AGG(age) FROM people", "ARRAY_AGG", 7)]
+    [InlineData("SELECT * FROM (SELECT city FROM addresses) p JOIN people q ON TRUE", "JOIN", 45)]
     [InlineData("CREATE DATABASE other", "CREATE", 0)]
     [InlineData("DROP DATABASE other", "DROP", 0)]
     [InlineData("USE other", "USE", 0)]
@@ -131,7 +135,7 @@ public sealed class OqlQueryParserTests
 
         diagnostic.Message!.ShouldContain(clause);
         diagnostic.Start.ShouldBe(start);
-        diagnostic.End.ShouldBe(start + (clause == "SUBQUERY" ? "SELECT".Length : clause == "IN array form" ? 2 : clause.Length));
+        diagnostic.End.ShouldBe(start + (clause == "derived FROM subquery" ? "SELECT".Length : clause == "IN array form" ? 2 : clause.Length));
         diagnostic.Line.ShouldBe(1);
     }
 

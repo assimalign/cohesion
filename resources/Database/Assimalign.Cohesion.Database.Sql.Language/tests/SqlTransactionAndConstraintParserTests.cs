@@ -81,7 +81,7 @@ public sealed class SqlTransactionAndConstraintParserTests
     [InlineData("START", "CS00003")]
     [InlineData("START WORK", "CS00003")]
     [InlineData("BEGIN SAVEPOINT marker", "CS00003")]
-    [InlineData("ROLLBACK TO marker", "CS00003")]
+    [InlineData("ROLLBACK TO marker extra", "CS00003")]
     [InlineData("BEGIN WORK TRANSACTION", "CS00003")]
     [InlineData("COMMIT WORK WORK", "CS00003")]
     [InlineData("END WORK", "CS00003")]
@@ -90,10 +90,8 @@ public sealed class SqlTransactionAndConstraintParserTests
     [InlineData("BEGIN TRANSACTION named", "CS00003")]
     [InlineData("END IF", "CS00003")]
     [InlineData("COMMIT PREPARED 'x'", "CS00003")]
-    [InlineData("START TRANSACTION ISOLATION LEVEL READ COMMITTED", "CS00003")]
-    [InlineData("START TRANSACTION READ ONLY", "CS00003")]
-    [InlineData("BEGIN WORK ISOLATION LEVEL SERIALIZABLE", "CS00003")]
-    [InlineData("ROLLBACK WORK TO SAVEPOINT a", "CS00003")]
+    [InlineData("START TRANSACTION READ ONLY", "CK00001")]
+    [InlineData("ROLLBACK WORK TO SAVEPOINT", "CS00003")]
     [InlineData("COMMIT AND NO CHAIN", "CS00003")]
     [InlineData("COMMIT AND CHAIN", "CS00003")]
     [InlineData("ROLLBACK AND NO CHAIN", "CS00003")]
@@ -101,9 +99,8 @@ public sealed class SqlTransactionAndConstraintParserTests
     [InlineData("ABORT", "CS00002")]
     [InlineData("ABORT WORK", "CS00002")]
     [InlineData("ABORT TRANSACTION", "CS00002")]
-    [InlineData("SAVEPOINT a", "CS00002")]
-    [InlineData("RELEASE SAVEPOINT a", "CS00002")]
-    [InlineData("SET TRANSACTION ISOLATION LEVEL READ COMMITTED", "CS00002")]
+    [InlineData("SAVEPOINT", "CS00003")]
+    [InlineData("RELEASE SAVEPOINT", "CS00003")]
     [InlineData("PREPARE TRANSACTION 'x'", "CS00002")]
     [InlineData("\"START\" TRANSACTION", "CS00002")]
     [InlineData("START \"TRANSACTION\"", "CS00003")]
@@ -200,17 +197,6 @@ public sealed class SqlTransactionAndConstraintParserTests
         statement.Diagnostics.ShouldBeEmpty();
         statement.SqlExpression.ShouldBeOfType<SqlAlterTableExpression>().Action
             .ShouldBeOfType<SqlAlterDropConstraintAction>().ConstraintName.ShouldBe("fk");
-    }
-
-    [Theory]
-    [InlineData("CREATE TABLE t (parent_id INT REFERENCES parent(id) ON UPDATE CASCADE);")]
-    [InlineData("CREATE TABLE t (parent_id INT REFERENCES parent(id) ON DELETE CASCADE ON UPDATE RESTRICT);")]
-    [InlineData("ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (parent_id) REFERENCES parent(id) ON UPDATE RESTRICT;")]
-    public void OnUpdate_RemainsUnsupported(string sql)
-    {
-        SqlLanguageProfile.Instance.Supports("ON UPDATE").ShouldBeFalse();
-        Parse(sql).Diagnostics.Single(diagnostic => diagnostic.Code == "CK00001")
-            .Message!.ShouldContain("ON UPDATE");
     }
 
     [Theory]

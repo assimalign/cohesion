@@ -32,6 +32,11 @@ internal static class SqlTreeDump
     {
         switch (expression)
         {
+            case SqlGroupingSetExpression group:
+                builder.Append("Grouping(").Append(group.Kind).Append(", ");
+                AppendList(builder, group.Items);
+                builder.Append(')');
+                break;
             case null:
                 builder.Append("null");
                 break;
@@ -75,6 +80,11 @@ internal static class SqlTreeDump
                 Append(builder, distinct.Right);
                 builder.Append(')');
                 break;
+            case SqlIsJsonExpression json:
+                builder.Append("IsJson(").Append(json.Kind).Append(", ").Append(json.IsNegated).Append(", ");
+                Append(builder, json.Operand);
+                builder.Append(')');
+                break;
             case SqlBooleanTestExpression test:
                 builder.Append("BooleanTest(").Append(test.TruthValue).Append(", ").Append(test.IsNegated).Append(", ");
                 Append(builder, test.Operand);
@@ -116,7 +126,7 @@ internal static class SqlTreeDump
                 builder.Append(')');
                 break;
             case SqlLikeExpression like:
-                builder.Append("Like(").Append(like.IsNegated).Append(", ");
+                builder.Append(like.IsCaseInsensitive ? "ILike(" : "Like(").Append(like.IsNegated).Append(", ");
                 Append(builder, like.Operand);
                 builder.Append(", ");
                 Append(builder, like.Pattern);
@@ -132,6 +142,7 @@ internal static class SqlTreeDump
             case SqlFunctionCallExpression function:
                 builder.Append("Call(").Append(Text(function.FunctionName)).Append(", ").Append(function.Quantifier).Append(", ").Append(function.HasWithinGroupOrdering).Append(", ");
                 AppendList(builder, function.Arguments);
+                if (function.Filter is not null) { builder.Append(", FILTER "); Append(builder, function.Filter); }
                 foreach (var order in function.OrderBy)
                 {
                     builder.Append(order.NullPlacement).Append(' ').Append(order.IsDescending ? ", DESC " : ", ASC ");
@@ -217,7 +228,7 @@ internal static class SqlTreeDump
             Append(builder, definition.Body);
             builder.Append(')');
         }
-        builder.Append("], distinct=").Append(select.IsDistinct).Append(", columns=[");
+        builder.Append("], distinct=").Append(select.IsDistinct).Append(", groupDistinct=").Append(select.IsGroupByDistinct).Append(", columns=[");
         for (int index = 0; index < select.Columns.Count; index++)
         {
             builder.Append(index > 0 ? ", " : string.Empty);

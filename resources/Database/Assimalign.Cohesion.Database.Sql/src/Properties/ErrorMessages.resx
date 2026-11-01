@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="UpsertPredicateInvalid" xml:space="preserve">
+    <value>ON CONFLICT target WHERE must use row-local scalar expressions.</value>
+  </data>
   <data name="UpsertArbiterInvalid" xml:space="preserve"><value>ON CONFLICT target '{0}' on '{1}.{2}': {3}</value></data>
   <data name="MergeActionInvalid" xml:space="preserve"><value>MERGE requires at least one WHEN clause with an action valid for its match kind.</value></data>
   <data name="MergeWhenUnreachable" xml:space="preserve"><value>A MERGE WHEN clause follows an unconditional clause of the same match kind.</value></data>
@@ -8,6 +11,7 @@
   <data name="MergeAggregate" xml:space="preserve"><value>Aggregates are not allowed in MERGE conditions or action values; use a source query.</value></data>
   <data name="MergeStar" xml:space="preserve"><value>A wildcard is not allowed in MERGE conditions or action values.</value></data>
   <data name="MergeAssignmentType" xml:space="preserve"><value>MERGE value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
+  <data name="IdentityOverrideAssignmentType" xml:space="preserve"><value>Value of type {0} cannot be assigned to column '{1}' of type {2}.</value></data>
   <data name="MergeRepeatedRow" xml:space="preserve"><value>MERGE cannot affect a target row a second time.</value></data>
   <data name="UpsertTargetRequired" xml:space="preserve"><value>DO UPDATE requires a column or ON CONSTRAINT target.</value></data>
   <data name="UpsertConstraintNotUnique" xml:space="preserve"><value>The constraint has no associated unique index (CHECK and FOREIGN KEY cannot arbitrate).</value></data>
@@ -38,6 +42,21 @@
     <value>A lock wait exceeded the configured lock timeout.</value>
   </data>
   <data name="RowTooLarge" xml:space="preserve"><value>Row for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
+  <data name="PartialPredicateDependencies" xml:space="preserve"><value>Persisted index predicate column dependencies do not match its expression.</value></data>
+  <data name="PartialPredicateMetadataInvalid" xml:space="preserve"><value>Index predicate metadata requires nonempty text and cannot declare dependencies without a predicate.</value></data>
+  <data name="IndexKeyOrderInvalid" xml:space="preserve">
+    <value>Index key orders must match the key columns and contain only supported directions and NULL placements; primary keys require the default order.</value>
+  </data>
+  <data name="PartialPrimaryKey" xml:space="preserve"><value>A primary key cannot have an index predicate.</value></data>
+  <data name="PartialPredicateInvalid" xml:space="preserve"><value>An index predicate must be immutable and row-local; parameters, sequences, subqueries, aggregates and windows are prohibited.</value></data>
+  <data name="PartialPredicateUnprepared" xml:space="preserve"><value>Index predicate membership was not prepared before applying the write.</value></data>
+  <data name="PartialPredicateUnavailable" xml:space="preserve"><value>whose persisted immutable function contract this engine cannot resolve</value></data>
+  <data name="PartialPredicateCastUnavailable" xml:space="preserve"><value>whose reachable cast from {0} to {1} is application-registered and has no immutable contract</value></data>
+  <data name="PartialPredicateDomainUnavailable" xml:space="preserve"><value>whose domain {0} no longer has an immutable check</value></data>
+  <data name="PartialPredicateCastInvalid" xml:space="preserve"><value>An index predicate cannot use the application-registered cast from {0} to {1} because it has no immutable contract.</value></data>
+  <data name="PartialPredicateDomainInvalid" xml:space="preserve"><value>An index predicate cannot use domain {0} because its check is not immutable.</value></data>
+  <data name="PartialPredicateBindingFailed" xml:space="preserve"><value>Index predicate '{0}' ({1}) does not bind: {2} {3}</value></data>
+  <data name="PartialPredicateTypeChange" xml:space="preserve"><value>Column '{0}' is read by partial index '{1}'; drop the index before changing the column type.</value></data>
   <data name="IndexKeyTooLarge" xml:space="preserve"><value>Index key for table '{0}' is too big: size {1} bytes, maximum size {2} bytes.</value></data>
   <data name="ColumnDefaultMissing" xml:space="preserve">
     <value>Column '{0}' does not allow NULL and has no default.</value>
@@ -77,6 +96,15 @@
   <data name="CastUtf8Text" xml:space="preserve">
     <value>CAST text must be valid UTF-8.</value>
   </data>
+  <data name="JsonInputInvalid" xml:space="preserve">
+    <value>JSON input is malformed, exceeds depth 128, has an invalid Unicode escape or is not valid UTF-8.</value>
+  </data>
+  <data name="JsonScalarKindInvalid" xml:space="preserve">
+    <value>Cannot cast JSON {0} to {1}.</value>
+  </data>
+  <data name="JsonSignatureInvalid" xml:space="preserve">
+    <value>JSON access requires JSON or JSONB and a TEXT or INTEGER selector; IS JSON requires character or JSON input.</value>
+  </data>
   <data name="CastJsonText" xml:space="preserve">
     <value>Invalid JSON text (maximum depth 128).</value>
   </data>
@@ -115,6 +143,27 @@
     <value>{0} subquery requires exactly one output column; found {1}.</value>
   </data>
   <data name="EngineIdentityIntegerRequired" xml:space="preserve"><value>IDENTITY requires a built-in integer type</value></data>
+  <data name="SequenceIncrementZero" xml:space="preserve"><value>INCREMENT must not be zero.</value></data>
+  <data name="SequenceBoundsInvalid" xml:space="preserve"><value>Sequence MINVALUE and MAXVALUE must fit the data type, with MINVALUE less than MAXVALUE.</value></data>
+  <data name="SequenceStartInvalid" xml:space="preserve"><value>Sequence START must be within MINVALUE and MAXVALUE.</value></data>
+  <data name="SequenceRestartInvalid" xml:space="preserve"><value>Sequence restart or current value must be within MINVALUE and MAXVALUE.</value></data>
+  <data name="SequenceCacheInvalid" xml:space="preserve"><value>Sequence CACHE must be at least one.</value></data>
+  <data name="SequenceTypeInvalid" xml:space="preserve"><value>Sequence data type must be SMALLINT, INTEGER or BIGINT.</value></data>
+  <data name="SequenceNamespaceMissing" xml:space="preserve"><value>The sequence namespace does not exist.</value></data>
+  <data name="SequenceRelationExists" xml:space="preserve"><value>{0} '{1}.{2}' already exists.</value></data>
+  <data name="SequenceExhausted" xml:space="preserve"><value>Sequence '{0}.{1}' has exhausted its range.</value></data>
+  <data name="SequenceMissing" xml:space="preserve"><value>The sequence does not exist.</value></data>
+  <data name="SequenceCurrentUndefined" xml:space="preserve"><value>currval is not yet defined for this sequence in this session.</value></data>
+  <data name="SequenceLastUndefined" xml:space="preserve"><value>lastval is not yet defined in this session.</value></data>
+  <data name="SequenceArgumentsInvalid" xml:space="preserve"><value>Sequence calls require a sequence name or object id, an integer value and an optional Boolean is_called.</value></data>
+  <data name="SequencePositionUnsupported" xml:space="preserve"><value>NEXT VALUE FOR requires a row value position; subqueries, derived tables, CTE definitions, CASE/COALESCE/NULLIF arguments, predicates, grouping keys, ordering expressions, row counts and RETURNING lists are not supported.</value></data>
+  <data name="SequenceTransactionEnded" xml:space="preserve"><value>The transaction ended while acquiring sequence locks.</value></data>
+  <data name="SequencePlanningUnsupported" xml:space="preserve"><value>Sequence operations require an executing SQL statement scope.</value></data>
+  <data name="SequencePersistedUnsupported" xml:space="preserve"><value>Sequence operations in persisted DEFAULT, CHECK, view and SQL function expressions are not supported.</value></data>
+  <data name="SequenceSetvalBounds" xml:space="preserve"><value>The setval value is outside the sequence bounds.</value></data>
+  <data name="SequenceChanged" xml:space="preserve"><value>The sequence was dropped or changed; resolve its current catalog description.</value></data>
+  <data name="SequenceRecordTooLarge" xml:space="preserve"><value>The sequence definition exceeds the catalog record limit.</value></data>
+  <data name="SequenceRecordMalformed" xml:space="preserve"><value>Sequence catalog metadata or reservation is malformed.</value></data>
   <data name="IdentityAlreadyDeclared" xml:space="preserve"><value>a table may have only one identity column</value></data>
   <data name="IdentityZeroIncrement" xml:space="preserve"><value>INCREMENT must not be zero</value></data>
   <data name="IdentityDefaultConflict" xml:space="preserve"><value>IDENTITY cannot be combined with DEFAULT</value></data>
@@ -140,6 +189,21 @@
   <data name="SystemNamespaceReadOnly" xml:space="preserve"><value>System namespace '{0}' is read-only.</value></data>
   <data name="ScriptNamespaceTypedObjects" xml:space="preserve"><value>CS03205: Declared script '{0}' cannot DROP SCHEMA '{1}' CASCADE over typed schema objects; declare the change in the typed schema. Nothing was opened or written.</value></data>
   <data name="CteDuplicateName" xml:space="preserve"><value>Common table expression name '{0}' is declared more than once.</value></data>
+  <data name="CteMutualRecursion" xml:space="preserve"><value>Mutual recursion between WITH items is not implemented.</value></data>
+  <data name="CteRecursiveForm" xml:space="preserve"><value>Recursive query '{0}' must have the form non-recursive term UNION [ALL] recursive term.</value></data>
+  <data name="CteRecursiveOrder" xml:space="preserve"><value>ORDER BY in a recursive query is not implemented.</value></data>
+  <data name="CteRecursiveOffset" xml:space="preserve"><value>OFFSET in a recursive query is not implemented.</value></data>
+  <data name="CteRecursiveLimit" xml:space="preserve"><value>LIMIT in a recursive query is not implemented.</value></data>
+  <data name="CteRecursiveAnchor" xml:space="preserve"><value>Recursive reference to query '{0}' must not appear within its non-recursive term.</value></data>
+  <data name="CteRecursiveSubquery" xml:space="preserve"><value>Recursive reference to query '{0}' must not appear within a subquery.</value></data>
+  <data name="CteRecursiveOuterJoin" xml:space="preserve"><value>Recursive reference to query '{0}' must not appear on the nullable side of an outer join.</value></data>
+  <data name="CteRecursiveIntersect" xml:space="preserve"><value>Recursive reference to query '{0}' must not appear within INTERSECT ALL.</value></data>
+  <data name="CteRecursiveExcept" xml:space="preserve"><value>Recursive reference to query '{0}' must not appear within this EXCEPT operand.</value></data>
+  <data name="CteRecursiveReferenceCount" xml:space="preserve"><value>Recursive reference to query '{0}' must appear exactly once in its recursive term.</value></data>
+  <data name="CteRecursiveAggregate" xml:space="preserve"><value>Aggregate functions are not allowed in the recursive term of query '{0}'.</value></data>
+  <data name="CteRecursiveColumnCount" xml:space="preserve"><value>Recursive query '{0}' must have the same number of anchor, recursive and declared output columns.</value></data>
+  <data name="CteRecursiveType" xml:space="preserve"><value>Recursive query '{0}' column {1} has type {2} in its non-recursive term but type {3} in its recursive UNION. Cast the output of the non-recursive term to the correct type.</value></data>
+  <data name="CteRecursiveCollation" xml:space="preserve"><value>Recursive query '{0}' column {1} has collation '{2}' in its non-recursive term, conflicting with recursive UNION collation '{3}'. Use COLLATE to set the collation of the non-recursive term.</value></data>
   <data name="CteForwardReference" xml:space="preserve"><value>Common table expression '{0}' is referenced before its declaration.</value></data>
   <data name="ConstantQueryWildcard" xml:space="preserve"><value>A SELECT without FROM cannot project a wildcard.</value></data>
   <data name="CountNonNegative" xml:space="preserve"><value>{0} requires a non-negative integer.</value></data>
@@ -218,8 +282,12 @@
   <data name="DefaultExpressionFailure" xml:space="preserve"><value>Column '{0}': {1}</value></data>
   <data name="DefaultStorageFailure" xml:space="preserve"><value>Column '{0}': DEFAULT value cannot be stored as {1}</value></data>
   <data name="VolatileDefaultBackfill" xml:space="preserve"><value>Column '{0}': ADD COLUMN with a VOLATILE DEFAULT on a populated table requires a table rewrite (#1447).</value></data>
+  <data name="CompiledUpdateActionInvalid" xml:space="preserve"><value>Unknown foreign-key ON UPDATE action '{0}' in the compiled snapshot.</value></data>
   <data name="CompiledDeleteActionInvalid" xml:space="preserve"><value>Schema-owned foreign keys cannot use ON DELETE {0}; compiled schemas support RESTRICT and CASCADE.</value></data>
-  <data name="DeleteActionUnknown" xml:space="preserve"><value>Unknown referential delete action.</value></data>
+  <data name="UpdateActionConflict" xml:space="preserve">
+    <value>Referential action '{0}' conflicts with an earlier assignment to '{1}.{2}.{3}'.</value>
+  </data>
+  <data name="DeleteActionUnknown" xml:space="preserve"><value>Unknown referential action.</value></data>
   <data name="RenameTableCollision" xml:space="preserve"><value>Table '{0}.{1}' already exists.</value></data>
   <data name="RenameColumnCollision" xml:space="preserve"><value>Column '{0}' already exists on '{1}'.</value></data>
   <data name="MissingValueConversion" xml:space="preserve"><value>Column '{0}': frozen missing value cannot be stored as {1}</value></data>
@@ -238,6 +306,54 @@
   <data name="ViewBindingFailed" xml:space="preserve"><value>View '{0}.{1}' cannot be bound. {2}</value></data>
   <data name="ViewContractChanged" xml:space="preserve"><value>A source definition changed its output type, modifiers, domain or collation.</value></data>
   <data name="AggregateModifiersOnScalar" xml:space="preserve"><value>DISTINCT, ALL or ORDER BY specified, but '{0}' is not an aggregate function.</value></data>
+  <data name="FilterRequiresAggregate" xml:space="preserve">
+    <value>FILTER is allowed only on aggregate calls.</value>
+  </data>
+  <data name="FilterContainsAggregate" xml:space="preserve">
+    <value>Aggregate functions are not allowed in FILTER conditions.</value>
+  </data>
+  <data name="WindowDuplicateName" xml:space="preserve"><value>A WINDOW name is defined more than once.</value></data>
+  <data name="WindowUnknownName" xml:space="preserve"><value>The referenced window is not defined or is not an earlier WINDOW definition.</value></data>
+  <data name="WindowInvalidCopy" xml:space="preserve"><value>A copied window cannot specify PARTITION BY, override an existing ORDER BY, or copy a window with an explicit frame.</value></data>
+  <data name="WindowSignature" xml:space="preserve"><value>The window function has an invalid argument count or call modifier.</value></data>
+  <data name="WindowIntegerArgument" xml:space="preserve"><value>Window offsets and bucket counts require an integer argument.</value></data>
+  <data name="WindowDefaultType" xml:space="preserve"><value>The navigation value and default have incompatible types.</value></data>
+  <data name="WindowPlacement" xml:space="preserve"><value>Window functions are allowed only in SELECT output and ORDER BY.</value></data>
+  <data name="WindowNested" xml:space="preserve"><value>Window functions cannot contain other window functions.</value></data>
+  <data name="WindowRequiresOver" xml:space="preserve"><value>Window function {0} requires an OVER clause.</value></data>
+  <data name="WindowBucketCount" xml:space="preserve"><value>NTILE requires a positive bucket count (SQLSTATE 22014).</value></data>
+  <data name="WindowFrameBounds" xml:space="preserve"><value>A window frame cannot start after its ending boundary category, start with UNBOUNDED FOLLOWING, or end with UNBOUNDED PRECEDING (SQLSTATE 42P20).</value></data>
+  <data name="WindowFrameOffsetScope" xml:space="preserve"><value>A window frame offset cannot contain row variables, aggregate or window functions (SQLSTATE 42P20).</value></data>
+  <data name="WindowRangeOrdering" xml:space="preserve"><value>RANGE with offsets requires exactly one ORDER BY key.</value></data>
+  <data name="WindowGroupsOrdering" xml:space="preserve"><value>GROUPS requires an ORDER BY clause.</value></data>
+  <data name="WindowRangeKeyType" xml:space="preserve"><value>RANGE offsets require a numeric, date, time, timestamp or interval ordering key.</value></data>
+  <data name="WindowRangeOffsetType" xml:space="preserve"><value>RANGE offsets require a compatible numeric distance or an interval for a temporal key.</value></data>
+  <data name="WindowRangeBoundary" xml:space="preserve"><value>A RANGE temporal boundary is outside its representable domain.</value></data>
+  <data name="WindowRangeOffsetInvalid" xml:space="preserve"><value>A RANGE offset must be nonnegative and cannot be NaN.</value></data>
+  <data name="WindowNullTreatment" xml:space="preserve"><value>RESPECT/IGNORE NULLS requires LAG, LEAD, FIRST_VALUE, LAST_VALUE or NTH_VALUE.</value></data>
+  <data name="WindowFrameInteger" xml:space="preserve"><value>A ROWS window frame offset requires an integer (SQLSTATE 42804).</value></data>
+  <data name="WindowFrameNull" xml:space="preserve"><value>A window frame offset must not be NULL (SQLSTATE 22004).</value></data>
+  <data name="WindowFrameNegative" xml:space="preserve"><value>A window frame offset must not be negative (SQLSTATE 22013).</value></data>
+  <data name="WindowNthInteger" xml:space="preserve"><value>NTH_VALUE requires an integer frame index (SQLSTATE 42804).</value></data>
+  <data name="WindowNthPositive" xml:space="preserve"><value>NTH_VALUE requires an argument greater than zero (SQLSTATE 22016).</value></data>
+  <data name="WindowDistinctAggregate" xml:space="preserve"><value>DISTINCT inside an aggregate window is not supported.</value></data>
+  <data name="WindowRequiresAggregate" xml:space="preserve"><value>OVER requires an aggregate or window function (SQLSTATE 42809).</value></data>
+  <data name="WindowMemoryBudget" xml:space="preserve"><value>Window state exceeds the statement memory budget of {0} bytes.</value></data>
+  <data name="GroupingPlacement" xml:space="preserve">
+    <value>GROUPING is allowed only in a grouped query's SELECT, HAVING or ORDER BY, outside aggregate inputs and grouping keys.</value>
+  </data>
+  <data name="GroupingExpansionLimit" xml:space="preserve">
+    <value>Too many grouping sets present (maximum 4096).</value>
+  </data>
+  <data name="GroupingArgument" xml:space="preserve">
+    <value>Arguments to GROUPING must be grouping expressions of the associated query level.</value>
+  </data>
+  <data name="GroupingArity" xml:space="preserve">
+    <value>GROUPING requires between 1 and 31 expression arguments.</value>
+  </data>
+  <data name="StatisticsOutOfRange" xml:space="preserve">
+    <value>The statistical aggregate result is outside its numeric type range.</value>
+  </data>
   <data name="DistinctOrderingArgument" xml:space="preserve"><value>In an aggregate with DISTINCT, ORDER BY expressions must appear in the argument list.</value></data>
   <data name="StringAggregateTypeHint" xml:space="preserve"><value> Use CAST(... AS TEXT) for non-text inputs; the delimiter must be a string constant or parameter.</value></data>
   <data name="StringAggregateDelimiter" xml:space="preserve"><value>STRING_AGG/LISTAGG delimiter must be a string constant or parameter known at plan time.</value></data>
@@ -266,6 +382,11 @@
 
   <data name="IdentityIntegerRequired" xml:space="preserve"><value>An identity column requires an integer storage type.</value></data>
 
+  <data name="IdentityNotNullRequired" xml:space="preserve"><value>The column must be NOT NULL before ADD GENERATED AS IDENTITY.</value></data>
+  <data name="IdentityRequired" xml:space="preserve"><value>The column is not an identity column.</value></data>
+  <data name="SequenceIdentityDependent" xml:space="preserve"><value>Sequence '{0}.{1}' is required by identity column '{2}.{3}.{4}'.</value></data>
+  <data name="SequenceOwnershipInvalid" xml:space="preserve"><value>OWNED BY requires a column of a table in the sequence's schema; an identity sequence cannot change ownership.</value></data>
+  <data name="SequenceDefaultDependent" xml:space="preserve"><value>Sequence '{0}.{1}' is required by the default of column '{2}.{3}.{4}'.</value></data>
   <data name="IdentityCounterMalformed" xml:space="preserve"><value>Malformed or duplicate identity counter record.</value></data>
 
   <data name="IdentityCounterOrphaned" xml:space="preserve"><value>An identity counter has no owning identity column.</value></data>
@@ -560,6 +681,12 @@
   <data name="UnregisteredDomainSqlEvaluation" xml:space="preserve"><value>{0}, so the column cannot be written and the write is refused. Register the domain on the engine's builder (SqlDatabaseEngineBuilder.Types), or drop the column.</value></data>
   <data name="ExceptionDivisionByZeroSqlEvaluation" xml:space="preserve"><value>Division by zero: the right operand of '{0}' is zero.</value></data>
   <data name="NumericValueOutOfRangeSqlEvaluation" xml:space="preserve"><value>Numeric value out of range: {0}</value></data>
+  <data name="BitwiseOperandType" xml:space="preserve">
+    <value>Operator {0} requires SMALLINT, INTEGER or BIGINT operands; received {1}.</value>
+  </data>
+  <data name="BitwiseShiftCountType" xml:space="preserve">
+    <value>Operator {0} requires an INTEGER shift count (SMALLINT widens); received {1}.</value>
+  </data>
   <data name="InvalidOperandTypeSqlEvaluation" xml:space="preserve"><value>Invalid operand type: unary '{0}' requires a numeric operand, but the operand is {1}.</value></data>
   <data name="ReferenceNotAllowedSqlEvaluation" xml:space="preserve"><value>Column reference '{0}' is not allowed in {1}, which has no columns in scope. Use literals, parameters and expressions over them{2}.</value></data>
   <data name="SignatureMismatchSqlEvaluation" xml:space="preserve"><value>Function '{0}' takes {1} but was called with {2}. Accepted: {3}.</value></data>
@@ -567,8 +694,10 @@
   <data name="SqlMaterializedRowGetBytesDatabase" xml:space="preserve"><value>Field {0} is not binary.</value></data>
   <data name="MaterializedRowRequireValueDatabase" xml:space="preserve"><value>Field {0} is NULL.</value></data>
   <data name="ExecuteAlterColumnAsyncSqlPlanning" xml:space="preserve"><value>ALTER COLUMN '{0}' changes DEFAULT through a full definition; use SET/DROP DEFAULT separately, and TYPE for value conversions.</value></data>
+  <data name="UpdateActionRowUnavailable" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON UPDATE {2} reached a row version that was rolled back after the walk found it, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="EnsureSnapshotSeesCascadeRowFailure" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON DELETE {2} reached a row version that was rolled back after the walk found it, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="EnsureSnapshotSeesCascadeRowFailure2" xml:space="preserve"><value>The row record in slot {0} of page {1} of table '{2}.{3}' holds {4} bytes, fewer than its {5}-byte version-stamp header.</value></data>
+  <data name="UpdateActionSnapshotConflict" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON UPDATE {2} reached a row version written by transaction {3}, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="EnsureSnapshotSeesCascadeRowFailure3" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': ON DELETE {2} reached a row version written by transaction {3}, which this transaction's snapshot does not see (first-updater-wins). Retry the transaction.</value></data>
   <data name="ExecutorEnsureLatestVersionFailure" xml:space="preserve"><value>Write-write conflict on '{0}.{1}': the row was modified by concurrently committed transaction {2} (first-updater-wins). Retry the transaction.</value></data>
   <data name="ExecutorCoerceForColumnSqlEvaluation" xml:space="preserve"><value>value '{0}' does not fit column '{1}' of type {2}.</value></data>
@@ -873,4 +1002,13 @@
   <data name="HandshakeDatabaseMissing" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="PrincipalAuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="DiscardInTransaction" xml:space="preserve"><value>DISCARD ALL cannot execute inside a transaction.</value></data>
+  <data name="TransactionIsolationOutside" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL requires an active transaction block.</value></data>
+  <data name="TransactionIsolationSavepoint" xml:space="preserve"><value>SET TRANSACTION is not allowed inside a savepoint.</value></data>
+  <data name="TransactionIsolationLate" xml:space="preserve"><value>SET TRANSACTION ISOLATION LEVEL must precede the first data statement and cannot run in a savepoint or while a statement is running.</value></data>
+  <data name="TransactionSerializable" xml:space="preserve"><value>SERIALIZABLE isolation is not supported; use REPEATABLE READ or READ COMMITTED.</value></data>
+  <data name="GroupingSetsNesting" xml:space="preserve"><value>GROUPING SETS cannot be nested inside ROLLUP or CUBE.</value></data>
+  <data name="WindowFrameWorkLimit" xml:space="preserve"><value>Window frame recomputation exceeded the statement limit of {0} input visits.</value></data>
+  <data name="RecursiveReaderCountExceeded" xml:space="preserve"><value>The CTE '{0}' opened more readers than its execution plan counted.</value></data>
+  <data name="JsonAlternativesMismatch" xml:space="preserve"><value>CASE/COALESCE alternatives in a JSON operand require compatible types; found {0} and {1}.</value></data>
 </root>

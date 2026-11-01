@@ -384,6 +384,9 @@ internal static class SqlFunctionResolver
     /// </summary>
     private static int Cost(SqlFunction overload, ReadOnlySpan<DatabaseType> types)
     {
+        // PostgreSQL has separate exact and floating statistical overloads. Exact
+        // integers stay numeric; an untyped NULL chooses the preferred double overload.
+        if (overload is SqlStatisticsFunction statistics && types.Length == 1 && !statistics.AcceptsInput(types[0])) { return -1; }
         if (overload is SqlBuiltinScalarFunction builtin && !builtin.AcceptsTypes(types)) { return -1; }
         if (overload is SqlAbsFunction && types.Length > 0 && types[0] != DatabaseType.Null && !IsNumeric(types[0])) { return -1; }
         int cost = overload.VariadicParameter is null ? 0 : 1;

@@ -16,6 +16,7 @@ internal static partial class GraphExpressionEvaluator
     internal static object? Evaluate(GqlExpression expression, IReadOnlyDictionary<string, object?> bindings, GraphEvaluationContext context, IReadOnlyDictionary<string, object?>? parameters = null)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (bindings is GraphIteratorBinding iterator && iterator.TryGetComputed(expression, out var scoped)) { return scoped; }
         if (bindings is GraphGroupedBinding grouped)
         {
             // ORDER BY aliases shadow source variable names, including grouped entities.
@@ -42,6 +43,12 @@ internal static partial class GraphExpressionEvaluator
                 GqlIsNullExpression test => (Evaluate(test.Operand, bindings, context, parameters) is null) != test.IsNegated,
                 GqlTruthTestExpression test => (Boolean(Evaluate(test.Operand, bindings, context, parameters), test.Operand) == test.TruthValue) != test.IsNegated,
                 GqlListExpression list => list.Items.Select(item => Evaluate(item, bindings, context, parameters)).ToArray(),
+                GqlListComprehensionExpression comprehension => Comprehension(comprehension, bindings, context, parameters),
+                GqlReduceExpression reduce => Reduce(reduce, bindings, context, parameters),
+                GqlPatternComprehensionExpression pattern => CollectPattern(pattern, bindings, context, parameters),
+                GqlExistsExpression exists => Exists(exists, bindings, context, parameters),
+                GqlListPredicateExpression predicate => ListPredicate(predicate, bindings, context, parameters),
+                GqlListSliceExpression slice => Slice(slice, bindings, context, parameters),
                 GqlMapExpression map => Map(map, bindings, context, parameters),
                 GqlCaseExpression conditional => Case(conditional, bindings, context, parameters),
                 GqlCoalesceExpression coalesce => Coalesce(coalesce, bindings, context, parameters),

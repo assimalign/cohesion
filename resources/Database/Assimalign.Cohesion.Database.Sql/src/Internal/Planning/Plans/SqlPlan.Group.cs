@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlGroupPlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlGroupPlan.DebugView))]
-internal sealed record SqlGroupPlan(
+internal record SqlGroupPlan(
     SqlPlan Input,
     IReadOnlyList<SqlCatalogColumn> SourceColumns,
     IReadOnlyList<SqlRelationBinding>? Bindings,

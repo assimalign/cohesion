@@ -200,7 +200,7 @@ Each model root project owns a public engine (`{Model}DatabaseEngine`, with a st
 |---|---|---|---|
 | SQL | `SqlDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | tables/schemas/views over row-oriented slotted pages | SQL dialect (declared matrix, conformance corpus) — `Sql.Language` |
 | Documents | `DocumentDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | named collections of versioned documents (`DocumentCollection`) | OQL query and index-DDL contract — `Documents.Language` |
-| Graph | `GraphDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | property graph: nodes, typed directed relationships, traversal | standard TBD (ISO GQL is the recommended default; decision gates deep language work) — `Graph.Language` |
+| Graph | `GraphDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | property graph: nodes, typed directed relationships, traversal | ISO/IEC 39075:2024 GQL (owner decision of 2026-09-17) — `Graph.Language` |
 | Blob | `BlobDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | containers of streamed large objects (`BlobContainer`) + metadata catalog | none (API-driven) |
 | KeyValuePair | `KeyValueDatabase` (a sealed `DatabaseInstance` since the concrete-types plan, phase 4) | ordered key space, point/range ops, TTL | none for MVP (commands ride the wire protocol directly) |
 

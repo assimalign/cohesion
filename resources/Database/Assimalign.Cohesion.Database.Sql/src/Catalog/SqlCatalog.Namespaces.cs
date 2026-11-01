@@ -106,6 +106,7 @@ public sealed partial class SqlCatalog
                 if (publication is not null) { CommitScriptAbsence(publication, SqlObjectIdentity.Schema(name)); return default; }
                 throw new SqlCatalogException("CS01028", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceMissing, name));
             }
+            var sequences = _sequences.Values.Where(slot => slot.Value.Schema.Equals(name, StringComparison.OrdinalIgnoreCase)).ToArray();
             var objects = ObjectsInNamespace(name);
             var ids = objects.Select(slot => slot.Table.ObjectId).ToHashSet();
             var droppedViews = _views.Where(pair => pair.Value.Value.Schema.Equals(name, StringComparison.OrdinalIgnoreCase) || pair.Value.Value.TableDependencies.Any(ids.Contains)).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
@@ -117,7 +118,7 @@ public sealed partial class SqlCatalog
                 { if (pair.Value.Value.Dependencies.Any(droppedViews.ContainsKey)) { added |= droppedViews.TryAdd(pair.Key, pair.Value); } }
             } while (added);
             if (!cascade && droppedViews.Count != 0) { RefuseViewDependency(droppedViews.Values.First().Value); }
-            if (!cascade && objects.Length != 0)
+            if (!cascade && (objects.Length != 0 || sequences.Any(slot => !IsOrphanSequence(slot.Value))))
             {
                 throw new SqlCatalogException("CS03030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, schema.Value.Name));
             }
@@ -144,27 +145,33 @@ public sealed partial class SqlCatalog
                 var table = slot.Table;
                 pending.Add(table.ObjectId, _storage.InsertRow(transaction, table.ObjectId, SqlReclamationRecord.Encode(table.ObjectId, table.Schema, table.Name)));
                 _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex);
-                DeleteIdentityCounter(transaction, table.ObjectId);
             }
             foreach (var slot in indexes) { _storage.DeleteRow(transaction, slot.Location.PageId, slot.Location.SlotIndex); }
             var tableSlots = replacements.Select(item => new TableSlot(item.Table, UpsertRecord(transaction, item.Old.Location, item.Record))).ToArray();
             var registrationsLocation = _registrationsLocation;
             if (indexes.Length != 0) { registrationsLocation = UpsertRecord(transaction, registrationsLocation, EncodeRegistrations(registrations)); }
             foreach (var view in droppedViews.Values) { _storage.DeleteRow(transaction, view.Location.PageId, view.Location.SlotIndex); }
+            var defaults = StageSequenceDefaults(transaction, sequences.Select(slot => slot.Value).ToArray(), cascade, identities,
+                replacements.ToDictionary(item => item.Table.ObjectId, item => item.Table));
+            foreach (var sequence in sequences) { DeleteSequence(transaction, sequence); }
             _storage.DeleteRow(transaction, schema.Location.PageId, schema.Location.SlotIndex);
             CommitCatalogChange(transaction, publication: publication, actualObject: SqlObjectIdentity.Schema(schema.Value.Name));
             foreach (var key in droppedViews.Keys) { _views.Remove(key); }
+            foreach (var sequence in sequences)
+            {
+                RemoveSequence(sequence.Value);
+            }
             _namespaces.Remove(name);
             _namespaceCapture = null;
             foreach (var slot in objects)
             {
                 _tables.Remove((slot.Table.Schema, slot.Table.Name));
-                _identityCounters.Remove(slot.Table.ObjectId);
                 var location = pending[slot.Table.ObjectId];
                 _pendingReclamations.Add(slot.Table.ObjectId, new SqlReclamationIntent(location.PageId, location.SlotIndex));
             }
-            foreach (var slot in indexes) { _indexes.Remove((slot.Index.TableObjectId, slot.Index.Name)); }
+            foreach (var slot in indexes) { RemoveIndexSlot((slot.Index.TableObjectId, slot.Index.Name)); }
             foreach (var slot in tableSlots) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
+            foreach (var slot in defaults) { _tables[(slot.Table.Schema, slot.Table.Name)] = slot; }
             _registrationsLocation = registrationsLocation;
             if (indexes.Length != 0) { _registrations = registrations; }
             return default;

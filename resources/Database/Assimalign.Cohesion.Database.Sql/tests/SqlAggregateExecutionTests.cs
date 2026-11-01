@@ -15,7 +15,7 @@ using Xunit;
 namespace Assimalign.Cohesion.Database.Sql.Tests;
 
 /// <summary>Verifies grouping, aggregate values and metadata through the live SQL session pipeline.</summary>
-public sealed class SqlAggregateExecutionTests
+public sealed partial class SqlAggregateExecutionTests
 {
     private const string createMetrics =
         "CREATE TABLE metrics (id INT, category TEXT, region TEXT, amount INT, empty_amount INT);";

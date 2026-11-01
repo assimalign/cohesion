@@ -24,6 +24,9 @@ internal sealed partial class SqlPlanner
         var actions = new List<SqlMergeActionPlan>();
         foreach (var clause in merge.Actions)
         {
+            if (clause.Action == SqlMergeAction.Insert) { RecordIdentityUsage(table); }
+            if (clause.Action == SqlMergeAction.Delete) { RecordReferentialSequenceUsage(table); }
+            if (clause.Action == SqlMergeAction.Update) { RecordReferentialSequenceUsage(table, deleting: false); }
             if (!Enum.IsDefined(clause.MatchKind) || !Enum.IsDefined(clause.Action) ||
                 clause.MatchKind == SqlMergeMatchKind.NotMatchedByTarget && clause.Action is SqlMergeAction.Update or SqlMergeAction.Delete ||
                 clause.MatchKind != SqlMergeMatchKind.NotMatchedByTarget && clause.Action == SqlMergeAction.Insert) { throw Invalid(); }
@@ -71,8 +74,15 @@ internal sealed partial class SqlPlanner
             {
                 for (int i = 0; i < insertValues.Count; i++)
                 {
-                    ValidateIdentity(ordinals[i], insertValues[i], update: false);
-                    values.Add(BindValue(ordinals[i], insertValues[i], scope));
+                    if (clause.Overriding == SqlIdentityOverride.None) { ValidateIdentity(ordinals[i], insertValues[i], update: false); }
+                    bool ignored = clause.Overriding == SqlIdentityOverride.User && table.Columns[ordinals[i]].Identity is not null && insertValues[i] is not SqlDefaultExpression;
+                    var value = BindValue(ordinals[i], insertValues[i], scope, ignored);
+                    if (ignored)
+                    {
+                        ValidateIgnoredIdentityInput(table.Columns[ordinals[i]], scope.StaticTypeOf(insertValues[i]), value, insertValues[i]);
+                        value = SqlBoundDefaultItem.Instance;
+                    }
+                    values.Add(value);
                 }
             }
             actions.Add(new(clause.MatchKind, clause.Action, condition, assignments, ordinals, values, clause.IsDefaultValues, actionQueries));
@@ -126,7 +136,7 @@ internal sealed partial class SqlPlanner
             Tree = kind == SqlJoinType.RightOuter ? new(-1, root.Right, root.Left, step) : root with { Step = step },
         };
         var input = source with { Associations = PushJoinPredicates(associations) };
-        return WrapSubqueries(new SqlMergePlan(table, input, actions, BindMergeReturning(merge, input), columns.Length), queries);
+        return WrapSubqueries(new SqlMergePlan(table, input, actions, on, BindMergeReturning(merge, input), columns.Length), queries);
 
         static SqlCatalogColumn NullableColumn(SqlCatalogColumn column) => column.IsNullable ? column
             : new SqlCatalogColumn(column.Name, column.Type, true, column.DefaultLiteral,
@@ -134,19 +144,20 @@ internal sealed partial class SqlPlanner
 
         void ValidateIdentity(int ordinal, SqlExpression expression, bool update)
         {
-            if (table.Columns[ordinal].Identity is { IsAlways: true } && (update || expression is not SqlDefaultExpression))
+            if (table.Columns[ordinal].Identity is { IsAlways: true } && expression is not SqlDefaultExpression)
             { throw SqlPlanningException.IdentityViolation(table.Columns[ordinal].Name, update ? ErrorMessages.IdentityUpdateForbidden : ErrorMessages.IdentityInsertForbidden); }
         }
 
-        SqlBoundExpression BindValue(int ordinal, SqlExpression expression, SqlExpressionEvaluator scope)
+        SqlBoundExpression BindValue(int ordinal, SqlExpression expression, SqlExpressionEvaluator scope, bool ignored = false)
         {
-            if (expression is SqlDefaultExpression) { return SqlBoundDefaultItem.Instance; }
+            if (expression is SqlDefaultExpression)
+            { RecordColumnSequenceUsage(table, table.Columns[ordinal]); return SqlBoundDefaultItem.Instance; }
             ValidateMergeValue(expression, scope);
             var type = scope.StaticTypeOf(expression);
             var target = table.Columns[ordinal];
             if (!CanAssignInsertType(type, target.Type.Type))
             { throw new SqlPlanningException("CS02003", string.Format(CultureInfo.CurrentCulture, ErrorMessages.MergeAssignmentType, type, target.Name, target.Type.Type), expression.Location); }
-            return scope.Bind(expression);
+            return ignored ? scope.BindIgnoredIdentityInput(expression) : scope.Bind(expression);
         }
 
         SqlPlanningException Invalid() => new("CS05013", ErrorMessages.MergeActionInvalid, merge.Location);
@@ -159,9 +170,9 @@ internal sealed partial class SqlPlanner
     {
         var state = _queryScopes!;
         bool deferred = state.DeferQueryEvaluation;
-        var scopeless = _scopelessEvaluator;
+        var scopeless = CachedScopelessEvaluator;
         state.DeferQueryEvaluation = true;
-        _scopelessEvaluator = null;
+        CachedScopelessEvaluator = null;
         try
         {
             return BindSubqueries(expressions.SelectMany(WalkSubqueries), dml: target,
@@ -170,7 +181,7 @@ internal sealed partial class SqlPlanner
         finally
         {
             state.DeferQueryEvaluation = deferred;
-            _scopelessEvaluator = scopeless;
+            CachedScopelessEvaluator = scopeless;
         }
     }
 

@@ -19,7 +19,7 @@ internal sealed partial class SqlPlanExecutor
     internal static Action? UniqueIndexEntryValidated { get; set; }
 
     private async Task BuildDeferredIndexAsync(SqlCatalogTable table, IndexDefinition definition,
-        int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken)
+        int[] ordinals, SqlStatementContext statement, Action created, CancellationToken cancellationToken, SqlCatalogIndex? metadata = null)
     {
         // Counting is worker work too. Build only checks owner allocation metadata.
         long total = 0;
@@ -27,7 +27,7 @@ internal sealed partial class SqlPlanExecutor
         {
             total++;
         }
-        statement.ProvisioningProgress!(0, total);
+        statement.ProvisioningProgress?.Invoke(0, total);
         var index = await statement.Coordinator.ApplyStatementAsync(statement.Transaction,
             async bracket =>
             {
@@ -43,26 +43,27 @@ internal sealed partial class SqlPlanExecutor
         // from committing. The table lock and snapshot pin outlive every bracket.
         foreach (var batch in ScanVersions(table, cancellationToken).Chunk(64))
         {
+            var included = metadata?.Predicate is null ? batch : batch.Where(version => MatchesIndex(table, metadata, version.Values, cancellationToken: cancellationToken, record: false)).ToArray();
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
-                foreach (var version in batch)
+                foreach (var version in included)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var key = BuildIndexKey(table, ordinals, version.Values);
+                    var key = BuildIndexKey(table, ordinals, version.Values, metadata?.KeyOrders);
                     await index.InsertVersionAsync(bracket, key, SqlRecordLocation.Pack(version.Location.PageId, version.Location.SlotIndex),
                         version.Writer, version.Deleter, cancellationToken).ConfigureAwait(false);
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
             processed += batch.Length;
-            statement.ProvisioningProgress(processed, Math.Max(processed, total));
+            statement.ProvisioningProgress?.Invoke(processed, Math.Max(processed, total));
         }
-        await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken).ConfigureAwait(false);
-        statement.ProvisioningProgress(processed, processed);
+        await ValidateBuiltUniqueIndexAsync(table, index, statement, cancellationToken, metadata?.Predicate is null ? null : ordinals, metadata?.Predicate is not null).ConfigureAwait(false);
+        statement.ProvisioningProgress?.Invoke(processed, processed);
     }
 
     private async ValueTask ValidateBuiltUniqueIndexAsync(SqlCatalogTable table, BTreeIndex index,
-        SqlStatementContext statement, CancellationToken cancellationToken, int[]? valueOrdinals = null)
+        SqlStatementContext statement, CancellationToken cancellationToken, int[]? valueOrdinals = null, bool nullsDistinct = false)
     {
         if (!index.IsUnique) { return; }
 
@@ -90,6 +91,7 @@ internal sealed partial class SqlPlanExecutor
                     {
                         var values = DecodeRow(record, pageId, slotIndex, table,
                             _definitions.Get(table, cancellationToken).MissingValues, out _, out _);
+                        if (nullsDistinct && valueOrdinals.Any(ordinal => values[ordinal] is null)) { continue; }
                         value = SafeValue(valueOrdinals.Select(ordinal => values[ordinal]).ToArray());
                     }
                 }

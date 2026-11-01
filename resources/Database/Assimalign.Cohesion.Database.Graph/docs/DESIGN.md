@@ -1,5 +1,221 @@
 # Graph engine design
 
+## Unknown entity properties (#1249, #1738, GQ-D3)
+
+Read-only planning reports structured warning CG01023 for a statically named property unknown
+across stored entity discoveries and label and relationship-type metadata. MATCH property-map keys and entity field accesses
+in predicates, projections, ordering, lexical collections and correlated subplans share the
+statement's token resolver. Composite operands and NEXT segments share it too: one warning per
+ordinal property name, using the first validated occurrence's expression span when present. Pattern keys have no AST span.
+Known names on another owner, map fields and dynamic subscripts do not warn. Every property-access
+AST form resolves ORDER BY aliases before classifying its receiver. Writing statements skip property
+analysis, including correlated EXISTS and pattern comprehensions. Results, explicit transactions and ordinary execution are preserved;
+EXPLAIN performs the same admission and reports the same warnings without execution.
+
+The catalog maintains a property-name directory alongside its existing version directory, loaded
+from existing v2 records and updated on publication and undo. Resolution checks snapshot-visible
+writer stamps in memory, without decoding catalog records or scanning labels, types or entities.
+Entity records currently embed string keys; there is no separate property-token identity to consult.
+Unlabeled writes and undeclared keys on schema-owned definitions therefore save untyped kind-3
+discovery records with private identities, using the same publication, visibility and undo path.
+They do not attach metadata to a definition or change its declared rules. Removal of a value retains
+its discovery across reopen. The existing record codec and format fence remain unchanged.
+Resolution and warning admission share one cached result per ordinal name across the statement.
+Known-only caches are borrowed during planning and returned on success or failure; diagnostic lists
+remain owned by their results. Only misses allocate diagnostic state and formatted messages.
+Resolver and ordinary planner object sizes stay fixed. Isolated Release scalar/aggregate dispatch remains
+17,130.368 / 58,094.944 B/query, matching the base; read-path allocation guards remain in force.
+The typed DatabaseResult.Diagnostics carrier and negotiated wire Diagnostics messages already
+carry warnings; no public API, assembly reference, disk format or wire change is required.
+
+This follows the readOnly and entity-kind checks in the local Neo4j reference
+`C:/Source/repos/neo4j/neo4j/community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/planner/CheckForUnresolvedTokens.scala:53-59,78-85`.
+GqlUnknownPropertyWarningTests, the profile execution corpus and GraphWireDiagnosticTests cover
+in-process, typed AST, InMemory and TCP behavior, including continued authenticated-session use.
+
+| Code | Severity | Condition |
+| --- | --- | --- |
+| CG01023 | Warning | Statically named entity property is unknown database-wide in a read-only statement |
+
+## Named savepoint integration (#1726, XT-4)
+
+The GQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+[SAVEPOINT] name through protected root controls before opening autocommit work. Names and
+duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
+the existing model adapters. The enclosing transaction stays open and can commit after undo.
+Ordinary failed statements and invalid named controls preserve this model's full-abort rule.
+Only whole ROLLBACK recovers those failures; ROLLBACK TO preserves CG04007. This is the recorded
+2026-10-25 owner decision, differing from PostgreSQL's aborted-subtransaction recovery.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+Named controls dispatch before async frame creation; their translation locals never grow ordinary control frames. Every named control uses the ordinary statement failure translator before reporting CK04009 for an incomplete kernel undo. The translated failure is retained as its cause. Offline, disposed and corruption failures take precedence; corruption aborts the writer (#1364). The server handles a recoverable failure as a statement error followed by Ready E, so retry or whole rollback uses the same connection.
+
+A direct transaction refusal or commit probes disposal/offline state outside root state before
+reporting a live partial-undo fence. Memory-only create/release allocation faults retain the
+model's ordinary statement policy.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+
+The central advertised-clause execution matrix also proves each savepoint AST command and
+its row visibility/effects through a live session; the unmapped-clause guard remains intact.
+
+## Anonymous savepoint adapters (#1726, XT-3)
+
+Catalog undo removes the exact undone metadata reference, including definition,
+child-name and schema-name directory routes. GraphStore journals before-images of the affected
+entity chain, definition membership, label/type tokens and advisory counts only for marked
+writers. Restore is idempotent across failed undo brackets and whole-transaction abort, and
+never materializes the full graph. IndexUndo equality/hash use the immutable store identity and
+physical index generation. Shared record/index undo restores postings and constraints with
+these directories before marker-scoped locks are released.
+Marked entity/definition publication and its directory before-image are recorded inside the
+admitted apply, before the physical bracket commits. A host rollback claiming the end after apply
+therefore sees the complete ordered ledger; no late marked directory entry can outlive or reorder
+that undo. Unmarked writers publish only after successful bracket commit, so a refused commit
+cannot leave label/type tokens, counts or entity references for rolled-back pages. Scope registration
+publishes immutable dictionary snapshots under the existing catalog monitor; the existing writer
+lookup moves to the publication decision without adding a lock or lookup to unmarked writes.
+Only marker registration/release copies these snapshots; the last release restores null.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit. A deterministic after-apply hook races a claimed host rollback;
+pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
+
+## Database-wide schema names and named constraints (#1738, GQ-D1)
+
+Index and constraint names share one database-wide, ordinal case-sensitive namespace. A name
+lookup uses a version-aware name directory; it never scans every label. The database writer
+lock serializes reservations through commit or rollback. A stale Snapshot writer reports the
+existing CG04007 conflict; a current duplicate reports CG03008. Label/type names retain their
+separate namespaces. Equivalent type or existence constraints on one property refuse with
+CG03009, as do incompatible named and unnamed type rules. This follows Neo4j's global name
+checks and equivalent-rule refusal in
+`C:/Source/repos/neo4j/neo4j/community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/Operations.java:2318-2349`.
+
+A named rule over an identical unnamed property declaration is accepted: the declarations are
+independent, and dropping the named constraint leaves the unnamed rule in force. Property-metadata
+saves check compatibility with named rules before scanning existing data, so an incompatible type
+reports structured CG03009 whether the owner is empty or populated.
+
+GraphConstraintMetadata persists the owner GUID, name, property key and optional type. A null
+type denotes existence (a non-null property is required); a type rule permits absent/null values.
+CreateConstraintAsync streams the owner's label or relationship-type postings, including self-loops,
+under the writer lock and latest visibility, refusing violations with CG03010. It never materializes
+the graph or the owner's entities and stops at the first violation; an empty type visits no nodes.
+Validation on CREATE/INSERT, SET, REMOVE and MERGE uses the same effective property metadata as unnamed rules.
+DELETE can remove constrained entities. Property validation now carries CG03003 in structured
+diagnostics with unprefixed message text; catalog caller-error translation preserves its actual
+code. The wire continues composing codes at its existing boundary. Dropping one named constraint preserves other constraints
+and persisted property metadata. Creating a constraint also discovers an untyped property key
+when none was declared, so dropping the last constraint retains the known key without its rule.
+A failed creation rolls back both the new key and constraint. Ownership always follows the parent and prevents child mutation on schema-owned
+definitions. Typed GetConstraintsAsync/FindConstraintAsync expose names; GetIndexesAsync and
+FindIndexAsync offer database-wide lookup. DropIndexAsync coordinates the physical and catalog
+tombstones. Dropping an absent named object reports CG01021.
+
+SHOW PROPERTY KEYS reports effective type/required rules. SHOW OBJECT OWNERSHIP includes each
+named CONSTRAINT with its owning definition and inherited authority; existing columns stay fixed.
+SHOW INDEXES retains its label-then-name ordering. D2 adds SHOW CONSTRAINTS, text DDL and
+the explicit-transaction policy described below. D3 supplies property warnings.
+
+GetPropertyKeysAsync returns declared metadata only; effective rules remain visible through SHOW
+PROPERTY KEYS and the constraint APIs. Reading and saving property metadata therefore cannot copy
+a named rule into an unnamed declaration. CreateConstraintAsync validates names, property keys,
+owner identities and supported types before statement admission, leaving an explicit transaction
+usable after a bad argument. D2 applies this order to the remaining schema mutations. Oversized encoded constraint metadata reports DatabaseException with CG02009.
+
+The catalog record codec is v2 for every kind (1 label, 2 relationship type, 3 property, 4 index,
+5 constraint). Its prefix remains writer/deleter u64 stamps, kind byte, version byte, GUID and
+length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
+by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
+versions refuse with CG06019 before logical recovery scrub; no legacy reader or upgrade exists.
+The refusal happens before any logical write; physical redo of the journal runs first until
+[Storage #1744](https://github.com/assimalign/cohesion/issues/1744) is fixed. CG06019 names the database,
+including for uncheckpointed v1 images.
+
+The graph entity/tree format remains 5. Internal record variants reuse the existing payload
+slots, and constraint-free property reads skip constraint-list allocation. This keeps ordinary
+CREATE/SET/DELETE within the unchanged allocation guards. The NativeAOT guard checks named creation, discovery,
+enforcement and independent drops. Catalog SaveIndexAsync retains same-record upsert semantics;
+typed CreateIndexAsync refuses every existing schema name. Crash images cover committed and abandoned constraint
+creation/drop, independent identities and named-index drop. An empty catalog has no versioned
+records to refuse. No wire bytes, public interface or assembly boundary changes are needed.
+
+| Code | Condition |
+| --- | --- |
+| CG01021 | Named index or constraint to drop is absent |
+| CG01022 | Schema property references another FOR variable |
+| CG03008 | Shared database-wide schema name is taken |
+| CG03009 | Duplicate constraint kind or incompatible property type rules |
+| CG03010 | Existing data violates a new named constraint |
+| CG04025 | Schema DDL inside an explicit transaction (Cohesion policy) |
+| CG06019 | Unsupported catalog record format; only v2 is admitted |
+
+## Schema text coordination (#1738, GQ-D2; #1249)
+
+GqlSchemaCommand is a standalone semantic AST. The parser bypasses the graph-query capability
+scan for recognized DDL, so ON never becomes an unknown function. GraphDatabaseSession routes
+valid row requests to GraphSchema; invalid hand-built combinations and path requests use the
+existing CG05001 admission refusal. Schema commands normalize parameter-map keys through the
+same contract as SHOW, although the grammar takes no parameter operands. Ordinary queries
+retain the existing planner/executor path and operation layout.
+
+GraphSchema shares private index/constraint cores between typed and text callers. WriteAsync
+admits one statement, refuses an explicit transaction with CG04025 before taking the writer
+lock, then serializes the complete auto-commit schema transaction. This is a behavior change:
+typed schema writes previously joined explicit transactions. The normal failed-statement path
+aborts such a transaction and preserves CG04025 in Diagnostics. SaveLabelAsync, relationship-type
+saves, property saves, index creates and named drops validate arguments before admission.
+Property saves and definition drops stream owner postings; empty owners decode no unrelated
+nodes, and validation/drop refusals stop at their first violating entity. Index backfill also
+uses the owning label's postings. Deterministic storage visit counters pin these bounds.
+
+Index creation saves a missing label and untyped property metadata in the operation that owns
+the logical and physical index. Text constraint creation similarly saves its missing owner
+before calling the shared independently named constraint core. A catalog conflict, oversized
+record/key, cancellation or failed validation rolls all discovery back. Successful rule drops
+retain discovered tokens. Conditional name/equivalence checks run after writer-snapshot refresh,
+before discovery, including requests queued behind committing or rolling-back reservations.
+Catalog-level staging tests preserve the lower layer's stale-snapshot and lock-handoff coverage;
+public-schema tests now assert the explicit-transaction refusal.
+
+Every admitted schema write starts and validates its statement budget inside the operation,
+after the explicit-transaction refusal and before writer-lock acquisition. Text requests use
+their lower GraphQueryLimits; typed writes use engine ceilings. Validation and definition-drop
+scans charge the same owner-posting work and cursor-memory callbacks as ordinary statements.
+Index backfill reserves growing entry-buffer capacity and owned keys before retaining them,
+stores only source references and keys, and charges both scans and tree insertions. An internal
+callback overload preserves the public storage boundary. All memory grants unwind with the
+schema operation; CG05004/CG05020 exhaustion rolls back rules, name reservations, physical
+index writes and discovered tokens through the normal failed-statement path. Invalid limits
+retain CG08021. No diagnostic identity or persisted format changes.
+
+Defaults (including generated-name hashing, scalar aliases, conditional matching, affected counts,
+definition syntax and SHOW CONSTRAINTS ordering) are specified in Graph.Language DIALECT.
+Generated identifiers depend only on semantic names/types and have no runtime hash randomization.
+No persisted format, wire capability, EventSource or public interface changes are required.
+
+Local Neo4j references, consulted without copying code:
+`community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:1205-1232`
+defines optional names, conditionals and single-owner schema patterns;
+`community/kernel/src/main/java/org/neo4j/kernel/impl/coreapi/schema/SchemaImpl.java:610-630,907-925`
+creates label/type/property tokens through the same transaction as the rule;
+`community/kernel/src/main/java/org/neo4j/kernel/impl/api/KernelTransactionImplementation.java:2093-2123`
+forbids data/schema write-state mixing, a narrower policy than Cohesion's explicit-transaction refusal.
+The deterministic naming algorithm is Cohesion's own; it follows the reference's optional-name
+behavior without claiming byte-identical Neo4j names.
+
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
@@ -406,13 +622,230 @@ The Database solution includes `Graph.RecoveryFixture` so solution builds keep t
 the selected configuration. The Graph test build copies that configuration's outputs beside the
 test assembly, allowing `dotnet test --no-build` after a Debug or Release solution build.
 
+### Whole-pattern MERGE execution (#1735, GQ-M2)
+
+The planner treats GqlMergeStage as a writing stage and validates both SET bodies through the same
+local validation as ordinary SET. It admits one creation-compatible fixed path and binds all path
+variables before checking branch items. Equalities see only the incoming scope and are evaluated
+once per input row; known null/invalid equalities also fail EXPLAIN (CG03004). Dynamic invalid
+values fail before the seam or creation. A bound null/missing/incompatible entity uses CG03005.
+The language DIALECT records repeated branch ordering, undirected orientation and bare repeated
+node variables. Already-declared relationship variables refuse during planning (CG03007); labels
+or properties on a repeated or incoming node refuse there too (CG03006), including EXPLAIN.
+No new public execution boundary or interface is added.
+
+| Code | MERGE condition |
+| --- | --- |
+| CG03004 | Null, non-finite or non-scalar equality, proven at planning or evaluated per row |
+| CG03005 | Null or absent bound node, or incompatible bound identity |
+| CG03006 | Repeated or already-bound node decorated with labels or properties |
+| CG03007 | Relationship variable declared before MERGE |
+| CK04002 | Statement or session ended while the database is live, including writer, parent and pattern lock queues and late grants |
+
+The executor gives every anonymous element a collision-free internal binding, constructs a fully
+evaluated path and lock identity, then delegates both probes to GraphMergeConcurrency. Each probe
+uses the supplied read view through GraphUpdates, includes overlays, and enumerates every complete
+match. Its freshness read set includes all matched elements and bound node identities, even
+when the remaining path has no match. Each probe re-reads incoming node and relationship values
+at its supplied view, including overlays, so ON MATCH expressions and replacement construction
+cannot republish stale incoming properties after a ReadCommitted pattern wait. That refreshed
+view also supplies incoming aliases outside the pattern to ON CREATE. Each incoming entity
+refresh checks cancellation and consumes one work unit. Work and both probe result tables are
+charged to the statement budget and released per input row. Output copies leave probe tables
+immutable while branch SET updates and binding cleanup run. Creation reuses bound nodes;
+later bare occurrences reuse the first node slot without merging labels or property maps.
+Both branches use ApplyAsync. After all input rows, RefreshMergeBindings refreshes the complete
+output table through SET's recursive alias refresh. Ordinary creation validates schema before entering the overlay;
+MERGE creation discovers definitions and checks supplied property types then, defers Required
+checks until ON CREATE has finished, and validates every created entity before the row leaves
+that branch. An entity still missing a Required property refuses with the existing CG03003.
+ApplyAsync validates complete changed entities after each SET branch. The one-time PublishAsync
+owns storage publication and affected counts; it does not own schema validation.
+
+The planner chooses an indexed label/property for row-dependent MERGE equalities and retains
+the expression as its value placeholder. The executor substitutes the already-evaluated row value
+before both probes, so an UNWIND upsert performs a seek per row and view. Row-dependent
+seeks rank ahead of every label or relationship-type scan, including zero published counts,
+because those estimates exclude the growing statement overlay. EXPLAIN renders the placeholder
+as GQL expression text. Property seeks maintain a lazy value-keyed view of current
+overlay postings for each label/property, updated on creation, replacement, relabeling and deletion.
+Exact graph scalar equality supplies the keys, including numeric equality across CLR tags.
+Building a view charges each earlier overlay entry once; each probe charges its value lookup and
+matching entries, and each subsequent change charges index maintenance. Persisted candidates
+whose identities are in the overlay are already suppressed; original-value removal postings
+would duplicate that check and are not retained. Overlay label scans visit only the selected
+label's postings; unions deduplicate those postings, and only NodeScan visits every overlay node.
+Every visited candidate is charged, including property-residual rejections. This follows Neo4j's
+label-specific transaction diff set in
+`community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/DefaultNodeLabelIndexCursor.java:58-68`
+(local clone, behavior consulted; no code copied). Retained change buckets and entries use
+the existing statement memory lease. The MERGE read-view override lives in MERGE's lazy state,
+so this cache adds no object size or eager allocation to ordinary writes. This follows Neo4j's
+value lookup of transaction-state index additions at
+`community/kernel/src/main/java/org/neo4j/kernel/impl/newapi/TxStateIndexChanges.java:333-345`
+(local clone, behavior consulted; no code copied). Latest probes retain
+the dropped-index fallback to a label scan. Ordinary MATCH anchor selection is unchanged.
+EXPLAIN describes the probe and both branches; InMemory/TCP conformance and NativeAOT exercise the
+same stage. Ordinary CREATE/SET/DELETE/MATCH retain their existing paths and lock resources. Release fixtures
+retain their base allocation ceilings: the MERGE count box is allocated only in its branch, and
+flow cleanup reuses RunAsync's existing finally without growing ordinary operations.
+The fix-pass Release fixtures retain the pre-fix MATCH planning/execution minima and enforce
+the measured ordinary CREATE, SET and DELETE allocation ceilings; MERGE-only checks avoid
+captured delegates that would grow every plan's closure.
+Ordinary-write measurements run their own warm-up in a fresh fixture process with fixed catalog
+label identities, keeping the posting layout and runner state reproducible. Their ceilings use
+that fixture's current-head minima plus 128 bytes, excluding the 4096-byte difference previously
+observed in combined runs; that difference is not attributed to snapshot bookkeeping. Injection
+tests require the guards to reject an additional 1 KiB on CREATE and DELETE, and a 129-byte payload on SET and DELETE. Successful assertions stay
+outside measured loops; unexpected outcomes still fail immediately. Existing MATCH ceilings
+and runtime compilation settings are unchanged.
+
+### Internal MERGE serialization contract (#1735, GQ-M1)
+
+`GraphMergeConcurrency.MatchAsync` executes every GQL MERGE decision (#1735, GQ-M2).
+Call it inside the existing operation failure bracket, before choosing match or create. Supply
+`GraphMergePatternIdentity` after binding: node binding slots with bound IDs, ordinal labels and
+evaluated property equalities, and fixed relationships with endpoint slots, type, orientation,
+optional bound ID and equalities. Repeated variables reuse a node slot; variable names are absent.
+Incoming edges swap endpoint slots. Node slots are canonical content tokens: sorting the node
+and relationship multisets makes incoming/outgoing spellings, reordered node-only parts,
+label/property order, duplicate labels, relationship-part order and undirected endpoint order
+independent of source positions. Equal node tokens can conservatively collapse different
+topologies, just as any lock-hash collision can over-serialize. Equal numeric values share the
+existing exact-fraction hash. Null, non-finite and composite equalities, zero bound IDs, empty
+patterns and invalid endpoint slots are refused with structured CG05023. This validates the
+internal identity only; the executor validates language equalities first with CG03004.
+
+The seam takes the existing exclusive database writer lock, then an exclusive logical pattern
+entry in Graph's reserved `ObjectId = ulong.MaxValue - 3` lock namespace.
+`GraphLockNamespaces` defines it once beside adjacency, label and relationship-type posting
+namespaces (`ulong.MaxValue - 2 .. ulong.MaxValue`). All four exceed the signed sequence
+allocator's range, so no allocated catalog/property-index object can collide. The entry is a process-local
+32-bit equality hash; collisions only over-serialize. An absent pattern is still a resource.
+No registry, public API, Transactions change or storage format is needed. These locks belong to
+the transaction and remain held through commit/rollback, including an empty or matched return.
+The writer lock is mandatory: differently expressed overlapping patterns, and ordinary writes,
+must also serialize with this decision. Ordinary CREATE/SET/DELETE acquire no additional lock and
+pay no new check. The source comment establishes lock/latch order; probes take only read latches
+and must neither mutate nor acquire locks. Normal operation abort and coordinator undo release
+ownership on exception/cancellation/disposal; an ended owner's late grant is explicitly released.
+
+The caller supplies a read-only whole-pattern probe over the supplied `TransactionSnapshot`,
+including its statement overlays and every match's persisted node/relationship read set. The
+seam owns an internal GraphUpdates read-view override around the latest probe, restored in
+`finally` on success, failure, cancellation or disposal. Every overlay-aware lookup, anchor,
+type selection and incident stream uses that view; type-selection caches are invalidated at
+each view transition and ReadCommitted writer refresh, including cached absence. A latest-view probe
+whose planned property index was dropped falls back to a label scan under the same locks. The probe returns complete matches, reports
+every persisted entity read, and charges ordinary query work and retained memory to its budget.
+At Snapshot, the seam probes the original view, compares every matched and bound entity's writer
+and revision against the latest committed view, and probes that latest pattern view before
+returning the original decision. A changed/deleted entity, fewer latest matches than decided
+matches, or a create decision with a new matching pattern raises retryable
+`DatabaseTransactionAbortedException` with structured CG04024. This
+detects replacements even if values are restored, and checks bound endpoints even with no whole
+match. Each entity revision comparison checks cancellation and consumes one physical-work unit
+from the operation's query budget. Caller-owned uncommitted versions appear in both views;
+overlay-only identities are absent
+from both store views. Unrelated commits and additional matches beside unchanged existing matches
+do not invalidate the original match decision. The match-count cross-check also catches an
+incomplete entity read set when a decided match disappears. At ReadCommitted the seam refreshes
+the statement view after the pattern grant and probes once, so a competing creator matches and
+a concurrent property/label update or deletion re-matches to absence. Its existing snapshot pin
+continues protecting that newer view.
+
+MERGE allocates its statement caches lazily. While the transaction-long database writer is
+held, it captures one latest-state view and one ReadCommitted writer view per statement; a
+pattern wait invalidates them and refreshes after its grant. Reentrant mutation writer requests
+reuse the captured view. The evaluated-pattern overload caches the most recent identity by
+reference to an immutable evaluation key, including every bound id and equality. An evaluation
+whose inputs change must use a fresh key. This one-entry cache retains no factory closure and
+cannot grow with distinct input rows; the executor accounts evaluated operands and both complete probe results.
+
+GraphMergeLocks is lazy and transaction-owned, including across statements. For marked writers,
+tracker parent/entry/escalation before-images join the existing ordered undo ledger through
+memory-only admission without durable writer enrollment. Root ends drain those changes before removing the ledger,
+so a late tracker publication cannot orphan undo after rollback. A matching MERGE that writes no
+data appends no journal record, waits for no durability and opens no undo bracket, even when an
+fsync failure is armed. No tracker monitor spans
+admission, an apply-gate wait or a lock request. ROLLBACK TO restores the pre-marker tracker and
+its retained memory charge before releasing scoped grants; RELEASE transfers those effects to
+the enclosing scope. Repeated undo and later MERGE therefore reacquire released grants without
+a spurious CG05020. This follows PostgreSQL lock owner removal/reassignment
+(src/backend/storage/lmgr/lock.c:2633-2723,2727-2805). A new parent/entry
+charges 640 bytes to the acquiring operation's existing query-memory budget (CG05020 on refusal),
+covering manager state and local bookkeeping. Each MERGE statement also accounts for all retained
+pattern state from earlier statements; 256 additional bytes cover its statement cache. All query
+leases end with the statement, so the tracker never retains a completed query's budget or value
+workspaces. A smaller later query budget refuses even a previously held pattern if the retained
+state exceeds that limit, aborting the explicit transaction. Each pattern first takes parent
+IntentExclusive. After 128 distinct entry resources, new patterns use a single Exclusive object
+lock in the same namespace. The earlier, at most 128 entry grants remain held until their owning scope is undone or
+normal coordinator release; escalation never grows that set. This caps both retained lock state
+and the manager's end walk without a new kernel release API or an unsafe early release. The
+parent protocol preserves phantom serialization. While the writer lock remains, production never
+waits on a pattern lock: raw test holders exercise those waits and escalation. If writer serialization
+were weakened, competing IntentExclusive-to-Exclusive upgrades would surface as detected retryable
+deadlocks. The database writer remains mandatory for
+overlapping patterns and ordinary writes. Normal writes allocate no MERGE tracker or cache.
+End cleanup fences tracker charges before releasing the statement lease on the same budget;
+late autocommit grant cleanup cannot race that release. FinishAsync atomically publishes an ended
+sentinel and disposes only locks, with operation release in finally. RunAsync releases the statement
+memory lease on its flow after execution has stopped, even if teardown already ended the operation.
+Late Merge access returns CK04002; a closing session also ends the statement before rollback
+and pin release publish that sentinel. A disposed pattern tracker reports the same code when
+teardown wins after the seam re-reads its state. Failed writer, parent and pattern queue waits
+also use CK04002 when the session ends while the database is live. Database disposal takes
+precedence and retains CG09019, including engine shutdown during UNWIND MERGE and a disposed
+read inside a probe. Every failure releases late lock ownership before reporting its code.
+The seam rechecks the sentinel before touching its cached tracker
+and after a late grant. A losing CompareExchange releases its unpublished lease. End-between-grants tests assert budget
+and lease release for both explicit transactions and autocommit operations.
+
+Non-parallel tests exercise real transactions for creators, ordinary deleters/replacements,
+directed/undirected relationship overlap, all matched entities, bound endpoints, overlays,
+unrelated commits and every return/failure/disposal path. Threaded stress runs for at least
+250 ms, then until at least two recorded queued creator races of each isolation have completed,
+under a 30-second cancellation ceiling; counters and lock-release checks decide success.
+GQ-M2 also races teardown against active memory charges until at least two rounds and 200
+post-teardown charges have completed after a 250 ms minimum, under the same 30-second ceiling.
+Indexed-anchor and type-cache regressions cover the latest-view fallback and writer refresh.
+Each creator-stress iteration disposes its database before the next begins. Actors publish their queued
+progress before assertions, so a failed assertion reaches the caller instead of hiding behind
+the progress wait's hang guard. The pending state is captured before publication: the signal
+may let the main actor commit before the assertion executes. Deterministic inline-completion
+and already-completed-task tests cover both orderings.
+
+The strict unselected-MATCH allocation fixture runs in the same non-parallel collection.
+Concurrent suite activity perturbs its small retained fixture ceiling; isolated baseline and
+current implementations allocate identically. All existing allocation ceilings remain enforced.
+Optional internal, instance-free test gates after writer acquisition and after pattern bookkeeping
+deterministically end the session or cancel before the manager request, proving actual late-grant
+cleanup and CK04002. Creator tests record the loser's pinned view before allowing the winner to
+commit. The seam's wait hook records an incomplete grant before releasing a raw pattern holder.
+Tests also force a
+pattern-only wait and check failure release before the caller rolls back its faulted transaction.
+
+Behavior consulted, no code copied: Neo4j
+`community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/MergePipe.scala:32-45,79-102`
+branches on a whole input match and its locking variant locks then re-reads. Neo4j's
+`community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticPatternCheck.scala:467-488`
+permits undirected MERGE and rejects variable-length update relationships. The fixed-Snapshot
+retry requirement above is the stronger owner-approved contract (2026-10-25).
+Redeclaration checks follow `SemanticPatternCheck.scala:670` and
+`community/cypher/cypher-planner/src/main/scala/org/neo4j/cypher/internal/compiler/ast/convert/plannerQuery/ClauseConverters.scala:519,885`.
+Repeated actions follow that converter at `:816-822` and
+`community/cypher/front-end/parser/v5/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v5/Cypher5Parser.g4:188`.
+Required-property deferral follows Neo4j's validation before commit
+(`community/kernel/src/main/java/org/neo4j/kernel/impl/api/KernelTransactionImplementation.java:1383,1830`);
+Graph validates the finished ON CREATE row before publication.
+
 ### Failed statements in explicit transactions (#1188)
 
-A statement that fails inside an explicit transaction aborts the whole transaction. Graph storage
-cannot undo one statement: a statement writes catalog definitions, records and index entries
-through separate physical brackets, and `Database.Transactions` undoes a writer only as a whole
-transaction, with no savepoints. The SQL session's contract, where the failed statement writes
-nothing and the transaction stays active, is therefore unavailable, and the session follows Neo4j:
+A statement that fails inside an explicit transaction aborts the whole transaction. Graph writes
+can span separate physical brackets. The owner retained this full-abort rule with named savepoints
+(#1726, 2026-10-25): ROLLBACK TO does not recover ordinary failed statements. The session
+continues to follow the existing Neo4j-style failure contract:
 
 1. The failure rolls the transaction's work back at once and releases its locks, so the aborted
    transaction blocks no other writer while it waits for the caller. (When the undo itself fails,
@@ -458,8 +891,8 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
    type, on the typed `GraphDatabase` writes; an invalid traversal specification, reported as
    `CG05001` before the traversal starts), a session of another database (`CG07005`), a token
    canceled before the statement starts, a non-GQL request, and the refusal of a second
-   concurrent operation on the session. A definition `GraphSchema` saves is validated by the
-   catalog inside its statement, so a rejected definition is a failed statement.
+   concurrent operation on the session. GraphSchema validates caller arguments before admission; a valid schema write inside an explicit
+   transaction is an admitted CG04025 refusal and aborts it.
 6. Autocommit statements are unaffected: a failure ends only its own statement transaction.
 7. A rollback or commit observes its cancellation token only before it starts: a token canceled
    by then throws `OperationCanceledException` and leaves the transaction as it was. One that has
@@ -487,8 +920,13 @@ nothing and the transaction stays active, is therefore unavailable, and the sess
 
 The session's explicit-transaction lifecycle, where Faulted is the new state:
 
+UndoPending is a recovery path also reported as TransactionState.Faulted; it does not
+represent an ordinary statement-aborted transaction. Only its named rollback retry or whole
+rollback recovers it, as described in the savepoint contract above.
+
 ```mermaid
 stateDiagram-v2
+    state "Faulted: incomplete undo" as UndoPending
     [*] --> Idle
     Idle --> Idle: autocommit statement succeeds or fails
     Idle --> Active: BeginTransactionAsync
@@ -497,6 +935,10 @@ stateDiagram-v2
     Faulted --> Faulted: statement or BEGIN refused with CG04007
     Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
     Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with CG04007
+    Active --> UndoPending: partial undo fails
+    UndoPending --> Active: ROLLBACK TO retained or outer scope
+    UndoPending --> UndoPending: other work refused with CK04009
+    UndoPending --> Idle: ROLLBACK or DisposeAsync
 ```
 
 The reference engines agree on the failure and the refusal; they differ only on COMMIT. Citations
@@ -537,6 +979,165 @@ rejected before it reaches the session and changes nothing. Each refusal is an `
 `Execute` and `ExecutePaths` alike, and the session stays ready.
 
 ## Planning, execution and bounds
+
+### Correlated pattern subplans (#1537, GQ-E1)
+
+GraphCorrelatedSubplan owns the planned inner MATCH stream and its lexical argument contract.
+GraphPlanExecutor.ExecuteCorrelatedAsync reuses the ordinary MATCH planner, endpoint/type
+adjacency and label/type anchors with the same GraphOperation, snapshot, update overlay,
+parameters and statement budget. It yields borrowed inner rows without a cardinality limit;
+GQ-C3 drains this boundary to collect results. The EXISTS semi consumer requests one advance
+and disposes immediately; scalar NOT supplies anti evaluation. Nested scopes copy binding
+metadata at planning and retain the per-row argument values without modifying the outer row.
+Programmatic ASTs may share subtrees: a copy-on-change binding pass gives each lexical correlated
+expression occurrence its own identity before authoritative validation, grouping and plan registration.
+Ordinary validation discovers whether binding is needed; only source-free statements containing
+EXISTS or pattern comprehensions take the bound planning pass. Path identity/depth/shape checks precede copying. Iterator scopes
+track shadowed imports so only references to the actual enclosing binding propagate outward.
+This follows Neo4j's lexical dependency subtraction for filter, extract and reduce scopes
+(`C:/Source/repos/neo4j/neo4j/community/cypher/front-end/expressions/src/main/scala/org/neo4j/cypher/internal/expressions/ScopeExpression.scala:42-60,94-99`).
+Bound paths follow their supplied node/edge identities through the matcher; correlated node
+and relationship positions keep their outer identity. NULL pattern arguments short-circuit
+before optional null extension. New inner variables never enter the outer binding layout.
+
+The existing function-binding reference carries a lazy GraphCorrelatedBindings registry,
+avoiding new planner/plan/operation fields and allocations for statements without EXISTS.
+Scalar evaluation remains synchronous: completed inner ValueTasks are consumed directly.
+The invariant is that every inner evaluation completes synchronously, including cold stores
+and faulted/canceled results. The registry counts evaluations and incomplete ValueTasks at
+the actual scalar join; the cold/warm EXISTS corpus asserts a nonzero count and zero suspended
+evaluations. The prerequisite is that before any inner read can suspend, the EXISTS seam needs
+a real async evaluation path, as OQ-Q1 built for OQL. The existing blocking fallback is not
+permission to add a suspending read source. Every inner await uses ConfigureAwait(false);
+stream cleanup owns its cursor and memory leases on
+first match, exhaustion, cancellation and evaluation/budget failures. EXPLAIN emits each
+semi/anti apply with its correlated variables and ordinary inner MATCH operators.
+
+Deterministic counters verify first-match work and complete iterator cleanup, while draining
+consumers collect every inner row through the same boundary. Generated recommendations agree
+with an independent brute-force oracle; see the language design for grammar and the local
+Neo4j references followed. No public interface, disk or wire contract changes are required.
+
+### Pattern comprehensions (#1736, GQ-C3)
+
+`GqlPatternComprehensionExpression(Pattern, Predicate, Projection)` carries a nonempty
+relationship chain, optional local path name, optional WHERE and mandatory projection.
+`[ [p =] (a)-[r:T]->(b) [WHERE predicate] | projection ]` drains the E1 correlated
+subplan in match order. Duplicates and NULL projections are retained. No matches, including
+an existing NULL node/relationship argument, produce an empty list. The optional path name
+is a new local binding and may shadow an outer name; other existing pattern names correlate.
+Names introduced inside do not escape. Parsed and hand-built AST occurrences bind separately.
+Fixed chains and existing relationship quantifiers (ISO and Cypher bracketed forms) are accepted; path selectors,
+explicit path modes and parenthesized quantified path groups are outside this expression form.
+A relationship quantified to zero still satisfies the syntactically nonempty requirement.
+
+The form is an expression in RETURN, WHERE, SET scalar values, aggregate operands, nested
+pattern/list comprehensions, list predicates and reduce. The inner projection may contain
+nested collection expressions but cannot contain an aggregate over its own match scope
+(CG05028). A known non-Boolean WHERE is CG02013 even on an empty scan. The existing property
+storage restrictions still apply to collection-valued SET/INSERT values. Top-level label
+bars use the list-comprehension disambiguation rule: prefer a complete WHERE | projection.
+Malformed missing-projection forms use CG00014 or the ordinary CG00002 syntax diagnostic.
+
+Lexical shape analysis binds inner node/relationship kinds and leaves outer callbacks live
+through projection, including reduce accumulator closure. Scalar projections of inner entities
+and groups cross Execute using protocol 2.1
+`graph.composite-values`; entity-valued lists retain CG05001 until #1662, including empty
+or FALSE-filtered lists. In-process results can contain nodes, relationships and paths.
+No public interface, assembly reference, wire capability, format or disk version changes.
+
+Reference evidence (local Neo4j clone; no code copied):
+
+- `community/cypher/front-end/parser/v25/parser/src/main/antlr4/org/neo4j/cypher/internal/parser/v25/Cypher25Parser.g4:723-725`: expression form with required projection and nonempty chain.
+- `community/cypher/front-end/frontend/src/main/scala/org/neo4j/cypher/internal/frontend/phases/parserTransformers/ReplacePatternComprehensionWithCollectSubqueryRewriter.scala:59-69,94-138`: collect rewrite and path-name shadowing; other pattern variables reference outer bindings.
+- `community/cypher/front-end/ast/src/main/scala/org/neo4j/cypher/internal/ast/semantics/SemanticExpressionCheck.scala:612-622`: the projection is checked in the simple (non-aggregate) expression context and its type is wrapped in a list.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/ExpandAllPipe.scala:49-71` and `community/cypher/runtime-spec-suite/src/test/scala/org/neo4j/cypher/internal/runtime/spec/tests/ExpandAllTestBase.scala:566-580`: NULL start yields zero inner matches.
+- `community/cypher/interpreted-runtime/src/main/scala/org/neo4j/cypher/internal/runtime/interpreted/pipes/RollUpApplyPipe.scala:33-42` and `community/cypher/runtime-spec-suite/src/test/scala/org/neo4j/cypher/internal/runtime/spec/tests/RollUpApplyTestBase.scala:59-78,102-123`: collection is empty for zero matches and preserves projected NULLs. Together with the rewrite, these establish the empty-list result for NULL outer entities.
+
+Collection uses E1's unbounded inner stream, with no first-match limit. The collector owns
+its temporary output buffer and retains each projected value in the shared statement memory
+ledger. Capacity growth reserves the new buffer before allocation and releases the predecessor;
+final array creation reserves overlapping storage. Named paths reserve their path/wrapper
+storage before binding, including paths rejected by WHERE. Every collected element consumes
+statement work. CG05004 and CG05020 keep their existing work/memory refusal meanings.
+Cancellation is checked before every advance and projection; all exits dispose the inner
+iterator and release temporary owners. Result ownership follows the ordinary retained-row stage.
+EXPLAIN adds CollectApply with correlated names, materialization and the complete inner plan.
+The cold/warm synchronous seam corpus includes collection and nested collection; **before any
+inner read can suspend**, a real asynchronous scalar evaluator is required. This preserves the
+GQ-E1/OQ-Q1 invariant. Fanout tests prove exactly N+1 advances and one disposal for N outputs.
+
+### Composite query planning and execution (#1737, GQ-Q1/Q2)
+
+`GraphCompositePlan` retains the binary syntax tree, indexed binary nodes and source-ordered leaf plans. A prewalk
+rejects writes and mixed UNION modes; every leaf is then planned by its own GraphPlanner against
+the same GraphOperation snapshot. Parameter normalization occurs once. The existing 65,536-visit reduce planning cap is shared
+across all operands and correlated passes. Binding scopes, native
+expression caches and correlated registries stay per operand, including reused source-free AST
+occurrences. The ordinary planner optionally reports result shapes to the composite reconciler;
+ordinary statements acquire no new plan/planner fields or shape allocations.
+NEXT binds above composites: GqlCompositeStage carries a nested GraphCompositeStagePlan. Each
+operand plans against the same incoming projected shapes and binding kinds, including named paths,
+with isolated lexical registries. Displayed result names remain distinct from decoded binding names;
+only referenceable BindingName values become keys for later stages, as at ordinary RETURN boundaries.
+The composite cursor captures the incoming table once under the statement memory budget and
+visits operands in source order. Later stages consume its combined projected bindings. Nested
+cursors restore the enclosing function registry before yielding, and all segments share the
+snapshot, cancellation and reduce planning cap. A prewalk refuses writes throughout a composite
+pipeline before any cursor opens. Ordinary linear pipelines retain their existing stage layout. All names, kinds,
+functions, parameters and wire capabilities are validated before opening an execution cursor.
+See the language DESIGN/DIALECT for associativity, grouping, local page semantics and references.
+
+UNION ALL drains operand cursors directly into the existing materialized final result contract;
+it creates no per-operand result set or union distinct table. Each operand reuses existing match,
+boundary, grouping, sort/page and lexical subplan execution. UNION uses GraphRowComparer and
+GraphValueComparer without a second equality contract, retaining the first structural occurrence.
+Its hash-state grants are shared with all operand/output memory and refuse with CG05030; other
+memory/work refusals retain CG05020/CG05004. Every submitted composite row consumes one work unit.
+Cancellation reaches every advance and projection, and failures dispose every cursor and owner.
+EXCEPT and INTERSECT use an explicit cursor stack, retaining left rows and structural hash counts,
+then reading the right operand and emitting eligible left occurrences in source order. DISTINCT
+retains only the first left representative. ALL retains original left rows and emits the first
+max(m-n,0) or min(m,n) occurrences, without coercing equivalent numeric representations. State is
+charged to the statement grant (CG05032); rows retained solely by operands/output keep CG05020.
+Each input hash visit and retained-row output visit consumes one work unit in addition to ordinary
+operand work. A binary operation has expected O(m+n) work and O(m) retained state; DISTINCT uses
+O(distinct left rows). The deterministic 100/200-row fixture records 700/1400 work units for each
+of the four modes. Hash behavior is the existing GraphRowComparer/GraphValueComparer contract.
+The explicit stack also handles mixed operators without recursive iterator chains. Homogeneous
+UNION keeps its existing flattened fast path. Nested operations retain separate budgeted owners.
+Every parent hash visit or forwarded row consumes one work unit, including UNION duplicate visits
+and UNION ALL/OTHERWISE forwarding; work therefore grows with both row count and visited depth.
+Frame reservations use the same retained-state diagnostic as their rows/keys: CG05030 for UNION,
+CG05032 for EXCEPT/INTERSECT, and CG05020 for ordinary operand and forwarding frames.
+
+OTHERWISE drains the complete left cursor; on any row it skips the right cursor entirely, while
+retaining duplicates and NULL rows. Errors propagate and never trigger fallback. Both branches are
+planned, shape-reconciled and wire-admitted first. This Cohesion whole-result fallback has no
+Neo4j precedent. Equal precedence and quantifier mixing follow the language DESIGN's grammar
+analysis; only UNION/UNION ALL mixing remains refused by owner decision.
+
+Unknown root result kinds are reconciled during execution, before a result can escape. NULL is
+kind-neutral; numeric representations are compatible. Collection values preserve heterogeneous
+contents, with proven incompatible nested entity kinds refused during planning.
+
+Result names come from the first operand; types and nullability cover every operand. Integral
+kinds widen to the largest kind, floating/integral mixtures to Float64, and decimal/integral
+mixtures to Decimal. Decimal/floating mixtures and other dynamic kinds use DatabaseType.Null
+(unknown), with NULL-only inputs neutral. Materialized values further reconcile the header
+without coercing cells, including when a composite ends a NEXT chain. Composite planning propagates CAST operand
+nullability, and unresolved static nullability is conservatively nullable across skipped branches.
+Terminal composites pass rows
+directly to the same collector, including unaliased computed columns. Composite-value encoding flags cover all operands. Static scalar/composite/entity-list admission visits every leaf, even an
+empty later operand. EXPLAIN uses explicit-stack traversal to retain every operator group
+and append every operand's complete plan, including correlated apply nodes. Root operator
+attribution also names the actual conjunction. Warnings retain
+operand source order. No public interface, assembly reference, persisted format or wire change
+is introduced. GraphUnionTests compares generated graphs to an independent structural bag/set
+oracle; GraphUnionExecutionTests proves one statement snapshot, cancellation in both operands,
+metadata and typed path delivery. Work accounting is deterministic and linear: doubling two
+100-row operands to two 200-row operands doubles recorded work from 400 to 800 units in each mode.
+GraphUnionWireTests covers InMemory and TCP, refusals, entity-list admission and session reuse.
 
 ### Linear composition (#1145)
 
@@ -1570,7 +2171,7 @@ Ownership follows SQL's `COHESION_SCHEMA.OBJECT_OWNERSHIP` vocabulary: `OBJECT_T
 authority, never a graph namespace. Label and relationship-type rows report their persisted owner.
 Property and index metadata has no independent ownership field: its rows report the parent
 definition's authority because catalog mutation enforcement checks that parent. `OBJECT_TYPE` is
-`LABEL`, `RELATIONSHIP TYPE`, `PROPERTY KEY` or `INDEX`; the definition identity disambiguates children.
+`LABEL`, `RELATIONSHIP TYPE`, `PROPERTY KEY`, `INDEX` or `CONSTRAINT`; the definition identity disambiguates children.
 
 The executor reads all definitions and children using the operation's existing pinned MVCC snapshot.
 Snapshot transactions retain their original visibility; ReadCommitted and auto-commit statements
@@ -1615,10 +2216,13 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG05001` | Invalid hand-built function arity or unbound argument; invalid pattern, variable binding, label expression, predicate or traversal specification, including an insertion that names `\|`, `!`, `%` or an either-direction edge, a binary `AND`, and a chain with fewer than two operands |
 | `CG01002` | Unknown label or relationship type in a schema write (`CreateIndexAsync`, `DropLabelAsync`, `DropRelationshipTypeAsync`), a failed statement. A read never reports it; see `CG01010` and `CG01011` |
 | `CG03003` | Proven incompatible function argument kind; schema/data mismatch, restricted deletion or invalid graph mutation; deterministic catalog identity reuse/rename, identity mismatch, index retargeting or missing owner |
+| `CG03004` | MERGE equality is null, non-finite or non-scalar |
+| `CG03005` | Bound MERGE node is null, absent or incompatible with its node pattern |
 | `CG05004` | Physical-work budget or 64-hop path limit exceeded |
 | `CG07005` | Session/database binding mismatch |
 | `CG06006` | Storage, index, or malformed catalog-record failure translated at the engine boundary |
 | `CG04007` | A retryable catalog conflict, or the session's explicit transaction is aborted by a failed statement: a statement, BEGIN or COMMIT is refused until a rollback completes; the message and `InnerException` name the original failure |
+| `CG04024` | MERGE: retryable Snapshot match-or-create decision invalidated by a committed entity replacement/deletion or a new matching pattern |
 | `CG05008` | Statement too complex: parsing, planning or evaluating it needs more stack than the executing thread has left (ISO SQLSTATE 54001). The statement fails and the session stays open; Graph.Client retains the connection after a terminal rejection before path output |
 | `CG02009` | Element too large: catalog metadata, a node's labels and properties, or a relationship's type and properties, exceed the 8,092-byte graph record, or an indexed property value exceeds the 1,016-byte index key. Nothing is written for the element; the statement fails and the session stays open |
 | `CG01010` | **Warning**, not a failure: a read-only statement or `GetIndexesAsync` names a label the database does not have at the statement's snapshot. No node carries it, so the read returns the rows the expression still matches (none for a required label), reports this `DiagnosticSeverity.Warning` diagnostic in `DatabaseResult.Diagnostics` or `GraphSchemaResult<T>.Diagnostics`, and leaves an explicit transaction active. Neo4j's `UnknownLabelWarning`, GQLSTATUS 01N50. Not sent over protocol 2.0 |
@@ -1628,12 +2232,35 @@ to exercise that enforcement path; compiled provisioning is not included.
 | `CG01014` | Multiple map keys normalize to the same bare parameter name |
 | `CG01015` | Duplicate final result column name, implicit or explicit, under ordinal case-sensitive comparison; rejected during planning before execution |
 | `CG01016` | A path search prefilter, with or without an explicit selector, references a variable introduced by a peer path in the same MATCH; located at the offending reference. Its own path bindings (including quantified singletons) and the scope entering MATCH are allowed |
+| `CG01017` | A hand-built list comprehension omits its iterator name |
+| `CG01018` | Reduce/list-predicate iterator declaration is missing/empty, or a reduce accumulator is missing/empty or equals its iterator |
+| `CG01019` | Binding/names — outer binding has a proven incompatible correlated pattern kind |
+| `CG01020` | Composite operand column names, order or count differ |
+| `CG00012` | List slice omits both bounds; refused during planning, including EXPLAIN |
+| `CG00013` | Language/syntax — EXISTS omits its nonempty braced pattern |
+| `CG00014` | Language — pattern comprehension requires a nonempty path and projection |
+| `CG00015` | A composite operation is missing its query operand |
+| `CG00016` | UNION and UNION ALL are mixed within one composite tree |
+| `CG02014` | Invalid list-operation source or slice bound kind/range; known non-integer bound types fail planning |
+| `CG02015` | Reduce/list-predicate source is neither a list nor NULL; known incompatible kinds fail planning |
+| `CG02016` | Values/types — runtime correlated argument has an incompatible entity kind |
+| `CG02017` | Composite operand result shapes are incompatible |
 | `CG07016` | A composite result requires graph.composite-values; ExecutionFailure before ResultHeader, preserving the authenticated session |
 | `CG06017` | Unsupported graph record or tree-registration format, including formats 1–4: opening is refused before logical recovery scrub with the remedy to recreate the database. Graph.Storage retains the code in its StorageCorruptionException cause's Diagnostics; the engine retains it as an additional Error diagnostic beside CG06018 under DatabaseCorruptionException / CK06003. No upgrade path exists |
 | `CG06018` | Missing or unrecoverable files; preserve the complete file set for recovery and restore missing sidecars from backup |
 | `CG09019` | The database or a resource used by a statement was disposed. ExecutionFailure on the wire; the session remains ready. Pre-statement direct-API lifetime guards retain ObjectDisposedException |
 | `CG05020` | Accounted retained execution memory exceeds the statement limit; no partial result escapes and every owned cursor/lease is released |
 | `CG05022` | A selected shortest-path node or relationship is absent from the statement snapshot while the operation remains active; reconstruction fails without a partial path |
+| `CG05023` | Internal MERGE seam: invalid bound pattern identity, topology or property equality |
+| `CG05024` | Aggregate in a list comprehension predicate or projection |
+| `CG05025` | Malformed reduce/list-predicate body or quantifier AST, or an aggregate inside that body |
+| `CG05026` | Reduce shape/type analysis exceeds the fixed statement planning cap of 65,536 visited nodes or closure steps |
+| `CG05027` | Execution — malformed or missing correlated subplan or missing argument |
+| `CG05028` | Execution — malformed pattern comprehension, aggregate projection, or missing collection plan |
+| `CG05029` | A composite query contains a modifying operand |
+| `CG05030` | UNION duplicate-elimination state exceeds the statement memory budget |
+| `CG05031` | An internal statement lookup unexpectedly lacks its key; the statement boundary retains the KeyNotFoundException cause and reports a code-free internal-error message. Application function failures retain their existing CG05021 wrapper |
+| `CG05032` | EXCEPT/INTERSECT retained frames, rows and hash state exceed the statement memory budget |
 | `CG08021` | Query limits are nonpositive or exceed the configured engine ceilings; invalid engine ceilings use the same code in the configuration exception message |
 | `CK06101` | `Database.Indexing`'s code, carried unchanged: opening a database whose property-index pages are in a B-tree page format this engine does not read (format 1, written before #1194) fails with "Database 'x' cannot be opened. CK06101: …", checked before recovery's scrub, so a cleanly closed database's files stay as they were (a crashed one has had only the storage layer's journal redo and undo, and keeps its journal) |
 | `CK06001` | `Database.Storage`'s code, carried unchanged: opening a database whose file set is in another storage format (#1251) fails with "Database 'x' cannot be opened. CK06001: …", the storage's `StorageFormatException` as its inner exception, refused before its journal is read, so the files stay as they were |
@@ -1959,6 +2586,50 @@ aggregate counts, remaining minimum bytes and lengths before allocating a contai
 Malformed scalar/composite payloads, duplicate keys, invalid UTF-8, unknown tags, trailing
 bytes or exceeded bounds are ProtocolViolation, for request parameters and result rows alike.
 Encoding is explicit/static and uses no reflection, JSON serializer or runtime code generation.
+
+List comprehensions and slices (#1736, GQ-C1) use immutable public Values AST leaves and lexical
+iterator frames over the enclosing binding. Sources evaluate once; nested frames shadow without
+mutating outer rows. Shape callbacks resolve each iterator against its source element at every
+container depth, so scalar properties of entity groups/path lists pass Execute through slices,
+WITH/NEXT and nested projections. Entity-valued results remain statically refused until #1662.
+Property positions admit indexed scalar comprehensions in MATCH, INSERT, SET and MERGE,
+including both MERGE action branches and per-row UNWIND evaluation. The parser rejects completed
+list/map constructors, comprehensions and unindexed slices with CK00001. Dynamic invalid property
+results retain CG03003 for ordinary writes and CG03004 for MERGE equalities.
+Grouping and deferred pattern-property checks respect lexical names. EXPLAIN validates the same
+scopes without evaluating bodies. Known non-Boolean filters fail planning with CG02013 even
+for empty/NULL sources; unknown types retain runtime checks. Aggregates are permitted in sources,
+but not iterator bodies.
+
+Comprehension iteration and slice copying consume the existing work budget; temporary source
+ownership, output buffers and retained nested projections share the statement memory ledger.
+Output capacity is reserved before allocation, and all grants unwind on value errors, budget
+refusal or cancellation. No query without these expressions acquires an iterator frame or
+additional shape callback closure. Comprehension/slice child enumeration uses separate iterators
+so ordinary expression walks retain their original iterator size. The Release dispatch measurements preserve baseline allocation
+costs; result checks and both wire transports cover scalar admission and pre-write entity refusal.
+Slice admission follows Neo4j semantic analysis: both omitted bounds use CG00012; known
+non-integer bounds use CG02014 during planning. Dynamic numeric bounds follow its runtime
+conversion: truncate toward zero, require Int32 range, then normalize
+negative offsets and clamp. NULL sources/bounds yield NULL and filters retain only TRUE.
+See the language design's [semantics and local reference citations](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#list-comprehensions-and-slices-1736-gq-c1).
+No disk, protocol or public interface boundary changes accompany this run.
+
+Reduce and ALL/ANY/NONE/SINGLE (#1736, GQ-C2) reuse these lexical frames, with a second
+accumulator frame for reduce. Sources evaluate once; a non-NULL reduce source evaluates the
+seed once and folds in order. Predicates implement the reference three-valued truth table and
+stop only on a decisive value. Known source/test kinds, all names and body aggregate placement
+validate before execution, including EXPLAIN. Source and current accumulator ownership stay
+live across nested evaluation; replacement retains its next value before releasing the previous
+one, and every visited element consumes shared work. Cancellation and failures unwind both.
+
+Reduction shape analysis computes a conservative finite closure of seed and body at demanded
+container depths, allowing accumulator type changes while preserving scalar group projections
+and the existing entity wire gate. Depths beyond the existing shape horizon remain unknown;
+positive proofs are withheld. Grouped-expression reuse and ORDER BY aliases honor both lexical
+declarations. Separate child iterators and reduce-only shape callbacks preserve ordinary-query
+allocation paths. Release measurements retain baseline allocations and result validation.
+See [binding semantics and Neo4j citations](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#reduce-and-list-predicates-1736-gq-c2).
 
 Expression semantics and reference-engine evidence are in
 [Graph.Language DESIGN](../../Assimalign.Cohesion.Database.Graph.Language/docs/DESIGN.md#conditional-expressions-and-composite-values-1146).
@@ -2515,7 +3186,7 @@ The Catalog component is part of `Assimalign.Cohesion.Database.Graph`, with publ
 #### Catalog: Intent and dependencies
 
 The catalog gives each logical graph database a durable vocabulary. A label or relationship
-type has a stable GUID identity and an ordinal, case-sensitive name. Property and index
+type has a stable GUID identity and an ordinal, case-sensitive name. Property, index and named constraint
 metadata references the stable identity, so dropping and recreating the same name does not
 reuse old child metadata. Identities cannot be reused across definitions or renamed.
 Label names and relationship-type names occupy separate namespaces.
@@ -2580,13 +3251,14 @@ The payload begins at byte 16:
 
 | Offset / order | Encoding | Meaning |
 | --- | --- | --- |
-| 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index |
-| 17 | byte | Format version, currently 1 |
-| 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4 |
+| 16 | byte | Kind: 1 label, 2 relationship type, 3 property key, 4 named index, 5 named constraint |
+| 17 | byte | Format version, currently 2; earlier versions refuse with CG06019 before logical scrub |
+| 18 | 16 bytes | CLR `Guid.ToByteArray()` representation: definition ID for kinds 1/2, parent ID for kinds 3/4/5 |
 | 34 | string | Definition name, property key, or index name |
 | Following name, kinds 1/2 | byte, string | `DatabaseObjectOwner` value and owning schema |
 | Following name, kind 3 | byte, byte | Shared `DatabaseType` value (255 means unconstrained), required flag (0 or 1) |
 | Following name, kind 4 | string | Indexed scalar property key |
+| Following name, kind 5 | string, byte | Constrained property key and type (255 means existence) |
 
 All fixed-width numeric values are little-endian. Strings use a signed 32-bit little-endian
 UTF-8 byte length followed by exactly that many strict UTF-8 bytes. Length -1 represents
@@ -2611,17 +3283,18 @@ now make them through the same member.
 
 Saving a version tombstones the old version and inserts the new one inside one shared physical
 statement bracket. Both changes register with the coordinator's version store. Deleting a
-definition tombstones its property and index records in that same bracket. A failed bracket
+definition tombstones its property, index and constraint records in that same bracket. A failed bracket
 publishes no directory references; logical rollback removes created versions and restores
 deleters. Snapshot readers continue to see their original definitions until they leave.
 
-Recovery order is storage open, coordinator analyze-and-scrub, catalog open, then coordinator
+Recovery order is storage open, graph/index and catalog format fences, coordinator analyze-and-scrub, catalog open, then coordinator
 complete-recovery. The graph store separately scrubs physical index entries before the recovery
 checkpoint. Catalog crash tests copy live data and WAL before disposal, proving that committed
 definitions survive and partial definition/child changes disappear.
 
 Identity discovery uses an in-memory id → set of (kind, name) keys for labels/types. Child
-discovery uses (kind, parent id) → ordinal sorted names for properties/indexes. Both are built
+discovery uses (kind, parent id) → ordinal sorted names for properties/indexes/constraints.
+A shared ordinal schema-name directory locates indexes and constraints across every parent. Both are built
 on open and maintained under the same catalog lock as the version directory; stale-reference
 removal prunes their entries. They select candidates only: every result still reloads and decodes
 the record and applies the original per-version MVCC checks. Recreating a dropped name with
@@ -2928,7 +3601,7 @@ collisions and retained versions; ordering its `m` visible matches adds `O(m log
 
 #### Storage: Atomicity, conflicts and recovery
 
-All graph writers acquire the shared database-level exclusive lock and retain it until
+All graph writers acquire the shared database-level exclusive lock and retain it until their owning savepoint is undone or until
 logical commit/rollback; readers use MVCC snapshots. A weakly associated per-transaction
 async gate serializes complete store mutations, including statement views of the same
 transaction, from lookup and encoding through directory publication. The gate is allocated
@@ -3330,3 +4003,24 @@ unknown calls; no frame layout or version changes.
 
 Interleaved same-process Release comparisons retain bounded native-dispatch allocation overhead;
 elapsed-time distributions remain descriptive rather than an acceptance gate.
+
+ORDER BY alias result kinds resolve projection expressions in the saved incoming scope,
+including Boolean and list aliases referenced beneath shadowing collection iterators (#1736).
+
+Reduce result kinds form a conservative seed/body union closed over accumulator feedback.
+NULL adds no non-NULL kind; unknown absorbs the union. Predicates and list sources with a
+provably incompatible union fail planning even on empty inputs and under EXPLAIN. Shape
+closures memoize invariant seeds and sources and share depth results using a dependency work
+queue. Binary body result shapes have no accumulator feedback, so scalar folds avoid
+closure allocation. Nested body closures are recomputed when their incoming accumulator facts change.
+All reduce shape/type analysis shares a cancellable statement cap of 65,536 node visits and
+closure steps (CG05026), independently of execution work and retained-memory budgets.
+The cap bounds temporary planning allocation, including nonexecuting EXPLAIN. Ordinary
+statements retain their planner object size and allocation path.
+
+## Ready retained-state contract (#1717)
+
+Every negotiated statement Ready now carries transaction I/T/E followed by a zero retained-state
+byte. This model retains no state requiring a family reset and declares no reset statement. Pool
+return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
+the former form without a compatibility reader; see Database.Protocol DESIGN.

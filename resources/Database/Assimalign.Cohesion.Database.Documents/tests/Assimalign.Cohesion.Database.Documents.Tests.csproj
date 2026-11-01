@@ -3,8 +3,11 @@
 		<RootNamespace>Assimalign.Cohesion.Database.Documents.Tests</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
+		<!-- Exact planning allocation guards must use one JIT tier, including in a full suite. -->
+		<TieredCompilation>false</TieredCompilation>
 	</PropertyGroup>
 	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Transactions\tests\TestObjects\UndoMarkerDriver.cs" Link="TestObjects\UndoMarkerDriver.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\DedicatedTestTask.cs" Link="TestObjects\DedicatedTestTask.cs" />
         <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Blob\tests\TestObjects\CrashReopen.cs" Link="TestObjects\CrashReopen.cs" />
 		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\WorkerPumpObservation.cs" Link="TestObjects\WorkerPumpObservation.cs" />

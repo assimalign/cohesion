@@ -173,12 +173,31 @@ public sealed class SqlUpsertExecutionTests
         CheckRows(await RowsAsync(session, "SELECT * FROM t"), [[10, 10, 20]]);
     }
 
+    [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: target WHERE can infer unconditional indexes and never filters proposals (#1630)")]
+    [InlineData(20)]
+    [InlineData(-20)]
+    public async Task ExecuteAsync_InferenceWhere_ShouldRetainUnconditionalArbiters(int age)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("upsert-inference-conformance", new());
+        var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE t (id INT PRIMARY KEY, age INT)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO t VALUES (1, 10)", cancellationToken: CancellationToken.None);
+
+        // Act
+        var result = await session.ExecuteAsync($"INSERT INTO t VALUES (2, {age}) ON CONFLICT (id) WHERE age > 0 DO NOTHING", cancellationToken: CancellationToken.None);
+
+        // Assert
+        result.AffectedCount.ShouldBe(1);
+        CheckRows(await RowsAsync(session, "SELECT * FROM t ORDER BY id"), [[1, 10], [2, age]]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [SqlEngine] - Upsert: excluded forms fail before any write")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON DUPLICATE KEY UPDATE age = 3")]
     [InlineData("INSERT OR IGNORE INTO t VALUES (2, 20)")]
     [InlineData("INSERT OR REPLACE INTO t VALUES (2, 20)")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (lower(age)) DO NOTHING")]
-    [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (id) WHERE age > 0 DO NOTHING")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (age COLLATE x) DO NOTHING")]
     [InlineData("INSERT INTO t VALUES (2, 20) ON CONFLICT (id) DO UPDATE SET age = (SELECT 1)")]
     [InlineData("INSERT INTO t SELECT id, age FROM t ON CONFLICT (id) DO UPDATE SET age = (SELECT 1)")]
@@ -546,9 +565,8 @@ public sealed class SqlUpsertExecutionTests
 
         // Assert
         CheckRows(await RowsAsync(session, "SELECT * FROM t ORDER BY id"), [[1, "a", 3], [4, "b", 40]]);
-        var failure = await Should.ThrowAsync<DatabaseException>(async () => await session.ExecuteAsync(
-            "INSERT INTO t (name) VALUES ('a') ON CONFLICT (name) DO UPDATE SET id = DEFAULT"));
-        failure.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03025");
+        await session.ExecuteAsync("INSERT INTO t (name) VALUES ('a') ON CONFLICT (name) DO UPDATE SET id = DEFAULT");
+        CheckRows(await RowsAsync(session, "SELECT id FROM t WHERE name='a'"), [[6]]);
     }
 
     [Fact(DisplayName = "Cohesion Test [SqlEngine] - Upsert: materialized SELECT and DEFAULT VALUES share arbitration")]

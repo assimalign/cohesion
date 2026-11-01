@@ -1,8 +1,10 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,6 +31,13 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 internal sealed partial class SqlPlanExecutor
 {
     private static readonly string _errorExecutorEnsureLatestVersionFailure = ErrorMessages.ExecutorEnsureLatestVersionFailure;
+
+    // Only partial-index statements create state. The executor is rooted throughout every
+    // asynchronous preparation/apply attempt; its weak key adds no field or allocation to
+    // ordinary DML, and no per-row dependent GC handle. Row arrays use reference identity.
+    private static readonly ConditionalWeakTable<SqlPlanExecutor, Dictionary<(SqlCatalogTable, SqlCatalogIndex),
+        (SqlBoundExpression Predicate, SqlExpressionEvaluator Evaluator, Dictionary<object?[], bool> Rows)>> _preparedIndexRows = new();
+    private static readonly ConditionalWeakTable<BTreeIndex, BTreeIndex> _nullKeyDeleteIndexes = new();
 
     // Test seam: after the final INSERT effect, while its statement apply is still admitted.
     internal static Action? AfterInsertApplied { get; set; }
@@ -83,6 +92,8 @@ internal sealed partial class SqlPlanExecutor
 
     internal Task<DatabaseResult> ExecuteAsync(SqlPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (plan.ContainsRecursion && RecursiveState is null)
+        { return ExecuteRecursiveStatementAsync(plan, statement, cancellationToken); }
         // Set before WITH and subquery materialization, and retain it in every child read.
         _isDml |= StatementInput(plan) is SqlInsertPlan or SqlInsertSelectPlan or SqlUpdatePlan or SqlDeletePlan or SqlMergePlan;
         return JoinedDml(plan) && statement.Metrics.JoinedDmlStatement is null
@@ -116,9 +127,13 @@ internal sealed partial class SqlPlanExecutor
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         _containsLike |= plan.ContainsLike;
         _metrics = statement.Metrics;
+        if (RecursiveState is not null && StatementInput(plan) is SqlRelationPlan)
+        { return await ExecuteRecursiveQueryAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         plan = InitializeWindow(plan, cancellationToken);
         switch (plan)
         {
+            case SqlWindowAggregatePlan window:
+                return await ExecuteWindowAggregateAsync(window, statement, cancellationToken).ConfigureAwait(false);
             case SqlSetOperationPlan set:
                 return await ExecuteSetOperationAsync(set, statement, cancellationToken).ConfigureAwait(false);
             case SqlConstantPlan constant:
@@ -133,7 +148,7 @@ internal sealed partial class SqlPlanExecutor
                     constant.Projections, constant.OrderBy, constant.Limit, constant.Offset, constant.IsDistinct,
                     evaluator, constant.OrderByProjections, cancellationToken);
             case SqlWithPlan with:
-                foreach (var relation in with.Relations)
+                foreach (var relation in RecursiveState is null ? with.Relations : Array.Empty<SqlDerivedRelation>())
                 {
                     await MaterializeRelationAsync(relation, statement, cancellationToken).ConfigureAwait(false);
                 }
@@ -145,6 +160,7 @@ internal sealed partial class SqlPlanExecutor
             case SqlCorrelatedSubqueryPlan correlated:
                 return await ExecuteSubqueriesAsync(correlated.Input, correlated.Queries, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertSelectPlan insertSelect:
+                _definitions.EnsureIndexPredicatesResolved(insertSelect.Table, cancellationToken);
                 return await ExecuteInsertSelectAsync(insertSelect, statement, cancellationToken).ConfigureAwait(false);
             case SqlGroupPlan group:
                 return await ExecuteGroupAsync(group, statement, cancellationToken).ConfigureAwait(false);
@@ -163,13 +179,19 @@ internal sealed partial class SqlPlanExecutor
             case SqlJoinPlan join:
                 return await ExecuteJoinAsync(join, statement, cancellationToken).ConfigureAwait(false);
             case SqlInsertPlan insert:
+                _definitions.EnsureIndexPredicatesResolved(insert.Table, cancellationToken);
                 return await ExecuteInsertAsync(insert, statement, cancellationToken).ConfigureAwait(false);
             case SqlUpdatePlan update:
+                _definitions.EnsureIndexPredicatesResolved(update.Table, cancellationToken);
                 return await ExecuteUpdateAsync(update, statement, cancellationToken).ConfigureAwait(false);
             case SqlDeletePlan delete:
+                _definitions.EnsureIndexPredicatesResolved(delete.Table, cancellationToken);
                 return await ExecuteDeleteAsync(delete, statement, cancellationToken).ConfigureAwait(false);
             case SqlMergePlan merge:
+                _definitions.EnsureIndexPredicatesResolved(merge.Table, cancellationToken);
                 return await ExecuteMergeAsync(merge, statement, cancellationToken).ConfigureAwait(false);
+            case SqlSequencePlan sequence:
+                return await ExecuteSequenceDdlAsync(sequence, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTablePlan create:
                 return await ExecuteCreateTableAsync(create, statement, cancellationToken).ConfigureAwait(false);
             case SqlCreateTableAsPlan create:
@@ -190,6 +212,8 @@ internal sealed partial class SqlPlanExecutor
                 return await ExecuteCreateIndexAsync(createIndex, statement, cancellationToken).ConfigureAwait(false);
             case SqlDropIndexPlan dropIndex:
                 return await ExecuteDropIndexAsync(dropIndex, statement, cancellationToken).ConfigureAwait(false);
+            case SqlAlterIdentityPlan identity:
+                return await ExecuteAlterIdentityAsync(identity, statement, cancellationToken).ConfigureAwait(false);
             case SqlAddColumnPlan addColumn:
                 return await ExecuteAddColumnAsync(addColumn, statement, cancellationToken).ConfigureAwait(false);
             case SqlRenamePlan rename:
@@ -211,6 +235,7 @@ internal sealed partial class SqlPlanExecutor
 
     private DatabaseResult ExecuteSelect(SqlSelectPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
+        if (plan.Access is SqlOrderedIndexPath ordered) { return ExecuteOrderedSelect(plan, ordered, statement, cancellationToken); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         // The access path narrows the candidate set; the full WHERE stays the
         // residual predicate for both paths, so seek results are equivalent to
@@ -227,6 +252,26 @@ internal sealed partial class SqlPlanExecutor
         }
     }
 
+    private DatabaseResult ExecuteOrderedSelect(SqlSelectPlan plan, SqlOrderedIndexPath path,
+        SqlStatementContext statement, CancellationToken cancellationToken)
+    {
+        // Resolve once before omitting the sort. A detached/replaced tree falls back to
+        // a heap scan with the original ordering. The statement's reclamation horizon
+        // retains a successfully resolved handle's pages even if DROP detaches it later.
+        if (!TryResolveSeekTree(plan.Table, path.Index, out var tree))
+        { return ExecuteSelect(plan with { Access = SqlScanPath.Instance }, statement, cancellationToken); }
+        var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
+        statement.Metrics.AccessPath = "ordered:" + path.Index.Name + (path.Reverse ? ":backward" : ":forward");
+        return MaterializeSelect(Matches(), plan.Projections, [], plan.Limit, plan.Offset,
+            plan.IsDistinct, evaluator, plan.OrderByProjections, cancellationToken);
+
+        IEnumerable<object?[]> Matches()
+        {
+            foreach (var (_, values) in SeekRows(plan.Table, path, tree, statement, cancellationToken))
+            { if (evaluator.Matches(plan.Where, values)) { yield return values; } }
+        }
+    }
+
     /// <summary>Applies the common SELECT projection, ordering, distinctness and window.</summary>
     private DatabaseResult MaterializeSelect(IEnumerable<object?[]> matches, IReadOnlyList<SqlProjection> projections,
         IReadOnlyList<SqlBoundOrdering> orderBy, SqlRowCount? limit, SqlRowCount? offset,
@@ -239,7 +284,7 @@ internal sealed partial class SqlPlanExecutor
         return FinishSelect(projected, projections, limit, offset, isDistinct, evaluator, cancellationToken);
     }
 
-    private static DatabaseResult FinishSelect(List<object?[]> projected, IReadOnlyList<SqlProjection> projections,
+    private DatabaseResult FinishSelect(List<object?[]> projected, IReadOnlyList<SqlProjection> projections,
         SqlRowCount? limit, SqlRowCount? offset, bool isDistinct, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
         Collation[]? projectionCollations = null)
     {
@@ -302,11 +347,38 @@ internal sealed partial class SqlPlanExecutor
             {
                 var output = ProjectRow(source, projections, evaluator, cancellationToken);
                 if (skip > 0) { skip--; continue; }
+                SqlWindowMemory.For(_metrics)?.Retain(output);
                 projected.Add(output);
                 if (--remaining == 0) { break; }
             }
             cancellationToken.ThrowIfCancellationRequested();
             return projected;
+        }
+        if (HasSequenceProjection(projections) &&
+            !OrderingUsesSequence(projections, outputSlots?.Values))
+        {
+            // PostgreSQL planner.c:6703-6763 postpones volatile outputs independent of
+            // sorting. Alias/ordinal keys need only their referenced, non-sequence outputs.
+            var sources = new SqlRowCollector(orderBy, evaluator.SubqueryValues, limit, offset, cancellationToken, _metrics);
+            if (sources.IsComplete) { return []; }
+            var completed = outputSlots?.Values.ToHashSet();
+            foreach (var source in matches)
+            {
+                var orderedRow = OrderingRow(source, projections, completed, evaluator, cancellationToken);
+                var keys = new object?[orderBy.Count];
+                for (int index = 0; index < keys.Length; index++) { keys[index] = evaluator.Evaluate(orderBy[index].Key, orderedRow); }
+                sources.Add(orderedRow, keys);
+            }
+            var selected = sources.Finish(resolveEmptyCollations: false, includeOffset: true);
+            var projected = new List<object?[]>(selected.Count);
+            foreach (var source in selected)
+            {
+                var output = ProjectRow(source, projections, evaluator, cancellationToken, completed,
+                    completed is { Count: > 0 } ? source.Length - projections.Count : 0);
+                SqlWindowMemory.For(_metrics)?.Retain(output);
+                projected.Add(output);
+            }
+            return ApplyRowWindow(projected, limit, offset);
         }
         if (outputSlots is not { Count: > 0 } && projections.Any(projection => ContainsVolatileCall(projection.Value)))
         {
@@ -318,7 +390,12 @@ internal sealed partial class SqlPlanExecutor
             if (sources.Count == 0) { return []; }
             var sorted = SortRows(sources, orderBy, evaluator, cancellationToken);
             var projected = new List<object?[]>(sorted.Count);
-            foreach (var source in sorted) { projected.Add(ProjectRow(source, projections, evaluator, cancellationToken)); }
+            foreach (var source in sorted)
+            {
+                var output = ProjectRow(source, projections, evaluator, cancellationToken);
+                SqlWindowMemory.For(_metrics)?.Retain(output);
+                projected.Add(output);
+            }
             cancellationToken.ThrowIfCancellationRequested();
             return ApplyRowWindow(projected, limit, offset);
         }
@@ -349,8 +426,25 @@ internal sealed partial class SqlPlanExecutor
         return rows.Finish(resolveEmptyCollations: false);
     }
 
+    private static object?[] OrderingRow(object?[] source, IReadOnlyList<SqlProjection> projections,
+        IReadOnlySet<int>? outputSlots, SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+    {
+        if (outputSlots is not { Count: > 0 }) { return source; }
+        var orderedRow = new object?[source.Length + projections.Count];
+        source.CopyTo(orderedRow, 0);
+        foreach (int index in outputSlots)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var projection = projections[index];
+            orderedRow[source.Length + index] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(source, ordinal)
+                : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, source, copySharedBinary: true), projection.Type);
+        }
+        return orderedRow;
+    }
+
     private static bool ContainsVolatileCall(SqlBoundExpression? expression)
     {
+        if (expression is SqlBoundSequence) { return true; }
         System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
         if (expression is null) { return false; }
         if (expression is SqlBoundCall { Function.Volatility: SqlFunctionVolatility.Volatile }) { return true; }
@@ -367,15 +461,50 @@ internal sealed partial class SqlPlanExecutor
         return BoundChildren(expression).Any(ContainsVolatileCall);
     }
 
+    private static bool ContainsSequenceCall(SqlBoundExpression? expression)
+    {
+        if (expression is null) { return false; }
+        if (expression is SqlBoundSequence) { return true; }
+        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlBoundCase choice)
+        {
+            if (ContainsSequenceCall(choice.Input) || ContainsSequenceCall(choice.ElseResult)) { return true; }
+            foreach (var when in choice.Whens)
+            { if (ContainsSequenceCall(when.Condition) || ContainsSequenceCall(when.Result)) { return true; } }
+        }
+        if (expression is SqlBoundLogical logical && logical.Operands.Any(ContainsSequenceCall)) { return true; }
+        if (expression is SqlBoundCoalesce coalesce && coalesce.Arguments.Any(ContainsSequenceCall)) { return true; }
+        return BoundChildren(expression).Any(ContainsSequenceCall);
+    }
+
+    private static bool HasSequenceProjection(IReadOnlyList<SqlProjection>? projections)
+    {
+        if (projections is null || SqlSequenceExecution.Current is null) { return false; }
+        foreach (var projection in projections) { if (ContainsSequenceCall(projection.Value)) { return true; } }
+        return false;
+    }
+
+    private static bool OrderingUsesSequence(IReadOnlyList<SqlProjection> projections, IEnumerable<int>? slots)
+    {
+        if (slots is not null)
+        {
+            foreach (int index in slots) { if (ContainsSequenceCall(projections[index].Value)) { return true; } }
+        }
+        return false;
+    }
+
     private static object?[] ProjectRow(object?[] row, IReadOnlyList<SqlProjection> projections,
-        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken)
+        SqlExpressionEvaluator evaluator, CancellationToken cancellationToken,
+        IReadOnlySet<int>? completed = null, int projectionStart = 0)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        using var rowScope = SqlSequenceExecution.Current?.BeginRow();
         var output = new object?[projections.Count];
         for (int i = 0; i < output.Length; i++)
         {
             var projection = projections[i];
-            output[i] = projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(row, ordinal)
+            output[i] = completed?.Contains(i) == true ? row[projectionStart + i]
+                : projection.ColumnOrdinal is int ordinal ? evaluator.DeliverColumn(row, ordinal)
                 : NormalizeGroupValue(evaluator.Evaluate(projection.Value!, row, copySharedBinary: true), projection.Type);
             if (output[i] is byte[])
             {
@@ -464,20 +593,27 @@ internal sealed partial class SqlPlanExecutor
     }
 
     /// <summary>Hashes each projected string with exactly the collation used for its equality.</summary>
-    private static List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
+    private List<object?[]> Deduplicate(List<object?[]> rows, IReadOnlyList<SqlProjection> projections,
         SqlExpressionEvaluator evaluator, CancellationToken cancellationToken, Collation[]? collations = null)
     {
-        var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
-            .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
-        int count = 0;
-        for (int i = 0; i < rows.Count; i++)
+        var windowMemory = SqlWindowMemory.For(_metrics);
+        long scratch = windowMemory is null ? 0 : 128L + 32L * projections.Count + 64L * rows.Count;
+        windowMemory?.Reserve(scratch);
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var row = rows[i];
-            if (seen.Add(row)) { rows[count++] = row; }
+            var seen = new HashSet<object?[]>(new GroupKeyComparer(collations ?? projections
+                .Select(projection => projection.Collation.Resolve(evaluator.SubqueryValues)).ToArray()));
+            int count = 0;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var row = rows[i];
+                if (seen.Add(row)) { rows[count++] = row; }
+            }
+            rows.RemoveRange(count, rows.Count - count);
+            return rows;
         }
-        rows.RemoveRange(count, rows.Count - count);
-        return rows;
+        finally { windowMemory?.Release(scratch); }
     }
 
     private static Collation[] CaptureProjectionCollations(IReadOnlyList<SqlProjection> projections,
@@ -520,7 +656,12 @@ internal sealed partial class SqlPlanExecutor
     //   deleter, and every effect is recorded in the version-store ledger so
     //   rollback can undo it logically.
 
-    private async Task<DatabaseResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+    private Task<DatabaseResult> ExecuteInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
+        => SqlSequenceExecution.Current is not null || plan.Overriding != Language.SqlIdentityOverride.None
+            ? ExecuteSequenceInsertAsync(plan, statement, cancellationToken)
+            : ExecutePlainInsertAsync(plan, statement, cancellationToken);
+
+    private async Task<DatabaseResult> ExecutePlainInsertAsync(SqlInsertPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         // A VALUES row has no columns in scope: the planner rejects column references (#1165) and
         // binds the values with no columns in scope, so no reference can resolve to an ordinal the
@@ -544,8 +685,10 @@ internal sealed partial class SqlPlanExecutor
     }
 
     private Task<DatabaseResult> ExecuteUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
-        => plan.Source is null ? ExecutePlainUpdateAsync(plan, statement, cancellationToken)
-            : ExecuteJoinedUpdateAsync(plan, statement, cancellationToken);
+        => HasUpdateActions(plan.Table, plan.Assignments)
+            ? ExecuteReferentialUpdateAsync(plan, statement, cancellationToken)
+            : plan.Source is null ? ExecutePlainUpdateAsync(plan, statement, cancellationToken)
+                : ExecuteJoinedUpdateAsync(plan, statement, cancellationToken);
 
     private Task<DatabaseResult> ExecuteDeleteAsync(SqlDeletePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
         => plan.Source is null ? ExecutePlainDeleteAsync(plan, statement, cancellationToken)
@@ -554,6 +697,8 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecutePlainUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await AcquireReferenceIntentLocksAsync(plan.Table, statement, cancellationToken).ConfigureAwait(false);
+        if (HasUpdateActions(plan.Table, plan.Assignments))
+        { return await ExecuteReferentialUpdateAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken);
         var indexes = GetLiveIndexes(plan.Table, statement);
         var targets = new List<(PageId PageId, int SlotIndex, object?[] Values)>();
@@ -577,6 +722,7 @@ internal sealed partial class SqlPlanExecutor
         int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
         foreach (var (pageId, slotIndex, values) in targets)
         {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             cancellationToken.ThrowIfCancellationRequested();
             var updated = (object?[])values.Clone();
 
@@ -607,6 +753,11 @@ internal sealed partial class SqlPlanExecutor
         var references = new List<SqlParentReference>();
         var pendingUpdates = BuildConstraintUpdates(plan.Table,
             replacements.Select(row => (SqlRecordLocation.Pack(row.PageId, row.SlotIndex), row.OldValues, row.NewValues)), plan.Assignments);
+        foreach (var replacement in replacements)
+        {
+            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken, updates: pendingUpdates);
+        }
+
         ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken,
             references: references, updates: pendingUpdates);
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
@@ -622,22 +773,23 @@ internal sealed partial class SqlPlanExecutor
             }));
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
-        foreach (var replacement in replacements)
-        {
-            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken, updates: pendingUpdates);
-        }
-
         // Unique key locks after the row locks (the lock-ordering rule): both the
         // old key (its entry is tombstoned) and the new key (its entry is
         // inserted) of every unique index.
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
-            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
-            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
+            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes, cancellationToken);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes, cancellationToken);
         }
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
+
+        if (HasSequenceProjection(plan.Returning))
+        {
+            foreach (var replacement in replacements)
+            { returned!.Add(ProjectRow(replacement.NewValues, plan.Returning!, evaluator, cancellationToken)); }
+        }
 
         try
         {
@@ -663,14 +815,16 @@ internal sealed partial class SqlPlanExecutor
                 // Release every replaced unique mapping before inserting replacements,
                 // so statement-consistent key swaps do not fail on an old live entry.
                 applied = 0;
-                foreach (var (_, _, _, newValues, newVersion) in replacements)
+                foreach (var (pageId, slotIndex, _, newValues, newVersion) in replacements)
                 {
                     if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                     var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
+                    _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(pageId, slotIndex),
+                        SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
-                        statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
+                        statement, bracket, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                    if (returned is not null && !HasSequenceProjection(plan.Returning)) { returned.Add(ProjectRow(newValues, plan.Returning!, evaluator, cancellationToken)); }
                 }
 
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, replacements.Count)
@@ -714,6 +868,8 @@ internal sealed partial class SqlPlanExecutor
                     // manager's deadlock detection rather than on a global ordering.
                     await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken, cascade: true).ConfigureAwait(false);
 
+                    using var attempt = _catalog.HasDeleteActions(plan.Table)
+                        ? statement.Metrics.BeginReferentialAttempt(_definitions.StatementMemoryBudget) : null;
                     var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
                     var returningTargets = plan.Returning is null ? null : targets.Select(target =>
                         SqlRecordLocation.Pack(target.Location.PageId, target.Location.SlotIndex)).ToHashSet();
@@ -734,6 +890,14 @@ internal sealed partial class SqlPlanExecutor
                     var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
                     ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
                     await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
+                    if (HasSequenceProjection(plan.Returning))
+                    {
+                        foreach (var deletion in deletions.Values)
+                        {
+                            if (deletion.Table.ObjectId == plan.Table.ObjectId && returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
+                            { returned!.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken)); }
+                        }
+                    }
                     return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
                     {
                         applyStarted = true;
@@ -752,7 +916,7 @@ internal sealed partial class SqlPlanExecutor
                             TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                             await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
                                 SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                            if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
+                            if (returned is not null && !HasSequenceProjection(plan.Returning) && deletion.Table.ObjectId == plan.Table.ObjectId &&
                                 returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
                             {
                                 returned.Add(ProjectRow(deletion.Values, plan.Returning!, evaluator, cancellationToken));
@@ -769,10 +933,12 @@ internal sealed partial class SqlPlanExecutor
                         {
                             cancellationToken.ThrowIfCancellationRequested();
                             var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
+                            _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex),
+                                SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                             statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                             try
                             {
-                                await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
+                                await InsertIndexEntriesAsync(statement, bracket, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
                                     SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                             }
                             catch (IndexUniqueViolationException exception)
@@ -900,6 +1066,8 @@ internal sealed partial class SqlPlanExecutor
 
             var ordinals = _definitions.Get(table).GetKey(metadata.ColumnNames).Ordinals;
 
+            if (metadata.Predicate is not null && _definitions.GetIndexPredicate(table, metadata) is SqlBoundFailure unresolved)
+            { unresolved.Raise(); }
             result.Add(new SqlLiveIndex(metadata, index, ordinals));
         }
 
@@ -907,23 +1075,77 @@ internal sealed partial class SqlPlanExecutor
         return result;
     }
 
+    private bool MatchesIndex(SqlCatalogTable table, SqlCatalogIndex index, object?[] values, bool prepared = false,
+        CancellationToken cancellationToken = default, bool record = true)
+    {
+        if (index.Predicate is null) { return true; }
+        var indexes = _preparedIndexRows.GetValue(this, static _ => new());
+        if (!indexes.TryGetValue((table, index), out var membership))
+        {
+            if (prepared) { throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.PartialPredicateUnprepared); }
+            membership = (_definitions.GetIndexPredicate(table, index, cancellationToken),
+                ExecutionEvaluator(null, cancellationToken, containsLike: true), new());
+            indexes.Add((table, index), membership);
+        }
+        if (prepared)
+        {
+            return membership.Rows.TryGetValue(values, out bool found) ? found
+                : throw new SqlExecutionException(SqlExecutionException.InternalErrorCode, ErrorMessages.PartialPredicateUnprepared);
+        }
+        bool matches = membership.Evaluator.Matches(membership.Predicate, values);
+        if (record) { membership.Rows[values] = matches; }
+        return matches;
+    }
+
+    private void ForgetIndexRows(object?[][] rows)
+    {
+        if (!_preparedIndexRows.TryGetValue(this, out var indexes)) { return; }
+        foreach (var membership in indexes.Values)
+        { foreach (var values in rows) { membership.Rows.Remove(values); } }
+    }
+
+    private static bool PartialNullKey(SqlCatalogIndex index, int[] ordinals, object?[] values)
+    {
+        if (index.Predicate is null || !index.IsUnique) { return false; }
+        foreach (int ordinal in ordinals) { if (values[ordinal] is null) { return true; } }
+        return false;
+    }
+
     /// <summary>
     /// Builds an index key from a row's values: one order-preserving component
     /// per key column, transformed under the column's effective collation and
-    /// temporal identity (null components participate — nulls sort first and
-    /// count as key values).
+    /// temporal identity. Each component applies its declared direction and NULL
+    /// placement before concatenation.
     /// </summary>
-    private IndexKey BuildIndexKeyUnchecked(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    private IndexKey BuildIndexKeyUnchecked(SqlCatalogTable table, int[] keyOrdinals, object?[] values, IReadOnlyList<SqlCatalogIndexKeyOrder>? keyOrders = null)
     {
         var writer = new DatabaseKeyWriter();
 
-        foreach (int ordinal in keyOrdinals)
+        int[]? rented = null;
+        Span<int> ends = keyOrdinals.Length <= 64 ? stackalloc int[keyOrdinals.Length]
+            : (rented = ArrayPool<int>.Shared.Rent(keyOrdinals.Length));
+        byte[] encoded;
+        try
         {
-            SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
-                table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
-        }
+            for (int i = 0; i < keyOrdinals.Length; i++)
+            {
+                int ordinal = keyOrdinals[i];
+                SqlRowCodec.AppendKeyValue(writer, table.Columns[ordinal].Type.Type, values[ordinal],
+                    table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
+                ends[i] = writer.Length;
+            }
 
-        var key = IndexKey.From(writer);
+            encoded = writer.ToArray();
+            for (int i = 0, start = 0; i < keyOrdinals.Length; start = ends[i++])
+            {
+                SqlIndexKeyEncoding.Transform(encoded.AsSpan(start, ends[i] - start), keyOrders?[i] ?? default);
+            }
+        }
+        finally
+        {
+            if (rented is not null) { ArrayPool<int>.Shared.Return(rented); }
+        }
+        var key = new IndexKey(encoded);
         IndexKeyBuilt?.Invoke(key);
         return key;
     }
@@ -933,9 +1155,9 @@ internal sealed partial class SqlPlanExecutor
     /// Locking, lookups and tombstones use the unchecked builder so old values and
     /// discarded conflict proposals never fail a write-size check.
     /// </summary>
-    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values)
+    private IndexKey BuildIndexKey(SqlCatalogTable table, int[] keyOrdinals, object?[] values, IReadOnlyList<SqlCatalogIndexKeyOrder>? keyOrders = null)
     {
-        var key = BuildIndexKeyUnchecked(table, keyOrdinals, values);
+        var key = BuildIndexKeyUnchecked(table, keyOrdinals, values, keyOrders);
         if (key.Length > BTreeIndex.MaxKeyLength)
         {
             throw SqlEvaluationException.IndexKeyTooLarge($"{table.Schema}.{table.Name}", key.Length, BTreeIndex.MaxKeyLength);
@@ -946,13 +1168,14 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Collects lock hashes for existing values without validating or building nonunique keys.
     /// </summary>
-    private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    private void CollectUniqueKeyHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes, CancellationToken cancellationToken)
     {
         foreach (var liveIndex in indexes)
         {
-            if (liveIndex.Metadata.IsUnique)
+            if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
+            if (liveIndex.Metadata.IsUnique && !PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
             {
-                hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values).Hash());
+                hashes.Add(BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders).Hash());
             }
         }
     }
@@ -960,12 +1183,13 @@ internal sealed partial class SqlPlanExecutor
     /// <summary>
     /// Validates every index key before apply and collects the unique keys' lock hashes.
     /// </summary>
-    private void ValidateIndexKeysAndCollectUniqueHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes)
+    private void ValidateIndexKeysAndCollectUniqueHashes(List<SqlLiveIndex> indexes, SqlCatalogTable table, object?[] values, List<ulong> hashes, CancellationToken cancellationToken)
     {
         foreach (var liveIndex in indexes)
         {
-            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
-            if (liveIndex.Metadata.IsUnique) { hashes.Add(key.Hash()); }
+            if (!MatchesIndex(table, liveIndex.Metadata, values, cancellationToken: cancellationToken)) { continue; }
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders);
+            if (liveIndex.Metadata.IsUnique && !PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values)) { hashes.Add(key.Hash()); }
         }
     }
 
@@ -1007,6 +1231,7 @@ internal sealed partial class SqlPlanExecutor
     /// </summary>
     private async ValueTask InsertIndexEntriesAsync(
         SqlStatementContext statement,
+        StorageTransaction bracket,
         List<SqlLiveIndex> indexes,
         SqlCatalogTable table,
         object?[] values,
@@ -1015,10 +1240,19 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var liveIndex in indexes)
         {
-            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values);
+            if (!MatchesIndex(table, liveIndex.Metadata, values, prepared: true)) { continue; }
+            var key = BuildIndexKey(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders);
             try
             {
-                await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+                // SQL NULL keys are distinct within a partial unique index. The
+                // existing version insertion API preserves stamps and bypasses physical
+                // equality rejection; the same logical undo ledger still owns the entry.
+                if (PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
+                {
+                    await liveIndex.Index.InsertVersionAsync(bracket, key, entryReference, statement.Transaction.Sequence,
+                        TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                }
+                else { await liveIndex.Index.InsertAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false); }
             }
             catch (IndexUniqueViolationException)
             {
@@ -1044,10 +1278,42 @@ internal sealed partial class SqlPlanExecutor
     {
         foreach (var liveIndex in indexes)
         {
-            var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values);
-            await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            if (!MatchesIndex(table, liveIndex.Metadata, values, prepared: true)) { continue; }
+            var key = BuildIndexKeyUnchecked(table, liveIndex.KeyOrdinals, values, liveIndex.Metadata.KeyOrders);
+            if (PartialNullKey(liveIndex.Metadata, liveIndex.KeyOrdinals, values))
+            {
+                // Attach a borrowed handle to the same fixed root and shared tree latch,
+                // with no key-lock manager. Only NULL-containing partial keys use it.
+                // DeleteAsync still stamps the exact existing version atomically: no
+                // erase/reinsert gap is visible to an older cursor or snapshot.
+                var index = NullKeyDeleteIndex(liveIndex.Index, statement.Coordinator, table.ObjectId, liveIndex.Metadata.Name);
+                await index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false);
+            }
+            else { await liveIndex.Index.DeleteAsync(statement.Transaction, key, entryReference, cancellationToken).ConfigureAwait(false); }
             statement.Coordinator.VersionStore.RecordIndexEntryTombstoned(statement.Transaction.Sequence, liveIndex.Versions, key.Encoded, entryReference);
         }
+    }
+
+    private BTreeIndex NullKeyDeleteIndex(BTreeIndex canonical, TransactionCoordinator coordinator, ulong objectId, string name)
+        => _nullKeyDeleteIndexes.TryGetValue(canonical, out var found) ? found
+            : CacheNullKeyDeleteIndex(canonical, coordinator, objectId, name);
+
+    // Keep both closure factories off the ordinary tombstone path and the cache-hit path.
+    private BTreeIndex CacheNullKeyDeleteIndex(BTreeIndex canonical, TransactionCoordinator coordinator, ulong objectId, string name)
+        => _nullKeyDeleteIndexes.GetValue(canonical, _ => AttachNullKeyDeleteIndex(coordinator, objectId, name));
+
+    private BTreeIndex AttachNullKeyDeleteIndex(TransactionCoordinator coordinator, ulong objectId, string name)
+    {
+        var registration = _indexManager.ExportRegistrations().Single(value => value.ObjectId == objectId && value.Definition.Name == name);
+        var manager = BTreeIndexManager.Create(new BTreeIndexManagerOptions
+        {
+            Storage = _storage,
+            ExistingIndexes = [registration],
+            TransactionSource = context => coordinator.TryGetStorageTransaction(context, out var bracket) ? bracket
+                : throw new DatabaseException(string.Format(CultureInfo.CurrentCulture, ErrorMessages.ResolveStatementBracketDatabase, context.Sequence)),
+        });
+        manager.TryGetIndex(objectId, name, out var index);
+        return index!;
     }
 
     /// <summary>
@@ -1072,14 +1338,20 @@ internal sealed partial class SqlPlanExecutor
     /// deleted slot, so a short record is a live slot's, and it is damaged, not a reclaimed version
     /// to retry against (#1362).
     /// </exception>
-    private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self)
+    private void EnsureLatestVersion(SqlCatalogTable table, PageId pageId, int slotIndex, TransactionSequence self, bool codeSerialization = false)
     {
         var (_, deleter) = ReadVersionStamps(table, pageId, slotIndex);
 
         if (deleter != TransactionSequence.None && deleter != self)
         {
-            throw new TransactionAbortedException(
+            var conflict = new TransactionAbortedException(
                 string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorExecutorEnsureLatestVersionFailure, table.Schema, table.Name, deleter));
+            if (codeSerialization)
+            {
+                throw new DatabaseTransactionAbortedException(conflict.Message,
+                    [new Diagnostic { Code = SqlExecutionException.SerializationFailureCode, Severity = DiagnosticSeverity.Error, Message = conflict.Message }], conflict);
+            }
+            throw conflict;
         }
     }
 
@@ -1117,6 +1389,9 @@ internal sealed partial class SqlPlanExecutor
         var current = _storage.ReadRow(pageId, slotIndex);
         byte[] tombstoned = SqlRowCodec.WithDeleter(current.Span, statement.Transaction.Sequence);
         _storage.UpdateRow(bracket, pageId, slotIndex, tombstoned);
+        // A failed UPDATE followed by DELETE in the same transaction must not reuse
+        // the failed replacement link (the transaction stamp alone cannot distinguish it).
+        _storage.RowVersionLinks.Forget(SqlRecordLocation.Pack(pageId, slotIndex), statement.Transaction.Sequence);
         statement.Coordinator.VersionStore.RecordTombstoned(statement.Transaction.Sequence, pageId, slotIndex);
     }
 
@@ -1221,9 +1496,11 @@ internal sealed partial class SqlPlanExecutor
             throw new SqlExecutionException(SqlExecutionException.UndefinedTableCode, string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TableMissing, plan.Schema, plan.Name));
         }
 
+        var ownedGrants = await LockOwnedSequencesAsync([before], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.DdlLockOwner, LockResource.Object(before.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        VerifyOwnedSequences([before], ownedGrants, statement);
         SqlCatalogTable current = ReadCurrentTable(before);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "ALTER TABLE DROP COLUMN", statement);
         EnsureSameIdentity(before, current);
@@ -1245,10 +1522,16 @@ internal sealed partial class SqlPlanExecutor
             _definitions.Get(prepared, cancellationToken);
         }
 
+        var droppedIndexes = _catalog.GetIndexes(current.ObjectId).Where(index => index.Predicate is not null &&
+            (index.PredicateColumns.Contains(plan.ColumnName, StringComparer.OrdinalIgnoreCase) ||
+             index.ColumnNames.Contains(plan.ColumnName, StringComparer.OrdinalIgnoreCase))).ToArray();
+        foreach (var index in droppedIndexes) { EnsureCanChange(index.Owner, index.Name, index.OwningSchema, "ALTER TABLE DROP COLUMN dependency", statement); }
+
         // The authoritative step: the catalog checks the drop again under its own lock
         // and commits it. Bind the published version before the statement completes, as
         // every DDL does, so no later write parses its definitions.
         var updated = await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, cancellationToken) : _catalog.DropColumnAsync(plan.Schema, plan.Name, plan.ColumnName, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
+        await RemoveDroppedIndexesAsync(statement, droppedIndexes, cancellationToken: CancellationToken.None).ConfigureAwait(false);
         if (prepared is not null) { _definitions.Adopt(updated, prepared, CancellationToken.None); }
         else { _definitions.Get(updated, CancellationToken.None); }
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
@@ -1274,9 +1557,11 @@ internal sealed partial class SqlPlanExecutor
         // The DDL-vs-writer interlock: an Exclusive table lock waits for every
         // in-flight row writer (IntentExclusive holders) to finish before the
         // table is dropped — and blocks new ones until this transaction ends.
+        var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(
             statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+        VerifyOwnedSequences([table], ownedGrants, statement);
         SqlCatalogTable current = ReadCurrentTable(table);
         EnsureCanChange(current.Owner, current.Name, current.OwningSchema, "DROP TABLE", statement);
         EnsureSameIdentity(table, current);
@@ -1338,9 +1623,11 @@ internal sealed partial class SqlPlanExecutor
     {
         if (_catalog.TryGetTable(schema, name, out var table))
         {
+            var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
             await statement.Coordinator.LockManager.AcquireAsync(
                 statement.DdlLockOwner, LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
 
+            VerifyOwnedSequences([table], ownedGrants, statement);
             SqlCatalogTable current = ReadCurrentTable(table);
             EnsureCanChange(current.Owner, current.Name, current.OwningSchema, operation, statement);
             EnsureSameIdentity(table, current);
@@ -1393,16 +1680,23 @@ internal sealed partial class SqlPlanExecutor
             ordinals[i] = FindColumnOrdinal(plan.Table, plan.ColumnNames[i]);
         }
 
+        var metadata = new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
+            statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
+            statement.ProvisioningSchema, predicate: plan.PartialIndex?.Predicate,
+            predicateColumns: plan.PartialIndex?.PredicateColumns, predicateFunctionCalls: plan.PartialIndex?.PredicateFunctionCalls, keyOrders: plan.KeyOrders);
+        if (metadata.Predicate is not null) { _definitions.GetIndexPredicate(plan.Table, metadata, cancellationToken); }
         var definition = new IndexDefinition(plan.IndexName, IndexKind.BTree, plan.IsUnique);
         bool registered = false;
         int commitsBeforePublication = statement.Metrics.SelfCommits;
 
         try
         {
-            if (statement.ProvisioningProgress is not null)
+            // Table X precedes apply gate, index directory/tree latch and page pins.
+            // X remains held through publication and all cleanup; session disposal releases it.
+            if (statement.ProvisioningProgress is not null || metadata.Predicate is not null)
             {
                 await BuildDeferredIndexAsync(plan.Table, definition, ordinals, statement,
-                    () => registered = true, cancellationToken).ConfigureAwait(false);
+                    () => registered = true, cancellationToken, metadata).ConfigureAwait(false);
             }
             else
             {
@@ -1415,29 +1709,24 @@ internal sealed partial class SqlPlanExecutor
 
                     foreach (var (location, values, writer, deleter) in ScanVersions(plan.Table, cancellationToken))
                     {
-                        var key = BuildIndexKey(plan.Table, ordinals, values);
+                        if (!MatchesIndex(plan.Table, metadata, values)) { continue; }
+                        var key = BuildIndexKey(plan.Table, ordinals, values, metadata.KeyOrders);
 
                         await index.InsertVersionAsync(
                             bracket, key, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), writer, deleter, cancellationToken).ConfigureAwait(false);
                     }
-                    await ValidateBuiltUniqueIndexAsync(plan.Table, index, statement, cancellationToken, ordinals).ConfigureAwait(false);
+                    await ValidateBuiltUniqueIndexAsync(plan.Table, index, statement, cancellationToken, ordinals, metadata.Predicate is not null).ConfigureAwait(false);
                     return true;
                 }, durable: true, cancellationToken).ConfigureAwait(false);
             }
             // Metadata + registrations persist in ONE catalog self-commit: a crash
             // cannot leave a described index without a tree registration (or the
             // reverse). A crash before this write leaves only orphaned tree pages.
-            var registrations = PublishedRegistrations([new SqlCatalogIndex(plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique)]);
+            var registrations = PublishedRegistrations([metadata]);
             await SelfCommitAsync(statement, (statement.ScriptReceipt is null ? _catalog.CreateIndexAsync(
-                new SqlCatalogIndex(
-                    plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
-                    statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                    statement.ProvisioningSchema),
+                metadata,
                 registrations, cancellationToken) : _catalog.CreateIndexAsync(
-                new SqlCatalogIndex(
-                    plan.Table.ObjectId, plan.IndexName, plan.ColumnNames, plan.IsUnique,
-                    statement.ProvisioningSchema is null ? DatabaseObjectOwner.Adhoc : DatabaseObjectOwner.Schema,
-                    statement.ProvisioningSchema),
+                metadata,
                 registrations, statement.ScriptReceipt, cancellationToken))).ConfigureAwait(false);
         }
         catch
@@ -1617,7 +1906,7 @@ internal sealed partial class SqlPlanExecutor
         // a DML row-lock wait. DML drains this cursor before taking sorted row locks,
         // then sorted unique-key locks, then the apply gate and storage/index latches.
         // The finally below also disposes on predicate failure and cancellation.
-        var cursor = index.OpenCursor(snapshot, range, cancellationToken: cancellationToken);
+        var cursor = index.OpenCursor(snapshot, range, reverse: seek is SqlOrderedIndexPath { Reverse: true }, cancellationToken: cancellationToken);
 
         try
         {
@@ -1665,95 +1954,7 @@ internal sealed partial class SqlPlanExecutor
     /// non-0xFF byte.
     /// </summary>
     private IndexKeyRange BuildSeekRange(SqlCatalogTable table, SqlIndexSeekPath seek, int[] indexOrdinals)
-    {
-        var prefixWriter = new DatabaseKeyWriter();
-
-        for (int i = 0; i < seek.EqualityValues.Count; i++)
-        {
-            int ordinal = indexOrdinals[i];
-            SqlRowCodec.AppendKeyValue(prefixWriter, table.Columns[ordinal].Type.Type, seek.EqualityValues[i],
-                table.Columns[ordinal].Collation ?? _catalog.DefaultCollation);
-        }
-
-        byte[] prefix = prefixWriter.ToArray();
-
-        if (seek.Lower is null && seek.Upper is null)
-        {
-            return new IndexKeyRange(
-                new IndexKey(prefix),
-                PrefixSuccessor(prefix) is { } successor ? new IndexKey(successor) : null,
-                IsStartInclusive: true,
-                IsEndInclusive: false);
-        }
-
-        int rangeOrdinal = indexOrdinals[seek.EqualityValues.Count];
-        var rangeType = table.Columns[rangeOrdinal].Type.Type;
-        var rangeCollation = table.Columns[rangeOrdinal].Collation ?? _catalog.DefaultCollation;
-
-        IndexKey? start = seek.EqualityValues.Count > 0 ? new IndexKey(prefix) : null;
-        bool startInclusive = true;
-        IndexKey? end = seek.EqualityValues.Count > 0 && PrefixSuccessor(prefix) is { } prefixEnd ? new IndexKey(prefixEnd) : null;
-        bool endInclusive = false;
-
-        if (seek.Lower is { } lower)
-        {
-            byte[] lowerKey = AppendComponent(prefix, rangeType, lower.Value, rangeCollation);
-
-            // Exclusive lower: skip every composite key whose range component
-            // equals the bound — start at the bound's prefix successor.
-            start = lower.Inclusive
-                ? new IndexKey(lowerKey)
-                : PrefixSuccessor(lowerKey) is { } lowerSuccessor ? new IndexKey(lowerSuccessor) : null;
-            startInclusive = true;
-        }
-
-        if (seek.Upper is { } upper)
-        {
-            byte[] upperKey = AppendComponent(prefix, rangeType, upper.Value, rangeCollation);
-
-            // Inclusive upper: admit every composite key whose range component
-            // equals the bound — end (exclusively) at the bound's successor.
-            end = upper.Inclusive
-                ? PrefixSuccessor(upperKey) is { } upperSuccessor ? new IndexKey(upperSuccessor) : null
-                : new IndexKey(upperKey);
-            endInclusive = false;
-        }
-
-        return new IndexKeyRange(start, end, startInclusive, endInclusive);
-    }
-
-    private static byte[] AppendComponent(byte[] prefix, DatabaseType type, object? value, Collation collation)
-    {
-        var writer = new DatabaseKeyWriter();
-        SqlRowCodec.AppendKeyValue(writer, type, value, collation);
-        byte[] component = writer.ToArray();
-
-        var combined = new byte[prefix.Length + component.Length];
-        prefix.CopyTo(combined, 0);
-        component.CopyTo(combined, prefix.Length);
-        return combined;
-    }
-
-    /// <summary>
-    /// Computes the smallest byte string greater than every string with the
-    /// given prefix, or null when none exists (an all-0xFF prefix): increment
-    /// the last non-0xFF byte and truncate behind it.
-    /// </summary>
-    private static byte[]? PrefixSuccessor(byte[] prefix)
-    {
-        for (int i = prefix.Length - 1; i >= 0; i--)
-        {
-            if (prefix[i] != 0xFF)
-            {
-                var successor = new byte[i + 1];
-                prefix.AsSpan(0, i + 1).CopyTo(successor);
-                successor[i]++;
-                return successor;
-            }
-        }
-
-        return null;
-    }
+        => SqlIndexKeyEncoding.BuildSeekRange(table, seek, indexOrdinals, _catalog.DefaultCollation);
 
     /// <summary>
     /// Scans the table's visible row versions through the statement's snapshot:

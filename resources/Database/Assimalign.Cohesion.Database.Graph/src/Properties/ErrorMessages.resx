@@ -1,10 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
+  <data name="SchemaNameDuplicate" xml:space="preserve"><value>Schema name '{0}' already identifies an index or constraint in this database.</value></data>
+  <data name="SchemaExplicitTransaction" xml:space="preserve"><value>CG04025: Cohesion requires schema DDL to run outside an explicit transaction.</value></data>
+  <data name="SchemaDefinitionDuplicate" xml:space="preserve"><value>CG03003: The schema definition '{0}' already exists.</value></data>
+  <data name="SchemaStandaloneRequired" xml:space="preserve"><value>Schema DDL requires a standalone row request.</value></data>
+  <data name="SchemaNameMissing" xml:space="preserve"><value>{0} '{1}' does not exist in this database.</value></data>
+  <data name="ConstraintConflict" xml:space="preserve"><value>A constraint or property definition already constrains '{0}' with an incompatible type or the same constraint kind.</value></data>
+  <data name="ConstraintTypeUnsupported" xml:space="preserve"><value>Property type '{0}' is not supported by graph storage.</value></data>
+  <data name="ConstraintDataViolation" xml:space="preserve"><value>Existing data violates constraint '{0}' on property '{1}'.</value></data>
+  <data name="CatalogFormatUnsupported" xml:space="preserve"><value>Graph catalog format {0} is unsupported; this engine supports only format 2. Recreate the database.</value></data>
   <data name="CatalogIndexPropertyMismatch" xml:space="preserve"><value>Index '{0}' already identifies property '{1}'.</value></data>
   <data name="CatalogIdentityMismatch" xml:space="preserve"><value>Definition '{0}' already has a different identity.</value></data>
   <data name="CatalogIdentityReused" xml:space="preserve"><value>A definition identity cannot be reused or renamed. After a drop, wait for version purge before reusing the identity.</value></data>
   <data name="CatalogOwnerMissing" xml:space="preserve"><value>The owning graph definition does not exist.</value></data>
   <data name="CatalogSnapshotChanged" xml:space="preserve"><value>The graph catalog changed since this transaction's snapshot. Retry the transaction.</value></data>
+  <data name="MergeSnapshotConflict" xml:space="preserve"><value>The MERGE pattern decision changed after this transaction's snapshot. Retry the transaction.</value></data>
+  <data name="MergePropertyInvalid" xml:space="preserve"><value>MERGE property equalities require non-null finite scalar values.</value></data>
+  <data name="MergeBoundInvalid" xml:space="preserve"><value>A bound MERGE entity must be present and satisfy its pattern, endpoints and direction.</value></data>
+  <data name="MergeIdentityInvalid" xml:space="preserve"><value>A bound MERGE pattern requires valid entity identities, endpoint slots, labels, relationship types and non-null finite scalar property equalities.</value></data>
   <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
@@ -21,6 +34,9 @@
   <data name="ArithmeticOperands" xml:space="preserve"><value>Arithmetic requires numeric operands; string concatenation requires two strings.</value></data>
   <data name="LogicalNodeRequired" xml:space="preserve"><value>AND joins predicates in a GqlLogicalExpression; a GqlBinaryExpression holds a scalar operation.</value></data>
   <data name="MembershipListRequired" xml:space="preserve"><value>IN requires a list.</value></data>
+  <data name="IteratorNameRequired" xml:space="preserve">
+    <value>A list comprehension requires a nonempty iterator name.</value>
+  </data>
   <data name="UnsupportedStringPredicate" xml:space="preserve"><value>Unsupported string predicate.</value></data>
   <data name="ParameterCollision" xml:space="preserve"><value>Parameter '{0}' has more than one binding after removing its sigil.</value></data>
   <data name="ParameterUnbound" xml:space="preserve"><value>Parameter '{0}' is not bound.</value></data>
@@ -36,17 +52,42 @@
   <data name="MatchClausePathsRequired" xml:space="preserve"><value>A matching clause requires a non-null, non-empty path list.</value></data>
   <data name="MatchLimitExceeded" xml:space="preserve"><value>The query exceeded 100000 path matches.</value></data>
   <data name="InsertEndpointInvalid" xml:space="preserve"><value>An inserted endpoint must be a non-null node compatible with its existing binding.</value></data>
+  <data name="UnionOperandMalformed" xml:space="preserve"><value>A composite operand must be a complete read-only query returning columns.</value></data>
+  <data name="CompositeMixedUnion" xml:space="preserve"><value>A composite query cannot mix UNION and UNION ALL, including inside groups.</value></data>
+  <data name="CompositeReadOnly" xml:space="preserve"><value>Composite query operands must be read-only.</value></data>
+  <data name="CompositeColumns" xml:space="preserve"><value>Composite operands must return the same column names in the same order.</value></data>
+  <data name="CompositeShapes" xml:space="preserve"><value>Composite operands have incompatible result shapes.</value></data>
+  <data name="UnionMemoryExceeded" xml:space="preserve"><value>UNION duplicate elimination exceeds the statement memory budget.</value></data>
+  <data name="SetStateMemoryExceeded" xml:space="preserve"><value>EXCEPT or INTERSECT retained state exceeds the statement memory budget.</value></data>
   <data name="EntityListWireUnsupported" xml:space="preserve"><value>Lists of nodes or relationships cannot be returned over the wire yet. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="ExecuteScalarRequired" xml:space="preserve"><value>Execute accepts scalar projections. Use ExecutePaths with a read-only MATCH to return a node, relationship, or path.</value></data>
   <data name="CompositeLimit" xml:space="preserve"><value>Graph values are limited to depth 64, 65536 values and 16777216 encoded bytes.</value></data>
   <data name="CompositeMalformed" xml:space="preserve"><value>Malformed or oversized Graph composite value.</value></data>
   <data name="CompositeRequired" xml:space="preserve"><value>This operation requires a list or map with a valid index or field name.</value></data>
+  <data name="SliceBoundRequired" xml:space="preserve"><value>A list slice requires a start or end bound.</value></data>
+  <data name="ReductionListRequired" xml:space="preserve">
+    <value>Reduce and list predicates require a list or NULL source.</value>
+  </data>
+  <data name="ReductionBindingInvalid" xml:space="preserve">
+    <value>Reduce and list predicates require nonempty iterator names; a reduce accumulator must have a different name from its iterator.</value>
+  </data>
+  <data name="PatternComprehensionInvalid" xml:space="preserve"><value>A pattern comprehension requires a nonempty path, a projection without aggregates, and a planned correlated subplan.</value></data>
+  <data name="CorrelatedPlanRequired" xml:space="preserve"><value>A correlated pattern requires a nonempty, validated inner plan and its bound arguments.</value></data>
+  <data name="ReductionBodyInvalid" xml:space="preserve">
+    <value>Reduce and list predicate bodies require valid expressions without aggregates.</value>
+  </data>
+  <data name="ListOperationInvalid" xml:space="preserve">
+    <value>A list operation requires a list source and numeric slice bounds in the signed 32-bit range.</value>
+  </data>
   <data name="CompositeCapabilityRequired" xml:space="preserve"><value>Graph composite values require the graph.composite-values capability.</value></data>
   <data name="CaseInvalid" xml:space="preserve"><value>A CASE requires alternatives and COALESCE requires at least two operands.</value></data>
   <data name="PageValueInvalid" xml:space="preserve"><value>Paging requires a non-negative integer value in the signed 64-bit range.</value></data>
   <data name="PageExpressionRequired" xml:space="preserve"><value>Paging requires an unsigned integer literal or parameter.</value></data>
   <data name="DistinctSortNotProjected" xml:space="preserve"><value>ORDER BY with RETURN DISTINCT may only reference projected values.</value></data>
   <data name="AggregatePlacement" xml:space="preserve"><value>An aggregate requires a valid function and operand in RETURN; aggregates cannot be nested or used in WHERE or GROUP BY.</value></data>
+  <data name="IteratorAggregateInvalid" xml:space="preserve">
+    <value>An aggregate is not allowed in a list comprehension predicate or projection.</value>
+  </data>
   <data name="GroupByMismatch" xml:space="preserve"><value>GROUP BY must list exactly the non-aggregated RETURN expressions.</value></data>
   <data name="GroupedExpressionRequired" xml:space="preserve"><value>An expression after grouping may only reference grouping keys, aggregates declared in RETURN, or their ORDER BY aliases.</value></data>
   <data name="SortShapeInvalid" xml:space="preserve"><value>Ordering and paging require a RETURN with valid sort items.</value></data>
@@ -58,6 +99,8 @@
   <data name="PropertyScalarRequired" xml:space="preserve"><value>A graph property requires a scalar value.</value></data>
   <data name="StageUnsupported" xml:space="preserve"><value>Unsupported graph statement stage.</value></data>
   <data name="ForListRequired" xml:space="preserve"><value>FOR and UNWIND require a list value or NULL.</value></data>
+  <data name="CorrelatedBindingConflict" xml:space="preserve"><value>An outer binding is incompatible with its correlated pattern position.</value></data>
+  <data name="CorrelatedEntityRequired" xml:space="preserve"><value>A correlated pattern argument must be the required node, relationship or path, or NULL.</value></data>
   <data name="EntityBindingRequired" xml:space="preserve"><value>This operation requires a node or relationship binding.</value></data>
   <data name="InsertPropertyScope" xml:space="preserve">
     <value>Inserted property maps may reference only variables bound before this INSERT clause.</value>
@@ -145,7 +188,7 @@
   <data name="ShortestPathDirectionInvalid" xml:space="preserve"><value>A shortest-path search requires a defined graph direction.</value></data>
   <data name="GraphDatabaseTraverseAsyncDatabase" xml:space="preserve"><value>CG05001: Traversal depth and direction must be valid.</value></data>
   <data name="DatabaseRequireOwnSessionDatabase" xml:space="preserve"><value>CG07005: The session belongs to another database or engine.</value></data>
-  <data name="ValidatePropertiesAsyncDatabase" xml:space="preserve"><value>CG03003: Property '{0}' does not match the graph definition.</value></data>
+  <data name="ValidatePropertiesAsyncDatabase" xml:space="preserve"><value>Property '{0}' does not match the graph definition.</value></data>
   <data name="GraphDatabaseTypeOfDatabase" xml:space="preserve"><value>CG03003: Unsupported graph property value.</value></data>
   <data name="GraphDatabaseLockWriterAsyncDatabase" xml:space="preserve"><value>The graph operation's transaction ended while waiting for the writer lock.</value></data>
   <data name="EngineDropDatabaseCoreAsyncFailure" xml:space="preserve"><value>Database '{0}' does not exist.</value></data>
@@ -274,4 +317,16 @@
   <data name="ShortestPathNodeMissing" xml:space="preserve"><value>The selected shortest path contains a node absent from this statement snapshot.</value></data>
   <data name="ShortestPathRelationshipMissing" xml:space="preserve"><value>The selected shortest path contains a relationship absent from this statement snapshot.</value></data>
   <data name="SelectivePrefilterPeerBinding" xml:space="preserve"><value>Selected path prefilters cannot reference '{0}', which is introduced by another path in the same MATCH. Bind it in an earlier clause or in this path.</value></data>
+  <data name="MergeRelationshipDeclared" xml:space="preserve">
+    <value>A MERGE relationship variable must not already be declared.</value>
+  </data>
+  <data name="MergeNodeDeclared" xml:space="preserve">
+    <value>A repeated or already-bound MERGE node must be a bare variable without labels or properties.</value>
+  </data>
+  <data name="ReductionPlanningLimit" xml:space="preserve">
+    <value>Reduce shape analysis exceeded the fixed planning work limit.</value>
+  </data>
+  <data name="StatementKeyMissing" xml:space="preserve">
+    <value>An internal statement lookup could not find its expected key.</value>
+  </data>
 </root>

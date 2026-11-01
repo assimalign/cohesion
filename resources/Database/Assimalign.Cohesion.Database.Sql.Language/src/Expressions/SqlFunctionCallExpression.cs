@@ -12,6 +12,9 @@ using Assimalign.Cohesion.Database.Language;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Language.SqlFunctionCallExpression.DebugView))]
 public sealed class SqlFunctionCallExpression : SqlExpression
 {
+    // A filtered call alone pays for the optional payload. Ordinary calls retain
+    // the original object size and argument list, including their allocation budget.
+    private readonly object _arguments;
     /// <summary>
     /// Initializes a new <see cref="SqlFunctionCallExpression"/>.
     /// </summary>
@@ -21,23 +24,28 @@ public sealed class SqlFunctionCallExpression : SqlExpression
     /// <param name="quantifier">The set quantifier.</param>
     /// <param name="orderBy">The input ordering.</param>
     /// <param name="hasWithinGroupOrdering">Whether the ordering was written in WITHIN GROUP.</param>
+    /// <param name="filter">The optional aggregate FILTER condition.</param>
     internal SqlFunctionCallExpression(string functionName, IReadOnlyList<SqlExpression> arguments, Location? location,
         SqlSetQuantifier quantifier = SqlSetQuantifier.Default, IReadOnlyList<SqlOrderByColumn>? orderBy = null,
-        bool hasWithinGroupOrdering = false)
+        bool hasWithinGroupOrdering = false, SqlExpression? filter = null)
         : base(location)
     {
         FunctionName = functionName;
-        Arguments = arguments;
+        _arguments = filter is null ? arguments : new FilteredArguments(arguments, filter);
         Quantifier = quantifier;
         OrderBy = orderBy ?? [];
         HasWithinGroupOrdering = hasWithinGroupOrdering;
         int depth = DepthOf(arguments);
         foreach (var key in OrderBy) { depth = Math.Max(depth, DepthOf(key.Expression)); }
+        if (filter is not null) { depth = Math.Max(depth, DepthOf(filter)); }
         Depth = 1 + depth;
     }
 
     /// <summary>Gets the set quantifier written inside the call.</summary>
     public SqlSetQuantifier Quantifier { get; }
+
+    /// <summary>Gets the condition evaluated before this aggregate's input expressions.</summary>
+    public SqlExpression? Filter => (_arguments as FilteredArguments)?.Filter;
 
     /// <summary>Gets the ordered input keys, also used for LISTAGG WITHIN GROUP.</summary>
     public IReadOnlyList<SqlOrderByColumn> OrderBy { get; }
@@ -53,7 +61,9 @@ public sealed class SqlFunctionCallExpression : SqlExpression
     /// <summary>
     /// Gets the list of arguments passed to the function.
     /// </summary>
-    public IReadOnlyList<SqlExpression> Arguments { get; }
+    public IReadOnlyList<SqlExpression> Arguments => _arguments is FilteredArguments filtered ? filtered.Arguments : (IReadOnlyList<SqlExpression>)_arguments;
+
+    private sealed record FilteredArguments(IReadOnlyList<SqlExpression> Arguments, SqlExpression Filter);
 
     private sealed class DebugView
     {
@@ -65,6 +75,7 @@ public sealed class SqlFunctionCallExpression : SqlExpression
         }
 
         public global::Assimalign.Cohesion.Database.Sql.Language.SqlSetQuantifier Quantifier => _target.Quantifier;
+        public SqlExpression? Filter => _target.Filter;
         public global::System.Collections.Generic.IReadOnlyList<global::Assimalign.Cohesion.Database.Sql.Language.SqlOrderByColumn> OrderBy => _target.OrderBy;
         public bool HasWithinGroupOrdering => _target.HasWithinGroupOrdering;
         public string FunctionName => _target.FunctionName;

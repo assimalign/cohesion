@@ -16,6 +16,8 @@ internal sealed partial class SqlPlanExecutor
     private async Task<DatabaseResult> ExecuteJoinedUpdateAsync(SqlUpdatePlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         await PrepareJoinedUpdateIntentsAsync(plan, statement, cancellationToken).ConfigureAwait(false);
+        if (HasUpdateActions(plan.Table, plan.Assignments))
+        { return await ExecuteReferentialUpdateAsync(plan, statement, cancellationToken).ConfigureAwait(false); }
         var evaluator = ExecutionEvaluator(_subqueryValues, cancellationToken,
             Enumerable.Repeat(true, plan.Source!.Associations.Columns.Count).ToArray());
         var indexes = GetLiveIndexes(plan.Table, statement);
@@ -35,6 +37,7 @@ internal sealed partial class SqlPlanExecutor
         int[]? assigned = bound.Domains.Count > 0 ? plan.Assignments.Select(static assignment => assignment.Ordinal).ToArray() : null;
         foreach (var (pageId, slotIndex, values) in targets)
         {
+            using var rowScope = SqlSequenceExecution.Current?.BeginRow();
             cancellationToken.ThrowIfCancellationRequested();
             var updated = (object?[])values.Clone();
             var input = associations[SqlRecordLocation.Pack(pageId, slotIndex)].Values;
@@ -70,6 +73,11 @@ internal sealed partial class SqlPlanExecutor
         var references = new List<SqlParentReference>();
         var pendingUpdates = BuildConstraintUpdates(plan.Table,
             replacements.Select(row => (SqlRecordLocation.Pack(row.PageId, row.SlotIndex), row.OldValues, row.NewValues)), plan.Assignments);
+        foreach (var replacement in replacements)
+        {
+            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken, updates: pendingUpdates);
+        }
+
         ValidateRows(plan.Table, replacements.Select(row => row.NewValues).ToList(), statement, cancellationToken,
             references: references, updates: pendingUpdates);
         await AcquireParentRowLocksAsync(references, statement, cancellationToken).ConfigureAwait(false);
@@ -85,22 +93,25 @@ internal sealed partial class SqlPlanExecutor
             }));
         await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
-        foreach (var replacement in replacements)
-        {
-            ValidateParentUpdate(plan.Table, replacement.OldValues, replacement.NewValues, statement, cancellationToken, updates: pendingUpdates);
-        }
-
         // Unique key locks after the row locks (the lock-ordering rule): both the
         // old key (its entry is tombstoned) and the new key (its entry is
         // inserted) of every unique index.
         var uniqueKeyHashes = new List<ulong>();
         foreach (var (_, _, oldValues, newValues, _) in replacements)
         {
-            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes);
-            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes);
+            CollectUniqueKeyHashes(indexes, plan.Table, oldValues, uniqueKeyHashes, cancellationToken);
+            ValidateIndexKeysAndCollectUniqueHashes(indexes, plan.Table, newValues, uniqueKeyHashes, cancellationToken);
         }
 
         await AcquireUniqueKeyLocksAsync(statement, plan.Table.ObjectId, uniqueKeyHashes, cancellationToken).ConfigureAwait(false);
+        if (HasSequenceProjection(plan.Returning))
+        {
+            foreach (var replacement in replacements)
+            {
+                var output = DmlReturningRow(associations[SqlRecordLocation.Pack(replacement.PageId, replacement.SlotIndex)].Values, replacement.NewValues);
+                returned!.Add(ProjectRow(output, plan.Returning!, evaluator, cancellationToken));
+            }
+        }
 
         try
         {
@@ -131,10 +142,12 @@ internal sealed partial class SqlPlanExecutor
                 {
                     if ((applied++ & 63) == 0) { cancellationToken.ThrowIfCancellationRequested(); }
                     var location = _storage.InsertRow(bracket, plan.Table.ObjectId, newVersion);
+                    _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(pageId, slotIndex),
+                        SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                     await InsertIndexEntriesAsync(
-                        statement, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null)
+                        statement, bracket, indexes, plan.Table, newValues, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
+                    if (returned is not null && !HasSequenceProjection(plan.Returning))
                     {
                         var output = DmlReturningRow(
                             associations[SqlRecordLocation.Pack(pageId, slotIndex)].Values, newValues);
@@ -188,6 +201,8 @@ internal sealed partial class SqlPlanExecutor
                     // manager's deadlock detection rather than on a global ordering.
                     await AcquireRowWriteLocksAsync(statement, plan.Table.ObjectId, targets.ConvertAll(t => t.Location), cancellationToken, cascade: true).ConfigureAwait(false);
 
+                    using var attempt = _catalog.HasDeleteActions(plan.Table)
+                        ? statement.Metrics.BeginReferentialAttempt(_definitions.StatementMemoryBudget) : null;
                     var returned = plan.Returning is null ? null : new List<object?[]>(targets.Count);
                     var returningTargets = plan.Returning is null ? null : targets.Select(target =>
                         SqlRecordLocation.Pack(target.Location.PageId, target.Location.SlotIndex)).ToHashSet();
@@ -208,6 +223,14 @@ internal sealed partial class SqlPlanExecutor
                     var updates = await CollectReferentialUpdatesAsync(deletions, scannedTables, statement, cancellationToken).ConfigureAwait(false);
                     ValidateRestrictedDeletes(deletions, updates, statement, cancellationToken);
                     await LockConstraintDeletesAsync(deletions.Values, statement, cancellationToken).ConfigureAwait(false);
+                    if (HasSequenceProjection(plan.Returning))
+                    {
+                        foreach (var deletion in deletions.Values)
+                        {
+                            if (deletion.Table.ObjectId == plan.Table.ObjectId && returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
+                            { returned!.Add(ProjectRow(associations![SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)].Values, plan.Returning!, evaluator, cancellationToken)); }
+                        }
+                    }
                     return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
                     {
                         applyStarted = true;
@@ -227,7 +250,7 @@ internal sealed partial class SqlPlanExecutor
                             TombstoneVersion(statement, bracket, deletion.Location.PageId, deletion.Location.SlotIndex);
                             await TombstoneIndexEntriesAsync(statement, GetLiveIndexes(deletion.Table, statement), deletion.Table, deletion.Values,
                                 SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                            if (returned is not null && deletion.Table.ObjectId == plan.Table.ObjectId &&
+                            if (returned is not null && !HasSequenceProjection(plan.Returning) && deletion.Table.ObjectId == plan.Table.ObjectId &&
                                 returningTargets!.Contains(SqlRecordLocation.Pack(deletion.Location.PageId, deletion.Location.SlotIndex)))
                             {
                                 var output = associations![
@@ -246,10 +269,12 @@ internal sealed partial class SqlPlanExecutor
                         {
                             cancellationToken.ThrowIfCancellationRequested();
                             var location = _storage.InsertRow(bracket, update.Table.ObjectId, update.NewVersion);
+                            _storage.RowVersionLinks.Add(SqlRecordLocation.Pack(update.Location.PageId, update.Location.SlotIndex),
+                                SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence);
                             statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
                             try
                             {
-                                await InsertIndexEntriesAsync(statement, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
+                                await InsertIndexEntriesAsync(statement, bracket, GetLiveIndexes(update.Table, statement), update.Table, update.NewValues,
                                     SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
                             }
                             catch (IndexUniqueViolationException exception)

@@ -14,6 +14,8 @@ internal sealed partial class GraphPlanner
     internal static string DescribeOperator(object plan) => plan switch
     {
         GraphPlan => "Match",
+        GraphCompositePlan composite => composite.Operator.ToString(),
+        GraphCorrelatedSubplan => "CorrelatedSubplan",
         GraphStagePlan => "Stage",
         GqlSetStage => "Set",
         GqlRemoveStage => "Remove",
@@ -37,16 +39,32 @@ internal sealed partial class GraphPlanner
     internal DatabasePlanDescription Describe(GraphPlan plan, GraphPlanExecutor.ExpansionBudget? budget = null)
     {
         var nodes = new List<DatabasePlanNode>();
-        bool pipeline = plan.Stages.Any(item => item.Stage is GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
+        AppendDescription(plan, nodes, null, budget);
+        return DatabasePlanDescription.Create(nodes, plan.Warnings);
+    }
+
+    private void AppendDescription(GraphPlan plan, List<DatabasePlanNode> nodes, int? rootParent, GraphPlanExecutor.ExpansionBudget? budget)
+    {
+        int descriptionRoot = nodes.Count;
+        bool pipeline = plan.Stages.Any(item => item.Stage is GqlCompositeStage or GqlMergeStage or GqlLetStage or GqlForStage or GqlFilterStage or GqlNextStage or GqlSetStage or GqlRemoveStage or GqlReturnStage { IsWith: true }) ||
             plan.Stages.Select((item, i) => item.Stage is GqlMatchStage && plan.Stages.Take(i).Any(earlier => earlier.Stage is GqlInsertStage or GqlDeleteStage)).Any(value => value) ||
             plan.Stages.Count(item => item.Stage is GqlInsertStage or GqlDeleteStage) > 1;
         if (pipeline)
         {
-            Add("Pipeline", null, detail: $"stages={plan.Stages.Count}; writes={plan.Writes}");
+            Add("Pipeline", rootParent, detail: $"stages={plan.Stages.Count}; writes={plan.Writes}");
             foreach (var item in plan.Stages)
             {
+                if (item is GraphCompositeStagePlan composite)
+                { AppendCompositeDescription(composite.Composite, nodes, descriptionRoot, budget); continue; }
                 int stageRoot = nodes.Count;
-                Append(item.Plan, 0, StageName(item.Stage));
+                Append(item.Plan, descriptionRoot, StageName(item.Stage));
+                if (item.Stage is GqlMergeStage merge)
+                {
+                    int create = Add("OnCreate", stageRoot, detail: "create every unbound part; undirected creation follows source order");
+                    int match = Add("OnMatch", stageRoot, detail: "complete path; per input row; pattern lock and freshness check");
+                    foreach (var change in merge.OnCreate) { Add("UpdateEntity", create, change.Variable, detail: "set"); }
+                    foreach (var change in merge.OnMatch) { Add("UpdateEntity", match, change.Variable, detail: "set"); }
+                }
                 if (item.Stage is GqlSetStage set)
                 {
                     foreach (var change in set.Items)
@@ -64,8 +82,25 @@ internal sealed partial class GraphPlanner
                 }
             }
         }
-        else { Append(plan, null, null); }
-        return DatabasePlanDescription.Create(nodes, plan.Warnings);
+        else { Append(plan, rootParent, null); }
+        if (plan.FunctionBindings is GraphCorrelatedBindings correlated)
+        {
+            var pending = new Stack<(GqlExpression? Owner, int Parent)>();
+            pending.Push((null, descriptionRoot));
+            while (pending.TryPop(out var scope))
+            {
+                foreach (var pair in correlated.Subplans)
+                {
+                    if (!ReferenceEquals(pair.Value.Parent, scope.Owner)) { continue; }
+                    bool collect = pair.Key is GqlPatternComprehensionExpression;
+                    int apply = Add(collect ? "CollectApply" : correlated.Anti?.Contains(pair.Key) == true ? "AntiSemiApply" : "SemiApply", scope.Parent,
+                        detail: $"correlated={string.Join(",", pair.Value.CorrelatedVariables)}; first_match={!collect}; materialize={collect}");
+                    int inner = nodes.Count;
+                    Append(pair.Value.Plan, apply, "CorrelatedSubplan");
+                    pending.Push((pair.Key, inner));
+                }
+            }
+        }
 
         void Append(GraphPlan plan, int? parentId, string? rootName)
         {
@@ -193,6 +228,7 @@ internal sealed partial class GraphPlanner
         GqlForStage { IsUnwind: true } => "Unwind",
         GqlForStage => "For",
         GqlInsertStage => "Insert",
+        GqlMergeStage => "Merge",
         GqlSetStage => "Set",
         GqlRemoveStage => "Remove",
         GqlDeleteStage { Detach: true } => "DetachDelete",
@@ -206,6 +242,7 @@ internal sealed partial class GraphPlanner
     private static string Value(object? value) => value switch
     {
         null => "NULL",
+        GqlExpression expression => GraphProjectionText.Describe(expression),
         string text => "'" + text.Replace("'", "''", StringComparison.Ordinal) + "'",
         _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "NULL",
     };

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Database.Indexing;
 using Assimalign.Cohesion.Database.Sql.Catalog;
+using Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -17,7 +18,7 @@ internal sealed partial class SqlPlanExecutor
     // Physical compaction and ALTER TYPE share this copier and publication path.
     internal async Task RewriteTableAsync(SqlCatalogTable table, SqlStatementContext statement,
         CancellationToken cancellationToken, Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe = null,
-        Func<object?[], object?[]>? transform = null, Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false)
+        Func<object?[], object?[]>? transform = null, Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false, IReadOnlyList<SqlCatalogIndex>? additionalIndexes = null)
     {
         // Lock/latch order: fail-fast schema admission -> old table X (before queueing)
         // -> fail-fast metadata admission (on the worker) -> reserved table X
@@ -29,8 +30,10 @@ internal sealed partial class SqlPlanExecutor
         // and logical transaction pin outlive all copying, directory cleanup and undo.
         // A source scan may retain a source-page pin (no latch) before target apply;
         // source and target owners are disjoint and reclamation waits for these pins.
+        var ownedGrants = await LockOwnedSequencesAsync([table], statement, cancellationToken).ConfigureAwait(false);
         await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
             LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+        VerifyOwnedSequences([table], ownedGrants, statement);
         // Exact description identity also refuses a metadata edit with unchanged owner id.
         if (!_catalog.TryGetTable(table.Schema, table.Name, out var current) || !ReferenceEquals(current, table))
         {
@@ -40,13 +43,13 @@ internal sealed partial class SqlPlanExecutor
         describe ??= static (previous, id) => new SqlCatalogTable(id, previous.Schema, previous.Name,
             previous.Columns, previous.PrimaryKeyColumns, previous.Owner, previous.OwningSchema, previous.Constraints);
         await ReplaceTableStorageAsync([table], null, describe, transform, copyRows: true, restartIdentity: false,
-            SqlObjectIdentity.Table(table.Schema, table.Name), statement, cancellationToken, validate, definitionChange).ConfigureAwait(false);
+            SqlObjectIdentity.Table(table.Schema, table.Name), statement, cancellationToken, validate, definitionChange, additionalIndexes).ConfigureAwait(false);
     }
 
     private async Task ReplaceTableStorageAsync(SqlCatalogTable[] previous, IReadOnlyList<SqlCatalogTable>? named,
         Func<SqlCatalogTable, ulong, SqlCatalogTable>? describe, Func<object?[], object?[]>? transform,
         bool copyRows, bool restartIdentity, string actualObject, SqlStatementContext statement, CancellationToken cancellationToken,
-        Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false)
+        Action<SqlCatalogTable, SqlCatalogIndex[]>? validate = null, bool definitionChange = false, IReadOnlyList<SqlCatalogIndex>? additionalIndexes = null)
     {
         var oldIndexes = previous.SelectMany(table => _catalog.GetIndexes(table.ObjectId)).ToArray();
         var retiredIndexes = new Dictionary<SqlCatalogIndex, BTreeIndex>(ReferenceEqualityComparer.Instance);
@@ -58,7 +61,9 @@ internal sealed partial class SqlPlanExecutor
         var mapping = previous.Select((table, index) => (table.ObjectId, Replacement: replacements[index]))
             .ToDictionary(pair => pair.ObjectId, pair => pair.Replacement);
         var indexes = oldIndexes.Select(index => new SqlCatalogIndex(mapping[index.TableObjectId].ObjectId,
-            index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey)).ToArray();
+            index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders)).ToArray();
+        if (additionalIndexes is { Count: > 0 })
+        { indexes = indexes.Concat(additionalIndexes.Select(index => new SqlCatalogIndex(replacements[0].ObjectId, index.Name, index.ColumnNames, index.IsUnique, index.Owner, index.OwningSchema, index.IsPrimaryKey, index.Predicate, index.PredicateColumns, index.PredicateFunctionCalls, index.KeyOrders))).ToArray(); }
         var created = new List<SqlCatalogIndex>();
         bool published = false;
         Exception? operationFailure = null;
@@ -68,6 +73,15 @@ internal sealed partial class SqlPlanExecutor
             else { TruncateReserved?.Invoke(); }
             foreach (var table in replacements)
             {
+                // Newly reserved sequences are unreachable through either SQL name/id
+                // lookup. Taking their X grant here cannot wait for another session.
+                foreach (var column in copyRows ? table.Columns.Where(column => column.Identity is not null && previous[0].FindColumn(column.Name)?.Identity is null) : Enumerable.Empty<SqlCatalogColumn>())
+                {
+                    var sequence = _catalog.IdentitySequence(table.ObjectId, column.Name);
+                    await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                        LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+                    SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
+                }
                 await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                     LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
                 _definitions.Get(table, cancellationToken);
@@ -154,7 +168,8 @@ internal sealed partial class SqlPlanExecutor
         var indexes = descriptions.Select(description =>
         {
             _indexManager.TryGetIndex(description.TableObjectId, description.Name, out var index);
-            return (Index: index, Ordinals: description.ColumnNames.Select(name => FindColumnOrdinal(replacement, name)).ToArray());
+            if (description.Predicate is not null) { _definitions.GetIndexPredicate(replacement, description, cancellationToken); }
+            return (Metadata: description, Index: index, Ordinals: description.ColumnNames.Select(name => FindColumnOrdinal(replacement, name)).ToArray());
         }).ToArray();
         var snapshot = ConstraintCurrentSnapshot(statement);
         long processed = 0;
@@ -164,44 +179,66 @@ internal sealed partial class SqlPlanExecutor
         // writer stamps. A prepared owner's intent remains durable until publication.
         // The scan retains one source-page pin across chunks, with no page latch.
         // Target writes use a different owner; decoded-row retention is bounded to 64.
-        foreach (var batch in ScanVersions(previous, cancellationToken)
+        using var scan = ScanVersions(previous, cancellationToken, statement.Metrics)
             .Where(version => snapshot.IsVisible(version.Writer) &&
-                (version.Deleter == TransactionSequence.None || !snapshot.IsVisible(version.Deleter))).Chunk(64))
+                (version.Deleter == TransactionSequence.None || !snapshot.IsVisible(version.Deleter))).GetEnumerator();
+        while (scan.MoveNext())
         {
+            using var memory = new SqlDmlMemory(statement.Metrics, _definitions.StatementMemoryBudget);
+            // Tuple slots and conversion-array references are retained together. Charge
+            // before growing the chunk, then charge each decoded row before retaining it.
+            memory.Reserve(80L + 64L * 48);
+            var batch = new List<((PageId PageId, int SlotIndex) Location, object?[] Values,
+                TransactionSequence Writer, TransactionSequence Deleter)>(64);
+            do
+            {
+                memory.Retain(scan.Current.Values);
+                batch.Add(scan.Current);
+            } while (batch.Count < 64 && scan.MoveNext());
             // User callbacks and constraint evaluation must not hold the database-wide
             // apply gate. Prepare this bounded chunk as ordinary DML does, then apply
             // storage/index mutations only. The source table X keeps its rows stable.
-            var converted = new object?[batch.Length][];
-            for (int i = 0; i < batch.Length; i++)
+            var converted = new object?[batch.Count][];
+            for (int i = 0; i < batch.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 converted[i] = transform is null ? batch[i].Values : transform(batch[i].Values);
+                memory.Retain(converted[i]);
+                foreach (var index in indexes) { MatchesIndex(replacement, index.Metadata, converted[i], cancellationToken: cancellationToken); }
             }
             await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
-                for (int i = 0; i < batch.Length; i++)
+                for (int i = 0; i < batch.Count; i++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var version = batch[i];
                     var values = converted[i];
                     byte[] record = SqlRowCodec.Encode(replacement, values, version.Writer);
-                    var location = _storage.InsertRow(bracket, replacement.ObjectId, record);
-                    foreach (var index in indexes)
+                    long recordBytes = (24L + record.Length + 7) & ~7L;
+                    memory.Reserve(recordBytes);
+                    try
                     {
-                        await index.Index.InsertVersionAsync(bracket, BuildIndexKey(replacement, index.Ordinals, values),
-                            SqlRecordLocation.Pack(location.PageId, location.SlotIndex), version.Writer,
-                            TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                        var location = _storage.InsertRow(bracket, replacement.ObjectId, record);
+                        foreach (var index in indexes)
+                        {
+                            if (!MatchesIndex(replacement, index.Metadata, values, prepared: true)) { continue; }
+                            await index.Index.InsertVersionAsync(bracket, BuildIndexKey(replacement, index.Ordinals, values, index.Metadata.KeyOrders),
+                                SqlRecordLocation.Pack(location.PageId, location.SlotIndex), version.Writer,
+                                TransactionSequence.None, cancellationToken).ConfigureAwait(false);
+                        }
                     }
+                    finally { memory.Release(recordBytes); }
                 }
                 return true;
             }, durable: true, cancellationToken).ConfigureAwait(false);
-            processed += batch.Length;
+            ForgetIndexRows(converted);
+            processed += batch.Count;
             statement.ProvisioningProgress?.Invoke(processed, null);
             RewriteStage?.Invoke("Copied", processed);
         }
         foreach (var index in indexes)
         {
-            await ValidateBuiltUniqueIndexAsync(replacement, index.Index, statement, cancellationToken).ConfigureAwait(false);
+            await ValidateBuiltUniqueIndexAsync(replacement, index.Index, statement, cancellationToken, index.Metadata.Predicate is null ? null : index.Ordinals, index.Metadata.Predicate is not null).ConfigureAwait(false);
         }
         statement.ProvisioningProgress?.Invoke(processed, processed);
     }

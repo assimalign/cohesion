@@ -4,7 +4,7 @@ Shared Sql wire contracts for the remote client and engine. The package owns 5 e
 
 See [DESIGN.md](DESIGN.md) for ownership and dependency boundaries.
 
-SQL and Graph negotiate transaction-status: each Execute ends with a Ready I/T/E status, enabling rollback before pool reuse. Existing identifiers and protocol 2.1 are retained (#1540).
+SQL and Graph negotiate transaction-status: each Execute ends with a two-byte Ready I/T/E plus retained-session-state status, enabling rollback before pool reuse. Existing identifiers and protocol 2.1 are retained (#1540).
 
 ## Sql diagnostic conventions (#1470)
 

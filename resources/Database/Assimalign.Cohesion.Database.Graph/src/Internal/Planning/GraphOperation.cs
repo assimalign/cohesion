@@ -1,9 +1,10 @@
 using System;
-using System.Collections.Generic;
 using System.Collections.Frozen;
-using Assimalign.Cohesion.Database.Graph.Language;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+
+using Assimalign.Cohesion.Database.Graph.Language;
 using Assimalign.Cohesion.Database.Transactions;
 
 namespace Assimalign.Cohesion.Database.Graph.Internal;
@@ -20,13 +21,59 @@ internal sealed class GraphOperation
     internal IReadOnlyDictionary<GqlNamedFunctionCallExpression, GraphFunction> FunctionBindings { get; set; } = FrozenDictionary<GqlNamedFunctionCallExpression, GraphFunction>.Empty;
     internal CancellationToken FunctionCancellation { get; set; }
     internal GraphPlanExecutor.ExpansionBudget? QueryBudget { get; set; }
-    private readonly GraphDatabase _database;
+    // Reuse the session reference so flow-owned MERGE cleanup adds no ordinary operation size.
+    private GraphDatabase Database => _session.Database;
     private readonly GraphDatabaseSession _session;
     private readonly GraphDatabaseTransaction? _transaction;
     private readonly TransactionContext _context;
     private readonly SemaphoreSlim _completionGate = new(1, 1);
     private TransactionContext? _snapshotPin;
     private int _finished;
+    private static readonly object _mergeEnded = new();
+    private object? _merge;
+    private GraphMergeStatement? _mergeLease;
+    internal GraphMergeStatement Merge
+    {
+        get
+        {
+            var current = Volatile.Read(ref _merge);
+            if (ReferenceEquals(current, _mergeEnded)) { throw Ended(); }
+            if (current is GraphMergeStatement existing) { return existing; }
+            var created = new GraphMergeStatement(Database, this, _transaction?.MergeLocks);
+            current = Interlocked.CompareExchange(ref _merge, created, null);
+            if (current is null) { _mergeLease = created; return created; }
+            created.Dispose();
+            return current as GraphMergeStatement ?? throw Ended();
+        }
+    }
+
+    // Query memory is flow-owned. Teardown fences locks; the running probe releases its
+    // memory lease on its own flow, after it has stopped accounting work and memory.
+    internal void ReleaseMerge() => _mergeLease?.Dispose();
+    internal TransactionSnapshot? MergeReadSnapshot => _mergeLease?.ReadSnapshot;
+    internal TransactionSnapshot? OverrideMergeReadSnapshot(TransactionSnapshot? snapshot)
+    {
+        // The running flow owns this lease even after teardown fences the tracker. It must
+        // still restore its read override in finally without trying to reopen ended state.
+        var statement = _mergeLease ?? Merge;
+        var previous = statement.ReadSnapshot;
+        statement.ReadSnapshot = snapshot;
+        return previous;
+    }
+    internal static DatabaseException Ended() => DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);
+    internal bool MergeHasEnded => _session.State == SessionState.Closed ||
+        Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0;
+
+    internal void EnsureMergeActive()
+    {
+        Database.EnsureNotDisposed();
+        // Session close precedes operation teardown. It already ends this statement even
+        // while rollback or snapshot-pin release has not yet published the ended sentinel.
+        if (MergeHasEnded)
+        { throw Ended(); }
+        try { EnsureActive(); }
+        catch (DatabaseException) when (_session.State == SessionState.Closed) { throw Ended(); }
+    }
 
     /// <summary>Initializes a new instance of the <see cref="GraphOperation"/> class.</summary>
     /// <param name="database">The database the statement runs on.</param>
@@ -36,7 +83,6 @@ internal sealed class GraphOperation
     /// <param name="transactionStart">The UTC instant captured before the transaction began.</param>
     internal GraphOperation(GraphDatabase database, GraphDatabaseSession session, TransactionContext context, GraphDatabaseTransaction? transaction, DateTimeOffset transactionStart)
     {
-        _database = database;
         _session = session;
         Context = context;
         _context = context;
@@ -47,7 +93,7 @@ internal sealed class GraphOperation
 
     internal TransactionContext Context { get; private set; }
     internal DateTimeOffset TransactionStart { get; }
-    internal GraphEvaluationContext EvaluationContext => new(TransactionStart, _database, this);
+    internal GraphEvaluationContext EvaluationContext => new(TransactionStart, Database, this);
     internal GraphUpdates Updates { get; }
 
     internal async ValueTask InitializeAsync(CancellationToken cancellationToken)
@@ -57,28 +103,32 @@ internal sealed class GraphOperation
             // Capture the pin before the statement snapshot. An earlier writer
             // may commit while the operation is open, so the refreshing transaction
             // context alone cannot preserve the statement's original horizon.
-            _snapshotPin = await _database.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
+            _snapshotPin = await Database.Coordinator.BeginSnapshotPinAsync(cancellationToken).ConfigureAwait(false);
             Context = _context.PinStatementSnapshot();
         }
     }
 
     internal ValueTask RefreshWriterSnapshotAsync(CancellationToken cancellationToken)
     {
-        if (_context.IsolationLevel == IsolationLevel.ReadCommitted)
+        if (_context.IsolationLevel == IsolationLevel.ReadCommitted && (Volatile.Read(ref _merge) as GraphMergeStatement)?.SnapshotCaptured != true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             // The existing pin's horizon is at or below the refreshed view's,
             // so it still protects every version this statement can read.
             Context = _context.PinStatementSnapshot();
+            Updates.RefreshReadSnapshot();
         }
         return ValueTask.CompletedTask;
     }
 
     internal void EnsureActive()
     {
-        _database.EnsureNotDisposed();
-        _database.ThrowIfOffline();
-        _session.ThrowIfNotOpen();
+        Database.EnsureNotDisposed();
+        if (_mergeLease is not null && _session.State == SessionState.Closed) { throw Ended(); }
+        Database.ThrowIfOffline();
+        try { _session.ThrowIfNotOpen(); }
+        catch (DatabaseException) when (_mergeLease is not null && _session.State == SessionState.Closed)
+        { throw Ended(); }
         if (Context.State != TransactionState.Active || Volatile.Read(ref _finished) != 0)
         {
             throw DatabaseException.CreateGraphFailure("CK04002", ErrorMessages.GraphOperationEnsureActiveDatabase);
@@ -96,7 +146,7 @@ internal sealed class GraphOperation
             {
                 if (_transaction is null)
                 {
-                    await _database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
+                    await Database.Coordinator.CommitAsync(_context).ConfigureAwait(false);
                     committed = true;
                 }
             }
@@ -107,7 +157,7 @@ internal sealed class GraphOperation
                 {
                     // The commit is durable. Cleanup cannot turn it into a failed statement
                     // that a caller might retry and apply twice.
-                    GraphDatabaseEventSource.Log.StatementCleanupFailed(_database.Name, error);
+                    GraphDatabaseEventSource.Log.StatementCleanupFailed(Database.Name, error);
                 }
             }
         }
@@ -133,11 +183,11 @@ internal sealed class GraphOperation
                     // and refuses later statements until the caller rolls back (#1188).
                     await _transaction.AbortForFailedStatementAsync(cause).ConfigureAwait(false);
                 }
-                else if (Context.State == TransactionState.Active && !_database.IsOffline)
+                else if (Context.State == TransactionState.Active && !Database.IsOffline)
                 {
                     // An offline database undoes nothing (#1243): the reopen's recovery aborts
                     // the operation's transaction.
-                    await _database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
+                    await Database.Coordinator.RollbackAsync(_context).ConfigureAwait(false);
                 }
             }
             finally
@@ -151,7 +201,11 @@ internal sealed class GraphOperation
     private async ValueTask FinishAsync()
     {
         try { await ReleaseSnapshotPinAsync().ConfigureAwait(false); }
-        finally { Finish(); }
+        finally
+        {
+            try { (Interlocked.Exchange(ref _merge, _mergeEnded) as GraphMergeStatement)?.EndLocks(); }
+            finally { Finish(); }
+        }
     }
 
     private void Finish()
@@ -168,10 +222,10 @@ internal sealed class GraphOperation
     private async ValueTask ReleaseSnapshotPinAsync()
     {
         var pin = Interlocked.Exchange(ref _snapshotPin, null);
-        if (pin?.State == TransactionState.Active && !_database.IsOffline)
+        if (pin?.State == TransactionState.Active && !Database.IsOffline)
         {
-            _database.BeforeSnapshotPinRelease?.Invoke(pin);
-            await _database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
+            Database.BeforeSnapshotPinRelease?.Invoke(pin);
+            await Database.Coordinator.RollbackAsync(pin).ConfigureAwait(false);
         }
     }
 

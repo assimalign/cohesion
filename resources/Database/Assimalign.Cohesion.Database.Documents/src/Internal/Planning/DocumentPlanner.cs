@@ -33,7 +33,7 @@ internal sealed partial class DocumentPlanner
     /// <param name="snapshot">The transaction snapshot at which catalog metadata is read.</param>
     /// <param name="parameters">The OQL parameter values, or <see langword="null"/> when the statement supplies none.</param>
     /// <param name="cancellationToken">The statement cancellation token, including constant evaluation.</param>
-    /// <param name="estimateSinglePath">Whether a description also needs estimates for an uncontested input.</param>
+    /// <param name="estimateSinglePath">Whether description planning includes uncontested estimates and ordering eligibility.</param>
     public DocumentPlanner(DocumentCatalog catalog, TransactionSnapshot snapshot, IReadOnlyDictionary<string, object?>? parameters,
         CancellationToken cancellationToken = default, bool estimateSinglePath = false, DocumentFunctionCatalog? functions = null)
     {
@@ -45,15 +45,25 @@ internal sealed partial class DocumentPlanner
         _estimateSinglePath = estimateSinglePath;
     }
 
-    internal DocumentStatementPlan Plan(OqlExpression expression) => expression switch
+    internal DocumentStatementPlan Plan(OqlExpression expression)
     {
-        OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName),
-        OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName),
+        if (HasSubquery(expression, _cancellationToken)) { return PlanNested(expression); }
+        _cancellationToken.ThrowIfCancellationRequested();
+        return PlanCore(expression);
+    }
+
+    private DocumentStatementPlan PlanCore(OqlExpression expression,
+        IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null, IReadOnlySet<string>? outerNames = null) => expression switch
+    {
+        OqlInsertExpression insert => PlanWrite(insert, insert.Collection, insert.Values, insert.Select, insert.KeyName, insert.ValueName, nested),
+        OqlUpsertExpression upsert => PlanWrite(upsert, upsert.Collection, upsert.Values, upsert.Select, upsert.KeyName, upsert.ValueName, nested),
         OqlDeleteExpression delete => PlanDelete(delete),
         OqlUpdateExpression update => PlanUpdate(update),
+        OqlSelectExpression select when select.Bindings != select.Unnest => PlanJoins(select, nested, outerNames),
+        OqlSelectExpression { Source: not null } select => PlanFrom(select, nested, outerNames),
         OqlSelectExpression select when DocumentSystemCollections.Find(select.Collection) is string name =>
-            new DocumentSystemCollectionPlan(CreateLogicalPlan(select, _cancellationToken, _parameters, _functions), name),
-        OqlSelectExpression select => Plan(select),
+            new DocumentSystemCollectionPlan(CreateLogicalPlan(select, _cancellationToken, _parameters, _functions, outerNames), name),
+        OqlSelectExpression select => Plan(select, outerNames),
         OqlCreateCollectionExpression createCollection => PlanCreateCollection(createCollection),
         OqlDropCollectionExpression dropCollection => PlanDropCollection(dropCollection),
         OqlCreateIndexExpression createIndex => PlanCreateIndex(createIndex),
@@ -61,12 +71,28 @@ internal sealed partial class DocumentPlanner
         _ => throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerPlanFailure, expression.Location),
     };
 
-    internal DocumentPlan Plan(OqlSelectExpression query)
+    internal DocumentPlan Plan(OqlSelectExpression query, IReadOnlySet<string>? outerNames = null)
     {
-        var logical = CreateLogicalPlan(query, _cancellationToken, _parameters, _functions);
+        var logical = CreateLogicalPlan(query, _cancellationToken, _parameters, _functions, outerNames);
         var collection = ResolveCollection(query.Collection, query.Location);
-        return new DocumentPlan(logical, collection, ChooseAccess(query.Predicate, query.Alias, _catalog.GetIndexes(collection.Id, _snapshot),
-            logical.UnnestVariables, query.Unnest));
+        var indexes = _catalog.GetIndexes(collection.Id, _snapshot);
+        var nonSourceNames = NonSourceNames(logical.UnnestVariables, outerNames);
+        var access = ChooseAccess(query.Predicate, query.Alias, indexes, out var accessCandidates, nonSourceNames, query.Unnest, outerNames);
+        if (logical.Query.OrderBy.Count > 0 && (_estimateSinglePath || indexes.Count > 0 &&
+            access is not DocumentIntersectionPath && !logical.IsGrouped && !query.IsDistinct && query.Bindings.Count == 0 &&
+            logical.Query.OrderBy.All(order => order.Expression is OqlPathExpression)))
+        {
+            access = AnalyzeOrdering(logical, access, indexes, accessCandidates, nonSourceNames);
+            if (access is DocumentOrderingPath { Consumed: not null })
+            {
+                // Type inference observes every match before paging. Only fixed result
+                // types can stop content reads without changing the result header.
+                logical = logical with { CanStopEarly = logical.Projections.All(projection =>
+                    projection.Type != DatabaseType.Null ||
+                    projection.Expression is OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression) };
+            }
+        }
+        return new DocumentPlan(logical, collection, access);
     }
 
     private static DocumentCreateCollectionPlan PlanCreateCollection(OqlCreateCollectionExpression create)
@@ -119,7 +145,7 @@ internal sealed partial class DocumentPlanner
         { throw new DocumentPlanningException("CD03025", ErrorMessages.ArrayIndexDefinitionInvalid, create.Location); }
         if (keys.Distinct().Count() != keys.Length)
         { throw new DocumentPlanningException("CD05001", ErrorMessages.IndexPathsDuplicate, create.Location); }
-        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, keys, create.IsUnique, create.IfNotExists);
+        return new DocumentCreateIndexPlan(ResolveCollection(create.Collection, create.Location), create.IndexName, keys, create.IsUnique, create.IfNotExists, create.IncludeMissing);
     }
 
     private DocumentDropIndexPlan PlanDropIndex(OqlDropIndexExpression drop)
@@ -145,28 +171,28 @@ internal sealed partial class DocumentPlanner
     }
 
     internal static DocumentLogicalPlan CreateLogicalPlan(OqlSelectExpression query, CancellationToken cancellationToken = default,
-        IReadOnlyDictionary<string, object?>? parameters = null, DocumentFunctionCatalog? functions = null)
+        IReadOnlyDictionary<string, object?>? parameters = null, DocumentFunctionCatalog? functions = null, IReadOnlySet<string>? outerNames = null)
     {
         functions ??= DocumentFunctionCatalog.Standard;
         var evaluator = new DocumentExpressionEvaluator(query.Alias, parameters, cancellationToken);
         long? limit = evaluator.PagingCount(query.Limit, "LIMIT");
         long offset = evaluator.PagingCount(query.Offset, "OFFSET") ?? 0;
-        var variables = query.Unnest.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { query.Alias ?? query.Collection };
-        foreach (var binding in query.Unnest)
+        var variables = query.Bindings.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { query.Alias ?? query.Collection };
+        foreach (var binding in query.Bindings)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.IsNullOrEmpty(binding.Variable))
             { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, binding.Location); }
             if (!variables!.Add(binding.Variable))
             { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameDuplicate, binding.Location); }
-            Validate(binding.Collection, allowAggregate: false, functions: functions);
-            ValidateMetadata(binding.Collection, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
+            Validate(binding.Expression, allowAggregate: false, functions: functions);
+            ValidateQueryMetadata(binding.Expression, query, outerNames, binding);
         }
         foreach (var expression in query.Projections.Select(p => p.Expression).Concat(query.GroupBy)
             .Concat(query.OrderBy.Select(o => o.Expression)).Concat(new[] { query.Predicate, query.Having }).OfType<OqlExpression>())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ValidateMetadata(expression, query.Alias, DocumentSystemCollections.Find(query.Collection) is null);
+            ValidateQueryMetadata(expression, query, outerNames);
         }
         if (query.Projections.Count == 0) { throw new DocumentPlanningException("CD05001", ErrorMessages.PlannerCreateLogicalPlanFailure, query.Location); }
         if (query.IsValue && (query.Projections.Count != 1 || query.Projections[0].Alias is not null ||
@@ -178,14 +204,16 @@ internal sealed partial class DocumentPlanner
         // continue to address source documents, including unprojected fields.
         var ordering = query.OrderBy.Select(order => order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
-                ? new OqlOrdering(projection.Expression, order.Descending) : order).ToArray();
+                ? new OqlOrdering(projection.Expression, order.Descending, order.NullPlacement) : order).ToArray();
         query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
-            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest);
+            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source, bindings: query.Bindings == query.Unnest ? null : query.Bindings);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression, functions)) ||
             (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions));
         variables?.Remove(query.Alias ?? query.Collection);
         var unnestVariables = variables;
+        var groupScope = query.GroupAliases.Count > 0 || query.GroupAs is not null ? GroupScope(query, unnestVariables) : null;
         var scopes = grouped || query.IsDistinct || query.IsValue && query.OrderBy.Count > 0 ? new DocumentBindingScopes() : null;
+        if (groupScope is not null) { scopes!.RegisterGroup(query, groupScope); }
         if (query.Predicate is not null)
         {
             Validate(query.Predicate, allowAggregate: false, functions: functions);
@@ -197,11 +225,14 @@ internal sealed partial class DocumentPlanner
         foreach (var projection in query.Projections)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Validate(projection.Expression, allowAggregate: true, allowStar: !grouped, functions: functions);
-            if (grouped) { ValidateGrouped(projection.Expression, query, unnestVariables, scopes!, functions); }
+            if (!grouped && query.Bindings != query.Unnest && projection.Expression is OqlUnaryExpression { Operator: ".*" } qualified)
+            { Validate(qualified.Operand, allowAggregate: false, functions: functions); }
+            else { Validate(projection.Expression, allowAggregate: true, allowStar: !grouped, functions: functions); }
+            if (grouped) { ValidateGrouped(projection.Expression, query, unnestVariables, scopes!, functions, groupScope, outerNames); }
+            if (query.GroupAs is not null) { ValidateGroupArrayInput(projection.Expression, query, scopes!, functions); }
             string name = query.IsValue ? "value" : projection.Alias ?? projection.Expression switch
             {
-                OqlStarExpression => "document",
+                OqlStarExpression or OqlUnaryExpression { Operator: ".*" } => "document",
                 OqlPathExpression path => path.Segments.LastOrDefault().Name ?? $"column{projections.Count + 1}",
                 OqlCallExpression call => call.Name.ToLowerInvariant(),
                 OqlMetaExpression meta => meta.Member!,
@@ -211,35 +242,46 @@ internal sealed partial class DocumentPlanner
             {
                 throw new DocumentPlanningException("CD01003", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.PlannerCreateLogicalPlanFailure3, name), projection.Expression.Location);
             }
-            projections.Add(new DocumentProjection(name, projection.Expression, StaticType(projection.Expression, functions)));
+            projections.Add(new DocumentProjection(name, projection.Expression,
+                groupScope is null ? StaticType(projection.Expression, functions) : GroupProjectionType(projection.Expression, query, functions)));
         }
         if (query.Having is not null)
         {
             Validate(query.Having, allowAggregate: true, functions: functions);
-            ValidateGrouped(query.Having, query, unnestVariables, scopes!, functions);
+            ValidateGrouped(query.Having, query, unnestVariables, scopes!, functions, groupScope, outerNames);
+            if (query.GroupAs is not null) { ValidateGroupArrayInput(query.Having, query, scopes!, functions); }
         }
         foreach (var order in query.OrderBy)
         {
+            if (order.NullPlacement is not (OqlNullPlacement.Default or OqlNullPlacement.First or OqlNullPlacement.Last))
+            { throw new DocumentPlanningException("CD01032", ErrorMessages.NullPlacementInvalid, order.Expression.Location); }
             if (query.IsDistinct && !query.Projections.Any(projection =>
-                EquivalentExpression(projection.Expression, order.Expression, query.Alias, unnestVariables, scopes!)))
+                EquivalentGroupedExpression(projection.Expression, order.Expression, query, unnestVariables, scopes!)))
             {
                 throw new DocumentPlanningException("CD01014", ErrorMessages.DistinctOrderNotProjected, order.Expression.Location);
             }
             Validate(order.Expression, allowAggregate: true, functions: functions);
-            if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!, functions); }
+            if (grouped) { ValidateGrouped(order.Expression, query, unnestVariables, scopes!, functions, groupScope, outerNames); }
+            if (query.GroupAs is not null) { ValidateGroupArrayInput(order.Expression, query, scopes!, functions); }
         }
         bool canStopEarly = !grouped && !query.IsDistinct && (query.OrderBy.Count == 0 ||
-            query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" }) &&
+            query.OrderBy.Count == 1 && query.OrderBy[0].Expression is OqlMetaExpression { Member: "id" } identity &&
+                IsLocalMetadata(identity, query.Alias ?? query.Collection)) &&
             projections.All(projection => (projection.Expression is not OqlStarExpression || query.Unnest.Count > 0) &&
                 (projection.Type != DatabaseType.Null || projection.Expression is
                     OqlLiteralExpression { Value: null or JsonElement { ValueKind: JsonValueKind.Null } } or OqlMissingExpression));
         var projectedOrdering = query.IsValue ? query.OrderBy.Select(order =>
-            EquivalentExpression(query.Projections[0].Expression, order.Expression, query.Alias, unnestVariables, scopes!)).ToArray() : [];
+            EquivalentGroupedExpression(query.Projections[0].Expression, order.Expression, query, unnestVariables, scopes!)).ToArray() : [];
         return new DocumentLogicalPlan(query, projections, grouped, limit, offset, unnestVariables, canStopEarly, projectedOrdering);
     }
 
     private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes,
         IReadOnlySet<string>? variables = null, IReadOnlyList<OqlUnnestExpression>? unnest = null)
+        => ChooseAccess(predicate, alias, indexes, out _, variables, unnest);
+
+    private DocumentAccessPath ChooseAccess(OqlExpression? predicate, string? alias, IReadOnlyList<DocumentIndexMetadata> indexes,
+        out List<(DocumentIndexPath Path, int Prefix, bool Range)> analyzed,
+        IReadOnlySet<string>? variables = null, IReadOnlyList<OqlUnnestExpression>? unnest = null, IReadOnlySet<string>? outerNames = null)
     {
         var predicates = new List<(string Path, string? LegacyPath, string Operator, object Value)>();
         if (predicate is not null) { Collect(predicate); }
@@ -249,7 +291,7 @@ internal sealed partial class DocumentPlanner
         long bestCost = long.MaxValue;
         var candidates = new List<(DocumentIndexPath Path, int Prefix, bool Range)>();
         var scopes = unnest is { Count: > 0 } || HasArrayPredicate(predicate)
-            ? ArrayScopes(predicate, alias, variables, unnest).ToArray() : null;
+            ? ArrayScopes(predicate, alias, variables, unnest, outerNames).ToArray() : null;
         foreach (var index in indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
             _cancellationToken.ThrowIfCancellationRequested();
@@ -259,6 +301,7 @@ internal sealed partial class DocumentPlanner
             if (scopes is null) { continue; }
             AddArrayCandidates(index);
         }
+        analyzed = candidates;
 
         // Keep captured array-key detection state off the scalar iteration path.
         void AddArrayCandidates(DocumentIndexMetadata index)
@@ -311,13 +354,15 @@ internal sealed partial class DocumentPlanner
         if (candidates.Count == 0) { return new DocumentScanPath(); }
         if (candidates.Count == 1 && !_estimateSinglePath) { return candidates[0].Path; }
         var probed = new List<DocumentIndexPath>(candidates.Count);
-        foreach (var (path, prefix, range) in candidates)
+        for (int i = 0; i < candidates.Count; i++)
         {
+            var (path, prefix, range) = candidates[i];
             var index = path.Index;
             var estimate = _catalog.CountIndexRange(index, path.EqualityPrefix ?? [], path.Lower?.Value,
                 path.Lower?.Inclusive ?? false, path.Upper?.Value, path.Upper?.Inclusive ?? false,
                 _snapshot, _cancellationToken);
             var candidate = path with { Estimate = estimate };
+            candidates[i] = (candidate, prefix, range);
             probed.Add(candidate);
             long cost = estimate.IsComplete ? estimate.Count : Math.Max(1024, estimate.Count * 2);
             bool better = best is null || cost < bestCost || cost == bestCost &&
@@ -490,22 +535,41 @@ internal sealed partial class DocumentPlanner
 
     internal static bool IsConstant(OqlExpression expression) => IsConstant(expression, null);
 
-    private static bool IsConstant(OqlExpression expression, DocumentBindingScope? bound) => expression switch
+    private static bool IsConstant(OqlExpression expression, DocumentBindingScope? bound)
     {
-        OqlComprehensionExpression comprehension => IsConstant(comprehension.Collection, bound) &&
-            IsConstant(comprehension.Projection, new DocumentBindingScope(comprehension.Variable, bound)) &&
-            (comprehension.Predicate is null || IsConstant(comprehension.Predicate, new DocumentBindingScope(comprehension.Variable, bound))),
-        OqlQuantifiedExpression quantified => IsConstant(quantified.Collection, bound) &&
-            IsConstant(quantified.Predicate, new DocumentBindingScope(quantified.Variable, bound)),
-        OqlPathExpression { Segments.Count: > 0 } path => DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null,
-        OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression => PredicateChildren(expression).All(child => IsConstant(child, bound)),
-        OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression => true,
-        OqlArrayExpression array => array.Elements.All(child => IsConstant(child, bound)),
-        OqlObjectExpression obj => obj.Members.All(member => IsConstant(member.Value, bound)),
-        OqlUnaryExpression unary => IsConstant(unary.Operand, bound),
-        OqlBinaryExpression binary => IsConstant(binary.Left, bound) && IsConstant(binary.Right, bound),
-        _ => false,
-    };
+        // Keep scalar/index planning independent of closure escape decisions after
+        // mixed correlated workloads. Capturing bound in All allocates a frame even
+        // on literal branches when the JIT cannot eliminate that shared frame.
+        switch (expression)
+        {
+            case OqlComprehensionExpression comprehension:
+                return IsConstant(comprehension.Collection, bound) &&
+                    IsConstant(comprehension.Projection, new DocumentBindingScope(comprehension.Variable, bound)) &&
+                    (comprehension.Predicate is null || IsConstant(comprehension.Predicate, new DocumentBindingScope(comprehension.Variable, bound)));
+            case OqlQuantifiedExpression quantified:
+                return IsConstant(quantified.Collection, bound) &&
+                    IsConstant(quantified.Predicate, new DocumentBindingScope(quantified.Variable, bound));
+            case OqlPathExpression { Segments.Count: > 0 } path:
+                return DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null;
+            case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
+                foreach (var child in PredicateChildren(expression)) { if (!IsConstant(child, bound)) { return false; } }
+                return true;
+            case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression:
+                return true;
+            case OqlArrayExpression array:
+                for (int index = 0; index < array.Elements.Count; index++) { if (!IsConstant(array.Elements[index], bound)) { return false; } }
+                return true;
+            case OqlObjectExpression obj:
+                for (int index = 0; index < obj.Members.Count; index++) { if (!IsConstant(obj.Members[index].Value, bound)) { return false; } }
+                return true;
+            case OqlUnaryExpression unary:
+                return IsConstant(unary.Operand, bound);
+            case OqlBinaryExpression binary:
+                return IsConstant(binary.Left, bound) && IsConstant(binary.Right, bound);
+            default:
+                return false;
+        }
+    }
 
     internal static bool ContainsAggregate(OqlExpression expression, DocumentFunctionCatalog? functions = null)
     {
@@ -533,12 +597,13 @@ internal sealed partial class DocumentPlanner
                 foreach (var child in PredicateChildren(comprehension)) { Validate(child, false, functions: functions); }
                 return;
             case OqlQuantifiedExpression quantified:
-                Validate(quantified.Collection, false, functions: functions);
-                Validate(quantified.Predicate, false, functions: functions);
+                Validate(quantified.Collection, allowAggregate, functions: functions);
+                Validate(quantified.Predicate, allowAggregate, functions: functions);
                 return;
             case OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression:
                 foreach (var child in PredicateChildren(expression)) { Validate(child, allowAggregate, functions: functions); }
                 return;
+            case OqlSubqueryExpression:
             case OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression or OqlPathExpression or OqlMetaExpression:
                 return;
             case OqlArrayExpression array:
@@ -549,14 +614,21 @@ internal sealed partial class DocumentPlanner
                 return;
             case OqlStarExpression when allowStar:
                 return;
-            case OqlBinaryExpression binary when binary.Operator is "AND" or "OR" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%":
+            case OqlBinaryExpression binary when binary.Operator is "IS DISTINCT FROM" or "IS NOT DISTINCT FROM" or "AND" or "OR" or "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" or "+" or "-" or "*" or "/" or "%":
                 Validate(binary.Left, allowAggregate, functions: functions);
                 Validate(binary.Right, allowAggregate, functions: functions);
                 return;
-            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "IS NULL" or "IS NOT NULL" or "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
+            case OqlUnaryExpression { Operator: ".*" }:
+                throw new DocumentPlanningException("CK00001", ErrorMessages.QualifiedStarDeferred, expression.Location);
+            case OqlUnaryExpression unary when unary.Operator is "+" or "-" or "NOT" or "EXISTS" or "IS NULL" or "IS NOT NULL" or "IS MISSING" or "IS NOT MISSING" or "IS VALUED" or "IS NOT VALUED":
                 Validate(unary.Operand, allowAggregate, functions: functions);
                 return;
             case OqlCallExpression call:
+                if (call.Quantifier != OqlAggregateQuantifier.None &&
+                    (call.Quantifier is not (OqlAggregateQuantifier.All or OqlAggregateQuantifier.Distinct) ||
+                     call.Arguments.Count != 1 || call.Arguments[0] is OqlStarExpression ||
+                     DocumentFunctionCatalog.IsSpecial(call.Name) || functions.HasName(call.Name) && !functions.IsAggregate(call.Name)))
+                { throw new DocumentPlanningException("CD01029", ErrorMessages.AggregateQuantifierInvalid, call.Location); }
                 if (DocumentFunctionCatalog.IsSpecial(call.Name))
                 {
                     var form = OqlFunctions.Find(call.Name);
@@ -590,56 +662,68 @@ internal sealed partial class DocumentPlanner
     }
 
     private static void ValidateGrouped(OqlExpression expression, OqlSelectExpression query, IReadOnlySet<string>? variables,
-        DocumentBindingScopes scopes, DocumentFunctionCatalog functions, DocumentBindingScope? bound = null)
+        DocumentBindingScopes scopes, DocumentFunctionCatalog functions, DocumentBindingScope? bound = null, IReadOnlySet<string>? outerNames = null)
     {
+        if (expression is OqlSubqueryExpression subquery)
+        {
+            if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes, rightScope: bound))) { return; }
+            ValidateGroupedCaptures(subquery.Query, query, variables, scopes, functions, bound, outerNames);
+            return;
+        }
+        if (expression is OqlMetaExpression { Arguments.Count: 1 } meta &&
+            meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } metadataSource &&
+            metadataSource.Segments[0].Name is string metadataName && metadataName != (query.Alias ?? query.Collection) &&
+            variables?.Contains(metadataName) != true && outerNames?.Contains(metadataName) == true) { return; }
         if (expression is OqlPathExpression { Segments.Count: > 0 } path &&
-            DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null) { return; }
+            (DocumentBindingScope.Resolve(bound, path.Segments[0].Name, out _) is not null ||
+             path.Segments[0].Name is string outerName && outerName != (query.Alias ?? query.Collection) &&
+                variables?.Contains(outerName) != true && outerNames?.Contains(outerName) == true)) { return; }
         // PostgreSQL parse_agg.c:1439-1452 adjusts grouping expressions to the current
         // scope before matching. An inner t must never stand in for an outer field t.
-        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query.Alias, variables, scopes, rightScope: bound))) { return; }
+        if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes, rightScope: bound))) { return; }
         if (expression is OqlComprehensionExpression comprehension)
         {
-            ValidateGrouped(comprehension.Collection, query, variables, scopes, functions, bound);
+            ValidateGrouped(comprehension.Collection, query, variables, scopes, functions, bound, outerNames);
             var inner = scopes.Enter(comprehension, comprehension.Variable, bound);
-            ValidateGrouped(comprehension.Projection, query, variables, scopes, functions, inner);
-            if (comprehension.Predicate is not null) { ValidateGrouped(comprehension.Predicate, query, variables, scopes, functions, inner); }
+            ValidateGrouped(comprehension.Projection, query, variables, scopes, functions, inner, outerNames);
+            if (comprehension.Predicate is not null) { ValidateGrouped(comprehension.Predicate, query, variables, scopes, functions, inner, outerNames); }
             return;
         }
         if (expression is OqlQuantifiedExpression quantified)
         {
-            ValidateGrouped(quantified.Collection, query, variables, scopes, functions, bound);
-            ValidateGrouped(quantified.Predicate, query, variables, scopes, functions, scopes.Enter(quantified, quantified.Variable, bound));
+            ValidateGrouped(quantified.Collection, query, variables, scopes, functions, bound, outerNames);
+            ValidateGrouped(quantified.Predicate, query, variables, scopes, functions, scopes.Enter(quantified, quantified.Variable, bound), outerNames);
             return;
         }
         if (expression is OqlInExpression or OqlBetweenExpression or OqlLikeExpression or OqlCaseExpression)
         {
-            foreach (var child in PredicateChildren(expression)) { ValidateGrouped(child, query, variables, scopes, functions, bound); }
+            foreach (var child in PredicateChildren(expression)) { ValidateGrouped(child, query, variables, scopes, functions, bound, outerNames); }
             return;
         }
         if (expression is OqlArrayExpression array)
         {
-            foreach (var element in array.Elements) { ValidateGrouped(element, query, variables, scopes, functions, bound); }
+            foreach (var element in array.Elements) { ValidateGrouped(element, query, variables, scopes, functions, bound, outerNames); }
             return;
         }
         if (expression is OqlObjectExpression obj)
         {
-            foreach (var member in obj.Members) { ValidateGrouped(member.Value, query, variables, scopes, functions, bound); }
+            foreach (var member in obj.Members) { ValidateGrouped(member.Value, query, variables, scopes, functions, bound, outerNames); }
             return;
         }
         if (expression is OqlCallExpression call)
         {
             if (functions.IsAggregate(call.Name)) { return; }
-            foreach (var argument in call.Arguments) { ValidateGrouped(argument, query, variables, scopes, functions, bound); }
+            foreach (var argument in call.Arguments) { ValidateGrouped(argument, query, variables, scopes, functions, bound, outerNames); }
             return;
         }
         if (expression is OqlLiteralExpression or OqlMissingExpression or OqlParameterExpression) { return; }
         if (expression is OqlBinaryExpression binary)
         {
-            ValidateGrouped(binary.Left, query, variables, scopes, functions, bound);
-            ValidateGrouped(binary.Right, query, variables, scopes, functions, bound);
+            ValidateGrouped(binary.Left, query, variables, scopes, functions, bound, outerNames);
+            ValidateGrouped(binary.Right, query, variables, scopes, functions, bound, outerNames);
             return;
         }
-        if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query, variables, scopes, functions, bound); return; }
+        if (expression is OqlUnaryExpression unary) { ValidateGrouped(unary.Operand, query, variables, scopes, functions, bound, outerNames); return; }
         throw new DocumentPlanningException("CD05001", ErrorMessages.DocumentPlannerValidateGroupedFailure, expression.Location);
     }
 
@@ -649,47 +733,51 @@ internal sealed partial class DocumentPlanner
     private static IEnumerable<OqlPathSegment> PathSegments(OqlPathExpression path, string? alias)
         => path.Segments.Skip(alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0);
 
-    private static bool EquivalentExpression(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables,
-        DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0) => (left, right) switch
+    private static bool EquivalentExpression(OqlExpression left, OqlExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
+        DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0, bool captured = false) => (left, right) switch
     {
+        (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(a.Query, b.Query) &&
+            EquivalentNestedBindings(a.Query, leftScope, rightScope, localDepth) &&
+            EquivalentNestedBindings(b.Query, leftScope, rightScope, localDepth),
         (OqlComprehensionExpression a, OqlComprehensionExpression b) => a.IsFirst == b.IsFirst && a.Variable == b.Variable &&
             (a.Predicate is null) == (b.Predicate is null) &&
-            EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&
-            EquivalentExpression(a.Projection, b.Projection, alias, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1) &&
-            (a.Predicate is null || EquivalentExpression(a.Predicate, b.Predicate!, alias, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1)),
+            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Projection, b.Projection, query, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured) &&
+            (a.Predicate is null || EquivalentExpression(a.Predicate, b.Predicate!, query, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured)),
         (OqlQuantifiedExpression a, OqlQuantifiedExpression b) => a.IsEvery == b.IsEvery && a.Variable == b.Variable &&
-            EquivalentExpression(a.Collection, b.Collection, alias, variables, scopes, leftScope, rightScope, localDepth) &&
-            EquivalentExpression(a.Predicate, b.Predicate, alias, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1),
-        (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
+            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Predicate, b.Predicate, query, variables, scopes,
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured),
+        (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
         (OqlCaseExpression a, OqlCaseExpression b) => (a.Operand is null) == (b.Operand is null) &&
-            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, alias, variables, leftScope, rightScope, localDepth),
+            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth, captured),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
-        (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && a.Arguments.Count == b.Arguments.Count &&
-            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth)),
+        (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && (a.Quantifier == OqlAggregateQuantifier.Distinct) == (b.Quantifier == OqlAggregateQuantifier.Distinct) && a.Arguments.Count == b.Arguments.Count &&
+            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
         (OqlStarExpression, OqlStarExpression) => true,
         (OqlArrayExpression a, OqlArrayExpression b) => a.Elements.Count == b.Elements.Count &&
-            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth)),
-        (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member,
+            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
+        (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member &&
+            EquivalentMetadataSource(a, b, query, variables, leftScope, rightScope, localDepth, captured),
         (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
             a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&
-                EquivalentExpression(pair.First.Value, pair.Second.Value, alias, variables, scopes, leftScope, rightScope, localDepth)),
+                EquivalentExpression(pair.First.Value, pair.Second.Value, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
         (OqlMissingExpression, OqlMissingExpression) => true,
         (OqlParameterExpression a, OqlParameterExpression b) => a.Name == b.Name,
         (OqlBinaryExpression a, OqlBinaryExpression b) => a.Operator == b.Operator &&
-            EquivalentExpression(a.Left, b.Left, alias, variables, scopes, leftScope, rightScope, localDepth) &&
-            EquivalentExpression(a.Right, b.Right, alias, variables, scopes, leftScope, rightScope, localDepth),
-        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, alias, variables, scopes, leftScope, rightScope, localDepth),
+            EquivalentExpression(a.Left, b.Left, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Right, b.Right, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, query, variables, scopes, leftScope, rightScope, localDepth, captured),
         _ => false,
     };
 
-    private static bool EquivalentPath(OqlPathExpression left, OqlPathExpression right, string? alias, IReadOnlySet<string>? variables,
-        DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
+    private static bool EquivalentPath(OqlPathExpression left, OqlPathExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
+        DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
     {
         string? leftName = left.Segments.Count > 0 ? left.Segments[0].Name : null;
         string? rightName = right.Segments.Count > 0 ? right.Segments[0].Name : null;
@@ -704,17 +792,20 @@ internal sealed partial class DocumentPlanner
                 left.Segments.SequenceEqual(right.Segments);
         }
         if (IsVariablePath(left, variables) != IsVariablePath(right, variables)) { return false; }
-        int leftStart = !IsVariablePath(left, variables) && alias is not null && leftName == alias ? 1 : 0;
-        int rightStart = !IsVariablePath(right, variables) && alias is not null && rightName == alias ? 1 : 0;
+        // Own paths strip only an explicit alias. Only the captured side may name
+        // an unaliased outer row by its collection; its group key still reads fields.
+        int leftStart = !IsVariablePath(left, variables) && query.Alias is not null && leftName == query.Alias ? 1 : 0;
+        string? rightSource = captured ? query.Alias ?? query.Collection : query.Alias;
+        int rightStart = !IsVariablePath(right, variables) && rightSource is not null && rightName == rightSource ? 1 : 0;
         return left.Segments.Skip(leftStart).SequenceEqual(right.Segments.Skip(rightStart));
     }
 
-    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, string? alias, IReadOnlySet<string>? variables,
-        DocumentBindingScopes scopes, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
+    private static bool EquivalentChildren(OqlExpression left, OqlExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
+        DocumentBindingScopes scopes, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
     {
         var a = PredicateChildren(left).ToArray();
         var b = PredicateChildren(right).ToArray();
-        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, alias, variables, scopes, leftScope, rightScope, localDepth));
+        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured));
     }
 
     private sealed class DebugView

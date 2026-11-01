@@ -327,7 +327,7 @@ public sealed class SqlPredicateExecutionTests
         var error = await Should.ThrowAsync<SqlDataStorageFormatException>(async () => await reopened.OpenDatabaseAsync("db", CancellationToken.None));
         // Assert
         error.Message.ShouldContain("uses data-storage format 24", Case.Sensitive);
-        error.Message.ShouldContain("supports only format 27", Case.Sensitive);
+        error.Message.ShouldContain("supports only format 32", Case.Sensitive);
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Persisted predicates: equality distinguishes truth, negation and ESCAPE")]
@@ -335,6 +335,8 @@ public sealed class SqlPredicateExecutionTests
     [InlineData("flag IS TRUE", "flag IS NOT TRUE")]
     [InlineData("a IS DISTINCT FROM b", "a IS NOT DISTINCT FROM b")]
     [InlineData("name LIKE pattern", "name LIKE pattern ESCAPE '!'")]
+    [InlineData("name ILIKE pattern", "name LIKE pattern")]
+    [InlineData("name ILIKE pattern", "name NOT ILIKE pattern")]
     [InlineData("name LIKE pattern ESCAPE '!'", "name LIKE pattern ESCAPE '#'")]
     public void Canonicalize_PredicateShape_ShouldRetainAndDistinguishOperands(string text, string other)
     {

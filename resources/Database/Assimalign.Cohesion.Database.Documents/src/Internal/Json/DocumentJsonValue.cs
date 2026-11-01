@@ -3,6 +3,8 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Assimalign.Cohesion.Database.Documents.Internal;
 
@@ -20,17 +22,33 @@ internal static class DocumentJsonValue
 
     internal static JsonElement Object(IEnumerable<KeyValuePair<string, object?>> members, string? writeVerb = null, int maxDepth = 256, string resultClause = "SELECT")
     {
-        // Couchbase expression/cons_object.go:53-77 constructs a keyed map and assigns
-        // non-MISSING members into it (72-73). Later assignments replace the same key.
         var keyed = new Dictionary<string, object?>(StringComparer.Ordinal);
-        foreach (var member in members)
-        {
-            if (member.Value is not DocumentMissing) { keyed[member.Key] = member.Value; }
-        }
+        foreach (var member in members) { AddMember(keyed, member); }
+        return Object(keyed, writeVerb, maxDepth, resultClause);
+    }
+
+    internal static async ValueTask<JsonElement> ObjectAsync(IAsyncEnumerable<KeyValuePair<string, object?>> members,
+        string? writeVerb, int maxDepth, string resultClause)
+    {
+        var keyed = new Dictionary<string, object?>(StringComparer.Ordinal);
+        await foreach (var member in members.ConfigureAwait(false)) { AddMember(keyed, member); }
+        return Object(keyed, writeVerb, maxDepth, resultClause);
+    }
+
+    private static void AddMember(Dictionary<string, object?> keyed, KeyValuePair<string, object?> member)
+    {
+        // Couchbase expression/cons_object.go:53-77: last non-MISSING assignment wins.
+        // Object serialization must follow this map stage on both paths, including
+        // its failure order for values later replaced by another assignment.
+        if (member.Value is not DocumentMissing) { keyed[member.Key] = member.Value; }
+    }
+
+    private static JsonElement Object(Dictionary<string, object?> keyed, string? writeVerb, int maxDepth, string resultClause)
+    {
         try
         {
             var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = DocumentJsonEncoder.Instance, MaxDepth = writeVerb is not null ? 128 : maxDepth }))
+            using (var writer = ConstructorWriter(buffer, writeVerb, maxDepth))
             {
                 writer.WriteStartObject();
                 foreach (var member in keyed)
@@ -40,8 +58,7 @@ internal static class DocumentJsonValue
                 }
                 writer.WriteEndObject();
             }
-            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = writeVerb is not null ? 128 : maxDepth });
-            return json.RootElement.Clone();
+            return ReadConstructor(buffer.WrittenMemory, writeVerb, maxDepth);
         }
         catch (InvalidOperationException exception)
         {
@@ -54,14 +71,13 @@ internal static class DocumentJsonValue
         try
         {
             var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = DocumentJsonEncoder.Instance, MaxDepth = writeVerb is not null ? 128 : maxDepth }))
+            using (var writer = ConstructorWriter(buffer, writeVerb, maxDepth))
             {
                 writer.WriteStartArray();
-                foreach (var element in elements) { Write(writer, element is DocumentMissing ? null : element, writeVerb); }
+                foreach (var element in elements) { WriteElement(writer, element, writeVerb); }
                 writer.WriteEndArray();
             }
-            using var json = JsonDocument.Parse(buffer.WrittenMemory, new JsonDocumentOptions { MaxDepth = writeVerb is not null ? 128 : maxDepth });
-            return json.RootElement.Clone();
+            return ReadConstructor(buffer.WrittenMemory, writeVerb, maxDepth);
         }
         catch (InvalidOperationException exception)
         {
@@ -69,7 +85,62 @@ internal static class DocumentJsonValue
         }
     }
 
-    private static DocumentPlanningException Depth(string constructor, string? writeVerb, string resultClause, Exception exception)
+    internal static async ValueTask<JsonElement> ArrayAsync(IAsyncEnumerable<object?> elements,
+        string? writeVerb, int maxDepth, string resultClause)
+    {
+        try
+        {
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = ConstructorWriter(buffer, writeVerb, maxDepth))
+            {
+                writer.WriteStartArray();
+                await foreach (var element in elements.ConfigureAwait(false)) { WriteElement(writer, element, writeVerb); }
+                writer.WriteEndArray();
+            }
+            return ReadConstructor(buffer.WrittenMemory, writeVerb, maxDepth);
+        }
+        catch (InvalidOperationException exception) { throw Depth("array", writeVerb, resultClause, exception); }
+    }
+
+    private static Utf8JsonWriter ConstructorWriter(ArrayBufferWriter<byte> buffer, string? writeVerb, int maxDepth)
+        => new(buffer, new JsonWriterOptions { Encoder = DocumentJsonEncoder.Instance, MaxDepth = writeVerb is not null ? 128 : maxDepth });
+
+    private static void WriteElement(Utf8JsonWriter writer, object? element, string? writeVerb)
+        => Write(writer, element is DocumentMissing ? null : element, writeVerb);
+
+    private static JsonElement ReadConstructor(ReadOnlyMemory<byte> bytes, string? writeVerb, int maxDepth)
+    {
+        using var json = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = writeVerb is not null ? 128 : maxDepth });
+        return json.RootElement.Clone();
+    }
+
+    internal static void ValidateDepth(object? value, int remaining, string? writeVerb = null,
+        string resultClause = "SELECT", string constructor = "projection", CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (value is not JsonElement json || json.ValueKind is not (JsonValueKind.Array or JsonValueKind.Object)) { return; }
+        ValidateJsonDepth(json, remaining, writeVerb, resultClause, constructor, cancellationToken);
+    }
+
+    private static void ValidateJsonDepth(JsonElement json, int remaining, string? writeVerb,
+        string resultClause, string constructor, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (json.ValueKind is not (JsonValueKind.Array or JsonValueKind.Object)) { return; }
+        if (remaining == 0) { throw Depth(constructor, writeVerb, resultClause, null); }
+        if (json.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in json.EnumerateArray())
+            { ValidateJsonDepth(item, remaining - 1, writeVerb, resultClause, constructor, cancellationToken); }
+        }
+        else
+        {
+            foreach (var member in json.EnumerateObject())
+            { ValidateJsonDepth(member.Value, remaining - 1, writeVerb, resultClause, constructor, cancellationToken); }
+        }
+    }
+
+    private static DocumentPlanningException Depth(string constructor, string? writeVerb, string resultClause, Exception? exception)
         => writeVerb is not null
             ? new DocumentPlanningException("CD02008", string.Format(CultureInfo.CurrentCulture, ErrorMessages.WriteJsonInvalid, writeVerb), innerException: exception)
             : new DocumentPlanningException("CD05015", string.Format(CultureInfo.CurrentCulture,

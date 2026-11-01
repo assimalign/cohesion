@@ -75,6 +75,7 @@ public sealed partial class SqlCatalog
         {
             ThrowIfOffline();
             string key = SqlObjectIdentity.View(view.Schema, view.Name);
+            if (SequenceNameExists(view.Schema, view.Name)) { throw RelationNameCollision(view.Schema, view.Name); }
             if (_tables.ContainsKey((view.Schema, view.Name))) { throw new SqlCatalogException("CS03033", ErrorMessages.ViewTargetIsTable); }
             _views.TryGetValue(key, out var previous);
             if (previous is not null && !orReplace) { throw new SqlCatalogException("CS03033", string.Format(CultureInfo.CurrentCulture, ErrorMessages.ViewExists, view.Schema, view.Name)); }
@@ -96,8 +97,10 @@ public sealed partial class SqlCatalog
                 { throw new SqlCatalogException("CS03033", ErrorMessages.ViewDependencyChanged); }
             }
             using var transaction = _storage.BeginTransaction();
+            var orphan = StageOrphanSequenceName(transaction, view.Schema, view.Name);
             var location = UpsertRecord(transaction, previous?.Location, record);
             CommitCatalogChange(transaction, publication: publication, actualObject: key, createsObject: true);
+            if (orphan is not null) { RemoveSequence(orphan); }
             _views[key] = new(view, location);
             return default;
         }

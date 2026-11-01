@@ -12,7 +12,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlJoinIndexPath")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlJoinIndexPath.DebugView))]
-internal sealed record SqlJoinIndexPath(
+internal record SqlJoinIndexPath(
     int InnerBinding,
     SqlCatalogIndex Index,
     IReadOnlyList<int> OuterOrdinals,

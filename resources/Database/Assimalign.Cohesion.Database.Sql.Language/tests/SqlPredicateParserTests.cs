@@ -14,6 +14,17 @@ public sealed class SqlPredicateParserTests
     [InlineData("a = b IS TRUE", "(a = b) IS TRUE")]
     [InlineData("a = b IS NULL", "(a = b) IS NULL")]
     [InlineData("a = b LIKE c", "a = (b LIKE c)")]
+    [InlineData("a = b ILIKE c", "a = (b ILIKE c)")]
+    [InlineData("NOT a ILIKE b", "NOT (a ILIKE b)")]
+    [InlineData("a NOT ILIKE b || c ESCAPE d || e", "a NOT ILIKE (b || c) ESCAPE (d || e)")]
+    [InlineData("-a::INT", "-(CAST(a AS INT))")]
+    [InlineData("+1::TEXT", "+CAST(1 AS TEXT)")]
+    [InlineData("+(1::TEXT)", "+CAST(1 AS TEXT)")]
+    [InlineData("+1::REGCLASS", "+CAST(1 AS REGCLASS)")]
+    [InlineData("a COLLATE binary::TEXT", "CAST(a COLLATE binary AS TEXT)")]
+    [InlineData("a IN (1)::INT", "CAST(a IN (1) AS INT)")]
+    [InlineData("a + b::INT * c", "a + (CAST(b AS INT) * c)")]
+    [InlineData("a::TEXT::INT", "CAST(CAST(a AS TEXT) AS INT)")]
     [InlineData("a IN (1) = TRUE", "(a IN (1)) = TRUE")]
     [InlineData("1 IN (1) IN (TRUE)", "(1 IN (1)) IN (TRUE)")]
     [InlineData("1 NOT IN (2) BETWEEN FALSE AND TRUE", "(1 NOT IN (2)) BETWEEN FALSE AND TRUE")]
@@ -68,6 +79,8 @@ public sealed class SqlPredicateParserTests
     [InlineData("name LIKE 'a!%' ESCAPE '!'")]
     [InlineData("name NOT LIKE @p || '%' ESCAPE @e || ''")]
     [InlineData("name LIKE pattern ESCAPE escape_column")]
+    [InlineData("name ILIKE pattern ESCAPE escape_column")]
+    [InlineData("name NOT ILIKE @p ESCAPE @e")]
     [InlineData("name LIKE 'a%' ESCAPE NULL")]
     public void Parse_PredicateOperands_ShouldRoundTrip(string text)
     {
@@ -83,6 +96,8 @@ public sealed class SqlPredicateParserTests
     [InlineData("a IS NOT banana", "banana")]
     [InlineData("a IS DISTINCT FROM;", ";")]
     [InlineData("a LIKE 'x' ESCAPE;", ";")]
+    [InlineData("a ILIKE 'x' ESCAPE;", ";")]
+    [InlineData("a::;", ";")]
     public void Parse_IncompletePredicate_ShouldReportSyntaxAtOperand(string text, string token)
     {
         // Arrange
@@ -96,20 +111,14 @@ public sealed class SqlPredicateParserTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Predicates: excluded operators have one named capability error")]
-    [InlineData("a ILIKE p", "ILIKE")]
     [InlineData("a ISNULL", "ISNULL")]
     [InlineData("a notnull", "NOTNULL")]
     [InlineData("a notnull FROM t", "NOTNULL")]
     [InlineData("a notnull + 1 FROM t", "NOTNULL")]
-    [InlineData("a NOT ILIKE p", "NOT ILIKE")]
     [InlineData("a SIMILAR TO p", "SIMILAR TO")]
     [InlineData("a NOT SIMILAR TO p", "NOT SIMILAR TO")]
-    [InlineData("a & b", "&")]
-    [InlineData("a | b", "|")]
-    [InlineData("a << b", "<<")]
-    [InlineData("a >> b", ">>")]
-    [InlineData("a::INT", "CAST(x AS type)")]
-    [InlineData("a IS JSON", "IS JSON")]
+    [InlineData("a ^ b", "^")]
+    [InlineData("a IS JSON WITH UNIQUE KEYS", "IS JSON WITH UNIQUE KEYS")]
     [InlineData("a IS OF (INT)", "IS OF")]
     [InlineData("a IS NORMALIZED", "IS NORMALIZED")]
     public void Parse_ExcludedOperator_ShouldReportSingleNamedCapability(string text, string form)
@@ -149,6 +158,7 @@ public sealed class SqlPredicateParserTests
     [Theory(DisplayName = "Cohesion Test [Sql.Language] - Predicates: loop-built truth tests respect the expression depth limit")]
     [InlineData(" IS TRUE")]
     [InlineData(" IS NULL")]
+    [InlineData("::INT")]
     [InlineData(" IS NOT UNKNOWN")]
     public void Parse_ChainedTests_ShouldApplyNestingLimit(string suffix)
     {
@@ -166,6 +176,7 @@ public sealed class SqlPredicateParserTests
     [InlineData("a = b = c", "=")]
     [InlineData("a IS DISTINCT FROM b IS NULL", "IS")]
     [InlineData("a LIKE b LIKE c", "LIKE")]
+    [InlineData("a ILIKE b ILIKE c", "ILIKE")]
     [InlineData("a BETWEEN 1 AND 2 LIKE c", "LIKE")]
     public void Parse_NonassociativeChain_ShouldLocateSecondOperator(string text, string second)
     {
@@ -220,6 +231,30 @@ public sealed class SqlPredicateParserTests
         positive.Diagnostics.ShouldBeEmpty();
         negative.Diagnostics.ShouldBeEmpty();
         negative.ExpressionNestingDepth.ShouldBe(positive.ExpressionNestingDepth);
+    }
+
+    [Theory(DisplayName = "Cohesion Test [Sql.Language] - Postfix CAST: all CAST target grammar is shared (#1721)")]
+    [InlineData("INT")]
+    [InlineData("INTEGER")]
+    [InlineData("TEXT")]
+    [InlineData("VARCHAR(10)")]
+    [InlineData("DECIMAL(10,2)")]
+    [InlineData("DOUBLE PRECISION")]
+    [InlineData("NATIONAL CHARACTER VARYING(10)")]
+    [InlineData("TIMESTAMP WITH TIME ZONE")]
+    [InlineData("TIME WITHOUT TIME ZONE")]
+    [InlineData("BINARY VARYING(10)")]
+    [InlineData("my_domain")]
+    [InlineData("\"a domain\"")]
+    [InlineData("REGCLASS")]
+    public void Parse_PostfixTarget_ShouldMatchCast(string target)
+    {
+        // Arrange / Act
+        var suffix = Parse("value::" + target);
+        var cast = Parse("CAST(value AS " + target + ")");
+        // Assert
+        SqlTreeDump.Dump(suffix).ShouldBe(SqlTreeDump.Dump(cast));
+        SqlExpressionRenderer.Render(suffix).ShouldBe(SqlExpressionRenderer.Render(cast));
     }
 
     private static SqlExpression Parse(string text)

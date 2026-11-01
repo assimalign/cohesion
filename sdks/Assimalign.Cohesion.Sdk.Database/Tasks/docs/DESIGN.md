@@ -1,5 +1,39 @@
 # Database SDK Design
 
+## Directed index migrations and compiled v11 (#1631, SQ-K1)
+
+CompiledSchemaIndex.KeyOrders reaches migration SQL for initial indexes and drop/add replacements,
+including partial indexes. The writer emits DESC, ASC's NULLS FIRST and DESC's NULLS LAST;
+it omits ASC and each direction's default NULL placement. Runtime and SDK render identical SQL.
+Key-order changes participate in the shared migration planner's equality test. SDK artifacts and
+baselines use v11 and reject v10 and earlier documents before writing a migration. The source
+extractor's existing single-member Index declaration stays ascending; directed composite keys
+are expressed by the shared compiled metadata. No project reference or public seam is added.
+
+
+## Compiled SQL schema v10 (#1630, SQ-P1)
+
+The shared compiled index record adds optional Predicate text. SDK artifacts and baselines
+use v11 and reject v10 and earlier formats through the existing gate. SDK extraction keeps its
+unconditional typed Index declarations; no extractor API or project boundary changes.
+
+The migration writer retains predicates on initial indexes and drop/add replacements. It parses
+the fragment both directly and inside parentheses, verifies the fixed SELECT carrier, and emits
+only the canonical expression AST. Identifier and string escaping therefore follow Sql.Language;
+trailing statements, clauses and comments cannot escape into the generated migration. Partial
+UNIQUE indexes retain their subset and NULL-distinct semantics when the script executes.
+
+
+## Compiled SQL schema format v9 (#1723, SQ-F1)
+
+The runtime contract adds CompiledSchemaConstraint.OnUpdate and advances v8 -> v9. SDK extraction
+uses the same compiled records, so an ordinary typed References declaration serializes NO ACTION
+update metadata with the runtime's identical document/hash. The builder signature is unchanged.
+The shared compiled record preserves explicit update actions; engine migration rendering emits them.
+SDK migration scaffolding retains its existing constraint-operation refusal. Earlier artifacts, including v8,
+are refused by the shared format gate before creating a migration; rebuild artifacts and recreate
+affected databases. This change updates the SDK's format pins and parity tests only.
+
 ## SQL type aliases (#1108)
 
 All three national names accept optional VARYING: NATIONAL CHAR VARYING, NATIONAL CHARACTER
@@ -17,7 +51,7 @@ are refused without an upgrade path. Migration SQL retains the validated CustomT
 
 ## Fixed-length strings (#1437)
 
-SDK and runtime now emit **cohesion/database-schema/v8** together. CLR char maps to Character (19)
+SDK and runtime now emit **cohesion/database-schema/v11** together. CLR char maps to Character (19)
 with length one, and explicit CHAR(n)/CHARACTER(n) string columns normalize through the schema
 snapshot to Character with length n. Shared SqlTypeModifiers still owns length validation.
 Migration SQL renders CHAR(n), and switching between CHAR and VARCHAR is an AlterColumn change.
@@ -207,7 +241,7 @@ The outputs are:
 | `CohesionDatabaseSchema` items | Set by `CohesionDatabaseCompileSchema` | One per database the manifest lists (its schema document, full path), with `DatabaseName` and `HashPath` metadata, for downstream targets. |
 | `Schemas` task output | `CompileDatabaseSchemaTask` | One item per database, named for it, with `Hash`, `SchemaPath` and `HashPath` metadata. |
 
-The document format is `cohesion/database-schema/v8`, shared with the runtime compiler and the
+The document format is `cohesion/database-schema/v11`, shared with the runtime compiler and the
 migration baseline writer. B2 introduced `defaultLiteral` in v4; #1438 advanced to v5 because
 decimal scale normalization changes a raw v4 NUMERIC(p) document's identity. #1437 advanced
 to v6 for Character identity, and #1108 to v7 for NCHAR normalization. #1422 advances to v8:
@@ -337,7 +371,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v11`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated

@@ -21,6 +21,29 @@ namespace Assimalign.Cohesion.Database.Sql.Tests;
 /// </summary>
 public sealed class SqlLanguageConformanceTests
 {
+    [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: sequence dependencies remain limited to column defaults (#1770)")]
+    [InlineData("CREATE TABLE checked(v INT CHECK(nextval('s') > 0))")]
+    [InlineData("CREATE VIEW v AS SELECT nextval('s') AS n")]
+    [InlineData("CREATE FUNCTION f() RETURNS BIGINT VOLATILE RETURN nextval('s')")]
+    [InlineData("CREATE DOMAIN d AS BIGINT DEFAULT nextval('s')")]
+    [InlineData("CREATE DOMAIN d AS BIGINT CHECK(nextval('s') > 0)")]
+    [InlineData("CREATE TABLE compound(v BIGINT DEFAULT nextval('s') + 1)")]
+    public async Task ExecuteAsync_PersistedSequenceCorpus_ShouldRefuseUnsupportedDependencies(string sql)
+    {
+        // Arrange
+        await using var engine = SqlDatabaseEngine.Create("sequence-context-conformance", new());
+        var database = await engine.CreateDatabaseAsync("db", CancellationToken.None);
+        await using var session = await database.CreateSessionAsync(CancellationToken.None);
+        await ExecuteAsync(session, "CREATE SEQUENCE s");
+
+        // Act
+        var failure = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session, sql));
+
+        // Assert
+        failure.Diagnostics[0].Code.ShouldBe("CS03074");
+        await ExpectRowsAsync(session, "SELECT nextval('s')", [[1L]]);
+    }
+
     [Theory(DisplayName = "Cohesion Test [Sql] - Conformance: TYPE narrowing preserves only excess trailing spaces (#1447)")]
     [InlineData("TEXT")]
     [InlineData("VARCHAR(8)")]
@@ -246,9 +269,16 @@ public sealed class SqlLanguageConformanceTests
         // The profile drives enumeration. A newly advertised clause cannot silently escape this test.
         var cases = CreateCases();
         // #1714 adds UPDATE FROM and DELETE USING and #1718 adds quantified comparisons:
-        // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and binding-only
-        // MERGE (#1715) add one each.
-        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(57);
+        // exactly three over #1118's 51. TRUNCATE and CREATE TABLE AS (#1716) and
+        // MERGE (#1715) add one each. WITH RECURSIVE (#1719) adds one measured fixpoint clause.
+        // Sequence DDL, NEXT VALUE FOR and DISCARD ALL (#1717) add five; GROUPING SETS, ROLLUP and CUBE (#1720) add three.
+        // Window clauses (#1526) add three measured; identity, SERIAL and OVERRIDING (#1717) add four.
+        // ON UPDATE (#1723, SQ-F1) adds one metadata declaration clause.
+        // Two explicit window frame clauses (#1526, SQ-W2); GROUPS, EXCLUDE and NULL treatment add three (#1526, SQ-W3).
+        // Isolation options and SET TRANSACTION (#1012) add exactly two clauses.
+        // Partial index WHERE (#1630, SQ-P1) adds one measured declaration clause.
+        // Named savepoint controls (#1726, XT-4) add exactly three measured clauses.
+        SqlLanguageProfile.Instance.Clauses.Count().ShouldBe(87);
         RequireExecutionCases(SqlLanguageProfile.Instance.Clauses, cases);
         cases.Keys.Except(SqlLanguageProfile.Instance.Clauses).ShouldBeEmpty("Cases must describe the current profile.");
 
@@ -641,10 +671,36 @@ public sealed class SqlLanguageConformanceTests
             ["COUNT"] = new("COUNT(*)", 3L),
             ["SUM"] = new("SUM(age)", 122m),
             ["AVG"] = new("AVG(age)", 122m / 3m),
+            ["BOOL_AND"] = new("BOOL_AND(age > 40)", false),
+            ["BOOL_OR"] = new("BOOL_OR(age > 40)", true),
+            ["EVERY"] = new("EVERY(age > 40)", false),
+            ["STDDEV"] = new("STDDEV(1)", 0m),
+            ["STDDEV_SAMP"] = new("STDDEV_SAMP(1)", 0m),
+            ["STDDEV_POP"] = new("STDDEV_POP(1)", 0m),
+            ["VARIANCE"] = new("VARIANCE(1)", 0m),
+            ["VAR_SAMP"] = new("VAR_SAMP(1)", 0m),
+            ["VAR_POP"] = new("VAR_POP(1)", 0m),
+            ["GROUPING"] = new("GROUPING(age-age)", 0, DatabaseType.Int32, "t GROUP BY age-age"),
+            ["GROUPING_ID"] = new("GROUPING_ID(age-age)", 0, DatabaseType.Int32, "t GROUP BY age-age"),
             ["MIN"] = new("MIN(age)", 36),
             ["MAX"] = new("MAX(age)", 45),
             ["STRING_AGG"] = new("STRING_AGG(name, ',' ORDER BY id)", "Ada,Grace,Alan"),
             ["LISTAGG"] = new("LISTAGG(name, ',') WITHIN GROUP (ORDER BY id)", "Ada,Grace,Alan"),
+            ["NEXTVAL"] = new("nextval('function_sequence')", 100L, DatabaseType.Int64, "scalar_rows"),
+            ["CURRVAL"] = new("currval('function_sequence')", 100L, DatabaseType.Int64, "scalar_rows"),
+            ["SETVAL"] = new("setval('function_sequence', 200)", 200L, DatabaseType.Int64, "scalar_rows"),
+            ["LASTVAL"] = new("lastval()", 200L, DatabaseType.Int64, "scalar_rows"),
+            ["ROW_NUMBER"] = new("ROW_NUMBER() OVER()", 1L, DatabaseType.Int64, "scalar_rows"),
+            ["RANK"] = new("RANK() OVER()", 1L, DatabaseType.Int64, "scalar_rows"),
+            ["DENSE_RANK"] = new("DENSE_RANK() OVER()", 1L, DatabaseType.Int64, "scalar_rows"),
+            ["PERCENT_RANK"] = new("PERCENT_RANK() OVER()", 0d, DatabaseType.Float64, "scalar_rows"),
+            ["CUME_DIST"] = new("CUME_DIST() OVER()", 1d, DatabaseType.Float64, "scalar_rows"),
+            ["NTILE"] = new("NTILE(3) OVER()", 1, DatabaseType.Int32, "scalar_rows"),
+            ["LAG"] = new("LAG(i,0) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["LEAD"] = new("LEAD(i,0) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["FIRST_VALUE"] = new("FIRST_VALUE(i) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["LAST_VALUE"] = new("LAST_VALUE(i) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
+            ["NTH_VALUE"] = new("NTH_VALUE(i,1) OVER()", -2L, DatabaseType.Int64, "scalar_rows"),
             ["COALESCE"] = new("COALESCE(NULL, 7)", 7L),
             ["CAST"] = new("CAST('42' AS INT)", 42),
             ["UPPER"] = new("UPPER('Ada')", "ADA"),
@@ -669,6 +725,7 @@ public sealed class SqlLanguageConformanceTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         foreach (string setup in _seed) { await ExecuteAsync(session, setup); }
 
+        await ExecuteAsync(session, "CREATE SEQUENCE function_sequence START 100;");
         await ExecuteAsync(session, "CREATE TABLE scalar_rows (s TEXT, i BIGINT, n DECIMAL, d DATE);");
         await ExecuteAsync(session, "INSERT INTO scalar_rows VALUES ('A😀b', -2, 2.5, DATE '2024-03-04');");
 
@@ -742,6 +799,20 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Intersect }, [[2]]),
         [SqlClauses.Except] = Query("SELECT id FROM t EXCEPT SELECT id FROM t WHERE id <> 2;",
             expression => expression is SqlSetOperationExpression { Operator: SqlSetOperator.Except }, [[2]]),
+        [SqlClauses.Recursive] = new("WITH RECURSIVE a AS (SELECT 7 AS n) SELECT n FROM a;", [],
+            expression => expression is SqlQueryBodyExpression { CommonTables: [ { IsRecursiveScope: true } ] },
+            async (session, result) =>
+            {
+                (await ReadRowsAsync((DatabaseResultSet)result)).ShouldHaveSingleItem().ShouldBe([7L]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT n FROM a LIMIT 3;", [[1L], [2L], [3L]]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION SELECT n FROM a) SELECT n FROM a;", [[1L]]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a WHERE n<3) SELECT ROW_NUMBER() OVER() FROM a;", [[1L], [2L], [3L]]);
+                await ExpectRowsAsync(session,
+                    "WITH RECURSIVE a(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM a) SELECT v IN (SELECT n FROM a WHERE n>=t.v),v=ANY(SELECT n FROM a WHERE n>=t.v),v=SOME(SELECT n FROM a WHERE n>=t.v),v>ALL(SELECT n FROM a WHERE n>=t.v) FROM (SELECT 1 AS v) t;", [[true, true, true, false]]);
+            }),
         [SqlClauses.Cte] = new("WITH a AS (SELECT id FROM t WHERE age > 40), b AS (SELECT id FROM a) SELECT id FROM b ORDER BY id;", _seed,
             expression => expression is SqlSelectExpression { CommonTables.Count: 2 },
             async (session, result) =>
@@ -803,6 +874,31 @@ public sealed class SqlLanguageConformanceTests
             expression => expression is SqlSelectExpression { Where: SqlBinaryExpression { Right: SqlCollateExpression } }, [[1]]),
         [SqlClauses.GroupBy] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t GROUP BY age > 40 ORDER BY age > 40;",
             expression => expression is SqlSelectExpression { GroupBy.Count: 1 }, [[false, 1L, 36m], [true, 2L, 86m]]),
+        [SqlClauses.GroupingSets] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY GROUPING SETS ((age), ()) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
+        [SqlClauses.Rollup] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY ROLLUP(age) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression { Kind: SqlGroupingSetKind.Rollup }] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
+        [SqlClauses.Cube] = Query("SELECT GROUPING(age), COUNT(*) FROM t GROUP BY CUBE(age) ORDER BY GROUPING(age), age;",
+            expression => expression is SqlSelectExpression { GroupBy: [SqlGroupingSetExpression { Kind: SqlGroupingSetKind.Cube }] }, [[0, 1L], [0, 1L], [0, 1L], [1, 3L]]),
+        [SqlClauses.Filter] = Query("SELECT COUNT(*) FILTER (WHERE age > 40), SUM(age) FILTER (WHERE age > 40), " +
+            "VAR_POP(COALESCE(CASE WHEN id=1 THEN 16777217 ELSE CAST(16777216 AS REAL) END, CAST(0 AS DOUBLE PRECISION))) FILTER (WHERE id > 0) FROM t;",
+            expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlFunctionCallExpression { Filter: not null }, [[2L, 86m, 0d]]),
+        [SqlClauses.Over] = Query("SELECT ROW_NUMBER() OVER(ORDER BY id) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[2L],[3L]]),
+        [SqlClauses.Partition] = Query("SELECT RANK() OVER(PARTITION BY id ORDER BY age) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[1L],[1L],[1L]]),
+        [SqlClauses.Window] = Query("SELECT ROW_NUMBER() OVER w FROM t WINDOW w AS(ORDER BY id) ORDER BY id;",
+            expression => expression is SqlSelectExpression { Windows.Count: 1 }, [[1L],[2L],[3L]]),
+        [SqlClauses.WindowRows] = Query("SELECT SUM(age ORDER BY id DESC) FILTER(WHERE age>0) OVER(ORDER BY id ROWS 1 PRECEDING) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Rows }, [[36m],[81m],[86m]]),
+        [SqlClauses.WindowGroups] = Query("SELECT SUM(age) OVER(ORDER BY id GROUPS 1 PRECEDING) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[36m],[81m],[86m]]),
+        [SqlClauses.WindowExclude] = Query("SELECT SUM(age) OVER(ORDER BY id ROWS 1 PRECEDING EXCLUDE CURRENT ROW) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36m],[45m]]),
+        [SqlClauses.WindowNullTreatment] = Query("SELECT LAG(age) IGNORE NULLS OVER(ORDER BY id) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns.Count: 1 }, [[null],[36],[45]]),
+        [SqlClauses.WindowRange] = Query("SELECT LAST_VALUE(age) OVER(ORDER BY id RANGE 1 PRECEDING) FROM t ORDER BY id;",
+            expression => expression is SqlSelectExpression { Columns: var columns } && columns[0].Expression is SqlWindowExpression { Specification.Frame.Mode: SqlWindowFrameMode.Range }, [[36],[45],[41]]),
         [SqlClauses.Having] = Query("SELECT age > 40, COUNT(*), SUM(age) FROM t WHERE age > 35 GROUP BY age > 40 HAVING SUM(age) > 50;",
             expression => expression is SqlSelectExpression { Having: not null }, [[true, 2L, 86m]]),
         [SqlClauses.OrderBy] = new("SELECT id, age AS years FROM ordering_rows ORDER BY years + 1 ASC NULLS LAST, 1 DESC;",
@@ -899,6 +995,68 @@ public sealed class SqlLanguageConformanceTests
                 CheckRows(await ReadRowsAsync(result), [[2, "Grace"]]);
                 await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [3]]);
             }),
+        [SqlClauses.CreateSequence] = new("CREATE SEQUENCE seq START 7;", [],
+            expression => expression is SqlCreateSequenceExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT nextval('seq');", [[7L]])),
+        [SqlClauses.AlterSequence] = new("ALTER SEQUENCE seq RESTART WITH 9;", ["CREATE SEQUENCE seq;"],
+            expression => expression is SqlAlterSequenceExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT nextval('seq');", [[9L]])),
+        [SqlClauses.DropSequence] = new("DROP SEQUENCE seq;", ["CREATE SEQUENCE seq;"],
+            expression => expression is SqlDropSequenceExpression,
+            async (session, _) => await ExpectRowsAsync(session, "SELECT SEQUENCE_NAME FROM INFORMATION_SCHEMA.SEQUENCES;", [])),
+        [SqlClauses.NextValue] = new("SELECT NEXT VALUE FOR seq, (SELECT u.id FROM t u WHERE u.id=t.id), NEXT VALUE FOR seq FROM t ORDER BY id;",
+            ["CREATE SEQUENCE seq;", "CREATE TABLE t(id INT);", "INSERT INTO t VALUES (1),(2);"],
+            expression => expression is SqlSelectExpression select && select.Columns[0].Expression is SqlNextValueExpression,
+            async (session, result) =>
+            {
+                CheckRows(await ReadRowsAsync(result), [[1L, 1, 1L], [2L, 2, 2L]]);
+                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
+                    "UPDATE t SET id = NEXT VALUE FOR seq RETURNING NEXT VALUE FOR seq;"));
+                error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03076");
+                await ExpectRowsAsync(session, "SELECT nextval('seq'), id FROM t ORDER BY id LIMIT 1 OFFSET 1;", [[4L, 2]]);
+                await ExpectRowsAsync(session, "SELECT nextval('seq');", [[5L]]);
+                foreach (string clauses in new[] { "", " GROUP BY id",
+                    " WHERE EXISTS (SELECT 1 FROM t u WHERE u.id=t.id)",
+                    " WHERE EXISTS (SELECT 1 FROM t u WHERE u.id=t.id) GROUP BY id" })
+                {
+                    await ExecuteAsync(session, "ALTER SEQUENCE seq RESTART WITH 1;");
+                    await ExpectRowsAsync(session, "SELECT NEXT VALUE FOR seq, NEXT VALUE FOR seq, id FROM t" +
+                        clauses + " LIMIT 1 OFFSET 1;", [[2L, 2L, 2]]);
+                    await ExpectRowsAsync(session, "SELECT nextval('seq');", [[3L]]);
+                }
+                foreach (string grouping in new[] { "ROLLUP(id)", "CUBE(id)", "GROUPING SETS ((id), ())" })
+                {
+                    await ExecuteAsync(session, "ALTER SEQUENCE seq RESTART WITH 1;");
+                    await ExpectRowsAsync(session, "SELECT NEXT VALUE FOR seq, NEXT VALUE FOR seq, id, GROUPING(id) FROM t GROUP BY " +
+                        grouping + " ORDER BY GROUPING(id), id LIMIT 1 OFFSET 1;", [[2L, 2L, 2, 0]]);
+                    await ExpectRowsAsync(session, "SELECT nextval('seq');", [[3L]]);
+                }
+            }),
+        [SqlClauses.AlterIdentity] = new("ALTER TABLE ids ALTER id RESTART WITH 7;", ["CREATE TABLE ids(id SERIAL);"],
+            expression => expression is SqlAlterTableExpression { Action: SqlAlterIdentityAction },
+            async (session, _) =>
+            {
+                await ExecuteAsync(session, "ALTER TABLE ids ALTER id TYPE BIGINT;");
+                await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;");
+                await ExpectRowsAsync(session, "SELECT id FROM ids;", [[7L]]);
+            }),
+        [SqlClauses.Serial] = new("CREATE TABLE ids(id SERIAL);", [],
+            expression => expression is SqlCreateTableExpression create && create.Columns[0].Identity is { IsAlways: false },
+            async (session, _) => { await ExecuteAsync(session, "INSERT INTO ids DEFAULT VALUES;"); await ExpectRowsAsync(session, "SELECT id FROM ids;", [[1]]); }),
+        [SqlClauses.Overriding] = new("INSERT INTO ids OVERRIDING SYSTEM VALUE VALUES(9);", ["CREATE TABLE ids(id INT GENERATED ALWAYS AS IDENTITY);"],
+            expression => expression is SqlInsertExpression { Overriding: SqlIdentityOverride.System },
+            async (session, _) =>
+            {
+                await ExpectRowsAsync(session, "SELECT id FROM ids;", [[9]]);
+                var error = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,
+                    "INSERT INTO ids OVERRIDING USER VALUE SELECT DATE '2026-01-01';"));
+                error.Diagnostics[0].Code.ShouldBe("CS05013");
+                await ExecuteAsync(session, "INSERT INTO ids OVERRIDING USER VALUE VALUES(99);");
+                await ExpectRowsAsync(session, "SELECT id FROM ids ORDER BY id;", [[1], [9]]);
+            }),
+        [SqlClauses.OwnedBy] = new("CREATE SEQUENCE owned OWNED BY ids.id;", ["CREATE TABLE ids(id INT);"],
+            expression => expression is SqlCreateSequenceExpression,
+            async (session, _) => { await ExecuteAsync(session, "DROP TABLE ids;"); await ExpectRowsAsync(session, "SELECT SEQUENCE_NAME FROM INFORMATION_SCHEMA.SEQUENCES;", []); }),
         [SqlClauses.Identity] = new("CREATE TABLE identities (id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 100 INCREMENT BY 5), label TEXT);", [],
             expression => expression is SqlCreateTableExpression create && create.Columns.Any(column => column.Identity is not null),
             async (session, _) =>
@@ -972,6 +1130,32 @@ public sealed class SqlLanguageConformanceTests
                 session.Database.Catalog.TryGetTable("sales", "orders", out var droppedTable).ShouldBeFalse();
                 await ExecuteAsync(session, "DROP SCHEMA IF EXISTS sales;");
             }),
+        [SqlClauses.PartialIndex] = new("CREATE UNIQUE INDEX ix_positive ON t(name) WHERE age > 0;", _seed,
+            expression => expression is SqlCreateIndexExpression { Predicate: not null },
+            async (session, _) =>
+            {
+                await ExecuteAsync(session, "INSERT INTO t VALUES(4,'Ada',-1);");
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE name='Ada' ORDER BY id+0;", [[1],[4]]);
+                session.LastStatementMetrics!.AccessPath.ShouldBe("scan");
+                await SqlConstraintAssertions.ThrowAsync(() => ExecuteAsync(session, "UPDATE t SET age=1 WHERE id=4;"));
+            }),
+        [SqlClauses.IndexKeyOrder] = new("CREATE INDEX ix_order ON t(age DESC NULLS LAST,name ASC NULLS FIRST);", _seed,
+            expression => expression is SqlCreateIndexExpression create && create.KeyOrders[0] == SqlIndexKeyOrder.DescendingNullsLast,
+            async (session, _) =>
+            {
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name;", [[1]]);
+                session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_order:forward");
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age=36 ORDER BY name DESC NULLS LAST LIMIT 1;", [[1]]);
+                session.LastStatementMetrics!.AccessPath.ShouldBe("ordered:ix_order:backward");
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
+                await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id LIMIT 2;", [[1],[2]]);
+                session.LastStatementMetrics!.RecordsExamined.ShouldBe(2);
+                session.LastStatementMetrics.PeakOrderedRows.ShouldBe(0);
+                await ExecuteAsync(session, "CREATE INDEX ix_age_default ON t(age);");
+                await ExpectRowsAsync(session, "SELECT id FROM t WHERE age>35 ORDER BY age LIMIT 2;", [[1],[3]]);
+                session.LastStatementMetrics!.PeakOrderedRows.ShouldBe(0);
+            }),
         [SqlClauses.CreateIndex] = new("CREATE UNIQUE INDEX ix_name ON t(name);", _seed,
             expression => expression is SqlCreateIndexExpression { IsUnique: true },
             async (session, _) =>
@@ -1006,6 +1190,55 @@ public sealed class SqlLanguageConformanceTests
                 await ExpectRowsAsync(session, "SELECT COUNT(*) FROM c;", [[2L]]);
             }),
         [SqlClauses.ForeignKey] = ForeignKeyCase("CREATE TABLE c (pid INT, CONSTRAINT fk_parent FOREIGN KEY(pid) REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
+        [SqlClauses.OnUpdate] = new("CREATE TABLE c (pid INT REFERENCES t(id) ON UPDATE CASCADE);", _seed,
+            expression => expression is SqlCreateTableExpression create && create.Constraints.Single().OnUpdate == SqlReferentialAction.Cascade,
+            async (session, _) =>
+            {
+                await ExecuteAsync(session, "INSERT INTO c VALUES (1);");
+                await ExecuteAsync(session, "UPDATE t SET id=9 WHERE id=1;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[9]]);
+                await ExpectRowsAsync(session, "SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS;", [["CASCADE"]]);
+                await ExecuteAsync(session, "TRUNCATE t,c;");
+                await ExecuteAsync(session, "INSERT INTO t VALUES(1,'replacement',1);");
+                await ExecuteAsync(session, "INSERT INTO c VALUES(1);");
+                await ExecuteAsync(session, "UPDATE t SET id=2;");
+                await ExpectRowsAsync(session, "SELECT pid FROM c;", [[2]]);
+                await ExecuteAsync(session, "CREATE TABLE p_image(id TEXT COLLATE case_insensitive PRIMARY KEY);");
+                await ExecuteAsync(session, "CREATE TABLE c_image(pid TEXT COLLATE case_insensitive REFERENCES p_image(id) ON UPDATE CASCADE);");
+                await ExecuteAsync(session, "INSERT INTO p_image VALUES('Ada');");
+                await ExecuteAsync(session, "INSERT INTO c_image VALUES('Ada');");
+                await ExecuteAsync(session, "UPDATE p_image SET id='ADA';");
+                await ExpectRowsAsync(session, "SELECT id FROM p_image;", [["ADA"]]);
+                await ExpectRowsAsync(session, "SELECT pid FROM c_image;", [["ADA"]]);
+                await ExecuteAsync(session, "CREATE TABLE self_update(id INT PRIMARY KEY,pid INT REFERENCES self_update(id) ON UPDATE CASCADE);");
+                await ExecuteAsync(session, "INSERT INTO self_update VALUES(1,NULL),(2,1);");
+                await ExpectRowsAsync(session, "UPDATE self_update SET id=id+10,pid=pid RETURNING id,pid;", [[11,null],[12,1]]);
+                await ExpectRowsAsync(session, "SELECT id,pid FROM self_update ORDER BY id;", [[11,null],[12,11]]);
+                string[] actions = ["SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
+                for (int index = 0; index < actions.Length; index++)
+                {
+                    string parent = "update_rule_p_" + index, child = "update_rule_c_" + index;
+                    await ExecuteAsync(session, $"CREATE TABLE {parent}(id INT PRIMARY KEY);");
+                    await ExecuteAsync(session, $"INSERT INTO {parent} VALUES(1),(2);");
+                    await ExecuteAsync(session, $"CREATE TABLE {child}(pid INT DEFAULT 2 REFERENCES {parent}(id) ON UPDATE {actions[index]});");
+                    await ExecuteAsync(session, $"INSERT INTO {child} VALUES(1);");
+                    if (index < 2)
+                    {
+                        await ExecuteAsync(session,$"UPDATE {parent} SET id=9 WHERE id=1;");
+                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",index == 0 ? [[null]] : [[2]]);
+                    }
+                    else if (index == 2)
+                    {
+                        var restrict = await Should.ThrowAsync<DatabaseException>(() => ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;"));
+                        restrict.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS03039");
+                    }
+                    else
+                    {
+                        await ExecuteAsync(session,$"UPDATE {parent} SET id=3-id;");
+                        await ExpectRowsAsync(session,$"SELECT pid FROM {child};",[[1]]);
+                    }
+                }
+            }),
         [SqlClauses.References] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id));", SqlReferentialAction.NoAction, VerifyReferenceAsync),
         [SqlClauses.Cascade] = ForeignKeyCase("CREATE TABLE c (pid INT REFERENCES t(id) ON DELETE CASCADE);", SqlReferentialAction.Cascade,
             async (session, result) =>
@@ -1048,6 +1281,31 @@ public sealed class SqlLanguageConformanceTests
             }),
         [SqlClauses.Begin] = new("BEGIN;", _seed,
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Begin }, VerifyBeginAsync),
+        [SqlClauses.IsolationLevel] = new("BEGIN ISOLATION LEVEL READ COMMITTED;", _seed,
+            expression => expression is SqlTransactionExpression { IsolationLevels.Count: 1 },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                session.CurrentTransaction.ShouldNotBeNull().IsolationLevel.ShouldBe(IsolationLevel.ReadCommitted);
+                await ExecuteAsync(session, "ROLLBACK;");
+            }),
+        [SqlClauses.SetTransaction] = new("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ;", [.. _seed, "BEGIN ISOLATION LEVEL READ COMMITTED;"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.SetTransaction },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                session.CurrentTransaction.ShouldNotBeNull().IsolationLevel.ShouldBe(IsolationLevel.Snapshot);
+                await ExecuteAsync(session, "COMMIT;");
+            }),
+        [SqlClauses.DiscardAll] = new("DISCARD ALL;", ["CREATE SEQUENCE seq;", "SELECT nextval('seq');"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Discard },
+            async (session, result) =>
+            {
+                result.AffectedCount.ShouldBe(0);
+                var failure = await Should.ThrowAsync<DatabaseException>(async () =>
+                    await session.ExecuteAsync("SELECT currval('seq')", cancellationToken: CancellationToken.None));
+                failure.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS04068");
+            }),
         [SqlClauses.Commit] = new("COMMIT;", [.. _seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Commit },
             async (session, _) =>
@@ -1056,6 +1314,15 @@ public sealed class SqlLanguageConformanceTests
                 await using var observer = await session.Database.CreateSessionAsync();
                 await ExpectRowsAsync(observer, "SELECT id FROM t WHERE id = 4;", [[4]]);
             }),
+        [SqlClauses.Savepoint] = new("SAVEPOINT scope;", [.. _seed, "BEGIN;"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Savepoint },
+            async (session, _) => { await ExecuteAsync(session, "ROLLBACK TO scope;"); await ExecuteAsync(session, "COMMIT;"); }),
+        [SqlClauses.ReleaseSavepoint] = new("RELEASE scope;", [.. _seed, "BEGIN;", "SAVEPOINT scope;", "INSERT INTO t VALUES (4, 'new', 1);"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.ReleaseSavepoint },
+            async (session, _) => { await ExecuteAsync(session, "COMMIT;"); await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [2], [3], [4]]); }),
+        [SqlClauses.RollbackToSavepoint] = new("ROLLBACK TO scope;", [.. _seed, "BEGIN;", "SAVEPOINT scope;", "INSERT INTO t VALUES (4, 'new', 1);"],
+            expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.RollbackToSavepoint },
+            async (session, _) => { await ExecuteAsync(session, "COMMIT;"); await ExpectRowsAsync(session, "SELECT id FROM t ORDER BY id;", [[1], [2], [3]]); }),
         [SqlClauses.Rollback] = new("ROLLBACK;", [.. _seed, "BEGIN;", "INSERT INTO t VALUES (4, 'new', 1);", "DELETE FROM t WHERE id = 2;"],
             expression => expression is SqlTransactionExpression { CommandType: SqlQueryCommandType.Rollback },
             async (session, _) =>

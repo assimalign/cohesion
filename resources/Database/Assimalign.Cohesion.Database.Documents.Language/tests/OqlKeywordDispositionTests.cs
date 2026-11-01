@@ -34,8 +34,10 @@ public sealed class OqlKeywordDispositionTests
         ["ORDER"] = Parses("SELECT a FROM c ORDER BY a"),
         ["ASC"] = Parses("SELECT a FROM c ORDER BY a ASC"),
         ["DESC"] = Parses("SELECT a FROM c ORDER BY a DESC"),
+        ["NULLS"] = Parses("SELECT a FROM c ORDER BY a NULLS FIRST"),
         ["AS"] = Parses("SELECT a AS b FROM c AS d"),
         ["CREATE"] = Parses("CREATE INDEX ix ON c (a)"),
+        ["INCLUDE"] = Parses("CREATE INDEX ix ON c (a INCLUDE MISSING)"),
         ["INDEX"] = Parses("CREATE INDEX ix ON c (a)"),
         ["ON"] = Parses("CREATE INDEX ix ON c (a)"),
         ["DROP"] = Parses("DROP INDEX ix ON c"),
@@ -82,7 +84,6 @@ public sealed class OqlKeywordDispositionTests
         ["UNIQUE"] = Parses("CREATE UNIQUE INDEX ix ON c (a)"),
         ["LISTTOSET"] = Rejects("SELECT LISTTOSET(a) FROM c", "LISTTOSET"),
         ["TYPEOF"] = Rejects("SELECT TYPEOF(a) FROM c", "TYPEOF"),
-        ["ARRAY_AGG"] = Rejects("SELECT ARRAY_AGG(a) FROM c", "ARRAY_AGG"),
         ["REGEXP_LIKE"] = Rejects("SELECT REGEXP_LIKE(a, 'x') FROM c", "REGEXP_LIKE"),
         ["REGEXP_REPLACE"] = Rejects("SELECT REGEXP_REPLACE(a, 'x', 'y') FROM c", "REGEXP_REPLACE"),
         ["REGEXP_POSITION"] = Rejects("SELECT REGEXP_POSITION(a, 'x') FROM c", "REGEXP_POSITION"),
@@ -98,9 +99,11 @@ public sealed class OqlKeywordDispositionTests
         ["START"] = Parses("START WORK ISOLATION LEVEL READ COMMITTED"),
         ["COMMIT"] = Parses("COMMIT"),
         ["ROLLBACK"] = Parses("ROLLBACK"),
-        ["SAVEPOINT"] = Rejects("SAVEPOINT point", "SAVEPOINT"),
+        ["SAVEPOINT"] = Parses("SAVEPOINT point"),
+        ["RELEASE"] = Parses("RELEASE SAVEPOINT point"),
         ["WITH"] = Rejects("WITH x AS (SELECT a FROM c) SELECT a FROM x", "WITH"),
-        ["JOIN"] = Rejects("SELECT * FROM c JOIN d ON c.a = d.a", "JOIN"),
+        ["LETTING"] = Rejects("SELECT a FROM c GROUP BY a LETTING x = 1", "LETTING"),
+        ["JOIN"] = Parses("SELECT * FROM c AS a JOIN d AS b ON META(b).id = a.k"),
         ["UNION"] = Rejects("SELECT a FROM c UNION SELECT a FROM d", "UNION"),
         ["INTERSECT"] = Rejects("SELECT a FROM c INTERSECT SELECT a FROM d", "INTERSECT"),
         ["EXCEPT"] = Rejects("SELECT a FROM c EXCEPT SELECT a FROM d", "EXCEPT"),
@@ -110,7 +113,7 @@ public sealed class OqlKeywordDispositionTests
         ["FETCH"] = Rejects("SELECT * FROM c ORDER BY a FETCH FIRST 5 ROWS ONLY", "FETCH"),
         ["UPSERT"] = Parses("UPSERT INTO c (KEY, VALUE) VALUES ('k', {'a': 1})"),
         ["MERGE"] = Rejects("MERGE INTO c USING d ON c.id = d.id WHEN MATCHED THEN UPDATE SET c.a = d.a", "MERGE"),
-        ["NEST"] = Rejects("SELECT * FROM c NEST d ON TRUE", "NEST"),
+        ["NEST"] = Parses("SELECT * FROM c AS a NEST d AS b ON META(b).id = a.k"),
         ["WITHIN"] = Rejects("SELECT * FROM c WHERE ANY x WITHIN a SATISFIES TRUE END", "WITHIN"),
         ["INNER"] = Parses("SELECT * FROM c d INNER UNNEST d.a t"),
         ["LEFT"] = Parses("SELECT * FROM c d LEFT UNNEST d.a t"),
@@ -258,6 +261,7 @@ public sealed class OqlKeywordDispositionTests
     private static string[] Words()
         => OqlLanguageProfile.Instance.Keywords.ToArray()
             .Concat(OqlUnsupportedVocabulary.Words.Select(word => word.Spelling))
+            .Concat(new[] { "NULLS", "INCLUDE" })
             .Concat(new[] { "UNNEST", "INNER", "LEFT", "OUTER", "EVERY", "SATISFIES" }).Append("EXPLAIN") // Contextual statement prefix; identifier cases live in this corpus too.
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();

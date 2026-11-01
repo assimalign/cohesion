@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Connections.InMemory;
 using Assimalign.Cohesion.Database.Client;
 using Assimalign.Cohesion.Database.Execution;
 using Assimalign.Cohesion.Database.Sql.Client;
+using Assimalign.Cohesion.Database.Sql.Language;
 
 namespace Assimalign.Cohesion.Database.Sql.AotSample;
 
@@ -35,6 +36,14 @@ internal static class Program
         "slugify(Note) AS note_slug, or_none(Note) AS note_or FROM customers ORDER BY Id";
 
     private const string aggregates = "SELECT product(Score) AS p, median(Score) AS m, join_names(Name) AS names, COUNT(*) AS c FROM customers";
+    private const string groupingSets = "SELECT Active,GROUPING(Active),GROUPING_ID(Active),COUNT(*),SUM(Score) FILTER(WHERE Score>0) " +
+        "FROM customers GROUP BY DISTINCT GROUPING SETS ((Active),(),()) ORDER BY GROUPING(Active),Active";
+    private const string outerGrouping = "SELECT Active,(SELECT GROUPING(customers.Active) GROUP BY customers.Active)," +
+        "(SELECT GROUPING_ID(customers.Active)),COUNT(*) FROM customers GROUP BY ROLLUP(Active) ORDER BY GROUPING(Active),Active";
+    private const string aggregateFilter = "SELECT COUNT(*) FILTER (WHERE Score > 0), " +
+        "SUM(1/0) FILTER (WHERE FALSE), BOOL_AND(Score > 0), BOOL_OR(Score > 150), EVERY(Score > 0), " +
+        "VAR_SAMP(Score), VARIANCE(Score), STDDEV_POP(Score), VAR_POP(CAST(Score AS DOUBLE PRECISION)), " +
+        "VAR_POP(CASE WHEN Score=100 THEN 1 ELSE CAST(3 AS DOUBLE PRECISION) END) FROM customers";
 
     private const string mergeBinding = "MERGE INTO default_guard AS t USING default_guard AS s ON t.id=s.id " +
         "WHEN MATCHED THEN UPDATE SET note=s.id WHEN NOT MATCHED THEN INSERT DEFAULT VALUES " +
@@ -73,6 +82,12 @@ internal static class Program
     private static readonly object?[][] _allCasts =
         [[0.8455124082255701m, new DateTime(2024, 1, 1), new TimeOnly(23, 0), new TimeSpan(1, 2, 3), "\\x00ff", "{\"雪\":1}", "TRUE", "1.0000001"]];
 
+    private const string jsonAccess = "SELECT '{\"a\":[\"café\",null,3]}'::JSON->'a'->>0, " +
+        "'{\"a\":[\"café\",null,3]}'::JSONB->'a'->-1, 'null'::JSON->>0, " +
+        "'broken' IS NOT JSON VALUE, '{}' IS JSON OBJECT, 'null' IS JSON SCALAR, NULL IS NOT JSON, " +
+        "'12.5'::JSONB::INT, 'true'::JSON::BOOLEAN, 'null'::JSONB::NUMERIC";
+    private static readonly object?[][] _jsonAccess = [["café", Encoding.UTF8.GetBytes("3"), null, true, true, true, null, 13, true, null]];
+
     private const string predicates = "SELECT NULL IS NOT DISTINCT FROM NULL, 1 IS DISTINCT FROM NULL, " +
         "NULL IS UNKNOWN, FALSE IS NOT TRUE, 1 = 1 IS TRUE, '50%' LIKE '50X%' ESCAPE 'X', " +
         "'a%' COLLATE case_accent_insensitive LIKE 'aé%' ESCAPE 'é', " +
@@ -84,11 +99,16 @@ internal static class Program
         "1 NOT IN (SELECT 2 FROM customers WHERE Id = 1) BETWEEN FALSE AND TRUE, " +
         "'เก' COLLATE invariant LIKE 'เก', 'ເກ' COLLATE invariant LIKE 'ເກ', " +
         "CAST('a' AS CHAR(3)) IS NOT DISTINCT FROM 'a', " +
-        "NOT EXISTS (SELECT Id FROM customers WHERE Id < 0) IS TRUE FROM customers WHERE Id = 1";
-    private static readonly object?[][] _predicates = [[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]];
+        "NOT EXISTS (SELECT Id FROM customers WHERE Id < 0) IS TRUE, " +
+        "'A%' ILIKE 'aX%' ESCAPE 'X', 'É' COLLATE case_accent_insensitive ILIKE 'e', " +
+        "'A' COLLATE invariant NOT ILIKE 'b', NULL ILIKE '%', -'7'::INT, '7'::TEXT::INT FROM customers WHERE Id = 1";
+    private static readonly object?[][] _predicates = [[true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, null, -7L, 7]];
 
     private const string characters = "SELECT c, CAST(c AS TEXT), LENGTH(c), c || 'b', c LIKE 'a' FROM fixed_codes WHERE c = 'a'";
     private static readonly object?[][] _characters = [["a  ", "a", 1L, "ab", false]];
+
+    private const string bitwise = "SELECT 1 | 2 & 3, 5 # 3, ~1::SMALLINT, 1 << 32, (-8)::BIGINT >> 65, NULL & 1, ~1 + 2";
+    private static readonly object?[][] _bitwise = [[3, 6, (short)-2, 1, -4L, null, -4L]];
 
     private const string typeAliases = "SELECT n, CAST(s AS CHARACTER VARYING(5)), CAST(f AS DOUBLE PRECISION), " +
         "CAST(NULL AS DATETIME2), CAST(NULL AS DATETIMEOFFSET), CAST(NULL AS UNIQUEIDENTIFIER) FROM type_aliases";
@@ -206,6 +226,11 @@ internal static class Program
     {
         engine.TryGetDatabase(databaseName, out SqlDatabase? database);
         await using SqlDatabaseSession session = await database!.CreateSessionAsync(CancellationToken.None);
+        await session.ExecuteAsync("CREATE TABLE savepoint_native(id INT PRIMARY KEY)");
+        foreach (string command in new[] { "BEGIN", "SAVEPOINT parent", "SAVEPOINT duplicate", "INSERT INTO savepoint_native VALUES(1)", "SAVEPOINT duplicate", "INSERT INTO savepoint_native VALUES(2)", "ROLLBACK TO duplicate", "RELEASE duplicate", "ROLLBACK TO duplicate", "INSERT INTO savepoint_native VALUES(3)", "RELEASE parent", "COMMIT" })
+        { await session.ExecuteAsync(command); }
+        Check("in process: named savepoint duplicate/release/undo/commit", await RowsAsync(session, "SELECT id FROM savepoint_native"), [[3]]);
+        await session.ExecuteAsync("DROP TABLE savepoint_native");
         await session.ExecuteAsync("CREATE SCHEMA native_namespace", cancellationToken: CancellationToken.None);
         Check("in process: CREATE SCHEMA and SCHEMATA", await RowsAsync(session,
             "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = 'native_namespace'"), [["native_namespace"]]);
@@ -227,12 +252,75 @@ internal static class Program
         await session.ExecuteAsync("CREATE TABLE sql_defined (n sql_positive DEFAULT sql_increment(2))");
         await session.ExecuteAsync("INSERT INTO sql_defined VALUES (sql_increment(3))");
         await session.ExecuteAsync("CREATE VIEW native_view AS SELECT sql_increment(n) AS n FROM sql_defined");
+        Check("in process: ranking and navigation window stage", await RowsAsync(session,
+            "SELECT Id,RANK() OVER w,LAG(Score,1,0) OVER w FROM customers WINDOW w AS(ORDER BY Id) ORDER BY Id"),
+            [[1L,1L,0L],[2L,2L,100L]]);
+        Check("in process: ROWS frames, aggregate FILTER and value functions", await RowsAsync(session,
+            "SELECT Id,SUM(Score) FILTER(WHERE Score>0) OVER w,FIRST_VALUE(Score) OVER w,LAST_VALUE(Score) OVER w,NTH_VALUE(Score,2) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
+            [[1L,100m,100L,100L,null],[2L,300m,100L,200L,200L]]);
+        Check("in process: RANGE distances, GROUPS and exclusion", await RowsAsync(session,
+            "SELECT Id,SUM(Score) OVER(ORDER BY Id RANGE 1 PRECEDING EXCLUDE CURRENT ROW),AVG(Score) OVER(ORDER BY Id GROUPS 1 PRECEDING EXCLUDE TIES),LEAD(Score) IGNORE NULLS OVER(ORDER BY Id) FROM customers ORDER BY Id"),
+            [[1L,null,100m,200L],[2L,100m,150m,null]]);
+        Check("in process: ordered native and application frame aggregates", await RowsAsync(session,
+            "SELECT Id,SUM(Score ORDER BY Id DESC) FILTER(WHERE Score>0) OVER w,product(Score) OVER w FROM customers WINDOW w AS(ORDER BY Id ROWS UNBOUNDED PRECEDING) ORDER BY Id"),
+            [[1L,100m,100L],[2L,300m,20000L]]);
         Check("in process: persisted view with pinned call", await RowsAsync(session, "SELECT n FROM native_view"), [[5]]);
         Check("in process: VIEWS metadata", await RowsAsync(session, "SELECT CHECK_OPTION, IS_UPDATABLE FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'native_view'"), [["NONE", "NO"]]);
         await session.ExecuteAsync("CREATE TABLE fixed_codes (c CHAR(3) PRIMARY KEY)");
         await session.ExecuteAsync("INSERT INTO fixed_codes VALUES ('a')");
         await session.ExecuteAsync("CREATE TABLE type_aliases (n NCHAR(3), s NVARCHAR(MAX), f DOUBLE PRECISION, d TIMESTAMP WITH TIME ZONE)");
         await session.ExecuteAsync("INSERT INTO type_aliases (n, s, f) VALUES ('ab', 'text', 1.5)");
+        await session.ExecuteAsync("CREATE SEQUENCE native_sequence AS SMALLINT START 10 INCREMENT 2");
+        Check("in process: sequence row sharing and nextval", await RowsAsync(session,
+            "SELECT NEXT VALUE FOR native_sequence, NEXT VALUE FOR native_sequence, nextval('native_sequence')"), [[10L, 10L, 12L]]);
+        await session.ExecuteAsync("ALTER SEQUENCE native_sequence RESTART WITH 20");
+        Check("in process: sequence setval and session state", await RowsAsync(session,
+            "SELECT setval('native_sequence', 30, false), nextval('native_sequence'::regclass), currval('native_sequence'), lastval()"), [[30L, 30L, 30L, 30L]]);
+        Check("in process: sequence metadata", await RowsAsync(session,
+            "SELECT DATA_TYPE, START_VALUE FROM INFORMATION_SCHEMA.SEQUENCES WHERE SEQUENCE_NAME='native_sequence'"), [["SMALLINT", "10"]]);
+        await session.ExecuteAsync("DROP SEQUENCE native_sequence RESTRICT");
+        await session.ExecuteAsync("CREATE TABLE serial_review(id SERIAL)");
+        await session.ExecuteAsync("ALTER TABLE serial_review ALTER id RESTART WITH 100");
+        await session.ExecuteAsync("ALTER TABLE serial_review ALTER id TYPE BIGINT");
+        await session.ExecuteAsync("INSERT INTO serial_review OVERRIDING USER VALUE VALUES(999)");
+        await session.ExecuteAsync("INSERT INTO serial_review OVERRIDING USER VALUE SELECT 998");
+        Check("in process: serial restart, type change and overriding plans", await RowsAsync(session,
+            "SELECT id FROM serial_review ORDER BY id"), [[100L], [101L]]);
+        CheckFailure("in process: ignored identity input still checks assignment", await FailureAsync(async () =>
+            await session.ExecuteAsync("INSERT INTO serial_review OVERRIDING USER VALUE SELECT DATE '2026-01-01'")), "CS05013");
+        await session.ExecuteAsync("CREATE TABLE tiny_review(id TINYINT GENERATED BY DEFAULT AS IDENTITY)");
+        Check("in process: identity sequence precision", await RowsAsync(session,
+            "SELECT NUMERIC_PRECISION FROM INFORMATION_SCHEMA.SEQUENCES WHERE SEQUENCE_NAME='tiny_review_id_seq'"), [[8L]]);
+        await session.ExecuteAsync("CREATE TABLE exhausted_review(id SMALLSERIAL)");
+        await session.ExecuteAsync("ALTER TABLE exhausted_review ALTER id RESTART WITH 32767");
+        await session.ExecuteAsync("INSERT INTO exhausted_review DEFAULT VALUES");
+        CheckFailure("in process: identity exhaustion diagnostic", await FailureAsync(async () =>
+            await session.ExecuteAsync("INSERT INTO exhausted_review DEFAULT VALUES")), "CS02002");
+        await session.ExecuteAsync("CREATE TABLE partial_guard(k INT,active BOOLEAN)");
+        await session.ExecuteAsync("INSERT INTO partial_guard VALUES(7,TRUE),(7,FALSE),(NULL,TRUE),(NULL,TRUE)");
+        await session.ExecuteAsync("CREATE UNIQUE INDEX partial_uq ON partial_guard(k DESC NULLS LAST) WHERE active");
+        CheckFailure("in process: partial uniqueness entering predicate", await FailureAsync(() => session.ExecuteAsync(
+            "UPDATE partial_guard SET active=TRUE WHERE active=FALSE").AsTask()), "CS03037");
+        await session.ExecuteAsync("UPDATE partial_guard SET active=FALSE WHERE k=7 AND active");
+        await session.ExecuteAsync("INSERT INTO partial_guard VALUES(7,TRUE)");
+        Check("in process: partial index canonical metadata", await RowsAsync(session,
+            "SELECT PREDICATE FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME='partial_uq'"), [["active"]]);
+        Check("in process: partial index never supplies an incomplete query", await RowsAsync(session,
+            "SELECT COUNT(*) FROM partial_guard WHERE k=7"), [[3L]]);
+        await session.ExecuteAsync("CREATE TABLE directed_guard(id INT,a INT,b INT)");
+        await session.ExecuteAsync("INSERT INTO directed_guard VALUES(1,1,2),(2,1,3),(3,1,NULL),(4,2,3)");
+        await session.ExecuteAsync("CREATE INDEX directed_ix ON directed_guard(a DESC NULLS LAST,b ASC NULLS FIRST)");
+        Check("in process: directed equality-prefix range", await RowsAsync(session,
+            "SELECT id FROM directed_guard WHERE a=1 AND b>=2 AND b<=3 ORDER BY b DESC"), [[2], [1]]);
+        Check("in process: directed canonical metadata", await RowsAsync(session,
+            "SELECT DIRECTION,NULL_PLACEMENT FROM INFORMATION_SCHEMA.INDEXES WHERE INDEX_NAME='directed_ix' ORDER BY ORDINAL_POSITION"),
+            [["DESC", "LAST"], [null, "FIRST"]]);
+        await session.ExecuteAsync("INSERT INTO partial_guard VALUES(7,TRUE) ON CONFLICT(k) WHERE active=TRUE DO UPDATE SET active=FALSE");
+        Check("in process: partial inference applies replacement membership", await RowsAsync(session,
+            "SELECT COUNT(*) FROM partial_guard WHERE k=7 AND active"), [[0L]]);
+        var partialProof = await RowsAsync(session, "EXPLAIN SELECT k FROM partial_guard WHERE k=7 AND active");
+        Check("in process: partial index EXPLAIN proof", [[partialProof.Any(row =>
+            Equals(row[4], "partial_uq") && row[5]!.ToString()!.Contains("implied_by=", StringComparison.Ordinal))]], [[true]]);
         await session.ExecuteAsync("CREATE TABLE identity_guard (id BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 100 INCREMENT BY 5), label INT)");
         await session.ExecuteAsync("INSERT INTO identity_guard (label) VALUES (1), (2)");
         await session.ExecuteAsync("UPDATE identity_guard SET id = DEFAULT WHERE label = 1");
@@ -266,6 +354,10 @@ internal static class Program
         Check("in process: DESC NULLS FIRST", await RowsAsync(session, "SELECT id FROM null_ordering ORDER BY x DESC NULLS FIRST, id"), [[2], [3], [1]]);
         Check("in process: aggregate NULL placement", await RowsAsync(session, "SELECT STRING_AGG(name, ',' ORDER BY x NULLS LAST, id) FROM null_ordering"), [["a,c,b"]]);
         Check("in process: SELECT without FROM (#1373)", await RowsAsync(session, "SELECT (SELECT 42) WHERE 1 IN (SELECT 1) AND EXISTS (SELECT NULL)"), [[42L]]);
+        Check("in process: recursive LIMIT demand (#1719)", await RowsAsync(session,
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT n FROM r LIMIT 3"), [[1L], [2L], [3L]]);
+        Check("in process: recursive DISTINCT fixpoint (#1719)", await RowsAsync(session,
+            "WITH RECURSIVE r(n) AS (SELECT NULL UNION SELECT n FROM r) SELECT n FROM r"), [[null]]);
         Check("in process: public function timestamp (#1373)",
             new SqlFunctionContext(default, null, CancellationToken.None, DateTimeOffset.UnixEpoch).TransactionTimestamp, DateTimeOffset.UnixEpoch);
         Check<DateTimeOffset?>("in process: absent function timestamp (#1373)", default(SqlFunctionContext).TransactionTimestamp, null);
@@ -278,7 +370,9 @@ internal static class Program
         Check("in process: OFFSET before LIMIT", await RowsAsync(session, "SELECT Id FROM customers ORDER BY Id OFFSET 1 LIMIT 1"), [[2L]]);
         Check("in process: TOP after sorting", await RowsAsync(session, "SELECT TOP (1) Id FROM customers ORDER BY Id DESC"), [[2L]]);
         Check("in process: all CAST families", await RowsAsync(session, allCasts), _allCasts);
+        Check("in process: JSON access and scalar conversions", await RowsAsync(session, jsonAccess), _jsonAccess);
         Check("in process: distinct truth tests and ESCAPE", await RowsAsync(session, predicates), _predicates);
+        Check("in process: integer bitwise types and precedence", await RowsAsync(session, bitwise), _bitwise);
         Check("in process: ordinary invariant LIKE anchors", await RowsAsync(session,
             "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%a', " +
             "(RPAD('z', 199997, 'z') || 'abc') COLLATE invariant LIKE '%abc%', " +
@@ -346,6 +440,32 @@ internal static class Program
         await session.ExecuteAsync("DELETE FROM action_parent WHERE id = 1", cancellationToken: CancellationToken.None);
         Check("in process: SET DEFAULT expression", await RowsAsync(session, "SELECT pid FROM action_child"), [[2]]);
         Check("in process: SET NULL", await RowsAsync(session, "SELECT pid FROM null_child"), [[null]]);
+        await session.ExecuteAsync("CREATE TABLE update_parent (id INT PRIMARY KEY)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO update_parent VALUES (1)", cancellationToken: CancellationToken.None);
+        string[] updateActions = ["CASCADE", "SET NULL", "SET DEFAULT", "RESTRICT", "NO ACTION"];
+        for (int actionIndex = 0; actionIndex < updateActions.Length; actionIndex++)
+        {
+            string action = updateActions[actionIndex];
+            string declaration = $"CREATE TABLE update_child_{actionIndex} (pid INT, CONSTRAINT update_fk_{actionIndex} FOREIGN KEY(pid) REFERENCES update_parent(id) ON UPDATE {action} ON DELETE CASCADE)";
+            var parsedConstraint = ((SqlCreateTableExpression)((SqlQueryStatement)new SqlQueryParser().Parse(declaration + ";")).SqlExpression).Constraints.Single();
+            Check("in process: ON UPDATE rendering " + action,
+                SqlExpressionRenderer.Render(parsedConstraint).Contains(" ON DELETE CASCADE ON UPDATE " + action, StringComparison.Ordinal), true);
+            await session.ExecuteAsync(declaration, cancellationToken: CancellationToken.None);
+            Check("in process: ON UPDATE metadata " + action, await RowsAsync(session,
+                $"SELECT UPDATE_RULE FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_NAME='update_fk_{actionIndex}'"), [[action]]);
+            if (actionIndex < 3)
+            {
+                await session.ExecuteAsync($"INSERT INTO update_child_{actionIndex} VALUES(1)", cancellationToken:CancellationToken.None);
+                await session.ExecuteAsync("UPDATE update_parent SET id=2", cancellationToken:CancellationToken.None);
+                Check("in process: ON UPDATE action " + action, await RowsAsync(session,$"SELECT pid FROM update_child_{actionIndex}"), action == "CASCADE" ? [[2]] : [[null]]);
+                await session.ExecuteAsync("UPDATE update_parent SET id=1", cancellationToken:CancellationToken.None);
+            }
+            await session.ExecuteAsync($"DROP TABLE update_child_{actionIndex}", cancellationToken: CancellationToken.None);
+        }
+        await session.ExecuteAsync("CREATE TABLE update_self (id INT PRIMARY KEY, pid INT REFERENCES update_self(id) ON UPDATE CASCADE)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO update_self VALUES (1,1)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("UPDATE update_self SET id=2", cancellationToken:CancellationToken.None);
+        Check("in process: self ON UPDATE action", await RowsAsync(session,"SELECT id,pid FROM update_self"), [[2,2]]);
         await session.ExecuteAsync("CREATE TABLE expression_clock (id INT DEFAULT CAST('3' AS INT), stamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("BEGIN", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO expression_clock DEFAULT VALUES", cancellationToken: CancellationToken.None);
@@ -427,6 +547,12 @@ internal static class Program
         }
         Check("in process: scalars of every arity, strict and non-strict", await RowsAsync(session, projection), _projection);
         Check("in process: typed and hand-written aggregates", await RowsAsync(session, aggregates), _aggregates);
+        Check("in process: grouping sets and subtotal masks", await RowsAsync(session, groupingSets),
+            [[false,0,0,1L,200m],[true,0,0,1L,100m],[null,1,1,2L,300m]]);
+        Check("in process: correlated grouping masks", await RowsAsync(session, outerGrouping),
+            [[false,0,0,1L],[true,0,0,1L],[null,1,1,2L]]);
+        Check("in process: FILTER and Boolean/statistical aggregates", await RowsAsync(session, aggregateFilter),
+            [[2L, null, true, true, true, 5000m, 5000m, 50m, 2500d, 1d]]);
         Check("in process: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(session, registered), _registered);
         Check("in process: a domain column, application casts and a cast to DATE", await RowsAsync(session, domains), _domains);
         CheckFailure("in process: the domain's check refuses a row",
@@ -500,6 +626,16 @@ internal static class Program
         }
         Check("over the wire: TOP after sorting", await RowsAsync(connection, "SELECT TOP 1 Id FROM customers ORDER BY Id DESC", timeout.Token), [[2L]]);
 
+        Check("over the wire: directed range and reversed output", await RowsAsync(connection,
+            "SELECT id FROM directed_guard WHERE a=1 AND b>1 ORDER BY b ASC", timeout.Token), [[1], [2]]);
+        Check("over the wire: directed NULL placement", await RowsAsync(connection,
+            "SELECT id FROM directed_guard WHERE a=1 ORDER BY b ASC NULLS FIRST", timeout.Token), [[3], [1], [2]]);
+        await connection.ExecuteAsync("CREATE SEQUENCE wire_sequence START 40", cancellationToken: timeout.Token);
+        Check("over the wire: sequence values", await RowsAsync(connection,
+            "SELECT NEXT VALUE FOR wire_sequence, NEXT VALUE FOR wire_sequence, nextval('wire_sequence')", timeout.Token), [[40L, 40L, 41L]]);
+        await connection.ExecuteAsync("ALTER SEQUENCE wire_sequence RESTART WITH 50", cancellationToken: timeout.Token);
+        Check("over the wire: sequence restart", await RowsAsync(connection, "SELECT nextval('wire_sequence'), lastval()", timeout.Token), [[50L, 50L]]);
+        await connection.ExecuteAsync("DROP SEQUENCE wire_sequence", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("CREATE TABLE identity_wire (id INT IDENTITY(10,2))", cancellationToken: timeout.Token);
         await connection.ExecuteAsync("INSERT INTO identity_wire DEFAULT VALUES", cancellationToken: timeout.Token);
         CheckFailure("over the wire: ALWAYS IDENTITY rejects explicit values", await FailureAsync(async () =>
@@ -540,7 +676,9 @@ internal static class Program
             "EXPLAIN ANALYZE SELECT l.id FROM hash_left l JOIN hash_right r ON l.k=r.k", timeout.Token);
         Check("over the wire: hash analysis keeps typed counts", hashAnalysis.Any(row => Equals(row[2], "JoinStep") && Equals(row[7], 80L) && row.Length == 8), true);
         Check("over the wire: all CAST families", await RowsAsync(connection, allCasts, timeout.Token), _allCasts);
+        Check("over the wire: JSON access and scalar conversions", await RowsAsync(connection, jsonAccess, timeout.Token), _jsonAccess);
         Check("over the wire: distinct truth tests and ESCAPE", await RowsAsync(connection, predicates, timeout.Token), _predicates);
+        Check("over the wire: integer bitwise types and precedence", await RowsAsync(connection, bitwise, timeout.Token), _bitwise);
         Check("over the wire: ordinary invariant LIKE anchors", await RowsAsync(connection,
             "SELECT RPAD('a', 200000, 'a') COLLATE invariant LIKE '%a', " +
             "(RPAD('z', 199997, 'z') || 'abc') COLLATE invariant LIKE '%abc%', " +
@@ -566,6 +704,10 @@ internal static class Program
         Check("over the wire: renamed derived join", await RowsAsync(connection, derivedJoin, timeout.Token), [[1L]]);
         Check("over the wire: chained CTEs", await RowsAsync(connection,
             "WITH a AS (SELECT Id FROM customers), b AS (SELECT Id FROM a) SELECT Id FROM b ORDER BY Id", timeout.Token), [[1L], [2L]]);
+        Check("over the wire: recursive shared demand (#1719)", await RowsAsync(connection,
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r) SELECT a.n,b.n FROM r a CROSS JOIN r b LIMIT 3", timeout.Token), [[1L, 1L], [1L, 2L], [1L, 3L]]);
+        Check("over the wire: recursive DISTINCT fixpoint (#1719)", await RowsAsync(connection,
+            "WITH RECURSIVE r(n) AS (SELECT 1 UNION SELECT n FROM r) SELECT n FROM r", timeout.Token), [[1L]]);
         await connection.ExecuteAsync("CREATE TABLE cte_wire (id BIGINT)", cancellationToken: timeout.Token);
         Check("over the wire: WITH INSERT", await connection.ExecuteAsync(
             "WITH a AS (SELECT Id FROM customers) INSERT INTO cte_wire SELECT Id FROM a", cancellationToken: timeout.Token), 2L);
@@ -586,6 +728,12 @@ internal static class Program
         Check("over the wire: CHAR length", fixedCodes.Columns[0].MaxLength == 3, true);
         Check("over the wire: scalars of every arity, strict and non-strict", await RowsAsync(connection, projection, timeout.Token), _projection);
         Check("over the wire: typed and hand-written aggregates", await RowsAsync(connection, aggregates, timeout.Token), _aggregates);
+        Check("over the wire: grouping sets and subtotal masks", await RowsAsync(connection, groupingSets, timeout.Token),
+            [[false,0,0,1L,200m],[true,0,0,1L,100m],[null,1,1,2L,300m]]);
+        Check("over the wire: correlated grouping masks", await RowsAsync(connection, outerGrouping, timeout.Token),
+            [[false,0,0,1L],[true,0,0,1L],[null,1,1,2L]]);
+        Check("over the wire: FILTER and Boolean/statistical aggregates", await RowsAsync(connection, aggregateFilter, timeout.Token),
+            [[2L, null, true, true, true, 5000m, 5000m, 50m, 2500d, 1d]]);
         Check("over the wire: COHESION_SCHEMA.FUNCTIONS", await RowsAsync(connection, registered, timeout.Token), _registered);
         Check("over the wire: a domain column, application casts and a cast to DATE", await RowsAsync(connection, domains, timeout.Token), _domains);
         CheckFailure("over the wire: the domain's check refuses a row",

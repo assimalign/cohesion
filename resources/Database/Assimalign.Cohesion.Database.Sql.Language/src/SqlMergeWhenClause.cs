@@ -22,6 +22,9 @@ public sealed class SqlMergeWhenClause
         Location = location;
     }
 
+    /// <summary>Gets the explicit identity assignment policy.</summary>
+    public SqlIdentityOverride Overriding { get; internal set; }
+
     /// <summary>Gets which candidate rows this clause considers.</summary>
     public SqlMergeMatchKind MatchKind { get; }
     /// <summary>Gets the optional AND condition.</summary>

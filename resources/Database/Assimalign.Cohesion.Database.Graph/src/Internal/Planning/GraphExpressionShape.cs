@@ -73,12 +73,38 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
                     foreach (var branch in conditional.Alternatives) { _token.ThrowIfCancellationRequested(); hash.Add(branch.Comparison, StringComparer.Ordinal); }
                     break;
                 case GqlMemberExpression member: hash.Add(member.Member, StringComparer.Ordinal); break;
+                case GqlListComprehensionExpression comprehension:
+                    hash.Add(comprehension.Variable, StringComparer.Ordinal);
+                    hash.Add(comprehension.Predicate is null); hash.Add(comprehension.Projection is null);
+                    break;
+                case GqlReduceExpression reduce:
+                    hash.Add(reduce.Accumulator, StringComparer.Ordinal); hash.Add(reduce.Variable, StringComparer.Ordinal); break;
+                case GqlPatternComprehensionExpression pattern: hash.Add(pattern.ToString(), StringComparer.Ordinal); break;
+                case GqlExistsExpression exists: hash.Add(exists.ToString(), StringComparer.Ordinal); break;
+                case GqlListPredicateExpression predicate:
+                    hash.Add(predicate.Kind); hash.Add(predicate.Variable, StringComparer.Ordinal); break;
+                case GqlListSliceExpression slice: hash.Add(slice.From is null); hash.Add(slice.To is null); break;
             }
             foreach (var child in GraphValueExpressions.Children(step.Expression))
             { _token.ThrowIfCancellationRequested(); hash.Add(child is null ? 0 : _hashes[child]); }
             _hashes.Add(step.Expression, hash.ToHashCode());
         }
         return _hashes[expression];
+    }
+
+    private static bool EquivalentExists(GqlExpression left, GqlExpression right, CancellationToken token)
+    {
+        // Syntax compares the pattern topology; scalar inputs retain ordinary expression
+        // identity/type rules, including conservative reuse of registered function calls.
+        if (left.ToString() != right.ToString()) { return false; }
+        using var first = (left is GqlExistsExpression firstExists ? GraphValueExpressions.ExistsInputs(firstExists) : GraphValueExpressions.CorrelatedInputs(left)).GetEnumerator();
+        using var second = (right is GqlExistsExpression secondExists ? GraphValueExpressions.ExistsInputs(secondExists) : GraphValueExpressions.CorrelatedInputs(right)).GetEnumerator();
+        while (first.MoveNext())
+        {
+            token.ThrowIfCancellationRequested();
+            if (!second.MoveNext() || !Equivalent(first.Current, second.Current, token)) { return false; }
+        }
+        return !second.MoveNext();
     }
 
     internal static bool Equivalent(GqlExpression? left, GqlExpression? right, CancellationToken token = default)
@@ -89,6 +115,8 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
         if (ReferenceEquals(left, right)) { return true; }
         bool same = (left, right) switch
         {
+            (GqlPatternComprehensionExpression a, GqlPatternComprehensionExpression b) => EquivalentExists(a, b, token),
+            (GqlExistsExpression a, GqlExistsExpression b) => EquivalentExists(a, b, token),
             (GqlFunctionCallExpression a, GqlFunctionCallExpression b) => a.Function == b.Function && a.Arguments is not null && b.Arguments is not null,
             (GqlNamedFunctionCallExpression, GqlNamedFunctionCallExpression) => false,
             (GqlCastExpression a, GqlCastExpression b) => a.Target == b.Target,
@@ -109,6 +137,11 @@ internal sealed class GraphExpressionShape : IEqualityComparer<GqlExpression>
                 a.Alternatives.All(branch => branch is not null) && b.Alternatives.All(branch => branch is not null) && (a.Operand is null) == (b.Operand is null) &&
                 (a.Otherwise is null) == (b.Otherwise is null) && a.Alternatives.Select(branch => branch.Comparison).SequenceEqual(b.Alternatives.Select(branch => branch.Comparison)),
             (GqlMemberExpression a, GqlMemberExpression b) => a.Member == b.Member,
+            (GqlListComprehensionExpression a, GqlListComprehensionExpression b) => a.Variable == b.Variable &&
+                (a.Predicate is null) == (b.Predicate is null) && (a.Projection is null) == (b.Projection is null),
+            (GqlReduceExpression a, GqlReduceExpression b) => a.Accumulator == b.Accumulator && a.Variable == b.Variable,
+            (GqlListPredicateExpression a, GqlListPredicateExpression b) => a.Kind == b.Kind && a.Variable == b.Variable,
+            (GqlListSliceExpression a, GqlListSliceExpression b) => (a.From is null) == (b.From is null) && (a.To is null) == (b.To is null),
             (GqlCoalesceExpression a, GqlCoalesceExpression b) => a.Operands is not null && b.Operands is not null,
             (GqlListExpression, GqlListExpression) or (GqlInExpression, GqlInExpression) or
                 (GqlNullIfExpression, GqlNullIfExpression) or

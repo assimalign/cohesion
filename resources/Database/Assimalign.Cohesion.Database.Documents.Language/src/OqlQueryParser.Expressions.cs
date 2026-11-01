@@ -35,6 +35,17 @@ public sealed partial class OqlQueryParser
                         left = new OqlInExpression(left, ParseExpression(4), negated, Span(start, Previous));
                         continue;
                     }
+                    if (Is("SELECT"))
+                    {
+                        var parenthesis = Previous;
+                        var queryStart = Current;
+                        var query = ParseSelect();
+                        if (!Failed && !query.IsValue)
+                        { Error("CD00014", ErrorMessages.InSubqueryRequiresRaw, queryStart); }
+                        if (!Failed) { Expect(TokenType.RightParen, "')'"); }
+                        left = new OqlInExpression(left, new OqlSubqueryExpression(query, Span(parenthesis, Previous)), negated, Span(start, Previous));
+                        continue;
+                    }
                     do { values.Add(ParseExpression()); } while (!Failed && Take(TokenType.Comma));
                     Expect(TokenType.RightParen, "')'");
                     left = new OqlInExpression(left, values.AsReadOnly(), negated, Span(start, Previous));
@@ -64,10 +75,16 @@ public sealed partial class OqlQueryParser
                 else { Error("CD00002", ErrorMessages.OqlQueryParserParseExpressionVoid3, Current); }
                 continue;
             }
-            if (Is("IS") && minimumPrecedence <= 3)
+            if (Is("IS") && minimumPrecedence <= 4)
             {
                 Advance();
                 bool negate = Take("NOT");
+                if (Take("DISTINCT"))
+                {
+                    Expect("FROM");
+                    left = new OqlBinaryExpression(left, negate ? "IS NOT DISTINCT FROM" : "IS DISTINCT FROM", ParseExpression(5), Span(start, Previous));
+                    continue;
+                }
                 string predicate = Current.Text.ToUpperInvariant();
                 if (Is("NULL") || Is("MISSING") || Is("VALUED")) { Advance(); }
                 else { Error("CD00002", ErrorMessages.OqlQueryParserParseExpressionVoid4, Current); }
@@ -80,8 +97,9 @@ public sealed partial class OqlQueryParser
                 "OR" => 1,
                 "AND" => 2,
                 "=" or "!=" or "<>" or "<" or "<=" or ">" or ">=" => 3,
-                "+" or "-" => 4,
-                "*" or "/" or "%" => 5,
+                "||" => 5,
+                "+" or "-" => 6,
+                "*" or "/" or "%" => 7,
                 _ => -1,
             };
             if (precedence < minimumPrecedence)
@@ -91,7 +109,9 @@ public sealed partial class OqlQueryParser
 
             Advance();
             var right = ParseExpression(precedence + 1);
-            left = new OqlBinaryExpression(left, op == "<>" ? "!=" : op, right, Span(start, Previous));
+            left = op == "||"
+                ? new OqlCallExpression("CONCAT", [left, right], Span(start, Previous))
+                : new OqlBinaryExpression(left, op == "<>" ? "!=" : op, right, Span(start, Previous));
         }
         _depth--;
         return left;
@@ -173,6 +193,10 @@ public sealed partial class OqlQueryParser
             _diagnostics.Add(QueryDiagnostics.UnsupportedParameterForm("CD00002", Span(start, end)));
             return new OqlLiteralExpression(null, Span(start, end));
         }
+        if (Take("EXISTS"))
+        {
+            return new OqlUnaryExpression("EXISTS", ParseExpression(4), Span(start, Previous));
+        }
         if (Take("NOT"))
         {
             return new OqlUnaryExpression("NOT", ParseExpression(3), Span(start, Previous));
@@ -196,12 +220,12 @@ public sealed partial class OqlQueryParser
 
         if (Take(TokenType.Plus))
         {
-            return new OqlUnaryExpression("+", ParseExpression(6), Span(start, Previous));
+            return new OqlUnaryExpression("+", ParseExpression(8), Span(start, Previous));
         }
 
         if (Take(TokenType.Minus))
         {
-            return new OqlUnaryExpression("-", ParseExpression(6), Span(start, Previous));
+            return new OqlUnaryExpression("-", ParseExpression(8), Span(start, Previous));
         }
 
         if (Take(TokenType.LeftBrace))
@@ -235,6 +259,12 @@ public sealed partial class OqlQueryParser
         }
         if (Take(TokenType.LeftParen))
         {
+            if (Is("SELECT"))
+            {
+                var query = ParseSelect();
+                if (!Failed) { Expect(TokenType.RightParen, "')'"); }
+                return new OqlSubqueryExpression(query, Span(start, Previous));
+            }
             var expression = ParseExpression();
             if (!Failed) { Expect(TokenType.RightParen, "')'"); }
             return expression;
@@ -304,6 +334,9 @@ public sealed partial class OqlQueryParser
             if (Take(TokenType.LeftParen))
             {
                 string function = name.ToUpperInvariant();
+                var quantifierToken = Current;
+                var quantifier = Take("DISTINCT") ? OqlAggregateQuantifier.Distinct :
+                    Take("ALL") ? OqlAggregateQuantifier.All : OqlAggregateQuantifier.None;
                 List<OqlExpression> arguments = [];
                 if (Current.Type != TokenType.RightParen)
                 {
@@ -323,14 +356,23 @@ public sealed partial class OqlQueryParser
                         ? string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid5, function)
                         : string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.OqlQueryParserParsePrimaryVoid6, function), start);
                 }
+                if (!Failed && quantifier != OqlAggregateQuantifier.None &&
+                    (definition is { IsAggregate: false } || arguments.Count != 1 || arguments[0] is OqlStarExpression))
+                { Error("CD00011", ErrorMessages.AggregateQuantifierInvalid, quantifierToken); }
                 if (function == "META")
                 {
                     string? member = Take(TokenType.Dot) ? Identifier(allowKeyword: true) : null;
                     return new OqlMetaExpression(arguments.AsReadOnly(), member, Span(start, Previous));
                 }
-                return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous));
+                return new OqlCallExpression(function, arguments.AsReadOnly(), Span(start, Previous), quantifier);
             }
-            return ParsePath(start, name);
+            var path = ParsePath(start, name);
+            if (Take(TokenType.Dot))
+            {
+                Expect(TokenType.Asterisk, "'*'");
+                return new OqlUnaryExpression(".*", path, Span(start, Previous));
+            }
+            return path;
         }
         Error("CD00002", ErrorMessages.OqlQueryParserParsePrimaryVoid7, start);
         return new OqlLiteralExpression(null, Span(start, start));
@@ -348,6 +390,7 @@ public sealed partial class OqlQueryParser
         List<OqlPathSegment> segments = [new(name, null)];
         while (!Failed)
         {
+            if (Current.Type == TokenType.Dot && _position + 1 < _tokens.Count && _tokens[_position + 1].Type == TokenType.Asterisk) { break; }
             if (Take(TokenType.Dot))
             {
                 segments.Add(new OqlPathSegment(Identifier(allowKeyword: true), null));

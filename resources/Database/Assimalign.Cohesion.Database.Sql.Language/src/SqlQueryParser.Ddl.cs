@@ -53,8 +53,7 @@ public sealed partial class SqlQueryParser
         }
         if (IsWord(ref lexer, "SEQUENCE"))
         {
-            RejectIdentityConstruct(ref lexer, "CREATE SEQUENCE");
-            return new SqlQueryExpression(SqlQueryCommandType.Create, null, Location.Create(1, 1, pos, _lastTokenEnd));
+            return ParseSequence(ref lexer, pos, alter: false);
         }
         return ParseCreateTable(ref lexer, pos);
     }
@@ -97,6 +96,7 @@ public sealed partial class SqlQueryParser
 
         // Key column list: ( col [, col]* ). Every element must name a column.
         var columns = new List<string>();
+        var keyOrders = new List<SqlIndexKeyOrder>();
         if (Expect(ref lexer, TokenType.LeftParen, "'(' and the index columns"))
         {
             while (true)
@@ -109,6 +109,19 @@ public sealed partial class SqlQueryParser
 
                 columns.Add(CurrentIdentifierText(ref lexer));
                 Advance(ref lexer);
+                if (IsKeyword(ref lexer, "DESC") || IsKeyword(ref lexer, "ASC") || IsWord(ref lexer, "NULLS"))
+                { RequireSchemaClause(ref lexer, SqlClauses.IndexKeyOrder); }
+                bool descending = IsKeyword(ref lexer, "DESC");
+                if (descending || IsKeyword(ref lexer, "ASC")) { Advance(ref lexer); }
+                bool nullsFirst = descending;
+                if (IsWord(ref lexer, "NULLS"))
+                {
+                    Advance(ref lexer);
+                    if (IsWord(ref lexer, "FIRST")) { nullsFirst = true; Advance(ref lexer); }
+                    else if (IsWord(ref lexer, "LAST")) { nullsFirst = false; Advance(ref lexer); }
+                    else { AddExpectedDiagnostic(ref lexer, "FIRST or LAST"); }
+                }
+                keyOrders.Add((SqlIndexKeyOrder)((descending ? 2 : 0) | (nullsFirst ? 1 : 0)));
                 if (lexer.Current.Type != TokenType.Comma)
                 {
                     break;
@@ -119,7 +132,15 @@ public sealed partial class SqlQueryParser
             SkipToClosingParenthesis(ref lexer);
         }
 
-        return new SqlCreateIndexExpression(indexName, table, columns, isUnique, ifNotExists, null,
+        SqlExpression? predicate = null;
+        if (IsKeyword(ref lexer, "WHERE"))
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.PartialIndex);
+            Advance(ref lexer);
+            predicate = ParseExpression(ref lexer);
+        }
+
+        return new SqlCreateIndexExpression(indexName, table, columns, keyOrders, isUnique, ifNotExists, predicate, null,
             Location.Create(1, 1, pos, _lastTokenEnd));
     }
 
@@ -257,7 +278,18 @@ public sealed partial class SqlQueryParser
             AddExpectedDiagnostic(ref lexer, "a column name");
         }
 
-        string dataType = ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorColumnSubject, columnName), out var resolvedType);
+        Assimalign.Cohesion.Database.Types.DatabaseTypeInfo? parsedType = null;
+        string serialType = CurrentText(ref lexer).ToUpperInvariant();
+        bool serial = serialType is "SERIAL" or "BIGSERIAL" or "SMALLSERIAL" or "SERIAL2" or "SERIAL4" or "SERIAL8";
+        string dataType = serial ? serialType is "SMALLSERIAL" or "SERIAL2" ? "SMALLINT" : serialType is "BIGSERIAL" or "SERIAL8" ? "BIGINT" : "INT" : ParseDefinitionType(ref lexer, string.Format(System.Globalization.CultureInfo.CurrentCulture, _errorColumnSubject, columnName), out parsedType);
+        Assimalign.Cohesion.Database.Types.DatabaseTypeInfo? resolvedType = parsedType;
+        if (serial)
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.Serial);
+            Advance(ref lexer);
+            SqlTypeNames.TryResolve(dataType, null, null, null, out var builtinType);
+            resolvedType = builtinType;
+        }
 
         // Parse optional constraints
         bool isNullable = true;
@@ -266,7 +298,7 @@ public sealed partial class SqlQueryParser
         bool isPrimaryKey = false;
         SqlExpression? defaultValue = null;
         string? collationName = null;
-        SqlIdentityDefinition? identity = null;
+        SqlIdentityDefinition? identity = serial ? new SqlIdentityDefinition(false, 1, 1) : null;
         var constraints = new List<SqlConstraintDefinition>();
 
         while (!IsAtEnd(ref lexer) &&
@@ -433,6 +465,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume ALTER
+        if (IsWord(ref lexer, "SEQUENCE")) { return ParseSequence(ref lexer, pos, alter: true); }
 
         // TABLE is required: ALTER INDEX ix RENAME TO iy used to report IX as the
         // unsupported ALTER TABLE action.
@@ -462,10 +495,6 @@ public sealed partial class SqlQueryParser
 
         // Action: ADD/DROP, RENAME, a column facet, or a complete ALTER COLUMN definition.
         SqlAlterAction? action;
-        if (TryRejectIdentityAlter(ref lexer))
-        {
-            return new SqlQueryExpression(SqlQueryCommandType.Alter, null, Location.Create(1, 1, pos, _lastTokenEnd));
-        }
         if (IsWord(ref lexer, "RENAME"))
         {
             action = ParseRenameAction(ref lexer);
@@ -597,6 +626,7 @@ public sealed partial class SqlQueryParser
         }
         if (IsWord(ref lexer, "COLUMN")) { Advance(ref lexer); }
         string column = ReadAlterName(ref lexer, "column name after ALTER");
+        if (ParseIdentityAlter(ref lexer, column) is { } identity) { return identity; }
         bool set = IsWord(ref lexer, "SET");
         bool drop = IsWord(ref lexer, "DROP");
         if (set || drop)
@@ -687,7 +717,7 @@ public sealed partial class SqlQueryParser
             return false;
         }
         Next(ref lexer);
-        return CurrentText(ref lexer).ToUpperInvariant() is not ("TYPE" or "SET" or "DROP");
+        return CurrentText(ref lexer).ToUpperInvariant() is not ("TYPE" or "SET" or "DROP" or "ADD" or "RESTART");
 
         static void Next(ref TokenLexer tokens)
         {
@@ -736,6 +766,7 @@ public sealed partial class SqlQueryParser
     {
         var pos = lexer.Current.Position;
         Advance(ref lexer); // consume DROP
+        if (IsWord(ref lexer, "SEQUENCE")) { return ParseDropSequence(ref lexer, pos); }
 
         if (IsKeyword(ref lexer, "VIEW")) { return ParseDropView(ref lexer, pos); }
         if (IsWord(ref lexer, "SCHEMA"))

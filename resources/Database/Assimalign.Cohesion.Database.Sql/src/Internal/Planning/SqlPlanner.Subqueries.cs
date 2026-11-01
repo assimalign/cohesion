@@ -52,6 +52,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanSubqueries(SqlSelectExpression select)
     {
         if (OuterScope is not null) { RejectOuterOnlyAggregates(select); }
+        if (OuterScope is not null && _queryScopes!.HasGroupingCalls) { BindOuterGroupingCalls(select); }
         var queries = BindSubqueries(SubquerySources(select), select);
         var input = PlanSelectCore(select);
         return WrapSubqueries(input, queries);
@@ -62,21 +63,31 @@ internal sealed partial class SqlPlanner
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
         var queries = new List<SqlSubqueryBinding>();
+        List<SqlFunctionCallExpression>? filteredCalls = null;
         foreach (var expression in sources)
         {
+            // Sources visits each parent before its children. Retain ancestry candidates
+            // only for FILTER, keeping ordinary subquery binding allocation-neutral.
+            if (expression is SqlFunctionCallExpression { Filter: not null } filtered)
+            {
+                (filteredCalls ??= new()).Add(filtered);
+            }
+            if (expression is SqlWindowExpression { Function.Filter: not null } window)
+            { (filteredCalls ??= new()).Add(window.Function); }
+            bool deferred = IsFilteredSource(filteredCalls, expression);
             switch (expression)
             {
                 case SqlSubqueryExpression scalar:
-                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml, ref scope);
+                    BindSubquery(scalar, scalar.Select, SqlSubqueryKind.Scalar, false, queries, owner, dml, ref scope, deferred);
                     break;
                 case SqlExistsExpression exists:
-                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml, ref scope);
+                    BindSubquery(exists, exists.Subquery, SqlSubqueryKind.Exists, exists.IsNegated, queries, owner, dml, ref scope, deferred);
                     break;
                 case SqlQuantifiedComparisonExpression quantified:
-                    BindSubquery(quantified, quantified.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
+                    BindSubquery(quantified, quantified.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope, deferred);
                     break;
                 case SqlInExpression { Subquery: not null } member:
-                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope);
+                    BindSubquery(member, member.Subquery, SqlSubqueryKind.Set, false, queries, owner, dml, ref scope, deferred);
                     break;
             }
         }
@@ -87,7 +98,7 @@ internal sealed partial class SqlPlanner
     // Keep child binding out of a closure: a stored-only query allocates no scope state.
     private void BindSubquery(SqlExpression source, SqlQueryBodyExpression query, SqlSubqueryKind kind, bool negated,
         List<SqlSubqueryBinding> queries, SqlSelectExpression? owner, SqlTableReference? dml,
-        ref SqlCorrelationScope? scope)
+        ref SqlCorrelationScope? scope, bool deferred)
     {
         if (_subqueryDepth >= 32)
         {
@@ -121,6 +132,8 @@ internal sealed partial class SqlPlanner
             OuterScope = parent;
             OuterDependencies = parentDependencies;
         }
+        if (dependencies.Contains(scope.Id) && owner is not null && (owner.Windows.Count > 0 || HasWindows(owner)) && IsFrameOffsetSource(owner, source))
+        { throw new SqlPlanningException("CS05081", ErrorMessages.WindowFrameOffsetScope, source.Location); }
         foreach (int dependency in dependencies)
         {
             if (dependency != scope.Id) { parentDependencies?.Add(dependency); }
@@ -138,7 +151,17 @@ internal sealed partial class SqlPlanner
         _subqueryTypes[source] = kind == SqlSubqueryKind.Scalar ? type : DatabaseType.Boolean;
         _subquerySlots[source] = slot;
         queries.Add(new SqlSubqueryBinding(child, slot.Id, type, collation, kind, negated,
-            scope.Id, dependencies.Count > 0));
+            scope.Id, dependencies.Count > 0, deferred));
+    }
+
+    private static bool IsFilteredSource(List<SqlFunctionCallExpression>? calls, SqlExpression source)
+    {
+        if (calls is null) { return false; }
+        foreach (var call in calls)
+        {
+            if (ContainsNode(call, source)) { return true; }
+        }
+        return false;
     }
 
     /// <summary>
@@ -158,6 +181,23 @@ internal sealed partial class SqlPlanner
     }
 
     private static IEnumerable<SqlExpression> SubqueryRoots(SqlSelectExpression select)
+        => select.Windows.Count == 0 ? OrdinarySubqueryRoots(select)
+            : OrdinarySubqueryRoots(select).Concat(WindowDefinitionRoots(select));
+
+    private static IEnumerable<SqlExpression> WindowDefinitionRoots(SqlSelectExpression select)
+    {
+        foreach (var window in select.Windows)
+        {
+            if (window.Specification.Frame?.Start.Offset is { } start) { yield return start; }
+            if (window.Specification.Frame?.End.Offset is { } end) { yield return end; }
+            foreach (var key in window.Specification.PartitionBy) { yield return key; }
+            foreach (var key in window.Specification.OrderBy) { yield return key.Expression; }
+        }
+    }
+
+    // Keep the iterator state of ordinary queries unchanged: extra yield loops retain
+    // extra enumerator fields even when their WINDOW collection is empty.
+    private static IEnumerable<SqlExpression> OrdinarySubqueryRoots(SqlSelectExpression select)
     {
         foreach (var column in select.Columns)
         {

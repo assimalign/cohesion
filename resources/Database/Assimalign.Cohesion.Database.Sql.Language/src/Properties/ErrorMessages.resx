@@ -14,14 +14,13 @@
   <data name="IntervalYearMonthUnsupported" xml:space="preserve"><value>Year-month INTERVAL literals are not supported.</value></data>
   <data name="TimeTextInvalid" xml:space="preserve"><value>TIME requires a valid clock within 00:00:00 through 23:59:59.9999999, optionally with AM/PM and a supported zone.</value></data>
   <data name="IntervalTextInvalid" xml:space="preserve"><value>Invalid day-time INTERVAL literal.</value></data>
-  <data name="AlterTypeRenderingRequired" xml:space="preserve"><value>This renderer requires an ALTER COLUMN TYPE action.</value></data>
+  <data name="AlterTypeRenderingRequired" xml:space="preserve"><value>This renderer requires an ALTER COLUMN TYPE, identity or ADD CONSTRAINT action.</value></data>
   <data name="RendererThrowIfTooDeepNotSupported" xml:space="preserve"><value>The expression nests {0} levels deep; the SQL dialect allows at most {1}, so its text would not parse.</value></data>
   <data name="SqlExpressionRendererNodeNotSupported" xml:space="preserve"><value>Expression node '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererLevelNotSupported" xml:space="preserve"><value>Binary operator '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererUnaryNotSupported" xml:space="preserve"><value>Unary operator '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererLiteralNotSupported" xml:space="preserve"><value>Literal type '{0}' has no SQL spelling.</value></data>
   <data name="ExpressionRendererSelectNotSupported" xml:space="preserve"><value>Join type '{0}' has no SQL spelling.</value></data>
-  <data name="ParserParseGroupingExpressionVoid" xml:space="preserve"><value>The empty SQL grouping set GROUP BY () is not supported; use an ungrouped aggregate.</value></data>
   <data name="ParserParseGroupingExpressionVoid2" xml:space="preserve"><value>SQL select-list ordinals in GROUP BY are not supported; use the source grouping expression. Ordinals are supported only in ORDER BY.</value></data>
   <data name="AddTypeModifierDiagnosticDiagnostic" xml:space="preserve"><value>{0}: {1}</value></data>
   <data name="SqlQueryParserParseCastVoid" xml:space="preserve"><value>Expected '(' after CAST.</value></data>
@@ -32,9 +31,11 @@
   <data name="SqlQueryParserParseConstraintVoid" xml:space="preserve"><value>Expected a CHECK predicate.</value></data>
   <data name="SqlQueryParserParseConstraintVoid2" xml:space="preserve"><value>Expected PRIMARY KEY, FOREIGN KEY, REFERENCES, CHECK, or UNIQUE.</value></data>
   <data name="SqlQueryParserParseConstraintVoid3" xml:space="preserve"><value>Expected ACTION.</value></data>
-  <data name="SqlQueryParserParseConstraintVoid4" xml:space="preserve"><value>Column lists after ON DELETE SET NULL or SET DEFAULT are not supported by the SQL surface.</value></data>
+  <data name="SqlQueryParserParseConstraintVoid4" xml:space="preserve"><value>Column lists after ON DELETE or ON UPDATE SET NULL or SET DEFAULT are not supported by the SQL surface.</value></data>
   <data name="SqlQueryParserParseConstraintVoid5" xml:space="preserve"><value>Expected CASCADE, RESTRICT, NO ACTION, SET NULL, or SET DEFAULT.</value></data>
-  <data name="SqlQueryParserParseConstraintVoid6" xml:space="preserve"><value>Expected DELETE after ON.</value></data>
+  <data name="ConstraintRenderingUnknown" xml:space="preserve"><value>The constraint kind or referential action cannot be rendered.</value></data>
+  <data name="ReferentialActionRepeated" xml:space="preserve"><value>A foreign key may specify ON DELETE and ON UPDATE only once each.</value></data>
+  <data name="SqlQueryParserParseConstraintVoid6" xml:space="preserve"><value>Expected DELETE or UPDATE after ON.</value></data>
   <data name="SqlQueryParserParseConstraintVoid7" xml:space="preserve"><value>Foreign key and referenced key must contain the same number of columns.</value></data>
   <data name="QueryParserParseConstraintColumnsVoid" xml:space="preserve"><value>Expected a constraint column name.</value></data>
   <data name="SqlQueryParserReadDdlIdentifierVoid" xml:space="preserve"><value>Expected an identifier.</value></data>
@@ -43,6 +44,8 @@
   <data name="SqlQueryParserParseCoreDiagnostic2" xml:space="preserve"><value>Unsupported or unknown SQL command.</value></data>
   <data name="SqlQueryParserParseCoreDiagnostic3" xml:space="preserve"><value>Statement does not end with ';'.</value></data>
   <data name="SqlQueryParserParseTransactionVoid" xml:space="preserve"><value>Expected the end of the transaction-control statement.</value></data>
+  <data name="TransactionIsolationSyntax" xml:space="preserve"><value>Expected ISOLATION LEVEL READ COMMITTED, READ UNCOMMITTED, REPEATABLE READ or SERIALIZABLE.</value></data>
+  <data name="SqlStatementSubject" xml:space="preserve"><value>a SQL statement</value></data>
   <data name="QueryParserAddExpectedDiagnosticVoid" xml:space="preserve"><value>Expected {0} before the end of the statement.</value></data>
   <data name="QueryParserAddExpectedDiagnosticVoid2" xml:space="preserve"><value>Expected {0} but found {1}.</value></data>
   <data name="SqlQueryParserRejectLexicalErrorsVoid" xml:space="preserve"><value>Unterminated string literal: the closing ' is missing, so the literal runs to the end of the text.</value></data>
@@ -75,6 +78,7 @@
   <data name="SqlQueryParserParsePredicatesVoid2" xml:space="preserve"><value>Comparison operators require parentheses to chain.</value></data>
   <data name="SqlQueryParserParsePredicatesVoid3" xml:space="preserve"><value>Predicates require parentheses to chain.</value></data>
   <data name="SqlQueryParserParsePredicatesVoid4" xml:space="preserve"><value>Unexpected NULL after NOT; write IS NOT NULL.</value></data>
+  <data name="DeferredOperator" xml:space="preserve"><value>The {0} operator is not supported by the SQL surface.</value></data>
   <data name="SqlQueryParserParseUnaryVoid" xml:space="preserve"><value>The prefix ~ operator (bitwise NOT) is not supported by the SQL surface.</value></data>
   <data name="SqlQueryParserRejectInfixTildeVoid" xml:space="preserve"><value>The infix {0} operator ({1}) is not supported by the SQL surface.</value></data>
   <data name="SqlQueryParserParsePrimaryVoid" xml:space="preserve"><value>DEFAULT is not allowed in this context.</value></data>

@@ -50,12 +50,7 @@ public sealed partial class SqlQueryParser
                 Location.Create(1, 1, pos, _lastTokenEnd));
         }
 
-        if (IsWord(ref lexer, "OVERRIDING"))
-        {
-            RejectIdentityConstruct(ref lexer, "OVERRIDING ... VALUE");
-            return new SqlInsertExpression(table, columns, null, null, false, null,
-                Location.Create(1, 1, pos, _lastTokenEnd));
-        }
+        var overriding = ParseIdentityOverride(ref lexer);
 
         // VALUES, DEFAULT VALUES or SELECT
         List<IReadOnlyList<SqlExpression>>? values = null;
@@ -89,7 +84,7 @@ public sealed partial class SqlQueryParser
         var returning = ParseReturning(ref lexer, table, onConflict is not null);
 
         return new SqlInsertExpression(table, columns, values, selectSource, isDefaultValues, null,
-            Location.Create(1, 1, pos, _lastTokenEnd), returning, onConflict);
+            Location.Create(1, 1, pos, _lastTokenEnd), returning, onConflict) { Overriding = overriding };
     }
 
     private SqlOnConflictClause? ParseOnConflict(ref TokenLexer lexer)
@@ -141,18 +136,18 @@ public sealed partial class SqlQueryParser
             if (IsNameToken(ref lexer)) { constraint = CurrentIdentifierText(ref lexer); Advance(ref lexer); }
             else { AddExpectedDiagnostic(ref lexer, "a constraint name"); }
         }
-        if (IsKeyword(ref lexer, "WHERE"))
+        SqlExpression? targetWhere = null;
+        if (kind == SqlOnConflictTargetKind.Columns && IsKeyword(ref lexer, "WHERE"))
         {
-            RequireSkippedConstruct(start, lexer.Current.Position + lexer.Current.Value.Length, "ON CONFLICT target WHERE (partial index inference)");
-            SkipQueryRemainder(ref lexer);
-            return null;
+            Advance(ref lexer);
+            targetWhere = ParseExpression(ref lexer);
         }
         if (!IsWord(ref lexer, "DO")) { AddExpectedDiagnostic(ref lexer, "DO after ON CONFLICT target"); return null; }
         Advance(ref lexer);
         if (IsWord(ref lexer, "NOTHING"))
         {
             Advance(ref lexer);
-            return new(kind, columns, constraint, SqlOnConflictAction.DoNothing, [], null);
+            return new(kind, columns, constraint, SqlOnConflictAction.DoNothing, [], null, targetWhere);
         }
         if (IsKeyword(ref lexer, "SELECT"))
         {
@@ -169,7 +164,7 @@ public sealed partial class SqlQueryParser
         }
         SqlExpression? where = null;
         if (IsKeyword(ref lexer, "WHERE")) { Advance(ref lexer); where = ParseExpression(ref lexer); }
-        return new(kind, columns, constraint, SqlOnConflictAction.DoUpdate, assignments, where);
+        return new(kind, columns, constraint, SqlOnConflictAction.DoUpdate, assignments, where, targetWhere);
     }
 
     /// <summary>

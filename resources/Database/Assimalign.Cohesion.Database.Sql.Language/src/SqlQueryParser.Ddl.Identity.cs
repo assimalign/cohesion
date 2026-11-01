@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Linq;
 
 using Assimalign.Cohesion.Database.Language;
 
@@ -31,61 +32,66 @@ public sealed partial class SqlQueryParser
             }
             ExpectIdentityWord(ref lexer, "IDENTITY");
         }
-        long? start = null;
-        long increment = 1;
-        bool sawIncrement = false;
+        System.Collections.Generic.IReadOnlyList<SqlSequenceOption> options = [];
         if (lexer.Current.Type == TokenType.LeftParen)
         {
             Advance(ref lexer);
             if (alias)
             {
-                start = ParseIdentityInteger(ref lexer);
+                long seed = ParseIdentityInteger(ref lexer);
                 Expect(ref lexer, TokenType.Comma, "',' between IDENTITY seed and increment");
-                increment = ParseIdentityInteger(ref lexer);
+                options = [new SqlSequenceOption("START", seed), new SqlSequenceOption("INCREMENT", ParseIdentityInteger(ref lexer))];
             }
-            else
-            {
-                while (!IsAtEnd(ref lexer) && lexer.Current.Type is not (TokenType.RightParen or TokenType.Semicolon))
-                {
-                    if (IsWord(ref lexer, "START"))
-                    {
-                        if (start is not null) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseIdentityVoid); }
-                        Advance(ref lexer);
-                        if (IsWord(ref lexer, "WITH")) { Advance(ref lexer); }
-                        start = ParseIdentityInteger(ref lexer);
-                    }
-                    else if (IsWord(ref lexer, "INCREMENT"))
-                    {
-                        if (sawIncrement) { AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseIdentityVoid2); }
-                        sawIncrement = true;
-                        Advance(ref lexer);
-                        if (IsWord(ref lexer, "BY")) { Advance(ref lexer); }
-                        increment = ParseIdentityInteger(ref lexer);
-                    }
-                    else if (IsWord(ref lexer, "MINVALUE") || IsWord(ref lexer, "MAXVALUE") ||
-                        IsWord(ref lexer, "CYCLE") || IsWord(ref lexer, "CACHE") || IsWord(ref lexer, "NO"))
-                    {
-                        RequireSkippedConstruct(lexer.Current.Position, lexer.Current.Position + lexer.Current.Value.Length, "IDENTITY MINVALUE/MAXVALUE/CYCLE/CACHE");
-                        SkipToColumnDefinitionEnd(ref lexer);
-                        if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
-                        return new SqlIdentityDefinition(always, start ?? 1, increment);
-                    }
-                    else
-                    {
-                        AddSyntaxDiagnostic(ref lexer, ErrorMessages.SqlQueryParserParseIdentityVoid3);
-                        SkipToColumnDefinitionEnd(ref lexer);
-                        if (lexer.Current.Type == TokenType.RightParen) { Advance(ref lexer); }
-                        return new SqlIdentityDefinition(always, start ?? 1, increment);
-                    }
-                }
-            }
-            if (!alias && start is null && !sawIncrement)
-            {
-                AddExpectedDiagnostic(ref lexer, "START or INCREMENT in IDENTITY options");
-            }
+            else { options = ParseSequenceOptions(ref lexer, alter: false, identity: true); if (options.Count == 0) { AddExpectedDiagnostic(ref lexer, "identity sequence options"); } }
             Expect(ref lexer, TokenType.RightParen, _errorIdentityOptionsClosingExpected);
         }
-        return new SqlIdentityDefinition(always, start ?? (increment < 0 ? -1 : 1), increment);
+        long increment = 1;
+        long? start = null;
+        foreach (var option in options)
+        { if (option.Name == "START") { start = option.Value; } if (option.Name == "INCREMENT") { increment = option.Value ?? 1; } }
+        foreach (var option in options)
+        { if (start is null && (increment > 0 && option.Name == "MINVALUE" || increment < 0 && option.Name == "MAXVALUE")) { start = option.Value; } }
+        return new SqlIdentityDefinition(always, start ?? (increment < 0 ? -1 : 1), increment, options);
+    }
+
+    private SqlIdentityOverride ParseIdentityOverride(ref TokenLexer lexer)
+    {
+        if (!IsWord(ref lexer, "OVERRIDING")) { return SqlIdentityOverride.None; }
+        RequireSchemaClause(ref lexer, SqlClauses.Overriding);
+        Advance(ref lexer);
+        bool user = IsWord(ref lexer, "USER");
+        if (user) { Advance(ref lexer); } else { ExpectWord(ref lexer, "SYSTEM"); }
+        ExpectWord(ref lexer, "VALUE");
+        return user ? SqlIdentityOverride.User : SqlIdentityOverride.System;
+    }
+
+    private SqlAlterIdentityAction? ParseIdentityAlter(ref TokenLexer lexer, string column)
+    {
+        if (IsWord(ref lexer, "ADD"))
+        { RequireSchemaClause(ref lexer, SqlClauses.AlterIdentity); Advance(ref lexer); if (!IsWord(ref lexer, "GENERATED")) { AddExpectedDiagnostic(ref lexer, "GENERATED after ADD"); } return new(column, "ADD", ParseIdentity(ref lexer)); }
+        if (IsWord(ref lexer, "RESTART"))
+        { RequireSchemaClause(ref lexer, SqlClauses.AlterIdentity); return IdentityAlterOptions(column, ParseSequenceOptions(ref lexer, alter: true, identity: true)); }
+        var scan = lexer;
+        if (!MoveTypeLookahead(ref scan)) { return null; }
+        if (IsWord(ref lexer, "DROP") && IsWord(ref scan, "IDENTITY"))
+        {
+            RequireSchemaClause(ref lexer, SqlClauses.AlterIdentity);
+            Advance(ref lexer); Advance(ref lexer);
+            bool guard = ParseExistenceGuard(ref lexer, notExists: false);
+            return new(column, "DROP", ifExists: guard);
+        }
+        if (!IsWord(ref lexer, "SET")) { return null; }
+        if (CurrentText(ref scan).ToUpperInvariant() is "GENERATED" or "START" or "INCREMENT" or "MINVALUE" or "MAXVALUE" or "NO" or "CACHE" or "CYCLE")
+        { RequireSchemaClause(ref lexer, SqlClauses.AlterIdentity); Advance(ref lexer); return IdentityAlterOptions(column, ParseSequenceOptions(ref lexer, alter: true, identity: true, firstIdentitySet: true)); }
+        return null;
+    }
+
+    private static SqlAlterIdentityAction IdentityAlterOptions(string column, System.Collections.Generic.IReadOnlyList<SqlSequenceOption> options)
+    {
+        var generated = options.FirstOrDefault(option => option.Name == "GENERATED");
+        System.Collections.Generic.IReadOnlyList<SqlSequenceOption> sequenceOptions = generated is null ? options : options.Where(option => option.Name != "GENERATED").ToArray();
+        return new(column, sequenceOptions.Count == 0 && generated is not null ? "SET GENERATED" : "OPTIONS",
+            isAlways: generated is null ? null : generated.Value == 1, options: sequenceOptions);
     }
 
     private void ExpectIdentityWord(ref TokenLexer lexer, string word)
@@ -147,27 +153,4 @@ public sealed partial class SqlQueryParser
         return false;
     }
 
-    private bool TryRejectIdentityAlter(ref TokenLexer lexer)
-    {
-        if (!IsWord(ref lexer, "ALTER")) { return false; }
-        var lookahead = lexer;
-        MoveTypeLookahead(ref lookahead);
-        if (IsWord(ref lookahead, "COLUMN")) { MoveTypeLookahead(ref lookahead); }
-        MoveTypeLookahead(ref lookahead); // column name
-        if (IsWord(ref lookahead, "RESTART"))
-        {
-            RejectIdentityConstruct(ref lexer, "ALTER COLUMN RESTART");
-            return true;
-        }
-        if (IsWord(ref lookahead, "SET"))
-        {
-            MoveTypeLookahead(ref lookahead);
-            if (IsWord(ref lookahead, "GENERATED"))
-            {
-                RejectIdentityConstruct(ref lexer, "ALTER COLUMN SET GENERATED");
-                return true;
-            }
-        }
-        return false;
-    }
 }

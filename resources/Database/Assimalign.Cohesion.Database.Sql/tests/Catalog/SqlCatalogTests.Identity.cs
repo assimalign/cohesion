@@ -49,7 +49,7 @@ public partial class SqlCatalogTests
         writer.AppendInt32(1).AppendInt64(1).AppendString("dbo", Collation.Binary).AppendString("ids", Collation.Binary)
             .AppendInt32(1).AppendString("id", Collation.Binary).AppendInt8((sbyte)DatabaseType.Int64)
             .AppendInt32(-1).AppendInt32(-1).AppendInt32(-1).AppendBoolean(nullable).AppendNull().AppendInt32(0)
-            .AppendInt8((sbyte)DatabaseObjectOwner.Adhoc).AppendNull().AppendInt32(7).AppendInt32(0)
+            .AppendInt8((sbyte)DatabaseObjectOwner.Adhoc).AppendNull().AppendInt32(8).AppendInt32(0)
             .AppendInt32(-1).AppendInt32(0).AppendNull().AppendInt32(0)
             .AppendBoolean(true).AppendBoolean(true).AppendInt64(start).AppendInt64(increment).AppendNull().AppendBoolean(false);
         using (var transaction = storage.BeginTransaction())
@@ -59,7 +59,9 @@ public partial class SqlCatalogTests
         }
 
         // Act / Assert
-        Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage)).Message.ShouldContain("id", Case.Sensitive);
+        var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
+        if (nullable || increment == 0) { failure.Message.ShouldContain("id", Case.Sensitive); }
+        else { failure.Diagnostics[0].Code.ShouldBe("CS06061"); }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql.Catalog] - Identity: corrupt counter records fail closed")]
@@ -83,8 +85,8 @@ public partial class SqlCatalogTests
 
         // Act / Assert
         var failure = Should.Throw<SqlCatalogException>(() => SqlCatalog.Open(storage));
-        if (!duplicate && !orphan) { failure.Message.ShouldBe("Identity counter of column 'id' is invalid."); }
-        else { failure.Message.ShouldContain("identity", Case.Insensitive); }
+        failure.Diagnostics[0].Code.ShouldBe("CS06059");
+        failure.Message.ShouldEndWith("Malformed or duplicate identity counter record.", Case.Sensitive);
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Identity: DROP TABLE removes the counter before reopen and recreate starts at START")]

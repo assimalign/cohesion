@@ -1,14 +1,35 @@
 # Assimalign.Cohesion.Database.Sql.Language — Overview
 
+CREATE [UNIQUE] INDEX supports an immutable row-local WHERE predicate. SQ-P1 persists and
+maintains the matching subset; SQ-P2 proves conservative implication for partial-index access,
+ON CONFLICT target-WHERE inference and EXPLAIN proof text. See DIALECT for supported proof
+rules, predicate refusals and conditional uniqueness.
+
+Foreign keys retain and render all five ON UPDATE actions beside ON DELETE, in either order.
+Omitted actions default to NO ACTION. All five actions execute on UPDATE, UPDATE FROM,
+ON CONFLICT DO UPDATE and MERGE; RESTRICT checks immediately and NO ACTION checks the final
+statement state (#1723, SQ-F2). See [DIALECT.md](DIALECT.md).
+
 The SQL language front-end of the Cohesion Data Platform: a recursive-descent
 parser (`SqlQueryParser`) producing a full clause-level AST over the shared lexer
 infrastructure (`Database.Language`), the declared dialect contract
 ([DIALECT.md](DIALECT.md)), and the type-name translation table (`SqlTypeNames`)
 binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 
+SAVEPOINT, RELEASE [SAVEPOINT] and ROLLBACK TO [SAVEPOINT] retain named nested scopes
+on the session's explicit transaction (#1726). Rollback keeps its target for reuse; RELEASE
+discards its target and descendants. SET TRANSACTION refuses inside an active scope.
+
 ## Scope
 
-- **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, plus `SELECT` (INNER/LEFT/RIGHT/FULL/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
+Aggregate calls retain FILTER conditions, DISTINCT/ALL and ordered inputs. The executable
+profile includes BOOL_AND/BOOL_OR/EVERY and sample/population variance and standard deviation
+(#1720, SQ-H1). GROUPING SETS, ROLLUP, CUBE, empty sets, GROUP BY DISTINCT and
+GROUPING/GROUPING_ID subtotal masks execute (#1720, SQ-H2). Ranking, LAG/LEAD, OVER and named WINDOW definitions execute (#1526, SQ-W1);
+ROWS, RANGE distances, GROUPS, EXCLUDE, aggregate windows with FILTER, value functions and
+IGNORE/RESPECT NULLS execute (#1526, SQ-W3). FROM FIRST/LAST retain named refusals.
+
+- **Parser** — UNION/INTERSECT/EXCEPT with ALL or DISTINCT in every query position, `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE (recursive bodies bind and execute demand-driven fixpoints; WITH RECURSIVE before MERGE reports CK00001), plus `SELECT` (INNER/LEFT/RIGHT/FULL/CROSS joins, parenthesized join groups, derived tables, grouping, ordering, limits, subqueries), `INSERT`
   (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, `INSERT ... SELECT`), `UPDATE`
   (including parsed/bound FROM sources, `SET c = DEFAULT` and correlated and uncorrelated WHERE subqueries), `DELETE`
   (including parsed/bound USING sources and correlated and uncorrelated WHERE subqueries), `CREATE/ALTER/DROP TABLE`, `TRUNCATE` table lists with identity and FK policies,
@@ -44,8 +65,9 @@ binding SQL DDL/CAST type names to the shared type system (`Database.Types`).
 
 MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action(), using the existing
 read-source forms. Repeated target modifications fail with CS05036. FULL associations require
-a safe mandatory hash equality and complete ON safety proof (CS05070). SQ-M3 supplies
-concurrent-target rechecks and complete mixed-action final-state constraints (#1715).
+a safe mandatory hash equality and complete ON safety proof (CS05070). ReadCommitted
+rechecks changed targets and reselects actions; Snapshot retains CS04064. Foreign keys validate
+the composed final action state (#1715).
 
 UPDATE FROM and DELETE USING execute and belong to the executable clause profile. EXPLAIN
 exposes target access paths and source join algorithms. UPDATE refuses multiple matches before

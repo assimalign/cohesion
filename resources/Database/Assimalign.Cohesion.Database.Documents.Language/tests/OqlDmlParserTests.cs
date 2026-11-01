@@ -65,6 +65,7 @@ public sealed class OqlDmlParserTests
         // Arrange / Act
         var statement = new OqlQueryParser().Parse(query);
         // Assert
+        if (message == "SUBQUERY") { statement.Diagnostics.ShouldBeEmpty(); return; }
         var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
         diagnostic.Code.ShouldBe(code);
         diagnostic.Message.ShouldNotBeNull().ShouldContain(message, Case.Sensitive);
@@ -128,27 +129,23 @@ public sealed class OqlDmlParserTests
         diagnostic.Line.ShouldBe(1);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents.Language] - DML: nested SELECT reports SUBQUERY at its keyword")]
+    [Theory(DisplayName = "Cohesion Test [Documents.Language] - DML: nested SELECT parses in predicates and values")]
     [InlineData("DELETE FROM items WHERE amount IN (SELECT VALUE amount FROM other)")]
     [InlineData("DELETE FROM items WHERE amount = (SELECT RAW amount FROM other)")]
-    [InlineData("EXPLAIN DELETE FROM items WHERE amount IN (SELECT amount FROM other)")]
+    [InlineData("EXPLAIN DELETE FROM items WHERE amount IN (SELECT RAW amount FROM other)")]
     [InlineData("UPSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT VALUE amount FROM other))")]
     [InlineData("EXPLAIN UPSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT amount FROM other))")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT VALUE amount FROM other))")]
     [InlineData("INSERT INTO items (KEY, VALUE) VALUES ((SELECT RAW id FROM other), 1)")]
     [InlineData("EXPLAIN INSERT INTO items (KEY, VALUE) VALUES ('a', (SELECT amount FROM other))")]
-    public void Parse_DmlSubquery_ShouldLocateOneCapabilityDiagnostic(string query)
+    public void Parse_DmlSubquery_ShouldRetainCompleteStatement(string query)
     {
         // Arrange / Act
         var statement = new OqlQueryParser().Parse(query);
 
         // Assert
-        var diagnostic = statement.Diagnostics.ShouldHaveSingleItem();
-        diagnostic.Code.ShouldBe("CK00001");
-        diagnostic.Message.ShouldNotBeNull().ShouldContain("SUBQUERY", Case.Sensitive);
-        diagnostic.Start.ShouldBe(query.IndexOf("SELECT", StringComparison.Ordinal));
-        diagnostic.End.ShouldBe(diagnostic.Start + "SELECT".Length);
-        diagnostic.Line.ShouldBe(1);
+        statement.Diagnostics.ShouldBeEmpty();
+        statement.Expression.Text.ShouldBe(query);
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents.Language] - INSERT: KEY/VALUE forms retain complete spans")]

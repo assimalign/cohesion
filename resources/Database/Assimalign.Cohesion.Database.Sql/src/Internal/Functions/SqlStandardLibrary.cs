@@ -25,6 +25,9 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </remarks>
 internal static class SqlStandardLibrary
 {
+    internal static bool IsGrouping(string name) => name.Equals("GROUPING", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("GROUPING_ID", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The name of <c>COALESCE</c>, the special form the evaluator computes lazily.</summary>
     internal const string Coalesce = "COALESCE";
 
@@ -80,11 +83,31 @@ internal static class SqlStandardLibrary
         new SqlBuiltinScalarFunction("LOCALTIMESTAMP", [], SqlType.Timestamp, SqlFunctionVolatility.Stable),
         new SqlBuiltinScalarFunction("NOW", [], SqlType.TimestampTz, SqlFunctionVolatility.Stable),
         new SqlBuiltinScalarFunction("DATE_TRUNC", [SqlType.Text, SqlType.AnyElement], SqlType.AnyElement),
+        new SqlBuiltinScalarFunction("NEXTVAL", [SqlType.Any], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("CURRVAL", [SqlType.Any], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("SETVAL", [SqlType.Any, SqlType.BigInt], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("SETVAL", [SqlType.Any, SqlType.BigInt, SqlType.Boolean], SqlType.BigInt, SqlFunctionVolatility.Volatile),
+        new SqlBuiltinScalarFunction("LASTVAL", [], SqlType.BigInt, SqlFunctionVolatility.Volatile),
         new SqlBuiltinScalarFunction("GEN_RANDOM_UUID", [], SqlType.Uuid, SqlFunctionVolatility.Volatile),
         new SqlCountFunction(rows: true),
         new SqlCountFunction(rows: false),
         new SqlSumFunction(average: false),
         new SqlSumFunction(average: true),
+        SqlAggregateFunction.Create<bool, bool, bool>("BOOL_AND", static () => true, static (state, value) => state && value, static state => state),
+        SqlAggregateFunction.Create<bool, bool, bool>("EVERY", static () => true, static (state, value) => state && value, static state => state),
+        SqlAggregateFunction.Create<bool, bool, bool>("BOOL_OR", static () => false, static (state, value) => state || value, static state => state),
+        new SqlStatisticsFunction("STDDEV", sample: true, squareRoot: true),
+        new SqlStatisticsFunction("STDDEV", sample: true, squareRoot: true, floating: true),
+        new SqlStatisticsFunction("STDDEV_SAMP", sample: true, squareRoot: true),
+        new SqlStatisticsFunction("STDDEV_SAMP", sample: true, squareRoot: true, floating: true),
+        new SqlStatisticsFunction("STDDEV_POP", sample: false, squareRoot: true),
+        new SqlStatisticsFunction("STDDEV_POP", sample: false, squareRoot: true, floating: true),
+        new SqlStatisticsFunction("VARIANCE", sample: true, squareRoot: false),
+        new SqlStatisticsFunction("VARIANCE", sample: true, squareRoot: false, floating: true),
+        new SqlStatisticsFunction("VAR_SAMP", sample: true, squareRoot: false),
+        new SqlStatisticsFunction("VAR_SAMP", sample: true, squareRoot: false, floating: true),
+        new SqlStatisticsFunction("VAR_POP", sample: false, squareRoot: false),
+        new SqlStatisticsFunction("VAR_POP", sample: false, squareRoot: false, floating: true),
         new SqlExtremumFunction(maximum: false),
         new SqlExtremumFunction(maximum: true),
         new SqlStringAggregateFunction("STRING_AGG", delimiter: true),
@@ -93,7 +116,7 @@ internal static class SqlStandardLibrary
     ];
 
     /// <summary>The special forms: grammar, never catalog functions.</summary>
-    private static readonly string[] _specialForms = ["COALESCE", "NULLIF", "CASE", "CAST", "EXTRACT"];
+    private static readonly string[] _specialForms = ["COALESCE", "NULLIF", "GROUPING", "GROUPING_ID", "CASE", "CAST", "EXTRACT"];
 
     /// <summary>
     /// Words the dialect gives a meaning that is not a call of a catalog function: quantifiers, and
@@ -118,6 +141,12 @@ internal static class SqlStandardLibrary
     /// <param name="function">The function.</param>
     /// <returns><see langword="true"/> for a standard-library leaf.</returns>
     internal static bool Contains(SqlFunction function) => Array.IndexOf(_functions, function) >= 0;
+
+    // Match native identities, including the Boolean instances built through the application
+    // factory. An application's own aggregate retains its specified input ordering.
+    internal static bool IgnoresWindowOrdering(SqlAggregateFunction function)
+        => function is SqlCountFunction or SqlSumFunction or SqlExtremumFunction or SqlStatisticsFunction ||
+            Contains(function) && function.Name is "BOOL_AND" or "BOOL_OR" or "EVERY";
 
     /// <summary>Whether a name is a built-in's, ignoring case.</summary>
     /// <param name="name">The name as written.</param>
@@ -177,7 +206,7 @@ internal static class SqlStandardLibrary
         return false;
     }
 
-    /// <summary>The special forms, which are grammar and never catalog functions: <c>COALESCE</c>, <c>NULLIF</c>, <c>CASE</c>, <c>CAST</c>, <c>EXTRACT</c>.</summary>
+    /// <summary>The special forms, which are grammar and never catalog functions, including GROUPING and its alias.</summary>
     internal static IReadOnlyList<string> SpecialForms { get; } = Array.AsReadOnly(_specialForms);
 
     /// <summary>Whether a call names <c>COALESCE</c>.</summary>
@@ -211,8 +240,8 @@ internal static class SqlStandardLibrary
     /// <summary>
     /// Checks a function name: an identifier (a letter or underscore, then letters, digits and
     /// underscores, as the lexer reads one) that is neither a special form, a SQL keyword, a name
-    /// the dialect reserves for a built-in that does not execute yet (<c>RANK</c>, <c>LEAD</c>,
-    /// <c>NTILE</c>, ...), a type name (<c>INT</c>, <c>DATE</c>, ...) nor a quantifier or
+    /// the dialect reserves for a window operator or a deferred built-in (<c>RANK</c>, <c>LEAD</c>,
+    /// <c>FIRST_VALUE</c>, ...), a type name (<c>INT</c>, <c>DATE</c>, ...) nor a quantifier or
     /// date-time value function (<c>ANY</c>, <c>SOME</c>, <c>LOCALTIMESTAMP</c>, ...). A reserved
     /// name an application took would fail its build the day the engine ships the built-in, and a
     /// type or quantifier name collides with grammar the dialect will parse.

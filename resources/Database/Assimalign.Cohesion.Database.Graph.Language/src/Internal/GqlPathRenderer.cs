@@ -10,7 +10,11 @@ namespace Assimalign.Cohesion.Database.Graph.Language.Internal;
 // and original spellings are not syntax: all semantic children are rendered from the AST.
 internal static class GqlPathRenderer
 {
-    internal static string Render(GqlPathPattern path)
+    internal static string Render(GqlPathPattern path) => RenderObject(path);
+    internal static string RenderExpression(GqlExpression expression) => RenderObject(expression);
+    internal static string RenderComposite(GqlCompositeQuery query) => RenderObject(query);
+
+    private static string RenderObject(object path)
     {
         var builder = new StringBuilder();
         var pending = new Stack<object>();
@@ -20,6 +24,69 @@ internal static class GqlPathRenderer
             switch (item)
             {
                 case string text: builder.Append(text); break;
+                case GqlCompositeQuery composite:
+                    Push("(", composite.Left, composite.Operator switch
+                    {
+                        GqlCompositeOperator.UnionAll => ") UNION ALL (",
+                        GqlCompositeOperator.Except => ") EXCEPT (",
+                        GqlCompositeOperator.ExceptAll => ") EXCEPT ALL (",
+                        GqlCompositeOperator.Intersect => ") INTERSECT (",
+                        GqlCompositeOperator.IntersectAll => ") INTERSECT ALL (",
+                        GqlCompositeOperator.Otherwise => ") OTHERWISE (",
+                        _ => ") UNION (",
+                    }, composite.Right, ")");
+                    break;
+                case GqlMatchStage match:
+                    if (match.Clause.Predicate is { } matchPredicate) { Push(" WHERE ", matchPredicate); }
+                    for (int i = match.Clause.Paths.Count - 1; i >= 0; i--) { Push(i == 0 ? null : ", ", match.Clause.Paths[i]); }
+                    // The prefix belongs before the paths on the LIFO work stack.
+                    pending.Push(match.Clause.Optional ? "OPTIONAL MATCH " : "MATCH ");
+                    break;
+                case GqlLetStage let:
+                    for (int i = let.Bindings.Count - 1; i >= 0; i--)
+                    { var binding = let.Bindings[i]; Push(i == 0 ? null : ", ", Name(binding.Alias!), " = ", binding.Expression); }
+                    pending.Push("LET ");
+                    break;
+                case GqlFilterStage filter: Push("FILTER ", filter.Predicate); break;
+                case GqlForStage loop: Push("FOR ", Name(loop.Variable), " IN ", loop.List); break;
+                case GqlCompositeStage stage: Push("(", stage.Query, ")"); break;
+                case GqlNextStage: builder.Append("NEXT"); break;
+                case GqlReturnStage result:
+                    if (result.Predicate is { } resultPredicate) { Push(" WHERE ", resultPredicate); }
+                    if (result.Limit is { } limit) { Push(" LIMIT ", limit); }
+                    if (result.Offset is { } offset) { Push(" OFFSET ", offset); }
+                    if (result.OrderBy.Count != 0)
+                    {
+                        for (int i = result.OrderBy.Count - 1; i >= 0; i--)
+                        {
+                            var sort = result.OrderBy[i];
+                            Push(i == 0 ? null : ", ", sort.Expression,
+                                sort.Direction == GqlSortDirection.Descending ? " DESC" : " ASC",
+                                sort.NullOrdering == GqlNullOrdering.First ? " NULLS FIRST" : sort.NullOrdering == GqlNullOrdering.Last ? " NULLS LAST" : null);
+                        }
+                        pending.Push(" ORDER BY ");
+                    }
+                    if (result.GroupBy is { } grouping)
+                    {
+                        if (grouping.Count == 0) { pending.Push("()"); }
+                        for (int i = grouping.Count - 1; i >= 0; i--) { Push(i == 0 ? null : ", ", grouping[i]); }
+                        pending.Push(" GROUP BY ");
+                    }
+                    if (result.ReturnStar) { pending.Push("*"); }
+                    else
+                    {
+                        for (int i = result.Projections.Count - 1; i >= 0; i--)
+                        {
+                            var projection = result.Projections[i];
+                            // Parsed unaliased column names are normalized source text. Retain
+                            // that spelling so quoting/canonicalization cannot rename a column.
+                            object value = projection.Alias is null && projection.Expression.Text is { } projectionText
+                                ? projectionText : projection.Expression;
+                            Push(i == 0 ? null : ", ", value, projection.Alias is null ? null : " AS " + Name(projection.Alias));
+                        }
+                    }
+                    Push(result.IsWith ? "WITH " : "RETURN ", result.SetQuantifier == GqlSetQuantifier.Distinct ? "DISTINCT " : null);
+                    break;
                 case GqlPathPattern pattern:
                     if (pattern.Variable is { } variable) { builder.Append(Name(variable)).Append(" = "); }
                     if (pattern.Selector is { } selector)
@@ -103,6 +170,15 @@ internal static class GqlPathRenderer
         {
             switch (expression)
             {
+                case GqlQueryExpression query:
+                    if (query.IsExplain) { builder.Append("EXPLAIN "); }
+                    if (query.Composite is { } composite) { pending.Push(composite); }
+                    else
+                    {
+                        var stages = query.Stages;
+                        for (int i = stages.Count - 1; i >= 0; i--) { Push(i == 0 ? null : " ", stages[i]); }
+                    }
+                    break;
                 case GqlLiteralExpression literal:
                     builder.Append(literal.Value switch
                     {
@@ -118,6 +194,36 @@ internal static class GqlPathRenderer
                 case GqlPropertyExpression property: Push(Name(property.Variable), ".", Name(property.Property)); break;
                 case GqlMemberExpression member: Push("(", member.Operand, ").", Name(member.Member)); break;
                 case GqlSubscriptExpression subscript: Push("(", subscript.Operand, ")[", subscript.Index, "]"); break;
+                case GqlPatternComprehensionExpression pattern:
+                    Push("[", pattern.Pattern, pattern.Predicate is null ? null : " WHERE ", pattern.Predicate,
+                        " | ", pattern.Projection, "]");
+                    break;
+                case GqlExistsExpression exists:
+                    Push(" }");
+                    for (int i = exists.MatchClauses.Count - 1; i >= 0; i--)
+                    {
+                        var clause = exists.MatchClauses[i];
+                        if (clause.Predicate is not null) { Push(" WHERE ", clause.Predicate); }
+                        for (int j = clause.Paths.Count - 1; j >= 0; j--)
+                        { Push(j == 0 ? null : ", ", clause.Paths[j]); }
+                        Push(i == 0 ? null : " ", clause.Optional ? "OPTIONAL MATCH " : "MATCH ");
+                    }
+                    Push("EXISTS { ");
+                    break;
+                case GqlReduceExpression reduce:
+                    Push("reduce(", Name(reduce.Accumulator), " = ", reduce.Initial, ", ", Name(reduce.Variable),
+                        " IN ", reduce.List, " | ", reduce.Body, ")");
+                    break;
+                case GqlListPredicateExpression predicate:
+                    Push(predicate.Kind.ToString().ToLowerInvariant(), "(", Name(predicate.Variable), " IN ",
+                        predicate.List, " WHERE ", predicate.Predicate, ")");
+                    break;
+                case GqlListSliceExpression slice: Push("(", slice.Operand, ")[", slice.From, "..", slice.To, "]"); break;
+                case GqlListComprehensionExpression comprehension:
+                    Push("[", Name(comprehension.Variable), " IN ", comprehension.List,
+                        comprehension.Predicate is null ? null : " WHERE ", comprehension.Predicate,
+                        comprehension.Projection is null ? null : " | ", comprehension.Projection, "]");
+                    break;
                 case GqlBinaryExpression binary: Push("(", binary.Left, " " + binary.Operator + " ", binary.Right, ")"); break;
                 case GqlLogicalExpression logical:
                     Push(")");

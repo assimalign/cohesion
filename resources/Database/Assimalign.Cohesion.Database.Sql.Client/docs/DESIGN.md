@@ -1,5 +1,70 @@
 # Database.Sql.Client — Design
 
+## Named savepoint wire conformance (#1726, XT-4)
+
+The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
+control frame, protocol version, client API or result shape is added. InMemory and TCP tests
+exercise duplicate names, nested release/undo, repeated rollback to the retained target, work
+continued after undo and root commit, peer isolation and the model's failure rule. CK04012 and
+CK04013 remain structured diagnostics. An active savepoint transaction returned to the pool
+is rolled back; tests rent the exact authenticated server session again and prove the old name
+and uncommitted rows are absent. Faulted partial undo uses existing Ready E and pool rollback.
+A closed database with a live undo fence returns CS04005 followed by Ready E on both transports;
+repeated requests keep the same session open.
+Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.
+
+## Directed index keys over the existing exchange (#1631, SQ-K1)
+
+InMemory and TCP carry per-column directions and NULL placement, composite seeks/ranges,
+canonical INDEXES metadata and CS00003 constraint-list refusals. Tests retain usable connections
+and verify that matching ORDER BY retains its ordering keys. SQ-K3 adds equality-prefix mixed
+orders, fully reversed scans, partial-index implication, LIMIT/OFFSET and OrderedIndexScan EXPLAIN
+with direction and sort_removed=true on both transports. No client API or wire format change is
+needed; existing result and plan columns carry the behavior.
+
+
+## Partial indexes over the existing exchange (#1630, SQ-P1/SQ-P2)
+
+InMemory and TCP execute CREATE INDEX WHERE, predicate transitions, NULL-distinct partial
+uniqueness, canonical metadata views and coded predicate refusals. Failed transitions leave
+rows intact and connections usable. ON CONFLICT target-WHERE inference, subset access and EXPLAIN proof text use the same exchanges
+on both transports. Untargeted and unproven targets retain their prior refusal/membership behavior.
+No client API or protocol format changes are required.
+
+
+## Foreign-key ON UPDATE actions (#1723, SQ-F1/SQ-F2)
+
+InMemory and TCP execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
+and MERGE, for separate and self-referencing tables. The omitted action is NO ACTION. RESTRICT
+rejects existing children immediately, without final-parent substitution; NO ACTION accepts a
+replacement final parent. CASCADE/SET NULL/SET DEFAULT compose before final validation, and
+conflicting assignments preserve CS05085 through the existing diagnostic exchange. Failures leave
+rows unchanged and connections usable. UPDATE_RULE retains truthful metadata, including views over
+INFORMATION_SCHEMA. No public client or wire format change is required.
+
+## Window ranking, navigation and frames (#1526, SQ-W1/SQ-W2/SQ-W3)
+
+InMemory and TCP use the existing result and diagnostic exchanges for window rankings,
+navigation, named definitions and EXPLAIN. Tests pin BIGINT ranks, DOUBLE PRECISION
+distributions, INTEGER tiles, numeric navigation default unification, coded placement/name/
+bucket and CS05079 budget refusals and reusable connections. ROWS/default-peer aggregate frames,
+FILTER, Boolean/statistical and value functions preserve types, NULLs and frame diagnostics on
+both transports; EXPLAIN includes frame boundaries and transition visits. RANGE offsets,
+GROUPS, every exclusion and IGNORE NULLS use the same exchange. The wire corpus also checks
+CS02074-02076 and CS05086-05088 with reusable connections. No client surface or protocol format changes.
+
+## Owned identity wire surface (#1717, SQ-S3)
+
+InMemory and TCP tests cover SERIAL, populated ADD identity, sequence session state,
+SET GENERATED, RESTART, both override policies, protected owned-sequence drops and
+TRUNCATE RESTART IDENTITY. Identity/backfill allocations report retained session state so
+the existing pool reset clears currval/lastval on physical connection reuse. No client API
+or protocol changes are required.
+
+## Sequence wire surface (#1717, SQ-S2)
+
+The ordinary execute exchange carries sequence DDL, functions, NEXT VALUE FOR, EXPLAIN and INFORMATION_SCHEMA.SEQUENCES on InMemory and TCP. Undefined session state and explicit-transaction DDL refusals remain structured execution failures with usable connections. Session currval/lastval survive rollback and remain isolated between logical connections: pool return clears them with the family-declared DISCARD ALL only when Ready reports retained state, after any required rollback. The two-byte Ready reports transaction state and retained state. A one-slot pool and queued waiter exercise exact exchange counts on both transports: idle 0, SELECT 1, BEGIN plus return 2, nextval plus reset 2, and nextval plus user DISCARD 2. Existing client methods and protocol identifiers remain unchanged.
+
 ## Terminal TCP conformance (#1087)
 
 The real SqlClient and model server run missing-database handshakes on InMemory and
@@ -12,15 +77,42 @@ An in-memory regression returns an authenticated rental to its pool and leaves t
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
 
+## JSON access wire conformance (#1722, SQ-N1)
+
+InMemory and TCP preserve JSON text, JSONB bytes, unescaped extraction text, Boolean
+predicates and typed scalar conversions. Tests distinguish missing members, JSON null
+and SQL NULL, exercise negative indexes and retain usable connections after CS01067,
+CS02078, CS02079 and existing cast/range errors. Invalid JSON assignments leave rows
+unchanged. The client API, protocol format and value representation remain unchanged.
+
+## Integer bitwise wire conformance (#1721, SQ-O2)
+
+InMemory and TCP preserve SMALLINT, INTEGER and BIGINT cells for &, |, #, prefix ~,
+<< and >>, including NULL and modulo-width shift results. CS02077 rejects noninteger
+operands through the existing structured diagnostics and leaves the connection usable.
+No client API or value-wire change is needed.
+
+## ILIKE and postfix CAST wire conformance (#1721)
+
+The existing exchange carries collation-aware ILIKE/NOT ILIKE, NULL Boolean cells,
+parameter ESCAPE and chained casts over InMemory and TCP. CS02022 and CS05040 retain
+located execution diagnostics and usable connections. Recorded matcher admission drives
+disconnect cancellation for LIKE and ILIKE. No public client API or wire layout changes.
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Sql.Protocol, Database.Types, Database.Protocol and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
 
-## MERGE (#1715, SQ-M2)
+## MERGE (#1715, SQ-M2/SQ-M3)
 
 The existing exchange carries MERGE actions, BY SOURCE and RETURNING with merge_action().
 InMemory/TCP tests assert new UPDATE/INSERT targets, old DELETE targets, NULL absent-source
-cells and reusable CS05036 failures with unchanged rows. No client API or protocol changes.
+cells and reusable CS05036 failures with unchanged rows. The final-state corpus covers moved
+children, overlapping CASCADE/SET NULL/SET DEFAULT writes, CHECK/unique/FK refusals and late
+RETURNING rollback while preserving earlier transaction writes. Recorded row-lock waits drive
+concurrent UPDATE/DELETE commits and assert CS04064 under wire BEGIN's default Snapshot
+isolation, with reusable connections. ReadCommitted rechecks are exercised through the engine
+transaction API. No client API or protocol changes.
 
 ## TRUNCATE (#1716, SQ-T1)
 
@@ -31,6 +123,12 @@ Engine-owned wire tests also run reclamation while the old snapshot remains acti
 no frees until it ends. No client surface, result shape or protocol version changes.
 
 ## Quantified comparisons (#1718)
+
+Grouping sets (#1720, SQ-H2) use the existing execute exchange. InMemory and TCP
+tests cover subtotal versus stored NULL masks, GROUPING_ID, HAVING/ORDER BY,
+FILTER/DISTINCT and Boolean/statistical/string aggregates, empty grouping sets,
+EXPLAIN expansion and reusable CS01062 failures. Mask metadata is non-null INTEGER;
+subtotal grouping columns remain nullable. No client API or wire format changes.
 
 The existing execute exchange carries scalar ANY/SOME/ALL subqueries without a
 protocol change. InMemory and TCP tests measure all comparison operators against
@@ -53,8 +151,8 @@ validation as ExecutionFailure with a reusable connection. No client API or payl
 
 Non-recursive WITH queries and INSERT/UPDATE/DELETE (#1116) travel through the
 existing SQL execute exchange. Wire tests pin results, exact affected counts and
-recursive/modifying-body ParseFailure diagnostics, preserving connection reuse
-and stored rows after rejection. No client API or wire payload changes.
+modifying-body ParseFailure diagnostics, preserving connection reuse
+and stored rows after rejection. WITH RECURSIVE (#1719, SQ-R1/SQ-R2) executes UNION ALL and DISTINCT fixpoints, shared scans and outer LIMIT demand. InMemory/TCP regressions cover values, NULL identity, EXPLAIN iteration/row counters, CS02066/CS02067 compatibility errors, CS05067 memory refusal and connection reuse. Invalid anchor references retain CS01055. Windows over finite fixpoints execute. For unbounded inputs, blocking consumers that retain input refuse with CS05067 when they exhaust StatementMemoryBudget; bounded-state consumers run until cancellation, including infinite COUNT and top-K sorts. No client API or wire payload changes.
 
 Blank derived output names fail planning with CS05013 and arrive as an
 ExecutionFailure with ConnectionUsable true. The connection and an explicit
@@ -103,8 +201,8 @@ protocol version, frame or metadata format changes.
 ## UPDATE final foreign-key state (#1667)
 
 Both transports pin dangling-reference rejection without writes, moving self-references,
-and consistent mutually referenced key swaps, with NO ACTION and RESTRICT under Snapshot
-and ReadCommitted. Tests begin through the existing server-session API to choose isolation;
+and consistent mutually referenced key swaps with NO ACTION under Snapshot and ReadCommitted.
+RESTRICT now refuses existing references immediately, including direct self-reference reassignment (#1723). Tests begin through the existing server-session API to choose isolation;
 the UPDATE, error, result and COMMIT exchanges all use the wire. No protocol changes.
 
 ## INSERT ... ON CONFLICT (#1118)
@@ -478,6 +576,11 @@ The package has no public interface left and no `Abstractions/` folder
 
 ## Aggregate modifiers (#1115)
 
+FILTER and statistics (#1720, SQ-H1): InMemory and TCP conformance exercise filtered COUNT,
+DISTINCT, ordered STRING_AGG/LISTAGG, Boolean aliases, exact and floating statistics, empty
+results and EXPLAIN through the existing scalar codecs. Nullable Boolean/Decimal/Double
+metadata is preserved. No client ABI or wire format changes.
+
 COUNT/SUM DISTINCT and ordered STRING_AGG use the existing statement/result framing.
 The live wire corpus verifies values, nullable String metadata and independent aggregate
 slots; excluded grouping/window forms continue to report usable-connection CK00001.
@@ -595,6 +698,20 @@ No client API or protocol format changes are needed.
 Deadline-dependent peers and busy test drivers use the linked Storage test helper's LongRunning threads. Ordinary async driver continuations stay on their actor scheduler, without changing SynchronizationContext. Existing deadlines of 25 seconds or more are hang guards. Runner settings impose no parallel-thread cap. See the [scheduling audit](../../Assimalign.Cohesion.Database.Storage/docs/TEST-HYGIENE-AUDIT.md) for every original Task.Run site, the exact journal counters and the physical index-work guards.
 
 Reference consulted: RavenDB test/StressTests/Voron/InvalidReleasesOfScratchPages.cs:39–68 and :71–103 use LongRunning stress drivers. No code was copied.
+
+## Transaction isolation text (#1012)
+
+Outside a transaction block, SET TRANSACTION succeeds with Warning CS04071 through the existing
+negotiated diagnostic frame; QueryAsync exposes the warning and leaves Ready idle. InMemory/TCP
+conformance verifies the warning and continued usability. No client API or wire format changes.
+
+BEGIN/START isolation modes and early SET TRANSACTION use existing Execute, diagnostic and Ready
+frames on InMemory and TCP. READ COMMITTED and READ UNCOMMITTED see a concurrent commit on the next
+statement; REPEATABLE READ keeps the begin snapshot. CS04071/CS04072/CS04073 preserve connection
+usability and transaction state. A one-slot pool proves physical-session reuse after an early
+isolation change, with optional DISCARD ALL, restores optionless BEGIN's Snapshot behavior.
+No client API, capability bit or wire identifier changes.
+
 
 ## Server-reported transaction reset (#1540)
 

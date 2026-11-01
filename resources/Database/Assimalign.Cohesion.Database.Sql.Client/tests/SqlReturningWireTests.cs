@@ -90,7 +90,6 @@ public sealed class SqlReturningWireTests
     [InlineData("INSERT INTO t VALUES (3, 4) RETURNING (SELECT 1)")]
     [InlineData("INSERT INTO t SELECT * FROM t RETURNING (SELECT 1)")]
     [InlineData("DELETE FROM t WHERE id = 1 RETURNING (SELECT 1)")]
-    [InlineData("UPDATE t SET age = 0 RETURNING ROW_NUMBER() OVER ()")]
     [InlineData("WITH d AS (DELETE FROM t RETURNING *) SELECT * FROM d")]
     public async Task QueryAsync_ExcludedReturning_ShouldRejectWithoutWrites(string sql)
     {
@@ -114,6 +113,7 @@ public sealed class SqlReturningWireTests
     [Theory(DisplayName = "Cohesion Test [Sql.Client] - RETURNING: evaluation and planning failures retain coded usable exchanges")]
     [InlineData("INSERT INTO t VALUES (3, 1), (4, 0) RETURNING 1 / age", "CS02001")]
     [InlineData("UPDATE t SET age = 1 RETURNING COUNT(*)", "CS05017")]
+    [InlineData("UPDATE t SET age = 0 RETURNING ROW_NUMBER() OVER ()", "CS05076")]
     public async Task QueryAsync_ReturningFailure_ShouldLeaveConnectionUsable(string sql, string code)
     {
         // Arrange

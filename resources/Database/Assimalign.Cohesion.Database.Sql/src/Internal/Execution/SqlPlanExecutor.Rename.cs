@@ -11,6 +11,7 @@ using Assimalign.Cohesion.Database.Language;
 using Assimalign.Cohesion.Database.Sql.Catalog;
 using Assimalign.Cohesion.Database.Sql.Internal;
 using Assimalign.Cohesion.Database.Sql.Language;
+using Assimalign.Cohesion.Database.Transactions;
 using Assimalign.Cohesion.Database.Types;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
@@ -62,15 +63,23 @@ internal sealed partial class SqlPlanExecutor
             .OrderBy(child => child.ObjectId).ToArray();
         foreach (var child in children)
         {
-            await AcquireObjectLockAsync(statement, child.Schema, child.Name, "ALTER TABLE RENAME dependency", cancellationToken).ConfigureAwait(false);
+            // Only FK names change on this child; sequence ownership/options do not.
+            // Its table X serializes the metadata, and taking a child sequence lock here
+            // would reverse the established sequence-before-target-table order.
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                LockResource.Object(child.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
+            EnsureCanChange(child.Owner, child.Name, child.OwningSchema, "ALTER TABLE RENAME dependency", statement);
             EnsureCurrentDefinition(child);
         }
         EnsureCurrentDefinition(plan.Table);
         var checks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var constraint in plan.Table.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Check))
         {
-            checks.Add(constraint.Name, RewriteRenameCheck(plan, constraint));
+            checks.Add(constraint.Name, RewriteRenameExpression(plan, constraint.CheckExpression!, constraint.Name));
         }
+        foreach (var index in _catalog.GetIndexes(plan.Table.ObjectId).Where(index => index.Predicate is not null))
+        { checks.Add(index.Name, RewriteRenameExpression(plan, index.Predicate!, index.Name)); }
         string RenameColumn(string name) => plan.ColumnName is not null && string.Equals(name, plan.ColumnName, StringComparison.OrdinalIgnoreCase) ? plan.NewName : name;
         var columns = plan.Table.Columns.Select(column => new SqlCatalogColumn(RenameColumn(column.Name), column.Type,
             column.IsNullable, column.DefaultLiteral, column.Collation, column.DomainName, column.DefaultFunctionCalls, column.Identity, column.MissingValueLiteral) { RecastDefault = column.RecastDefault }).ToArray();
@@ -109,12 +118,12 @@ internal sealed partial class SqlPlanExecutor
         return new SqlQueryResult(DatabaseResultStatus.Success, affectedCount: 0);
     }
 
-    private static string RewriteRenameCheck(SqlRenamePlan plan, SqlCatalogConstraint constraint)
+    private static string RewriteRenameExpression(SqlRenamePlan plan, string text, string name)
     {
-        // Re-lex only column-reference nodes in the CHECK's single-table scope. Names used as
+        // Re-lex only column-reference nodes in the predicate's single-table scope. Names used as
         // functions, types, collations or literal contents are never candidates for replacement.
         const string prefix = "SELECT * FROM __cohesion_expression WHERE ";
-        string source = prefix + constraint.CheckExpression!;
+        string source = prefix + text;
         var select = (SqlSelectExpression)SqlQueryRequest.FromSql(source, null, SqlQueryRequest.CeilingParserOptions).Statement.SqlExpression;
         var replacements = new SortedDictionary<int, (int Length, string Text)>();
         Visit(select.Where!);
@@ -124,7 +133,7 @@ internal sealed partial class SqlPlanExecutor
             result.Remove(start, replacement.Length).Insert(start, replacement.Text);
         }
         return SqlPersistedExpression.Canonicalize(SqlPersistedExpression.Load(result.ToString(prefix.Length, result.Length - prefix.Length),
-            $"CHECK '{constraint.Name}'"), $"CHECK '{constraint.Name}'");
+            $"predicate '{name}'"), $"predicate '{name}'");
 
         void Visit(SqlExpression expression)
         {

@@ -88,6 +88,64 @@ public class SqlCatalogIndexTests
         reopened.GetIndexRegistrations().ShouldBe(new[] { registration });
     }
 
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Directed indexes: orders snapshot and round trip with predicates (#1631)")]
+    public async Task CreateIndex_KeyOrders_ShouldCopyAndPersist()
+    {
+        // Arrange
+        var (catalog, harness, table) = await OpenWithTableAsync();
+        SqlCatalogIndexKeyOrder[] orders = [SqlCatalogIndexKeyOrder.DescendingNullsLast, SqlCatalogIndexKeyOrder.AscendingNullsFirst];
+        var metadata = new SqlCatalogIndex(table.ObjectId, "ix", ["age", "email"], false,
+            predicate: "age > 0", predicateColumns: ["age"], keyOrders: orders);
+        orders[0] = SqlCatalogIndexKeyOrder.AscendingNullsLast;
+
+        // Act
+        await catalog.CreateIndexAsync(metadata, [Registration(table.ObjectId, "ix", false, 42)], CancellationToken.None);
+        var recovered = harness.Reopen();
+
+        // Assert
+        recovered.TryGetIndex(table.ObjectId, "ix", out var index).ShouldBeTrue();
+        index.KeyOrders.ShouldBe([SqlCatalogIndexKeyOrder.DescendingNullsLast, SqlCatalogIndexKeyOrder.AscendingNullsFirst]);
+        index.Predicate.ShouldBe("age > 0");
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "bad", ["a"], false,
+            keyOrders: [])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03085");
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "bad", ["a"], false,
+            keyOrders: [(SqlCatalogIndexKeyOrder)4])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03085");
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "bad", ["a"], true, isPrimaryKey: true,
+            keyOrders: [SqlCatalogIndexKeyOrder.DescendingNullsFirst])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03085");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Partial indexes: predicate and immutable dependencies persist symmetrically (#1630)")]
+    public async Task CreateIndex_PartialMetadata_ShouldRoundTripAndCopyDependencies()
+    {
+        // Arrange
+        var (catalog, harness, table) = await OpenWithTableAsync();
+        string[] columns = ["age"];
+        var metadata = new SqlCatalogIndex(table.ObjectId, "ix_adult", ["email"], true,
+            predicate: "age > 17", predicateColumns: columns);
+        columns[0] = "email";
+
+        // Act
+        await catalog.CreateIndexAsync(metadata, [Registration(table.ObjectId, "ix_adult", true, 42)], CancellationToken.None);
+        var recovered = harness.Reopen();
+        recovered.TryGetIndex(table.ObjectId, "ix_adult", out var index).ShouldBeTrue();
+
+        // Assert
+        index.Predicate.ShouldBe("age > 17");
+        index.PredicateColumns.ShouldBe(["age"]);
+        index.PredicateFunctionCalls.ShouldBeEmpty();
+        recovered.GetIndexRegistrations().ShouldHaveSingleItem().Definition.IsUnique.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Partial indexes: malformed or primary predicate metadata is coded (#1630)")]
+    public void Constructor_InvalidPartialMetadata_ShouldRefuseWithCodes()
+    {
+        // Arrange / Act / Assert
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "ix", ["age"], true, isPrimaryKey: true,
+            predicate: "age > 0", predicateColumns: ["age"])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03082");
+        Should.Throw<SqlCatalogException>(() => new SqlCatalogIndex(1, "ix", ["age"], false,
+            predicateColumns: ["age"])).Diagnostics.ShouldHaveSingleItem().Code.ShouldBe("CS03084");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sql.Catalog] - Indexes: duplicate names, unknown tables, and unknown columns are rejected")]
     public async Task CreateIndex_InvalidDefinitions_ShouldThrow()
     {

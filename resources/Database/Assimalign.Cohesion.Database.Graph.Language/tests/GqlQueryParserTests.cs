@@ -12,6 +12,9 @@ public class GqlQueryParserTests
 {
     [Theory]
     [InlineData("MATCH (a) SET a.age = 5")]
+    [InlineData("CREATE CONSTRAINT c FOR ()-[r:T]->() REQUIRE r.p IS NOT NULL")]
+    [InlineData("CREATE CONSTRAINT c FOR ()<-[r:T]-() REQUIRE r.p IS NOT NULL")]
+    [InlineData("CREATE CONSTRAINT c FOR ()-[r:T]-() REQUIRE r.p IS NOT NULL")]
     [InlineData("MATCH (a) REMOVE a.age")]
     [InlineData("MATCH (a:Person) RETURN a")]
     [InlineData("UNWIND [1, 2] AS a RETURN a")]
@@ -25,6 +28,10 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a)-[r]->{1,3}(b) RETURN a")]
     [InlineData("MATCH trail = (a)-[r]->{1,2}(b) RETURN trail")]
     [InlineData("MATCH (a) RETURN a.age + 1 AS next, a.name || '!'")]
+    [InlineData("RETURN [x IN [1,2,3] WHERE x > 1 | x * 2]")]
+    [InlineData("RETURN [x IN [1,2]], [x IN [] WHERE NULL], [x IN NULL | x]")]
+    [InlineData("RETURN [1,2,3][1..2], [1,2][..1], [1,2][1..], [1,2][..]")]
+    [InlineData("RETURN [x IN [1,2] | [x IN [x] | x]]")]
     [InlineData("RETURN 1 + 1 AS two")]
     [InlineData("RETURN DISTINCT 1")]
     [InlineData("RETURN ALL 1")]
@@ -43,6 +50,8 @@ public class GqlQueryParserTests
     [InlineData("MATCH (a) WHERE @age = a.age RETURN a")]
     [InlineData("MATCH (a) WHERE a.left = a.right RETURN a")]
     [InlineData("MATCH (a) WHERE NULL = a.absent RETURN a")]
+    [InlineData("MATCH (n:Person {never_seen:1}) RETURN n.never_seen ORDER BY n.never_seen")]
+    [InlineData("MATCH (n:Person) WHERE n.never_seen IS NULL RETURN n[$key], properties(n).never_seen")]
     [InlineData("INSERT (a:Person {name: 'Alice', age: -42, active: TRUE, optional: NULL})")]
     [InlineData("INSERT (a:Person), (b:Person), (a)-[r:KNOWS {weight: .5}]->(b) RETURN a, r, b")]
     [InlineData("CREATE (a:Person {name: 'Alice'}) RETURN a")]
@@ -106,8 +115,6 @@ public class GqlQueryParserTests
     [InlineData("MANDATORY MATCH (a) RETURN a")]
 
 
-    [InlineData("MERGE (a:Person)")]
-    [InlineData("MATCH (a) RETURN a UNION MATCH (b) RETURN b")]
     [InlineData("MATCH (a) RETURN a {.name}")]
     [InlineData("INSERT (:Person {tags: [1, 2]})")]
     [InlineData("MATCH (a) DELETE a RETURN a")]

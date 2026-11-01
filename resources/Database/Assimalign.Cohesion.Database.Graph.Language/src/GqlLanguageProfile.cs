@@ -6,7 +6,7 @@ namespace Assimalign.Cohesion.Database.Graph.Language;
 /// <summary>
 /// Provides the lexical vocabulary and clause capabilities for the Graph Query Language (GQL).
 /// </summary>
-/// <remarks>The executable ISO/IEC 39075 subset includes documented Cohesion CREATE and SHOW extensions.</remarks>
+/// <remarks>The executable ISO/IEC 39075 subset includes documented Cohesion CREATE, SHOW and savepoint extensions.</remarks>
 public static class GqlLanguageProfile
 {
     // EXPLAIN is recognized only at the statement prefix; elsewhere it remains an identifier.
@@ -48,7 +48,7 @@ public static class GqlLanguageProfile
 
     private static readonly string[] _functions =
     [
-        .. GqlScalarFunctions.Signatures.Keys, "cast",
+        .. GqlScalarFunctions.Signatures.Keys, "cast", "reduce",
         "count", "sum", "avg", "min", "max", "collect_list", "collect",
     ];
 
@@ -61,6 +61,16 @@ public static class GqlLanguageProfile
         GqlClauses.OptionalMatch,
         GqlClauses.Explain,
         GqlClauses.Return,
+        GqlClauses.SetOperation,
+        GqlClauses.UnionDistinct,
+        GqlClauses.UnionAll,
+        GqlClauses.Except,
+        GqlClauses.ExceptDistinct,
+        GqlClauses.ExceptAll,
+        GqlClauses.Intersect,
+        GqlClauses.IntersectDistinct,
+        GqlClauses.IntersectAll,
+        GqlClauses.Otherwise,
         GqlClauses.Next,
         GqlClauses.With,
         GqlClauses.GroupBy,
@@ -68,9 +78,16 @@ public static class GqlLanguageProfile
         GqlClauses.Offset,
         GqlClauses.Skip,
         GqlClauses.Limit,
+        GqlClauses.Exists,
         GqlClauses.Case,
+        GqlClauses.ListComprehension,
+        GqlClauses.PatternComprehension,
+        GqlClauses.ListSlice,
+        GqlClauses.Reduce,
+        GqlClauses.ListPredicate,
         GqlClauses.Create,
         GqlClauses.Insert,
+        GqlClauses.Merge,
         GqlClauses.Set,
         GqlClauses.Remove,
         GqlClauses.Delete,
@@ -81,6 +98,17 @@ public static class GqlLanguageProfile
         GqlClauses.For,
         GqlClauses.Unwind,
         GqlClauses.Show,
+        GqlClauses.Savepoint,
+        GqlClauses.ReleaseSavepoint,
+        GqlClauses.RollbackToSavepoint,
+        GqlClauses.CreateIndex,
+        GqlClauses.DropIndex,
+        GqlClauses.CreateConstraint,
+        GqlClauses.DropConstraint,
+        GqlClauses.CreateLabel,
+        GqlClauses.DropLabel,
+        GqlClauses.CreateRelationshipType,
+        GqlClauses.DropRelationshipType,
         GqlClauses.LabelExpression,
     ];
     /// <summary>Gets the ISO GQL language profile used by graph-model query consumers.</summary>

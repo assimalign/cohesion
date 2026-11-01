@@ -1,5 +1,41 @@
 # Graph client design
 
+## Named savepoint failure recovery (#1726)
+
+Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.
+
+## Named savepoint wire conformance (#1726, XT-4)
+
+The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
+control frame, protocol version, client API or result shape is added. InMemory and TCP tests
+exercise duplicate names, nested release/undo, repeated rollback to the retained target, work
+continued after undo and root commit, peer isolation and the model's failure rule. CK04012 and
+CK04013 remain structured diagnostics. An active savepoint transaction returned to the pool
+is rolled back; tests rent the exact authenticated server session again and prove the old name
+and uncommitted rows are absent. Faulted partial undo uses existing Ready E and pool rollback.
+
+## Named schema constraints (#1738, GQ-D1)
+
+Typed schema changes are visible through the existing SHOW exchanges on InMemory and TCP.
+SHOW PROPERTY KEYS returns effective named/unnamed rules; SHOW OBJECT OWNERSHIP includes
+CONSTRAINT names with inherited parent authority. Column shapes stay fixed. Wire regressions
+create type/existence rules locally, verify metadata, exercise rejected CREATE/INSERT writes,
+drop independent rules and indexes, and retain one authenticated session. Enforcement failures
+carry structured CG03003. No client production source, capability or wire version changes.
+
+## Schema text DDL (#1738, GQ-D2)
+
+Read-only unknown entity properties (#1249, GQ-D3) arrive as CG01023 Warning entries in the
+existing negotiated Diagnostics channel before scalar/path completion. InMemory and TCP tests
+pin names, spans, statement-wide de-duplication, normal NULL/empty results, known-anywhere and
+map/write exclusions, and authenticated-session reuse. No production client or protocol change
+is required; the typed API already preserves the structured carrier established in GQ-D2.
+
+CREATE/DROP indexes, constraints and definitions execute over existing InMemory/TCP exchanges.
+Wire tests pin token discovery, conditional no-ops, generated names, SHOW CONSTRAINTS, enforcement,
+structured CG04025 for explicit-transaction DDL, rollback and authenticated-session reuse.
+No client production API, capability, protocol version or byte layout changes are required.
+
 ## Terminal TCP conformance (#1087)
 
 The real GraphClient and model server run missing-database handshakes on InMemory and
@@ -40,7 +76,41 @@ sequenceDiagram
     GraphConnection-->>App: GraphPath enumeration
 ```
 
+## Composite queries (#1737, GQ-Q1/Q2)
+
+UNION, EXCEPT, INTERSECT (DISTINCT/ALL) and OTHERWISE use existing Execute and ExecutePaths framing. Result metadata follows
+the first operand's column names; type metadata widens across operands with NULL neutral and
+DatabaseType.Null representing dynamic values. Values retain their runtime types. Value
+capability admission visits every operand before execution. UNION DISTINCT normalizes to UNION;
+NEXT consumes the complete composite binding table, including grouped selectors. InMemory
+and TCP conformance covers duplicate/NULL/scalar-list results, correlated operands, EXPLAIN,
+CG00016/CG01020/CG02017/CG05029 refusals, the #1662 entity-list gate and authenticated-session
+reuse. GraphSetQueryWireTests adds multiset difference/intersection, whole-result lazy fallback
+with a throwing execution counter, left-error propagation, skipped-branch admission, metadata,
+EXPLAIN, typed paths and session reuse on both transports. CG05032 bounds set state; scalar NULLs
+and composite values retain existing codecs. OTHERWISE is a Cohesion fallback contract, with no
+Neo4j precedent. No client production source,
+protocol, capability or version changes are required.
+
+## Correlated existence predicates (#1537)
+
+EXISTS/NOT EXISTS return ordinary Boolean scalar cells through the existing Execute exchange.
+InMemory/TCP conformance verifies correlated parameters, anti filtering, iterator and NULL
+bindings, EXPLAIN, coded refusals and continued reuse of the authenticated session. The client
+requires no new capability, result kind, protocol version or engine dependency.
+
 ## Scalar completion
+
+Reduce and ALL/ANY/NONE/SINGLE (#1736, GQ-C2) use the existing Execute exchange. InMemory/TCP
+regressions pin NULL/empty identities, ordered and nested reduction, scalar entity-group fields,
+aggregate operands, MERGE actions and nonexecuting EXPLAIN. Entity-valued reductions and nested
+entity accumulators retain static pre-write refusal until #1662. CG01018/CG02015/CG05025 and
+existing Boolean CG02013 failures retain structured diagnostics and the authenticated session.
+No client source, protocol message, codec or capability change is required.
+
+Collection admission regressions (#1736) cover scalar comprehension properties and both MERGE
+action branches over InMemory and TCP. Static slice/filter refusals retain structured codes
+CG00012, CG02014 and CG02013 and the authenticated session; protocol 2.1 is unchanged.
 
 SET and REMOVE execute through existing requests and ResultComplete affected counts (#1149).
 QueryAsync returns post-update values and the distinct mutation count. NULL optional targets
@@ -365,9 +435,35 @@ Path completion diagnostics follow Neo4j's completion metadata model
 The concrete result stream preserves bounded streaming and adds no public interface.
 CK07001 reports diagnostic overflow without turning successful reads into failures.
 
+## MERGE (#1735)
+
+MERGE uses the existing Execute request, scalar result and negotiated diagnostic carriers. Whole-path
+match/create, ON CREATE/ON MATCH SET, repeated-row overlays, undirected relationships and bound
+reuse execute unchanged over InMemory and TCP. GraphMergeWireTests pins counts, values, EXPLAIN,
+coded refusals and reuse of the exact authenticated session after failure. ExecutePaths keeps the
+existing pre-mutation refusal of writing stages. No protocol capability or wire bytes change.
+
 ## Linear composition (#1145)
 
 QueryAsync executes LET, FILTER, FOR/UNWIND, WITH and RETURN ... NEXT using the existing request encoding. Lists use the negotiated composite-value parameter codec. Final planned column kinds govern Execute admission: scalar LET/FOR values pass, possible composites require negotiation, and carried entities keep the ExecutePaths hint. Read-only composed path requests preserve optionality; a write stage anywhere rejects the request before execution. GraphLinearCompositionWireTests verifies both InMemory and TCP, own-write reads, row-valued insertion maps, bound MATCH maps, map/entity member access, decoded star bindings and Int64 COUNT metadata through WITH. Scope, duplicate carried-name, INSERT-map and runtime container rejections retain coded diagnostics and permit the next statement on the exact same server session. Comma-separated MATCH maps can reference later pattern parts; their clause-wide predicates, including anonymous elements, execute over both transports and validate under EXPLAIN. FOR/UNWIND retains proven node and relationship list element kinds through WITH/NEXT for later MATCH, DELETE and ExecutePaths; scalar/mixed lists retain coded rejection and exact-session reuse. No protocol format changes.
+
+## Pattern comprehensions (#1736, GQ-C3)
+
+QueryAsync carries pattern collection as ordinary GQL. Scalar/property projections and nested
+lists use the existing protocol 2.1 composite capability over InMemory and TCP. Entity-valued
+lists (nodes, relationships and paths) retain CG05001 until #1662; no available capability
+encodes those values. Refusal precedes writes and preserves the exact session. Pattern tests
+cover NULL correlation, iterator correlation, projection, EXPLAIN and subsequent rental reuse.
+No client API or wire contract changes.
+
+## List comprehensions and slices (#1736, GQ-C1)
+
+QueryAsync uses the existing scalar/composite encoding for comprehensions and slices. Lexical
+scalar projections over quantified groups and path lists cross Execute; entity-producing lists
+retain the pre-write static refusal until #1662, even with a FALSE filter. Existing protocol 2.1
+composite negotiation remains required. GraphCompositeWireTests covers InMemory/TCP, nested
+shadowing, slices, NULLs, parameters, EXPLAIN, rollback and exact-session reuse after CG02014
+and CK00001 ALL admission errors. No client API, capability or wire bytes change.
 
 ## Explicit transaction text (#1540, D5)
 

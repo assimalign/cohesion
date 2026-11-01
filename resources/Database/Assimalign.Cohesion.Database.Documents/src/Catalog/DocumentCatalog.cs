@@ -75,7 +75,37 @@ public sealed partial class DocumentCatalog
         }
         foreach (var versions in catalog._maintenance) { versions.RebuildPublicationOrder(); }
         catalog.OpenIndexes();
+        storage.UndoScopesChanged = catalog.UndoScopesChanged;
+        storage.CreatedVersionUndone = catalog.CreatedVersionUndone;
         return catalog;
+    }
+
+    private HashSet<TransactionSequence>? _markedWriters;
+
+    private void UndoScopesChanged(TransactionSequence writer, bool active)
+    {
+        lock (_sync)
+        {
+            if (active) { (_markedWriters ??= new()).Add(writer); }
+            else { _markedWriters?.Remove(writer); }
+        }
+    }
+
+    private void CreatedVersionUndone(PageId page, int slot, ReadOnlyMemory<byte> bytes)
+    {
+        if (bytes.Span[16] is not (1 or 2 or 4)) { return; }
+        var record = DocumentCatalogCodec.Decode(bytes.Span, page, slot);
+        var writer = RecordVersionStamp.ReadStamps(bytes.Span).Writer;
+        lock (_sync)
+        {
+            Versions? versions;
+            if (record.Collection is { } collection) { _collections.TryGetValue(collection.Name, out versions); }
+            else if (record.Index is { } index) { _indexDefinitions.TryGetValue((index.CollectionId, index.Name), out versions); }
+            else { var document = record.Document!.Value; _documents.TryGetValue((document.CollectionId, document.Name), out versions); }
+            if (versions is null) { return; }
+            versions.RemoveLocation(page, slot, writer);
+            if (versions.Count == 0) { Retire(versions); }
+        }
     }
 
     /// <summary>
@@ -384,7 +414,7 @@ public sealed partial class DocumentCatalog
                 Track(versions, value => value.Document is { } document && document.CollectionId == key.CollectionId && document.Name == key.Name, () => _documents.Remove(key));
             }
         }
-        versions.Add(reference, recoveredDeleter);
+        versions.Add(reference, recoveredDeleter, _markedWriters?.Contains(reference.Writer) == true);
     }
 
     private Found? FindCollectionVersion(string name, TransactionSnapshot snapshot)
@@ -418,7 +448,7 @@ public sealed partial class DocumentCatalog
     private Found? Find(Versions versions, TransactionSnapshot snapshot, Func<CatalogRecord, bool> matches)
     {
         // Lock order: model writer lock, catalog monitor, storage page latches.
-        // Apply/undo never enter this monitor. Maintenance runs after the purge gate exits.
+        // Undo closes each storage page latch before entering this monitor; this monitor never spans gate acquisition or a lock wait. Maintenance runs after the purge gate exits.
         long before = _recordReadCount;
         var result = Select(versions, snapshot, matches);
         // Three reads suffice for a current lookup, including cleanup and an undone head.

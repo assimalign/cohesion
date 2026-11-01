@@ -364,7 +364,7 @@ public sealed partial class DocumentQueryTests
     [InlineData("SELECT ANY d IN [1] SATISFIES META(d).id = 'a' END FROM items d", "CD05001")]
     [InlineData("SELECT ANY x IN [1] SATISFIES META(x).id = 'a' END FROM items d", "CD05001")]
     [InlineData("SELECT META(t).id FROM items d UNNEST d.tags t", "CD05001")]
-    [InlineData("SELECT ANY x IN [1] SATISFIES COUNT(*) > 0 END FROM items", "CD05001")]
+    [InlineData("SELECT 1 FROM items WHERE ANY x IN [1] SATISFIES COUNT(*) > 0 END", "CD05001")]
     [InlineData("SELECT * FROM items d UNNEST [COUNT(*)] t", "CD05001")]
     [InlineData("SELECT ANY x IN [1] SATISFIES @absent END FROM items", "CD01005")]
     [InlineData("SELECT 1 FROM items UNNEST @absent t", "CD01005")]

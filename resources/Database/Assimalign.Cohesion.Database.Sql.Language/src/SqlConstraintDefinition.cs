@@ -13,7 +13,8 @@ public sealed class SqlConstraintDefinition
         IReadOnlyList<string>? referencedColumns = null,
         SqlReferentialAction onDelete = SqlReferentialAction.NoAction,
         SqlExpression? checkExpression = null,
-        string? checkExpressionText = null)
+        string? checkExpressionText = null,
+        SqlReferentialAction onUpdate = SqlReferentialAction.NoAction)
     {
         Name = name;
         Kind = kind;
@@ -21,6 +22,7 @@ public sealed class SqlConstraintDefinition
         ReferencedTable = referencedTable;
         ReferencedColumns = referencedColumns ?? [];
         OnDelete = onDelete;
+        OnUpdate = onUpdate;
         CheckExpression = checkExpression;
         CheckExpressionText = checkExpressionText;
     }
@@ -42,6 +44,9 @@ public sealed class SqlConstraintDefinition
 
     /// <summary>Gets the parent deletion action; omitted actions default to NO ACTION.</summary>
     public SqlReferentialAction OnDelete { get; }
+
+    /// <summary>Gets the parent key update action; omitted actions default to NO ACTION.</summary>
+    public SqlReferentialAction OnUpdate { get; }
 
     /// <summary>Gets the predicate of a check constraint.</summary>
     public SqlExpression? CheckExpression { get; }

@@ -123,7 +123,7 @@ public sealed class DocumentTransactionResetTests
                         await CompleteAsync(channel, 0, 0);
                         if (scenario == "missing-status") { continue; }
                         if (!legacy)
-                        { await WriteAsync(channel, ProtocolMessageType.Ready, [scenario is "invalid-status" or "primary-error" ? (byte)0 : scenario == "failed" ? (byte)'E' : (byte)'T'], token); }
+                        { await WriteAsync(channel, ProtocolMessageType.Ready, [scenario is "invalid-status" or "primary-error" ? (byte)0 : scenario == "failed" ? (byte)'E' : (byte)'T', 0], token); }
                         if (reuse || scenario.StartsWith("rollback-", StringComparison.Ordinal))
                         {
                             var rollback = await ReadAsync(channel, token);
@@ -141,7 +141,7 @@ public sealed class DocumentTransactionResetTests
                             {
                                 await CompleteAsync(channel, scenario == "rollback-results" ? 1 : 0, scenario == "rollback-affected" ? -1 : 0);
                                 await WriteAsync(channel, ProtocolMessageType.Ready,
-                                    [scenario == "rollback-active" ? (byte)'T' : scenario == "rollback-failed" ? (byte)'E' : scenario == "rollback-status" ? (byte)0 : (byte)'I'], token);
+                                    [scenario == "rollback-active" ? (byte)'T' : scenario == "rollback-failed" ? (byte)'E' : scenario == "rollback-status" ? (byte)0 : (byte)'I', 0], token);
                             }
                         }
                     }
@@ -149,7 +149,7 @@ public sealed class DocumentTransactionResetTests
                     {
                         (await ReadAsync(channel, token)).Type.ShouldBe((ProtocolMessageType)69);
                         await CompleteAsync(channel, 0, 0);
-                        await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'I'], token);
+                        await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'I', 0], token);
                     }
                     try { while (await channel.Reader.ReadFrameAsync(token) is { } frame && frame.Type != ProtocolMessageType.Terminate) { } }
                     catch (IOException) { }
@@ -216,10 +216,10 @@ public sealed class DocumentTransactionResetTests
                 DocumentProtocolExecuteMessage.Decode((await ReadAsync(channel, timeout.Token)).Payload.Span).Statement.ShouldBe("COMMIT");
                 await WriteAsync(channel, (ProtocolMessageType)66, new DocumentProtocolCompleteMessage(0, 0).Encode(), timeout.Token);
                 await decoded.Task.WaitAsync(timeout.Token);
-                await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'I'], timeout.Token);
+                await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'I', 0], timeout.Token);
                 (await ReadAsync(channel, timeout.Token)).Type.ShouldBe((ProtocolMessageType)69);
                 await WriteAsync(channel, (ProtocolMessageType)66, new DocumentProtocolCompleteMessage(0, 0).Encode(), timeout.Token);
-                await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'I'], timeout.Token);
+                await WriteAsync(channel, ProtocolMessageType.Ready, [(byte)'I', 0], timeout.Token);
                 while (await channel.Reader.ReadFrameAsync(timeout.Token) is { } terminal && terminal.Type != ProtocolMessageType.Terminate) { }
             }
             catch (OperationCanceledException) when (timeout.IsCancellationRequested) { }

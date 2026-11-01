@@ -17,7 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </para>
 /// <para>
 /// The family is closed and internal: the evaluator switches on <see cref="Kind"/>, one jump per
-/// node, and casts to the sealed leaf the kind names. Binding never throws for something the
+/// node, and casts to the concrete node the kind names. Binding never throws for something the
 /// evaluator used to throw only when it reached the node (an unsupported construct, a missing
 /// parameter value, an oversized literal): such a node binds as <see cref="SqlBoundFailure"/>,
 /// which raises the same exception when, and only when, it is evaluated. Nodes are immutable, so

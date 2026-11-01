@@ -35,7 +35,7 @@ internal static class SqlCastConverter
         object? converted = null;
         if (value is not null)
         {
-            var source = cast.SourceType is DatabaseType.Json or DatabaseType.JsonBinary ? cast.SourceType : StorageTypeOf(value);
+            var source = DispatchType(cast.SourceType, StorageTypeOf(value));
             SqlCast? registered = source == DatabaseType.Null ? null : cast.Casts[(int)source];
             if (registered is null && source != DatabaseType.Null && source != cast.Target.Storage.Type)
             {
@@ -50,7 +50,12 @@ internal static class SqlCastConverter
                 {
                     // The built-in text conversion needs the destination scale before reducing
                     // its digits to Decimal. Application casts still own their conversions.
-                    converted = (value is string || value is SqlCharacter) && cast.Target.Storage.Type == DatabaseType.Decimal
+                    converted = source is DatabaseType.Json or DatabaseType.JsonBinary
+                        && cast.Target.Storage.Type is DatabaseType.Boolean or DatabaseType.Int8 or DatabaseType.Int16 or DatabaseType.Int32
+                            or DatabaseType.Int64 or DatabaseType.Decimal or DatabaseType.Float32 or DatabaseType.Float64
+                        && SqlStandardCasts.Contains(registered)
+                        ? SqlJsonAccess.Scalar(value, cast.Target.Storage)
+                        : (value is string || value is SqlCharacter) && cast.Target.Storage.Type == DatabaseType.Decimal
                         && SqlStandardCasts.Contains(registered)
                         ? ParseNumericText(value is SqlCharacter fixedText ? fixedText.Text : (string)value, cast.Target.Storage)
                         : registered.Apply(value);
@@ -115,6 +120,7 @@ internal static class SqlCastConverter
     /// <exception cref="InvalidCastException">A binary value exceeds its declared length.</exception>
     internal static object ApplyModifiers(object value, DatabaseTypeInfo target, bool isExplicit = false)
     {
+        if (target.Type is DatabaseType.Json or DatabaseType.JsonBinary) { SqlJsonAccess.Validate(value); return value; }
         if (value is SqlCharacter character) { value = character.Value; }
         if (target.Type == DatabaseType.Character)
         {
@@ -190,6 +196,17 @@ internal static class SqlCastConverter
 
     // The largest scale System.Decimal holds, and the most integer digits whose power of ten it holds.
     private const int maxDecimalScale = 28;
+
+    /// <summary>The conversion slot for a static operand type and a producible value type.</summary>
+    internal static DatabaseType DispatchType(DatabaseType operandType, DatabaseType valueType)
+        => operandType is DatabaseType.Json or DatabaseType.JsonBinary ? operandType : valueType switch
+        {
+            // JSON values share the string/byte[] representations. Only a statically
+            // JSON-typed operand preserves their SQL identity at the conversion boundary.
+            DatabaseType.Json => DatabaseType.String,
+            DatabaseType.JsonBinary => DatabaseType.Binary,
+            _ => valueType,
+        };
 
     /// <summary>
     /// The storage type of a value as the row holds it: exactly one of the codec's CLR types, so a

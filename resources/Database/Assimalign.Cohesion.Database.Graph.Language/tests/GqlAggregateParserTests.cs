@@ -52,7 +52,7 @@ public sealed class GqlAggregateParserTests
         statement.GqlExpression.GroupBy.ShouldNotBeNull().ShouldBeEmpty();
     }
 
-    [Theory(DisplayName = "Cohesion Test [GQL] - Aggregates: function-named comprehension variables retain the capability diagnostic")]
+    [Theory(DisplayName = "Cohesion Test [GQL] - Aggregates: function-named comprehension variables parse")]
     [InlineData("count")]
     [InlineData("sum")]
     [InlineData("avg")]
@@ -60,14 +60,12 @@ public sealed class GqlAggregateParserTests
     [InlineData("max")]
     [InlineData("collect_list")]
     [InlineData("collect")]
-    public void Parse_FunctionNamedComprehension_ShouldReportCapabilityDiagnostic(string name)
+    public void Parse_FunctionNamedComprehension_ShouldParse(string name)
     {
         // Arrange / Act
         var statement = new GqlQueryParser().Parse($"RETURN [{name} IN [1,2] | {name}]");
         // Assert
-        var error = statement.Diagnostics.ShouldHaveSingleItem();
-        error.Code.ShouldBe("CK00001");
-        error.Message.ShouldNotBeNull().ShouldContain("LIST COMPREHENSION", Case.Sensitive);
+        statement.Diagnostics.ShouldBeEmpty();
     }
 
     [Theory(DisplayName = "Cohesion Test [GQL] - Aggregates: function names remain legal variables and property owners")]

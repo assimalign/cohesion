@@ -8,6 +8,37 @@ public static class GqlClauses
 {
     /// <summary>The Cohesion database-scoped catalog introspection extension.</summary>
     public const string Show = "SHOW";
+
+    /// <summary>Create a named undo scope.</summary>
+    public const string Savepoint = "SAVEPOINT";
+    /// <summary>Release a named undo scope and descendants.</summary>
+    public const string ReleaseSavepoint = "RELEASE SAVEPOINT";
+    /// <summary>Undo to a named scope, retaining it.</summary>
+    public const string RollbackToSavepoint = "ROLLBACK TO SAVEPOINT";
+    /// <summary>Standalone create index schema DDL.</summary>
+    public const string CreateIndex = "CREATE INDEX";
+
+    /// <summary>Standalone drop index schema DDL.</summary>
+    public const string DropIndex = "DROP INDEX";
+
+    /// <summary>Standalone create constraint schema DDL.</summary>
+    public const string CreateConstraint = "CREATE CONSTRAINT";
+
+    /// <summary>Standalone drop constraint schema DDL.</summary>
+    public const string DropConstraint = "DROP CONSTRAINT";
+
+    /// <summary>Standalone create label schema DDL.</summary>
+    public const string CreateLabel = "CREATE LABEL";
+
+    /// <summary>Standalone drop label schema DDL.</summary>
+    public const string DropLabel = "DROP LABEL";
+
+    /// <summary>Standalone create relationship type schema DDL.</summary>
+    public const string CreateRelationshipType = "CREATE RELATIONSHIP TYPE";
+
+    /// <summary>Standalone drop relationship type schema DDL.</summary>
+    public const string DropRelationshipType = "DROP RELATIONSHIP TYPE";
+
     /// <summary>Matches a graph pattern.</summary>
     public const string Match = "MATCH";
 
@@ -99,8 +130,53 @@ public static class GqlClauses
     /// <summary>Combines graph query results with a set operation.</summary>
     public const string SetOperation = "UNION";
 
+    /// <summary>Combines read-only query results with structural duplicate elimination.</summary>
+    public const string UnionDistinct = "UNION DISTINCT";
+
+    /// <summary>Concatenates read-only query results with duplicate rows preserved.</summary>
+    public const string UnionAll = "UNION ALL";
+
+    /// <summary>Returns distinct rows present only in the left result.</summary>
+    public const string Except = "EXCEPT";
+
+    /// <summary>Explicitly selects distinct difference.</summary>
+    public const string ExceptDistinct = "EXCEPT DISTINCT";
+
+    /// <summary>Subtracts right multiplicities from left multiplicities.</summary>
+    public const string ExceptAll = "EXCEPT ALL";
+
+    /// <summary>Returns distinct rows shared by both results.</summary>
+    public const string Intersect = "INTERSECT";
+
+    /// <summary>Explicitly selects distinct intersection.</summary>
+    public const string IntersectDistinct = "INTERSECT DISTINCT";
+
+    /// <summary>Returns the smaller multiplicity for each shared row.</summary>
+    public const string IntersectAll = "INTERSECT ALL";
+
+    /// <summary>Evaluates the right query only when the whole left result is empty.</summary>
+    public const string Otherwise = "OTHERWISE";
+
+    /// <summary>Tests whether a correlated inner graph pattern produces any row.</summary>
+    public const string Exists = "EXISTS";
+
     /// <summary>Evaluates conditional branches in an expression.</summary>
     public const string Case = "CASE";
+
+    /// <summary>A list comprehension with an iterator, optional filter and optional projection.</summary>
+    public const string ListComprehension = "LIST COMPREHENSION";
+
+    /// <summary>Correlated pattern collection expressions.</summary>
+    public const string PatternComprehension = "PATTERN COMPREHENSION";
+
+    /// <summary>A list slice with optional inclusive start and exclusive end.</summary>
+    public const string ListSlice = "LIST SLICING";
+
+    /// <summary>Ordered reduction with lexical accumulator and iterator bindings.</summary>
+    public const string Reduce = "REDUCE";
+
+    /// <summary>Three-valued ALL, ANY, NONE and SINGLE predicates over lists.</summary>
+    public const string ListPredicate = "LIST PREDICATE";
 
     /// <summary>Invokes a graph query procedure.</summary>
     public const string Call = "CALL";

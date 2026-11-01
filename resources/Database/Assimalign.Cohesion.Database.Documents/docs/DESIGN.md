@@ -1,5 +1,61 @@
 # Documents engine design
 
+## Named savepoint integration (#1726, XT-4)
+
+The OQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
+[SAVEPOINT] name through protected root controls before opening autocommit work. Names and
+duplicate/descendant lifetime belong to the root transaction; row/index/lock undo remains in
+the existing model adapters. The enclosing transaction stays open and can commit after undo.
+Ordinary failed statements and invalid named controls preserve this model's full-abort rule.
+Only whole ROLLBACK recovers those failures; ROLLBACK TO preserves CD04101. This is the recorded
+2026-10-25 owner decision, differing from PostgreSQL's aborted-subtransaction recovery.
+
+Incomplete undo is different: CK04009 fences every statement except ROLLBACK TO the same or an
+outer retained scope and whole ROLLBACK; reads cannot observe partially undone own work. The
+root reports Faulted while the kernel remains Active and retryable. Pre-canceled controls change
+no scope; admitted undo ignores later cancellation. Root ends/disposal drain it. No disk or wire
+format changes are needed (storage 4); rollback-on-pool-return discards every named scope.
+
+Named controls dispatch before async frame creation; their translation locals never grow ordinary control frames. Every named control uses the ordinary statement failure translator before reporting CK04009 for an incomplete kernel undo. The translated failure is retained as its cause. Offline, disposed and corruption failures take precedence; corruption aborts the writer (#1364). The server handles a recoverable failure as a statement error followed by Ready E, so retry or whole rollback uses the same connection.
+
+A direct transaction refusal or commit probes disposal/offline state outside root state before
+reporting a live partial-undo fence. Memory-only create/release allocation faults retain the
+model's ordinary statement policy.
+
+| Code | Savepoint condition |
+|---|---|
+| CK04009 | Incomplete undo requires retry of its target/outer scope or whole rollback |
+| CK04012 | A savepoint command requires an explicit bound transaction |
+| CK04013 | The named savepoint does not exist |
+
+The central advertised-clause execution matrix also proves each savepoint AST command and
+its row visibility/effects through a live session; the unmapped-clause guard remains intact.
+
+## Anonymous savepoint adapters (#1726, XT-3)
+
+Catalog publication retains earlier same-writer metadata while that writer has markers.
+The record-space undo adapter removes only the exact undone page/slot reference and retires
+an empty directory chain; older collection, document and index generations remain available.
+IndexUndo equality/hash use the immutable catalog identity and physical index generation,
+independent of the apply gate. Open chunk streams refuse marker controls with CK04010 and
+refuse a 65,536th registration with CK04011 and release registration once on completion, failure or cancellation. Completed chains undo with
+metadata and postings through ordinary physical operations; no whole-catalog reload occurs.
+Full rollback invokes the same exact-reference unlink as partial undo before writer untracking,
+so retained own versions cannot hide a committed predecessor in the live catalog. A later save
+tombstones that predecessor and its unique postings normally. Undo observers reuse the confirmed
+stamp-read buffer, including for chunks, rather than making another copy.
+
+Markers remain memory-only. Storage stays at format 4; no model record, catalog, index or wire
+format changes. Named controls and language/session admission are provided by XT-4. The engine tests
+exercise real writes before/after a marker, undo, write-again and copied live crash images with
+and without the root commit. Live-catalog tests cover full rollback and rollback-to followed by
+full rollback. Pinned Snapshot and fresh READ COMMITTED readers must progress within physical undo.
+
+| Code | Condition |
+|---|---|
+| CK04010 | An open write stream prevents marker create, release or rollback-to |
+| CK04011 | The transaction already has 65,535 open write streams |
+
 ## Worker lane isolation (#1279)
 
 Checkpoint, page write-back, WAL group flush and version purge run one database's work at a
@@ -154,6 +210,30 @@ Administrative database lookup remains ordinal-ignore-case. SQL database default
 column collations, and expression `COLLATE` have no effect on this model.
 Configurable document collation is deferred; stored text retains its original form.
 
+## ORDER BY null placement (#1730)
+
+Each term accepts `expr [ASC | DESC] [NULLS FIRST | LAST]`, including projection aliases,
+multiple terms and LIMIT/OFFSET. ASC is the omitted direction. The omitted placement is FIRST
+for ASC and LAST for DESC. FIRST/LAST moves the whole MISSING/NULL block; direction controls
+its internal order: ASC keeps MISSING before NULL, DESC keeps NULL before MISSING. Thus the
+older “MISSING before NULL” wording means the ascending base order, not every direction.
+This follows the pinned [Couchbase table](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/orderby.adoc#L64-L99).
+Values retain Boolean, number, ordinal string, array and object order (reversed for DESC).
+Equal query keys retain ordinal document identity, independent of direction; later ORDER BY
+terms precede that tie break. NULLS stays contextual, so existing fields named nulls remain valid.
+Malformed NULLS options give located CD00013; an invalid direct-AST placement gives CD01032.
+No new sorting bound or budget diagnostic is introduced; retained sorting still uses CD05018.
+
+| Term | First to last |
+|---|---|
+| ASC / ASC NULLS FIRST | MISSING, NULL, values ascending |
+| ASC NULLS LAST | values ascending, MISSING, NULL |
+| DESC / DESC NULLS LAST | values descending, NULL, MISSING |
+| DESC NULLS FIRST | NULL, MISSING, values descending |
+
+The sort executor uses CompareOrdered; grouping and equality continue to use the base total
+comparison. The omitted option preserves the previous comparison and allocation shape.
+
 ## Incremental index reads (#1542)
 
 Catalog index scans and unique probes pass their statement token at cursor open and on every move. Shared B+Tree cursors copy bounded batches and release their read latch before document decoding or validation. Scans and unique checks finish before applying index changes, so transaction-stamped own writes cannot extend an active scan.
@@ -221,7 +301,7 @@ session itself. Once that close ends the engine forgets the database, so a later
 Collection CRUD always takes a `DocumentDatabaseSession`; a collection rejects sessions from
 another database. A handle obtained through a session remains bound to that specific session and
 fails once it closes. Collection names are database-local, case-sensitive names;
-OQL has one collection source and no database qualification or server commands.
+OQL sources are database-local, with no general database qualification or server commands.
 The inherited `DatabaseInstance.Engine` lifecycle reference is the root API;
 executing OQL or CRUD never interprets it as session authority over other databases.
 
@@ -276,7 +356,7 @@ COMMIT/ROLLBACK without a current transaction reports CD04104. OQL collection an
 including conditional no-ops, reports CD04105 inside an explicit transaction and aborts it before
 catalog mutation. C# collection operations keep their existing transactional API contract.
 DDL refusal follows [SQL++ transaction restrictions](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/partials/n1ql-language-reference/transaction-restrictions.adoc#L1).
-SAVEPOINT and SET TRANSACTION remain deferred. The language's DIALECT records exact spellings.
+SAVEPOINT, RELEASE and ROLLBACK TO execute through the root; SET TRANSACTION remains deferred. The language's DIALECT records exact spellings.
 
 The wire server dispatches the same controls on its connection-owned session (#1725 OQ-T2).
 Documents negotiates transaction-status and sends Ready with Idle (I), Active (T), or Failed (E)
@@ -327,9 +407,8 @@ not this interactive session protocol. No reference-engine code was copied.
 ### Failed statements in explicit transactions (#1225)
 
 A statement that fails inside an explicit transaction aborts the whole transaction. Document
-storage cannot undo one statement: a `PutAsync` writes its content chunks, tombstones the old
-chain and publishes catalog and index entries through separate physical brackets, and
-`Database.Transactions` undoes a writer only as a whole transaction, with no savepoints. Until
+writes can span separate physical brackets. The owner retained this failure rule with named
+savepoints (#1726, 2026-10-25); a failed statement is recovered only by whole ROLLBACK. Until
 #1225 the session then dropped the rolled-back transaction from view, so the next statement
 silently ran in autocommit and the caller's `RollbackAsync` threw. The session now follows the
 contract the Graph engine set in #1188 (Graph [DESIGN.md](../../Assimalign.Cohesion.Database.Graph/docs/DESIGN.md#failed-statements-in-explicit-transactions-1188)),
@@ -415,8 +494,13 @@ one-statement hold are the root `DatabaseSession` base's; the model supplies `CD
 
 The explicit-transaction lifecycle, where Faulted is the new state:
 
+UndoPending is a recovery path also reported as TransactionState.Faulted; it does not
+represent an ordinary statement-aborted transaction. Only its named rollback retry or whole
+rollback recovers it, as described in the savepoint contract above.
+
 ```mermaid
 stateDiagram-v2
+    state "Faulted: incomplete undo" as UndoPending
     [*] --> Idle
     Idle --> Idle: autocommit statement succeeds or fails
     Idle --> Active: BeginTransactionAsync
@@ -425,6 +509,10 @@ stateDiagram-v2
     Faulted --> Faulted: statement or BEGIN refused with CD04101
     Active --> Idle: CommitAsync (committed, or aborted by the kernel), RollbackAsync, or DisposeAsync
     Faulted --> Idle: RollbackAsync, DisposeAsync, or CommitAsync failing with CD04101
+    Active --> UndoPending: partial undo fails
+    UndoPending --> Active: ROLLBACK TO retained or outer scope
+    UndoPending --> UndoPending: other work refused with CK04009
+    UndoPending --> Idle: ROLLBACK or DisposeAsync
 ```
 
 The reference engines agree on the outcome. PostgreSQL aborts the whole block on any error
@@ -480,8 +568,19 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03012` | INSERT found an existing key, or INSERT/UPSERT repeated a key in one statement |
 | `CD02013` | Invalid evaluated LIKE escape or a pattern ending in its escape character |
 | `CD01014` | DISTINCT ORDER BY expression is absent from the projection |
-| `CD05015` | A query/RETURNING array or object constructor exceeds the 256-level result limit |
-| `CD05018` | RETURNING retained result exceeds the statement memory budget |
+| `CD05015` | A query/RETURNING constructor, SELECT projection or result formatter exceeds the 256-level serialized result limit, including the row wrapper |
+| `CD05018` | Retained statement source rows, ordered candidate buckets, key-lookup caches, groups, RETURNING results or aggregate values exceed the statement memory budget |
+| `CD05020` | Shared expression/lookup work budget exhausted across nested queries, expression sources and key joins |
+| `CD00011` | ALL/DISTINCT applied to a scalar or star call |
+| `CD00013` | NULLS without FIRST or LAST |
+| `CD00014` | Direct IN subquery requires RAW/VALUE |
+| `CD00015` | Derived FROM subquery requires an alias |
+| `CD00016` | Every SELECT source in a joined statement requires an explicit alias |
+| `CD01033` | FROM expression has no explicit alias or implicit field name |
+| `CD01034` | Unbound variable in a FROM expression without an input-row scope |
+| `CD01035` | Invalid key-join binding scope or ambiguous/invalid joined META receiver |
+| `CD01029` | Direct call AST has an invalid aggregate quantifier or quantifier target |
+| `CD01032` | Direct ordering AST has an invalid null placement |
 | `CD05019` | Serialized RETURNING value exceeds 256 levels, including a named projection wrapper |
 | `CD02016` | Invalid UPDATE target or an incompatible object/array shape or index |
 | `CD01017` | UPDATE targets duplicate or prefix-overlap after alias normalization |
@@ -498,6 +597,7 @@ CD00007 for the same count rule at parse and plan time:
 | `CD03028` | Array index WHEN exceeds 32 levels or 128 predicate nodes |
 | `CD01028` | Array projection or WHEN path does not start with its element variable |
 | `CD02027` | Array index WHEN constant is not a supported scalar literal |
+| `CD02028` | Join/NEST key is neither a string, NULL nor MISSING |
 | `CD01025` | Index does not exist |
 | `CD01026` | A directly constructed RETURNING projection has an empty output name |
 | `CD01027` | A directly constructed comprehension has an empty variable name |
@@ -522,7 +622,7 @@ through two virtual document collections:
 
 | Source | Document properties | Cardinality |
 | --- | --- | --- |
-| `COHESION_SCHEMA.INDEXES` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `INDEX_NAME`, `PATH`, `PATHS`, `IS_UNIQUE` | One document per visible definition; PATHS is the ordered path array, PATH its leading element, and IS_UNIQUE the actual flag |
+| `COHESION_SCHEMA.INDEXES` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `INDEX_NAME`, `PATH`, `PATHS`, `IS_UNIQUE`, `INCLUDE_MISSING` | One document per visible definition; PATHS is the rendered key array, PATH its leading element, and both flags are the actual values |
 | `COHESION_SCHEMA.OBJECT_OWNERSHIP` | `COLLECTION_CATALOG`, `COLLECTION_NAME`, `OBJECT_TYPE`, `OBJECT_NAME`, `OWNER`, `OWNING_SCHEMA` | One document per visible collection; `OBJECT_TYPE` is `COLLECTION` |
 
 `COLLECTION_CATALOG` is the bound database name. `OWNER` preserves SQL's `Adhoc`
@@ -562,6 +662,224 @@ The sources are read-only. `INSERT`, `UPSERT`, `UPDATE`, `DELETE`, `CREATE COLLE
 and `CreateCollectionAsync` or `DropCollectionAsync` using either reserved name,
 throw `DatabaseException` with `System collection '<canonical source>' is read-only.`
 before ordinary catalog lookup or mutation. Virtual sources do not provide mutable `DocumentCollection` handles.
+
+### Nested SELECT execution context (#1731, OQ-Q1)
+
+DocumentNestedPlan owns the root statement plan and an immutable-use, reference-keyed map of
+OqlSubqueryExpression to DocumentNestedQueryPlan. Planning binds every nested SELECT once,
+with its own grouping, metadata and lexical scope. The scoped visitor records free outer names, preserves inner shadowing and propagates transitive captures to deeper queries; only deterministic queries with no outer dependencies cache.
+There is no cross-statement plan cache in Documents: a reused request rebuilds root and nested
+plans against the current operation snapshot, so CREATE/DROP INDEX cannot retain stale access.
+Captured outer paths are constant within one inner grouping invocation; grouping validation
+permits them in projection, HAVING and ordering while preserving local grouping restrictions.
+Scalar/array access constraints and ordered-index presence/domain proofs exclude resolved outer
+bindings. An outer path cannot constrain or prove ordering of the inner stored document.
+Equivalence checks for own paths use only the explicit alias: in FROM items, items.g denotes the field items then g.
+The collection name identifies an unaliased source only for captured references from nested
+SELECTs and META receivers. Group-key equivalence normalizes only the captured side to the
+outer query's own path scope; DISTINCT and RAW projected ordering retain that own scope too.
+Metadata validation refuses UNNEST, comprehension and unknown receivers before evaluation
+(CD05001), so the unaliased evaluator shortcut can receive only the collection name.
+Identity paging recognizes only local-source
+META().id or META(local_source).id; EXPLAIN reports identity_paging=True for that path. Captured metadata
+is constant and keeps ascending inner identity ties. Metadata equivalence compares receiver bindings.
+Captured expressions are also checked against every enclosing grouped scope, including captures
+under inner aggregates and in FROM. Only group keys, group bindings and the enclosing aggregate's
+row inputs remain visible; hidden source paths use the direct-reference CD05001 refusal. GROUP AS
+captures in that aggregate's row input retain CD01031. The visitor matches complete group keys
+before their components and preserves inner source, comprehension and projection-alias shadowing.
+Repeated subquery group keys also compare their free receiver bindings across enclosing scopes;
+identical text cannot prove a key after a captured UNNEST/comprehension binding is shadowed.
+This follows the SQL++ rule that grouping hides original objects
+([GROUP BY](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/groupby.html#group-as-clause))
+and PostgreSQL src/backend/parser/parse_agg.c:1427-1514's level-aware grouping check.
+One planning visitor rule mirrors ORDER BY execution: a standalone projection alias substitutes
+its projection expression, other direct expressions use the grouped row scope, and only nested
+SELECTs receive projection aliases. Comprehension/quantifier frames inside the ordering expression
+shadow those aliases. Captured names that are also this query's own source or UNNEST variable
+remain subject to local grouping validation. Array-scope planning carries outer-name iterator
+state only for correlated queries; ordinary ANY and UNNEST plans retain their original allocation bytes.
+Documents tests disable tiered compilation, like Transactions and Hosting, so exact allocation
+guards compare one optimized JIT shape in isolated and full-suite execution.
+Captured source frames carry their existing row content and identity; path evaluation exposes only
+the content, while META resolves stored id/version. Expression/derived rows and scalar bindings
+carry no identity, preserving their NULL metadata behavior.
+The wrapper exists only for statements containing subqueries; ordinary plan records stay unchanged.
+A pre-existing evaluation limitation remains: in a statement containing subqueries, an unaliased
+own path can still strip the collection name as a source prefix. This planning correction leaves
+that runtime behavior unchanged.
+
+DocumentNestedExecutionContext borrows the statement's DocumentOperation and database, parameter
+snapshot, frozen function catalog and cancellation token. It never creates or completes an operation,
+transaction or snapshot. EvaluateAsync receives the caller's lexical binding chain. Each evaluator keeps outer bindings separate from its local source and UNNEST frames, so stars contain only local rows. Every nested access uses ReadCandidatesAsync, including
+asynchronous index/intersection access; there is no sync-over-async bridge. The context drives the
+existing selection, grouping and result helpers through a separate async expression/row path.
+The original synchronous evaluator and executor remain the allocation path for ordinary queries.
+Both paths call the same helpers for Boolean short circuits, binary operations, IN, BETWEEN,
+CASE matching, LIKE compilation/cache/results, collection admission, quantified truth, lazy
+conditional arguments, scalar invocation and aggregate creation/admission/result retention.
+DocumentJsonValue owns constructor serialization, MISSING handling, duplicate-key policy and
+result-depth errors. Async array constructors and ARRAY comprehensions request and serialize one
+value before evaluating the next; FIRST stops after its first admitted mapping. Async objects
+admit each evaluated member directly into the same map helper as synchronous objects, without
+pre-evaluating a list. Both retain the existing last-non-MISSING map stage before final object
+serialization, including the failure order of replaced values; changing that order would change
+ordinary queries. Only operand dispatch, await/iteration scheduling, lazy branch loops,
+synchronous constant-constructor caching and scratch release brackets remain separate: ordinary
+queries keep their original allocation path, while async release excludes statement-cache reservations.
+The permanent generated parity corpus compares equivalent literal/subquery operands, including
+NULL/MISSING, null/object/nested arrays, results and runtime kinds, diagnostic codes and
+developer callback counts. Several-row clause pairs cover WHERE, ORDER BY, GROUP BY, HAVING,
+star and UNNEST, compare normalized diagnostic spans/lines/location kinds, and assert exact
+subquery-execution counts for cached, per-evaluation and skipped expressions.
+
+Execution is lazy at the expression read. CASE, Boolean short circuits, FIRST and conditional
+functions retain their original reachability, with no work, callbacks, retention or runtime errors
+from an unreached subquery. Static validation remains eager. The context caches successful
+uncorrelated results only when every call is a native nonvolatile function or a lazy grammar form;
+NOW_STR/NOW_MILLIS and all developer callbacks disable caching transitively. Failures never cache.
+LastQuerySubqueriesExecuted is an internal statement counter used by deterministic tests.
+
+The operation owns the DocumentAggregateMemory counter. Cached deterministic arrays have statement lifetime. Uncached subquery results have expression lifetime:
+filters release discarded arrays immediately; projection, group keys, ordered keys and expanded
+UNNEST rows clone and charge independent retained values. No list in the statement context retains
+uncached arrays. Each nested query owns its temporary sources, results and conservative array
+serialization reservation. Failure/cancellation unwind each reservation before operation cleanup.
+Quantified predicates release each iteration's discarded scratch in finally, after the collection
+has been evaluated and excluding statement-cache reservations. IN lists, CASE conditions and
+skipped lazy conditional arguments release each discarded operand; ARRAY/FIRST filters already
+use the same predicate bracket. Object members release expression scratch after charging their
+live map value, retaining only the last non-MISSING value per key until serialization. Budget
+ownership then transfers to the final object representation. Array constructors and ARRAY charge
+their final JSON value; FIRST transfers the selected mapping's charge across iterator disposal.
+Every returned construction stays charged until its consumer's iteration or row releases it,
+including when a binary expression holds several constructed operands. Budget
+regressions compare literal and correlated 8 KiB operands across 1,000 iterations under 256 KiB,
+and separately preserve cached collection reservations and refuse oversized live object maps.
+The deterministic 10,000-row filter test observes identical first/last evaluation peaks under a
+16 MiB grant, replacing the former 8,488 retained bytes per row. Ordinary Release allocations stay
+at the base budgets because outer-scope state exists only in the nested evaluator state variant.
+
+DML predicates, SET/VALUES expressions and INSERT/UPSERT SELECT materialize all pending writes
+before mutation. RETURNING containing subqueries stages before writes too. UPDATE/INSERT/UPSERT
+reserve each actual version from the existing durable allocator, evaluate the post-image with that
+version, then pass the reserved version into the existing internal collection write path. DELETE
+stages its pre-images. All nested reads therefore see statement-start data, including earlier
+statements in the same transaction, and unreached RETURNING branches read nothing. Failed
+statements can leave version gaps, as failed content writes already can. No version is invented,
+reused or made visible before the normal transactional write. RETURNING callbacks may run before
+a later storage/constraint failure; results remain private until every write succeeds. The version
+array is charged with the pending buffer. This avoids retaining snapshots of whole collections.
+
+StatementWorkBudget defaults to 10,000,000 reached expression evaluations for nested/expression-source
+statements. All depths and cache hits share one context counter; unreached expressions consume no
+work. CD05020 refuses before the next evaluation. Memory, cancellation, snapshot and operation
+remain shared. There is no correlated memoization and no new interface, friend grant, project
+reference, persisted format or wire shape. EXPLAIN records captured names beside cache policy.
+
+Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null normalization and
+object-star preservation (nonobject roots wrap under document). Star deliberately follows this
+engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
+IN subqueries retain the conservative CD00014 guard pending owner sign-off; this is a deliberate
+SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
+shadow them. Qualified stars outside joined SELECT projections retain their CK00001 refusal.
+FROM references to explicit outer aliases use per-row expression scans. Unqualified fields
+otherwise bind to the inner source, as in Couchbase. EXISTS uses
+Couchbase coll_exists.go:40-53; the array
+contract follows subqueries.adoc:26-68 at the pinned versions linked in the language DIALECT.
+PostgreSQL src/backend/optimizer/plan/subselect.c:392-410 informed the separate subplan ownership
+boundary, but SQL scalar-cardinality semantics and unconditional init-plan hoisting are not adopted.
+EXPLAIN shows SubqueryExpression owners, spans, child plans and cache policy without invoking
+functions. Tests cover snapshot concurrency, own writes, lazy failures, caching counters, shared
+budget/cancellation cleanup, reusing plans after index DDL, both transports and NativeAOT.
+Before returning a SELECT projection, both evaluators validate the complete JSON depth at the
+projection expression span (CD05015). The row writer owns the shared allowance rule: RAW/VALUE
+and lone stars are bare (256 levels); named columns and stars beside other columns have an
+object wrapper (255 value levels). This also covers JSON
+returned through subqueries, functions, CASE, FIRST and aggregates without a local constructor.
+Developer-function JSON receives the same projection check, even without a local constructor.
+The formatter also translates its own depth refusal to located CD05015 as a last defence; the
+server supplies the statement span and retains a reusable session after a terminal Failure.
+Nested array/object materialization retains the same depth guard and located subquery failure.
+Release measurements preserve the baseline allocations for ordinary plans, native queries and
+selective scans; the statement wrapper adds no ordinary-plan fields.
+Constant binding uses explicit child loops, avoiding a captured-scope allocation whose escape
+behavior could otherwise change after mixed correlated workloads. Allocation guards keep their existing limits.
+
+### Derived and expression sources (#1731, OQ-Q2)
+
+DocumentFromPlan owns the outer logical plan and an optional derived input plan. Generic inputs
+retain the expression in OqlSelectExpression.Source. PlanNested's lexical visitor validates the
+source before introducing its row alias, binding outer captures and refusing otherwise unbound source variables with CD01034. Comprehension-local bindings remain valid. Planning
+binds inner collections, parameters, grouping and metadata even when LIMIT 0 skips execution.
+The ordinary AST and plan allocation path remains unchanged: the collection-name storage slot
+also carries the optional source expression. CD00015 names a missing derived alias; CD01033
+names an expression without an explicit alias or implicit field name.
+
+SourceInputAsync, SourceMatchesAsync and StreamSourceRowsAsync form a pull pipeline. Simple
+inner SELECTs lend one projected JSON row until the next MoveNext; no subquery array is created.
+Each cursor owns its candidate and current-row reservations and is disposed by await using on
+LIMIT, success, failure and cancellation. The outer match loop tests its window before advancing.
+Filters and UNNEST remain lazy, and each nonblocking source projection is evaluated once. Dynamic
+headers describe the selected page; paging precedes projection. Source stars use the existing
+synthetic wrapper helper with the FROM alias, even without UNNEST. META yields NULL for rows
+without stored identity. Stored collection stars and metadata keep their existing contracts.
+
+Grouping, DISTINCT and sorting use the existing blocking helpers. Retained input content and
+UNNEST bindings are independently cloned and charged to the same CD05018 counter before the
+input advances. Temporary projected rows, expression values and result rows have scoped owners.
+The source UNNEST cursor also reserves independently generated arrays while re-reading their elements.
+Only surviving final results transfer their reservation to DocumentQueryResult. Cached nested arrays keep statement ownership; uncached arrays use expression or consumer ownership. Candidate discovery uses the operation snapshot
+and sees own writes. No new public execution seam, interface, reference or friend grant is needed.
+EXPLAIN includes DerivedSource/ExpressionSource and the inner tree; outer ORDER BY always sorts.
+After eager planning, a zero LIMIT returns an empty result with planned column metadata before
+opening any stored, system, expression or derived source or running grouping, DISTINCT or sorting.
+Derived input iterators enforce their own zero window before opening a cursor, even without an
+outer LIMIT. This follows PostgreSQL src/backend/executor/nodeLimit.c:81-95 in the reference clone.
+The deterministic LIMIT counters prove one inner content read and callback for LIMIT 1. Ordinary
+Release plan, native-query and selective-scan allocation measurements retain their base budgets.
+
+### Key joins and NEST (#1732)
+
+DocumentJoinPlan wraps the initial stored, virtual, derived or expression source plan and resolves
+each right-hand stored collection against the planning snapshot. Ordered source bindings share the
+streaming expression-source pipeline, including left-to-right UNNEST cursors, correlation, grouped
+captures and ORDER BY aliases. Every SELECT source in a statement containing a key join requires an explicit alias pending #1767,
+including nested scopes without their own joins and direct AST requests. Key expressions retain initial
+FROM field fallback; a name matching a self or later binding requires an earlier-source qualifier.
+The language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#key-join-and-nest-1732-oq-j1)
+records all defaults, including the NULL/MISSING lookup-NEST table, qualified stars, metadata
+ambiguity and selected-window headers. Ordinary queries keep their existing execution path.
+Metadata validation removes captured names shadowed by each local UNNEST, and introduces
+JOIN/NEST receivers in binding order. A binding's
+input/key expression sees only preceding declarations.
+
+DocumentNestedExecutionContext owns a lazy cache keyed by collection Guid and ordinal document key.
+It calls Catalog.FindDocument with the current operation snapshot and reads content inside that
+operation; it never uses public GetAsync. Hits and misses are cached across aliases and subqueries.
+The least-recently-used lookup cache owns at most one eighth of StatementMemoryBudget (8 MiB
+by default), including NEST arrays. Eviction drops the entire entry and its array; oversized
+entries bypass caching. Repeated evicted keys call FindDocument in the same operation and snapshot.
+Current cursor rows have separate conservative reservations, released when their binding frame
+advances. Blocking rows clone and charge content, stored identities and NEST arrays independently,
+so cache eviction never releases their ownership. NEST arrays are cached alongside document values.
+Cache entries, keys, content and arrays reserve conservative retained bytes before allocation where sizes are known;
+all cache retention shares CD05018. Evaluation/lookup/cache-hit work shares CD05020. Reservations
+release on success, failure and cancellation. RavenDB uses the analogous statement loader cache in
+src/Raven.Server/Documents/Queries/Results/QueryResultRetrieverBase.cs:921-931 (local reference).
+
+Joined frames retain a DocumentEvaluationContext for stored values, so content paths, metadata,
+GROUP AS wrappers and synthetic stars agree on source identity. Blocking stages preserve the initial
+row's id/version while owning cloned source content. A lazy MISSING source marker retains absent
+stored identity in binding frames; path evaluation canonicalizes it to ordinary MISSING, preserving
+existing non-join metadata behavior. LEFT JOIN's absent frame and its META are MISSING;
+NEST arrays have no scalar identity. EXPLAIN inserts KeyJoin/LeftKeyJoin/KeyNest/LeftKeyNest between
+projection and initial access, with collection, alias, snapshot and cache details, without lookups.
+The generated nested-loop oracle and statement counters prove one lookup per distinct right-hand
+identity while resident, and tiny-grant differential tests force eviction across all four forms.
+Event-gated Snapshot/ReadCommitted tests pin both cached and first-time lookups during
+an intervening writer commit. Both transports, the parity corpus and NativeAOT exercise the feature.
+There is no new public engine interface, assembly reference, friend grant, disk or wire contract.
 
 ### Stored document queries
 
@@ -669,9 +987,9 @@ rounding; fractional inputs cannot normalize to zero or round into an integer. C
 the issue's original Int32 bound under the 2026-10-18 ruling. NULL and LIMIT ALL remain invalid,
 diverging from PostgreSQL (src/backend/executor/nodeLimit.c:359-408).
 
-Paging runs last, after HAVING, DISTINCT, ORDER BY and complete column-type inference and numeric
-promotion. Alias rewrites retain both AST operands. Empty and zero-limit pages keep the header
-and static function types, including Int64 COUNT. The window clamps offset to row count, then
+Unless LIMIT is zero, paging runs last, after HAVING, DISTINCT, ORDER BY and complete column-type
+inference and numeric promotion. Alias rewrites retain both AST operands. Empty and zero-limit
+pages keep the header and static function types, including Int64 COUNT. The window clamps offset to row count, then
 limit to remaining rows; it never adds counts, so Int64.MaxValue is safe. The same output slice
 carries original whole-document bytes. Query AffectedCount stays -1; wire Complete's result
 count is the number of frames after paging. INSERT and UPSERT SELECT write only that page.
@@ -684,16 +1002,110 @@ data. Writes between separate statements may shift pages; use a shared snapshot 
 EXPLAIN's select detail includes resolved limit (none when absent) and offset (zero when absent).
 Unsorted, ungrouped, non-DISTINCT queries whose projections have fixed static result types stop reads
 once the page is complete, including registered scalar functions, unary and binary operators,
-META, literals and constructors. LIMIT 0 evaluates no row predicates; a completed window never
+META, literals and constructors. LIMIT 0 skips all execution stages after static validation and
+uses planned column types without reading documents or invoking callbacks; a completed window never
 evaluates the next predicate, following PostgreSQL src/backend/executor/nodeLimit.c:153-159.
 Paths and lone stars can observe heterogeneous scalar roots and
 still inspect all matches to guarantee page-independent column types; their result is materialized.
 This preserves the metadata contract while making early termination safe where types are fixed.
 
+#### Aggregate quantifiers and native accumulators (#1729, OQ-G1)
+
+The [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#aggregate-quantifiers-and-native-aggregates-1729-oq-g1)
+defines ALL/DISTINCT and the eleven native aggregate names. Each call/group still creates a fresh
+DocumentAggregateAccumulator through #1711's NVI boundary. Native ARRAY_AGG opts into unknown
+inputs, skips MISSING and retains NULL; Boolean/statistic cores skip valued wrong kinds. Existing
+SUM/AVG numeric refusal is preserved. Exact BigInteger moments at decimal scale 28 avoid
+cancellation from large offsets and premature decimal overflow/underflow. The largest intermediate
+is bounded by 604 bits even at Int64.MaxValue inputs, so state is independent of group size.
+Sample statistics return singleton zero. VARIANCE rounds the final rational to decimal using
+nearest-even rounding; STDDEV uses SQRT's decimal conversion and square-root convention, falling
+back to the rational's double value when intermediate variance is not exactly representable.
+The exact rational decides root overflow; if floating conversion crosses the decimal boundary, an exact midpoint comparison rounds the integral root to nearest-even. Only a final out-of-range result uses CD02007. No new public function seam,
+interface, visibility grant or dependency is needed; local native configuration carries the
+statement memory counter and constructor depth without exposing implementation state publicly.
+
+The evaluator applies DISTINCT before Add, using grouping comparison with cancellation through
+structural comparisons. It retains separate state per call/group, deduplicates 1 and 1.0 and
+structurally equal objects regardless of member order, and releases set charges after Finish.
+ARRAY_AGG returns independently owned JSON through the ordinary constructor writer; no input-order
+promise is made. Each appearance in projection/HAVING/ORDER BY remains independent, as #1711 states. Quantified predicates inherit aggregate permission and carry the enclosing group through collection and SATISFIES evaluation; aggregate arguments still disable nested aggregates.
+EXPLAIN names aggregate kinds/quantifiers on Group without calling an accumulator or reading data.
+PostgreSQL src/backend/executor/nodeAgg.c:888-906 also removes DISTINCT duplicates before the
+transition function; src/backend/utils/adt/float.c:2937-2955 explains why stable online moments
+avoid naive floating squared-sum subtraction. Cohesion uses its own grouping comparator and exact
+integer squared-sum subtraction, where cancellation loses no digits; no reference-engine code was copied.
+
+The operation-owned counter applies StatementMemoryBudget to catalog identities and sort staging,
+retained SELECT source rows (including JSON, IDs, raw star bytes and expanded bindings), group
+keys and membership, native accumulator state, DISTINCT sets, array inputs, scratch expressions,
+and projected output. It reuses CD05018 for retained statement memory exhaustion (#1753, #1097).
+Source and group reservations release on every executor exit; a reservation can also own the
+GROUP AS wrappers and arrays (#1729, OQ-G2). Fixed transition-state estimates include the bounded exact
+statistic moments. Planning never creates this execution-only state.
+
+A set reserves 128 bytes plus 64 bytes per entry and scalar ownership. An array input list
+reserves 256 bytes plus entries/values; its independently owned JSON result is charged separately
+while both representations coexist. JSON costs raw UTF-8 length plus 12 bytes per token and
+128 bytes per owner, as RETURNING does. HAVING scratch releases after each predicate; projection
+scratch transfers to independently charged result rows; ORDER BY values release after sorting.
+Duplicate and paged-away results release their row charges. Statement completion releases remaining
+charges. Budget refusal or cancellation publishes no partial result and uses ordinary rollback.
+These lifetimes follow the separation of input, transition and output contexts described in the
+local PostgreSQL src/backend/executor/nodeAgg.c:66-80; no reference-engine code was copied.
+The limit remains a retained-storage estimate; DML pending buffers share it (#1755), while application
+callback-owned state are outside these native estimates. Parser, execution-conformance and
+InMemory/TCP corpora and the NativeAOT sample cover the contract.
+
+#### GROUP AS and group aliases (#1729, OQ-G2)
+
+The language [dialect](../../Assimalign.Cohesion.Database.Documents.Language/docs/DIALECT.md#group-as-and-group-term-aliases-1729-oq-g2)
+is authoritative for wrapper shape, visibility and refusal codes. The logical plan carries optional
+GroupAliases/GroupAs through the query key list. A lexical group frame distinguishes aliases
+from input paths when checking grouped expressions, DISTINCT and projected ordering; inner
+comprehensions and quantifiers retain their existing frames. Explicit group-term aliases bind
+per-row computed keys before aggregate evaluation. The GROUP AS array binds only the group
+representative, after input grouping, so aggregate row inputs cannot read it (CD01031).
+
+Queries with group aliases track retained key/alias representations by reference identity (JSON
+views use owner/element identity). A shared payload is charged once across members, terms and
+groups; every key slot and alias frame keeps its overhead. Tracking reserves 128 bytes plus 64
+bytes per representation. Equal independently owned strings/JSON remain separately charged,
+as do serialized wrappers and the final array. Queries without aliases create no tracking set.
+
+Each array element wraps the FROM value, UNNEST bindings and explicit group-term aliases in an
+object. MISSING members are omitted; NULL survives. Empty GROUP BY inputs produce zero groups.
+Temporary wrapper owners reserve 128 bytes of list storage plus 64 bytes and the existing JSON
+ownership/token estimate per wrapper. Before final array construction the group reservation
+charges 128 bytes of JSON ownership, raw wrapper payloads/commas/array delimiters, 12 bytes per
+token and 128 bytes of binding/slot storage. Temporary and final representations are both charged
+while they coexist. The materializer transfers its successful final reservation to the group owner
+without releasing the shared charge; the ordinary group reservation remains local, preserving its
+base stack allocation. Arrays survive through ordering; HAVING-rejected groups release their array
+reservations immediately. Projection clones independently charge output and no group context
+escapes in the returned result. Scoped reservations release on failure and cancellation before
+operation cleanup. Exhaustion retains CD05018. No GROUP AS path runs for ordinary queries, whose
+base allocation measurements are preserved.
+
+EXPLAIN adds group_as and group_aliases to Group details (or system-source details), without
+executing terms or reading data. CD00012 rejects GROUP AS without GROUP BY; CD01030 rejects
+invalid or colliding declarations, including direct AST shape; CD01031 rejects a group array in
+an aggregate row input. Existing CD05015 governs wrapper/array constructor depth and CD05018
+governs retention. No new public interface, dependency, visibility grant or format is needed.
+The wrapper precedent is Couchbase groupby.adoc:47-81 at c3bb1549af4887019b9983e371d9e8b4f569052c;
+no reference-engine code was copied. Embedded, conformance, both transports and NativeAOT tests
+exercise binding, output ownership, empty metadata, EXPLAIN and refusal/release behavior.
+
+| Code | Grouping refusal |
+| --- | --- |
+| `CD00012` | GROUP AS lacks preceding GROUP BY terms; located at GROUP |
+| `CD01030` | Invalid/duplicate group alias or collision with FROM/UNNEST; statement span |
+| `CD01031` | Group array referenced in an aggregate's row input; path span |
+
 #### SQL++ functions and transaction clock (#1137)
 
-Documents.Language's public immutable OqlFunctions table declares the 40 standard executable
-names (META, five aggregates and 34 scalars), arities, kind constraints and static result types.
+Documents.Language's public immutable OqlFunctions table declares the 46 standard executable
+names (META, eleven aggregates and 34 scalars), arities, kind constraints and static result types.
 Native registrations use that metadata; the frozen engine function catalog also contains application
 registrations and supplies planning and execution binding. No visibility grant is added. Scalar validation
 passes aggregate permission into its arguments, while aggregates forbid nested aggregates.
@@ -752,11 +1164,11 @@ columns retain long values. JSON numeric equality and wire digits are unchanged 
 
 The supported clause matrix lives in the language package's
 [DESIGN.md](../../Assimalign.Cohesion.Database.Documents.Language/docs/DESIGN.md).
-SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, FROM/UNNEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
+SELECT (ALL/DISTINCT and VALUE/RAW), object/array constructors, expression/derived FROM, UNNEST, key JOIN/NEST, quantified predicates, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, CREATE COLLECTION, DROP COLLECTION,
 CREATE INDEX, DROP INDEX, INSERT, UPSERT, UPDATE, UNSET, DELETE, VALUES, IN, BETWEEN, LIKE and CASE are executed. OQL retains its name with a SQL++ basis.
-Retired ODMG constructs are rejected positionally; nested queries, deferred document mutations
-and server statements are rejected with `CK00001`. The parser advertises only clauses this executor
-supports.
+Retired ODMG constructs are rejected positionally; general joins, deferred document mutations
+and server statements are rejected with `CK00001`. Expression subqueries execute as described above.
+The parser advertises only clauses this executor supports.
 AST diagnostics are checked both for text requests and directly constructed requests.
 
 Each result is one JSON value. A SELECT list desugars to a VALUE object: `e1 AS a, e2 AS b`
@@ -1062,6 +1474,7 @@ It changes no documents or catalog entries, including when its explicit transact
 | `Unnest`, `LeftUnnest` | Array expansion between projection/grouping and access, with the variable name in Detail |
 | `CollectionScan` | Candidate retrieval from the named collection |
 | `IndexSeek` | Catalog index name, collection, inclusive/exclusive bounds and bounded index-entry estimate |
+| `IndexOrderCandidate` | Per-index ordering eligibility, reason, direction and equal-key bucket contract; consumed=True and sort=elided when selected |
 | `IndexIntersection` | Ordinal identity intersection before JSON reads; children are the selected IndexSeek inputs |
 | `Delete` | Snapshot-filtered deletion; detail names its IndexSeek, IndexIntersection or CollectionScan child |
 | `Update` | Snapshot-filtered partial update; detail names its IndexSeek, IndexIntersection or CollectionScan child |
@@ -1184,8 +1597,7 @@ arrays by token count while large strings pay for their bytes. A lone star retai
 and one original raw image; each representation is charged once. A 1,024-byte ASCII object
 with one string property costs 2,448 bytes per row (224 row storage + 1,200 clone + 1,024 raw),
 plus 208 bytes of statement metadata. Charges accumulate before rows enter the result list; CD05018 at the clause span rolls
-back the statement on exhaustion. This does not retrofit accounting onto existing SELECT or
-mutation/source staging and is not a process-heap cap. The public option is a model configuration
+back the statement on exhaustion. SELECT source/group staging, native accumulators and aggregate results share this limit and release reservations according to their lifetimes, as described above. OQL mutation pending buffers share this owner (#1755). UPDATE reserves 160 bytes plus twice the key length and the patched UTF-8 length per row; DELETE reserves 96 bytes plus twice the key length per identity. INSERT/UPSERT reserve 192 bytes plus twice the key length for the pending list and duplicate-key set, then 32 bytes plus the encoded content length. Repeated keys are checked before reserving another slot: a duplicate retains no additional key and keeps CD03012 even near the grant limit. SELECT source results remain charged while INSERT/UPSERT SELECT builds pending writes. Every buffer is completely staged before mutation, so a pending-buffer CD05018 occurs before the first write. Scoped reservations release on success, validation failure and cancellation, independently of operation cleanup. The public option is a model configuration
 capability, not an assembly-visibility bridge. No new public interface or dependency is added.
 
 The server already serializes both counts into Complete; updated Documents.Client accepts an
@@ -1614,11 +2026,11 @@ the database's own retry, a `FailureBackoff` after the failure, not the next
 ## Limits and verification
 
 The current engine materializes query inputs/results and whole JSON values in
-managed memory. UNNEST multiplies input rows and has no row cap; it is not a join and
-does not add JOIN or cross-collection execution. Chunk persistence handles documents larger than a page but does
+managed memory. UNNEST multiplies input rows and has no row cap; scalar key JOIN/NEST can
+look up another stored collection in the same database. Chunk persistence handles documents larger than a page but does
 not promise a bounded heap independent of document/query size. Database-wide
-writer locking is conservative; there are no persisted query statistics, join,
-subquery, external sort, replication, model-specific security,
+writer locking is conservative; there are no persisted query statistics, general-predicate joins,
+external sort, replication, model-specific security,
 ApplicationModel integration, or compiled-schema provisioning.
 
 Co-located tests cover nested/mixed JSON, expected-version writes, explicit commit
@@ -2346,7 +2758,7 @@ and exponent spellings within its domain. CLR Single/Double literals in a direct
 AST are refused (CD02027), like the typed catalog API. Parameters, computed mappings and sources,
 and other WHEN expressions are refused before catalog mutation with located CD01028/CD02027/
 CD03027/CD03028 diagnostics. Catalog CD03025 still refuses multiple array keys and UNIQUE arrays.
-ALL remains CK00001; INCLUDE MISSING syntax stays deferred. No format changes beyond existing v3.
+ALL remains CK00001; INCLUDE MISSING is now a leading scalar-key suffix (#1632). No format changes beyond existing v3.
 `OqlCreateIndexExpression.Keys` snapshots paths/comprehensions; each comprehension denotes DISTINCT.
 Its scalar Paths view remains empty for array indexes, matching the catalog's coverage boundary.
 
@@ -2377,7 +2789,7 @@ Ungrouped, non-DISTINCT pages with fixed projection types (including META().id) 
 OFFSET + LIMIT residual survivors when there is no ORDER BY or the sole ordering is document
 identity, ASC or DESC. Projection aliases resolving to META().id have the same behavior. Candidates
 are visited in that identity direction, and every visited document receives the full residual.
-Other orderings, grouping, DISTINCT and projections requiring type inference retain materialization.
+Proven scalar index order also supports early paging (#1632); grouping, DISTINCT and projections requiring type inference retain materialization.
 Candidate metadata and index probes are not limited by this content-read optimization.
 
 For the benchmark-shaped `(category, DISTINCT ARRAY v.price FOR v IN variants END)` query with
@@ -2430,7 +2842,7 @@ upper uses successor(P+v) exclusively. A successor increments the last non-FF by
 truncates after it. Every component tag is below FF, so every nonempty prefix has a successor.
 These bounds include trailing components, unlike an inclusive [P,P] range. The planner uses
 one range component and retains all other conjuncts as residual filters, matching PostgreSQL
-`doc/src/sgml/indices.sgml:461-466`. Candidate documents remain ordered by ordinal identity.
+`doc/src/sgml/indices.sgml:461-466`. The ordinary search returns ordinal identities; proven ORDER BY uses the internal ordered cursor.
 
 Index leaf entry references are packed metadata page/slot locations. Leaf entries carry writer
 and deleter stamps through the existing index API. Create snapshots only visible document/reference
@@ -2758,6 +3170,81 @@ engine tests retain their original message prefix, coordinator-disposal and byte
 assertions. Registration truncation retains its exact EndOfStreamException beneath the located
 corruption and catalog wrappers. No format reader, upgrader or public exception member is added.
 
+### INCLUDE MISSING and ordered index execution (#1632)
+
+`CREATE INDEX ix ON items (score INCLUDE MISSING, category)` includes leading-MISSING
+records using the existing v3 flag; INCLUDE is contextual. The suffix belongs inside the key
+list on the first scalar key, following [Couchbase](https://github.com/couchbaselabs/docs-devex/blob/c3bb1549af4887019b9983e371d9e8b4f569052c/modules/n1ql/pages/n1ql-language-reference/createindex.adoc#L317-L330).
+It is invalid on later keys or after the closing parenthesis. Direct AST leading-array definitions
+still receive CD03025. COHESION_SCHEMA.INDEXES exposes INCLUDE_MISSING and renders the suffix
+in PATH and PATHS[0], making the key list reusable as DDL. No format or wire bump is needed.
+
+EXPLAIN reports order_eligible and order_reason on the selected access and one
+IndexOrderCandidate per visible index, including ORDER BY-only candidates. Eligible candidates
+report forward/reverse direction, equality prefix, complete equal-key buckets and the document
+identity tie break. Ordinary sparse indexes need a mandatory predicate proving that leading
+MISSING cannot qualify. AND needs either proof, OR needs both; direct presence tests and direct
+comparisons are recognized. Calls and computed paths establish no proof. ORDER BY must match
+consecutive leading keys after optional equality-fixed keys, with one direction for varying keys.
+Nondefault null placement requires proof that both unknowns are excluded. Arrays, grouping,
+DISTINCT, UNNEST, nonindex expressions and intersections retain their stated fallback reasons.
+
+Lossy array/object values never establish ordering. UNIQUE enforces scalar keys; direct scalar
+comparisons or NULL/MISSING tests can also prove a domain. Otherwise a snapshot-visible,
+one-entry/32-page existence probe checks complex tags on the first varying component, without
+fetching documents. A visible match stops immediately; an invisible first entry leaves the domain
+unproven. Incomplete probes and later varying components without a scalar proof report
+scalar_domain_unproven. This deliberately conservative fallback needs no new diagnostic.
+Ordering reuses the ordinary access analysis; every structural and predicate proof runs before
+probing. Rejected ordinary plans allocate no EXPLAIN candidate graph.
+A shorter ORDER BY than the physical key still requires a complete equal-ORDER-BY-prefix bucket,
+including all trailing physical components, before identity sorting and LIMIT termination.
+Execution consumes a proven scalar index in forward or reverse order and elides the result
+sort. The existing predicate chooser's eligible index wins; otherwise the first eligible index
+in ordinal name order wins. Intersections retain their identity merge and fallback sort.
+The catalog cursor uses the statement snapshot and releases every page/latch before returning
+metadata. It materializes one complete equal-ORDER-BY-prefix bucket, including trailing physical
+components, then emits that bucket in ascending document identity order in either scan direction.
+The full WHERE predicate filters this stream without changing its order. Bucket metadata, keys
+and identities charge the existing statement memory budget (CD05018); cancellation and failure
+release the cursor and reservations.
+
+With fixed projection types, LIMIT/OFFSET stop after OFFSET + LIMIT residual survivors. LIMIT 0
+opens no cursor. One next-bucket entry establishes completeness, and the B-tree may already have
+read ahead in its bounded batch. SELECT * has a fixed JSON type and stops early on a consumed
+ordered path. Projections needing result type inference still read all matching documents so
+column headers retain the existing full-result contract;
+their proven index order still elides sorting. EXPLAIN reports consumed=True; sort=elided on the
+selected access and candidate, early_paging, and paging_reason=result_type_inference when needed.
+VALUE/RAW ordering by its projected expression retains sorting unless MISSING is rejected,
+because projection promotes MISSING to NULL and changes equal-key ties (value_missing_becomes_null).
+Other candidates retain consumed=False and their eligibility/selection reason; the root describes
+sort retention and its reason. EXPLAIN remains nonexecuting and actual_rows remains NULL.
+
+Conformance compares 504 generated index/predicate/order combinations across eight paging
+windows (4,032 exact comparisons), with complete duplicate buckets, residual rejections,
+scalar extremes, MISSING/NULL, escaped strings and trailing coarse tags. Controlled concurrent
+insert/update/delete/index replacement tests cover autocommit, Snapshot and ReadCommitted,
+plus own writes, rollback and cancellation. InMemory/TCP and the NativeAOT consumer exercise
+consumption and paging without new API, wire or disk formats. Star paging regressions cover
+both directions and the 256 KiB statement budget; rejected-shape allocation guards cover complex
+values, mixed directions, unproven MISSING, later scalar domains and array indexes.
+
+Equality-fixed leading keys can be skipped, following PostgreSQL's constant-pathkey principle
+(src/backend/optimizer/path/pathkeys.c:129-137,164-166 in the local reference clone);
+Cohesion deliberately uses only its direct scalar equality bounds, with no equivalence-class solver.
+DocumentOrderingPath carries the original access, eligibility candidates and the selected ordered
+candidate. Queries without ORDER BY and known shaped-row/intersection fallbacks skip execution
+analysis. Predicate/type proofs and bounded absence probes remain conservative; ProbeComplexOrderKeys uses
+existing tagged v3 keys and the shared bounded CountRange, never content reads or a new public seam.
+
+Ordered execution follows PostgreSQL's scan-direction, statement-snapshot and residual recheck
+separation (C:/Source/repos/postgres/postgres/src/backend/executor/nodeIndexscan.c:96-100,
+112-120, 142-156). OQL additionally repairs equal-key identity ties; PostgreSQL's physical tie
+order is not adopted. The internal LastQueryIndexEntriesRead counter counts visible cursor
+advances, including stale references and boundary lookahead, and excludes bounded read-ahead;
+LastQueryDocumentsRead counts JSON fetches. Neither is a public diagnostic or EventSource.
+
 ## Probe costing and identity intersection (D3, #1527)
 
 Planning binds the existing scalar equality prefixes and next-component ranges, then probes
@@ -2972,9 +3459,8 @@ The public family is `DocumentFunction`, `DocumentScalarFunction`,
 `DocumentValue`, borrowed `DocumentArguments`, and `DocumentFunctionContext`.
 Scalar `Invoke`, aggregate `CreateAccumulator`, accumulator `Add` and `Finish` are
 nonvirtual validation boundaries over protected abstract cores. Native functions use those
-same boundaries. The standard catalog contains 30 scalar registrations and six aggregate
-registrations: COUNT has separate value and star signatures; SUM, AVG, MIN and MAX have one
-each. META and the four lazy conditional forms remain grammar forms, like SQL CASE, rather
+same boundaries. The standard catalog contains 30 scalar registrations and twelve aggregate
+registrations: COUNT has separate value and star signatures; each of the other ten aggregate names has one. META and the four lazy conditional forms remain grammar forms, like SQL CASE, rather
 than eager callbacks.
 
 `DocumentFunctionName` is a generated identifier value with implicit string conversion and
@@ -3066,3 +3552,10 @@ Protocol layout and version stay unchanged.
 
 Interleaved same-process Release comparisons did not reproduce the reported native-call
 slowdown; dispatch retains bounded per-statement allocation overhead.
+
+## Ready retained-state contract (#1717)
+
+Every negotiated statement Ready now carries transaction I/T/E followed by a zero retained-state
+byte. This model retains no state requiring a family reset and declares no reset statement. Pool
+return therefore sends only a needed ROLLBACK. The exact two-byte public record/payload replaces
+the former form without a compatibility reader; see Database.Protocol DESIGN.

@@ -19,6 +19,8 @@ internal sealed partial class SqlPlanExecutor
     private static readonly string _upsertSnapshotConflict = ErrorMessages.UpsertSnapshotConflict;
     private static readonly string _upsertIndexesChanged = ErrorMessages.UpsertIndexesChanged;
     private sealed record SqlUpsertWrite(ulong? OldLocation, object?[]? OldValues, object?[] Values, byte[] Record);
+    private sealed record SqlPartialUpsertPreparation(IEnumerable<(object?[] Values, IndexKey[] Keys)> Rows,
+        HashSet<(object?[] Values, SqlCatalogIndex Index)> Failures);
 
     private static void EnsureUpsertIndexes(SqlCatalogTable table, List<SqlLiveIndex> indexes, SqlOnConflictPlan? plan)
     {
@@ -42,21 +44,46 @@ internal sealed partial class SqlPlanExecutor
         var statementMark = locks.MarkStatement(owner);
         var mark = statementMark;
         bool applyStarted = false;
+        int cascadeRefusals = 0;
         try
         {
+            // PostgreSQL RelationGetIndexList (relcache.c:4934) walks creation/OID order.
+            // GetLiveIndexes retains the catalog's persisted registration order, including
+            // a table-declared PK before subsequently created partial arbiters.
             var arbiters = indexes.Where(index => plan.Arbiters.Any(arbiter => arbiter.Name == index.Metadata.Name)).ToList();
-            var unique = indexes.Where(index => index.Metadata.IsUnique).ToList();
+            var unique = indexes.Where(index => index.Metadata.IsUnique && index.Metadata.Predicate is null).ToList();
+            bool partialArbiters = false;
+            for (int index = 0; index < arbiters.Count; index++)
+            {
+                if (arbiters[index].Metadata.Predicate is not null) { unique.Add(arbiters[index]); partialArbiters = true; }
+            }
         RetryArbitration:
             cancellationToken.ThrowIfCancellationRequested();
             var hashes = new List<ulong>();
             // Build each proposal's keys once, sharing them between locking, arbitration and
             // pending inserts. Without side-effecting defaults the full batch precedes lookup.
-            IEnumerable<(object?[] Values, IndexKey[] Keys)> prepared = proposals.Select(values =>
-                (values, unique.Select(index => BuildIndexKeyUnchecked(table, index.KeyOrdinals, values)).ToArray()));
+            // Prelocking must not change error order: mark predicate failures beside their
+            // row/index, with no key to lock. Raise only when arbitration reaches that index,
+            // after this row's CHECKs and any earlier conflicting arbiter (execIndexing.c:615-653).
+            SqlPartialUpsertPreparation? partialPreparation = null;
+            IEnumerable<(object?[] Values, IndexKey[] Keys)> prepared;
+            if (partialArbiters)
+            {
+                partialPreparation = PreparePartialUpsert(table, unique, proposals, cancellationToken);
+                prepared = partialPreparation.Rows;
+            }
+            else
+            {
+                // Preserve ordinary upserts' established preparation and allocation shape.
+                prepared = proposals.Select(values =>
+                    (values, unique.Select(index => index.Metadata.Predicate is not null &&
+                        (!MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false) || PartialNullKey(index.Metadata, index.KeyOrdinals, values))
+                        ? default : BuildIndexKeyUnchecked(table, index.KeyOrdinals, values, index.Metadata.KeyOrders)).ToArray()));
+            }
             if (!orderedDefaults)
             {
                 prepared = prepared.ToList();
-                foreach (var proposal in prepared) { hashes.AddRange(proposal.Keys.Select(key => key.Hash())); }
+                foreach (var proposal in prepared) { hashes.AddRange(UpsertKeyHashes(proposal.Keys)); }
                 await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
             }
             // Ordered defaults stay lazy: acquire each proposal's sorted unique keys after
@@ -71,13 +98,14 @@ internal sealed partial class SqlPlanExecutor
             int[]? assigned = bound.Domains.Count == 0 ? null : plan.Assignments.Select(assignment => assignment.Ordinal).ToArray();
             foreach (var proposal in prepared)
             {
+                using var rowScope = SqlSequenceExecution.Current?.BeginRow();
                 cancellationToken.ThrowIfCancellationRequested();
                 // PostgreSQL nodeModifyTable.c:1108: proposed constraints precede arbitration.
                 ValidateRows(table, [proposal.Values], statement, cancellationToken, checksOnly: true);
                 if (orderedDefaults)
                 {
                     hashes.Clear();
-                    hashes.AddRange(proposal.Keys.Select(key => key.Hash()));
+                    hashes.AddRange(UpsertKeyHashes(proposal.Keys));
                     await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
                 }
                 ulong? conflict = null;
@@ -85,7 +113,15 @@ internal sealed partial class SqlPlanExecutor
                 for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                 {
                     var arbiter = arbiters[arbiterIndex];
-                    var key = proposal.Keys[arbiterOrdinals[arbiterIndex]];
+                    int ordinal = arbiterOrdinals[arbiterIndex];
+                    if (partialPreparation is not null && partialPreparation.Failures.Contains((proposal.Values, arbiter.Metadata)))
+                    {
+                        // Immutable predicates reproduce their error at the ordered boundary.
+                        // Retain only a marker during preparation, never an exception per row.
+                        _ = MatchesIndex(table, arbiter.Metadata, proposal.Values, cancellationToken: cancellationToken, record: false);
+                    }
+                    var key = proposal.Keys[ordinal];
+                    if (key.Length == 0) { continue; } // This partial arbiter does not cover this proposed key.
                     if (pending.TryGetValue((arbiter.Metadata.Name, key), out var prior))
                     {
                         if (prior is null) { continue; } // An earlier update released this key.
@@ -139,7 +175,9 @@ internal sealed partial class SqlPlanExecutor
                     for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                     {
                         var arbiter = arbiters[arbiterIndex];
-                        pending[(arbiter.Metadata.Name, BuildIndexKeyUnchecked(table, arbiter.KeyOrdinals, oldValues))] = null;
+                        if (arbiter.Metadata.Predicate is null ||
+                            MatchesIndex(table, arbiter.Metadata, oldValues, cancellationToken: cancellationToken) && !PartialNullKey(arbiter.Metadata, arbiter.KeyOrdinals, oldValues))
+                        { pending[(arbiter.Metadata.Name, BuildIndexKeyUnchecked(table, arbiter.KeyOrdinals, oldValues, arbiter.Metadata.KeyOrders))] = null; }
                     }
                 }
                 // PostgreSQL nodeModifyTable.c:1121-1232 arbitrates before heap/index insertion.
@@ -149,8 +187,11 @@ internal sealed partial class SqlPlanExecutor
                 for (int arbiterIndex = 0; arbiterIndex < arbiters.Count; arbiterIndex++)
                 {
                     var arbiter = arbiters[arbiterIndex];
-                    var key = write.OldLocation.HasValue ? BuildIndexKey(table, arbiter.KeyOrdinals, write.Values)
+                    if (write.OldLocation.HasValue && arbiter.Metadata.Predicate is not null &&
+                        (!MatchesIndex(table, arbiter.Metadata, write.Values, cancellationToken: cancellationToken) || PartialNullKey(arbiter.Metadata, arbiter.KeyOrdinals, write.Values))) { continue; }
+                    var key = write.OldLocation.HasValue ? BuildIndexKey(table, arbiter.KeyOrdinals, write.Values, arbiter.Metadata.KeyOrders)
                         : proposal.Keys[arbiterOrdinals[arbiterIndex]];
+                    if (key.Length == 0) { continue; }
                     pending[(arbiter.Metadata.Name, key)] = write;
                 }
             }
@@ -168,17 +209,51 @@ internal sealed partial class SqlPlanExecutor
             {
                 if (write.OldValues is not null)
                 {
-                    CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes);
+                    CollectUniqueKeyHashes(indexes, table, write.OldValues, hashes, cancellationToken);
                 }
-                ValidateIndexKeysAndCollectUniqueHashes(indexes, table, write.Values, hashes);
+                ValidateIndexKeysAndCollectUniqueHashes(indexes, table, write.Values, hashes, cancellationToken);
             }
             // Arbitration takes sorted key locks, then try-acquires rows. A refused row
             // releases new keys before waiting (WaitForUpsertRowAsync). Size checks stay
             // inside this release scope and precede the coordinator gate and page latches.
             await AcquireUniqueKeyLocksAsync(statement, table.ObjectId, hashes, cancellationToken).ConfigureAwait(false);
             var replacements = writes.Where(write => write.OldLocation.HasValue).ToList();
-            var pendingUpdates = BuildConstraintUpdates(table,
-                replacements.Select(write => (write.OldLocation!.Value, write.OldValues!, write.Values)), plan.Assignments);
+            if (replacements.Count != 0 && HasUpdateActions(table, plan.Assignments))
+            {
+                try
+                {
+                    applyStarted = true;
+                    return await ExecuteReferentialUpsertAsync(table, writes, plan, returning, statement, cancellationToken, statementMark).ConfigureAwait(false);
+                }
+                catch (SqlCascadeLockRetry refused)
+                {
+                    applyStarted = false;
+                    if (++cascadeRefusals < 3)
+                    { mark = await WaitForUpsertRowAsync(refused.Resource, refused.Mode, mark, statement, null, cancellationToken).ConfigureAwait(false); }
+                    else
+                    {
+                        // Match #1420's retained phase: closure grants stop backing off,
+                        // while real cycles still go through the lock manager's detector.
+                        await locks.AcquireAsync(owner, refused.Resource, refused.Mode, cancellationToken).ConfigureAwait(false);
+                        mark = locks.MarkStatement(owner);
+                    }
+                    statement.References.ClearAfterCascadeRetry();
+                    goto RetryArbitration;
+                }
+            }
+            // Pending inserts can supply an old NO ACTION key, even when no changing
+            // action exists. Ordinary upserts retain their original replacement-only map.
+            var pendingUpdates = replacements.Count != 0 && writes.Count != replacements.Count && HasUpdateActions(table, plan.Assignments, changingOnly: false)
+                ? BuildConstraintUpdates(table, writes.Select((write, index) =>
+                    (write.OldLocation ?? SqlRecordLocation.Pack(new PageId(-1L - index), 0), write.OldValues ?? [], write.Values)), plan.Assignments)
+                : BuildConstraintUpdates(table, replacements.Select(write => (write.OldLocation!.Value, write.OldValues!, write.Values)), plan.Assignments);
+            foreach (var write in writes)
+            {
+                if (write.OldValues is not null)
+                {
+                    ValidateParentUpdate(table, write.OldValues, write.Values, statement, cancellationToken, updates: pendingUpdates);
+                }
+            }
             var references = new List<SqlParentReference>();
             // An RC arbiter wait can reach a new row and its parent committed together after the
             // original statement snapshot. Refresh committed visibility, never the all-writers
@@ -205,14 +280,11 @@ internal sealed partial class SqlPlanExecutor
             }
             await AcquireParentRowLocksAsync(released, statement, cancellationToken, validate: false).ConfigureAwait(false);
 
-            foreach (var write in writes)
-            {
-                if (write.OldValues is not null)
-                {
-                    ValidateParentUpdate(table, write.OldValues, write.Values, statement, cancellationToken, updates: pendingUpdates);
-                }
-            }
             var returned = returning is null ? null : new List<object?[]>(writes.Count);
+            if (HasSequenceProjection(returning))
+            {
+                foreach (var write in writes) { returned!.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
+            }
             applyStarted = true;
             return await statement.Coordinator.ApplyStatementAsync(statement.Transaction, async bracket =>
             {
@@ -226,15 +298,24 @@ internal sealed partial class SqlPlanExecutor
                         TombstoneVersion(statement, bracket, pageId, slotIndex);
                         await TombstoneIndexEntriesAsync(statement, indexes, table, write.OldValues!, oldReference, cancellationToken).ConfigureAwait(false);
                     }
+                }
+                // Release all replaced unique mappings before publishing any replacement.
+                // NO ACTION can therefore accept a different final parent in an upsert swap.
+                foreach (var write in writes)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var location = _storage.InsertRow(bracket, table.ObjectId, write.Record);
+                    if (write.OldLocation is { } predecessor)
+                    { _storage.RowVersionLinks.Add(predecessor, SqlRecordLocation.Pack(location.PageId, location.SlotIndex), statement.Transaction.Sequence); }
                     statement.Coordinator.VersionStore.RecordCreated(statement.Transaction.Sequence, location.PageId, location.SlotIndex);
-                    await InsertIndexEntriesAsync(statement, indexes, table, write.Values,
+                    await InsertIndexEntriesAsync(statement, bracket, indexes, table, write.Values,
                         SqlRecordLocation.Pack(location.PageId, location.SlotIndex), cancellationToken).ConfigureAwait(false);
-                    if (returned is not null) { returned.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
+                    if (returned is not null && !HasSequenceProjection(returning)) { returned.Add(ProjectRow(write.Values, returning!, evaluator, cancellationToken)); }
                 }
                 return await statement.PrepareResultAsync(returned is null ? new SqlQueryResult(DatabaseResultStatus.Success, writes.Count)
                     : MaterializeProjected(returning!, returned, writes.Count), cancellationToken).ConfigureAwait(false);
             }, durable: false, cancellationToken).ConfigureAwait(false);
+
         }
         catch when (!applyStarted)
         {
@@ -246,6 +327,35 @@ internal sealed partial class SqlPlanExecutor
 
         TransactionAbortedException SnapshotConflict() => new(string.Format(CultureInfo.CurrentCulture,
             _upsertSnapshotConflict, table.Schema, table.Name));
+    }
+
+    private SqlPartialUpsertPreparation PreparePartialUpsert(SqlCatalogTable table, List<SqlLiveIndex> indexes,
+        IEnumerable<object?[]> proposals, CancellationToken cancellationToken)
+    {
+        var failures = new HashSet<(object?[], SqlCatalogIndex)>();
+        return new(proposals.Select(Prepare), failures);
+
+        (object?[] Values, IndexKey[] Keys) Prepare(object?[] values)
+        {
+            var keys = new IndexKey[indexes.Count];
+            for (int ordinal = 0; ordinal < indexes.Count; ordinal++)
+            {
+                var index = indexes[ordinal];
+                if (index.Metadata.Predicate is not null)
+                {
+                    bool matches;
+                    try { matches = MatchesIndex(table, index.Metadata, values, cancellationToken: cancellationToken, record: false); }
+                    catch (DatabaseException)
+                    {
+                        failures.Add((values, index.Metadata));
+                        continue;
+                    }
+                    if (!matches || PartialNullKey(index.Metadata, index.KeyOrdinals, values)) { continue; }
+                }
+                keys[ordinal] = BuildIndexKeyUnchecked(table, index.KeyOrdinals, values, index.Metadata.KeyOrders);
+            }
+            return (values, keys);
+        }
     }
 
     // No heap/index mutation or RETURNING projection precedes the apply below arbitration.
@@ -281,6 +391,17 @@ internal sealed partial class SqlPlanExecutor
             }
         }
         return null;
+    }
+
+    private static IEnumerable<ulong> UpsertKeyHashes(IndexKey[] keys)
+    {
+        // Keep the original Select allocation for unconditional proposals. Only a
+        // nonparticipating partial arbiter needs the extra filtering iterator.
+        foreach (var key in keys)
+        {
+            if (key.Length == 0) { return keys.Where(candidate => candidate.Length != 0).Select(candidate => candidate.Hash()); }
+        }
+        return keys.Select(key => key.Hash());
     }
 
     private static object? CoerceUpsertColumn(SqlCatalogTable table, int ordinal, object? value)

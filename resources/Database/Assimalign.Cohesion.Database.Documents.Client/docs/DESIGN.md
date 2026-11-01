@@ -1,5 +1,16 @@
 # Documents client design
 
+## Named savepoint wire conformance (#1726, XT-4)
+
+The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
+control frame, protocol version, client API or result shape is added. InMemory and TCP tests
+exercise duplicate names, nested release/undo, repeated rollback to the retained target, work
+continued after undo and root commit, peer isolation and the model's failure rule. CK04012 and
+CK04013 remain structured diagnostics. An active savepoint transaction returned to the pool
+is rolled back; tests rent the exact authenticated server session again and prove the old name
+and uncommitted rows are absent. Faulted partial undo uses existing Ready E and pool rollback.
+Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.
+
 ## Array-posting NativeAOT guard (#1530)
 
 The engine-linked NativeAOT consumer additionally exercises the catalog's typed DISTINCT array
@@ -8,6 +19,32 @@ after rollback; a committed-delete negative control uses the same check to prove
 deletion that survived transaction end. Leading array definitions keep IncludeMissing false.
 These are catalog checks;
 the client API and wire contract do not change. OQL array-index DDL and planning follow in OQ-I2.
+
+## Aggregate wire conformance (#1729, OQ-G1)
+
+ALL/DISTINCT arguments and ARRAY_AGG, BOOL_AND, BOOL_OR, aggregate EVERY, STDDEV and VARIANCE
+use ordinary OQL text and existing JSON result cells. Empty aggregates retain Json, Boolean or
+Decimal headers; COUNT remains Int64. DocumentAggregateWireTests verifies grouped/ungrouped
+values, HAVING, ordering, EXPLAIN detail, NULL/MISSING, sample singleton zero and located
+syntax/context/overflow/budget diagnostics over InMemory and TCP. Budget failure aborts explicit
+work; rollback permits reuse of the connection. The NativeAOT sample exercises all six names
+and quantifiers on both transports. Source/group staging now shares the statement counter (#1753); aggregate-span fixtures admit source retention before testing the aggregate limit. The 32 MiB response fixtures explicitly allow 256 MiB of statement retention while retaining their existing 8 MiB formatter allocation assertion. No client API, capability, codec, frame or version changes.
+
+## Subquery wire conformance (#1731, OQ-Q1)
+
+Expression SELECT arrays, EXISTS and IN (SELECT RAW ...) use ordinary JSON cells over InMemory
+and TCP. DocumentSubqueryWireTests checks RAW/object arrays, membership, empty EXISTS, lazy
+failure suppression, EXPLAIN cache policy, lexical correlation and connection reuse.
+OQ-Q3 additionally exercises correlated expression/FROM sources, SET/VALUES and INSERT SELECT,
+self-referencing UPDATE/DELETE predicates, staged statement-start RETURNING reads and located CD05020
+work refusal on InMemory and TCP. The NativeAOT guard checks correlation and mutation snapshot
+semantics on both transports. There is no new client API, frame, capability or version.
+Overdeep subquery projections return located CD05015 before the formatter on both transports,
+including the named wrapper; the same connection then successfully reads another result.
+The existing NativeAOT consumer checks arrays, EXISTS, IN and lazy conditional behavior on both
+transports. The NativeAOT consumer also checks located depth refusals, constructor failure
+order and RAW depth boundaries while preserving connection reuse. No client public API,
+frame, capability or version changes are needed.
 
 ## Comprehension wire conformance (#1728)
 
@@ -23,6 +60,15 @@ The real DocumentClient and model server run missing-database handshakes on InMe
 loopback TCP for at least one second and 200 consecutive coded refusals per transport. The
 tests assert DatabaseNotFound and reuse a one-slot pool to expose leaked failed rentals.
 
+## Ordering wire conformance (#1730, #1632)
+
+InMemory and TCP tests execute every ASC/DESC NULLS combination over mixed values and MISSING,
+including aliases, multiple keys and paging. INCLUDE MISSING catalog rendering and EXPLAIN
+eligibility, consumed=True and sort=elided travel in existing rows. Ordered cursor pages match
+the forced-sort control across complete duplicate prefixes and residual rejections on both
+transports; dynamic projections preserve full-result type inference. The NativeAOT sample checks
+selected consumption and LIMIT/OFFSET execution. No client API, capability, codec or frame changes.
+
 ## Contract-only dependencies
 
 Direct references are Database.Client, Documents.Protocol, Database.Types, Database.Protocol, Database.Execution and Connections. Wire contracts live in each model Protocol assembly, shared by client and engine. This client has no engine, area-root, storage, transaction, indexing, model parser or schema reference. Cache.Client remains an empty placeholder. Engine-free trimming and NativeAOT coverage lives in Database.Client/samples/Assimalign.Cohesion.Database.Client.AotSample.
@@ -30,6 +76,23 @@ Direct references are Database.Client, Documents.Protocol, Database.Types, Datab
 ## Client exception ownership
 
 `DocumentClientException` derives directly from `System.Exception`. It preserves constructors, wire codes, inner exception and connection-usability behavior. Its locally declared Diagnostics is never null: explicit diagnostics are defensively copied into a read-only snapshot, stably ordered by offset with unlocated entries last. SQL and Graph wrappers copy from DatabaseClientException or their own nested client exception. Documents retains its explicit diagnostics parameter and returns an empty collection when none was supplied. Engine-side DatabaseException remains in the area root; catching it intentionally no longer catches remote client failures.
+
+## Key join wire results (#1732)
+
+INNER/LEFT document-key JOIN and NEST use existing request text, JSON result cells and MISSING
+bits. DocumentKeyJoinWireTests checks per-source metadata, synthetic and qualified stars, correlated
+joins, unknown-key NEST arrays, EXPLAIN and located CD00016/CD01035/CD02028 refusals over InMemory
+and TCP. The NativeAOT consumer exercises both transports. No client API, capability, frame or version
+changes are needed; ordinary RAW numeric roots keep their existing JSON value shape.
+
+## FROM source results (#1731, OQ-Q2)
+
+Derived and uncorrelated expression FROM sources use the existing row/document frames on
+InMemory and TCP. Aliased stars wrap the source value under its alias; RAW source projections
+preserve mixed JSON kinds. META on a source without stored identity returns NULL. EXPLAIN
+includes DerivedSource/ExpressionSource and child plans. CD00015/CD01033 preserve their
+structured identity and leave an autocommit connection reusable. The NativeAOT guard exercises
+both source forms, mixed values, empty MISSING, star, metadata and EXPLAIN on both transports.
 
 ## Intent and dependencies
 
@@ -209,6 +272,18 @@ explicit transaction, and the pre-RETURNING completion predicate on both transpo
 autocommit retry and explicit disconnect cleanup. The malformed-peer zero-affected case has
 a valid decoded Complete and a matching result count, so it reaches ValidateCompletion's
 affected-count predicate directly.
+
+## GROUP AS and group aliases (#1729, OQ-G2)
+
+GROUP BY term aliases and GROUP AS use existing JSON result cells and headers. Each group-array
+member wraps the FROM value, UNNEST values and explicit group-term aliases; MISSING members
+are absent and NULL members remain. ARRAY/FIRST, quantified predicates, HAVING and ORDER BY
+execute on the server with their existing lexical scopes. Empty grouped results retain Json
+metadata for the group array. EXPLAIN describes aliases without execution. InMemory/TCP tests
+and the NativeAOT sample cover wrappers, scopes, owned results and empty metadata. CD00012,
+CD01030/CD01031 and wrapper-budget CD05018 use the existing structured Failure response and
+preserve the wire session. DML pending-buffer CD05018 (#1755) also retains unchanged documents
+and connection reuse on both transports. No production client API or frame change is needed.
 
 ## Failures and pooling
 
@@ -427,3 +502,11 @@ both require their own publish/execution evidence. No sample project reference c
 Unknown engine-resolved function names use ExecutionFailure rather than ParseFailure, with
 no StatementParseFailed event. Application callback timeout and I/O errors use the model
 callback diagnostic and leave the exact wire session reusable after a completed failure.
+
+## Projection depth recovery (#1731)
+
+Both evaluators derive depth from the serialized row shape: lone stars and RAW/VALUE are bare;
+other projections reserve one object level. Developer-function JSON follows the same check.
+Depth refusals preserve located CD05015 and the exact server session on InMemory and TCP.
+The row writer also translates its own depth failure with the statement span, allowing the
+existing terminal Failure path to recover even if evaluation missed an overdeep value.

@@ -19,6 +19,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlGroupAggregate.DebugView))]
 internal sealed class SqlGroupAggregate
 {
+    private readonly object _ordering;
     /// <summary>Initializes a bound aggregate call.</summary>
     /// <param name="call">The aggregate call as written.</param>
     /// <param name="function">The overload the call resolved to.</param>
@@ -28,11 +29,13 @@ internal sealed class SqlGroupAggregate
     /// <param name="database">The database whose statement runs the aggregate.</param>
     /// <param name="orderBy">The bound input ordering.</param>
     /// <param name="argumentCollations">The per-argument DISTINCT collations.</param>
+    /// <param name="filter">The predicate evaluated before any aggregate inputs.</param>
     internal SqlGroupAggregate(SqlFunctionCallExpression call, SqlAggregateFunction function,
-        SqlBoundExpression[] arguments, DatabaseType[]? targets, SqlBoundCollation collation, DatabaseName database, IReadOnlyList<SqlBoundOrdering> orderBy, IReadOnlyList<SqlBoundCollation> argumentCollations)
+        SqlBoundExpression[] arguments, DatabaseType[]? targets, SqlBoundCollation collation, DatabaseName database, IReadOnlyList<SqlBoundOrdering> orderBy, IReadOnlyList<SqlBoundCollation> argumentCollations,
+        SqlBoundExpression? filter)
     {
         ArgumentCollations = argumentCollations;
-        OrderBy = orderBy;
+        _ordering = filter is null ? orderBy : new FilteredOrdering(orderBy, filter);
         Call = call;
         Function = function;
         Arguments = arguments;
@@ -45,8 +48,10 @@ internal sealed class SqlGroupAggregate
     /// <summary>Gets each DISTINCT argument's own comparison collation.</summary>
     internal IReadOnlyList<SqlBoundCollation> ArgumentCollations { get; }
 
+    internal SqlBoundExpression? Filter => (_ordering as FilteredOrdering)?.Filter;
+
     /// <summary>Gets input ordering bound over the source row.</summary>
-    internal IReadOnlyList<SqlBoundOrdering> OrderBy { get; }
+    internal IReadOnlyList<SqlBoundOrdering> OrderBy => _ordering is FilteredOrdering filtered ? filtered.OrderBy : (IReadOnlyList<SqlBoundOrdering>)_ordering;
 
     /// <summary>Gets the aggregate call as written.</summary>
     internal SqlFunctionCallExpression Call { get; }
@@ -71,6 +76,8 @@ internal sealed class SqlGroupAggregate
 
     /// <summary>Gets the database whose statement runs the aggregate.</summary>
     internal DatabaseName Database { get; }
+
+    private sealed record FilteredOrdering(IReadOnlyList<SqlBoundOrdering> OrderBy, SqlBoundExpression Filter);
 
     private sealed class DebugView
     {

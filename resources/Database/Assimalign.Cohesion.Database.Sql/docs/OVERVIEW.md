@@ -1,5 +1,26 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
+Conservative implication also supports ON CONFLICT target-WHERE inference; EXPLAIN reports the
+selected index and proof. Unproven cases use the existing complete access paths (#1630).
+
+WITH RECURSIVE uses anchor-typed working-table iteration and shared demand-driven scans.
+Outer LIMIT and subquery demand can stop an infinite producer. The statement memory grant
+bounds retained rows and DISTINCT state, and cancellation releases every buffer (#1719).
+Single-pass readers reclaim consumed rows and obsolete working ranges. Windows consume
+completed inputs and report CS05067 when retained statement memory is exhausted.
+
+Foreign keys execute all five ON UPDATE actions on UPDATE, UPDATE FROM, ON CONFLICT DO UPDATE
+and MERGE, including self-references and mixed delete/update chains. RESTRICT checks immediately;
+NO ACTION accepts final-parent substitution. Conflicting cascade assignments report CS05085;
+all writes in a failed closure roll back (#1723). UPDATE_RULE exposes the persisted action.
+
+Ranking, distribution, NTILE and LAG/LEAD execute in a budgeted WindowAgg stage between
+HAVING and DISTINCT/ORDER BY/pagination, with named windows and shared compatible sorts
+(#1526, SQ-W1/SQ-W2/SQ-W3). ROWS, RANGE distances, GROUPS, exclusion, aggregate windows
+with FILTER and FIRST_VALUE/LAST_VALUE/NTH_VALUE execute over their frames. Native moving
+aggregates use inverse transitions or monotonic queues; NULL treatment is supported.
+
 ALTER COLUMN TYPE with optional COLLATE and USING converts original-row values through the
 shared exclusive rewrite, rechecks defaults/constraints/FKs and atomically replaces rows/indexes
 (#1447). This run executes inline; populated-table provisioning handoff follows in SQ-A3.
@@ -12,8 +33,8 @@ WITH NO DATA creates only the inferred definition. Failed builds leave no table 
 MERGE executes ordered actions, BY SOURCE and RETURNING/merge_action() within one statement
 rollback bracket. Repeated target modifications fail with CS05036. USING retains the existing
 read-source forms. FULL associations require a safe mandatory hash equality and complete ON
-safety proof (CS05070). SQ-M3 supplies concurrent-target rechecks and complete mixed-action
-final-state constraints (#1715).
+safety proof (CS05070). ReadCommitted rechecks concurrently changed targets and reselects ordered actions; Snapshot
+refuses them with CS04064. Foreign keys validate the composed final action state (#1715).
 
 ## Wire contract ownership
 
@@ -69,8 +90,10 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   full pool, so unrelated runtime retention cannot decide its bound (DESIGN, bounded build validation).
 - **SQL execution** — the declared dialect (`Database.Sql.Language/docs/DIALECT.md`)
   planned with rules and executed over stored, system and derived relations: `SELECT` with `WHERE`,
-  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST`, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates;
-  non-recursive `WITH` before SELECT/INSERT/UPDATE/DELETE, with ordered SELECT definitions
+  projection, INNER/LEFT/RIGHT/FULL/CROSS joins with parenthesized groups, RIGHT-to-LEFT normalization and bounded FULL hash execution, aliased derived sources, `ORDER BY` with per-key `NULLS FIRST/LAST` and costed forward/backward matching index scans, `LIMIT/OFFSET`, `DISTINCT`, grouping and aggregates, including GROUPING SETS, ROLLUP, CUBE and GROUPING masks;
+  `WITH [RECURSIVE]` before SELECT/INSERT/UPDATE/DELETE and plain `WITH` before MERGE
+  (recursive bodies execute demand-driven UNION ALL/DISTINCT fixpoints; WITH RECURSIVE
+  before MERGE reports CK00001 at RECURSIVE), with ordered SELECT definitions
   materialized once per statement and optional complete output column lists;
   `INSERT` (multi-row, whole-item `DEFAULT`, `DEFAULT VALUES`, nullability);
   `UPDATE` (including `SET c = DEFAULT`)/`DELETE` with correlated and uncorrelated WHERE subqueries and accurate
@@ -125,11 +148,11 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
   strings, and ignores trailing spaces for comparison, grouping and index keys. CHAR-to-text
   casts and concatenation strip padding; LENGTH ignores it, while LIKE sees padded input.
   Domains and function parameters/results preserve their CHAR lengths. Compiled schemas use
-  format v8; result-header format 2 carries Character identity and the declared length.
+  format v11; result-header format 2 carries Character identity and the declared length.
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 27). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 32). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.
@@ -265,7 +288,7 @@ physical index registrations exported by `Database.Indexing`.
 
 - **Fixed-length characters** — columns retain Character identity and length; domains and
   function signatures retain CHAR(n). The [current record-space format](../../Assimalign.Cohesion.Database.Sql/docs/DESIGN.md#execution-model)
-  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v8.
+  retains this identity and trimmed index keys; applied and pending compiled documents use schema format v11.
 
 - **Metadata model** — table descriptions with stable `ObjectId`s, ordered columns
   typed by the shared type system (`DatabaseTypeInfo`), nullability, default
@@ -315,6 +338,15 @@ var users = await catalog.CreateTableAsync("dbo", "users", new[]
 
 See [DESIGN.md](DESIGN.md) for the persistence model and decisions.
 
+
+Standalone sequences have internal catalog objects and share the identity allocator (#1717,
+SQ-S1). SQ-S2 delivers CREATE/ALTER/DROP SEQUENCE, NEXT VALUE FOR, nextval/currval/setval/lastval,
+REGCLASS references and INFORMATION_SCHEMA.SEQUENCES. SQL format 30 stores definitions and reservations.
+Identity columns now own catalog sequences, including SERIAL aliases, identity ALTER/RESTART,
+OVERRIDING and recoverable populated-table backfill (SQ-S3). Column nextval and NEXT VALUE FOR
+defaults retain dependencies. The shared allocator reserves up to 32 values before use, retaining rollback
+and recovery gaps, and serialize allocation engine-wide. CACHE is stored without per-session
+caches. See DESIGN for option defaults, incarnation checks and the lock order.
 
 ## Storage component
 
@@ -378,7 +410,8 @@ Access selection compares bounded snapshot-visible index probes without stored s
 Broad safe equijoins can build an in-memory hash table; unique and small indexed probes retain
 nested loops. LEFT semantics, duplicate matches, SQL equality and full residual evaluation remain.
 The positive StatementMemoryBudget engine option defaults to 64 MiB and limits concurrent live
-hash builds per statement; CS05067 (SQLSTATE 53200) refuses excess memory, without spill.
+hash builds and grouping-set aggregate states per statement; CS05067 (SQLSTATE 53200)
+refuses excess memory, without spill.
 Plain EXPLAIN reports estimates without executing its data statement. SELECT-only EXPLAIN ANALYZE
 executes to report candidate work in the same eight-column description; unavailable counts remain
 NULL. Correlated child work accumulates on its own nodes and is excluded from the parent's count;
@@ -434,7 +467,7 @@ and SDK extraction therefore retain identical ArgumentException text and the `va
 without a resource lookup on successful rendering. SQL explanatory message fragments also use
 resources. SDK compiler identifiers remain `COHDBSDK`; embedded runtime identities use `CK00001`
 for language syntax and `CS03101` for unsupported principal declarations. Schema format remains
-`cohesion/database-schema/v8`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
+`cohesion/database-schema/v11`; SQLSTATE, wire, diagnostics carriers and public APIs are unchanged.
 
 
 The shared Types module also binds modifier-refusal templates to each consumer's own generated

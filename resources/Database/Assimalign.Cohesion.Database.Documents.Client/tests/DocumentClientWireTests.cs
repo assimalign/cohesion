@@ -251,6 +251,9 @@ public sealed class DocumentClientWireTests
         var grouped = await connection.QueryAsync("SELECT d.group AS category, COUNT(*) AS n, SUM(d.score) AS total, AVG(d.score) AS average, MIN(d.score) AS low, MAX(d.score) AS high FROM items d GROUP BY d.group HAVING SUM(d.score) > 2 ORDER BY total DESC", cancellationToken: harness.Token);
         grouped.ShouldHaveSingleItem().ToArray().ShouldBe(new object?[] { "A", 2L, 6m, 3m, 2m, 4m });
         var expanded = await connection.QueryAsync("SELECT t, COUNT(*) AS n FROM items d UNNEST d.array t GROUP BY t ORDER BY t", cancellationToken: harness.Token);
+        var wrappers = await connection.QueryAsync("SELECT key, ARRAY_LENGTH(g) AS n FROM items d GROUP BY d.group AS key GROUP AS g HAVING ANY r IN g SATISFIES r.d.score > 0 END ORDER BY key", cancellationToken: harness.Token);
+        wrappers.Select(row => row[0]).ShouldBe(new object?[] { "A", "B" });
+        wrappers.Select(row => row[1]).ShouldBe(new object?[] { 2L, 1L });
         expanded.Select(row => row.ToArray()).ShouldBe(new[] { new object?[] { null, 1L }, new object?[] { 9m, 1L } });
         (await connection.QueryAsync("SELECT name FROM items d WHERE ANY t IN d.array SATISFIES t = 9 END", cancellationToken: harness.Token))
             .ShouldHaveSingleItem()[0].ShouldBe("Ada");

@@ -481,6 +481,7 @@ public sealed class KeyValueDatabase : DatabaseInstance
         if (error is DatabaseException { Diagnostics: [{ Code: "CV06105" }, ..] }) { return error; }
         return error switch
         {
+            _ when DatabaseFailure.TranslateUndoFailure(error) is { } undo => undo,
             _ when DatabaseFailure.IsStorageFailure(error) => new DatabaseException(error.Message, [new Types.Diagnostic
             { Code = "CV06105", Message = error.Message, Severity = Types.DiagnosticSeverity.Error }], error),
             _ => error,

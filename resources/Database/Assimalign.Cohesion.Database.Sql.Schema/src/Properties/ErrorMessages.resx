@@ -32,6 +32,7 @@
   <data name="ValidatorValidateTableConstraintsVoid" xml:space="preserve"><value>The constraint entry cannot be null.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid2" xml:space="preserve"><value>The constraint name is declared more than once.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid3" xml:space="preserve"><value>Constraint kind '{0}' is not defined.</value></data>
+  <data name="UpdateActionInvalid" xml:space="preserve"><value>The update action must be a defined foreign-key action; CHECK constraints require NO ACTION.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid4" xml:space="preserve"><value>The referential delete action is invalid for this constraint.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid5" xml:space="preserve"><value>Referenced table '{0}' is not declared.</value></data>
   <data name="ValidatorValidateTableConstraintsVoid6" xml:space="preserve"><value>A reference must pair every local column with one referenced column.</value></data>
@@ -51,6 +52,9 @@
   <data name="SchemaValidatorValidateIndexesVoid" xml:space="preserve"><value>The index entry cannot be null.</value></data>
   <data name="SchemaValidatorValidateIndexesVoid2" xml:space="preserve"><value>The index name is declared more than once.</value></data>
   <data name="SchemaValidatorValidateIndexesVoid3" xml:space="preserve"><value>An index must declare at least one column or field.</value></data>
+  <data name="IndexKeyOrderInvalid" xml:space="preserve">
+    <value>Index key orders must match the key columns and contain only supported directions and NULL placements; primary keys require the default order.</value>
+  </data>
   <data name="ValidatorValidateMemberNamesVoid" xml:space="preserve"><value>The same column or field is named more than once.</value></data>
   <data name="ValidatorValidateMemberNamesVoid2" xml:space="preserve"><value>The column or field is not declared.</value></data>
   <data name="ValidatorValidateTypeReferenceVoid" xml:space="preserve"><value>Database type '{0}' is not a supported stored value type.</value></data>

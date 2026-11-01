@@ -15,7 +15,7 @@ internal sealed partial class SqlPlanner
     /// no rows. Value-dependent conversions are checked by the shared insert path.
     /// </summary>
     private SqlInsertSelectPlan PlanInsertSelect(SqlCatalogTable table, IReadOnlyList<int> targetOrdinals,
-        SqlQueryBodyExpression source)
+        SqlQueryBodyExpression source, SqlIdentityOverride overriding = SqlIdentityOverride.None)
     {
         var plan = PlanQuery(source);
         var projections = InsertSourceProjections(plan);
@@ -33,8 +33,11 @@ internal sealed partial class SqlPlanner
                 throw new SqlPlanningException("CS05013",
                     string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.SqlPlannerPlanInsertSelectSqlPlanning, i + 1, sourceType, target.Name, target.Type.Type), source.Location);
             }
+            if (target.Identity is not null && overriding == SqlIdentityOverride.User)
+            { ValidateIgnoredIdentityInput(target, sourceType, projections[i].Value, projections[i].Expression); }
         }
-        return new SqlInsertSelectPlan(table, targetOrdinals, plan);
+        return overriding == SqlIdentityOverride.None ? new SqlInsertSelectPlan(table, targetOrdinals, plan)
+            : new SqlIdentityInsertSelectPlan(table, targetOrdinals, plan, overriding);
     }
 
     /// <summary>Reads projected types through the closed query plan family.</summary>

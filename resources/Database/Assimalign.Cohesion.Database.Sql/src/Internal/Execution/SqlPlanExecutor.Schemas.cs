@@ -13,6 +13,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanExecutor
 {
+    internal static Action? SchemaDefinitionLeaseEntered { get; set; }
     private async Task<DatabaseResult> ExecuteCreateSchemaAsync(SqlCreateSchemaPlan plan, SqlStatementContext statement, CancellationToken cancellationToken)
     {
         if (SqlNamespaces.Find(_catalog, plan.Name) is not null)
@@ -40,28 +41,38 @@ internal sealed partial class SqlPlanExecutor
         var snapshot = _catalog.CaptureSnapshot();
         var schema = snapshot.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var contents = ObjectsInNamespace(snapshot, plan.Name);
+        var sequences = snapshot.Sequences.Where(s => s.Schema.Equals(plan.Name, StringComparison.OrdinalIgnoreCase)).OrderBy(s => s.ObjectId).ToArray();
         if (!plan.Cascade && contents.Views.Length != 0)
         { throw new SqlPlanningException("CS03302", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineViewDropDependent, plan.Name, contents.Views[0].Schema, contents.Views[0].Name)); }
-        if (!plan.Cascade && contents.Tables.Length != 0)
+        if (!plan.Cascade && (contents.Tables.Length != 0 || sequences.Length != 0))
         {
             throw new SqlPlanningException("CS03030", string.Format(CultureInfo.CurrentCulture, ErrorMessages.EngineNamespaceDependentObjects, plan.Name));
         }
         // Definition DDL must never wait for transaction locks under its metadata lease:
         // a deferred migration owns table reservations and waits for that lease between steps.
+        foreach (var sequence in sequences)
+        {
+            BeforeSequenceDdlLock?.Invoke();
+            await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
+                LockResource.Object(sequence.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
+            SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
+        }
         foreach (var table in contents.AffectedTables)
         {
             await statement.Coordinator.LockManager.AcquireAsync(statement.DdlLockOwner,
                 LockResource.Object(table.ObjectId), LockMode.Exclusive, cancellationToken).ConfigureAwait(false);
         }
+        SqlSequenceExecution.CheckGrant(statement, statement.DdlLockOwner);
         using var metadata = statement.DdlInterlock is { } interlock
             ? statement.ProvisioningSchema is not null
                 ? await interlock.EnterMetadataAsync(definition: true, cancellationToken).ConfigureAwait(false)
                 : interlock.EnterMetadata(statement.DatabaseName, definition: true)
             : null;
+        SchemaDefinitionLeaseEntered?.Invoke();
         var current = _catalog.CaptureSnapshot();
         var currentSchema = current.Namespaces.FirstOrDefault(value => value.Name.Equals(plan.Name, StringComparison.OrdinalIgnoreCase));
         var currentContents = ObjectsInNamespace(current, plan.Name);
-        if (!ReferenceEquals(schema, currentSchema) || !contents.Tables.SequenceEqual(currentContents.Tables) ||
+        if (!sequences.SequenceEqual(current.Sequences.Where(s => s.Schema.Equals(plan.Name, StringComparison.OrdinalIgnoreCase)).OrderBy(s => s.ObjectId)) || !ReferenceEquals(schema, currentSchema) || !contents.Tables.SequenceEqual(currentContents.Tables) ||
             !contents.AffectedTables.SequenceEqual(currentContents.AffectedTables) || !contents.Indexes.SequenceEqual(currentContents.Indexes) || !contents.Views.SequenceEqual(currentContents.Views))
         {
             // The statement's ordinary cleanup releases its complete lock set. Never publish
@@ -117,6 +128,8 @@ internal sealed partial class SqlPlanExecutor
         var tables = new List<SqlCatalogTable>();
         var affected = new List<SqlCatalogTable>();
         var indexes = new List<SqlCatalogIndex>();
+        var sequenceDependencies = snapshot.Sequences.Where(sequence => sequence.Schema.Equals(name, StringComparison.OrdinalIgnoreCase))
+            .Select(sequence => SqlSequenceDefault.Dependency(sequence.ObjectId)).ToHashSet(StringComparer.Ordinal);
         foreach (var table in snapshot.Tables)
         {
             if (table.Schema.Equals(name, StringComparison.OrdinalIgnoreCase))
@@ -126,7 +139,8 @@ internal sealed partial class SqlPlanExecutor
                 indexes.AddRange(snapshot.GetIndexes(table.ObjectId));
             }
             else if (table.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference &&
-                name.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase)))
+                name.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase)) ||
+                table.Columns.Any(column => column.DefaultFunctionCalls.Any(sequenceDependencies.Contains)))
             {
                 affected.Add(table);
             }

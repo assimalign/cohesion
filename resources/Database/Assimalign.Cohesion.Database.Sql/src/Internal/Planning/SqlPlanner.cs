@@ -40,8 +40,31 @@ internal sealed partial class SqlPlanner
     private readonly SqlFunctionEnvironment _functions;
 
     /// <summary>Backs <see cref="ScopelessEvaluator"/>.</summary>
-    private SqlExpressionEvaluator? _scopelessEvaluator;
+    // Ordinary planners retain their original one-reference cache. Sequence planning alone
+    // wraps that cache with usage metadata, so adding the SQL surface costs no ordinary bytes.
+    private object? _scopelessState;
     private bool _containsLike;
+
+    private SqlExpressionEvaluator? CachedScopelessEvaluator
+    {
+        get => _scopelessState is SqlSequenceUsage usage ? usage.Evaluator : _scopelessState as SqlExpressionEvaluator;
+        set
+        {
+            if (_scopelessState is SqlSequenceUsage usage) { usage.Evaluator = value; }
+            else { _scopelessState = value; }
+        }
+    }
+
+    private SqlSequenceUsage? SequenceUsage
+    {
+        get => _scopelessState as SqlSequenceUsage;
+        set
+        {
+            var evaluator = CachedScopelessEvaluator;
+            if (value is not null) { value.Evaluator = evaluator; _scopelessState = value; }
+            else { _scopelessState = evaluator; }
+        }
+    }
 
     /// <summary>Initializes a planner for one statement.</summary>
     /// <param name="catalog">The database's catalog.</param>
@@ -103,7 +126,10 @@ internal sealed partial class SqlPlanner
             var referenced = FindReferencedCommonTables(expression);
             _commonTableState = referenced is null ? null : new CommonTableState(referenced);
             var plan = PlanCore(expression);
+            plan.ContainsRecursion = _commonTableState?.HasRecursion == true;
             plan.ContainsLike = _containsLike;
+            if (SequenceUsage is { } usage)
+            { usage.Evaluator = null; plan = new SqlSequenceScopePlan(plan, usage) { ContainsLike = _containsLike }; }
             return plan;
         }
         catch (SqlEvaluationException exception) when (exception.Diagnostics[0].Start is null && expression.Location is not null)
@@ -122,6 +148,7 @@ internal sealed partial class SqlPlanner
             SqlInsertExpression { CommonTables.Count: > 0 } insert => PlanCommonTables(insert.CommonTables, insert),
             SqlUpdateExpression { CommonTables.Count: > 0 } update => PlanCommonTables(update.CommonTables, update),
             SqlDeleteExpression { CommonTables.Count: > 0 } delete => PlanCommonTables(delete.CommonTables, delete),
+            SqlMergeExpression { CommonTables.Count: > 0 } merge => PlanCommonTables(merge.CommonTables, merge),
             _ => PlanStatementCore(expression),
         };
 
@@ -132,6 +159,7 @@ internal sealed partial class SqlPlanner
         ValidateFunctionCalls(expression);
         return expression switch
         {
+            SqlCreateSequenceExpression or SqlAlterSequenceExpression or SqlDropSequenceExpression => new SqlSequencePlan(expression),
             SqlCreateFunctionExpression or SqlDropFunctionExpression or SqlCreateDomainExpression or SqlDropDomainExpression
                 => new SqlDefinitionPlan(expression),
             SqlQueryBodyExpression query => PlanQuery(query),
@@ -164,6 +192,7 @@ internal sealed partial class SqlPlanner
     /// <summary>Binds a SELECT whose subqueries have already been lowered to value slots.</summary>
     private SqlPlan PlanSelectCore(SqlSelectExpression select)
     {
+        ValidateNamedWindows(select);
         if (select.Where is not null && ContainsAggregate(select.Where))
         {
             throw new SqlPlanningException("CS05017", ErrorMessages.SqlPlannerPlanSelectCoreSqlPlanning, select.Where?.Location);
@@ -195,6 +224,8 @@ internal sealed partial class SqlPlanner
             return PlanGroup(select, table, systemView, columns, bindings, evaluator, steps, tree);
         }
 
+        ValidateWindowDefinitions(select, evaluator);
+        if (HasWindows(select)) { return PlanWindowSelect(select, table, systemView, columns, bindings, evaluator, steps, outputOrdinals, tree); }
         var projections = BindProjections(select.Columns, columns, evaluator, outputOrdinals);
 
         SqlBoundExpression? where = null;
@@ -239,7 +270,7 @@ internal sealed partial class SqlPlanner
             BindCount(select.Limit, LimitClause(select)),
             BindCount(select.Offset, "OFFSET"),
             select.IsDistinct,
-            SelectAccessPath(table!, select.Where, OuterScope is null ? null : evaluator), orderByProjections);
+            SelectOrderedAccessPath(table!, select, projections, ordering, where, evaluator), orderByProjections);
     }
 
     /// <summary>Resolves a read source and requests the statement's one catalog image at binding time.</summary>
@@ -359,12 +390,21 @@ internal sealed partial class SqlPlanner
     /// choice can cost performance but never correctness.
     /// </summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope = null)
-        => SelectAccessPath(table, where is null ? [] : [where], scope);
+        => SelectAccessPath(table, where, scope, out _);
+
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, SqlExpression? where, SqlExpressionEvaluator? scope,
+        out Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates)
+        => SelectAccessPath(table, where is null ? [] : [where], scope, out predicates);
 
     // A caller may supply only the conjuncts applicable to its input and that input's scope.
     // Keep predicate collection independent of SELECT/DML binding (and of future join pushdown).
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope)
+        => SelectAccessPath(table, conjuncts, scope, out _);
+
+    private SqlAccessPath SelectAccessPath(SqlCatalogTable table, IReadOnlyList<SqlExpression> conjuncts, SqlExpressionEvaluator? scope,
+        out Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>? predicates)
     {
+        predicates = null;
         if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || conjuncts.Count == 0 || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
@@ -378,22 +418,30 @@ internal sealed partial class SqlPlanner
         }
 
         // Top-level AND conjuncts → per-column sargable predicates.
-        var predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
+        predicates = new Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>>();
         foreach (var conjunct in conjuncts) { CollectSargablePredicates(table, conjunct, predicates, scope); }
 
-        if (predicates.Count == 0)
+        if (predicates.Count == 0 && !HasPartialIndexes(indexes))
         {
             return SqlScanPath.Instance;
         }
 
-        return SelectAccessPath(table, predicates, indexes);
+        IReadOnlyList<SqlBoundExpression>? restrictions = null;
+        if (HasPartialIndexes(indexes))
+        {
+            scope ??= new SqlExpressionEvaluator(table.Columns, _parameters, defaultCollation: _catalog.DefaultCollation,
+                functions: _functions, cancellationToken: _cancellationToken, foldConstants: false);
+            restrictions = conjuncts.Select(scope.BindPredicate).ToArray();
+        }
+        return SelectAccessPath(table, predicates, indexes, restrictions);
     }
 
     /// <summary>Shares seek ranking with join inputs whose restrictions are already bound.</summary>
     private SqlAccessPath SelectAccessPath(SqlCatalogTable table,
-        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null)
+        Dictionary<int, List<(SqlBinaryOperator Op, object? Value)>> predicates, IReadOnlyList<SqlCatalogIndex>? indexes = null,
+        IReadOnlyList<SqlBoundExpression>? restrictions = null, int offset = 0)
     {
-        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 || _commonTableState?.BindingUnused == true)
+        if (_queryScopes?.DeferQueryEvaluation == true || ViewDefinitionBinding is not null || _inferringTableOutput && !_tableAsWithData || predicates.Count == 0 && restrictions is null || _commonTableState?.BindingUnused == true)
         {
             return SqlScanPath.Instance;
         }
@@ -406,13 +454,21 @@ internal sealed partial class SqlPlanner
 
         foreach (var index in indexes.OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase))
         {
+            string? proof = null;
+            if (index.Predicate is not null)
+            {
+                if (restrictions is null || ProvePartialIndex(table, index, restrictions, offset) is not { } proven) { continue; }
+                proof = proven;
+            }
             var seek = TryBuildSeek(table, index, predicates, out int prefixLength, out bool hasRange);
 
             if (seek is null)
             {
-                continue;
+                if (proof is null) { continue; }
+                seek = new SqlIndexSeekPath(index, [], null, null);
             }
 
+            if (proof is not null) { seek = new SqlPartialIndexSeekPath(index, seek.EqualityValues, seek.Lower, seek.Upper, proof); }
             if (firstCandidate is null) { firstCandidate = seek; }
             else
             {
@@ -697,8 +753,8 @@ internal sealed partial class SqlPlanner
             return;
         }
 
-        // Physical IEEE keys distinguish signed zero; SQL equality combines them.
-        // A single encoded equality probe would omit the other zero representation.
+        // Retain the existing conservative signed-zero probe admission. SQL keys
+        // now canonicalize zero signs (#1631); widening the predicate matrix is separate work.
         if (value is double doubleValue && doubleValue == 0d || value is float floatValue && floatValue == 0f)
         {
             return;
@@ -716,8 +772,8 @@ internal sealed partial class SqlPlanner
     /// <summary>
     /// Range seeks require evaluator order to match encoded byte order. String
     /// predicates also pass the effective-collation compatibility check above.
-    /// Guid, binary and JSON remain equality-only. Floating keys place NaN last,
-    /// unlike SQL comparison, so even finite range bounds require a scan.
+    /// Guid, binary and JSON remain equality-only. Floating range admission stays
+    /// conservative in this run, although SQL key order now matches the comparer (#1631).
     /// </summary>
     private static bool IsRangeSargable(DatabaseType type) => type switch
     {
@@ -737,6 +793,7 @@ internal sealed partial class SqlPlanner
         }
 
         var table = ResolveTable(insert.Table);
+        RecordIdentityUsage(table);
 
         IReadOnlyList<int> targetOrdinals;
 
@@ -762,7 +819,7 @@ internal sealed partial class SqlPlanner
         for (int index = 0; index < targetOrdinals.Count && !insert.IsDefaultValues; index++)
         {
             var column = table.Columns[targetOrdinals[index]];
-            if (column.Identity is not { IsAlways: true }) { continue; }
+            if (column.Identity is not { IsAlways: true } || insert.Overriding != SqlIdentityOverride.None) { continue; }
             if (insert.SelectSource is not null)
             {
                 throw SqlPlanningException.IdentityViolation(column.Name, ErrorMessages.IdentityInsertForbidden);
@@ -779,14 +836,14 @@ internal sealed partial class SqlPlanner
         var onConflict = BindOnConflict(insert, table);
         if (insert.SelectSource is not null)
         {
-            var plan = PlanInsertSelect(table, targetOrdinals, insert.SelectSource);
+            var plan = PlanInsertSelect(table, targetOrdinals, insert.SelectSource, insert.Overriding);
             return plan with { Returning = returning, OnConflict = onConflict };
         }
 
         if (insert.IsDefaultValues)
         {
             // Validate any column list above, then omit every column through the shared INSERT path.
-            return new SqlInsertPlan(table, [], [Array.Empty<SqlBoundExpression>()]) { Returning = returning, OnConflict = onConflict };
+            return InsertPlan(table, [], [Array.Empty<SqlBoundExpression>()], insert.Overriding, returning, onConflict);
         }
 
         foreach (var row in insert.Values!)
@@ -821,14 +878,22 @@ internal sealed partial class SqlPlanner
             var bound = new SqlBoundExpression[row.Count];
             for (int ordinal = 0; ordinal < bound.Length; ordinal++)
             {
-                bound[ordinal] = row[ordinal] is SqlDefaultExpression
-                    ? SqlBoundDefaultItem.Instance : ScopelessEvaluator.Bind(row[ordinal]);
+                var expression = row[ordinal];
+                bool ignored = insert.Overriding == SqlIdentityOverride.User && table.Columns[targetOrdinals[ordinal]].Identity is not null && expression is not SqlDefaultExpression;
+                var value = expression is SqlDefaultExpression ? SqlBoundDefaultItem.Instance
+                    : ignored ? ScopelessEvaluator.BindIgnoredIdentityInput(expression) : ScopelessEvaluator.Bind(expression);
+                if (ignored)
+                {
+                    ValidateIgnoredIdentityInput(table.Columns[targetOrdinals[ordinal]], ScopelessEvaluator.StaticTypeOf(expression), value, expression);
+                    value = SqlBoundDefaultItem.Instance;
+                }
+                bound[ordinal] = value;
             }
 
             rows[index] = bound;
         }
 
-        return new SqlInsertPlan(table, targetOrdinals, rows) { Returning = returning, OnConflict = onConflict };
+        return InsertPlan(table, targetOrdinals, rows, insert.Overriding, returning, onConflict);
     }
 
     /// <summary>
@@ -873,7 +938,7 @@ internal sealed partial class SqlPlanner
     /// The empty column scope that VALUES rows and LIMIT/OFFSET counts bind and evaluate against,
     /// created on first use and shared by the statement.
     /// </summary>
-    private SqlExpressionEvaluator ScopelessEvaluator => _scopelessEvaluator ??=
+    private SqlExpressionEvaluator ScopelessEvaluator => CachedScopelessEvaluator ??=
         new SqlExpressionEvaluator(Array.Empty<SqlCatalogColumn>(), _parameters, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken, foldConstants: FoldQueryConstants);
 
     /// <summary>Whether <c>*</c> appears anywhere in an expression, outside a subquery.</summary>
@@ -921,6 +986,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanUpdate(SqlUpdateExpression update)
     {
         var (table, evaluator, source, queries) = BindDmlSources(update.Table, update.From, update.Where, update);
+        RecordReferentialSequenceUsage(table, deleting: false);
 
         var assignments = new List<(int Ordinal, SqlBoundExpression Value)>(update.Assignments.Count);
         var assigned = new HashSet<int>();
@@ -933,12 +999,13 @@ internal sealed partial class SqlPlanner
                 throw new SqlPlanningException("CS01019", string.Format(CultureInfo.CurrentCulture,
                     ErrorMessages.DuplicateAssignment, assignment.ColumnName), assignment.Value.Location);
             }
-            if (table.Columns[ordinal].Identity is { IsAlways: true })
+            if (table.Columns[ordinal].Identity is { IsAlways: true } && assignment.Value is not SqlDefaultExpression)
             {
                 throw SqlPlanningException.IdentityViolation(assignment.ColumnName, ErrorMessages.IdentityUpdateForbidden);
             }
             if (assignment.Value is SqlDefaultExpression)
             {
+                RecordColumnSequenceUsage(table, table.Columns[ordinal]);
                 assignments.Add((ordinal, SqlBoundDefaultItem.Instance));
                 continue;
             }
@@ -974,6 +1041,7 @@ internal sealed partial class SqlPlanner
     private SqlPlan PlanDelete(SqlDeleteExpression delete)
     {
         var (table, evaluator, source, queries) = BindDmlSources(delete.Table, delete.Using, delete.Where, delete);
+        RecordReferentialSequenceUsage(table);
 
         SqlBoundExpression? where = null;
         if (delete.Where is not null)
@@ -1073,6 +1141,15 @@ internal sealed partial class SqlPlanner
 
     private string? ResolveDefaultLiteral(SqlExpression expression, SqlType type, string columnName, string table)
     {
+        if (SqlSequenceDefault.IsCandidate(expression))
+        {
+            var sequence = SqlSequenceDefault.Resolve(_catalog, expression);
+            (SequenceUsage ??= new()).Names.Add(sequence.ObjectId);
+            if (!CanAssignInsertType(DatabaseType.Int64, type.Storage.Type))
+            { throw new SqlPlanningException("CS05013", string.Format(CultureInfo.CurrentCulture, ErrorMessages.DefaultTypeIncompatible, columnName, DatabaseType.Int64, type.Storage.Type), expression.Location); }
+            if (expression is SqlNextValueExpression) { return SqlExpressionRenderer.Render(expression); }
+            return "nextval(" + sequence.ObjectId.ToString(CultureInfo.InvariantCulture) + ")";
+        }
         if (expression is SqlLiteralExpression { LiteralType: SqlLiteralType.Null })
         {
             return type.DefaultLiteral is null ? null : "NULL";
@@ -1146,6 +1223,12 @@ internal sealed partial class SqlPlanner
     {
         if (text is null) { return []; }
         var expression = SqlPersistedExpression.Load(text, "DEFAULT");
+        if (SqlSequenceDefault.IsCandidate(expression))
+        {
+            var sequence = SqlSequenceDefault.Resolve(_catalog, expression);
+            (SequenceUsage ??= new()).Names.Add(sequence.ObjectId);
+            return [SqlSequenceDefault.Dependency(sequence.ObjectId)];
+        }
         var scope = new SqlExpressionEvaluator([], null, defaultCollation: _catalog.DefaultCollation, functions: _functions, cancellationToken: _cancellationToken);
         return SqlDefinitionBinder.FunctionCalls(expression, scope);
     }
@@ -1202,7 +1285,8 @@ internal sealed partial class SqlPlanner
             }
         }
 
-        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists);
+        var partial = create.Predicate is null ? null : SqlPartialIndexPredicate.Declare(table, create, _catalog.DefaultCollation, _functions);
+        return new SqlCreateIndexPlan(table, create.IndexName, create.Columns, create.IsUnique, create.IfNotExists, create.KeyOrders.Select(order => (SqlCatalogIndexKeyOrder)order).ToArray(), partial);
     }
 
     private SqlDropIndexPlan PlanDropIndex(SqlDropIndexExpression drop)
@@ -1232,6 +1316,7 @@ internal sealed partial class SqlPlanner
             SqlAlterDropColumnAction drop => new SqlDropColumnPlan(schema, alter.Table.TableName, drop.ColumnName),
             SqlAlterAddConstraintAction add => new SqlAddConstraintPlan(ResolveTable(alter.Table), add.Constraint),
             SqlAlterDropConstraintAction drop => new SqlDropConstraintPlan(ResolveTable(alter.Table), drop.ConstraintName),
+            SqlAlterIdentityAction change => new SqlAlterIdentityPlan(ResolveTable(alter.Table), change),
             SqlAlterColumnAction change => PlanAlterColumn(alter.Table, change),
             SqlAlterColumnTypeAction change => PlanAlterColumnType(alter.Table, change),
             SqlAlterRenameTableAction rename => new SqlRenamePlan(ResolveTable(alter.Table), null, rename.NewName),
@@ -1333,6 +1418,7 @@ internal sealed partial class SqlPlanner
             throw new SqlPlanningException("CS01014", string.Format(CultureInfo.CurrentCulture, ErrorMessages.TableMissing, schema, table));
         }
         var identity = ResolveIdentity(add.Column, type.Storage, current.Columns.Any(column => column.Identity is not null));
+        if (identity is not null) { SequenceUsage ??= new(); }
         string? defaultLiteral = identity is null ? ResolveDefaultLiteral(add.Column, $"{schema}.{table}") : null;
         return new SqlAddColumnPlan(
             schema,
@@ -1411,6 +1497,7 @@ internal sealed partial class SqlPlanner
     /// <exception cref="SqlEvaluationException">The name is neither a built-in type nor a registered domain (<c>CS02010</c>).</exception>
     internal static SqlType ResolveCastTarget(SqlCastExpression cast, SqlTypeCatalog types)
     {
+        if (cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase)) { return SqlType.BigInt; }
         if (cast.TargetTypeInfo is { } builtIn)
         {
             return SqlType.ForStorage(builtIn);
@@ -1541,7 +1628,17 @@ internal sealed partial class SqlPlanner
             if (evaluator.IsBoundValue(expression)) { return; }
             throw new SqlPlanningException("CS01053", ErrorMessages.MergeActionContext, expression.Location);
         }
+        if (expression is SqlFunctionCallExpression grouping && IsGrouping(grouping))
+        {
+            if (evaluator.IsBoundValue(expression) || evaluator.OuterGrouping(grouping) is not null) { return; }
+            throw new SqlPlanningException("CS05074", ErrorMessages.GroupingPlacement, expression.Location);
+        }
         bool isBound = boundSubqueries is not null && boundSubqueries.ContainsKey(expression);
+        if (expression is SqlFunctionCallExpression { Filter: not null } filtered &&
+            !evaluator.Functions.Catalog.IsAggregate(filtered.FunctionName))
+        {
+            throw new SqlPlanningException("CS05072", ErrorMessages.FilterRequiresAggregate, filtered.Location);
+        }
         switch (expression)
         {
             case SqlParameterExpression parameter when !evaluator.TryGetParameterValue(parameter, out _):
@@ -1709,6 +1806,7 @@ internal sealed partial class SqlPlanner
     private static void ValidateCast(SqlCastExpression cast, SqlExpressionEvaluator evaluator,
         IReadOnlyDictionary<SqlExpression, DatabaseType>? boundSubqueries, IReadOnlyDictionary<SqlExpression, int>? boundValues)
     {
+        if (cast.TargetType.Equals("REGCLASS", StringComparison.OrdinalIgnoreCase)) { return; }
         var types = evaluator.Functions.Types;
         var target = ResolveCastTarget(cast, types);
         // Reuse the binder's CASE, arithmetic and aggregate result inference, while an
@@ -1743,11 +1841,13 @@ internal sealed partial class SqlPlanner
         {
             SqlParameterExpression => true,
             SqlCollateExpression collate => CastTypeDependsOnParameter(collate.Operand, evaluator),
-            SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate } sign
+            SqlUnaryExpression { Operator: SqlUnaryOperator.Plus or SqlUnaryOperator.Negate or SqlUnaryOperator.BitwiseNot } sign
                 => CastTypeDependsOnParameter(sign.Operand, evaluator),
             SqlBinaryExpression { Operator: SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo } arithmetic
                 => CastTypeDependsOnParameter(arithmetic.Left, evaluator) || CastTypeDependsOnParameter(arithmetic.Right, evaluator),
+            SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator)
+                => CastTypeDependsOnParameter(bitwise.Left, evaluator) || CastTypeDependsOnParameter(bitwise.Right, evaluator),
             SqlCaseExpression conditional => conditional.WhenClauses.Any(clause => CastTypeDependsOnParameter(clause.Result, evaluator))
                 || conditional.ElseResult is not null && CastTypeDependsOnParameter(conditional.ElseResult, evaluator),
             SqlFunctionCallExpression call when evaluator.CallResultDependsOnArguments(call)
@@ -1806,10 +1906,13 @@ internal sealed partial class SqlPlanner
             SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? evaluator.TryResolveCastTarget(cast)?.Storage.Type,
             SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
             SqlLogicalExpression => DatabaseType.Boolean,
+            SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator) => evaluator.StaticTypeOf(json),
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
+            SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator) => evaluator.StaticTypeOf(bitwise),
+            SqlUnaryExpression { Operator: SqlUnaryOperator.BitwiseNot } bitwise => evaluator.StaticTypeOf(bitwise),
             SqlBinaryExpression { Operator: not (SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply
                 or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo) } => DatabaseType.Boolean,
-            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
+            SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlExistsExpression => DatabaseType.Boolean,
             SqlSubqueryExpression when boundSubqueries is not null && boundSubqueries.TryGetValue(expression, out var type) => type,
             // A scalar call's resolved result type: UPPER and LOWER take their argument's type, so
             // UPPER over text is text. CAST's binder fallback also types aggregate results.
@@ -1826,6 +1929,12 @@ internal sealed partial class SqlPlanner
     /// <summary>Whether a projection or an ordering key of a SELECT calls an aggregate, which makes the SELECT a grouping.</summary>
     private bool ProjectsOrOrdersByAggregate(SqlSelectExpression select)
     {
+        for (int i = 0; i < select.Windows.Count; i++)
+        {
+            var definition = select.Windows[i].Specification;
+            for (int k = 0; k < definition.PartitionBy.Count; k++) { if (ContainsAggregate(definition.PartitionBy[k])) { return true; } }
+            for (int k = 0; k < definition.OrderBy.Count; k++) { if (ContainsAggregate(definition.OrderBy[k].Expression)) { return true; } }
+        }
         for (int index = 0; index < select.Columns.Count; index++)
         {
             if (ContainsAggregate(select.Columns[index].Expression))
@@ -1891,6 +2000,7 @@ internal sealed partial class SqlPlanner
     private bool ContainsVolatileCall(SqlExpression expression)
     {
         RuntimeHelpers.EnsureSufficientExecutionStack();
+        if (expression is SqlNextValueExpression || expression is SqlCastExpression { TargetType: "REGCLASS" }) { return true; }
         if (expression is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
         {
             try
@@ -1945,13 +2055,33 @@ internal sealed partial class SqlPlanner
     /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
     {
+        SqlWindowExpression window => WindowChildren(window),
+        SqlGroupingSetExpression grouping => grouping.Items,
         SqlLogicalExpression logical => logical.Operands,
+        SqlFunctionCallExpression { Filter: not null } function => FilterOperands(function),
         SqlFunctionCallExpression function => function.OrderBy.Count == 0 ? function.Arguments :
             function.Arguments.Concat(function.OrderBy.Select(key => key.Expression)),
-        SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsNullExpression or SqlBetweenExpression
+        SqlCollateExpression or SqlBinaryExpression or SqlUnaryExpression or SqlDistinctExpression or SqlBooleanTestExpression or SqlIsJsonExpression or SqlIsNullExpression or SqlBetweenExpression
             or SqlInExpression or SqlQuantifiedComparisonExpression or SqlLikeExpression or SqlCaseExpression or SqlCastExpression => Operands(expression),
         _ => [],
     };
+
+    private static IEnumerable<SqlExpression> WindowChildren(SqlWindowExpression window)
+    {
+        foreach (var child in Children(window.Function)) { yield return child; }
+        if (window.Specification is not { } specification) { yield break; }
+        foreach (var key in specification.PartitionBy) { yield return key; }
+        foreach (var key in specification.OrderBy) { yield return key.Expression; }
+        if (specification.Frame?.Start.Offset is { } start) { yield return start; }
+        if (specification.Frame?.End.Offset is { } end) { yield return end; }
+    }
+
+    private static IEnumerable<SqlExpression> FilterOperands(SqlFunctionCallExpression call)
+    {
+        foreach (var argument in call.Arguments) { yield return argument; }
+        foreach (var key in call.OrderBy) { yield return key.Expression; }
+        yield return call.Filter!;
+    }
 
     /// <summary>The operands of a node that has some, in source order (<see cref="Children"/>).</summary>
     private static IEnumerable<SqlExpression> Operands(SqlExpression expression)
@@ -1974,6 +2104,9 @@ internal sealed partial class SqlPlanner
                 break;
             case SqlBooleanTestExpression test:
                 yield return test.Operand;
+                break;
+            case SqlIsJsonExpression json:
+                yield return json.Operand;
                 break;
             case SqlIsNullExpression isNull:
                 yield return isNull.Operand;
