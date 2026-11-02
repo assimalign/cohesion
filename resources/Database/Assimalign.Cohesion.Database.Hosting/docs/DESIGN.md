@@ -24,7 +24,7 @@ flowchart LR
     Model["Database model packages"] --> Root
 ```
 
-COHRES001–004 remain enforced. The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
+COHRES001–004 remain enforced. [Database.Hosting.ApplicationModel](../../Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md) supplies the managed-resource registration on `builder.Services`; the runtime itself references no ApplicationModel package.
 
 ## Build and configuration
 
@@ -86,7 +86,24 @@ A factory transfers a fresh product, and cleans up partial allocations if it thr
 
 ## Runtime lifetime
 
-Additional services start in registration order, then servers; shutdown drains servers first and stops services in reverse.
+After freezing the engine/server registry and creating every `AddService` product, Build resolves
+`IEnumerable<IHostService>` from the application's provider exactly once. The lifecycle list is
+`AddService` registrations in registration order, container `IHostService` registrations in
+registration order, the optional reopen service, then servers in engine/attachment order.
+Shutdown reverses that complete order: servers drain before container services stop, keeping a
+managed instance's control plane open during drain. All lifecycle `StartingAsync` callbacks finish
+before any service starts, so a managed instance publishes and restores before services or servers
+start. Engine open, recovery and inline schema migration have already completed inside Build;
+deferred migrations can continue on engine workers.
+
+Container services keep container ownership: factory products are disposed by the provider, which
+the application owns as infrastructure; instance registrations are borrowed. Neither is added to
+the application's owned-service list. Returning the same object through `AddService` and the
+container, through multiple container registrations, or as both a server and a container service
+fails Build with the existing duplicate-lifecycle refusal. A throwing container factory also fails
+Build and follows the same rollback: attempt all owned roots and the provider, aggregating cleanup
+failures with the original construction failure first. The provider's own disposal remains
+fail-fast; the outer cleanup still continues with the remaining infrastructure.
 
 ## Provisioning (B1 of the engine extensibility design)
 
@@ -170,7 +187,7 @@ The module raises its own events through one internal event source, named for th
 | 4 | `ReopenFailed` | Warning | `engineName`, `database`, `attempt`, `exceptionType` (full name), `exceptionMessage`, `retryMilliseconds` |
 | 5 | `ReopenAbandoned` | Informational | `engineName`, `database`, `reason` (dropped, closed or reopened elsewhere, or its engine disposed) |
 | 6 | `ReopenLoopFailed` | Error | `exceptionType`, `exceptionMessage` |
-| 7 | `ApplicationBuilt` | Informational | `hostId`, `engines`, `servers`, `services` (non-server hosted services) |
+| 7 | `ApplicationBuilt` | Informational | `hostId`, `engines`, `servers`, `services` (all non-server hosted services, including container services and the optional reopen service) |
 | 8 | `ApplicationStarting` | Informational | `hostId` |
 | 9 | `ApplicationStarted` | Informational | `hostId`, `durationMilliseconds` |
 | 10 | `ApplicationStartFailed` | Error | `hostId`, `exceptionType`, `exceptionMessage` |

@@ -148,6 +148,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <see cref="IHostEnvironment"/>, <see cref="IConfiguration"/> and <see cref="ILoggerFactory"/>
     /// for its own pieces. A factory-created service is owned by the provider and disposed with the
     /// application; an instance stays owned by its caller. <see cref="Build"/> creates the
+    /// application's lifecycle list from <see cref="AddService(IHostService)"/> registrations first,
+    /// then this provider's <see cref="IHostService"/> registrations, each in registration order,
+    /// then the reopen service and servers. Stop reverses that order, draining servers first.
+    /// Container lifecycle services retain the provider's ownership rules. Build creates the
     /// application's one provider; building these registrations directly yields a separate provider
     /// the application never uses, which creates its singletons a second time and is the caller's to
     /// dispose. <c>WebApplicationBuilder</c>'s <c>Services</c> is the same.
@@ -191,9 +195,12 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         return this;
     }
 
-    /// <summary>Registers a borrowed lifecycle service, started before servers and stopped after them.</summary>
+    /// <summary>Registers a borrowed lifecycle service, started before container services, the reopen service and servers.</summary>
     /// <param name="service">The caller-owned service.</param>
     /// <returns>This builder.</returns>
+    /// <remarks>AddService registrations start in registration order; stop reverses the complete order, draining servers first.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Build has begun.</exception>
     public DatabaseApplicationBuilder AddService(IHostService service)
     {
         EnsureMutable();
@@ -205,6 +212,14 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <summary>Defers owned lifecycle service construction until the engine/server registry is complete.</summary>
     /// <param name="service">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
+    /// <remarks>
+    /// AddService factories run before container lifecycle services are resolved. These services
+    /// start in registration order, followed by the container's IHostService registrations, the
+    /// reopen service and servers. Stop reverses that order. The application disposes this
+    /// factory's product; container products remain owned by the provider or their callers.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="service"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Build has begun.</exception>
     public DatabaseApplicationBuilder AddService(Func<DatabaseApplicationContext, IHostService> service)
     {
         EnsureMutable();
@@ -364,6 +379,19 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
                     ownership.Services.Add(service);
                 }
+                if (!lifecycleProducts.Add(service))
+                {
+                    throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure8);
+                }
+
+                hostServices.Add(service);
+            }
+
+            // Resolve once, after every engine, server and AddService product exists. Container
+            // services follow their registrations' ownership: factories belong to the provider,
+            // instances to their callers. Neither is enrolled in ownership.Services.
+            foreach (IHostService service in services.GetRequiredService<IEnumerable<IHostService>>())
+            {
                 if (!lifecycleProducts.Add(service))
                 {
                     throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure8);
