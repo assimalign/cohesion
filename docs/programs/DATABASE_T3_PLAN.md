@@ -51,10 +51,11 @@
    bump.
 7. **Since #1759, a production Database application serves no health endpoint.** [Certain]
    - Nothing outside tests constructs `DatabaseAdminEndpointService`.
-   - `DatabaseCommandClient` posts to a route the admin listener now refuses with 403.
+   - `DatabaseCommandClient` posted to a route the admin listener now refuses with 403. #1785 (#1811)
+     deleted it, with `ResourceCommand` and `ResourceCommandObservation`.
 
-   EN-A1–A3 fix both on the new application model (#1785). Two gaps belong to the ApplicationModel area
-   (§7).
+   EN-A1–A3 fix the health endpoint on the new application model (#1785). Two gaps belong to the
+   ApplicationModel area (§7).
 8. **Cuts (recommended):**
    - defer the SQL clustered index #1634, which rewrites SQL row addressing and is about 5 runs;
    - materialized views, triggers and procedures go to a later program;
@@ -146,7 +147,7 @@ row by its number.
 | SQ-L2, SQ-L3, SQ-L4 | #1789 | Spillable sort; hash aggregation and DISTINCT; result spooling | EN-X1, L1 | none |
 | EN-C1, EN-C2 | #1283 | Trace the growth to the transactions that block checkpoints, and route raw brackets through the apply gate; bounded admission pause near the journal limit | — | none |
 | EN-P1 | #1264 | `DatabaseRow` NVI with typed accessors; parser and analyzer audit | — | public API |
-| EN-A1 | #1790 | Each model server binds its named platform endpoint when its options set none. The health listener binds `http` when managed. Delete `DatabaseCommandClient` and `ResourceCommandObservation` | #1785 | public API |
+| EN-A1 | #1790 | Each model server binds its named platform endpoint when its options set none. The health listener binds `http` when managed. (#1785 already deleted `DatabaseCommandClient` and `ResourceCommandObservation`) | #1785 | public API |
 | EN-A2 | #1790 | Database health as `IApplicationInstanceHealthContributor`s, plus a readiness contributor for accepting servers | #1785 | none |
 | EN-A3 | #1790 | Read-only `databases` and `health` actions; no write actions (Hosting D3) | #1785 | none |
 | EN-D1 | #1791 | Fold the event-source, extensibility and concrete-types program documents into the project designs, and delete them | — | docs |
