@@ -793,7 +793,7 @@ reference, persisted format or wire shape. EXPLAIN records captured names beside
 Subqueries preserve zero/multiple-row SQL++ arrays, including RAW/VALUE null normalization and
 object-star preservation (nonobject roots wrap under document). Star deliberately follows this
 engine's top-level SELECT-star shape rather than Couchbase's alias-keyed shape. Direct non-RAW
-IN subqueries retain the conservative CD00014 guard pending owner sign-off; this is a deliberate
+IN subqueries retain the conservative CD00014 guard (owner sign-off, 2026-11-02); this is a deliberate
 SQL++ deviation. Outer projection aliases are in ORDER BY's enclosing scope; inner declarations
 shadow them. Qualified stars outside joined SELECT projections retain their CK00001 refusal.
 FROM references to explicit outer aliases use per-row expression scans. Unqualified fields
