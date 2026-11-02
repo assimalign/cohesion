@@ -23,13 +23,15 @@ public sealed class DatabaseResourceLifecycleTests
         // Arrange
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var action = new GreetingAction();
+        string? observedAtStart = null;
         var client = new TestGatewayClient
         {
             Snapshots = [ApplicationActionSnapshot.Create("greeting", Encoding.UTF8.GetBytes("""{"text":"restored"}"""))],
         };
         await using RunningResource resource = RunningResource.Build(client, options => options
             .AddAction(action, GreetingJsonContext.Default)
-            .AddAction(new GreetingAction(name: "second"), GreetingJsonContext.Default));
+            .AddAction(new GreetingAction(name: "second"), GreetingJsonContext.Default),
+            builder => builder.AddService(new SnapshotObserver(() => observedAtStart = action.Value.Text)));
         int publications = 0;
         int openings = 0;
         int closings = 0;
@@ -59,6 +61,7 @@ public sealed class DatabaseResourceLifecycleTests
 
         // Assert: callbacks record the boundaries; no elapsed-time observation decides ordering.
         publications.ShouldBe(1);
+        observedAtStart.ShouldBe("restored");
         openings.ShouldBe(1);
         client.Started.ShouldBeTrue();
         client.Serving.ShouldNotBeNull();
@@ -89,5 +92,18 @@ public sealed class DatabaseResourceLifecycleTests
         (await TestPorts.AcceptsAsync(resource.Port, guard.Token)).ShouldBeTrue();
         resource.Application.Context.HostedServices.OfType<Assimalign.Cohesion.ApplicationModel.Hosting.IApplicationInstanceService>().ShouldBeEmpty();
         await resource.StopAsync(guard.Token);
+    }
+
+    private sealed class SnapshotObserver : IHostService
+    {
+        private readonly Action _observe;
+        public SnapshotObserver(Action observe) => _observe = observe;
+        public ServiceId Id { get; } = ServiceId.New();
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            _observe();
+            return Task.CompletedTask;
+        }
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

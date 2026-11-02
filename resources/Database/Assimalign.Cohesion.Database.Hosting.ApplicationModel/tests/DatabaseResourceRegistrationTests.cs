@@ -16,7 +16,7 @@ namespace Assimalign.Cohesion.Database.Hosting.ApplicationModel.Tests;
 
 /// <summary>
 /// <c>builder.Services.AddResource(...)</c> is a registration: a managed resource is one lifecycle
-/// service the application's container creates when the application is built, and an unmanaged one is
+/// service the application creates from its container registration at Build, and an unmanaged one is
 /// nothing at all.
 /// </summary>
 public sealed class DatabaseResourceRegistrationTests
@@ -56,7 +56,7 @@ public sealed class DatabaseResourceRegistrationTests
     }
 
     [Fact(DisplayName = displayPrefix + "Building the application creates the resource with the actions the application added")]
-    public async Task Build_WithManagedResource_ShouldCreateTheInstanceServiceFromTheContainer()
+    public async Task Build_WithManagedResource_ShouldIncludeTheInstanceInHostedServices()
     {
         // Arrange
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder([]);
@@ -72,8 +72,7 @@ public sealed class DatabaseResourceRegistrationTests
         await using DatabaseApplication application = builder.Build();
 
         // Assert
-        IApplicationInstanceService service = application.Context.Services
-            .GetRequiredService<IEnumerable<IHostService>>()
+        IApplicationInstanceService service = application.Context.HostedServices
             .OfType<IApplicationInstanceService>()
             .ShouldHaveSingleItem();
         IApplicationInstance instance = service.ControlPlane.Instance;

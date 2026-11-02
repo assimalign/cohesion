@@ -17,8 +17,145 @@ public sealed class DatabaseContainerServiceTests
 {
     private const string displayPrefix = "Cohesion Test [Database.Hosting] - Container services: ";
 
-    [Fact(DisplayName = displayPrefix + "Build resolves once after AddService and starts in the documented order")]
-    public async Task Build_WithContainerServices_ShouldResolveOnceAndPreserveLifecycleOrder()
+    [Theory(DisplayName = displayPrefix + "Null factory products fail Build before duplicate detection")]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Build_WithNullContainerFactories_ShouldRefuseTheNullProduct(int registrations)
+    {
+        // Arrange
+        var builder = DatabaseApplication.CreateBuilder();
+        for (int index = 0; index < registrations; index++)
+        {
+            builder.Services.AddSingleton<IHostService>(_ => null!);
+        }
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        failure.Message.ShouldBe(ErrorMessages.BuilderBuildCompositionFailure6);
+    }
+
+    [Theory(DisplayName = displayPrefix + "Non-singleton lifecycle registrations fail Build and name the registration")]
+    [InlineData(ServiceLifetime.Scoped)]
+    [InlineData(ServiceLifetime.Transient)]
+    public void Build_WithNonSingletonContainerService_ShouldNameTheRegistration(ServiceLifetime lifetime)
+    {
+        // Arrange
+        var builder = DatabaseApplication.CreateBuilder();
+        var descriptor = new ServiceDescriptor(typeof(IHostService), _ => new DisposableHostService(), lifetime);
+        builder.Services.Container.Register(descriptor);
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        failure.Message.ShouldContain(descriptor.ToString(), Case.Sensitive);
+        failure.Message.ShouldContain("singleton", Case.Sensitive);
+    }
+
+    [Theory(DisplayName = displayPrefix + "A duplicate AddService factory product is disposed only by the application")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Build_WithAddServiceFactoryAlias_ShouldRefuseWithoutDoubleDisposal(bool containerFactory)
+    {
+        // Arrange
+        var service = new DisposableHostService();
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddService(_ => service);
+        if (containerFactory)
+        {
+            builder.Services.AddSingleton<IHostService>(_ => service);
+        }
+        else
+        {
+            builder.Services.AddSingleton<IHostService>(service);
+        }
+
+        // Act
+        var failure = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        failure.Message.ShouldBe(ErrorMessages.BuilderBuildCompositionFailure8);
+        service.DisposeCount.ShouldBe(1);
+    }
+
+    [Theory(DisplayName = displayPrefix + "Disposal stops a running container service once and disposes owned products before engines")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DisposeAsync_WithRunningContainerService_ShouldStopThenDisposeBeforeEngine(bool factory)
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var engine = new RecordingEngine();
+        var service = new DisposableHostService
+        {
+            OnDispose = () => engine.TryGetDatabase("orders", out _).ShouldBeFalse(),
+        };
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine("recording-engine", _ => engine);
+        if (factory)
+        {
+            builder.Services.AddSingleton<IHostService>(_ => service);
+        }
+        else
+        {
+            builder.Services.AddSingleton<IHostService>(service);
+        }
+        DatabaseApplication application = builder.Build();
+        await ((IHost)application).StartAsync(guard.Token);
+
+        // Act
+        await ((IAsyncDisposable)application).DisposeAsync();
+        await ((IAsyncDisposable)application).DisposeAsync();
+
+        // Assert
+        service.StopCount.ShouldBe(1);
+        service.DisposeCount.ShouldBe(factory ? 1 : 0);
+        engine.DisposeCount.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = displayPrefix + "Stop and disposal reverse the complete lifecycle and dependency order")]
+    public async Task DisposeAsync_WithAllServiceKinds_ShouldReverseCreationOrder()
+    {
+        // Arrange
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var events = new List<string>();
+        DatabaseReopenService? reopen = null;
+        var engine = new RecordingEngine { OnDispose = () => events.Add("engine:dispose") };
+        engine.AddServer(owner => new RecordingServer(events, "server", owner));
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.Services.AddSingleton(_ => new DisposalRecorder(() => events.Add("provider:dispose")));
+        builder.AddEngine("recording-engine", context =>
+        {
+            context.Services.GetRequiredService<DisposalRecorder>();
+            return engine;
+        });
+        builder.AddService(_ => new DisposableHostService(events, "add-first"));
+        builder.AddService(_ => new DisposableHostService(events, "add-second"));
+        builder.Services.AddSingleton<IHostService>(_ => new DisposableHostService(events, "container-first"));
+        builder.Services.AddSingleton<IHostService>(_ => new DisposableHostService(events, "container-second")
+        {
+            OnDispose = () => Should.Throw<ObjectDisposedException>(() => reopen.ShouldNotBeNull().StartAsync()),
+        });
+        DatabaseApplication application = builder.Build();
+        reopen = application.Context.ReopenService.ShouldNotBeNull();
+        application.Context.HostedServices.ElementAt(4).ShouldBeSameAs(reopen);
+        await ((IHost)application).StartAsync(guard.Token);
+
+        // Act
+        await ((IAsyncDisposable)application).DisposeAsync();
+
+        // Assert
+        events.ShouldBe([
+            "add-first:start", "add-second:start", "container-first:start", "container-second:start", "server:start",
+            "server:stop", "container-second:stop", "container-first:stop", "add-second:stop", "add-first:stop",
+            "container-second:dispose", "container-first:dispose", "add-second:dispose", "add-first:dispose",
+            "engine:dispose", "provider:dispose"]);
+    }
+
+    [Fact(DisplayName = displayPrefix + "Build invokes factories once after AddService and starts in the documented order")]
+    public async Task Build_WithContainerServices_ShouldInvokeFactoriesOnceAndPreserveLifecycleOrder()
     {
         // Arrange: register container services first to prove the grouping is independent of call order.
         var events = new List<string>();
@@ -174,20 +311,50 @@ public sealed class DatabaseContainerServiceTests
 
     private sealed class DisposableHostService : IHostService, IDisposable
     {
+        private readonly List<string>? _events;
+        private readonly string? _name;
+
+        public DisposableHostService(List<string>? events = null, string? name = null)
+        {
+            _events = events;
+            _name = name;
+        }
+
         public ServiceId Id { get; } = ServiceId.New();
         public int DisposeCount { get; private set; }
+        public int StopCount { get; private set; }
         public Exception? DisposeFailure { get; init; }
-        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Action? OnDispose { get; init; }
+        public Task StartAsync(CancellationToken cancellationToken = default)
+        {
+            _events?.Add($"{_name}:start");
+            return Task.CompletedTask;
+        }
+        public Task StopAsync(CancellationToken cancellationToken = default)
+        {
+            StopCount++;
+            _events?.Add($"{_name}:stop");
+            return Task.CompletedTask;
+        }
 
         public void Dispose()
         {
             DisposeCount++;
+            StopCount.ShouldBe(_events is not null || OnDispose is not null ? 1 : 0);
+            _events?.Add($"{_name}:dispose");
+            OnDispose?.Invoke();
             if (DisposeFailure is { } failure)
             {
                 throw failure;
             }
         }
+    }
+
+    private sealed class DisposalRecorder : IDisposable
+    {
+        private readonly Action _dispose;
+        public DisposalRecorder(Action dispose) => _dispose = dispose;
+        public void Dispose() => _dispose();
     }
 
     private sealed class HostServer : DatabaseServer, IHostService

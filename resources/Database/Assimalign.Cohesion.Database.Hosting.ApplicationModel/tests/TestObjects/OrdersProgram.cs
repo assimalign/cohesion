@@ -25,8 +25,11 @@ internal sealed class OrdersProgram
 
     public TaskCompletionSource<DatabaseApplication> Created { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public bool Stopped { get; private set; }
+    public Task Completion { get; private set; } = Task.CompletedTask;
 
-    public async Task MainAsync(string[] args)
+    public Task MainAsync(string[] args) => Completion = RunAsync(args);
+
+    private async Task RunAsync(string[] args)
     {
         DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
         RunningResource.ConfigureSql(builder, _path, _port);

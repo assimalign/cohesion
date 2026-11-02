@@ -43,10 +43,21 @@ public sealed class DatabaseResourceInProcessTests
             DatabaseApplication application = await program.Created.Task.WaitAsync(guard.Token);
             // Gateway G18 counts publication as ready. Wait for the host's recorded state before
             // calling its control plane, which opens after publication and restore.
-            while (application.Context.State != HostState.Started)
+            while (application.Context.State is not (HostState.Started or HostState.Failed))
             {
                 await Task.Delay(10, guard.Token);
             }
+            if (application.Context.State == HostState.Failed)
+            {
+                // Surface the gateway's failure, or its program's startup failure, instead of
+                // timing out while polling a terminal state.
+                if (gateway.Completion.IsFaulted)
+                {
+                    await gateway.Completion.WaitAsync(guard.Token);
+                }
+                await program.Completion.WaitAsync(guard.Token);
+            }
+            application.Context.State.ShouldBe(HostState.Started);
 
             // Act
             ApplicationActionResult write = await gateway.ExecuteAsync("Database", OrdersProgram.Name, "greeting", ApplicationActionContext.Create(
@@ -69,7 +80,9 @@ public sealed class DatabaseResourceInProcessTests
                 new ApplicationActionDescriptor("greeting", ApplicationActionKind.ReadWrite, IsStateful: true),
                 new ApplicationActionDescriptor("second", ApplicationActionKind.ReadWrite, IsStateful: true),
             });
-            resource.Outputs.ShouldContainKey(OutputName.Endpoint); // StartAsync completed its ready path.
+            // Pins today's documented gap (open question 1): this is the platform's HTTP
+            // endpoint, not Database's wire address. Update deliberately when named endpoints land.
+            resource.Outputs.ShouldContainKey(OutputName.Endpoint);
 
             write.Status.ShouldBe(ApplicationActionStatus.Succeeded);
             resource.State.ShouldHaveSingleItem().Action.ShouldBe((ActionName)"greeting");
@@ -81,8 +94,9 @@ public sealed class DatabaseResourceInProcessTests
         {
             await gateway.StopAsync().WaitAsync(TimeSpan.FromSeconds(30));
             await gateway.Completion.WaitAsync(TimeSpan.FromSeconds(30));
-            // G37/G40 leave workloads running on StopAsync; G42 disposes the owned in-process
-            // platform and signals each program's scope shutdown when the gateway is disposed.
+            // G37/G40 leave the Database application Started and accepting connections after
+            // StopAsync and Completion. G42 DisposeAsync stops the run, then disposes the owned
+            // platform; platform disposal owns workload shutdown, so it is our shutdown criterion.
             await gateway.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(30));
         }
 

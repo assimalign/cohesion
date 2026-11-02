@@ -22,7 +22,8 @@ internal sealed class RunningResource : IAsyncDisposable
     public DatabaseApplication Application { get; }
     public int Port { get; }
 
-    public static RunningResource Build(TestGatewayClient? gateway, Action<DatabaseResourceOptions>? configure = null)
+    public static RunningResource Build(TestGatewayClient? gateway, Action<DatabaseResourceOptions>? configure = null,
+        Action<DatabaseApplicationBuilder>? configureApplication = null)
     {
         var directory = new TemporaryDirectory();
         try
@@ -30,6 +31,7 @@ internal sealed class RunningResource : IAsyncDisposable
             int port = TestPorts.GetFree();
             DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder();
             ConfigureSql(builder, directory.Path, port);
+            configureApplication?.Invoke(builder);
             builder.Services.AddResource("orders-db", resource =>
             {
                 resource.Platform = gateway?.Platform;

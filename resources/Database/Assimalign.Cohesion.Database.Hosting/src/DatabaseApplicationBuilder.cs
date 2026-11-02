@@ -146,12 +146,18 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <see cref="InvalidOperationException"/>. The provider is created without dynamic code, so the
     /// application accepts closed factory and instance registrations only, and reserves
     /// <see cref="IHostEnvironment"/>, <see cref="IConfiguration"/> and <see cref="ILoggerFactory"/>
-    /// for its own pieces. A factory-created service is owned by the provider and disposed with the
-    /// application; an instance stays owned by its caller. <see cref="Build"/> creates the
+    /// for its own pieces. Ordinary factory-created services are owned by the provider; instances
+    /// stay owned by their callers. <see cref="Build"/> creates the
     /// application's lifecycle list from <see cref="AddService(IHostService)"/> registrations first,
     /// then this provider's <see cref="IHostService"/> registrations, each in registration order,
     /// then the reopen service and servers. Stop reverses that order, draining servers first.
-    /// Container lifecycle services retain the provider's ownership rules. Build creates the
+    /// Unkeyed IHostService registrations must be singletons. Build invokes their factories once
+    /// directly and the application disposes their products before engines, in reverse order;
+    /// instance registrations are borrowed. Keyed registrations are not lifecycle services.
+    /// A forwarding factory (sp => sp.GetRequiredService&lt;X&gt;()) transfers an object the provider
+    /// also owns, so both dispose it, as the container does for a forwarded singleton. Dispose must
+    /// be idempotent, following .NET's disposal guidelines; use AddService(instance) or an instance
+    /// registration to retain ownership instead. Build creates the
     /// application's one provider; building these registrations directly yields a separate provider
     /// the application never uses, which creates its singletons a second time and is the caller's to
     /// dispose. <c>WebApplicationBuilder</c>'s <c>Services</c> is the same.
@@ -213,10 +219,10 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <param name="service">The ownership-transferring factory.</param>
     /// <returns>This builder.</returns>
     /// <remarks>
-    /// AddService factories run before container lifecycle services are resolved. These services
+    /// AddService factories run before container lifecycle factories are invoked. These services
     /// start in registration order, followed by the container's IHostService registrations, the
     /// reopen service and servers. Stop reverses that order. The application disposes this
-    /// factory's product; container products remain owned by the provider or their callers.
+    /// factory's product and container lifecycle factory products; instances remain caller-owned.
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="service"/> is null.</exception>
     /// <exception cref="InvalidOperationException">Build has begun.</exception>
@@ -387,14 +393,32 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 hostServices.Add(service);
             }
 
-            // Resolve once, after every engine, server and AddService product exists. Container
-            // services follow their registrations' ownership: factories belong to the provider,
-            // instances to their callers. Neither is enrolled in ownership.Services.
-            foreach (IHostService service in services.GetRequiredService<IEnumerable<IHostService>>())
+            // Invoke lifecycle factories ourselves, once, after the complete engine/server
+            // registry and AddService products exist. The provider must not capture their
+            // products: services dispose before the engines they use. Instances stay borrowed.
+            foreach (ServiceDescriptor descriptor in Services.Container)
             {
+                if (descriptor.ServiceType != typeof(IHostService))
+                {
+                    continue;
+                }
+
+                IHostService service = (IHostService?)(descriptor.ImplementationInstance
+                    ?? descriptor.ImplementationFactory!(services))
+                    ?? throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure6);
                 if (!lifecycleProducts.Add(service))
                 {
                     throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure8);
+                }
+
+                if (descriptor.ImplementationInstance is null)
+                {
+                    if (!products.Add(service))
+                    {
+                        throw new InvalidOperationException(ErrorMessages.BuilderBuildCompositionFailure7);
+                    }
+
+                    ownership.Services.Add(service);
                 }
 
                 hostServices.Add(service);
@@ -492,6 +516,12 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         {
             foreach (ServiceDescriptor descriptor in container)
             {
+                if (descriptor.ServiceType == typeof(IHostService) && descriptor.Lifetime != ServiceLifetime.Singleton)
+                {
+                    throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                        ErrorMessages.LifecycleServiceLifetimeInvalid, descriptor));
+                }
+
                 if (descriptor.ServiceType == typeof(IConfiguration)
                     || descriptor.ServiceType == typeof(IHostEnvironment)
                     || descriptor.ServiceType == typeof(ILoggerFactory))
