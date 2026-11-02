@@ -174,7 +174,7 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
     /// </summary>
     internal Exception? OpenFailure { get; set; }
 
-    public override DocumentStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability)
+    public override DocumentStorage OpenStorage(DatabaseName databaseName, StorageCommitDurability? durability, bool readOnly = false)
     {
         if (OpenFailure is { } failure) { throw failure; }
         Files files;
@@ -183,6 +183,13 @@ internal sealed class FaultInjectingJournalStorageStrategy : DocumentStorageStra
             if (!_databases.TryGetValue(databaseName.ToString(), out var closed))
             {
                 throw new DatabaseNotFoundException($"Database '{databaseName}' does not exist.");
+            }
+
+            if (readOnly)
+            {
+                return DocumentStorage.Open(DatabaseMemoryFiles.ReadOnly(closed.Data),
+                    DatabaseMemoryFiles.ReadOnly(closed.Journal, LoseUnconfirmedJournalOnReopen ? closed.Journal.ConfirmedLength : null),
+                    DatabaseMemoryFiles.ReadOnly(closed.Backup), checkpointOnOpen: false);
             }
 
             var journal = Copy(closed.Journal, new FaultInjectingStream());

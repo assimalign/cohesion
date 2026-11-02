@@ -50,16 +50,16 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
     /// The open-time checkpoint is deferred, as the file-based strategy defers it: the engine runs
     /// transaction-recovery analysis over the recovered journal first.
     /// </remarks>
-    public override KeyValueStorage OpenStorage(string databaseName, bool catalog)
+    public override KeyValueStorage OpenStorage(string databaseName, bool catalog, bool readOnly = false)
     {
-        if (!_files.TryOpen(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup))
+        if (!_files.TryOpen(databaseName, GetFileSet(catalog), out var data, out var journal, out var backup, readOnly))
         {
             throw DatabaseException.CreateEngineFailure("CK06005", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageStrategyOpenStorageDatabase2, GetLabel(databaseName, catalog)));
         }
 
         try
         {
-            return KeyValueStorage.Open(data, journal, backup, checkpointOnOpen: false, _durability);
+            return KeyValueStorage.Open(data, journal, backup, checkpointOnOpen: false, readOnly ? null : _durability);
         }
         catch
         {

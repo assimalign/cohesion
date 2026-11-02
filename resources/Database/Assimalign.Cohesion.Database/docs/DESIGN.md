@@ -365,7 +365,10 @@ carried: `DatabaseEngine` and `DatabaseInstance` are `IAsyncDisposable` and `IDi
   releases every file set, so a disposed engine still referenced holds none of its databases), and
   an open copies the closed streams' bytes into new streams outside its lock, each allocated once
   at its final size (a `MemoryStream` keeps its buffer after it closes), and runs the same
-  recovery a file reopen runs; it refuses a file set whose storage still has a stream open. The
+  recovery a file reopen runs; it refuses a file set whose storage still has a stream open.
+  Format preflight (#1744) instead borrows the closed buffers through non-writable streams,
+  without replacing the stored set or copying database/journal bytes; accepted opens then use
+  the existing writable copy and recovery path. The
   root suite pins the base's part with a test leaf (`TestEngine`) whose close a gate holds: an
   open, a canceled open, a drop and the engine's disposal during a holder's close, the refusal
   of a leaf that never forgets, and a second disposal that waits.

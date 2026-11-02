@@ -1,0 +1,15 @@
+<Project>
+  <ItemGroup>
+    <CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage.FormatProbeFixture" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\tests\TestObjects\FormatProbeCrash.cs" Link="TestObjects\FormatProbeCrash.cs" />
+    <Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Blob\tests\TestObjects\CrashReopen.cs" Link="TestObjects\CrashReopen.cs" Condition="'$(MSBuildProjectName)' != 'Assimalign.Cohesion.Database.Blob.Tests' and '$(MSBuildProjectName)' != 'Assimalign.Cohesion.Database.Documents.Tests'" />
+  </ItemGroup>
+  <Target Name="CopyFormatProbeFixture" AfterTargets="Build">
+    <ItemGroup>
+      <FormatProbeFixtureOutput Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database.Storage\fixtures\Assimalign.Cohesion.Database.Storage.FormatProbeFixture\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FormatProbeFixtureOutput)" DestinationFiles="@(FormatProbeFixtureOutput->'$(OutDir)FormatProbeFixture\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

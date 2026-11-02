@@ -1,5 +1,16 @@
 # Graph engine design
 
+## Refused opens preserve every file (#1744)
+
+GraphStore.EnsureIndexFormat and GraphCatalog.EnsureFormat read graph headers, index registrations
+and roots, and catalog v2 records. The engine validates these through Storage's recovered read-only
+view before acquiring writable file handles.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The Storage DESIGN records the common replay rules, memory bound and complete gate inventory.
+
 ## Unknown entity properties (#1249, #1738, GQ-D3)
 
 Read-only planning reports structured warning CG01023 for a statically named property unknown
@@ -154,8 +165,8 @@ The catalog record codec is v2 for every kind (1 label, 2 relationship type, 3 p
 length-prefixed UTF-8 name. Constraint payload is a length-prefixed UTF-8 property key followed
 by one type byte (255 for existence). Other payload layouts are unchanged. Earlier or future
 versions refuse with CG06019 before logical recovery scrub; no legacy reader or upgrade exists.
-The refusal happens before any logical write; physical redo of the journal runs first until
-[Storage #1744](https://github.com/assimalign/cohesion/issues/1744) is fixed. CG06019 names the database,
+The refusal happens through Storage's recovered read-only view before any physical or logical
+write (#1744). CG06019 names the database,
 including for uncheckpointed v1 images.
 
 The graph entity/tree format remains 5. Internal record variants reuse the existing payload

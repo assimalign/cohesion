@@ -29,7 +29,7 @@ not an edge.
 
 | | Count |
 | --- | --- |
-| Projects indexed | 589 |
+| Projects indexed | 590 |
 | Shipped library/resource projects | 236 |
 | Library areas | 21 |
 | Resource areas | 18 |
@@ -1085,14 +1085,14 @@ warning, not a problem in itself: these are the assemblies whose contracts cost 
 | `Assimalign.Cohesion.Database.Types` | 19 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Client, Assimalign.Cohesion.Database.Documents, … |
 | `Assimalign.Cohesion.FileSystem` | 17 | Assimalign.Cohesion.Configuration.FileSystem, Assimalign.Cohesion.Configuration.FileSystem.Tests, Assimalign.Cohesion.Configuration.Ini.Tests, Assimalign.Cohesion.Configuration.Json.Tests, … |
 | `Assimalign.Cohesion.Database.Protocol` | 14 | Assimalign.Cohesion.Database, Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Blob.Client, Assimalign.Cohesion.Database.Blob.Protocol, … |
-| `Assimalign.Cohesion.Database.Sql` | 13 | Assimalign.Cohesion.Database.Client.Tests, Assimalign.Cohesion.Database.Hosting.ApplicationModel.Tests, Assimalign.Cohesion.Database.Hosting.Tests, Assimalign.Cohesion.Database.Sql.AotSample, … |
+| `Assimalign.Cohesion.Database.Sql` | 14 | Assimalign.Cohesion.Database.Client.Tests, Assimalign.Cohesion.Database.Hosting.ApplicationModel.Tests, Assimalign.Cohesion.Database.Hosting.Tests, Assimalign.Cohesion.Database.Sql.AotSample, … |
 | `Assimalign.Cohesion.Web.Authentication` | 13 | Assimalign.Cohesion.IntegrationCheck, Assimalign.Cohesion.Web.AotGuard, Assimalign.Cohesion.Web.Authentication.Bearer, Assimalign.Cohesion.Web.Authentication.Certificate, … |
 | `Assimalign.Cohesion.Database` | 12 | Assimalign.Cohesion.Database.Blob, Assimalign.Cohesion.Database.Documents, Assimalign.Cohesion.Database.Embedded, Assimalign.Cohesion.Database.Graph, … |
 | `Assimalign.Cohesion.Http.Cookies` | 12 | Assimalign.Cohesion.Http.Antiforgery, Assimalign.Cohesion.Http.Antiforgery.Tests, Assimalign.Cohesion.Http.Connections.Tests, Assimalign.Cohesion.Http.Cookies.Tests, … |
 
 ## Harnesses
 
-271 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
+272 test, sample, example, and fixture projects are indexed for fan-in but excluded from the
 area graphs above: they consume the shipped assemblies rather than forming part of the product
 graph, and the dependency guards exempt them by path.
 
@@ -1105,7 +1105,7 @@ membership is an item list, not a project reference: App's kernel roots in
 | Kind | Count |
 | --- | --- |
 | `examples/` | 5 |
-| `fixtures/` | 14 |
+| `fixtures/` | 15 |
 | `samples/` | 9 |
 | `tests/` | 243 |
 

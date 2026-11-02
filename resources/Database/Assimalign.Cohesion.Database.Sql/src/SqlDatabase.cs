@@ -270,6 +270,16 @@ public sealed partial class SqlDatabase : DatabaseInstance
         }
     }
 
+    internal static void EnsureIndexFormats(string name, SqlStorage storage, SqlCatalog catalog)
+    {
+        try { BTreeIndexManager.EnsureFormat(storage, catalog.GetIndexRegistrations()); }
+        catch (IndexFormatException exception)
+        {
+            throw new SqlDataStorageFormatException(string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                ErrorMessages.SqlDatabaseFailure, name, catalog.RecordSpaceFormatVersion, exception.Message), exception);
+        }
+    }
+
     /// <summary>
     /// Refuses an existing database on any data-storage format but this engine's
     /// own. The engine has no upgrade path (owner decision of 2026-10-01; upgrades

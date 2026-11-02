@@ -6,8 +6,8 @@ using Assimalign.Cohesion.Database.Storage.Units;
 
 namespace Assimalign.Cohesion.Database.Sql.Internal;
 
-// A bounded read-only file image. Recovery, if needed for an emptiness decision, runs
-// only on private copies, never on the files a refusal must preserve.
+// Bounded creation metadata and a factory for Storage's recovered read-only view.
+// Memory-image sources are borrowed without copying their page or journal bytes.
 [global::System.Diagnostics.DebuggerDisplay("SqlStorageProbe")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlStorageProbe.DebugView))]
 internal sealed record SqlStorageProbe(long Length, byte[] Data, byte[] Journal, byte[] Backup, bool HasSidecars = true)
@@ -29,15 +29,9 @@ internal sealed record SqlStorageProbe(long Length, byte[] Data, byte[] Journal,
     internal bool IsSmall => Length <= 2L * Page.Size;
 
     internal SqlStorage Open()
-        => OpenReadOnly?.Invoke() ?? SqlStorage.Open(Copy(Data), Copy(Journal), Copy(Backup), checkpointOnOpen: false);
+        => OpenReadOnly?.Invoke() ?? SqlStorage.Open(ReadOnly(Data), ReadOnly(Journal), ReadOnly(Backup), checkpointOnOpen: false);
 
-    private static MemoryStream Copy(byte[] bytes)
-    {
-        var stream = new MemoryStream();
-        stream.Write(bytes);
-        stream.Position = 0;
-        return stream;
-    }
+    private static MemoryStream ReadOnly(byte[] bytes) => new MemoryStream(bytes, writable: false);
 
     private sealed class DebugView
     {

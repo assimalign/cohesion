@@ -79,7 +79,8 @@ internal abstract class KeyValueStorageStrategy
     /// records an eager truncation would destroy) and checkpoints the storage itself once analysis
     /// completes.
     /// </remarks>
-    public abstract KeyValueStorage OpenStorage(string databaseName, bool catalog);
+    /// <param name="readOnly">True to open only read-only source streams for the recovered format preflight; false for normal recovery.</param>
+    public abstract KeyValueStorage OpenStorage(string databaseName, bool catalog, bool readOnly = false);
 
     /// <summary>
     /// Drops every file set of a database: on disk, its directory.

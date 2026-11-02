@@ -86,6 +86,16 @@ public sealed class BlobDatabase : DatabaseInstance
         Catalog = BlobCatalog.Open(storage, Coordinator);
     }
 
+    internal static void EnsureFormats(DatabaseName name, BlobStorage storage)
+    {
+        using var records = storage.GetUnitIterator(0);
+        while (records.MoveNext())
+        {
+            var unit = records.Current;
+            _ = BlobCatalogCodec.Decode(unit.Data.Span, unit.PageId, unit.SlotIndex);
+        }
+    }
+
     /// <summary>
     /// Gets the blob engine that owns this database.
     /// </summary>

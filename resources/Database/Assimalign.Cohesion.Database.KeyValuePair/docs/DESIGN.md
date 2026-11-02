@@ -1,5 +1,16 @@
 # Assimalign.Cohesion.Database.KeyValuePair — Design
 
+## Refused opens preserve every file (#1744)
+
+The catalog preflight checks the entry-space marker before opening even a read-only data view,
+then validates every primary-index registration against its recovered root. Both sets pass their
+storage header and journal-frame gates before either set is opened for writing.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The Storage DESIGN records the common replay rules, memory bound and complete gate inventory.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The explicit transaction binds its kernel coordinator/context to the root base, so incomplete
@@ -247,11 +258,9 @@ and explicit-transaction cases are regression guards, not proof of that session 
   registration, and a tree the marker does not describe is refused with
   `DatabaseException` "Database 'x' cannot be opened. CK06101: Index … uses
   B-tree page format 1, but this engine supports only format 2 …", the index
-  manager's `IndexFormatException` as its inner exception. A cleanly closed
-  database is left byte-identical by either refusal; a crashed one has had only
-  the storage layer's format-agnostic journal redo and undo, and keeps its
-  journal for the engine that wrote it (`KeyValueEngineLifecycleTests` pins both
-  refusals). There is no upgrade path (owner decision of 2026-10-02; #1152).
+  manager's `IndexFormatException` as its inner exception. Clean and crashed
+  databases are left byte-identical by either refusal: catalog and tree checks read Storage's
+  recovered read-only views before either original set opens for writing (#1744). There is no upgrade path (owner decision of 2026-10-02; #1152).
   **Below both, each file set has its own storage format (#1251):** the storage refuses
   a data or catalog file set in another storage format with `StorageFormatException`
   (`CK06001`) before its journal is read, and the engine names the database and the

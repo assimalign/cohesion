@@ -1,5 +1,16 @@
 # Blob engine design
 
+## Refused opens preserve every file (#1744)
+
+The preflight decodes owner-zero catalog metadata through Storage's recovered read-only view,
+including the catalog record version refusal. Chunk pages have no independent open-time format
+gate. Cache has no persisted-format open gate.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The Storage DESIGN records the common replay rules, memory bound and complete gate inventory.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The explicit transaction binds its kernel coordinator/context to the root base, so incomplete

@@ -74,7 +74,7 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
     }
 
     /// <inheritdoc />
-    public override KeyValueStorage OpenStorage(string databaseName, bool catalog)
+    public override KeyValueStorage OpenStorage(string databaseName, bool catalog, bool readOnly = false)
     {
         var files = DatabaseFileNames.GetFiles(DatabaseFileNames.GetDirectory(_rootPath, databaseName), GetFileSet(catalog));
 
@@ -90,18 +90,18 @@ internal sealed class FileSystemKeyValueStorageStrategy : KeyValueStorageStrateg
             string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.CreationSidecarMissing, databaseName);
             throw new DatabaseException(message, [new Diagnostic { Code = "CV06104", Message = message, Severity = DiagnosticSeverity.Error }]);
         }
-        var dataStream = StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
+        var dataStream = readOnly ? new StorageStream(new FileStream(files.Data, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Data, FileMode.Open, FileShare.Read);
 
         StorageStream? journalStream = null;
         StorageStream? backupStream = null;
         try
         {
-            journalStream = StorageStream.FromFile(files.Journal, FileMode.Open, FileShare.Read);
-            backupStream = StorageStream.FromFile(files.Backup, FileMode.Open, FileShare.Read);
+            journalStream = readOnly ? new StorageStream(new FileStream(files.Journal, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Journal, FileMode.Open, FileShare.Read);
+            backupStream = readOnly ? new StorageStream(new FileStream(files.Backup, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Backup, FileMode.Open, FileShare.Read);
 
             // Defer the open-time checkpoint: the engine's transaction coordinator
             // analyzes the recovered journal before checkpoint truncates its records.
-            return KeyValueStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false, _durability);
+            return KeyValueStorage.Open(dataStream, journalStream, backupStream, checkpointOnOpen: false, readOnly ? null : _durability);
         }
         catch
         {

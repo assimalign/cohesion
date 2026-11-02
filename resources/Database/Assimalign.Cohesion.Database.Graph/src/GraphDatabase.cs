@@ -83,38 +83,9 @@ public sealed partial class GraphDatabase : DatabaseInstance
         // page as it attaches the tree. That happens inside the store's open, after
         // the recovery scrub has written to the database, so the check runs here
         // first: a database whose indexes or catalog this engine cannot read is refused before
-        // any logical write. Physical journal redo runs first until Storage #1744 is fixed.
-        try
-        {
-            GraphStore.EnsureIndexFormat(storage);
-            GraphCatalog.EnsureFormat(storage);
-        }
-        catch (GraphCatalogException exception)
-        {
-            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            if (exception.Diagnostics is [{ Code: "CG06019" }, ..])
-            {
-                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                    ErrorMessages.DatabaseOpenRefused, name, exception.Message);
-                throw new DatabaseException(message, [new Diagnostic
-                { Code = "CG06019", Message = message, Severity = DiagnosticSeverity.Error }], exception);
-            }
-            throw new DatabaseException(exception.Message, exception.Diagnostics, exception);
-        }
-        catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
-        {
-            Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            // The decoder's format diagnostic survives physical context without parsing text.
-            const string formatCode = "CG06017";
-            if (exception.InnerException is GraphRecordFormatException { Diagnostics: [{ Code: formatCode }, ..] })
-            {
-                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused,
-                    name, exception.Message);
-                throw new DatabaseException(message, [new Diagnostic
-                { Code = formatCode, Message = message, Severity = DiagnosticSeverity.Error }], exception);
-            }
-            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused, name, exception.Message), exception);
-        }
+        // any write. The engine first runs this gate through Storage's recovered read-only view (#1744).
+        try { EnsureFormats(name, storage); }
+        catch { Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
 
         var recovery = recover ? Coordinator.AnalyzeAndScrub() : null;
         Catalog = GraphCatalog.Open(storage, Coordinator);
@@ -136,6 +107,40 @@ public sealed partial class GraphDatabase : DatabaseInstance
                 GraphDatabaseEventSource.Log.IndexRecoveryStop(name, recovered, recoveryStarted);
             }
         }
+    }
+
+    internal static void EnsureFormats(DatabaseName name, GraphStorage storage)
+    {
+        try
+        {
+            GraphStore.EnsureIndexFormat(storage);
+            GraphCatalog.EnsureFormat(storage);
+        }
+        catch (GraphCatalogException exception)
+        {
+            if (exception.Diagnostics is [{ Code: "CG06019" }, ..])
+            {
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.DatabaseOpenRefused, name, exception.Message);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = "CG06019", Message = message, Severity = DiagnosticSeverity.Error }], exception);
+            }
+            throw new DatabaseException(exception.Message, exception.Diagnostics, exception);
+        }
+        catch (Exception exception) when (exception is Indexing.IndexFormatException or Assimalign.Cohesion.Database.Storage.StorageCorruptionException)
+        {
+            // The decoder's format diagnostic survives physical context without parsing text.
+            const string formatCode = "CG06017";
+            if (exception.InnerException is GraphRecordFormatException { Diagnostics: [{ Code: formatCode }, ..] })
+            {
+                string message = string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused,
+                    name, exception.Message);
+                throw new DatabaseException(message, [new Diagnostic
+                { Code = formatCode, Message = message, Severity = DiagnosticSeverity.Error }], exception);
+            }
+            throw new DatabaseException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseOpenRefused, name, exception.Message), exception);
+        }
+
     }
 
     /// <summary>

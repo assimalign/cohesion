@@ -795,11 +795,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 {
                     try
                     {
-                        // Inspect every catalog through a read-only overlay before either
-                        // original set can run recovery with write access.
-                        if (catalogProbe is not null)
+                        // Gate both sets through recovered read-only views. This scope closes
+                        // their read handles before acquiring any writable handle.
                         {
-                            using var probeStorage = catalogProbe.Open();
+                            using var probeStorage = catalogProbe?.Open() ?? _strategy.OpenStorage(name, catalog: true, cancellationToken, readOnly: true);
                             var probeCatalog = OpenCatalog(name, probeStorage);
                             if (SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog, SqlNamespaceNames.Default)
                                 && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
@@ -811,6 +810,15 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                                 SqlDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog.RecordSpaceFormatVersion);
                                 if (creating) { throw DatabaseException.CreateEngineFailure("CK03001", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.DatabaseAlreadyExists, name)); }
                                 SqlSchemaProvisioner.ValidateRecordedFormats(probeCatalog);
+                                try
+                                {
+                                    using var probeData = _strategy.OpenStorage(name, catalog: false, cancellationToken, readOnly: true);
+                                    SqlDatabase.EnsureIndexFormats(name, probeData, probeCatalog);
+                                }
+                                catch (StorageFormatException exception)
+                                {
+                                    throw RefuseStorageFormat(name, "data", name, exception);
+                                }
                             }
                         }
                         catalogStorage = _strategy.OpenStorage(name, catalog: true, cancellationToken);

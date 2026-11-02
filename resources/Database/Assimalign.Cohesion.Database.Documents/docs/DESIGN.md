@@ -1,5 +1,16 @@
 # Documents engine design
 
+## Refused opens preserve every file (#1744)
+
+DocumentCatalog.EnsureIndexFormat reads metadata kind/version headers, physical registrations and
+every registered B-tree root. The engine performs this preflight through Storage's recovered
+read-only view before acquiring writable file handles.
+A refusal preserves data, journals, backups, catalog files and sidecars byte for byte, including
+committed and uncommitted crash records. Acceptance discards the probe, opens the original files
+and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
+its journal before the gate reads it. No format version or diagnostic identity changes.
+The Storage DESIGN records the common replay rules, memory bound and complete gate inventory.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The OQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
@@ -1515,8 +1526,8 @@ is recorded for owner review; P8 (#1264) later absorbs the description into its 
 Index definition and physical registration records use catalog v3 (#1530); other record kinds
 retain their current versions. Startup validates metadata and tree formats before the recovery
 scrub. V1/v2 index catalogs are refused with a recreate remedy; no legacy reader or upgrade exists.
-The engine-level refusal names the database, disposes its coordinator and leaves a cleanly closed
-file set byte-identical, for both v1/v2 definition and registration records.
+The engine-level preflight refusal names the database before constructing its coordinator and leaves
+clean or crashed file sets byte-identical, for both v1/v2 definition and registration records.
 
 
 `CREATE [UNIQUE] INDEX [IF NOT EXISTS] <index-name> ON <collection> (<path>, ...)` and
@@ -1924,10 +1935,8 @@ checkpoint deferred, scrubs uncommitted record writers and index changes, and th
 completes the recovery checkpoint. Before the scrub it checks every index tree's
 B-tree page format (`DocumentCatalog.EnsureIndexFormat`, #1194): a database whose
 indexes an engine before #1194 wrote is refused with "Database 'x' cannot be
-opened. CK06101: …". A cleanly closed database is left byte-identical. A
-crashed one has already had the storage layer's format-agnostic journal redo and
-undo when the check runs, but keeps its journal (the open-time checkpoint is
-deferred), so the engine that wrote it still recovers it. A file set in another storage
+opened. CK06101: …". Clean and crashed databases are left byte-identical: the check reads Storage's recovered read-only view
+before physical recovery opens original files for writing (#1744). A file set in another storage
 format (#1251) is refused by the storage before its journal is read, and the engine names
 the database: "Database 'x' cannot be opened. CK06001: …", the storage's
 `StorageFormatException` as its inner exception, the files byte-identical
@@ -2936,9 +2945,8 @@ so the scrub does not change them), and each root page. `Open` decodes metadata 
 after recovery; the fence does not allocate decoded collections, documents or path lists.
 The Documents engine calls it before recovery and refuses a database
 whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. CK06101: …",
-the `IndexFormatException` as its inner exception. A cleanly closed database is left
-byte-identical; a crashed one has had only the storage layer's format-agnostic journal redo and
-undo, and keeps its journal for the engine that wrote it. There is no upgrade path (owner decision
+the `IndexFormatException` as its inner exception. Clean and crashed databases are left
+byte-identical: physical recovery runs only after the recovered read-only preflight accepts (#1744). There is no upgrade path (owner decision
 of 2026-10-02; #1152). The fence runs one way only: engines before #1194 check neither the page
 format nor anything this catalog changed, so they cannot detect a database this engine wrote and
 must not open one (owner review of #1194). Former raw, unstamped DocumentStorage stub files are unsupported

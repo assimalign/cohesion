@@ -1935,8 +1935,9 @@ Recovery never replays onto page 0 either: nothing journals it, so an image of i
 
 An open over a data stream whose `CanWrite` is false is a recovered read-only view. The existing
 model storage factories own these streams; no new public interface or producer-to-consumer
-visibility grant is needed. A caller can run its format gates through this view, dispose it, then
-open the original streams for normal physical recovery. Refusal, cancellation and probe disposal issue no writes, truncation, checkpoint, backup or sidecar creation.
+visibility grant is needed. Engines acquire read-only handles for every file set, perform all
+format gates, dispose the probes, then open the originals for normal physical recovery. Refusal,
+cancellation and probe disposal issue no writes, truncation, checkpoint, backup or sidecar creation.
 A read failure retains its existing I/O/corruption identity. A probe mutation is API misuse and
 throws resource-backed `NotSupportedException`, without a new Database diagnostic.
 
@@ -1960,13 +1961,40 @@ conservative object headers (`RetainedIndexBytes`). Existing allocator/owner and
 state is `O(P + T + R)`, with no page payloads. Scan workspace is a returned 256 KiB journal chunk
 (or one larger frame), one decoded payload and one page-header buffer. Model-decoded catalog
 metadata follows the gate-read pages. No journal-size cap refuses an otherwise openable database;
-there is no temporary file and no dependence on query spill.
+there is no temporary file and no dependence on query spill. In-memory preflights borrow closed
+MemoryStream buffers through non-writable views; they do not copy whole databases or journals.
+SQL's private block overlay has been removed in favor of this one mechanism.
 
-The probe adds **no durable boundary**. Header/chain reads, journal analysis/indexing, recovered
-header scans, gate reads and disposal all precede the handoff to existing physical recovery.
-Storage tests compare every probe page with real recovery over mixed committed and uncommitted
-histories, torn pages and protected anchors. The existing 1,000-history oracle still checks physical
-writes in order. A 32 MiB unread journal test uses deterministic retained-byte counters.
+The complete database-open gate inventory (paths relative to `resources/Database`, source locations
+on this implementation) is:
+
+| Engine / layer | Gates through the recovered read-only view |
+|---|---|
+| Shared Storage, every set | `Storage/src/Storage.cs:3868` ReadHeader (file format and checkpoint chains); `Storage/src/Journal/StorageJournal.cs:1490` DecodeRecord (verified journal frame format) |
+| Shared Indexing | `Indexing/src/BTreeIndexManager.cs:115` EnsureFormat and `Indexing/src/BTreeIndex.cs:164` EnsureFormat, reading every registered root |
+| Graph | `Graph/src/Storage/GraphStore.cs:164` EnsureIndexFormat (entity headers via `Graph/src/Internal/Storage/GraphRecordCodec.cs:21`, registration version at `Graph/src/Storage/GraphStore.Indexes.cs:296`, roots); `Graph/src/Catalog/GraphCatalog.cs:91` EnsureFormat (every catalog record version via `Graph/src/Internal/Catalog/GraphCatalogCodec.cs:79`) |
+| Documents | `Documents/src/Catalog/DocumentCatalog.cs:124` EnsureIndexFormat (metadata kind/version headers via `Documents/src/Internal/Catalog/DocumentCatalogCodec.cs:64` EnsureHeader and `:181` EnsureVersion; registrations at `Documents/src/Catalog/DocumentCatalog.Indexes.cs:536`; roots) |
+| SQL, catalog and data | `Sql/src/SqlDatabaseEngine.cs:913` OpenCatalog (table-extension version at `Sql/src/Catalog/SqlCatalog.cs:1941`, index-record version at `:2122`); `Sql/src/SqlDatabase.cs:298` ThrowIfFormatIsNotCurrent; `Sql/src/Internal/Provisioning/SqlSchemaProvisioner.cs:70` ValidateRecordedFormats; `Sql/src/SqlDatabase.cs:273` EnsureIndexFormats (data roots); shared storage gates on both sets |
+| KeyValuePair, catalog and data | `KeyValuePair/src/KeyValueDatabase.cs:259` ThrowIfFormatIsNotCurrent; `KeyValuePair/src/KeyValueDatabase.cs:232` EnsureIndexFormats (data roots); shared storage gates on both sets |
+| Blob | `Blob/src/BlobDatabase.cs:89` EnsureFormats, decoding owner-zero records with `Blob/src/Internal/Catalog/BlobCatalogCodec.cs:73` catalog-version gate |
+| Cache | No persisted database-open format gate; it owns no storage file set |
+
+SQL's optional ProbeStorage describes interrupted-creation metadata only. A strategy returning
+null still has to honor the readOnly argument of OpenStorage and undergo the same preflight.
+Catalog refusals precede even a read-only data open; data header/root refusals precede writable
+catalog opens. Instance-level checks remain as defense in depth and preserve their existing codes.
+
+The probe adds **no durable boundary**. Its boundaries are read header/chains, analyze/index journal,
+scan recovered headers, gate catalog/registrations/roots, dispose, then hand off to the existing
+physical-recovery boundaries. Cancellation or a read fault before handoff leaves the original
+crash image intact. Acceptance uses the same redo, data flush, logical scrub and checkpoint ordering
+as before; existing crash-boundary suites remain unchanged. Process-exit fixtures leave committed
+and stolen uncommitted physical brackets in every engine and both SQL/KeyValuePair sets. Refusals
+compare every file through engine disposal; current-format cases tear journal-covered root stamps
+and data pages and assert exact committed bytes after recovery and a second reopen. Storage tests
+compare every probe page with real recovery over mixed histories and protected anchors; the
+existing 1,000-history oracle still checks physical writes in order. A 32 MiB unread journal test
+uses deterministic retained-byte counters, not elapsed time or GC measurements.
 
 ### Checkpoints
 

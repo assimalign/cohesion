@@ -653,6 +653,13 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             DocumentStorage? storage = null;
             try
             {
+                if (!create)
+                {
+                    using var probe = _options.StorageStrategy is { } probeStrategy
+                        ? probeStrategy.OpenStorage(name, null, readOnly: true)
+                        : OpenStorage(directory, _memory, name, create: false, null, readOnly: true);
+                    DocumentDatabase.EnsureFormats(DatabaseFileNames.GetOpenedName(name, probe.Name), probe);
+                }
                 storage = _options.StorageStrategy is { } strategy
                     ? create ? strategy.CreateStorage(name, _options.Durability) : strategy.OpenStorage(name, _options.Durability)
                     : OpenStorage(directory, _memory, name, create, _options.Durability);
@@ -737,7 +744,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
 
     // A database's files: in its directory, or, for an in-memory engine, the memory the engine
     // keeps for it, created empty or opened again with the bytes its last storage left.
-    private static DocumentStorage OpenStorage(string? directory, DatabaseMemoryFiles? memory, string name, bool create, StorageCommitDurability? durability)
+    private static DocumentStorage OpenStorage(string? directory, DatabaseMemoryFiles? memory, string name, bool create, StorageCommitDurability? durability, bool readOnly = false)
     {
         StorageStream? data = null, journal = null, backup = null;
         try
@@ -746,7 +753,7 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             {
                 bool found = memory is not null && (create
                     ? memory.TryCreate(name, DataFileSet, out data, out journal, out backup)
-                    : memory.TryOpen(name, DataFileSet, out data, out journal, out backup));
+                    : memory.TryOpen(name, DataFileSet, out data, out journal, out backup, readOnly));
                 if (!found)
                 {
                     throw create
@@ -758,12 +765,12 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             {
                 var mode = create ? FileMode.CreateNew : FileMode.Open;
                 var files = DatabaseFileNames.GetFiles(directory, DataFileSet);
-                data = StorageStream.FromFile(files.Data, mode, FileShare.Read);
-                journal = StorageStream.FromFile(files.Journal, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
-                backup = StorageStream.FromFile(files.Backup, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
+                data = readOnly ? new StorageStream(new FileStream(files.Data, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Data, mode, FileShare.Read);
+                journal = readOnly ? new StorageStream(new FileStream(files.Journal, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Journal, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
+                backup = readOnly ? new StorageStream(new FileStream(files.Backup, FileMode.Open, FileAccess.Read, FileShare.Read)) : StorageStream.FromFile(files.Backup, create ? FileMode.CreateNew : FileMode.Open, FileShare.Read);
             }
 
-            return create ? DocumentStorage.Create(data!, journal!, backup!, name, durability) : DocumentStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, durability);
+            return create ? DocumentStorage.Create(data!, journal!, backup!, name, durability) : DocumentStorage.Open(data!, journal!, backup!, checkpointOnOpen: false, readOnly ? null : durability);
         }
         catch { data?.Dispose(); journal?.Dispose(); backup?.Dispose(); throw; }
     }
