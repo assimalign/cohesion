@@ -43,7 +43,7 @@ public sealed class SqlSnapshotPinDiagnosticsTests
         database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         database.DataStorage.GetOwnerPages(objectId).ShouldBeEmpty();
         database.OfflineError.ShouldBeNull();
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
         recorder.Sum("transactions-per-second", sequence, reclaimed).ShouldBe(1);
         recorder.Sum("commits-per-second", sequence, reclaimed).ShouldBe(1);
         recorder.Sum("rollbacks-per-second", sequence, reclaimed).ShouldBe(0);
@@ -84,13 +84,13 @@ public sealed class SqlSnapshotPinDiagnosticsTests
         {
             recorder.Sum(rate, sequence, readsFinished).ShouldBe(0, rate);
         }
-        database.Coordinator.GetOpenContexts().Count.ShouldBe(1);
+        database.TableReclamation.GetOpenContextsAtIdleForTesting().Count.ShouldBe(1);
         await transaction.RollbackAsync(token);
         long rollbackFinished = await recorder.WaitForBoundaryAsync(token);
         recorder.Sum("rollbacks-per-second", readsFinished, rollbackFinished).ShouldBe(1);
 
         // Assert: the real transaction still reports its begin and rollback exactly once.
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
         recorder.Events.ShouldNotContain(e => e.EventId == 0);
         recorder.Events.Where(e => e.EventId is 1 or 2 or 3 && Equals(e.Payload?[0], "pins"))
             .Select(e => e.EventName).ShouldBe(["TransactionBegun", "TransactionRolledBack"]);
