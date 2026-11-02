@@ -653,11 +653,12 @@ public sealed class DocumentDatabaseEngine : DatabaseEngine
             DocumentStorage? storage = null;
             try
             {
-                if (!create)
+                if (!create && (_options.StorageStrategy is not null || DatabaseRecoveryPreflight.Required(directory, _memory, name, DataFileSet)))
                 {
                     using var probe = _options.StorageStrategy is { } probeStrategy
                         ? probeStrategy.OpenStorage(name, null, readOnly: true)
                         : OpenStorage(directory, _memory, name, create: false, null, readOnly: true);
+                    DatabaseRecoveryPreflight.AssertRecovered(probe);
                     DocumentDatabase.EnsureFormats(DatabaseFileNames.GetOpenedName(name, probe.Name), probe);
                 }
                 storage = _options.StorageStrategy is { } strategy

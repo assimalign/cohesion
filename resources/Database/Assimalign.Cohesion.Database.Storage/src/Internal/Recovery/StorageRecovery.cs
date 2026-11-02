@@ -124,8 +124,14 @@ internal static class StorageRecovery
 
             long pageId = (long)record.PageId;
             if (!ShouldApply(record, committed)) { continue; }
-            byte[] page = record.Type == JournalRecordType.FullPageImage || !imaged.Contains(pageId) ? cache.Take(pageId) : cache.Get(pageId);
-            Apply(record, page, imaged.Contains(pageId));
+            bool hasImage = imaged.Contains(pageId);
+            if (record.Type != JournalRecordType.FullPageImage && !hasImage)
+            {
+                // Validate before Take can evict and write another page on a corrupt chain.
+                Apply(record, Array.Empty<byte>(), imaged: false);
+            }
+            byte[] page = record.Type == JournalRecordType.FullPageImage ? cache.Take(pageId) : cache.Get(pageId);
+            Apply(record, page, hasImage);
             imaged.Add(pageId);
 
             if (record.Lsn == plan.LastLsn)
@@ -143,7 +149,7 @@ internal static class StorageRecovery
     /// Gets whether a record type describes a page (storage format 3).
     /// </summary>
     internal static bool IsPageRecord(JournalRecordType type)
-        => type is JournalRecordType.FullPageImage or JournalRecordType.PageDelta or JournalRecordType.CommittedPageImage;
+        => StorageRecoveryJournal.IsPageRecord(type);
 
     internal static Dictionary<long, StorageRecoveryPagePlan> GetPlans(
         StorageRecoveryAnalysis analysis, long originalLength, IReadOnlySet<long>? protectedPages,

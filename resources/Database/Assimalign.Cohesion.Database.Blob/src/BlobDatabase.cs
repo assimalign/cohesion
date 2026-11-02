@@ -80,13 +80,14 @@ public sealed class BlobDatabase : DatabaseInstance
 
         if (recover)
         {
+            EnsureFormats(storage);
             Coordinator.AnalyzeAndScrub();
             Coordinator.CompleteRecovery();
         }
         Catalog = BlobCatalog.Open(storage, Coordinator);
     }
 
-    internal static void EnsureFormats(DatabaseName name, BlobStorage storage)
+    internal static void EnsureFormats(BlobStorage storage)
     {
         using var records = storage.GetUnitIterator(0);
         while (records.MoveNext())

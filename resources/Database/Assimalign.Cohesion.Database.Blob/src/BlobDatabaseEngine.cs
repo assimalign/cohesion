@@ -653,12 +653,13 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             BlobStorage? storage = null;
             try
             {
-                if (!create)
+                if (!create && (_options.StorageStrategy is not null || DatabaseRecoveryPreflight.Required(directory, _memory, name, DataFileSet)))
                 {
                     using var probe = _options.StorageStrategy is { } probeStrategy
                         ? probeStrategy.OpenStorage(name, null, readOnly: true)
                         : OpenStorage(directory, _memory, name, create: false, null, readOnly: true);
-                    BlobDatabase.EnsureFormats(name, probe);
+                    DatabaseRecoveryPreflight.AssertRecovered(probe);
+                    BlobDatabase.EnsureFormats(probe);
                 }
                 storage = _options.StorageStrategy is { } strategy
                     ? create ? strategy.CreateStorage(name, _options.Durability) : strategy.OpenStorage(name, _options.Durability)

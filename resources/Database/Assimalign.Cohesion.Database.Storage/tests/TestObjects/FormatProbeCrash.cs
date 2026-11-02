@@ -50,6 +50,22 @@ internal static class FormatProbeCrash
         { new FileInfo(path).Length.ShouldBeGreaterThan(0); }
     }
 
+    internal static void AssertUncommittedImages(string root)
+    {
+        foreach (string marker in Directory.GetFiles(root, "*.page", SearchOption.AllDirectories))
+        {
+            long pageId = long.Parse(File.ReadAllText(marker), CultureInfo.InvariantCulture);
+            using var journal = StorageJournal.Create(new MemoryStream(File.ReadAllBytes(Path.ChangeExtension(marker, ".log"))));
+            var records = journal.ReadAll().ToArray();
+            var commits = records.Where(record => record.Type == JournalRecordType.CommitTransaction).Select(record => record.TransactionSequence).ToHashSet();
+            records.ShouldContain(record => record.Type == JournalRecordType.FullPageImage && (long)record.PageId == pageId
+                && !commits.Contains(record.TransactionSequence), marker);
+            using var data = File.OpenRead(Path.ChangeExtension(marker, ".dat"));
+            data.Position = pageId * Units.Page.Size + 512;
+            data.ReadByte().ShouldBe(0x55);
+        }
+    }
+
     internal static Dictionary<string, byte[]> Snapshot(string root)
         => Directory.GetFiles(root, "*", SearchOption.AllDirectories).ToDictionary(path => path, File.ReadAllBytes);
 

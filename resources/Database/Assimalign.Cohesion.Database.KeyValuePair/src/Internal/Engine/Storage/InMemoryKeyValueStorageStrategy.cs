@@ -27,6 +27,9 @@ internal sealed class InMemoryKeyValueStorageStrategy : KeyValueStorageStrategy
         _durability = durability;
     }
 
+    internal override bool RequiresRecovery(string databaseName, bool catalog)
+        => DatabaseRecoveryPreflight.Required(null, _files, databaseName, GetFileSet(catalog));
+
     /// <inheritdoc />
     public override KeyValueStorage CreateStorage(string databaseName, bool catalog)
     {

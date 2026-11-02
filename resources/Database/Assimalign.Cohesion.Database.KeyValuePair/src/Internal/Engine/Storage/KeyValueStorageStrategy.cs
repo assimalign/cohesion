@@ -82,6 +82,8 @@ internal abstract class KeyValueStorageStrategy
     /// <param name="readOnly">True to open only read-only source streams for the recovered format preflight; false for normal recovery.</param>
     public abstract KeyValueStorage OpenStorage(string databaseName, bool catalog, bool readOnly = false);
 
+    internal virtual bool RequiresRecovery(string databaseName, bool catalog) => true;
+
     /// <summary>
     /// Drops every file set of a database: on disk, its directory.
     /// </summary>

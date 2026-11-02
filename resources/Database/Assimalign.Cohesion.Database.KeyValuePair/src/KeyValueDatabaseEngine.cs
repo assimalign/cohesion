@@ -606,18 +606,23 @@ public sealed class KeyValueDatabaseEngine : DatabaseEngine
                 // data: a catalog refusal must not run the data set's physical recovery (#1270).
                 try
                 {
-                    using (var probeCatalogStorage = _strategy.OpenStorage(name, catalog: true, readOnly: true))
+                    if (_strategy.RequiresRecovery(name, catalog: true) || _strategy.RequiresRecovery(name, catalog: false))
                     {
-                        var probeCatalog = KeyValueCatalog.Open(probeCatalogStorage);
-                        KeyValueDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog);
-                        try
+                        using (var probeCatalogStorage = _strategy.OpenStorage(name, catalog: true, readOnly: true))
                         {
-                            using var probeData = _strategy.OpenStorage(name, catalog: false, readOnly: true);
-                            KeyValueDatabase.EnsureIndexFormats(name, probeData, probeCatalog);
-                        }
-                        catch (StorageFormatException exception)
-                        {
-                            throw RefuseStorageFormat(name, "data", name, exception);
+                            DatabaseRecoveryPreflight.AssertRecovered(probeCatalogStorage);
+                            var probeCatalog = KeyValueCatalog.Open(probeCatalogStorage);
+                            KeyValueDatabase.ThrowIfFormatIsNotCurrent(name, probeCatalog);
+                            try
+                            {
+                                using var probeData = _strategy.OpenStorage(name, catalog: false, readOnly: true);
+                                DatabaseRecoveryPreflight.AssertRecovered(probeData);
+                                KeyValueDatabase.EnsureIndexFormats(name, probeData, probeCatalog);
+                            }
+                            catch (StorageFormatException exception)
+                            {
+                                throw RefuseStorageFormat(name, "data", name, exception);
+                            }
                         }
                     }
                     catalogStorage = _strategy.OpenStorage(name, catalog: true);

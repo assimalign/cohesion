@@ -61,6 +61,9 @@ internal sealed class FileSystemSqlStorageStrategy : SqlStorageStrategy
         _durability = durability;
     }
 
+    internal override bool RequiresRecovery(string databaseName, bool catalog)
+        => DatabaseRecoveryPreflight.Required(DatabaseFileNames.GetDirectory(_rootPath, databaseName), null, databaseName, GetFileSet(catalog));
+
     /// <inheritdoc />
     public override SqlStorage CreateStorage(string databaseName, bool catalog)
         => CreateStorage(databaseName, catalog, restarting: false);

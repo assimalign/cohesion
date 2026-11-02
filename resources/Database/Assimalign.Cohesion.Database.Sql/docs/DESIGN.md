@@ -10,7 +10,12 @@ A refusal preserves data, journals, backups, catalog files and sidecars byte for
 committed and uncommitted crash records. Acceptance discards the probe, opens the original files
 and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
 its journal before the gate reads it. No format version or diagnostic identity changes.
-The Storage DESIGN records the common replay rules, memory bound and complete gate inventory.
+When journal-only analysis finds no applicable page records (in both sets), the engine skips the full recovered
+probe. The writable open defers checkpointing, physical recovery has no writes, and all format
+gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
+asserted read-only at the strategy boundary, and is disposed before writable handles open.
+The probe reports no Storage lifecycle events or gauge changes. The Storage DESIGN records the
+source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
 
 ## Bounded COPY TO (#1724, SQ-C1)
 

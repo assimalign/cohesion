@@ -4,6 +4,8 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
+// Deviates from the repo RootNamespace rule: stateless recovery readers are compiled
+// into Storage and each engine without exposing a public implementation bridge.
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 /// <summary>

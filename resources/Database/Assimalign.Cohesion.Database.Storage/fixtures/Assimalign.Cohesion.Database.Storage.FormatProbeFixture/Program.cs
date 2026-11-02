@@ -28,7 +28,9 @@ internal static class Program
         // This process deliberately exits with live physical brackets. Never dispose them before Exit.
         string model = args[0];
         string root = args[1];
-        bool legacy = args[2] == "legacy";
+        bool clean = args[2].StartsWith("clean-", StringComparison.Ordinal);
+        string mode = clean ? args[2][6..] : args[2];
+        bool legacy = mode == "legacy";
         string directory = Path.Combine(root, "probe");
         switch (model)
         {
@@ -65,6 +67,34 @@ internal static class Program
         }
 
         StorageStream Open(string set, string extension) => StorageStream.FromFile(Path.Combine(directory, set + extension), FileMode.Open, FileShare.Read);
+        // A sentinel page is checkpointed before any crash workload. Its next first
+        // touch must journal an uncommitted full image, independently of later allocations.
+        foreach (string set in model is "Sql" or "KeyValuePair" ? new[] { "catalog", model == "Sql" ? "sql" : "keyvalue" }
+            : new[] { model == "Documents" ? "document" : model.ToLowerInvariant() })
+        {
+            using var prepared = OpenSet(set);
+            var transaction = prepared.BeginTransaction();
+            using (var page = prepared.AllocatePageForWrite(transaction, PageType.Data, ulong.MaxValue))
+            {
+                new SlottedPage(page.Page).Initialize();
+                page.Page.AsSpan()[512] = 0x43;
+                page.MarkDirty();
+                File.WriteAllText(Path.Combine(directory, set + ".page"), ((long)page.Id).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            transaction.Commit();
+            prepared.Checkpoint();
+        }
+
+        Assimalign.Cohesion.Database.Storage.Storage OpenSet(string set) => model switch
+        {
+            "Graph" => GraphStorage.Open(Open(set, ".dat"), Open(set, ".log"), Open(set, ".bak"), checkpointOnOpen: false),
+            "Documents" => DocumentStorage.Open(Open(set, ".dat"), Open(set, ".log"), Open(set, ".bak"), checkpointOnOpen: false),
+            "Blob" => BlobStorage.Open(Open(set, ".dat"), Open(set, ".log"), Open(set, ".bak"), checkpointOnOpen: false),
+            "Sql" => SqlStorage.Open(Open(set, ".dat"), Open(set, ".log"), Open(set, ".bak"), checkpointOnOpen: false),
+            "KeyValuePair" => KeyValueStorage.Open(Open(set, ".dat"), Open(set, ".log"), Open(set, ".bak"), checkpointOnOpen: false),
+            _ => throw new ArgumentOutOfRangeException(nameof(model)),
+        };
+
         Assimalign.Cohesion.Database.Storage.Storage storage;
         string dataSet;
         if (model == "Sql")
@@ -104,9 +134,9 @@ internal static class Program
                 var bracket = typed.BeginTransaction(); typed.InsertEntry(bracket, record); bracket.Commit(); storage = typed;
             }
         }
-        if (storage is GraphStorage graph && args[2] is "entity" or "registration")
+        if (storage is GraphStorage graph && mode is "entity" or "registration")
         {
-            using var records = graph.GetUnitIterator(args[2] == "entity" ? 2UL : 1UL);
+            using var records = graph.GetUnitIterator(mode == "entity" ? 2UL : 1UL);
             if (!records.MoveNext()) { throw new InvalidOperationException("Graph seed has no format-gated record."); }
             var unit = records.Current;
             byte[] bytes = unit.Data.ToArray();
@@ -122,7 +152,7 @@ internal static class Program
                 using var read = storage.PageManager.GetPage((PageId)id);
                 if (read.Page.Type != PageType.Index) { continue; }
                 using var write = storage.OpenPageForWrite(bracket, (PageId)id);
-                if (args[2] == "index") { write.Page.AsBodySpan()[2] = 1; }
+                if (mode == "index") { write.Page.AsBodySpan()[2] = 1; }
                 write.MarkDirty();
             }
             bracket.Commit();
@@ -133,16 +163,15 @@ internal static class Program
 
         void LeaveUncommitted(Assimalign.Cohesion.Database.Storage.Storage target, string set)
         {
+            if (clean) { target.Checkpoint(); target.Dispose(); return; }
             var committed = target.BeginTransaction();
-            PageId pageId;
             using (var page = target.AllocatePageForWrite(committed, PageType.Data, ulong.MaxValue))
             {
-                pageId = page.Id;
                 new SlottedPage(page.Page).Initialize();
-                page.Page.AsSpan()[512] = 0x43;
                 page.MarkDirty();
             }
             committed.Commit();
+            PageId pageId = (PageId)long.Parse(File.ReadAllText(Path.Combine(directory, set + ".page")), System.Globalization.CultureInfo.InvariantCulture);
             var uncommitted = target.BeginTransaction();
             using (var page = target.OpenPageForWrite(uncommitted, pageId))
             {

@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 
+// Deviates from the repo RootNamespace rule: stateless recovery readers are compiled
+// into Storage and each engine without exposing a public implementation bridge.
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
 // Identities only: no payload or per-frame entry survives the initialization scan.

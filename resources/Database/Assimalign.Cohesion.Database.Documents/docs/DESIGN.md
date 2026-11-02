@@ -9,7 +9,12 @@ A refusal preserves data, journals, backups, catalog files and sidecars byte for
 committed and uncommitted crash records. Acceptance discards the probe, opens the original files
 and runs the existing physical and logical recovery. A torn current-format page is rebuilt from
 its journal before the gate reads it. No format version or diagnostic identity changes.
-The Storage DESIGN records the common replay rules, memory bound and complete gate inventory.
+When journal-only analysis finds no applicable page records (in the data set), the engine skips the full recovered
+probe. The writable open defers checkpointing, physical recovery has no writes, and all format
+gates precede logical scrub/checkpoint. Otherwise the recovered probe remains read-only, is
+asserted read-only at the strategy boundary, and is disposed before writable handles open.
+The probe reports no Storage lifecycle events or gauge changes. The Storage DESIGN records the
+source-shared journal analysis, common replay rules, retained-byte bound and gate inventory.
 
 ## Named savepoint integration (#1726, XT-4)
 
@@ -1935,8 +1940,8 @@ checkpoint deferred, scrubs uncommitted record writers and index changes, and th
 completes the recovery checkpoint. Before the scrub it checks every index tree's
 B-tree page format (`DocumentCatalog.EnsureIndexFormat`, #1194): a database whose
 indexes an engine before #1194 wrote is refused with "Database 'x' cannot be
-opened. CK06101: …". Clean and crashed databases are left byte-identical: the check reads Storage's recovered read-only view
-before physical recovery opens original files for writing (#1744). A file set in another storage
+opened. CK06101: …". Clean and crashed databases are left byte-identical: gates precede all writes,
+using Storage's recovered read-only view when replay is needed (#1744). A file set in another storage
 format (#1251) is refused by the storage before its journal is read, and the engine names
 the database: "Database 'x' cannot be opened. CK06001: …", the storage's
 `StorageFormatException` as its inner exception, the files byte-identical
@@ -2946,7 +2951,7 @@ after recovery; the fence does not allocate decoded collections, documents or pa
 The Documents engine calls it before recovery and refuses a database
 whose indexes an engine before #1194 wrote with "Database 'x' cannot be opened. CK06101: …",
 the `IndexFormatException` as its inner exception. Clean and crashed databases are left
-byte-identical: physical recovery runs only after the recovered read-only preflight accepts (#1744). There is no upgrade path (owner decision
+byte-identical: gates precede all writes, using the recovered read-only preflight when replay is needed (#1744). There is no upgrade path (owner decision
 of 2026-10-02; #1152). The fence runs one way only: engines before #1194 check neither the page
 format nor anything this catalog changed, so they cannot detect a database this engine wrote and
 must not open one (owner review of #1194). Former raw, unstamped DocumentStorage stub files are unsupported

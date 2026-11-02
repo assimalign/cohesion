@@ -797,8 +797,10 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                     {
                         // Gate both sets through recovered read-only views. This scope closes
                         // their read handles before acquiring any writable handle.
+                        if (creationPending || _strategy.RequiresRecovery(name, catalog: true) || _strategy.RequiresRecovery(name, catalog: false))
                         {
                             using var probeStorage = catalogProbe?.Open() ?? _strategy.OpenStorage(name, catalog: true, cancellationToken, readOnly: true);
+                            DatabaseRecoveryPreflight.AssertRecovered(probeStorage);
                             var probeCatalog = OpenCatalog(name, probeStorage);
                             if (SqlCatalogCreation.IsCreationOnly(probeStorage, probeCatalog, SqlNamespaceNames.Default)
                                 && (!creationPending || !IsEmptyDataProbe(name, dataProbe)))
@@ -813,6 +815,7 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                                 try
                                 {
                                     using var probeData = _strategy.OpenStorage(name, catalog: false, cancellationToken, readOnly: true);
+                                    DatabaseRecoveryPreflight.AssertRecovered(probeData);
                                     SqlDatabase.EnsureIndexFormats(name, probeData, probeCatalog);
                                 }
                                 catch (StorageFormatException exception)

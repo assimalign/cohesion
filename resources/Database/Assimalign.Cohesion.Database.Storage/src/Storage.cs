@@ -1057,7 +1057,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
     /// </summary>
     private void CountOpen()
     {
-        if (Interlocked.CompareExchange(ref _gaugeState, 1, 0) == 0)
+        if (_recoveredView is null && Interlocked.CompareExchange(ref _gaugeState, 1, 0) == 0)
         {
             StorageEventSource.Log.CountStorageOpened();
         }
@@ -1161,7 +1161,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 ExceptionDispatchInfo.Capture(headerReadFailure).Throw();
             }
 
-            StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure);
+            if (_recoveredView is null) { StorageEventSource.Log.HeaderReadFallback(this, _headerSlot, header.Generation, header.LsnFloor, headerReadFailure); }
         }
         bool journalHadRecords = _journal!.LastLsn > 0;
 
@@ -1174,7 +1174,7 @@ public abstract class Storage : IAsyncDisposable, IDisposable
         // Zero unless the event source is listening: the recovery's start and stop events then
         // bracket the replay and the page scan, and the stop is written whether or not they
         // complete, so its activity always closes.
-        long recoveryStarted = StorageEventSource.Log.RecoveryStart(this);
+        long recoveryStarted = _recoveredView is null ? StorageEventSource.Log.RecoveryStart(this) : 0;
         try
         {
             var recovery = _recoveredView is null
@@ -1298,21 +1298,21 @@ public abstract class Storage : IAsyncDisposable, IDisposable
                 // named a base no record in the journal produced — the following open refused the file
                 // set with a chain gap (#1253 review). Nothing has been appended since open, which
                 // RaiseLsnFloor requires.
-                StorageEventSource.Log.JournalTailLost(this, strayLsn, redoLsn);
+                if (_recoveredView is null) { StorageEventSource.Log.JournalTailLost(this, strayLsn, redoLsn); }
                 _journal.RaiseLsnFloor(strayLsn);
                 redoLsn = strayLsn;
             }
 
             Volatile.Write(ref _redoLsn, redoLsn);
 
-            StorageEventSource.Log.RecoveryStop(this, succeeded: true, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted);
+            if (_recoveredView is null) { StorageEventSource.Log.RecoveryStop(this, succeeded: true, recovery.RebuiltPages.Count, recovery.MaxSequence, redoLsn, recoveryStarted); }
             recoveryStarted = 0;
         }
         finally
         {
             // A recovery that threw: its stop carries zeros and Error, and the open's exception is the failure.
             // A no-op after the stop above, and while nobody listens.
-            StorageEventSource.Log.RecoveryStop(this, succeeded: false, 0, 0, 0, recoveryStarted);
+            if (_recoveredView is null) { StorageEventSource.Log.RecoveryStop(this, succeeded: false, 0, 0, 0, recoveryStarted); }
         }
 
         _pageManager = new StoragePageManager(Data, _bufferPool, _freeSpaceMap) { WroteOutsideJournal = ForgetShadow };

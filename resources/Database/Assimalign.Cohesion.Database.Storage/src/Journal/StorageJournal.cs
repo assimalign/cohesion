@@ -12,6 +12,8 @@ namespace Assimalign.Cohesion.Database.Storage;
 using Assimalign.Cohesion.Database.Storage.Internal;
 using Assimalign.Cohesion.FileSystem;
 
+using static Assimalign.Cohesion.Database.Storage.Internal.StorageRecoveryJournal;
+
 /// <summary>
 /// The write-ahead log: LSN assignment, append serialization, the CRC-protected frame codec,
 /// the user-space append buffer, and torn-tail-tolerant reading, over a stream-backed medium.
@@ -265,13 +267,40 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     internal static StorageJournal OpenReadOnly(StorageStream stream)
         => new StorageJournal(stream, stream, leaveOpen: true, readOnly: true);
 
-    internal void ReadRecoveryPayload(long offset, Span<byte> destination)
+    // Offsets were selected from verified frames during probe initialization. Page ranges
+    // preserve file order; Fill reuses the same chunk across all records of a page.
+    internal IEnumerable<JournalRecord> ReadRecoveryPageRecords(long[] offsets, int start, int count)
     {
-        lock (_mediumLock) { ReadAtCore(offset, destination); }
+        lock (_mediumLock)
+        {
+            byte[] chunk = ArrayPool<byte>.Shared.Rent(readChunkSize);
+            // The complete index scan verified this immutable read-only prefix.
+            long length = _scannedLength;
+            long chunkOffset = -1;
+            int chunkCount = 0;
+            try
+            {
+                for (int i = start; i < start + count; i++)
+                {
+                    long offset = offsets[i];
+                    if (!Fill(_handle, ref chunk, ref chunkOffset, ref chunkCount, offset, framePrefixSize, length))
+                    {
+                        throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalReadAtCoreFailure, _handle.Length, framePrefixSize, offset));
+                    }
+                    int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan((int)(offset - chunkOffset)));
+                    int frameLength = checked(framePrefixSize + bodyLength + sizeof(uint));
+                    if (!Fill(_handle, ref chunk, ref chunkOffset, ref chunkCount, offset, frameLength, length))
+                    {
+                        throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalReadAtCoreFailure, _handle.Length, frameLength, offset));
+                    }
+                    yield return DecodeRecord(chunk.AsMemory((int)(offset - chunkOffset) + framePrefixSize, bodyLength), i + 1);
+                }
+            }
+            finally { ArrayPool<byte>.Shared.Return(chunk); }
+        }
     }
 
     internal const int RecoveryFrameOverhead = framePrefixSize + bodyHeaderSize + sizeof(uint);
-    internal const int RecoveryPayloadOffset = framePrefixSize + bodyHeaderSize;
 
     /// <summary>Creates a journal backed by an explicit random-access file handle.</summary>
     /// <param name="handle">The file handle providing I/O and durability.</param>
@@ -1497,11 +1526,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             throw StorageFormatException.ForJournalFrame(frameNumber, body[0], currentVersion);
         }
 
-        long lsn = BinaryPrimitives.ReadInt64LittleEndian(body[1..]);
-        long transactionSequence = BinaryPrimitives.ReadInt64LittleEndian(body[9..]);
-        var type = (JournalRecordType)body[17];
-        long pageId = BinaryPrimitives.ReadInt64LittleEndian(body[18..]);
-        return new JournalRecord(lsn, transactionSequence, type, (PageId)pageId, frame[bodyHeaderSize..]);
+        return StorageRecoveryJournal.DecodeRecord(frame);
     }
 
     internal void EnsureInitialized(CancellationToken cancellationToken = default)
@@ -1573,103 +1598,7 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     // code immediately instead of waiting for the tiered JIT invocation threshold.
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private StorageRecoveryAnalysis ScanRecoveryAnalysis(CancellationToken cancellationToken)
-    {
-        long lastLsn = 0;
-        long maxSequence = 0;
-        long checkpointLsn = 0;
-        long ordinal = 0;
-        var committed = new HashSet<long>();
-        var pages = new Dictionary<long, StorageRecoveryPagePlan>();
-        var pending = new Dictionary<long, Dictionary<long, StorageRecoveryPagePlan>>();
-        var freePending = new Stack<Dictionary<long, StorageRecoveryPagePlan>>();
-        var rolledBack = new HashSet<long>();
-        bool replan = false;
-
-        void Merge(long pageId, StorageRecoveryPagePlan next)
-        {
-            pages.TryGetValue(pageId, out var previous);
-            pages[pageId] = next.Ordinal >= previous.Ordinal
-                ? next with { Committed = previous.Committed || next.Committed }
-                : previous with { Committed = previous.Committed || next.Committed };
-        }
-
-        foreach (var record in ReadRecordsCore())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            ordinal++;
-            lastLsn = record.Lsn;
-            maxSequence = Math.Max(maxSequence, record.TransactionSequence);
-            if (record.Type == JournalRecordType.CommitTransaction)
-            {
-                replan |= rolledBack.Contains(record.TransactionSequence);
-                committed.Add(record.TransactionSequence);
-                if (pending.Remove(record.TransactionSequence, out var changes))
-                {
-                    foreach (var (pageId, plan) in changes)
-                    {
-                        Merge(pageId, plan with { Committed = true });
-                    }
-                    changes.Clear();
-                    freePending.Push(changes);
-                }
-            }
-            else if (record.Type == JournalRecordType.RollbackTransaction)
-            {
-                if (pending.Remove(record.TransactionSequence, out var changes))
-                {
-                    rolledBack.Add(record.TransactionSequence);
-                    changes.Clear();
-                    freePending.Push(changes);
-                }
-            }
-            else if (record.Type == JournalRecordType.Checkpoint)
-            {
-                checkpointLsn = Math.Max(checkpointLsn, record.Lsn);
-            }
-            else if (StorageRecovery.IsPageRecord(record.Type) && (long)record.PageId > 0)
-            {
-                long pageId = (long)record.PageId;
-                bool committedRecord = committed.Contains(record.TransactionSequence);
-                var plan = new StorageRecoveryPagePlan(ordinal, record.Lsn, committedRecord);
-                if (record.Type == JournalRecordType.FullPageImage || committedRecord)
-                {
-                    Merge(pageId, plan);
-                }
-                if (!committedRecord)
-                {
-                    // Retain only the last identity for each page of an unproven bracket.
-                    // A later commit promotes it; missing commits discard it after the scan.
-                    if (!pending.TryGetValue(record.TransactionSequence, out var changes))
-                    {
-                        changes = freePending.TryPop(out var reusable) ? reusable : new Dictionary<long, StorageRecoveryPagePlan>();
-                        pending.Add(record.TransactionSequence, changes);
-                    }
-                    changes[pageId] = plan;
-                }
-            }
-        }
-        if (replan)
-        {
-            // Fresh allocation resumes above MaxSequence, but BeginTransaction(long) and the
-            // journal append API permit reusing an adopted sequence after rollback. Base gates
-            // every change of that sequence on any commit, even one after the rollback. Rebuild
-            // identities on this rare path rather than retaining all rolled-back page entries.
-            pages.Clear();
-            ordinal = 0;
-            foreach (var record in ReadRecordsCore())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                ordinal++;
-                bool committedRecord = committed.Contains(record.TransactionSequence);
-                if (StorageRecovery.IsPageRecord(record.Type) && (long)record.PageId > 0
-                    && (record.Type == JournalRecordType.FullPageImage || committedRecord))
-                {
-                    Merge((long)record.PageId, new StorageRecoveryPagePlan(ordinal, record.Lsn, committedRecord));
-                }
-            }
-        }
-        return new StorageRecoveryAnalysis(lastLsn, maxSequence, checkpointLsn, committed, pages);
-    }
+        => StorageRecoveryJournal.Analyze(() => ReadRecordsCore(), cancellationToken);
 
     private void ThrowIfDisposed()
     {
@@ -1756,114 +1685,18 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     private IEnumerable<ReadOnlyMemory<byte>> ReadFrames(bool reuseVerifiedPrefix)
     {
         long originalPosition = _stream.Position;
-        byte[] chunk = [];
-
+        long position = 0;
         try
         {
-            long length = _handle.Length;
-            // Trust is single-use and confined to recovery immediately after its analysis on
-            // this instance. Public readers and every later borrowed scan verify every CRC.
-            long verifiedPrefix = reuseVerifiedPrefix ? _scannedLength : 0;
-            chunk = ArrayPool<byte>.Shared.Rent((int)Math.Min(readChunkSize, Math.Max(length, framePrefixSize)));
-            long chunkOffset = 0;
-            int chunkCount = 0;
-            long position = 0;
-
-            while (position + framePrefixSize <= length)
+            foreach (var frame in StorageRecoveryJournal.ReadFrames(_handle, reuseVerifiedPrefix ? _scannedLength : 0))
             {
-                if (!Fill(ref chunk, ref chunkOffset, ref chunkCount, position, framePrefixSize, length))
-                {
-                    break;
-                }
-
-                int start = (int)(position - chunkOffset);
-                int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start));
-                int magic = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan(start + sizeof(int)));
-                if (magic != magicValue || bodyLength < bodyHeaderSize || bodyLength > int.MaxValue - framePrefixSize - sizeof(uint)
-                    || (long)framePrefixSize + bodyLength + sizeof(uint) > length - position)
-                {
-                    break;
-                }
-
-                int frameLength = framePrefixSize + bodyLength + sizeof(uint);
-                if (!Fill(ref chunk, ref chunkOffset, ref chunkCount, position, frameLength, length))
-                {
-                    break;
-                }
-
-                start = (int)(position - chunkOffset);
-                var body = chunk.AsMemory(start + framePrefixSize, bodyLength);
-                uint expected = BinaryPrimitives.ReadUInt32LittleEndian(chunk.AsSpan(start + framePrefixSize + bodyLength));
-                if (position + frameLength > verifiedPrefix && Crc32C.Compute(body.Span) != expected)
-                {
-                    break;
-                }
-
-                position += frameLength;
-                yield return body;
+                position += framePrefixSize + frame.Length + sizeof(uint);
+                yield return frame;
             }
-
-            // Reached only when the scan ran to the end of the verified frames, never when the
-            // caller stopped enumerating early: the next append goes here.
             _appendOffset = position;
             _tailUnchecked = true;
         }
-        finally
-        {
-            if (chunk.Length > 0)
-            {
-                ArrayPool<byte>.Shared.Return(chunk);
-            }
-            _stream.Seek(originalPosition, SeekOrigin.Begin);
-        }
-    }
-
-    /// <summary>
-    /// The size of the chunks a read scan reads the medium in.
-    /// </summary>
-    private const int readChunkSize = 256 * 1024;
-
-    /// <summary>
-    /// Makes the <paramref name="count"/> bytes at <paramref name="position"/> available in the
-    /// chunk, reading the medium from <paramref name="position"/> when they are not (growing the
-    /// chunk for a frame larger than it).
-    /// </summary>
-    /// <returns>False when the medium ends before the bytes do.</returns>
-    private bool Fill(ref byte[] chunk, ref long chunkOffset, ref int chunkCount, long position, int count, long length)
-    {
-        if (position >= chunkOffset && position + count <= chunkOffset + chunkCount)
-        {
-            return true;
-        }
-
-        if (position + count > length)
-        {
-            return false;
-        }
-
-        if (count > chunk.Length)
-        {
-            byte[] grown = ArrayPool<byte>.Shared.Rent(count);
-            ArrayPool<byte>.Shared.Return(chunk);
-            chunk = grown;
-        }
-
-        int wanted = (int)Math.Min(chunk.Length, length - position);
-        int total = 0;
-        while (total < wanted)
-        {
-            int read = _handle.Read(chunk.AsSpan(total, wanted - total), position + total);
-            if (read <= 0)
-            {
-                break;
-            }
-
-            total += read;
-        }
-
-        chunkOffset = position;
-        chunkCount = total;
-        return total >= count;
+        finally { _stream.Seek(originalPosition, SeekOrigin.Begin); }
     }
 
     /// <summary>
@@ -1927,29 +1760,6 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             _stream.Dispose();
         }
     }
-
-    /// <summary>
-    /// Size of the frame prefix: length + magic.
-    /// </summary>
-    private const int framePrefixSize = sizeof(int) + sizeof(int);
-
-    /// <summary>
-    /// Size of the fixed body header: version + lsn + transaction sequence + type + page id.
-    /// </summary>
-    private const int bodyHeaderSize = 1 + sizeof(long) + sizeof(long) + 1 + sizeof(long);
-
-    /// <summary>
-    /// Journal frame format version: 4 since storage format 3 (#1253), whose page records are
-    /// full page images, page deltas and committed page images, encoded as byte runs; 3 was
-    /// storage format 2's (CRC-32C frames carrying full before- and after-images, #1251). A
-    /// verified frame of any other version is refused with <see cref="StorageFormatException"/>.
-    /// </summary>
-    private const byte currentVersion = 4;
-
-    /// <summary>
-    /// Journal frame magic value ('WAL2').
-    /// </summary>
-    private const int magicValue = 0x324C4157;
 
     private sealed class DebugView
     {

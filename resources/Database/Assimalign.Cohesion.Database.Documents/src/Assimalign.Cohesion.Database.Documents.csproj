@@ -12,6 +12,7 @@
 	<ItemGroup>
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="RecoveryPreflight" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Storage" />
