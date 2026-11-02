@@ -101,8 +101,8 @@ The platform runs in two modes, matching Cohesion's identity:
 | R1 | **ACID compliance for every model.** Atomicity and durability via WAL + recovery; isolation via MVCC snapshots with pessimistic locks where required; consistency via per-model constraint enforcement. | `Database.Storage` (WAL, recovery), `Database.Transactions` (MVCC, locks, isolation levels), per-model catalogs (constraints) |
 | R2 | **Every model has its own independent engine.** One `DatabaseEngine` leaf per model (`SqlDatabaseEngine`, `DocumentDatabaseEngine`, `GraphDatabaseEngine`, `BlobDatabaseEngine`, `KeyValueDatabaseEngine`). Engines compose kernel subsystems internally; no engine depends on another engine. | `Database.{Model}` root projects |
 | R3 | **Every model builds on the shared kernel.** Storage, journaling, transactions, and indexing are reused, never duplicated per model. A model may bring a model-specific storage *layout* (e.g. graph adjacency pages) but it lives on the shared page/WAL substrate. *(Assumption: the original requirement statement was cut short — "every model should utilize …" — and has been read as "…the shared core engine", consistent with the existing backlog language and issue #31. Flag if wrong.)* | kernel projects (§4.1) |
-| R4 | **Hosting via `libraries/Hosting`.** The database host is a `Host<DatabaseApplicationContext>` whose composed services follow the per-service execution menu: the private HTTP default-control-plane service runs as an additional host service; each wire-protocol endpoint is adapted directly to `IHostService`, so its `StartAsync` bind must complete before the host reports `Started`. Provisioning is the model's: a SQL engine's build provisions the databases its builder declares before it returns, inside application `Build()`, and servers start only when the application starts, so provisioning precedes accept with no schema knowledge in Hosting (owner decision 49 of 2026-10-09; until B1 it was an additional host service). Additional services start before servers; concurrent lifecycle options are rejected and post-build mutation cannot weaken that order. No second lifecycle model. The Lane-H dedicated-thread guardrail (WAL flush and page write-back on dedicated threads, immune to pool starvation) is satisfied *inside the engine* — the engine spawns and owns those threads for its whole life (2026-07-13; engines are data machines, see §3.5). | `Database.Hosting` (composition, admin control plane), model engine builders (provisioning), engines (durability threads) |
-| R5 | **Orchestration via the ApplicationModel.** `Database.ApplicationModel` supplies a manifest-backed `DatabaseResource : PlannedResource`, `AddDatabase(manifest, options)`, the platform-neutral Database planner, and the Database default-control-plane factory. It never references the runtime host; the runtime host never references it. An enabled customer executable's generated code connects both sides through the `Hosting.Resources` `ResourceRuntime`. | `Database.ApplicationModel` |
+| R4 | **Hosting via `libraries/Hosting`.** The database host is a `Host<DatabaseApplicationContext>` whose composed services follow the per-service execution menu: the managed instance service from Database.Hosting.ApplicationModel runs as a container host service; each wire-protocol endpoint is adapted directly to `IHostService`, so its `StartAsync` bind must complete before the host reports `Started`. Provisioning is the model's: a SQL engine's build provisions the databases its builder declares before it returns, inside application `Build()`, and servers start only when the application starts, so provisioning precedes accept with no schema knowledge in Hosting (owner decision 49 of 2026-10-09; until B1 it was an additional host service). Additional services start before servers; concurrent lifecycle options are rejected and post-build mutation cannot weaken that order. No second lifecycle model. The Lane-H dedicated-thread guardrail (WAL flush and page write-back on dedicated threads, immune to pool starvation) is satisfied *inside the engine* — the engine spawns and owns those threads for its whole life (2026-07-13; engines are data machines, see §3.5). | `Database.Hosting` (composition and admin health), model engine builders (provisioning), engines (durability threads) |
+| R5 | **Managed resources via the ApplicationModel.** `Database.Hosting.ApplicationModel` supplies `builder.Services.AddResource("orders-db", resource => resource.UseInProcess())`. Without a named gateway platform it registers nothing; managed applications publish their instance manifest, restore added actions and open the selected platform client before servers accept. The gateway declares a Database resource generically with `builder.AddResource("Database", "orders-db")`. No generated manifest, ambient resource registry or Database gateway package exists. | `Database.Hosting.ApplicationModel` + `ApplicationModel.Hosting` |
 | R6 | **NativeAOT throughout.** No reflection-based serialization, no runtime codegen, no plugin discovery via `Assembly.LoadFrom`. Model engines are composed statically. | all projects (`IsAotCompatible=true`) |
 | R10 | **The platform data layer.** Every other Cohesion resource can use this area as its data layer. That mandates the **engine self-sufficiency principle**: an engine owns its internal background workers (WAL flush, checkpoint, version pruning) whether embedded or hosted, so `Database.Hosting` is composition-only and `Database.Embedded` is thin. Cross-resource packaging rides the `CohesionPrivateProjectReference` + `CohesionFrameworkPrivateAssembly` pattern when a resource hides its data layer from consumers. | `Database.Embedded` (facade, shipped), every engine (#862) |
 | R11 | **Enterprise readiness.** Beyond correctness: encryption at rest keyed by the platform key ring (#861, consuming `Security.DataProtection` #774), per-model authorization (#177 …), quotas/tenancy/audit (#167), backup/restore with version compatibility (#161, PITR via WAL archiving as the follow-on), health/readiness/diagnostics (#168, delivered by #973). Security and governance run in parallel with engine work, not after it (roadmap feature-ordering rule). | kernel + governance features |
@@ -111,7 +111,7 @@ The platform runs in two modes, matching Cohesion's identity:
 
 | # | Requirement | Where it lands |
 |---|---|---|
-| R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines and their servers, and declares the databases each engine owns with their C# schemas on the model's engine builder (`builder.AddSql("orders-sql", sql => sql.AddDatabase("sales", database => database.Schema(...)))`). `Database.Sql.Schema` owns SQL tables, custom types (domains of the SQL engine since E3) and database-scoped principals (refused at engine Build until their DDL exists, and at the SDK build with `COHDBSDK108`). Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash ([current format](../../../resources/Database/Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md#fixed-length-schema-columns-1437)); the SDK writes one artifact pair per declared database, `$(IntermediateOutputPath)cohesion/database/<database>.schema.json` and `.schema.sha256`, from the inline `database.Schema(...)` or a `SqlSchema.Create`/`Compile` declaration (owner decision 59 of 2026-10-09). The area root holds no schema type (owner decision 50 of 2026-10-09); other models own their own vocabulary. Setting `CohesionApplicationModel=enabled` also produces the resource manifest and typed ambient accessors. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
+| R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines and their servers, and declares the databases each engine owns with their C# schemas on the model's engine builder (`builder.AddSql("orders-sql", sql => sql.AddDatabase("sales", database => database.Schema(...)))`). `Database.Sql.Schema` owns SQL tables, custom types (domains of the SQL engine since E3) and database-scoped principals (refused at engine Build until their DDL exists, and at the SDK build with `COHDBSDK108`). Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash ([current format](../../../resources/Database/Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md#fixed-length-schema-columns-1437)); the SDK writes one artifact pair per declared database, `$(IntermediateOutputPath)cohesion/database/<database>.schema.json` and `.schema.sha256`, from the inline `database.Schema(...)` or a `SqlSchema.Create`/`Compile` declaration (owner decision 59 of 2026-10-09). The area root holds no schema type (owner decision 50 of 2026-10-09); other models own their own vocabulary. The SDK emits no resource manifest; `builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel` opts the application into management at runtime. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
 | R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: for one declared database (`CohesionDatabaseName`, optional when the project declares one), diff its compiled schema model against that database's ordinal baseline under `Migrations/<database>/` (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks, idempotent catalog hashing, and reverse-order compensation of completed reversible statements. The landed catalog remains self-committing per statement, so fully atomic destructive multi-statement DDL awaits a batch-transaction seam. | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
 | R9 | **Model-specific build tools, loaded by model.** The SDK inspects `$(CohesionDatabaseModel)` on the consumer project and selects from explicit static imports (`Sdk.Database.Sql.targets`, `Sdk.Database.KeyValuePair.targets`). SQL compiles schema artifacts and generates migrations. After A3 removed the shared collection shape, KeyValuePair compilation and migration generation fail explicitly until that model supplies its own schema package and catalog/statement surface. Static allowlisted MSBuild imports — no consumer-controlled path or runtime plugin loading — keep this AOT-clean. | `sdks/Assimalign.Cohesion.Sdk.Database/Targets/` |
 
@@ -135,37 +135,21 @@ These are permanent commitments, not MVP scoping — features that contradict th
 
 ### 3.1 Layering
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Orchestration      Database.ApplicationModel (typed resource,       │
-│                    planner, default control plane)                  │
-├─────────────────────────────────────────────────────────────────────┤
-│ Hosting            Database.Hosting (Host<TContext> composition,    │
-│                    DI/Config/Logging seam — the ONLY DI seam;       │
-│                    runs engine builds (provisioning) + HTTP admin   │
-│                    plane; wraps DatabaseServer instances as         │
-│                    endpoint host services)                          │
-├─────────────────────────────────────────────────────────────────────┤
-│ Service surface    Database.Client                                  │
-│                    (servers are per-model and live in the model     │
-│                    packages, each carrying its own copy of the      │
-│                    server machinery — the root's DatabaseServer     │
-│                    contract is the only area-wide server            │
-│                    requirement)                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│ Model engines      Sql · Documents · Graph · Blob · KeyValuePair    │
-│  (per model)       {Model}: engine, server, Catalog, Storage          │
-│                    and future security                              │
-│                    {Model}.Language* · {Model}.Client                │
-│                    Sql.Schema · optional Sql.Tcp                    │
-├─────────────────────────────────────────────────────────────────────┤
-│ Kernel (shared)    Database (contracts; rolls up the child roots)   │
-│                    Database.Execution · Database.Transactions       │
-│                    Database.Indexing · Database.Storage (pages,     │
-│                    buffer pool, WAL, recovery) · Database.Types     │
-│                    Database.Language · Database.Protocol            │
-│                    Database.Security                                │
-└─────────────────────────────────────────────────────────────────────┘
+The managed integration references the runtime; model engines and clients share wire contracts
+and the kernel. Arrows mean "references"; the runtime composes engines through the root seam.
+
+```mermaid
+flowchart TD
+    Integration["Database.Hosting.ApplicationModel"] --> Runtime["Database.Hosting"]
+    Integration --> AM["ApplicationModel.Hosting"]
+    Integration --> Root["Database — area root"]
+    Runtime --> Root
+    Root --> Kernel["Storage, Transactions, Indexing, Types, Language, Execution, Protocol, Security"]
+    Model["Sql, Documents, Graph, Blob, KeyValuePair: engine, server, Catalog, Storage"] --> Root
+    Model --> Wire["Model.Protocol"]
+    Client["Model.Client"] --> Wire
+    Client --> SharedClient["Database.Client"]
+    SharedClient --> SharedWire["Database.Protocol / Types / Connections"]
 ```
 
 Dependency direction is strictly downward. Model engines depend on kernel projects; kernel projects never depend on a model. The shared service surface (`Database.Client`) depends on shared Protocol, Types and Connections and is model-agnostic; each typed client references its model Protocol. Each model's wire-protocol server lives in its engine package, derives from the root's `DatabaseServer` base, and carries its **own copy** of the server machinery (per-model duplication, owner decision 2026-07-14 — decision log).
@@ -212,7 +196,7 @@ Each model project includes Catalog (schema/metadata and constraint enforcement)
 
 `DatabaseName` compares ordinally, ignoring case, so `sales` and `SALES` name one database. Every model maps a name to its files through one function, `DatabaseFileNames`, compiled from the root's `shared/` folder into each of the five model assemblies. Until #1392 each model built the directory from the name as the caller spelled it. On a case-sensitive file system (Linux, the container target) a database created as `sales` and opened or declared as `SALES` was not found, and the engine created a second, empty database beside it. Ubuntu CI failed `KeyValueEngineDeclarationTests.BuildAsync_DeclaredDatabaseExists_ShouldOpenItWithItsData` on exactly that.
 
-- **One name rule, the same on every OS.** A name is 1 to 128 characters, each an ASCII letter, digit, `_`, `-` or `.`. It does not start or end with a dot or hold two dots in a row. The part before its first dot is not a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, in any case). The rule used to be `Path.GetInvalidFileNameChars`, which holds only NUL and `/` on Linux and macOS, so `a:b` was valid on Linux and refused on Windows. A fixed set makes a valid name valid everywhere and a legal directory name everywhere. The extra characters (`_`, `-`, `.`), the length and the dot placement follow RavenDB (`src/Raven.Client/Util/ResourceNameValidator.cs:12-25`, `Constants.cs:443`). The letters and digits narrow RavenDB's, which are any Unicode letter or digit (`char.IsLetterOrDigit`, `ResourceNameValidator.cs:118`), to ASCII, which is what makes lower-casing safe (next point). Every engine checks the rule in its create, open and drop cores, and every engine builder checks it when a database is declared. The refusal message starts with the rule and ends with the reason. A server handshake that names a database breaking the rule is refused as `DatabaseNotFound`, since no database can have that name, and the Hosting command handler refuses a `database.add-database` command for one as `Rejected`, with the rule in its detail.
+- **One name rule, the same on every OS.** A name is 1 to 128 characters, each an ASCII letter, digit, `_`, `-` or `.`. It does not start or end with a dot or hold two dots in a row. The part before its first dot is not a Windows device name (`CON`, `PRN`, `AUX`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`, in any case). The rule used to be `Path.GetInvalidFileNameChars`, which holds only NUL and `/` on Linux and macOS, so `a:b` was valid on Linux and refused on Windows. A fixed set makes a valid name valid everywhere and a legal directory name everywhere. The extra characters (`_`, `-`, `.`), the length and the dot placement follow RavenDB (`src/Raven.Client/Util/ResourceNameValidator.cs:12-25`, `Constants.cs:443`). The letters and digits narrow RavenDB's, which are any Unicode letter or digit (`char.IsLetterOrDigit`, `ResourceNameValidator.cs:118`), to ASCII, which is what makes lower-casing safe (next point). Every engine checks the rule in its create, open and drop cores, and every engine builder checks it when a database is declared. The refusal message starts with the rule and ends with the reason. A server handshake that names a database breaking the rule is refused as `DatabaseNotFound`, since no database can have that name, and invalid names remain refused at engine composition; the old Hosting catalog-mutation commands were retired with #1759.
 - **The directory is the invariant lower case of the name.** `GetDirectory(root, name)` is `root/` plus `name.ToLowerInvariant()`. Because the rule admits ASCII only, lower-case equality is exactly `DatabaseName` equality: equal names share one directory on every OS, unequal names never share one, and no culture (Turkish I) or Unicode folding (`ſ`, the Kelvin sign) can merge two names. Neo4j folds database names the same way (`community/common/src/main/java/org/neo4j/kernel/database/NormalizedDatabaseName.java:27-29`, `toLowerCase(Locale.ROOT)`). The mapping is a pure function: nothing enumerates the root to find a database, and listing skips any directory that is not a lower-case valid name. A case-variant directory made outside the engine (`Sales` for `sales`) is outside the contract and behaves as its file system makes it: Linux ignores it, while on Windows and macOS the file system resolves the lower-case path to it, so an open finds it and a create refuses it.
 - **A database is its data file.** An open, and so a server handshake, finds a database only when its directory holds its data set's data file (`sql.dat`, `keyvalue.dat`, `graph.dat`, `document.dat`, `blob.dat`), and Graph, Documents and Blob, which list from disk, list only such directories. A directory without one, left by an interrupted create or drop, is not found: `DatabaseNotFoundException`, not a raw `FileNotFoundException`. A create claims the directory itself, so in every model it refuses a directory that is already there, with a message that names the leftover and the remedy, and never takes it over: in SQL and key-value a stale catalog set must not meet a new data set. A drop removes the directory, which is how such a leftover is cleared.
 - **File sets live inside the directory, named for their role.** Each set is `{set}.dat`, `{set}.log` and `{set}.bak`: the model's data set (`sql`, `keyvalue`, `graph`, `document`, `blob`) and, for SQL and key-value, the `catalog` set. No file set is named from the database name. Before #1392 the SQL and key-value catalog of `sales` was the directory `sales.catalog`, which was also the directory of a database named `sales.catalog`. In memory, `DatabaseMemoryFiles` keys each set by the database's storage name and the set's name, and a drop releases every set of that database.
@@ -296,8 +280,8 @@ flowchart TD
 `Database.Hosting` remains **composition-only** with respect to the Database area: its only
 same-area reference is the root, it wraps composed `DatabaseServer` instances generically as
 endpoint host services (started last, drained first), and the per-model server machinery remains
-inside each model package (§3.4). The module also owns the resource-host concern that belongs at
-the composition seam: the Database default control plane. Provisioning left it for the model
+inside each model package (§3.4). The module retains the private Web admin health implementation;
+the managed control plane belongs to Database.Hosting.ApplicationModel. Provisioning left it for the model
 engines in B1. Its
 private cross-area references to `Web.Hosting` and `Web.Health` are the sanctioned
 `CohesionPrivateProjectReference`/`CohesionFrameworkPrivateAssembly` pattern; Web implements the
@@ -316,13 +300,17 @@ carries one, and a standalone engine is `XDatabaseEngine.Create(name, options)`,
 options too. Composition roots register ordered lifecycle services through the
 concrete `DatabaseApplicationBuilder.AddService` verb in `Database.Hosting`; the root
 contract references no hosting library (O34). `Database.Hosting` implements the builder and exposes
-`DatabaseApplication.CreateBuilder(args)`. The `args` overload checks the calling assembly's
-generated registration: when `CohesionApplicationModel=enabled` generated a Database default
-control plane, the builder honors it together with `Hosting.Resources`
-`ResourceRuntime.Current`; when no registration exists, it behaves as a plain application. There
-is no Database-specific environment-variable bridge. Generated `Resource` accessors and the
-ambient `Hosting.Resources` `ResourceContext` carry endpoints, mounts, settings, references,
-environment, and the bootstrap credential.
+`DatabaseApplication.CreateBuilder(args)`. The `args` overload loads the application's ordinary
+configuration. `Database.Hosting.ApplicationModel` makes it managed explicitly with
+`builder.Services.AddResource("orders-db", resource => resource.UseInProcess())`. Its options read
+the platform and deployment through Core's AppEnvironment, including the scope each in-process
+program runs in. Without a named platform, AddResource registers nothing; a platform the program
+did not opt into is refused. A managed registration adds one singleton IHostService factory to
+Services, creating the instance and its control plane from the application's added actions.
+Build freezes engines and servers, creates AddService products, then resolves the container's
+IHostService aggregate once. Start order is AddService registrations, container services, the
+optional reopen service, then servers; stop reverses it. Container factory products remain
+provider-owned and instances remain borrowed. There is no generated manifest or accessor.
 
 Provisioning belongs to the model (B1 of `docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md`,
 owner decisions 49 to 58 of 2026-10-09). `sql.AddDatabase(name, database => ...)` declares a
@@ -349,30 +337,39 @@ and `DROP INDEX` refuse schema-owned targets with `DatabaseObjectLockedException
 the internal compiled-schema apply path may change them. Objects created by ad-hoc
 statements remain ad-hoc and fully mutable through those statements.
 
-For an enabled resource, the internal `DatabaseAdminEndpointService : BackgroundService` binds
-the ambient `admin` endpoint and hosts a private `WebApplication`. `Web.Health` maps
-`/healthz`, `/readyz`, and `/livez`; the shared Web control-plane middleware supplies observed
-endpoints, graceful stop, and Database command dispatch. This is the area's **default control
-plane**, whose contract is delivered by `Database.ApplicationModel` and registered by generated
-`ResourceControlPlane.g.cs`; it is never a user composition verb.
+The internal `DatabaseAdminEndpointService` retains the private Web implementation of health,
+readiness and liveness routes when composed. It is separate from the managed instance's control
+plane: the latter is supplied by ApplicationModel.Hosting and reached through the selected
+platform client, with no Database-owned listener or command dispatch. The retired generated
+registration and bootstrap credential left with #1759; the remaining admin implementation refuses
+non-health namespaced calls and remote namespaced health callers.
 
-`Database.ApplicationModel` now consumes the build-produced `ResourceManifest` rather than
-inventing a framework-owned artifact or injecting resource-specific variables. Its
-`DatabaseResource : PlannedResource` delegates to the Database planner, whose platform-neutral
-`ResourcePlan` requires stable workload identity, a sized per-replica claim for every persistent
-volume, and exactly one headless governing service. Platform compilers — not the planner — turn
-that IR into Kubernetes, Docker, or local objects. `DatabaseConnectionSettings.For(Uri)` bridges
-generated or ambient endpoints to the client, while `SqlDatabaseServerOptions.Listen(Uri)` in
-`Database.Sql.Tcp` bridges the same typed endpoint into server binding. Both validate the Cohesion endpoint shape before using
-`Uri.IdnHost` and `Uri.Port` at the socket boundary; callers never reconstruct endpoint strings.
+`Database.Hosting.ApplicationModel` exposes provider `Database`, resource name, a fresh instance
+key, deployment and exactly the actions the application adds, in order. The platform client
+publishes and restores snapshots in StartingAsync after Build has opened, recovered and migrated
+the engines; all StartingAsync callbacks complete before services or servers start. StartAsync
+opens the control plane; servers listen afterwards and drain before the client closes on stop.
+Deferred SQL migrations retain their worker/admission behavior. The gateway's startup window
+must cover Build's recovery and inline schema migration. A gateway declares the resource with
+`builder.AddResource("Database", "orders-db")`; it loads no Database planner or area definition.
+
+There are no Database-owned actions or instance health contributors yet. The retired catalog
+mutation commands do not fit snapshot restore: writes are restored on every instance, whose data
+and principals live in its durable catalog. Gateway health aggregation is unresolved. These remain
+owner follow-ups. Database binds only code-configured endpoints, through Database.Tcp's Listen(Uri)
+or a supplied listener, and reads no COHESION_ENDPOINT_* variable. The in-process platform reports
+an HTTP endpoint unrelated to the database wire listener, so dependents pass the latter as a
+literal setting. Gateway G18 counts publication as readiness, before servers accept; dependent
+deployment can therefore precede database accept. See the integration's
+[open questions](../../../resources/Database/Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md#open-questions).
 
 The framework-owned `Assimalign.Cohesion.Database.Application` executable is deleted; #973
 supersedes the target described by #906. The resource instance is the customer's ordinary
 `Sdk.Database` executable and its real `Program.cs`. The non-packable
-`resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost` is the in-repo executable proof with
-`CohesionApplicationModel=enabled`. `Database.Testing` is the area's sole explicit
+`resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost` is the in-repo executable proof.
+`Database.Testing` is the area's sole explicit
 hosting-isolation exemption holder: `DatabaseApplicationTestFactory.FromProgram<Program>()`
-invokes the real entry point inside `Hosting.Resources` `ResourceRuntime.CreateScope(...)`, while
+invokes the real entry point inside an AppEnvironmentScope, while
 the real-process E2E obtains the sample apphost through `ReferenceOutputAssembly=false`.
 
 ### 3.6 ACID, concretely
@@ -420,8 +417,7 @@ The integration architecture, in the order the work items landed:
 
 ### 3.9 Operational root seams
 
-- **Health/diagnostics (#168, delivered by #973):** `DatabaseApplicationContext` implements the
-  `Hosting.Health` `IHealthContributor` contract and aggregates each distinct registered or
+- **Health/diagnostics (#168, delivered by #973):** `DatabaseApplicationContext` aggregates each distinct registered or
   server-fronted engine. `Running` is healthy, `Faulted` is degraded, and `Disposed` or an unknown
   state is unhealthy; diagnostic data includes the engine state and its complete worker
   name/kind/cadence inventory. Since #1268 `Faulted` lasts exactly while a worker keeps failing
@@ -430,15 +426,13 @@ The integration architecture, in the order the work items landed:
   names each failing worker with the type of its last failure (never the message, which the
   `Assimalign.Cohesion.Database` event source carries); a database a failed fsync, journal drain
   or header slot write took offline is unhealthy until it is reopened, and every lock wait on it ends with the
-  coded refusal (`TransactionCoordinator.AbandonLockWaits`). User checks added through `builder.AddHealthCheck(name, check)` and
-  any other registered `Hosting.Health` `IHealthContributor`s join the same generated control
-  plane. `Database.Hosting`'s internal admin service exposes the aggregate over private
+  coded refusal (`TransactionCoordinator.AbandonLockWaits`). `Database.Hosting`'s internal admin service exposes the aggregate over private
   `Web.Health` routes (`/healthz`, `/readyz`, `/livez`) and the control-plane endpoints on `admin`.
   This realizes the observational
   surface without adding a Database-specific health abstraction or treating the wire protocol's
-  `Ping` frame as readiness. The generated registration and ambient `Hosting.Resources`
-  `ResourceContext` are scoped
-  per resource invocation, so multiple in-process resource hosts do not share health state.
+  `Ping` frame as readiness. Each Database application owns its context and health observations.
+  `Database.Hosting.ApplicationModel` currently contributes no instance health to the gateway;
+  Gateway G18 readiness is first publication, which precedes server accept.
 - **Backup/restore (#161):** becomes an **engine-level, per-model operation on the data-machine contract** — a data machine that can be snapshotted while running (checkpoint + copy of the file sets; PITR later via WAL archiving per R11), not a host service (embedded consumers need it identically, R10). The storage layer already reserves the backup seams (`.bak` asset naming in the strategy contract). Design note only; the contract lands with #161.
 - **Authorization (#177 family):** `Database.Security` (child root) grows the authorization vocabulary (principals, roles, permission checks — beside the existing `DatabaseAuthenticator` authentication seam), and **per-model enforcement composes in the model packages** (SQL enforcing over its catalog objects), consistent with per-model servers: the server authenticates, the model authorizes. Design note only.
 
@@ -662,7 +656,7 @@ What existed before this scaffold vs. what a real multi-model OLTP engine needs.
 | Transactions / MVCC / lock manager — nothing beyond the `IDatabaseTransaction` surface | only task #164 ("transaction boundaries") | New `Database.Transactions` project + new feature under #31 (Core Engine) |
 | Shared index infrastructure — `IStorageIndexManager` was a name with no design | indexing mentioned only for Documents (#188) | New `Database.Indexing` project + new feature under #31 — **adopted by the SQL engine 2026-07-14** (#912/#913: DDL + write-path maintenance + planner seeks; per-object record chains #911 made the fallback scan O(table)) |
 | Wire protocol + server front-end + client core — `IDatabaseServer` was an empty stub | per-model "client APIs" tasks, no protocol foundation | New `Database.Protocol` project + new feature under #31 (the server machinery's placement history: folded into `Database.Hosting` 2026-07-12 → resurrected as the shared `Database.Server` base 2026-07-13 → folded into `Database.Sql` 2026-07-14 → extracted back into `Database.Server` the same day when the second model server fired the recorded trigger → **settled 2026-07-14 by owner review: per-model duplication** — the shared library removed, each model package carries its own copy; the root contract remains the only area-wide server requirement) |
-| ApplicationModel manifest — no `Database.ApplicationModel`, no typed resource/planner | not in original backlog | Delivered by #853 and realigned by #973: manifest-backed `DatabaseResource : PlannedResource`, Database planner, generated default-control-plane registration, no framework-owned apphost or resource-specific environment bridge |
+| ApplicationModel manifest — no `Database.ApplicationModel`, no typed resource/planner | not in original backlog | Delivered by #853 and realigned by #973: manifest-backed `DatabaseResource : PlannedResource`, Database planner, generated default-control-plane registration, no framework-owned apphost or resource-specific environment bridge **Superseded 2026-11-02 by #1759:** the generated resource design is retired; #1785 supplies Database.Hosting.ApplicationModel and explicit AddResource registration, with unmanaged/managed behavior and a generic gateway declaration. |
 | Code-first resource schema had no retained model | schema compile/migrations #857–#859 | #973 added the root declaration vocabulary; #859 lowers it to a validated, dialect-bound `CompiledSchema` with canonical JSON/hash; #857 adds deterministic table/collection diff and the shipped SQL statement/apply path |
 | SDK build tooling — `Migration.targets` and the Tasks project were empty shells | #176 covers migration *workflows* as engine behavior only | #858 adds explicit per-model target loading, static C# schema compilation for SQL/KV, and ordinal SQL migration/baseline generation |
 | Shared type system — `Database.Types` skeletal, no collation/encoding story | #173 covers SQL type coercion only | Fleshed out via new feature under #31; `IndexKey` encoding depends on it |
@@ -693,9 +687,9 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 | **The trigger fired: the proven core is extracted into `Database.Server`** (2026-07-14, the second model server — the fourth and evidence-based placement of the server machinery: Hosting fold → shared base → Sql-internal → extracted shared core) | Building `KeyValueDatabaseServer` (#917) supplied the evidence the trigger demanded, and the evidence **exceeded the prediction**: the predicted core (session table, guardrails, two-phase drain) proved common — and so did the handshake *and the execute pump*, because the second model rides the root's text-execute seam (its command grammar travels the existing Execute message; its results ride the generic result framing — the predicted "KV wants binary command paths" divergence never materialized, by the model's own recorded grammar decision). The extraction scope followed the evidence: `Assimalign.Cohesion.Database.Server` (refs: root + `Connections`) carried the whole machinery as the guided `DatabaseServer` base + `DatabaseServerOptions`; `SqlDatabaseServer` and `KeyValueDatabaseServer` were thin sealed derivations in their model packages; `Database.Hosting` untouched. **Superseded by owner review, 2026-07-14 — see the next row.** |
 | **Per-model duplication: the shared `Database.Server` library is removed; each model carries its own full copy of the server machinery** (2026-07-14, owner decision on review of the extraction evidence — the fifth and settled placement: Hosting fold → shared base → Sql-internal → extracted shared core → per-model copies) | The owner reviewed the fired trigger's evidence (preserved in §3.10) and chose per-model duplication anyway, with the trade-off stated and accepted: **model independence outweighs the duplication/drift cost**. Each model package (`Database.Sql`, `Database.KeyValuePair`) carries its own copy of the session pump, handshake, guardrails, two-phase drain, and framing glue as internals behind its sealed `{Model}DatabaseServer` (options standalone per model; refs: root + `Connections`); **wire-behavior parity is maintained by the protocol contract and per-model E2E suites, not by shared code**. Explicitly rejected: linked-source `<Compile Include>` tricks and shared-internals assemblies (hidden shared libraries — divergence per model is the point). The evidence-driven `AffectedCount` fix from the extraction is kept in both copies. The root contracts (`IDatabaseServer`/`IDatabaseServerContext`/`IDatabaseServerSession`) remain the only area-wide server requirement; `Database.Hosting` still composes any `IDatabaseServer` via the root seam. The shared-core fake-engine suite was redistributed: each model's server suite now covers its own copy's machinery behavior (session lifecycle, guardrails, drain, error taxonomy). |
 | **Child roots roll up under the root** (2026-07-13, owner decision) | Unlike the Web area, the database has a vast base-component surface, broken out as child roots for separation of concerns and testability: `Types`, `Language`, `Storage`, `Transactions`, `Execution`, `Protocol`, `Security`, `Governance`. The root references THEM; no child references the root — so each stays independently consumable and one root reference delivers the whole base surface. Consequences: `ProtocolVersion` moved home to `Protocol` (plain static `Current`), `TransactionId`/`TransactionState` moved down to `Transactions`, `ProtocolException`/`TransactionAbortedException` re-rooted on `Exception` (child roots own independent exception roots — `DatabaseException` covers the root and everything above it), and `Database.Hosting`'s COHRES002 exemption became unnecessary (Protocol/Security arrive transitively via the root). The rejected alternative — children referencing the root for shared vocabulary — made Protocol/Transactions unaggregatable and pushed exemptions into the hosting module. |
-| **The resource instance is the customer's `Sdk.Database` executable; `Database.Application` is retired** (#973, 2026-09-07; supersedes #906) | One concept now has one name and owner: the customer's ordinary project and its `Program.cs` are both the executable and the resource definition. `CohesionApplicationModel=enabled` adds manifest/typed-resource/default-control-plane generation at build time; disabled stays plain. The framework-owned `.Application` project made image ownership and composition ambiguous, so it was deleted. The real-process acceptance fixture is the non-packable `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost`; `Database.Testing` is the area's one explicit hosting-isolation exemption holder. |
+| **The resource instance is the customer's `Sdk.Database` executable; `Database.Application` is retired** (#973, 2026-09-07; supersedes #906) | One concept now has one name and owner: the customer's ordinary project and its `Program.cs` are both the executable and the resource definition. `CohesionApplicationModel=enabled` adds manifest/typed-resource/default-control-plane generation at build time; disabled stays plain. The framework-owned `.Application` project made image ownership and composition ambiguous, so it was deleted. The real-process acceptance fixture is the non-packable `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost`; `Database.Testing` is the area's one explicit hosting-isolation exemption holder. **Superseded 2026-11-02 by #1759:** the generated resource design is retired; #1785 supplies Database.Hosting.ApplicationModel and explicit AddResource registration, with unmanaged/managed behavior and a generic gateway declaration. |
 | **Provision before accept, independent of verb order; retain one C# schema model** (#973, 2026-09-07; compiled/apply delivered by #857–#859) | `builder.AddDatabase(engine, name, schema)` compiles the one retained declaration and registers `DefaultDatabaseProvisioner` with its immutable `CompiledSchema`; `DatabaseApplication` always starts all additional services before every server wrapper. The model database diffs/applies only that compiled contract and records its hash after convergence. A separate administration or build-only schema vocabulary would violate the code-first prime directive and invite drift. **Mechanism superseded by B1 (owner decisions 49 to 58 of 2026-10-09):** the principle stands, but the SQL engine builder declares its databases and provisions them while the engine is built, inside application Build, so the Hosting verbs, the provisioner service and the root `CompiledSchema` are deleted. |
-| **The `admin` endpoint is the Database default control plane, implemented with private Web hosting** (#973, 2026-09-07; delivers #168) | `Database.Hosting` privately consumes `Web.Hosting`/`Web.Health` and App.Database carries that private runtime closure. This keeps the owner's HTTP-delivered-health principle and one health implementation across resource kinds while preserving the public Database boundary. Rejected: a leaner hand-rolled `/readyz` responder over `Http.Connections`, because it would reimplement health outside the Web area. `DatabaseApplicationContext` implements the `Hosting.Health` `IHealthContributor` contract and derives engine health from `State` and `Workers`; generated code registers the `Hosting.Resources` plane only for enabled executables. Readiness additionally gates on the outer host reaching `Started` (all servers accepting), while liveness remains process-oriented; gateway-scoped namespaced routes require the bootstrap credential and fail closed if none was supplied. |
+| **The `admin` endpoint is the Database default control plane, implemented with private Web hosting** (#973, 2026-09-07; delivers #168) | `Database.Hosting` privately consumes `Web.Hosting`/`Web.Health` and App.Database carries that private runtime closure. This keeps the owner's HTTP-delivered-health principle and one health implementation across resource kinds while preserving the public Database boundary. Rejected: a leaner hand-rolled `/readyz` responder over `Http.Connections`, because it would reimplement health outside the Web area. `DatabaseApplicationContext` implements the `Hosting.Health` `IHealthContributor` contract and derives engine health from `State` and `Workers`; generated code registers the `Hosting.Resources` plane only for enabled executables. Readiness additionally gates on the outer host reaching `Started` (all servers accepting), while liveness remains process-oriented; gateway-scoped namespaced routes require the bootstrap credential and fail closed if none was supplied. **Superseded 2026-11-02 by #1759:** the generated resource design is retired; #1785 supplies Database.Hosting.ApplicationModel and explicit AddResource registration, with unmanaged/managed behavior and a generic gateway declaration. |
 | No `.Language` for Blob and KeyValuePair | Blob is stream/metadata API-driven; KV commands are simple protocol verbs. A parser would be ceremony. Cache (#208, post-MVP) may still get one. |
 | SQL migration tooling in the SDK, apply engine in `Sql.Catalog` | Build-time diffing belongs to MSBuild (R7–R9); runtime apply must be transactional inside the engine. Splitting keeps the SDK task a thin orchestrator. |
 | `EngineModel.KeyValueStore` enum name vs `KeyValuePair` project naming | Left as-is for now — renaming the enum member is surface churn with no behavior; revisit before the first public package. |
@@ -709,7 +703,7 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 - [README.md](../../../resources/Database/README.md) — area overview and project catalog
 - [docs/programs/DATABASE_PROGRAM_PLAN.md](../../programs/DATABASE_PROGRAM_PLAN.md) — stages, lanes, blockers, session protocol (temporary)
 - `Assimalign.Cohesion.Database.Hosting/docs/DESIGN.md` — host execution-model decisions
-- `libraries/ApplicationModel/DESIGN.md` — the two-plane orchestration model `Database.ApplicationModel` plugs into
+- [ApplicationModel area design](../../libraries/ApplicationModel/DESIGN.md) — the model `Database.Hosting.ApplicationModel` implements on the instance side
 - `libraries/Hosting/Assimalign.Cohesion.Hosting/docs/DESIGN.md` — the per-service execution menu the host composition follows
 - `docs/SERVICE_LAYER_DESIGN.md` §Database, `docs/programs/SERVICE_STORY_REQUIREMENTS.md` §Database — the earlier requirement passes this design reconciles
 
@@ -717,7 +711,7 @@ Everything under `resources/Database/` builds with `IsAotCompatible=true` (area 
 
 The owner-approved [hosting design](../../programs/DATABASE_HOSTING_DESIGN.md), with its implementation corrections, is now Add intent → one-shot Build → engine access / Run. All five model verbs are deferred and return the application builder. No Use method is introduced. Each model owns a typed engine-builder interface with options and deferred worker/server factories. `DatabaseName` is the root and concrete engine name parameter for create/open/drop/lookup operations.
 
-Hosting snapshots engine-owned servers for start/stop, disposes factory-owned engines, borrows registered instances, and constructs one Configuration / interpreted DependencyInjection provider per application. Services start before servers; servers drain first. Application disposal closes owned products before infrastructure and aggregates cleanup failures. Existing ApplicationModel integration is preserved without adding manifests, control planes or orchestration work. See the Hosting project DESIGN for ownership, configuration precedence and failure rules.
+Hosting snapshots engine-owned servers for start/stop, disposes factory-owned engines, borrows registered instances, and constructs one Configuration / interpreted DependencyInjection provider per application. AddService registrations start before container IHostService registrations, then the reopen service and servers; servers drain first. Application disposal closes owned products before infrastructure and aggregates cleanup failures. Database.Hosting.ApplicationModel supplies the explicit AddResource registration; the plain runtime has no ApplicationModel dependency. See the Hosting project DESIGN for ownership, configuration precedence and failure rules.
 
 ## E4 persisted SQL extensions
 

@@ -85,6 +85,7 @@ jobs:
             'Assimalign.Cohesion.Database.Graph.Language',
             'Assimalign.Cohesion.Database.Graph.Protocol',
             'Assimalign.Cohesion.Database.Hosting',
+            'Assimalign.Cohesion.Database.Hosting.ApplicationModel',
             'Assimalign.Cohesion.Database.Indexing',
             'Assimalign.Cohesion.Database.KeyValuePair',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',
