@@ -24,7 +24,7 @@ flowchart LR
     Model["Database model packages"] --> Root
 ```
 
-COHRES001–004 remain enforced. The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
+COHRES001–004 remain enforced. [Database.Hosting.ApplicationModel](../../Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md) supplies the managed-resource registration on `builder.Services`; the runtime itself references no ApplicationModel package.
 
 ## Build and configuration
 
@@ -51,7 +51,7 @@ The content root `CreateBuilder(args)` reads those files under is `AppContext.Ba
 
 *Before the owner request,* the builder exposed `IConfigurationBuilder Configuration` and `IServiceProviderBuilder Services` as deferred registration facades that loaded nothing until Build, refused their own `Build`, and took the environment and content root from the options at Build; the build context carried `IConfiguration` and `IServiceProvider` only, and there was no logging builder (the enabled-resource telemetry built a factory nothing used). Every `CreateBuilder` overload loaded the default sources at Build.
 
-One Cohesion service provider is built with `EnableDynamicCode = false`, `ValidateScopes = true`, and `ValidateOnBuild = true`. This selects the interpreted resolver on JIT and NativeAOT. Hosting permits closed factories and instances only, rejects implementation-type/open-generic activation, and reserves `IHostEnvironment`, `IConfiguration` and `ILoggerFactory` for the application's own pieces, which Build registers as borrowed instances. Model construction uses explicit assignments rather than reflection-based binding. Provider-owned services must not be returned from application factories; doing so would create two owners.
+One Cohesion service provider is built with `EnableDynamicCode = false`, `ValidateScopes = true`, and `ValidateOnBuild = true`. This selects the interpreted resolver on JIT and NativeAOT. Hosting permits closed factories and instances only, rejects implementation-type/open-generic activation, and reserves `IHostEnvironment`, `IConfiguration` and `ILoggerFactory` for the application's own pieces, which Build registers as borrowed instances. Model construction uses explicit assignments rather than reflection-based binding. Engine factories must not return provider-owned services; lifecycle factory forwarding has the idempotent-disposal caveat below.
 
 Root engine factories observe preceding engine registrations. They cannot depend on later registrations. Every engine is registered by name (owner decision 52 of 2026-10-09): a borrowed engine by its own `Name`, a factory by the name its registration gives, which the factory's product must match exactly (ordinal). The name is reserved at Add, so a duplicate is refused there, before any factory runs; the nameless factory overload, whose product's name could only be checked once the factory had returned, is deleted, because a model's factory now opens and provisions databases, which a duplicate engine must never reach (the duplicate would have run against the same data path). Names are nonempty, case-sensitive, and unique across models. `Context.GetEngine(name)` returns a borrowed reference, typed as the root base; the root's static extension `Context.GetEngine<TEngine>(name)` returns it as the model's engine (`SqlDatabaseEngine`, …).
 
@@ -77,7 +77,8 @@ Application Build flattens each engine's `Servers` snapshot in engine/attachment
 | Model builder worker/server factory | Engine |
 | `AddService(instance)` | Caller |
 | `AddService(factory)` | Application if disposable |
-| Provider-created service | Provider |
+| Container `IHostService` factory | Application if disposable, before engines |
+| Other provider-created service | Provider |
 | Provider instance registration | Caller |
 | Configuration and default configuration file system | Application |
 | Logger factory and service provider | Application |
@@ -86,7 +87,40 @@ A factory transfers a fresh product, and cleans up partial allocations if it thr
 
 ## Runtime lifetime
 
-Additional services start in registration order, then servers; shutdown drains servers first and stops services in reverse.
+After freezing the engine/server registry and creating every `AddService` product, Build reads
+the unkeyed `IHostService` descriptors from `Services.Container` in registration order. It borrows
+instance products and invokes each factory once with the built provider, refusing null products
+with the same error as AddService. It never resolves `IEnumerable<IHostService>` from the provider.
+Scoped and transient lifecycle registrations fail Build with an error naming the registration;
+implementation-type registrations remain refused. Keyed registrations are not lifecycle services
+and are ignored. The lifecycle list is
+`AddService` registrations in registration order, container `IHostService` registrations in
+registration order, the optional reopen service, then servers in engine/attachment order.
+Shutdown reverses that complete order: servers drain before container services stop, keeping a
+managed instance's control plane open during drain. All lifecycle `StartingAsync` callbacks finish
+before any service starts, so a managed instance publishes and restores before services or servers
+start. Engine open, recovery and inline schema migration have already completed inside Build;
+deferred migrations can continue on engine workers.
+
+The application owns container lifecycle factory products, enrolling them with AddService factory
+products, so the provider never creates or captures them during lifecycle composition. After stop,
+disposal runs the reopen service, container services in reverse registration order, AddService
+services in reverse order, engines, then infrastructure (provider, logger factory, configuration,
+content root). This reverses creation: lifecycle services follow engines, while provider singletons
+that engine factories resolve precede them. Instance registrations remain borrowed and are never
+disposed by the application. Returning the same object through `AddService` and the
+container, through multiple container registrations, or as both a server and a container service
+fails Build with the existing duplicate-lifecycle refusal. A throwing container factory also fails
+Build and follows the same rollback: attempt all owned roots and the provider, aggregating cleanup
+failures with the original construction failure first. Provider disposal also continues past
+disposer failures in reverse creation order: it propagates one failure unchanged and aggregates
+several in an AggregateException (`ServiceProviderEngineScope.DisposeAsync`, including its awaited
+continuation). Outer cleanup continues with the remaining infrastructure in either case.
+
+A forwarding lifecycle factory (`sp => sp.GetRequiredService<X>()`) hands the application an object
+the provider also owns. Both dispose it, just as the container already disposes a forwarded
+singleton twice. Such a service needs idempotent Dispose, following .NET's disposal guidelines;
+use `AddService(instance)` or an instance registration when ownership must stay with the caller.
 
 ## Provisioning (B1 of the engine extensibility design)
 
@@ -170,7 +204,7 @@ The module raises its own events through one internal event source, named for th
 | 4 | `ReopenFailed` | Warning | `engineName`, `database`, `attempt`, `exceptionType` (full name), `exceptionMessage`, `retryMilliseconds` |
 | 5 | `ReopenAbandoned` | Informational | `engineName`, `database`, `reason` (dropped, closed or reopened elsewhere, or its engine disposed) |
 | 6 | `ReopenLoopFailed` | Error | `exceptionType`, `exceptionMessage` |
-| 7 | `ApplicationBuilt` | Informational | `hostId`, `engines`, `servers`, `services` (non-server hosted services) |
+| 7 | `ApplicationBuilt` | Informational | `hostId`, `engines`, `servers`, `services` (all non-server hosted services, including container services and the optional reopen service) |
 | 8 | `ApplicationStarting` | Informational | `hostId` |
 | 9 | `ApplicationStarted` | Informational | `hostId`, `durationMilliseconds` |
 | 10 | `ApplicationStartFailed` | Error | `hostId`, `exceptionType`, `exceptionMessage` |

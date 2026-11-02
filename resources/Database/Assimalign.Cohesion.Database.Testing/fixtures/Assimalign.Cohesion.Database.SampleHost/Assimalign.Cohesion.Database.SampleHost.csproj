@@ -3,7 +3,6 @@
 		<RootNamespace>Assimalign.Cohesion.Database.SampleHost</RootNamespace>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
-		<CohesionApplicationModel>disabled</CohesionApplicationModel>
 		<CohesionDatabaseProject>true</CohesionDatabaseProject>
 	</PropertyGroup>
 </Project>

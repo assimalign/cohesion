@@ -375,24 +375,6 @@ policy is required. The streaming path adds no dependencies or shipped-library
 TLS remains a connection-factory concern.
 
 
-## Declarative command delivery
-
-`DatabaseCommandClient.Create(Uri controlPlaneAddress, string bearerToken, HttpMessageInvoker transport)`
-accepts a caller-owned transport, including its TLS trust policy. Disposing the returned client
-does not dispose that transport; the caller retains it until requests finish and disposes it
-afterward. The two-argument factory still creates a transport owned and disposed by the client.
-Both overloads perform the same endpoint and credential validation; a null supplied transport
-throws `ArgumentNullException`. The client does not discover application trust.
-
-The sealed `DatabaseCommandClient` is the separate HTTP admin command client. `DatabaseCommandClient.Create`
-accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
-SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is
-base64. DeleteCommandAsync sends DELETE to the same route and envelope. Both return package-local
-ResourceCommandObservation with Status and Detail, retaining actionable provider refusal text.
-Transport failures propagate; HTTP refusals become Rejected observations. Serialization uses explicit
-Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect following and cookies
-are disabled. No runtime Hosting or ApplicationModel dependency was added.
-
 ## Concrete types (concrete-types plan, phase 5, #1261)
 
 The client core has no public interface left and no `Abstractions/` folder
@@ -401,7 +383,6 @@ The client core has no public interface left and no `Abstractions/` folder
 | Type | Shape | Was |
 |---|---|---|
 | `DatabaseClient` | sealed; `Create(DatabaseClientOptions)` over a private constructor | the static `DatabaseClient` factory, `IDatabaseClient` and the internal `DefaultDatabaseClient` |
-| `DatabaseCommandClient` | sealed; the two `Create` overloads over a private constructor | the static factory, `IDatabaseCommandClient` and the internal `HttpDatabaseCommandClient` |
 | `DatabaseConnection` | sealed; internal constructor | `IDatabaseConnection` and the internal `PooledDatabaseConnection` |
 | `DatabaseProtocolExchange<TResult>` | abstract; protected constructor | `IDatabaseProtocolExchange<TResult>` |
 | `DatabaseStreamingExchange` | abstract; protected constructor | `IDatabaseStreamingExchange` |
@@ -586,3 +567,10 @@ Runtime reference consulted: [.NET 10 `dotnet/runtime` v10.0.0](https://github.c
 (queued cancellation), `:483–514` (source disposal), and `:680–689` (callback registration
 ownership), and `:829–846` (linked parent-registration cleanup). No code was copied. This corrects
 the exchange-join guarantee of #1313.
+
+## Managed-resource boundary (#1785)
+
+The retired HTTP command client and its command/observation envelopes are removed. Its bootstrap
+credential and /commands route belong to the old resource design; those routes now return 403.
+This package supplies wire clients only. Database.Hosting.ApplicationModel owns instance-side
+integration; Database-owned actions and HTTP health follow in T3 EN-A1–A3.

@@ -3,8 +3,9 @@
 `Acme.Api` and `Acme.Database` are ordinary executables with a `Program.cs`. `Acme.Api` makes itself a
 managed resource with one call, `builder.Services.AddResource("acme-api", resource => resource.UseInProcess())`:
 started by a gateway it publishes itself and the gateway manages it, started on its own it is a plain
-Web application. The Database area has no application-model integration yet, so `Acme.Database` always
-runs unmanaged; `Acme.Api` reads its endpoint from `Database:Endpoint`.
+Web application. `Acme.Database` stays unmanaged until Program.cs opts into
+`Database.Hosting.ApplicationModel` with `builder.Services.AddResource(...)` and a platform client;
+`Acme.Api` reads its wire endpoint from `Database:Endpoint`.
 
 `Acme.Gateway` declares the model in its `Program.cs`, one `AddResource(provider, name)` per resource:
 
