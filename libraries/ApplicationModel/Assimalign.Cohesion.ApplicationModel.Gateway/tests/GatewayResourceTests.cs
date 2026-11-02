@@ -11,9 +11,19 @@ using Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 namespace Assimalign.Cohesion.ApplicationModel.Gateway.Tests;
 
 /// <summary>
+/// The race tests below block a thread per participant for thousands of rounds, which starves the
+/// thread pool the lease-timing tests elsewhere run their timers on, so these tests run alone.
+/// </summary>
+[CollectionDefinition(nameof(GatewayResourceTests), DisableParallelization = true)]
+public sealed class GatewayResourceCollection
+{
+}
+
+/// <summary>
 /// One resource's startup gate: which registration or renewal opens it, whichever of the
 /// registration, the plan, and the deployment comes first.
 /// </summary>
+[Collection(nameof(GatewayResourceTests))]
 public sealed class GatewayResourceTests
 {
     private const string DisplayPrefix = "Cohesion Test [ApplicationModel] - GatewayResource: ";
