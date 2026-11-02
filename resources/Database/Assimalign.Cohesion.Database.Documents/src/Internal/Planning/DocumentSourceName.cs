@@ -8,9 +8,9 @@ internal static class DocumentSourceName
 
     internal static bool IsImplicitCollection(OqlSelectExpression query, string name)
     {
-        if (query.Source is null && query.Alias is null && Of(query) == name) { return true; }
+        if (query.IsAliasImplicit && Of(query) == name) { return true; }
         foreach (var binding in query.Bindings)
-        { if (binding is OqlJoinExpression { Alias: null } && binding.Variable == name) { return true; } }
+        { if (binding is OqlJoinExpression { Alias: null } or OqlUnnestExpression { Alias: null } && binding.Variable == name) { return true; } }
         return false;
     }
 

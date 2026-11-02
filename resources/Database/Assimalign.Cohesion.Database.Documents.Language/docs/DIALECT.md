@@ -192,8 +192,14 @@ following the pinned [SQL++ implicit-alias rule](https://github.com/couchbaselab
 Own and captured paths use the same normalization: SELECT items.g FROM items GROUP BY g,
 SELECT DISTINCT g FROM items ORDER BY items.g and SELECT RAW g FROM items ORDER BY items.g
 all execute with g semantics. UPDATE items SET items.g = 1 writes g; SET items = 1 is root
-replacement and fails with CD02016. CREATE INDEX paths remain document-relative: ON items(items.g)
-indexes the actual nested field, whereas WHERE items.g = 1 uses an index on g.
+replacement and fails with CD02016. CREATE INDEX key paths use the same implicit alias:
+ON items(items.g) indexes g, and ON items(items.items.g) indexes the self-named field items.g.
+The rule also applies to the source path of a DISTINCT ARRAY key; its element variable still owns
+projection and WHEN paths. This follows the SQL++ expression model for
+[index keys](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/createindex.html#index-key)
+and the implicit-alias precedence above. Catalog paths store the normalized document-relative key.
+The introspection PATH/PATHS expressions add a collection receiver for a self-named leading field,
+so copying the rendered key into CREATE INDEX preserves its meaning.
 META on an UNNEST variable, comprehension variable or unknown name is refused with CD05001
 before evaluation. A standalone ORDER BY projection alias keeps precedence, including
 SELECT x AS items FROM items ORDER BY items.
@@ -226,12 +232,20 @@ A nested `FROM d.items AS i`, or `FROM d AS i`
 where d is an explicit outer alias, iterates that outer value per row. A bare FROM items under
 an implicit outer items continues to name the collection; under an explicit outer items it
 correlates to that value. The same distinction applies to implicit versus explicit JOIN/NEST
-collection bindings, including grouped captures. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
+collection bindings and inferred UNNEST and FROM-expression names, including grouped captures.
+For example, UNNEST tags leaves an inner bare FROM tags naming the collection; UNNEST tags AS tags
+allows that inner FROM to iterate the outer value. Explicit paths can capture either kind of name.
+The parser retains the inferred-name provenance described by the
+[SQL++ AS clause](https://docs.couchbase.com/server/current/n1ql/n1ql-language-reference/from.html#as-clause).
+This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
 Qualified stars (`d.*`) retain their CK00001 refusal outside joined SELECT projections; see
 [key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
 
 Subqueries execute in UPDATE/DELETE predicates, SET and VALUES expressions, INSERT/UPSERT SELECT
-sources and RETURNING. Every nested read sees statement-start data, including writes from earlier
+sources and RETURNING. VALUES has no destination row to capture: a subquery referring to its
+destination binding without a local declaration is refused during planning with CD01036. Local
+aliases and comprehensions may shadow that name, and a bare FROM may read the destination collection.
+Every nested read sees statement-start data, including writes from earlier
 statements in an explicit transaction, and excludes this statement's writes. Mutation predicates,
 values and SELECT inputs finish staging before writes. RETURNING with subqueries also stages
 before writes, using post-images and versions reserved from the existing durable allocator;
@@ -305,7 +319,7 @@ JOIN and NEST aliases replace captured names with their local metadata behavior.
 captures and ORDER BY projection aliases keep their existing scope rules. Unqualified ordinary
 field paths continue to address the initial FROM value.
 
-SELECT * yields a synthetic object keyed by the explicit FROM alias and every JOIN/NEST/UNNEST
+SELECT * yields a synthetic object keyed by the explicit or implicit FROM alias and every JOIN/NEST/UNNEST
 alias; MISSING members are omitted and NULL members remain. A top-level qualified star (b.*)
 is supported in ungrouped joined SELECT projections and yields that alias's value, using the existing bare
 result mode when it is the sole projection. Non-join qualified stars retain their existing refusal.

@@ -604,7 +604,9 @@ OqlSelectExpression.Source holds an expression or OqlSubqueryExpression for FROM
 the collection-source representation. The existing collection storage slot holds either the
 collection name or expression, preserving ordinary SELECT node size. Collection is empty for an
 expression source, and logical-plan copies preserve Source. The parser permits optional AS for
-derived aliases, requires AS before generic explicit aliases, and diagnoses a missing derived
+derived aliases. IsAliasImplicit distinguishes inferred expression names from explicit aliases,
+and plan copies preserve it when resolving the effective source name. The parser requires AS before
+generic explicit aliases, and diagnoses a missing derived
 alias with CD00015. Unnamed generic expressions without an implicit field name give CD01033
 at binding. The profile advertises DERIVED FROM and EXPRESSION FROM beside FROM, with live
 conformance cases. The [dialect](DIALECT.md#derived-and-expression-from-sources-1731-oq-q2)
@@ -620,8 +622,10 @@ retains their evaluation order; Unnest remains the array-only view. SELECT's exi
 holds an optional wrapper only for joined queries, preserving ordinary node size and allocations.
 OqlJoinExpression.Alias retains the nullable explicit declaration; inherited Variable always
 contains the resolved explicit or implicit name. A null constructor variable selects the collection
-name. This provenance keeps an inner bare FROM a collection under an implicit outer JOIN/NEST
-name; only explicit aliases correlate, as for the initial FROM. No parser text reconstruction or
+name. OqlUnnestExpression.Alias likewise distinguishes an inferred path name from an explicit
+declaration, while Variable retains the resolved name. This provenance keeps an inner bare FROM a
+collection under any implicit outer FROM, JOIN/NEST or UNNEST name; only explicit aliases correlate.
+No parser text reconstruction or
 engine-facing visibility grant is needed. The parser accepts only right-hand META(alias).id
 equality and keeps JOIN/NEST contextual.
 General forms, ON KEYS and UPDATE/DELETE source joins retain CK00001. Collections supply their

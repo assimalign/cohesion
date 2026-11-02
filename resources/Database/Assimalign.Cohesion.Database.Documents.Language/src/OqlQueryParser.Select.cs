@@ -45,7 +45,8 @@ public sealed partial class OqlQueryParser
         }
         if (!Failed && source is OqlSubqueryExpression && alias is null)
         { Error("CD00015", ErrorMessages.DerivedSourceAliasRequired, sourceToken); }
-        if (source is OqlPathExpression { Segments.Count: > 0 } sourcePath && alias is null)
+        bool implicitAlias = alias is null;
+        if (source is OqlPathExpression { Segments.Count: > 0 } sourcePath && implicitAlias)
         { alias = sourcePath.Segments[^1].Name; }
 
         List<OqlUnnestExpression> unnest = [];
@@ -95,12 +96,14 @@ public sealed partial class OqlQueryParser
             var expression = ParseExpression();
             var variableToken = Current;
             string? variable = null;
+            bool implicitVariable = false;
             if (Take("AS")) { variableToken = Current; variable = Identifier(); }
             else if (Current.Type is TokenType.Identifier or TokenType.QuotedIdentifier or TokenType.Function && !IsSourceBindingClause() && !IsReturningClause())
             { variable = Identifier(); }
             else if (expression is OqlPathExpression { Segments.Count: > 0 } path)
             {
                 variable = path.Segments[^1].Name;
+                implicitVariable = true;
                 int pathEnd = _position - 1;
                 while (pathEnd > 0 && _tokens[pathEnd].End > path.Location!.End) { pathEnd--; }
                 if (_tokens[pathEnd].Type == TokenType.RightBracket) { pathEnd--; }
@@ -108,7 +111,7 @@ public sealed partial class OqlQueryParser
             }
             if (!Failed && variable is null) { Error("CD00002", ErrorMessages.OqlQueryParserParseSelectVoid3, variableToken); }
             if (!Failed && !variables.Add(variable!)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, variableToken); }
-            var expansion = new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous));
+            var expansion = new OqlUnnestExpression(expression, variable ?? string.Empty, left, Span(bindingStart, Previous), implicitVariable);
             unnest.Add(expansion);
             bindings?.Add(expansion);
         }
@@ -189,7 +192,7 @@ public sealed partial class OqlQueryParser
         }
         return new OqlSelectExpression(collection, alias, projections.AsReadOnly(), predicate,
             groups.AsReadOnly(), having, ordering.AsReadOnly(), distinct, value, limit, offset, Span(start, Previous), unnest.AsReadOnly(),
-            groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly());
+            groupAliases?.AsReadOnly(), groupAs, source, bindings?.AsReadOnly(), implicitAlias);
     }
 
     private void UnsupportedKeyJoin(Lexeme token, string suffix = " general ON predicate")

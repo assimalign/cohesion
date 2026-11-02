@@ -140,7 +140,8 @@ internal sealed partial class DocumentPlanner
 
         if (create.Keys.Count is < 1 or > 32)
         { throw new DocumentPlanningException("CD03022", ErrorMessages.IndexPathCount, create.Location); }
-        var keys = create.Keys.Select(DocumentArrayIndexExpressions.BindKey).ToArray();
+        string name = DocumentSourceName.Of(create.Collection, null);
+        var keys = create.Keys.Select(key => DocumentArrayIndexExpressions.BindKey(key, name)).ToArray();
         if (keys.Count(key => key.ArraySource is not null) > 1 || create.IsUnique && keys.Any(key => key.ArraySource is not null))
         { throw new DocumentPlanningException("CD03025", ErrorMessages.ArrayIndexDefinitionInvalid, create.Location); }
         if (keys.Distinct().Count() != keys.Length)
@@ -176,10 +177,11 @@ internal sealed partial class DocumentPlanner
         functions ??= DocumentFunctionCatalog.Standard;
         if (query.Alias is { Length: 0 })
         { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, query.Location); }
-        var evaluator = new DocumentExpressionEvaluator(DocumentSourceName.Of(query), parameters, cancellationToken);
+        string sourceName = DocumentSourceName.Of(query);
+        var evaluator = new DocumentExpressionEvaluator(sourceName, parameters, cancellationToken);
         long? limit = evaluator.PagingCount(query.Limit, "LIMIT");
         long offset = evaluator.PagingCount(query.Offset, "OFFSET") ?? 0;
-        var variables = query.Bindings.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { DocumentSourceName.Of(query) };
+        var variables = query.Bindings.Count == 0 ? null : new HashSet<string>(StringComparer.Ordinal) { sourceName };
         foreach (var binding in query.Bindings)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -207,8 +209,11 @@ internal sealed partial class DocumentPlanner
         var ordering = query.OrderBy.Select(order => order.Expression is OqlPathExpression { Segments.Count: 1 } path &&
             query.Projections.FirstOrDefault(projection => projection.Alias is not null && projection.Alias == path.Segments[0].Name) is { } projection
                 ? new OqlOrdering(projection.Expression, order.Descending, order.NullPlacement) : order).ToArray();
-        query = new OqlSelectExpression(query.Collection, query.Alias, query.Projections, query.Predicate,
-            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source, bindings: query.Bindings == query.Unnest ? null : query.Bindings);
+        // Resolve once into the plan's existing query copy, preserving declaration provenance.
+        // Group wrappers and expression equivalence then reuse the name without substrings.
+        query = new OqlSelectExpression(query.Collection, sourceName, query.Projections, query.Predicate,
+            query.GroupBy, query.Having, ordering, query.IsDistinct, query.IsValue, query.Limit, query.Offset, query.Location, query.Unnest, source: query.Source,
+            bindings: query.Bindings == query.Unnest ? null : query.Bindings, isAliasImplicit: query.IsAliasImplicit);
         bool grouped = query.GroupBy.Count > 0 || query.Projections.Any(projection => ContainsAggregate(projection.Expression, functions)) ||
             (query.Having is not null && ContainsAggregate(query.Having, functions)) || query.OrderBy.Any(order => ContainsAggregate(order.Expression, functions));
         variables?.Remove(DocumentSourceName.Of(query));
@@ -736,45 +741,45 @@ internal sealed partial class DocumentPlanner
         => path.Segments.Skip(alias is not null && path.Segments.Count > 0 && path.Segments[0].Name == alias ? 1 : 0);
 
     private static bool EquivalentExpression(OqlExpression left, OqlExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
-        DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0, bool captured = false) => (left, right) switch
+        DocumentBindingScopes scopes, DocumentBindingScope? leftScope = null, DocumentBindingScope? rightScope = null, int localDepth = 0) => (left, right) switch
     {
         (OqlSubqueryExpression a, OqlSubqueryExpression b) => EquivalentNestedQuery(a.Query, b.Query) &&
             EquivalentNestedBindings(a.Query, leftScope, rightScope, localDepth) &&
             EquivalentNestedBindings(b.Query, leftScope, rightScope, localDepth),
         (OqlComprehensionExpression a, OqlComprehensionExpression b) => a.IsFirst == b.IsFirst && a.Variable == b.Variable &&
             (a.Predicate is null) == (b.Predicate is null) &&
-            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth) &&
             EquivalentExpression(a.Projection, b.Projection, query, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured) &&
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1) &&
             (a.Predicate is null || EquivalentExpression(a.Predicate, b.Predicate!, query, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured)),
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1)),
         (OqlQuantifiedExpression a, OqlQuantifiedExpression b) => a.IsEvery == b.IsEvery && a.Variable == b.Variable &&
-            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
+            EquivalentExpression(a.Collection, b.Collection, query, variables, scopes, leftScope, rightScope, localDepth) &&
             EquivalentExpression(a.Predicate, b.Predicate, query, variables, scopes,
-                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1, captured),
-        (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
-        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
-        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+                scopes.Enter(a, a.Variable, leftScope), scopes.Enter(b, b.Variable, rightScope), localDepth + 1),
+        (OqlInExpression a, OqlInExpression b) => (a.Array is null) == (b.Array is null) && a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth),
+        (OqlBetweenExpression a, OqlBetweenExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth),
+        (OqlLikeExpression a, OqlLikeExpression b) => a.Negated == b.Negated && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth),
         (OqlCaseExpression a, OqlCaseExpression b) => (a.Operand is null) == (b.Operand is null) &&
-            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+            (a.Otherwise is null) == (b.Otherwise is null) && a.Branches.Count == b.Branches.Count && EquivalentChildren(a, b, query, variables, scopes, leftScope, rightScope, localDepth),
         (OqlPathExpression a, OqlPathExpression b) => EquivalentPath(a, b, query, variables, leftScope, rightScope, localDepth),
         (OqlLiteralExpression a, OqlLiteralExpression b) => DocumentExpressionEvaluator.Compare(a.Value, b.Value) == 0,
         (OqlCallExpression a, OqlCallExpression b) => a.Name == b.Name && (a.Quantifier == OqlAggregateQuantifier.Distinct) == (b.Quantifier == OqlAggregateQuantifier.Distinct) && a.Arguments.Count == b.Arguments.Count &&
-            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
+            a.Arguments.Zip(b.Arguments).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth)),
         (OqlStarExpression, OqlStarExpression) => true,
         (OqlArrayExpression a, OqlArrayExpression b) => a.Elements.Count == b.Elements.Count &&
-            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
+            a.Elements.Zip(b.Elements).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth)),
         (OqlMetaExpression a, OqlMetaExpression b) => a.Member == b.Member &&
-            EquivalentMetadataSource(a, b, query, variables, leftScope, rightScope, localDepth, captured),
+            EquivalentMetadataSource(a, b, query, variables, leftScope, rightScope, localDepth),
         (OqlObjectExpression a, OqlObjectExpression b) => a.Members.Count == b.Members.Count &&
             a.Members.Zip(b.Members).All(pair => pair.First.Key == pair.Second.Key &&
-                EquivalentExpression(pair.First.Value, pair.Second.Value, query, variables, scopes, leftScope, rightScope, localDepth, captured)),
+                EquivalentExpression(pair.First.Value, pair.Second.Value, query, variables, scopes, leftScope, rightScope, localDepth)),
         (OqlMissingExpression, OqlMissingExpression) => true,
         (OqlParameterExpression a, OqlParameterExpression b) => a.Name == b.Name,
         (OqlBinaryExpression a, OqlBinaryExpression b) => a.Operator == b.Operator &&
-            EquivalentExpression(a.Left, b.Left, query, variables, scopes, leftScope, rightScope, localDepth, captured) &&
-            EquivalentExpression(a.Right, b.Right, query, variables, scopes, leftScope, rightScope, localDepth, captured),
-        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, query, variables, scopes, leftScope, rightScope, localDepth, captured),
+            EquivalentExpression(a.Left, b.Left, query, variables, scopes, leftScope, rightScope, localDepth) &&
+            EquivalentExpression(a.Right, b.Right, query, variables, scopes, leftScope, rightScope, localDepth),
+        (OqlUnaryExpression a, OqlUnaryExpression b) => a.Operator == b.Operator && EquivalentExpression(a.Operand, b.Operand, query, variables, scopes, leftScope, rightScope, localDepth),
         _ => false,
     };
 
@@ -801,11 +806,11 @@ internal sealed partial class DocumentPlanner
     }
 
     private static bool EquivalentChildren(OqlExpression left, OqlExpression right, OqlSelectExpression query, IReadOnlySet<string>? variables,
-        DocumentBindingScopes scopes, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
+        DocumentBindingScopes scopes, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
     {
         var a = PredicateChildren(left).ToArray();
         var b = PredicateChildren(right).ToArray();
-        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth, captured));
+        return a.Length == b.Length && a.Zip(b).All(pair => EquivalentExpression(pair.First, pair.Second, query, variables, scopes, leftScope, rightScope, localDepth));
     }
 
     private sealed class DebugView

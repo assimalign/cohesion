@@ -31,9 +31,11 @@ public sealed class DocumentImplicitAliasTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Implicit alias: a self-named-field index preserves nested DELETE results")]
-    [InlineData(false, 1)]
-    [InlineData(true, 1)]
-    public async Task ExecuteAsync_QualifiedDelete_ShouldMatchScanAsync(bool indexed, long expected)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ExecuteAsync_QualifiedDelete_ShouldMatchScanAsync(bool indexed, bool nested)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("implicit-alias", new());
@@ -41,13 +43,13 @@ public sealed class DocumentImplicitAliasTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE COLLECTION items", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("INSERT INTO items (KEY, VALUE) VALUES ('a', {g:1})", cancellationToken: CancellationToken.None);
-        if (indexed) { await session.ExecuteAsync("CREATE INDEX ix ON items(items.g)", cancellationToken: CancellationToken.None); }
+        if (indexed) { await session.ExecuteAsync("CREATE INDEX ix ON items(items.items.g)", cancellationToken: CancellationToken.None); }
 
         // Act
         var result = await session.ExecuteAsync(
-            "DELETE FROM items WHERE items.g = 1 AND EXISTS (SELECT RAW 1 FROM [1] AS s)", cancellationToken: CancellationToken.None);
+            "DELETE FROM items WHERE items.g = 1" + (nested ? " AND EXISTS (SELECT RAW 1 FROM [1] AS s)" : ""), cancellationToken: CancellationToken.None);
 
         // Assert
-        result.AffectedCount.ShouldBe(expected);
+        result.AffectedCount.ShouldBe(1);
     }
 }

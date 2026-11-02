@@ -10,6 +10,8 @@ internal sealed partial class DocumentPlanner
 {
     private DocumentUpdatePlan PlanUpdate(OqlUpdateExpression update)
     {
+        if (update.Alias is { Length: 0 })
+        { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, update.Location); }
         DocumentSystemCollections.EnsureReadOnly(update.Collection, update.Location);
         var collection = ResolveCollection(update.Collection, update.Location);
         var targets = new List<DocumentUpdateTarget>();
@@ -94,6 +96,8 @@ internal sealed partial class DocumentPlanner
 
     private DocumentDeletePlan PlanDelete(OqlDeleteExpression delete)
     {
+        if (delete.Alias is { Length: 0 })
+        { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, delete.Location); }
         DocumentSystemCollections.EnsureReadOnly(delete.Collection, delete.Location);
         var collection = ResolveCollection(delete.Collection, delete.Location);
         if (delete.Predicate is { } predicate)
@@ -111,6 +115,8 @@ internal sealed partial class DocumentPlanner
         string? keyName, string? valueName, IReadOnlyDictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>? nested = null)
     {
         string verb = statement is OqlUpsertExpression ? "UPSERT" : "INSERT";
+        if (statement is OqlInsertExpression { Alias.Length: 0 } or OqlUpsertExpression { Alias.Length: 0 })
+        { throw new DocumentPlanningException("CD01023", ErrorMessages.BindingNameMissing, statement.Location); }
         DocumentSystemCollections.EnsureReadOnly(destination, statement.Location);
         var collection = ResolveCollection(destination, statement.Location);
         var returning = statement switch

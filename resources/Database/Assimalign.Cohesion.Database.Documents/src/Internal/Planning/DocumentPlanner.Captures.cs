@@ -42,7 +42,7 @@ internal sealed partial class DocumentPlanner
             meta.Arguments[0] is OqlPathExpression { Segments.Count: 1 } path && path.Segments[0].Name == alias;
 
     private static bool EquivalentMetadataSource(OqlMetaExpression left, OqlMetaExpression right, OqlSelectExpression query,
-        IReadOnlySet<string>? variables, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth, bool captured)
+        IReadOnlySet<string>? variables, DocumentBindingScope? leftScope, DocumentBindingScope? rightScope, int localDepth)
     {
         bool Local(OqlMetaExpression meta, DocumentBindingScope? scope) => IsLocalMetadata(meta, DocumentSourceName.Of(query)) &&
             (meta.Arguments.Count == 0 || DocumentBindingScope.Resolve(scope, DocumentSourceName.Of(query), out _) is null);
@@ -157,7 +157,7 @@ internal sealed partial class DocumentPlanner
             // Match complete keys before their components, while retaining every
             // inner binding's identity so shadowed names cannot prove a group key.
             if (query.GroupBy.Any(key => EquivalentExpression(key, expression, query, variables, scopes,
-                rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local, captured: true))) { return; }
+                rightScope: expression is OqlSubqueryExpression ? nestedOrder ?? local : local))) { return; }
             if (expression is OqlSubqueryExpression subquery) { VisitQuery(subquery.Query, nestedOrder ?? local); return; }
             if (expression is OqlMetaExpression meta)
             {

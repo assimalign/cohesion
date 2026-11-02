@@ -64,7 +64,7 @@ public sealed class DocumentImplicitAliasWireTests
             if (indexed == 1)
             {
                 await execute("CREATE INDEX by_g ON items(g)");
-                await execute("CREATE INDEX by_self ON items(items.g)");
+                await execute("CREATE INDEX by_self ON items(items.items.g)");
             }
             foreach (string form in new[] { "SELECT", "UPDATE", "UNSET", "DELETE", "INSERT", "UPSERT" })
             {

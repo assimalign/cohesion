@@ -94,6 +94,7 @@ internal sealed partial class DocumentPlanner
         var queries = new Dictionary<OqlSubqueryExpression, DocumentNestedQueryPlan>(ReferenceEqualityComparer.Instance);
         var empty = new Dictionary<string, bool>(StringComparer.Ordinal);
         var free = new HashSet<string>(StringComparer.Ordinal);
+        string? unboundValuesName = null;
         if (expression is OqlSelectExpression query) { VisitQuery(query, empty, free); }
         else
         {
@@ -120,7 +121,13 @@ internal sealed partial class DocumentPlanner
             foreach (var child in NestedChildren(expression))
             {
                 if (child is OqlSelectExpression select) { VisitQuery(select, empty, free); }
-                else { Visit(child, child is OqlReturningExpression ? "RETURNING" : "DML", local, empty, free); }
+                else
+                {
+                    bool values = expression is OqlInsertExpression or OqlUpsertExpression && child is not OqlReturningExpression;
+                    unboundValuesName = values ? name : null;
+                    Visit(child, child is OqlReturningExpression ? "RETURNING" : "DML", values ? empty : local, empty, free);
+                    unboundValuesName = null;
+                }
             }
         }
         return new DocumentNestedPlan(PlanCore(expression, queries), queries);
@@ -129,7 +136,7 @@ internal sealed partial class DocumentPlanner
         {
             bool capturesSource = select.Source is null && outer.TryGetValue(select.Collection, out bool keyspace) && !keyspace;
             var source = new Dictionary<string, bool>(StringComparer.Ordinal)
-            { [DocumentSourceName.Of(select)] = select.Alias is null && select.Source is null && !capturesSource };
+            { [DocumentSourceName.Of(select)] = select.IsAliasImplicit && !capturesSource };
             var joinNames = select.Bindings == select.Unnest ? null :
                 new HashSet<string>(select.Bindings.Select(binding => binding.Variable), StringComparer.Ordinal);
             if (capturesSource)
@@ -139,7 +146,7 @@ internal sealed partial class DocumentPlanner
             {
                 Visit(binding.Expression, binding is OqlJoinExpression ? "JOIN" : "UNNEST", source, outer, free,
                     keyNames: binding is OqlJoinExpression ? joinNames : null);
-                source[binding.Variable] = binding is OqlJoinExpression { Alias: null };
+                source[binding.Variable] = binding is OqlJoinExpression { Alias: null } or OqlUnnestExpression { Alias: null };
             }
             Visit(select.Predicate, "WHERE", source, outer, free);
             foreach (var key in select.GroupBy) { Visit(key, "GROUP BY", source, outer, free); }
@@ -161,6 +168,9 @@ internal sealed partial class DocumentPlanner
             if (node is null) { return; }
             if (node is OqlPathExpression path && path.Segments.Count > 0 && path.Segments[0].Name is string name)
             {
+                if (name == unboundValuesName && !local.ContainsKey(name) && !outer.ContainsKey(name))
+                { throw new DocumentPlanningException("CD01036", string.Format(System.Globalization.CultureInfo.CurrentCulture,
+                    ErrorMessages.ValuesDestinationUnbound, name), node.Location); }
                 if (outer.ContainsKey(name) && !local.ContainsKey(name))
                 { free.Add(name); }
                 if (owner == "JOIN" && keyNames?.Contains(name) == true && !local.ContainsKey(name) && !outer.ContainsKey(name))
@@ -217,15 +227,6 @@ internal sealed partial class DocumentPlanner
             }
             return NestedChildren(node).All(CanCache);
         }
-    }
-
-    private static bool ContainsKeyJoin(OqlExpression node)
-    {
-        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
-        if (node is OqlSelectExpression query && query.Bindings != query.Unnest) { return true; }
-        if (node is OqlLiteralExpression or OqlMissingExpression or OqlPathExpression or OqlParameterExpression or OqlStarExpression) { return false; }
-        foreach (var child in NestedChildren(node)) { if (ContainsKeyJoin(child)) { return true; } }
-        return false;
     }
 
     internal static IEnumerable<OqlExpression> NestedChildren(OqlExpression node)
@@ -335,7 +336,7 @@ internal sealed partial class DocumentPlanner
     private static bool EquivalentNestedQuery(OqlSelectExpression left, OqlSelectExpression right)
     {
         if (ReferenceEquals(left, right)) { return true; }
-        if (left.Collection != right.Collection || left.Alias != right.Alias || left.IsValue != right.IsValue ||
+        if (left.Collection != right.Collection || left.Alias != right.Alias || left.IsAliasImplicit != right.IsAliasImplicit || left.IsValue != right.IsValue ||
             left.IsDistinct != right.IsDistinct || left.GroupAs != right.GroupAs ||
             !left.GroupAliases.SequenceEqual(right.GroupAliases) || left.Projections.Count != right.Projections.Count ||
             left.OrderBy.Count != right.OrderBy.Count || left.Bindings.Count != right.Bindings.Count) { return false; }
@@ -348,7 +349,7 @@ internal sealed partial class DocumentPlanner
         {
             if (left.Bindings[index].Variable != right.Bindings[index].Variable || left.Bindings[index].IsLeft != right.Bindings[index].IsLeft) { return false; }
             if (left.Bindings[index] is OqlJoinExpression a && (right.Bindings[index] is not OqlJoinExpression b || a.Collection != b.Collection || a.Alias != b.Alias || a.IsNest != b.IsNest) ||
-                left.Bindings[index] is OqlUnnestExpression && right.Bindings[index] is not OqlUnnestExpression) { return false; }
+                left.Bindings[index] is OqlUnnestExpression unnest && (right.Bindings[index] is not OqlUnnestExpression other || unnest.Alias != other.Alias)) { return false; }
             variables.Add(left.Bindings[index].Variable);
         }
         if ((left.Predicate is null) != (right.Predicate is null) || (left.Having is null) != (right.Having is null) ||
