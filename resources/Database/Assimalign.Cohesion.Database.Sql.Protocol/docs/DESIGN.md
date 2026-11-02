@@ -13,6 +13,28 @@ flowchart LR
 
 Wire bytes, limits, malformed-payload behavior and exception text are preserved. Span-based codecs and explicit value handling remain trimming and NativeAOT compatible; no reflection serializer or dynamic discovery is introduced. The ProtocolMessageFamily is defined exactly once in this assembly. Existing codec tests live in this project's tests; engine/server/client integration tests retain their existing owners.
 
+## SQL outbound stream (#1724)
+
+sql.outbound-stream is independent of bulk and adds CopyTo 80, CopyStart 81, CopyData 82 and
+CopyComplete 83 and empty CopyAcknowledged 84. All five identifiers are defined in the SQL family and gated by negotiation.
+CopyTo carries the existing Execute payload with zero parameters; CopyStart is empty. CopyData
+contains 1..16,384 uninterpreted UTF-8 export bytes. The server awaits one empty CopyAcknowledged
+after each CopyData; the consumer sends it only after delivering the bytes. This one-frame window
+bounds even an unbounded transport queue and makes disconnect/cancellation release the snapshot.
+CopyComplete is exactly two big-endian Int64
+nonnegative counters: data rows (excluding header), then total CopyData bytes. Each row needs
+at least its LF, so rows cannot exceed bytes. CK07005 refuses
+invalid parameters, frame/acknowledgment order, chunk limits, truncated streams and malformed/mismatched counters.
+Structured Diagnostics may immediately precede a terminal Error or completion. An incomplete or
+malformed response never certifies a reusable connection. A statement Error before CopyStart does:
+its snapshot is already released, and the client throws while preserving the transaction. Late
+Errors discard the transfer because delivery acknowledgments may still be outstanding. If
+transaction-status was negotiated, existing Ready follows completion/Error, as with Execute.
+The SQL exchange requests this status explicitly through DatabaseProtocolExchange's constructor;
+it does not extend the shared client's 5/64/69 automatic recognition. No shared protocol/client
+edits or version bump are needed. The exchange changes neither transaction nor retained state.
+Peers without the capability keep existing Execute bytes; ordinary COPY returns CS05096.
+
 ## Execute transaction status (#1540, D5)
 
 SQL and Graph advertise the shared `transaction-status` capability in protocol 2.1. Startup Ready

@@ -104,13 +104,16 @@ public sealed class SqlCostDefinitionTests
     [InlineData("join", 2)]
     [InlineData("hash", 0)]
     [InlineData("hash", 2)]
+    [InlineData("search", 0)]
+    [InlineData("search", 2)]
+    [InlineData("searchEarlier", 2)]
     public async Task Cost_DefinitionChangedBeforeOrDuringProbe_ShouldKeepBoundPlan(string shape, int dropAfterProbe)
     {
         // Arrange
         await using var engine = SqlDatabaseEngine.Create("cost-definition-plans", new());
         var database = await engine.CreateDatabaseAsync("app", CancellationToken.None);
         await using var writer = await database.CreateSessionAsync(CancellationToken.None);
-        foreach (string table in new[] { "t", "s" })
+        foreach (string table in shape.StartsWith("search", StringComparison.Ordinal) ? new[] { "t", "s", "r" } : new[] { "t", "s" })
         {
             await writer.ExecuteAsync($"CREATE TABLE {table}(id INT PRIMARY KEY,b VARCHAR(10),c INT,d INT)", cancellationToken: CancellationToken.None);
             if (shape != "hash")
@@ -124,6 +127,7 @@ public sealed class SqlCostDefinitionTests
         {
             "alternatives" => "SELECT * FROM t WHERE c=7 AND d=7",
             "join" or "hash" => "SELECT t.id,s.id FROM t JOIN s ON t.c=s.c",
+            "search" or "searchEarlier" => "SELECT t.id,s.id,r.id FROM t JOIN s ON t.c=s.c JOIN r ON s.c=r.c",
             _ => "SELECT * FROM t WHERE c=7",
         };
         var plan = new SqlPlanner(database.Catalog, null).Plan(SqlQueryRequest.FromSql(sql).Statement.SqlExpression);
@@ -152,7 +156,7 @@ public sealed class SqlCostDefinitionTests
             {
                 await completed.Task.WaitAsync(TimeSpan.FromSeconds(30));
                 // The second join probe observes s; other probes observe t.
-                string changed = shape is "join" or "hash" ? "s" : "t";
+                string changed = shape is "join" or "hash" or "search" ? "s" : "t";
                 await writer.ExecuteAsync($"ALTER TABLE {changed} DROP COLUMN b", cancellationToken: CancellationToken.None);
                 release.Set();
             }
@@ -160,7 +164,7 @@ public sealed class SqlCostDefinitionTests
 
             // Assert: even earlier successful estimates must not change the original access path.
             costed.ShouldBeSameAs(plan);
-            Volatile.Read(ref probes).ShouldBe(dropAfterProbe);
+            Volatile.Read(ref probes).ShouldBe(shape == "searchEarlier" ? 3 : dropAfterProbe);
         }
         finally
         {

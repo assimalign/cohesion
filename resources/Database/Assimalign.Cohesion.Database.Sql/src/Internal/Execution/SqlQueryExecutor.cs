@@ -22,7 +22,7 @@ using Assimalign.Cohesion.Database.Types;
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlQueryExecutor")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlQueryExecutor.DebugView))]
-internal sealed class SqlQueryExecutor
+internal sealed partial class SqlQueryExecutor
 {
     // Deterministic snapshot-versus-publication tests stop before any table binding.
     internal static Action<SqlQueryRequest>? BeforePlan { get; set; }
@@ -64,11 +64,14 @@ internal sealed class SqlQueryExecutor
 
         var parameters = NormalizeParameters(request.Parameters);
         _definitions.EnsureDefinitions(cancellationToken);
+        if (request.Statement.SqlExpression is SqlCopyToExpression copy)
+        { return ExecuteCopyAsync(copy, statement, session?.CopyDestination(request), cancellationToken); }
         BeforePlan?.Invoke(request);
         var planner = new SqlPlanner(_catalog, parameters, _definitions.Functions, cancellationToken, statement);
         SqlPlan plan;
         try
         {
+            using var jsonPlanning = SqlJsonPathExecution.BeginPlanning(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken);
             plan = planner.Plan(request.Statement.SqlExpression, statement.Snapshot);
         }
         catch (SqlUnsupportedQueryException exception)
@@ -82,7 +85,8 @@ internal sealed class SqlQueryExecutor
         var executor = new SqlPlanExecutor(_storage, _catalog, _indexManager, _definitions);
         var sequenceUsage = plan.SequenceUsage;
         if (plan is SqlSequenceScopePlan sequenceScope) { plan = sequenceScope.Input; }
-        plan = executor.Cost(plan, statement, cancellationToken);
+        using (SqlJsonPathExecution.BeginPlanning(statement.Metrics, _definitions.StatementMemoryBudget, cancellationToken))
+        { plan = executor.Cost(plan, statement, cancellationToken); }
         return sequenceUsage is not null ? ExecuteSequencesAsync(executor, plan, statement, session, cancellationToken, sequenceUsage)
             : executor.ExecuteAsync(plan, statement, cancellationToken);
     }

@@ -4,6 +4,7 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="CopyOptionInvalid" xml:space="preserve"><value>COPY option {0} is invalid, repeated or incompatible with the selected format.</value></data>
   <data name="DateTextInvalid" xml:space="preserve"><value>DATE text must be a valid ISO 8601 date, yyyy-mm-dd.</value></data>
   <data name="TimestampTextInvalid" xml:space="preserve"><value>TIMESTAMP text requires yyyy-mm-dd and an optional time.</value></data>
   <data name="TimestampSeparatorInvalid" xml:space="preserve"><value>TIMESTAMP requires a space or T before the time.</value></data>
@@ -23,6 +24,12 @@
   <data name="ExpressionRendererSelectNotSupported" xml:space="preserve"><value>Join type '{0}' has no SQL spelling.</value></data>
   <data name="ParserParseGroupingExpressionVoid2" xml:space="preserve"><value>SQL select-list ordinals in GROUP BY are not supported; use the source grouping expression. Ordinals are supported only in ORDER BY.</value></data>
   <data name="AddTypeModifierDiagnosticDiagnostic" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="JsonBehaviorInvalid" xml:space="preserve">
+    <value>Invalid SQL/JSON behavior clause.</value>
+  </data>
+  <data name="JsonPassingUnsupported" xml:space="preserve">
+    <value>SQL/JSON PASSING variables are outside the supported path subset.</value>
+  </data>
   <data name="SqlQueryParserParseCastVoid" xml:space="preserve"><value>Expected '(' after CAST.</value></data>
   <data name="SqlQueryParserParseCastVoid2" xml:space="preserve"><value>Expected AS before the CAST target type.</value></data>
   <data name="SqlQueryParserParseCastVoid3" xml:space="preserve"><value>Expected a CAST target type name.</value></data>

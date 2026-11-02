@@ -17,6 +17,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// </summary>
 public sealed class SqlClientException : Exception
 {
+    private bool _connectionUnusable;
     /// <summary>Gets the complete read-only diagnostic snapshot, ordered by source offset; empty when none were supplied.</summary>
     public IReadOnlyList<Diagnostic> Diagnostics { get; } = Array.Empty<Diagnostic>();
 
@@ -67,12 +68,20 @@ public sealed class SqlClientException : Exception
     /// Indicates whether the failure left the connection usable. Statement-level
     /// failures (parse, execution, transaction abort) keep the session ready;
     /// connection, protocol, and capacity failures break it.
+    /// An incomplete COPY exchange can be unusable even when its failure has a statement error kind.
     /// </summary>
-    public bool ConnectionUsable => Kind is SqlClientErrorKind.ParseFailure
+    public bool ConnectionUsable => !_connectionUnusable && Kind is (SqlClientErrorKind.ParseFailure
         or SqlClientErrorKind.ExecutionFailure
         or SqlClientErrorKind.TransactionAborted
         or SqlClientErrorKind.NotAuthorized
-        or SqlClientErrorKind.InvalidCast;
+        or SqlClientErrorKind.InvalidCast);
+
+    internal static SqlClientException FromStreamingException(DatabaseClientException exception)
+    {
+        var translated = FromClientException(exception);
+        translated._connectionUnusable = true;
+        return translated;
+    }
 
     /// <summary>
     /// Translates a shared-core <see cref="DatabaseClientException"/> into a

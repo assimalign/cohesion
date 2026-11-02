@@ -159,7 +159,7 @@ public sealed class SqlOnUpdateTests : IDisposable
         await using var query = await opened.CreateSessionAsync(CancellationToken.None);
 
         // Assert
-        opened.Catalog.RecordSpaceFormatVersion.ShouldBe(32);
+        opened.Catalog.RecordSpaceFormatVersion.ShouldBe(33);
         opened.Catalog.TryGetTable("dbo", "c", out var child).ShouldBeTrue();
         child.Constraints.Single().OnUpdate.ShouldBe(expected);
         child.Constraints.Single().OnDelete.ShouldBe(SqlCatalogReferentialAction.SetNull);
@@ -282,7 +282,7 @@ public sealed class SqlOnUpdateTests : IDisposable
         // Assert
         error.Diagnostics.ShouldContain(diagnostic => diagnostic.Code == "CS06041");
         error.Message.ShouldContain("data-storage format 29", Case.Sensitive);
-        error.Message.ShouldContain("supports only format 32", Case.Sensitive);
+        error.Message.ShouldContain("supports only format 33", Case.Sensitive);
         Directory.GetFiles(_rootPath, "*", SearchOption.AllDirectories).ShouldBe(before.Keys, ignoreOrder: true);
         foreach (var file in before) { File.ReadAllBytes(file.Key).ShouldBe(file.Value); }
     }

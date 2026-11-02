@@ -1,5 +1,17 @@
 # Assimalign.Cohesion.Database.Sql.Language — Design
 
+## COPY table export grammar (#1724)
+
+SqlCopyToExpression retains the ordered table column list and immutable resolved SqlCopyOptions.
+COPY and its option words remain contextual, preserving every existing identifier and persisted
+expression. The profile adds COPY TO STDOUT beside TRUNCATE (+1 clause). The parser validates
+option duplicates and incompatibilities before execution; the renderer emits explicit defaults.
+The language and engine conformance corpora and DIALECT specify PostgreSQL source references,
+formatting differences, parenthesized-only option grammar and deliberate refusals. CS01070 is an
+invalid option; CS01071 is an invalid output-column selection. No persisted syntax changes.
+The execution corpus also verifies table-scoped COPY scan cost, byte-sized delivery batches,
+deferred migration admission and shared embedded-session admission; DIALECT records these contracts.
+
 ## Savepoint grammar and rendering (#1726, XT-4)
 
 Transaction AST nodes retain the normalized SavepointName. The contextual parser and renderer
@@ -27,7 +39,7 @@ covers default ORDER BY against default indexes on primary keys and filtered nul
 persisted contract; earlier artifacts are refused, with no upgrade reader.
 
 
-The current record-space format is 32; index predicates are persisted by Sql, independently
+The current record-space format is 33; index predicates are persisted by Sql, independently
 of this parser assembly. Earlier catalog formats are refused without conversion.
 
 
@@ -155,7 +167,7 @@ CREATE/ALTER/DROP SEQUENCE use sealed statement leaves and a closed option list 
 
 ## Sequence catalog review (#1717)
 
-DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 32's
+DIALECT.md distinguishes format 27's TYPE default-assignment flag from current format 33's
 sequence records. Existing-sequence relation collisions use CS03070 (42P07) and identify the
 existing kind; table-on-table collisions retain their existing identity. The engine conformance
 regressions exercise CREATE TABLE, CTAS, RENAME and CREATE VIEW at this boundary. Sequence SQL
@@ -1255,6 +1267,55 @@ are parsed independently of the foreign-key action capability flags.
 The engine's view metadata contract is documented in DIALECT: complete common type modifiers
 flow through scalar alternatives and set operands, every catalog view column is nullable, and
 catalog refusals retain structured diagnostics over the wire.
+
+
+## SQL/JSON path execution (#1722, SQ-N2)
+
+SqlJsonFunctionExpression retains context, path, RETURNING, wrapper, quotes and both
+behavior/default operands. Canonical rendering emits effective wrapper, quotes and
+behavior defaults, while preserving older vocabulary and expression spelling. Three
+contextual profile clauses and parser/live conformance cases cover the functions.
+The closed internal SqlJsonPath parser accepts only the owner's accessor subset and
+parses constants/parameters before rows, including skipped branches. Bound nodes retain
+path and output conversion; context CASE/COALESCE uses the N1 common-type resolver.
+The DIALECT records every effective default and the exact PostgreSQL source anchors.
+
+Context conversion validates the original DOM through the N1 reader, applies last-duplicate
+membership and UTF-8 length/binary wildcard order during traversal, and serializes only
+selected results. Pooled input and direct Unicode-escape validation keep narrow-path
+allocation flat in unselected padding. Stored JSONB,
+its equality and arrows remain unchanged. Input conversion precedes error handling;
+ON ERROR covers path/cardinality and result coercion only. ERROR ON EMPTY, behavior
+failures, cancellation and budget failures escape. Result conversions reuse the local
+cast registry, modifiers and domain checks without a new assembly boundary. $name, @name
+and $1 paths use ordinary parameter names. Boolean DEFAULTs honor the selected application
+cast, and JSON_VALUE uses domain coercion for JSON/JSONB domains even without CHECKs
+(parse_expr.c:4727-4733; execExprInterp.c:4977-4990,5016-5035). The live corpus covers these
+parameter and domain cases without a grammar or format change.
+
+A JSON-only execution scope shares SqlStatementMetrics' existing retained-memory ledger
+and the database StatementMemoryBudget. Path visits and window-frame recomputation share
+the existing 1,000,000-visit statement cap; each inspected member, array item and serialized item is
+charged. Parsed paths are limited to 65,536 UTF-16 units and 256 accessors. Wildcard
+access recursively pushes one match at a time, retaining only final results; strict
+EXISTS completes the walk to detect later errors while retaining one result reference.
+Synchronous planning uses a stack-owned budget scope; JSON-only weak statement state
+keeps one work counter through binding, costing and execution. Direct wildcard proofs show
+n+1 visits and 32n result-reference bytes; lax EXISTS stops at two visits. Cached
+table versions retain separate read/write JSON usage. Only plans reaching JSON expressions
+or definitions activate a scope; unrelated definitions and DROP add no ordinary query cost.
+Nested statements retain separate work and memory ledgers.
+
+| Code | Condition |
+| --- | --- |
+| CS01068 | Path must be a string constant or parameter (42804) |
+| CS01069 | Invalid SQL/JSON operand/default/RETURNING signature (42804) |
+| CS02081 | Invalid or unsupported path before rows (42601/0A000) |
+| CS02082 | Strict accessor structural error (2203A) |
+| CS02083 | ERROR ON EMPTY (2203F) |
+| CS02084 | Context jsonb number exceeds exponent, precision or scale bounds (22003) |
+| CS05093 | Result cardinality or scalar-kind error (22034/2203B) |
+| CS05094 | Path size, statement work or memory budget (54000) |
 
 
 ## JSON access (#1722, SQ-N1)

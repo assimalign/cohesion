@@ -45,6 +45,11 @@ internal sealed class SqlBoundTable
         DefaultValues = defaultValues;
         MissingValues = missingValues ?? new SqlBoundExpression?[table.Columns.Count];
         Domains = domains ?? [];
+        foreach (var value in MissingValues) { ReadsJsonPath |= SqlJsonUsage.Contains(value, defaultCollation, default); }
+        WritesJsonPath = ReadsJsonPath;
+        foreach (var value in DefaultValues) { DefaultsUseJsonPath |= SqlJsonUsage.Contains(value, defaultCollation, default); }
+        foreach (var check in checks) { WritesJsonPath |= SqlJsonUsage.Contains(check.Bound, defaultCollation, default); }
+        foreach (var domain in Domains) { WritesJsonPath |= SqlJsonUsage.Contains(domain.Check, defaultCollation, default); }
         int references = 0;
         foreach (var constraint in table.Constraints) { if (constraint.Kind == SqlCatalogConstraintKind.Reference) { references++; } }
         if (references > 0)
@@ -123,6 +128,12 @@ internal sealed class SqlBoundTable
     internal IReadOnlyList<SqlBoundCheck> Checks => _checks;
 
     internal bool ChecksContainLike { get; }
+
+    // Usage belongs to this immutable table version. DROP/replacement cannot leave
+    // a database-wide sticky bit, and reads do not inherit write-only CHECK work.
+    internal bool ReadsJsonPath { get; }
+    internal bool WritesJsonPath { get; }
+    internal bool DefaultsUseJsonPath { get; }
 
     /// <summary>
     /// Gets each column's DEFAULT by ordinal, bound once

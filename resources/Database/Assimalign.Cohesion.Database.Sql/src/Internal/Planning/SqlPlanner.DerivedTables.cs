@@ -22,6 +22,7 @@ internal sealed partial class SqlPlanner
         SqlType? declared = expression is null ? null : UnwrapCollation(expression) switch
         {
             SqlCastExpression cast => SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location),
+            SqlJsonFunctionExpression json => evaluator!.JsonReturning(json),
             SqlFunctionCallExpression call when !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName) => evaluator!.ResolveFunction(call)?.ReturnType,
             _ => null,
         };
@@ -92,6 +93,7 @@ internal sealed partial class SqlPlanner
             {
                 var value = UnwrapCollation(projected);
                 if (value is SqlCastExpression cast) { declaredType = SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location); }
+                else if (value is SqlJsonFunctionExpression json) { declaredType = (scope ?? ScopelessEvaluator).JsonReturning(json); }
                 else if (value is SqlFunctionCallExpression call && !SqlStandardLibrary.IsEvaluatorForm(call.FunctionName))
                 {
                     scope ??= new SqlExpressionEvaluator(output.Columns, _parameters, output.Bindings,

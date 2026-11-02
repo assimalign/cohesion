@@ -45,6 +45,12 @@ internal sealed class SqlExpressionFunction : SqlScalarFunction
 
     internal string? Unresolved { get; }
 
+    // Scope discovery must never compile a second collation or wait for a callback.
+    internal SqlBoundExpression? PreparedBody(Collation collation)
+        => _bindBody is null || ReferenceEquals(collation, _bodyCollation)
+            ? _body ?? _defaultBody!.Value
+            : _bodies.TryGetValue(collation, out var entry) ? entry.Value : null;
+
     // Fixed call collations prepare this during binding. Deferred collations use the same cache.
     // Coordinate only this collation. Other variants never wait on its application callbacks.
     internal SqlBoundExpression PrepareBody(Collation collation, CancellationToken cancellationToken)

@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 
 /// <summary>
 /// One typed SQL connection: executes commands against the bound database and materializes their
-/// results as typed row sets or affected counts.
+/// results as typed row sets or affected counts, and streams table exports.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -36,7 +36,7 @@ namespace Assimalign.Cohesion.Database.Sql.Client;
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("SqlConnection")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Client.SqlConnection.DebugView))]
-public sealed class SqlConnection : IAsyncDisposable
+public sealed partial class SqlConnection : IAsyncDisposable
 {
     private readonly DatabaseConnection _connection;
     // Operation diagnostics may finish after disposal has returned the shared lease.

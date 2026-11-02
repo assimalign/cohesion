@@ -80,6 +80,13 @@ internal static class SqlTreeDump
                 Append(builder, distinct.Right);
                 builder.Append(')');
                 break;
+            case SqlJsonFunctionExpression json:
+                builder.Append("JsonFunction(").Append(json.Kind).Append(", ").Append(Text(json.ReturningType is { } jsonType ? $"{jsonType.Type}/{jsonType.MaxLength}/{jsonType.Precision}/{jsonType.Scale}" : json.Returning))
+                    .Append(", ").Append(json.Wrapper).Append(", ").Append(json.OmitQuotes).Append(", ")
+                    .Append(json.OnEmpty).Append(", ").Append(json.OnError).Append(", ");
+                foreach (var operand in json.GetOperands()) { Append(builder, operand); builder.Append(", "); }
+                builder.Append(')');
+                break;
             case SqlIsJsonExpression json:
                 builder.Append("IsJson(").Append(json.Kind).Append(", ").Append(json.IsNegated).Append(", ");
                 Append(builder, json.Operand);

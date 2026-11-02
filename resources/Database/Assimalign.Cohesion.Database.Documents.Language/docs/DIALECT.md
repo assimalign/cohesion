@@ -1,5 +1,12 @@
 # OQL SQL++ dialect
 
+## Savepoint execution conformance (#1726, XT-5)
+
+The engine SavepointMatrixTests and client SavepointFailureWireTests extend the named-control
+corpus across in-process, InMemory and TCP execution. They check failed-control policy,
+incomplete-undo recovery with exact commits, live crash images, and disposal/pool return while
+undo is admitted. Nested-name and statement-failure rules below are unchanged.
+
 ## Named savepoints (#1726, XT-4)
 
 OQL accepts SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK [WORK | TRAN | TRANSACTION]

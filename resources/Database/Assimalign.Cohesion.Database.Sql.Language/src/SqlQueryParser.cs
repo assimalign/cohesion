@@ -124,7 +124,8 @@ public sealed partial class SqlQueryParser : QueryParser
         string firstToken = CurrentText(ref lexer);
         SqlQueryExpression expression;
 
-        if (IsWord(ref lexer, "SAVEPOINT") || IsWord(ref lexer, "RELEASE") || IsWord(ref lexer, "SET") && StartsSetTransaction(lexer))
+        if (IsWord(ref lexer, "COPY")) { expression = ParseCopy(ref lexer); }
+        else if (IsWord(ref lexer, "SAVEPOINT") || IsWord(ref lexer, "RELEASE") || IsWord(ref lexer, "SET") && StartsSetTransaction(lexer))
         {
             expression = ParseTransaction(ref lexer);
         }
@@ -699,6 +700,7 @@ public sealed partial class SqlQueryParser : QueryParser
         SqlCreateIndexExpression => "CREATE INDEX",
         SqlDropTableExpression => "DROP TABLE",
         SqlTruncateExpression => "TRUNCATE",
+        SqlCopyToExpression => "COPY TO STDOUT",
         SqlDropSchemaExpression => "DROP SCHEMA",
         SqlDropViewExpression => "DROP VIEW",
         SqlDropIndexExpression => "DROP INDEX",

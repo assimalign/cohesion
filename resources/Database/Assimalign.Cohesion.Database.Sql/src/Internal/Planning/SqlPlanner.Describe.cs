@@ -14,6 +14,19 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 
 internal sealed partial class SqlPlanner
 {
+    private static string JoinSearchDetail(SqlJoinPlan plan)
+    {
+        if (plan is SqlSearchedJoinPlan searched)
+        {
+            return $"; join_search=exact_dp; collapse_limit={SqlJoinSearch.ExactRelationLimit}; chosen_order={searched.ChosenOrder}; reordered={searched.Reordered.ToString().ToLowerInvariant()}; search_states={searched.States}; search_partitions={searched.Partitions}; search_scope={(searched.SourceOnly ? "source_only; target_boundary=fixed" : "select")}";
+        }
+        if (plan.Steps.Count == 0) { return ""; }
+        var order = plan.Tree is { } tree ? tree.Leaves().ToArray()
+            : new[] { plan.FirstBinding }.Concat(plan.Steps.Select((step, i) => i == 0 && plan.FirstBinding == 1 ? 0 : step.Binding)).ToArray();
+        string names = string.Join(",", order.Select(i => plan.Bindings[i].Reference.Alias ?? plan.Bindings[i].Source.Name));
+        return $"; join_search=bound; chosen_order={names}; reordered={(order.SequenceEqual(Enumerable.Range(0, plan.Bindings.Count)) ? "false" : "true")}";
+    }
+
     // The same closed mapping supplies every emitted plan node. Tests enumerate the plan
     // family and exercise this switch, so a new record cannot silently disappear from EXPLAIN.
     private static string WindowFrameDetail(SqlWindowFunction function)
@@ -141,7 +154,7 @@ internal sealed partial class SqlPlanner
                     (p.Access is SqlOrderedIndexPath ? "; sort_removed=true; order_source=index" : ""),
                 SqlSystemViewPlan p => QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
                 SqlJoinPlan p => string.Join("; ", p.Steps.Select(step => $"{step.Kind}: {(recursiveDemand ? "demand-driven inputs" : step.Hash is not null ? "bounded in-memory hash" : step.Access is null ? "buffered inputs" : "correlated equality-prefix seek")}")) + "; " +
-                    QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset),
+                    QueryDetail(p.Where is not null, p.OrderBy, p.IsDistinct, p.Limit, p.Offset) + JoinSearchDetail(p),
                 SqlGroupPlan p => $"keys={p.Keys.Count}; aggregates={p.Aggregates.Count}; having={p.Having is not null}; " +
                     (p is not SqlGroupingSetsPlan extended ? "" : GroupingSetsDetail(extended)) +
                     (p.Aggregates.Any(aggregate => aggregate.Filter is not null) ? $"filtered_aggregates={p.Aggregates.Count(aggregate => aggregate.Filter is not null)}; " : "") +
@@ -256,7 +269,7 @@ internal sealed partial class SqlPlanner
                     JoinInput(first, id);
                     foreach (var step in join.Steps)
                     {
-                        int inner = ReferenceEquals(step, join.Steps[0]) && first == 1 ? 0 : step.Binding;
+                        int inner = join is not SqlSearchedJoinPlan && ReferenceEquals(step, join.Steps[0]) && first == 1 ? 0 : step.Binding;
                         var binding = join.Bindings[inner];
                         int stepId = nodes.Count;
                         string algorithm = !recursiveDemand && step.Hash is not null ? "HashJoin" : step.Access is not null ? "IndexNestedLoop" : "NestedLoop";

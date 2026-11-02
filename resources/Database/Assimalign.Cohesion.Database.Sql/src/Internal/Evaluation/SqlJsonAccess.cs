@@ -30,10 +30,17 @@ internal static class SqlJsonAccess
         if (value is not (string or byte[] or SqlCharacter)) { throw Signature(); }
         try
         {
-            byte[] bytes;
-            if (value is byte[] binary) { _ = _utf8.GetCharCount(binary); bytes = binary; }
-            else { bytes = _utf8.GetBytes(value is SqlCharacter character ? character.Text : (string)value); }
-            return JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 128 });
+            var options = new JsonDocumentOptions { MaxDepth = 128 };
+            if (value is byte[] binary)
+            {
+                _ = _utf8.GetCharCount(binary);
+                return JsonDocument.Parse(binary, options);
+            }
+            string text = value is SqlCharacter character ? character.Text : (string)value;
+            _ = _utf8.GetByteCount(text);
+            // JsonDocument owns pooled UTF-8 input for text. Preserve strict admission
+            // without allocating a fresh document-sized byte array per extraction.
+            return JsonDocument.Parse(text, options);
         }
         catch (Exception exception) when (exception is JsonException or EncoderFallbackException or DecoderFallbackException)
         { throw new FormatException(_invalidJsonText, exception); }
@@ -76,8 +83,8 @@ internal static class SqlJsonAccess
         {
             if (value is string input ? input.Contains('\\') : ((byte[])value).AsSpan().Contains((byte)'\\'))
             {
-                try { ValidateDecoded(document.RootElement); }
-                catch (InvalidOperationException exception) { throw new SqlExecutionException("CS02078", ErrorMessages.JsonInputInvalid, exception); }
+                if (value is string text) { ValidateDecoded(text, []); }
+                else { ValidateDecoded([], (byte[])value); }
             }
             return document;
         }
@@ -126,17 +133,38 @@ internal static class SqlJsonAccess
         return source == DatabaseType.JsonBinary ? _utf8.GetBytes(raw) : raw;
     }
 
-    private static void ValidateDecoded(JsonElement element)
+    private static void ValidateDecoded(ReadOnlySpan<char> text, ReadOnlySpan<byte> bytes)
     {
-        if (element.ValueKind == JsonValueKind.String) { Check(element.GetString()!); }
-        else if (element.ValueKind == JsonValueKind.Array)
-        { foreach (var item in element.EnumerateArray()) { ValidateDecoded(item); } }
-        else if (element.ValueKind == JsonValueKind.Object)
-        { foreach (var property in element.EnumerateObject()) { Check(property.Name); ValidateDecoded(property.Value); } }
-
-        static void Check(string text)
+        // Syntax and literal UTF encoding were admitted by ReadChecked. Inspect the
+        // escape spelling directly so unselected strings never need decoding into
+        // document-sized managed strings. Both property names and values participate.
+        int length = Math.Max(text.Length, bytes.Length);
+        for (int index = 0; index < length; index++)
         {
-            if (text.Contains('\0')) { throw new SqlExecutionException("CS02078", ErrorMessages.JsonInputInvalid); }
+            if (Unit(text, bytes, index) != '\\' || Unit(text, bytes, ++index) != 'u') { continue; }
+            int scalar = Hex(text, bytes, index + 1);
+            index += 4;
+            if (scalar == 0 || scalar is >= 0xDC00 and <= 0xDFFF)
+            { throw new SqlExecutionException("CS02078", ErrorMessages.JsonInputInvalid); }
+            if (scalar is >= 0xD800 and <= 0xDBFF)
+            {
+                if (index + 6 >= length || Unit(text, bytes, index + 1) != '\\' || Unit(text, bytes, index + 2) != 'u' ||
+                    Hex(text, bytes, index + 3) is < 0xDC00 or > 0xDFFF)
+                { throw new SqlExecutionException("CS02078", ErrorMessages.JsonInputInvalid); }
+                index += 6;
+            }
+        }
+
+        static int Unit(ReadOnlySpan<char> text, ReadOnlySpan<byte> bytes, int index) => text.IsEmpty ? bytes[index] : text[index];
+        static int Hex(ReadOnlySpan<char> text, ReadOnlySpan<byte> bytes, int start)
+        {
+            int value = 0;
+            for (int index = start; index < start + 4; index++)
+            {
+                int digit = Unit(text, bytes, index);
+                value = value * 16 + (digit <= '9' ? digit - '0' : (digit | 0x20) - 'a' + 10);
+            }
+            return value;
         }
     }
 

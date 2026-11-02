@@ -380,6 +380,12 @@ internal static class SqlDefinitionBinder
                 }
                 dependencies.Add(DomainKey(domain.Name));
             }
+            if (node is SqlJsonFunctionExpression json && scope.JsonReturning(json) is { IsDomain: true } jsonDomain)
+            {
+                if (UnresolvedDomainReason(jsonDomain) is { } reason)
+                { throw new SqlPlanningException(SqlEvaluationException.UnregisteredFunctionCode, reason, json.Location); }
+                dependencies.Add(DomainKey(jsonDomain.Name));
+            }
             foreach (var child in SqlPlanner.Children(node))
             {
                 Visit(child);
@@ -411,6 +417,8 @@ internal static class SqlDefinitionBinder
         {
             return true;
         }
+        if (expression is SqlJsonFunctionExpression json && UnresolvedDomainReason(scope.JsonReturning(json)) is not null)
+        { return true; }
         return SqlPlanner.Children(expression).Any(child => HasUnavailableCall(child, scope, requiredVolatility));
     }
 

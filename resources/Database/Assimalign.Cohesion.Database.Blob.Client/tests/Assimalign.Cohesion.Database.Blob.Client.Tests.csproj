@@ -29,4 +29,7 @@
           DestinationFiles="@(BlobClientStreamingFixtureOutput->'$(OutDir)BlobClientStreamingFixture\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
   </Target>
+	<ItemGroup>
+		<Compile Include="$(CohesionRepositoryDirectory)resources\Database\Assimalign.Cohesion.Database\tests\TestObjects\SavepointUndoFault.cs" Link="TestObjects\SavepointUndoFault.cs" />
+	</ItemGroup>
 </Project>

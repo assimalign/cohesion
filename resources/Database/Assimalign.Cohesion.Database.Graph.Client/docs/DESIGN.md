@@ -1,5 +1,24 @@
 # Graph client design
 
+## Savepoint lifecycle conformance (#1726, XT-5)
+
+Explicit wire lifecycle probes require canceled-before-dispatch controls to take no kernel admission;
+the shared client breaks the canceled exchange, and lease return must scrub all scopes. They also require
+offline storage to outrank CK04009 with a complete Ready E exchange, and session/database close to
+drain a physically admitted control on both transports.
+
+The shared failure schedule now checks index erase/clear, memory before/after restoration and
+three physical undo brackets on both transports. A failed undo returns CK04009 and Ready E;
+retry or whole rollback is followed by exact committed rows. A fenced pool return clears the
+same authenticated session's names and effects. Progress-counted, non-parallel stress returns
+or drops/cancels a connection inside an admitted undo and verifies root rollback, pool-slot release
+and exact next-lease contents. Failed unknown-name controls retain the ordinary model policy.
+
+Wire conformance also checks outer recovery at every stage, every fenced command family,
+corruption during undo, and disposed/offline precedence. Ready checks require the exact expected
+letter; teardown stress keeps undo blocked until the server lifetime cancellation is recorded.
+Pool reset fails before memory restoration and must invoke restoration again before re-leasing.
+
 ## Named savepoint failure recovery (#1726)
 
 Recorded-adapter I/O failures and second-batch physical undo failures are statement errors. Both InMemory and TCP retain the connection, report CK04009 followed by Ready E, and support retry of the target or whole rollback with exact committed contents.

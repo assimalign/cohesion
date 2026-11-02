@@ -22,6 +22,40 @@ model's ordinary statement policy.
 | CK04012 | A savepoint command requires an explicit bound transaction |
 | CK04013 | The named savepoint does not exist |
 
+The shared eleven-stage schedule includes four late index/memory adapter failures after real
+undo brackets have committed. Each requires a separate physical-progress observation before
+adapter failure, followed by exact target, outer and root recovery. The Transactions design
+records the covered cells and transport-specific exclusions.
+
+## Borrowed wire transaction scopes (#1726, XT-5)
+
+The Blob protocol has no transaction-control messages and its pump serializes exchanges, so
+pipelined frames cannot execute a COMMIT or ROLLBACK during a transfer. The host can nevertheless
+end the server session's transaction between container lookup and stream admission; connection
+lifetime cancellation and session disposal can also end it. Upload admission checks the captured
+transaction identity under the existing operation reservation and refuses a stale host with
+CK04005 instead of starting autocommit. Every failed upload aborts the destination's own operation
+before buffered stream disposal, including protocol validation failures with a live lifetime token.
+Pre-operation protocol failures also abort the host before terminal I/O, retaining their exact cause.
+
+Downloads select metadata and content from one catalog record and pinned operation snapshot,
+including READ COMMITTED during a concurrent replacement. EOF releases the operation before
+TransferComplete is written, so immediate host COMMIT cannot encounter the read hold. Protocol
+acknowledgement failures abort the borrowed read operation before disposal and retain their cause.
+Only an automatically created envelope is committed/disposed by the server. No monitor spans a
+transport await; the XT-4 admission and end ordering, public API and storage format 4 are unchanged.
+Deterministic tests cover both transports, stale host COMMIT/ROLLBACK, wrong-length completion
+while the lifetime is live, pre-operation failure, failed downloads, immediate commit, and replacement
+of a 20,000-byte version by a 30,000-byte version while the original download remains pinned.
+
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real Blob mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
+Stream saturation also proves CK04011, CK04010 and complete registration drain.
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog publication retains earlier same-writer metadata while markers are live. Undo

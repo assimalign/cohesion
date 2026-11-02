@@ -219,17 +219,21 @@ internal sealed class SqlStatementMetrics
     internal long HashMemoryBytes => (_accessPath as JoinWork)?.MemoryBytes ?? 0;
     internal long PeakHashMemoryBytes => (_accessPath as JoinWork)?.PeakMemoryBytes ?? 0;
 
-    private const long windowFrameVisitLimit = 1_000_000;
+    internal const long StatementWorkVisitLimit = 1_000_000;
+    internal long WindowFrameWorkVisits => (_accessPath as JoinWork)?.ObservationState is WindowFrameWork work ? work.Visits : 0;
 
     internal void RecordWindowFrameRecomputation()
     {
         if (_accessPath is not JoinWork state) { state = new([]) { ScalarPath = _accessPath as string }; _accessPath = state; }
         if (state.ObservationState is not WindowFrameWork work)
         { work = new() { Analysis = state.Operators }; state.ObservationState = work; }
-        if (work.Visits == windowFrameVisitLimit)
+        long jsonVisits = SqlJsonPathExecution.VisitsFor(this);
+        if (jsonVisits != 0 && work.Visits >= StatementWorkVisitLimit - jsonVisits)
+        { throw new SqlExecutionException("CS05094", ErrorMessages.JsonPathBudget); }
+        if (work.Visits == StatementWorkVisitLimit)
         {
             throw new SqlExecutionException("CS05084", string.Format(System.Globalization.CultureInfo.CurrentCulture,
-                ErrorMessages.WindowFrameWorkLimit, windowFrameVisitLimit));
+                ErrorMessages.WindowFrameWorkLimit, StatementWorkVisitLimit));
         }
         work.Visits++;
     }

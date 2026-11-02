@@ -317,6 +317,8 @@ internal sealed partial class SqlExpressionEvaluator
                 return EvaluateBinary((SqlBoundBinary)expression, row);
             case SqlBoundExpressionKind.Bitwise:
                 return EvaluateBitwise((SqlBoundBitwise)expression, row);
+            case SqlBoundExpressionKind.JsonFunction:
+                return EvaluateJsonFunction((SqlBoundJsonFunction)expression, row);
             case SqlBoundExpressionKind.JsonAccess:
                 return EvaluateJsonAccess((SqlBoundJsonAccess)expression, row);
             case SqlBoundExpressionKind.IsJson:
@@ -570,6 +572,7 @@ internal sealed partial class SqlExpressionEvaluator
 
     private SqlCollationCandidate FindCollationCore(SqlExpression expression, bool bound)
     {
+        if (expression is SqlJsonFunctionExpression) { return new SqlCollationCandidate(_defaultCollation, 1); }
         if (expression is SqlIsJsonExpression) { return default; }
         if (expression is SqlBinaryExpression json && SqlJsonAccess.IsOperator(json.Operator))
         { return json.Operator == SqlBinaryOperator.JsonTextAccess ? FindCollation(json.Right, bound) : default; }

@@ -1,5 +1,7 @@
 # Assimalign.Cohesion.Database.Sql — Overview
 
+SqlDatabaseSession.CopyToAsync and its negotiated SQL outbound stream export physical tables as snapshot-consistent UTF-8 text/CSV (#1724).
+
 Partial indexes use proven local predicates for seeks, ranges, subset scans, joins and joined DML.
 Conservative implication also supports ON CONFLICT target-WHERE inference; EXPLAIN reports the
 selected index and proof. Unproven cases use the existing complete access paths (#1630).
@@ -152,7 +154,7 @@ shared storage, with DDL flowing through this assembly's relational Catalog comp
 - **SQL definitions and declared scripts (E4)** — database-local SQL functions use the same
   bound expression evaluator and scalar ABI as registered functions. SQL domains share type
   resolution and write enforcement with registered domains. Canonical definitions, dependencies,
-  ownership, script receipts and table reclamation intents persist in the catalog (format 32). A builder's named scripts run
+  ownership, script receipts and table reclamation intents persist in the catalog (format 33). A builder's named scripts run
   inline after its typed schema, in declaration order, and resume at committed statement
   boundaries after a crash. Checksums prohibit edits to an applied name; Verify checks receipts;
   an unchanged script-set hash and catalog generation skip reconciliation in constant time.

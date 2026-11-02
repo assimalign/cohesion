@@ -37,6 +37,14 @@ internal sealed class BlobGuardedStream : Stream
         if (inner.CanWrite) { operation.MarkUpload(); }
     }
 
+    // Protocol validation can fail without a stream write failing. End this exact operation
+    // before disposal can publish buffered content.
+    internal ValueTask AbortAsync(Exception cause)
+    {
+        _readFailed = _inner.CanRead;
+        return _operation.AbortAsync(cause);
+    }
+
     public override bool CanRead => !_disposed && _inner.CanRead;
     public override bool CanSeek => false;
     public override bool CanWrite => !_disposed && _inner.CanWrite;

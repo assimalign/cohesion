@@ -137,8 +137,10 @@ public sealed partial class SqlCreateTableAsTests
 
         // Assert
         database.Catalog.TryGetTable("dbo", "bad", out _).ShouldBeFalse();
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
         await ReclaimAsync(database, timeout.Token);
+        // Discovery briefly owns a snapshot pin. A leaked builder prevents this
+        // recorded reclamation drain, so assert transaction cleanup after it.
+        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
         database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
         await ExecAsync(session, "CREATE TABLE bad AS SELECT id FROM src", timeout.Token);
     }
@@ -195,8 +197,8 @@ public sealed partial class SqlCreateTableAsTests
         owner.ShouldBeGreaterThan(0UL);
         session.LastStatementMetrics.ShouldNotBeNull().HashMemoryBytes.ShouldBe(0);
         database.Catalog.TryGetTable("dbo", "copy", out _).ShouldBeFalse();
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
         await ReclaimAsync(database, timeout.Token);
+        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
         database.DataStorage.HasOwnerPages(owner).ShouldBeFalse();
         await ExecAsync(session, "CREATE TABLE copy AS SELECT id FROM src", timeout.Token);
         (await RowsAsync(session, "SELECT * FROM copy", timeout.Token)).Count.ShouldBe(65);

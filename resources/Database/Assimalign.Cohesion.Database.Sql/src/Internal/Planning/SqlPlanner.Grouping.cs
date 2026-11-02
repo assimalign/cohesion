@@ -315,6 +315,7 @@ internal sealed partial class SqlPlanner
                 && (a.TargetTypeInfo is not null || SqlTypeRules.SameTypeName(a.TargetType, b.TargetType)),
             (SqlDistinctExpression a, SqlDistinctExpression b) => a.IsNegated == b.IsNegated,
             (SqlBooleanTestExpression a, SqlBooleanTestExpression b) => a.IsNegated == b.IsNegated && a.TruthValue == b.TruthValue,
+            (SqlJsonFunctionExpression a, SqlJsonFunctionExpression b) => SqlPersistedExpression.SameJsonFunction(a, b),
             (SqlIsJsonExpression a, SqlIsJsonExpression b) => a.IsNegated == b.IsNegated && a.Kind == b.Kind,
             (SqlIsNullExpression a, SqlIsNullExpression b) => a.IsNegated == b.IsNegated,
             (SqlBetweenExpression a, SqlBetweenExpression b) => a.IsNegated == b.IsNegated,
@@ -391,6 +392,7 @@ internal sealed partial class SqlPlanner
         SqlSubqueryExpression or SqlExistsExpression or SqlQuantifiedComparisonExpression or SqlInExpression { Subquery: not null }
             when _subqueryTypes.TryGetValue(expression, out var subqueryType) => subqueryType,
         SqlCollateExpression collate => GroupExpressionType(collate.Operand, columns, evaluator),
+        SqlJsonFunctionExpression json => evaluator.JsonReturning(json).Storage.Type,
         SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? ResolveCastTarget(cast, _functions.Types).Storage.Type,
         SqlParameterExpression parameter => GroupValueType(evaluator.Evaluate(parameter, [])),
         SqlLiteralExpression literal => literal.LiteralType switch

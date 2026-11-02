@@ -1014,6 +1014,8 @@ public sealed partial class SqlQueryParser
     {
         if (!quoted || name == name.ToLowerInvariant())
         {
+            if (!quoted && (name.Equals("JSON_VALUE", StringComparison.OrdinalIgnoreCase) || name.Equals("JSON_QUERY", StringComparison.OrdinalIgnoreCase) || name.Equals("JSON_EXISTS", StringComparison.OrdinalIgnoreCase)))
+            { return ParseJsonFunction(ref lexer, name.ToUpperInvariant(), pos); }
             if (SqlUnsupportedVocabulary.IsNiladicFunction(name)) { return ParseNiladic(ref lexer, name, pos); }
             if (name.ToUpperInvariant() is "SUBSTRING" or "TRIM" or "POSITION" or "EXTRACT")
             {

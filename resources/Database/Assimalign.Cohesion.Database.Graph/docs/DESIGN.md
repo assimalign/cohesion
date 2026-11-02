@@ -37,6 +37,13 @@ in-process, typed AST, InMemory and TCP behavior, including continued authentica
 | --- | --- | --- |
 | CG01023 | Warning | Statically named entity property is unknown database-wide in a read-only statement |
 
+The shared eleven-stage schedule includes four late index/memory adapter failures after real
+undo brackets have committed. Each requires a separate physical-progress observation before
+adapter failure, followed by exact target, outer and root recovery. The Transactions design
+records the covered cells and transport-specific exclusions. Matched MERGE conformance runs
+in-process and on both transports, requires memory-ledger growth and its removal by undo, and
+checks an unchanged journal plus zero physical brackets and durability waits.
+
 ## Named savepoint integration (#1726, XT-4)
 
 The GQL session dispatches SAVEPOINT name, RELEASE [SAVEPOINT] name and ROLLBACK TO
@@ -67,6 +74,13 @@ model's ordinary statement policy.
 
 The central advertised-clause execution matrix also proves each savepoint AST command and
 its row visibility/effects through a live session; the unmapped-clause guard remains intact.
+
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real Graph mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
 
 ## Anonymous savepoint adapters (#1726, XT-3)
 

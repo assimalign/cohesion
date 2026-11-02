@@ -89,12 +89,20 @@ public sealed class BlobContainer
     /// </exception>
     /// <exception cref="DatabaseOfflineException">The database is offline (<c>CB06002</c>, #1243).</exception>
     /// <exception cref="DatabaseTransactionAbortedException">The blob catalog changed since the transaction's snapshot (retryable).</exception>
-    public async ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions? options = null, CancellationToken cancellationToken = default)
+    public ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions? options = null, CancellationToken cancellationToken = default)
+        => OpenWriteCoreAsync(name, options, null, cancellationToken);
+
+    internal ValueTask<Stream> OpenWriteAsync(string name, BlobWriteOptions options,
+        BlobDatabaseTransaction expectedTransaction, CancellationToken cancellationToken)
+        => OpenWriteCoreAsync(name, options, expectedTransaction, cancellationToken);
+
+    private async ValueTask<Stream> OpenWriteCoreAsync(string name, BlobWriteOptions? options,
+        BlobDatabaseTransaction? expectedTransaction, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         bool overwrite = options?.Overwrite ?? true;
         string? contentType = options?.ContentType;
-        var operation = await _database.BeginOperationAsync(_session, cancellationToken).ConfigureAwait(false);
+        var operation = await _database.BeginOperationAsync(_session, cancellationToken, expectedTransaction).ConfigureAwait(false);
         try
         {
             await _database.LockWriterAsync(operation.Context, cancellationToken).ConfigureAwait(false);
@@ -162,10 +170,7 @@ public sealed class BlobContainer
         var operation = await _database.BeginOperationAsync(_session, cancellationToken).ConfigureAwait(false);
         try
         {
-            EnsureContainer(operation.Context);
-            var entry = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot)
-                ?? throw DatabaseException.CreateBlobFailure("CB01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, name));
-            return new BlobGuardedStream(_database.DataStorage.OpenRead(BlobDatabase.Content(entry), operation.CompleteAsync), operation);
+            return OpenReadCore(name, operation, out _);
         }
         catch (Exception error)
         {
@@ -174,6 +179,36 @@ public sealed class BlobContainer
             if (ReferenceEquals(reported, error)) { throw; }
             throw reported;
         }
+    }
+
+    // Wire metadata and content share one catalog record and operation snapshot, including
+    // a host READ COMMITTED transaction whose successive operations refresh their snapshots.
+    internal async ValueTask<(Stream Content, BlobProperties Properties)> OpenReadWithPropertiesAsync(
+        string name, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        var operation = await _database.BeginOperationAsync(_session, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var content = OpenReadCore(name, operation, out var properties);
+            return (content, properties);
+        }
+        catch (Exception error)
+        {
+            var reported = _database.TranslateFailure(error);
+            await operation.AbortAsync(reported).ConfigureAwait(false);
+            if (ReferenceEquals(reported, error)) { throw; }
+            throw reported;
+        }
+    }
+
+    private Stream OpenReadCore(string name, BlobOperation operation, out BlobProperties properties)
+    {
+        EnsureContainer(operation.Context);
+        var entry = _database.Catalog.FindBlob(_container.Id, name, operation.Context.Snapshot)
+            ?? throw DatabaseException.CreateBlobFailure("CB01002", string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.BlobContainerOpenReadAsyncDatabase, name));
+        properties = BlobDatabase.Properties(entry);
+        return new BlobGuardedStream(_database.DataStorage.OpenRead(BlobDatabase.Content(entry), operation.CompleteAsync), operation);
     }
 
     /// <summary>

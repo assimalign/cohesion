@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Database.Sql.Internal;
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("SqlJoinPlan")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Sql.Internal.SqlJoinPlan.DebugView))]
-internal sealed record SqlJoinPlan(
+internal record SqlJoinPlan(
     IReadOnlyList<SqlRelationBinding> Bindings,
     IReadOnlyList<SqlCatalogColumn> Columns,
     IReadOnlyList<SqlJoinStep> Steps,

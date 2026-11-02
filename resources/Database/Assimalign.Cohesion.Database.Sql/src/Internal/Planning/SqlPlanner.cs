@@ -44,6 +44,7 @@ internal sealed partial class SqlPlanner
     // wraps that cache with usage metadata, so adding the SQL surface costs no ordinary bytes.
     private object? _scopelessState;
     private bool _containsLike;
+    private bool _containsJsonPath;
 
     private SqlExpressionEvaluator? CachedScopelessEvaluator
     {
@@ -128,6 +129,7 @@ internal sealed partial class SqlPlanner
             var plan = PlanCore(expression);
             plan.ContainsRecursion = _commonTableState?.HasRecursion == true;
             plan.ContainsLike = _containsLike;
+            plan.ContainsJsonPath = _containsJsonPath;
             if (SequenceUsage is { } usage)
             { usage.Evaluator = null; plan = new SqlSequenceScopePlan(plan, usage) { ContainsLike = _containsLike }; }
             return plan;
@@ -1906,6 +1908,7 @@ internal sealed partial class SqlPlanner
             SqlCastExpression cast => cast.TargetTypeInfo?.Type ?? evaluator.TryResolveCastTarget(cast)?.Storage.Type,
             SqlUnaryExpression { Operator: SqlUnaryOperator.Not } => DatabaseType.Boolean,
             SqlLogicalExpression => DatabaseType.Boolean,
+            SqlJsonFunctionExpression jsonFunction => evaluator.JsonReturning(jsonFunction).Storage.Type,
             SqlBinaryExpression json when SqlJsonAccess.IsOperator(json.Operator) => evaluator.StaticTypeOf(json),
             SqlBinaryExpression { Operator: SqlBinaryOperator.Concat } => DatabaseType.String,
             SqlBinaryExpression bitwise when SqlBitwise.IsBinary(bitwise.Operator) => evaluator.StaticTypeOf(bitwise),
@@ -2055,6 +2058,7 @@ internal sealed partial class SqlPlanner
     /// </remarks>
     internal static IEnumerable<SqlExpression> Children(SqlExpression expression) => expression switch
     {
+        SqlJsonFunctionExpression json => json.GetOperands(),
         SqlWindowExpression window => WindowChildren(window),
         SqlGroupingSetExpression grouping => grouping.Items,
         SqlLogicalExpression logical => logical.Operands,

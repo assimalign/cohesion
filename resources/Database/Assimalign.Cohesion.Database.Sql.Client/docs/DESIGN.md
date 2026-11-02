@@ -1,5 +1,30 @@
 # Database.Sql.Client — Design
 
+## Exact join-order search over the existing exchange (#1629, SQ-Z1)
+
+InMemory and TCP return stable written-column results after cost-based join reassociation.
+EXPLAIN carries chosen_order, reordered, exact_dp/bound and search work counts in existing
+plan detail columns. No client API, capability, frame or protocol version changes are required.
+
+## Savepoint lifecycle conformance (#1726, XT-5)
+
+Explicit wire lifecycle probes require canceled-before-dispatch controls to take no kernel admission;
+the shared client breaks the canceled exchange, and lease return must scrub all scopes. They also require
+offline storage to outrank CK04009 with a complete Ready E exchange, and session/database close to
+drain a physically admitted control on both transports.
+
+The shared failure schedule now checks index erase/clear, memory before/after restoration and
+three physical undo brackets on both transports. A failed undo returns CK04009 and Ready E;
+retry or whole rollback is followed by exact committed rows. A fenced pool return clears the
+same authenticated session's names and effects. Progress-counted, non-parallel stress returns
+or drops/cancels a connection inside an admitted undo and verifies root rollback, pool-slot release
+and exact next-lease contents. Failed unknown-name controls retain the ordinary model policy.
+
+Wire conformance also checks outer recovery at every stage, every fenced command family,
+corruption during undo, and disposed/offline precedence. Ready checks require the exact expected
+letter; teardown stress keeps undo blocked until the server lifetime cancellation is recorded.
+Pool reset fails before memory restoration and must invoke restoration again before re-leasing.
+
 ## Named savepoint wire conformance (#1726, XT-4)
 
 The existing Execute exchange carries SAVEPOINT, RELEASE and ROLLBACK TO; no capability,
@@ -76,6 +101,13 @@ and 200 idle and graceful-stop notices surfaced by the next concrete-client oper
 An in-memory regression returns an authenticated rental to its pool and leaves the client open
 and unread throughout soft stop or idle eviction. Server completion must precede outer-budget
 abort, and idle eviction must release the sole session slot for a fresh client after linger.
+
+## SQL/JSON path wire conformance (#1722, SQ-N2)
+
+InMemory and TCP carry parameterized paths, INTEGER values, JSONB wrapper bytes,
+Boolean existence and SQL NULL/default results. Structured path, context, cardinality,
+empty and structural refusals leave the connection usable. No client API or wire format
+change is required.
 
 ## JSON access wire conformance (#1722, SQ-N1)
 
@@ -529,12 +561,34 @@ failure (empty kind and code) and a stop written only after a written start. The
 observers override the hooks as `protected internal`, which the project's test-only
 `InternalsVisibleTo` requires (CS0507); an application overrides them as `protected`.
 
+## COPY stream consumer (#1724)
+
+SqlConnection.CopyToAsync copies a negotiated table export to a caller-owned Stream and returns
+the verified data-row count. The API accepts a destination, so DatabaseProtocolExchange owns
+one admitted transfer and hands it bounded frames directly, without an independent download
+queue. Each frame is acknowledged only after destination delivery, bounding the server's
+one-frame window even on transports without backpressure. The producer fills its 16 KiB buffer
+across rows, so frame and acknowledgment counts grow with bytes. It checks opening metadata, chunk
+lengths/order, diagnostics placement and terminal byte
+counts, then the existing core drains Ready. A statement Error marks the response complete for Ready
+draining. Before CopyStart it preserves connection and transaction; a late Error keeps its
+diagnostic and partial output but discards the incomplete transfer, avoiding a pending delivery
+acknowledgment after a server timeout. Cancellation,
+malformed/incomplete responses and destination failures abort and join the rental. An internal
+delivery wrapper preserves the original destination exception outside transport-I/O translation;
+the caller receives that original exception after teardown. The destination stays open and must
+honor cancellation and avoid reentering the same connection from its write callbacks. Destination
+exceptions retain their original type and instance, including exceptions other than IOException. Missing
+capability is CS05096 before any new frame, preserving older peers. Existing command events and
+observer hooks cover COPY. There is no new public interface, reflection, generic virtual member,
+SQL parsing dependency, or shared-client boundary expansion.
+
 ## AOT and non-goals
 
 Encoding and materialization are hand-written, with no reflection or code
 generation. Transports are typed options, never string-named plugins. Full result
-materialization is SQL client policy; an incremental API can be added here
-independently. Parsing, ORM behavior, retries, and explicit wire transactions
+materialization is ordinary SQL client policy; COPY has its own incremental API.
+Parsing, ORM behavior and retries
 remain outside the current surface.
 
 ## Concrete types (concrete-types plan, phase 5, #1261)

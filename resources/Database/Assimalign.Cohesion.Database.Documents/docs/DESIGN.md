@@ -31,6 +31,19 @@ model's ordinary statement policy.
 The central advertised-clause execution matrix also proves each savepoint AST command and
 its row visibility/effects through a live session; the unmapped-clause guard remains intact.
 
+The shared eleven-stage schedule includes four late index/memory adapter failures after real
+undo brackets have committed. Each requires a separate physical-progress observation before
+adapter failure, followed by exact target, outer and root recovery. The Transactions design
+records the covered cells and transport-specific exclusions.
+
+## Savepoint conformance (#1726, XT-5)
+
+SavepointMatrixTests applies the shared undo-failure schedule to real Documents mutations,
+checks retry/outer/root recovery and exact committed contents, and reopens live crash images
+captured during undo before source cleanup. The Transactions design records the complete
+cross-model matrix and the existing reader, lock, cancellation and lifecycle suites.
+Stream saturation also proves CK04011, CK04010 and complete registration drain.
+
 ## Anonymous savepoint adapters (#1726, XT-3)
 
 Catalog publication retains earlier same-writer metadata while that writer has markers.

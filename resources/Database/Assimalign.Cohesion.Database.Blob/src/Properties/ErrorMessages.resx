@@ -90,4 +90,6 @@
   <data name="DatabaseNotFound" xml:space="preserve"><value>The server's engine has no database named '{0}'.</value></data>
   <data name="AuthenticationResponseExpected" xml:space="preserve"><value>Expected an authenticate response but received {0}.</value></data>
   <data name="AuthenticationFailed" xml:space="preserve"><value>Authentication failed for principal '{0}'.</value></data>
+  <data name="DownloadLengthInvalid" xml:space="preserve"><value>The Blob content length does not match its metadata.</value></data>
+  <data name="DownloadAcknowledgementInvalid" xml:space="preserve"><value>The Blob chunk acknowledgement is invalid.</value></data>
 </root>

@@ -17,6 +17,9 @@ public class SqlLanguageProfileTests
 {
     [Theory]
     [InlineData(SqlClauses.Select, "SELECT 1;")]
+    [InlineData(SqlClauses.JsonValue, "SELECT JSON_VALUE(doc,'$.a' RETURNING INT) FROM t;")]
+    [InlineData(SqlClauses.JsonQuery, "SELECT JSON_QUERY(doc,'$[*]' WITH WRAPPER) FROM t;")]
+    [InlineData(SqlClauses.JsonExists, "SELECT JSON_EXISTS(doc,'$.a') FROM t;")]
     [InlineData(SqlClauses.SetOperation, "SELECT a FROM t UNION SELECT a FROM u;")]
     [InlineData(SqlClauses.Intersect, "SELECT a FROM t INTERSECT SELECT a FROM u;")]
     [InlineData(SqlClauses.Except, "SELECT a FROM t EXCEPT SELECT a FROM u;")]
@@ -46,6 +49,7 @@ public class SqlLanguageProfileTests
     [InlineData(SqlClauses.AlterTable, "ALTER TABLE t ADD COLUMN name TEXT;")]
     [InlineData(SqlClauses.DropTable, "DROP TABLE t;")]
     [InlineData(SqlClauses.Truncate, "TRUNCATE TABLE ONLY t RESTART IDENTITY CASCADE;")]
+    [InlineData(SqlClauses.CopyTo, "COPY t TO STDOUT WITH (FORMAT csv, HEADER);")]
     [InlineData(SqlClauses.CreateView, "CREATE VIEW v AS SELECT a FROM t;")]
     [InlineData(SqlClauses.DropView, "DROP VIEW v;")]
     [InlineData(SqlClauses.DropIndex, "DROP INDEX ix_t_id ON t;")]

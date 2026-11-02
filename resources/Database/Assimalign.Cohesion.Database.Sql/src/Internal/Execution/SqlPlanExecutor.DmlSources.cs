@@ -214,7 +214,7 @@ internal sealed partial class SqlPlanExecutor
             cancellationToken.ThrowIfCancellationRequested();
             await PrepareSubqueriesAsync(plan.Where, row, statement, cancellationToken).ConfigureAwait(false);
             if (!evaluator.Matches(plan.Where, row)) { continue; }
-            var identity = identities[(object?[])row[^1]!];
+            var identity = identities[(object?[])(plan.Tree is null ? row[^1] : row[^2])!];
             ulong key = SqlRecordLocation.Pack(identity.PageId, identity.SlotIndex);
             if (result.ContainsKey(key))
             {

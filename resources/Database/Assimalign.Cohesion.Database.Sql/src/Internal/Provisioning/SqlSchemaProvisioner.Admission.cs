@@ -98,6 +98,9 @@ internal sealed partial class SqlSchemaProvisioner
         }
         switch (query)
         {
+            case SqlCopyToExpression copy:
+                yield return copy.Table;
+                break;
             case SqlExplainExpression explain:
                 foreach (var table in References(explain.Statement))
                 {

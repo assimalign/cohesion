@@ -379,6 +379,7 @@ public static partial class SqlExpressionRenderer
         SqlDistinctExpression distinct => Operand(distinct.Left, concatLevel) +
             (distinct.IsNegated ? " IS NOT DISTINCT FROM " : " IS DISTINCT FROM ") + Operand(distinct.Right, comparisonLevel),
         SqlBooleanTestExpression test => Operand(test.Operand, concatLevel) + (test.IsNegated ? " IS NOT " : " IS ") + test.TruthValue.ToString().ToUpperInvariant(),
+        SqlJsonFunctionExpression json => JsonFunction(json),
         SqlIsJsonExpression json => Operand(json.Operand, concatLevel) + (json.IsNegated ? " IS NOT JSON " : " IS JSON ") + json.Kind.ToString().ToUpperInvariant(),
         SqlIsNullExpression isNull => Operand(isNull.Operand, concatLevel) + (isNull.IsNegated ? " IS NOT NULL" : " IS NULL"),
         SqlBetweenExpression between => Operand(between.Operand, concatLevel) + (between.IsNegated ? " NOT BETWEEN " : " BETWEEN ") +
@@ -887,6 +888,7 @@ public static partial class SqlExpressionRenderer
     private static string FunctionName(string name)
     {
         bool bare = IsRegularIdentifier(name) && !name.Equals("CAST", StringComparison.OrdinalIgnoreCase) &&
+            !name.Equals("JSON_VALUE", StringComparison.OrdinalIgnoreCase) && !name.Equals("JSON_QUERY", StringComparison.OrdinalIgnoreCase) && !name.Equals("JSON_EXISTS", StringComparison.OrdinalIgnoreCase) &&
             !Contains(_windowFunctions, name) &&
             (Contains(SqlLanguageProfile.Instance.Functions, name) || !IsReservedWord(name));
         return bare ? name : "\"" + name.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";

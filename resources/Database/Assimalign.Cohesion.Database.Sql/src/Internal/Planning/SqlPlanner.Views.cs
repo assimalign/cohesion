@@ -186,6 +186,8 @@ internal sealed partial class SqlPlanner
         if (outputs?.ContainsKey(expression) == true) { return; } // Output dependencies were captured at projection binding.
         if (expression is SqlCastExpression cast && SqlDefinitionBinder.ResolveType(cast.TargetType, _functions, cast.Location) is { IsDomain: true } domain)
         { ViewDefinitionBinding!.Dependencies.Add(SqlDefinitionBinder.DomainKey(domain.Name)); }
+        if (expression is SqlJsonFunctionExpression json && scope.JsonReturning(json) is { IsDomain: true } jsonDomain)
+        { ViewDefinitionBinding!.Dependencies.Add(SqlDefinitionBinder.DomainKey(jsonDomain.Name)); }
         if (expression is SqlColumnReferenceExpression reference)
         {
             int ordinal = scope.ResolveColumn(reference);
