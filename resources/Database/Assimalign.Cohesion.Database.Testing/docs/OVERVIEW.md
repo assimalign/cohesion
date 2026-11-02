@@ -4,8 +4,8 @@
 
 `Assimalign.Cohesion.Database.Testing` runs a Database program's real entry
 point in the test process. The retired resource integration was removed on 2026-10-31 with the
-application-model restart (assimalign/cohesion#1759), and the area's resource integration returns
-as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
+application-model restart (assimalign/cohesion#1759), and the area's resource integration is
+`Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
 
 ## Public surface
 
@@ -87,7 +87,7 @@ The test launches that process, awaits READY after application startup, complete
 and Ping/Pong with each model family, then sends STOP and requires a clean exit. This uses the
 existing generic DatabaseClient exchange seam without adding a public Ping member. The 90-second
 operation and independent 30-second cleanup budgets are hang guards, not timing assertions.
-The fixture disables ApplicationModel/schema generation; the existing SampleHost retains SQL
+The fixture runs unmanaged without AddResource and leaves schema compilation off; SampleHost retains SQL
 schema compilation. Both use the fresh local feed from
 `scripts/Install-Local.ps1` before the explicit Database.Testing test project is built.
 

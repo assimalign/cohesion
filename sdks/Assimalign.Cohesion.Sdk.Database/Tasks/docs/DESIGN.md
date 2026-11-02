@@ -104,16 +104,10 @@ expression renderer, avoiding a second literal grammar; it does not pull the SQL
 carrier check explicitly requires `SqlTableReference`; a derived relation cannot
 be substituted for the fixed carrier. No reference or schema-artifact format changes.
 
-## Orchestration commands
+## Managed resources
 
-When `CohesionApplicationModel=enabled`, the `Assimalign.Cohesion.Sdk.ApplicationModel`
-manifest task writes this SDK's `CohesionCommand` defaults, `database.add-database` and
-`database.add-principal`, as bare strings in `commands`; neither sets `RequiresInputResolver`,
-the metadata that switches an entry to the object form. These advertise the Database
-default control plane's bounded command set. Typed declarations ship in
-Database.ApplicationModel, and the gateway delivers them through its generic
-`ResourceControlPlaneCommandClient`; the SDK never executes them or places payloads in
-the manifest. The schema compiler and migration path remain independent.
+The SDK emits no resource manifest, and a Database application becomes a managed resource with
+`builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel`.
 
 ## Model selection
 
@@ -386,7 +380,7 @@ and COHDBSDK206 reporting boundary. Assembly-local Defaults/Types bindings live 
 and retain the linked owning namespaces. Private fixture constants use repository casing;
 compiler identifiers, generated artifact contents, schema format and extraction behavior are unchanged.
 
-MSBuild item declarations use one item type per group while retaining their original order and conditions. Resource commands, endpoint/probe/mount defaults, schema artifact ownership and FileWrites registration are unchanged. Compiler preview settings come from the shared build; the task and test projects retain their explicit AOT contract.
+MSBuild item declarations use one item type per group while retaining their original order and conditions. Sdk.Database.props carries task wiring and CohesionDatabase properties only; retired orchestration properties and endpoint/probe/mount defaults are removed (#1785). Schema artifact ownership and FileWrites registration are unchanged. Compiler preview settings come from the shared build; the task and test projects retain their explicit AOT contract.
 
 ## Error message producers and catalog carriers
 

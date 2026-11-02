@@ -9,6 +9,41 @@ on:
       - 'resources/Database/**'
       - '!resources/Database/**/*.slnx'
       - '!resources/Database/**/*.md'
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
+      # change to the application model reruns the area.
+      - 'libraries/ApplicationModel/**'
+      # The E2E job packs the SDK chain the SampleHost builds on (base and Database SDKs) through
+      # Install-Local.ps1 and the packaging module beside it, and derives the SampleHost's SDK pins
+      # from the root global.json (listed below); a change to any of them must re-run it.
+      - 'sdks/Assimalign.Cohesion.Sdk/**'
+      - 'sdks/Assimalign.Cohesion.Sdk.Database/**'
+      - 'scripts/**'
+      # The framework-closure job reads App.Database's member list against the project graph.
+      - 'libraries/App/Assimalign.Cohesion.App.Runtime/tests/**'
+      - '.github/workflows/resource-database.yml'        # When Pipeline File Changes
+      # Shared build infrastructure that every project in this workflow compiles with.
+      - '.github/actions/build/**'
+      - 'global.json'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'resources/Directory.Build.props'
+      - 'resources/Directory.Build.targets'
+      - 'build/Build.props'
+      - 'build/Build.targets'
+      - 'build/Targets/**'
+      - 'build/Tasks/**'
+  pull_request:
+    paths:
+      # Covers Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost, the area's
+      # acceptance fixture, and the engine/wire streaming fixtures under Blob and Blob.Client.
+      # Fixtures sit inside the projects whose tests drive them.
+      # Includes the five model Protocol src/tests/shared trees and the client-only AOT canary.
+      - 'resources/Database/**'
+      - '!resources/Database/**/*.slnx'
+      - '!resources/Database/**/*.md'
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
+      # change to the application model reruns the area.
+      - 'libraries/ApplicationModel/**'
       # The E2E job packs the SDK chain the SampleHost builds on (base and Database SDKs) through
       # Install-Local.ps1 and the packaging module beside it, and derives the SampleHost's SDK pins
       # from the root global.json (listed below); a change to any of them must re-run it.
@@ -85,6 +120,7 @@ jobs:
             'Assimalign.Cohesion.Database.Graph.Language',
             'Assimalign.Cohesion.Database.Graph.Protocol',
             'Assimalign.Cohesion.Database.Hosting',
+            'Assimalign.Cohesion.Database.Hosting.ApplicationModel',
             'Assimalign.Cohesion.Database.Indexing',
             'Assimalign.Cohesion.Database.KeyValuePair',
             'Assimalign.Cohesion.Database.KeyValuePair.Client',

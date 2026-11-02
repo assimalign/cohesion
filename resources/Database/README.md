@@ -2,6 +2,13 @@
 
 The multi-model OLTP database engine family for Cohesion: five independent database engines — **SQL**, **Documents**, **Graph**, **Blob**, and **KeyValuePair** — sharing one durable kernel (storage, write-ahead logging, transactions, indexing). A hosted database is an ordinary customer-owned `Sdk.Database` executable whose `Program.cs` composes its engines, code-first schema, servers, and provisioning. See [DESIGN.md](../../docs/resources/Database/DESIGN.md) for the architecture, requirements, and decision log; sequencing lives in [docs/programs/DATABASE_PROGRAM_PLAN.md](../../docs/programs/DATABASE_PROGRAM_PLAN.md).
 
+A Database application becomes a managed resource instance with
+[Assimalign.Cohesion.Database.Hosting.ApplicationModel](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/OVERVIEW.md):
+`builder.Services.AddResource("orders-db", resource => resource.UseInProcess())` joins the gateway
+through the selected platform, publishes the instance and restores added actions before servers
+start. The [integration design](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md)
+records lifecycle details and the remaining endpoint/readiness gaps.
+
 ## Storage corruption diagnostics (#1160)
 
 `DatabaseCorruptionException` with `CK06003` is the area-wide signal for damaged storage,
@@ -54,6 +61,7 @@ flowchart LR
     P2["Database.Client"]
     P3["Database.Hosting — runtime module"]
     P4["Database.Testing"]
+    AM["Database.Hosting.ApplicationModel"]
     GRAPH["Database.Graph"]
     GRAPHCLI["Database.Graph.Client — NuGet-only"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
@@ -69,22 +77,27 @@ flowchart LR
     P3 -->|"private"| PRIV
     P4 --> P3
     P4 --> HOSTFAM
+    AM --> P3
+    AM --> P0
+    AM --> HOSTFAM
     P0 -.->|"COHRES001 ✗"| P3
 ```
 
 Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
-rejects: **no library in the area may reference its own `Database.Hosting` runtime
-module**. The area root and its feature
+rejects: **the area root and feature libraries may not reference `Database.Hosting`**.
+`Database.Hosting.ApplicationModel` references the runtime by COHRES001's exact-name sanction.
+The area root and its feature
 libraries likewise reference no `Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
 
-`Database.Testing → Database.Hosting` is the one solid edge that crosses that line, and it is the
-area's **single sanctioned exemption**: the test factory drives the concrete runtime, which cannot
+`Database.Testing → Database.Hosting` uses the area's **single sanctioned exemption**:
+the test factory drives the concrete runtime, which cannot
 be done through abstractions alone, so the project declares
 `CohesionHostingIsolationExemptions` in its own csproj. Nothing else in the area may, and a second
-holder needs the deviation protocol in `.claude/rules/deviations.md`.
+holder needs the deviation protocol in `.claude/rules/deviations.md`. The application-model
+integration needs no exemption property.
 
 The diagram is the area's **spine** — the root, the runtime module, the hosting-family
-integrations, the declarative plane, and the client and test packages. The area has more
+integrations, and the client and test packages. The area has more
 projects than one readable diagram holds; the table below and `docs/DEPENDENCIES.md` carry
 them all.
 
@@ -172,7 +185,8 @@ Each implemented remote client references its model Protocol and shared Client/P
 | `Assimalign.Cohesion.Database.Protocol` | Child root — framing, handshake, lifecycle, errors, version negotiation, and immutable model-family binding |
 | `Assimalign.Cohesion.Database.Client` | Shared client core: connection settings, pooling, handshake, framing, and model-exchange lifetime; model clients materialize results |
 | `Assimalign.Cohesion.Database.Security` | Child root — the authentication contract (`DatabaseAuthenticator`, an abstract base the application implements, and its `AllowAll`) |
-| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's only DI seam; implements `DatabaseApplication.CreateBuilder(args)`. Every model engine opens or creates the databases its builder declares (a SQL engine also provisions their schemas) inside application Build, so they exist before any server accepts. The internal admin service privately hosts `Web.Hosting` + `Web.Health` for health, readiness, and liveness. The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`. |
+| `Assimalign.Cohesion.Database.Hosting` | Host composition (`Host<TContext>`), the area's runtime DI seam; implements `DatabaseApplication.CreateBuilder(args)`. Engine Build opens and provisions declared databases before servers accept. AddService and container lifecycle services start before the reopen service and servers; servers drain first. The internal admin service privately hosts Web health routes. |
+| `Assimalign.Cohesion.Database.Hosting.ApplicationModel` | [Managed-resource integration](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/OVERVIEW.md): AddResource on Services, provider Database, application-added actions, platform-selected publication/restore and control plane; [design](Assimalign.Cohesion.Database.Hosting.ApplicationModel/docs/DESIGN.md). Public App.Database member. |
 | `Assimalign.Cohesion.Database.Testing` | The area's sole hosting-isolation exemption holder; `DatabaseApplicationTestFactory.FromProgram<Program>()` runs the resource's real entry point |
 | `resources/Database/Assimalign.Cohesion.Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost` | Non-packable `Sdk.Database` executable with build-time schema compilation; composes a SQL table/index schema and the TCP server in `Program.cs` and provisions that compiled schema before accept |
 | `Assimalign.Cohesion.Database.Embedded` | In-process consumption facade — how other platform resources embed their data layer |
@@ -184,7 +198,7 @@ Each implemented remote client references its model Protocol and shared Client/P
   menu exposed by the concrete `DatabaseApplicationBuilder.AddService` verb in
   `Database.Hosting`. The Database root and feature libraries reference no hosting library (O34).
 - `libraries/Connections` — transport drivers for the per-model servers (`Database.Sql`'s `SqlDatabaseServer`, and every future model's server)
-- `libraries/ApplicationModel` — orchestration contracts (`Database.ApplicationModel` only)
+- `libraries/ApplicationModel` — managed-instance contracts through `Database.Hosting.ApplicationModel`; gateways declare Database resources generically
 - `resources/Web` — private implementation details: the root's existing Web dependency plus
   `Web.Hosting`/`Web.Health` in `Database.Hosting` for the `admin` control plane. The coordinated
   `CohesionPrivateProjectReference`/`CohesionFrameworkPrivateAssembly` path keeps that closure in

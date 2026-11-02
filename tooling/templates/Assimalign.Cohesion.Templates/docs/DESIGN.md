@@ -67,7 +67,8 @@ itself managed in its `Program.cs`, and only where that reads as part of the sca
 `Acme.Api` calls `builder.Services.AddResource("acme-api", resource => resource.UseInProcess())`
 and references `Assimalign.Cohesion.ApplicationModel.Hosting.InProcess`. The standalone resource
 templates are plain applications; their READMEs show the one call that makes them managed. The
-Database area has no integration yet, so the database programs say so and stay unmanaged.
+database programs stay unmanaged too; their READMEs show the same `builder.Services.AddResource(...)`
+call from `Database.Hosting.ApplicationModel` (#1785).
 
 ## Gateway composition and platforms
 

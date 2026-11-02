@@ -16,6 +16,7 @@ using Xunit;
 
 using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Sql;
+using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
@@ -32,6 +33,30 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 public sealed partial class DatabaseHostingEventSourceTests
 {
     private const string appValue = "app";
+
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - ApplicationBuilt: Should count AddService, container and reopen services but exclude servers")]
+    public async Task Build_WithAllLifecycleKinds_ShouldReportTheNonServerServiceCount()
+    {
+        // Arrange
+        using var recorder = new HostingEventRecorder(EventLevel.Informational);
+        var builder = DatabaseApplication.CreateBuilder();
+        builder.AddEngine("recording-engine", _ =>
+        {
+            var engine = new RecordingEngine();
+            engine.AddServer(owner => new RecordingServer([], engine: owner));
+            return engine;
+        });
+        builder.AddService(new RecordingService([]));
+        builder.Services.AddSingleton<IHostService>(_ => new RecordingService([]));
+
+        // Act
+        await using var application = builder.Build();
+
+        // Assert
+        Event(recorder, 7, "ApplicationBuilt", "hostId", "engines", "servers", "services")
+            .Payload.ShouldBe([application.Context.HostId.ToString(), 1, 1, 3]);
+        application.Context.HostedServices.Count().ShouldBe(4);
+    }
 
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Lifecycle: Should report build start and stop once for a real application")]
     public async Task Application_StartedAndStopped_ShouldReportEachTransitionOnce()

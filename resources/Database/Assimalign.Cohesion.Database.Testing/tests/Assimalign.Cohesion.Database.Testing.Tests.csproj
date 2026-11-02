@@ -9,8 +9,8 @@
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Testing" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.Testing.TestHost" />
-		<!-- Build the SDK consumer and its generated manifest/apphost without making its
-		     Program or runtime closure a compile-time dependency of this test assembly. -->
+		<!-- Build the SDK consumers without making their Program or runtime closure a
+		     compile-time dependency of this test assembly. -->
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.SampleHost" ReferenceOutputAssembly="false" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.TcpSdkHost" ReferenceOutputAssembly="false" />
 		<CohesionProjectReference Include="Assimalign.Cohesion.Database.KeyValuePair.Protocol" />
