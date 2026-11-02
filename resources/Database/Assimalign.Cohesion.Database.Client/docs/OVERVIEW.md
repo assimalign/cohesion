@@ -59,14 +59,14 @@ var result = await connection.ExecuteAsync(
     new Dictionary<string, object?> { ["id"] = 42 });
 ```
 
-Generated and ambient endpoints stay typed:
+Read the Database wire address from configuration and keep it typed:
 
 ```csharp
-Uri endpoint = Resource.Endpoints.Db;
+Uri endpoint = new Uri(configuration["Database:Endpoint"]!);
 DatabaseConnectionSettings settings = DatabaseConnectionSettings.For(
     endpoint,
     database: "app",
-    principal: Resource.Name);
+    principal: "orders-api");
 ```
 
 `For(Uri)` requires a Cohesion endpoint URI—an absolute, host-bearing value with a valid port and
@@ -75,24 +75,6 @@ endpoint without formatting and reparsing a string.
 
 See [DESIGN.md](DESIGN.md) for the pooling and settings decisions.
 
-
-## Declarative commands
-
-`DatabaseCommandClient.Create(Uri controlPlaneAddress, string bearerToken, HttpMessageInvoker transport)`
-accepts a caller-owned transport, including its TLS trust policy. Disposing the returned client
-does not dispose that transport; the caller retains it until requests finish and disposes it
-afterward. The two-argument factory still creates a transport owned and disposed by the client.
-Both overloads perform the same endpoint and credential validation; a null supplied transport
-throws `ArgumentNullException`. The client does not discover application trust.
-
-The sealed `DatabaseCommandClient` is the separate HTTP admin command client. `DatabaseCommandClient.Create`
-accepts the full manifest control-plane URI (including its path) and an opaque bootstrap bearer.
-SendCommandAsync posts the camel-case id/kind/owner/key/payload envelope to commands; payload is
-base64. DeleteCommandAsync sends DELETE to the same route and envelope. Both return package-local
-ResourceCommandObservation with Status and Detail, retaining actionable provider refusal text.
-Transport failures propagate; HTTP refusals become Rejected observations. Serialization uses explicit
-Utf8JsonWriter/JsonDocument access. The caller disposes the client; redirect following and cookies
-are disabled. No runtime Hosting or ApplicationModel dependency was added.
 
 Supply an `IDuplexConnectionFactory` through `DatabaseClientOptions.ConnectionFactory`; the shared pool owns the duplex connections it establishes.
 

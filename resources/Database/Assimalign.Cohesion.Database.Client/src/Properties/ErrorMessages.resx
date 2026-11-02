@@ -17,7 +17,6 @@
   <data name="DatabaseClientCreateArgument5" xml:space="preserve"><value>The pool size must be positive.</value></data>
   <data name="DatabaseClientCreateArgument6" xml:space="preserve"><value>A model message family is required.</value></data>
   <data name="ClientExecuteStreamingAsyncArgument" xml:space="preserve"><value>The exchange belongs to a different message family.</value></data>
-  <data name="ClientValidateArgumentsArgument" xml:space="preserve"><value>The database control-plane address must use HTTP or HTTPS.</value></data>
   <data name="DatabaseConnectionExecuteAsyncFailure" xml:space="preserve"><value>An exchange is already active on this connection.</value></data>
   <data name="ConnectionSettingsParseDatabaseClient" xml:space="preserve"><value>Malformed connection string segment '{0}'; expected key=value.</value></data>
   <data name="ConnectionSettingsParseDatabaseClient2" xml:space="preserve"><value>Invalid MaxPoolSize value '{0}'; expected a positive integer.</value></data>

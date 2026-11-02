@@ -56,8 +56,7 @@ public sealed class DatabaseConnectionSettings
     public const int DefaultPort = 5740;
 
     /// <summary>
-    /// Creates client settings for a resource endpoint supplied by the Cohesion
-    /// application model or ambient resource context.
+    /// Creates client settings for a Database wire endpoint supplied by application configuration.
     /// </summary>
     /// <param name="endpoint">The resolved endpoint URI.</param>
     /// <param name="database">The optional database to bind to.</param>
