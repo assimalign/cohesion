@@ -139,7 +139,7 @@ internal sealed partial class DocumentPlanner
             {
                 Visit(binding.Expression, binding is OqlJoinExpression ? "JOIN" : "UNNEST", source, outer, free,
                     keyNames: binding is OqlJoinExpression ? joinNames : null);
-                source[binding.Variable] = false;
+                source[binding.Variable] = binding is OqlJoinExpression { Alias: null };
             }
             Visit(select.Predicate, "WHERE", source, outer, free);
             foreach (var key in select.GroupBy) { Visit(key, "GROUP BY", source, outer, free); }
@@ -347,7 +347,7 @@ internal sealed partial class DocumentPlanner
         for (int index = 0; index < left.Bindings.Count; index++)
         {
             if (left.Bindings[index].Variable != right.Bindings[index].Variable || left.Bindings[index].IsLeft != right.Bindings[index].IsLeft) { return false; }
-            if (left.Bindings[index] is OqlJoinExpression a && (right.Bindings[index] is not OqlJoinExpression b || a.Collection != b.Collection || a.IsNest != b.IsNest) ||
+            if (left.Bindings[index] is OqlJoinExpression a && (right.Bindings[index] is not OqlJoinExpression b || a.Collection != b.Collection || a.Alias != b.Alias || a.IsNest != b.IsNest) ||
                 left.Bindings[index] is OqlUnnestExpression && right.Bindings[index] is not OqlUnnestExpression) { return false; }
             variables.Add(left.Bindings[index].Variable);
         }

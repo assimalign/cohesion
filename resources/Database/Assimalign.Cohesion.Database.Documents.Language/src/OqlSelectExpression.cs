@@ -14,7 +14,7 @@ public sealed class OqlSelectExpression : OqlExpression
 
     /// <summary>Initializes a query over a collection or expression source.</summary>
     /// <param name="collection">The unqualified collection name or reserved COHESION_SCHEMA system collection name; ignored when <paramref name="source"/> is supplied.</param>
-    /// <param name="alias">The explicit iteration variable; null uses the collection name, or the last segment of a system source.</param>
+    /// <param name="alias">The iteration variable, including an inferred expression-source name; null uses the collection name, or the last segment of a system source.</param>
     /// <param name="projections">The projected expressions.</param>
     /// <param name="predicate">The optional document filter.</param>
     /// <param name="groupBy">The grouping expressions.</param>
@@ -62,7 +62,7 @@ public sealed class OqlSelectExpression : OqlExpression
     public OqlExpression? Source => ((_from as Sources)?.From ?? _from) as OqlExpression;
     /// <summary>Gets all source bindings in their evaluation order.</summary>
     public IReadOnlyList<OqlSourceBindingExpression> Bindings => (_from as Sources)?.Bindings ?? Unnest;
-    /// <summary>Gets the explicit iteration variable, or null for the implicit collection binding.</summary>
+    /// <summary>Gets the iteration variable, including an inferred expression-source name, or null for the implicit collection binding.</summary>
     public string? Alias { get; }
     /// <summary>Gets the array bindings in expansion order.</summary>
     public IReadOnlyList<OqlUnnestExpression> Unnest { get; }

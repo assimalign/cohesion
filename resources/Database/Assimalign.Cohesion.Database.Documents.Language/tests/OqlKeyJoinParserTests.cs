@@ -83,6 +83,7 @@ public sealed class OqlKeyJoinParserTests
         var join = select.Bindings[1].ShouldBeOfType<OqlJoinExpression>();
         join.Collection.ShouldBe("docs");
         join.Variable.ShouldBe("b");
+        join.Alias.ShouldBe("b");
         join.IsLeft.ShouldBe(left);
         join.IsNest.ShouldBe(nest);
         join.Expression.ShouldBeOfType<OqlPathExpression>().Segments.Single().Name.ShouldBe("k");
@@ -105,6 +106,25 @@ public sealed class OqlKeyJoinParserTests
         var statement = new OqlQueryParser().Parse(text).ShouldBeOfType<OqlQueryStatement>();
         // Assert
         statement.Diagnostics.ShouldBeEmpty();
+    }
+
+    [Theory(DisplayName = "Cohesion Test [OQL] - Key joins: AST distinguishes explicit aliases from implicit names")]
+    [InlineData("JOIN", "", null, "docs")]
+    [InlineData("JOIN", " AS d", "d", "d")]
+    [InlineData("JOIN", " AS docs", "docs", "docs")]
+    [InlineData("NEST", "", null, "docs")]
+    [InlineData("NEST", " AS d", "d", "d")]
+    [InlineData("NEST", " AS docs", "docs", "docs")]
+    public void Parse_JoinAlias_ShouldPreserveExplicitDeclaration(string form, string written, string? alias, string variable)
+    {
+        // Arrange / Act
+        var statement = new OqlQueryParser().Parse("SELECT * FROM items " + form + " docs" + written + " ON META(" + variable + ").id = 'a'").ShouldBeOfType<OqlQueryStatement>();
+        // Assert
+        statement.Diagnostics.ShouldBeEmpty();
+        var join = statement.OqlExpression.ShouldBeOfType<OqlSelectExpression>().Bindings.Single().ShouldBeOfType<OqlJoinExpression>();
+        join.Alias.ShouldBe(alias);
+        join.Variable.ShouldBe(variable);
+        new OqlJoinExpression("docs", alias, join.Expression).Variable.ShouldBe(variable);
     }
 
     [Theory(DisplayName = "Cohesion Test [OQL] - Implicit aliases: duplicate collection and inferred names keep the binding diagnostic")]

@@ -618,7 +618,12 @@ OqlSourceBindingExpression is a closed abstract AST family with nonvirtual expre
 and preservation state. OqlUnnestExpression and OqlJoinExpression are sealed leaves. Bindings
 retains their evaluation order; Unnest remains the array-only view. SELECT's existing source slot
 holds an optional wrapper only for joined queries, preserving ordinary node size and allocations.
-The parser accepts only right-hand META(alias).id equality and keeps JOIN/NEST contextual.
+OqlJoinExpression.Alias retains the nullable explicit declaration; inherited Variable always
+contains the resolved explicit or implicit name. A null constructor variable selects the collection
+name. This provenance keeps an inner bare FROM a collection under an implicit outer JOIN/NEST
+name; only explicit aliases correlate, as for the initial FROM. No parser text reconstruction or
+engine-facing visibility grant is needed. The parser accepts only right-hand META(alias).id
+equality and keeps JOIN/NEST contextual.
 General forms, ON KEYS and UPDATE/DELETE source joins retain CK00001. Collections supply their
 implicit aliases when omitted; inferred UNNEST aliases are valid in joined statements too. Duplicate
 explicit or implicit names use CD00010 in text and CD01023 in direct ASTs. CD00016 stays retired

@@ -96,6 +96,8 @@ internal static class Program
         await connection.QueryAsync("INSERT INTO join_items (KEY, VALUE) VALUES ('a',{n:1}), ('b',{n:2})", cancellationToken: cancellationToken);
         var implicitJoin = await connection.QueryAsync("SELECT RAW b.n FROM join_items JOIN join_items AS b ON META(b).id = 'a'", cancellationToken: cancellationToken);
         Check(implicitJoin.Documents.Select(value => value.GetInt32()).SequenceEqual(new[] { 1, 1 }), "implicit key JOIN alias");
+        var implicitScope = await connection.QueryAsync("SELECT RAW (SELECT RAW i.n FROM join_items i ORDER BY i.n) FROM [1] AS seed JOIN join_items ON META(join_items).id = 'a' GROUP BY 1", cancellationToken: cancellationToken);
+        Check(implicitScope.Documents.Single().GetRawText() == "[1,2]", "implicit JOIN name keeps bare FROM as a collection");
         var ordinary = await connection.QueryAsync("SELECT RAW join_items.n FROM join_items ORDER BY join_items.n", cancellationToken: cancellationToken);
         var nested = await connection.QueryAsync("SELECT RAW join_items.n FROM join_items WHERE EXISTS (SELECT RAW 1 FROM [1] AS s) ORDER BY join_items.n", cancellationToken: cancellationToken);
         Check(ordinary.Documents.Select(value => value.GetRawText()).SequenceEqual(nested.Documents.Select(value => value.GetRawText())), "implicit alias subquery parity");

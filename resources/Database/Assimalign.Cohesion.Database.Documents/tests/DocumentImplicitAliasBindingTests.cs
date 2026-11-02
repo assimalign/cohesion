@@ -22,6 +22,12 @@ public sealed class DocumentImplicitAliasBindingTests
     [InlineData("SELECT RAW g FROM items ORDER BY items.g", "1;2;3")]
     [InlineData("SELECT RAW (SELECT RAW i.g FROM items i ORDER BY i.g) FROM items", "[1,2,3];[1,2,3];[1,2,3]")]
     [InlineData("SELECT RAW (SELECT RAW i.g FROM items i) FROM items AS items", "[1];[2];[3]")]
+    [InlineData("SELECT RAW (SELECT RAW i.g FROM items i ORDER BY i.g) FROM [1] AS seed JOIN items ON META(items).id = 'a'", "[1,2,3]")]
+    [InlineData("SELECT RAW (SELECT RAW i.g FROM items i ORDER BY i.g) FROM [1] AS seed JOIN items AS items ON META(items).id = 'a'", "[1]")]
+    [InlineData("SELECT RAW (SELECT RAW i.g FROM items i ORDER BY i.g) FROM [1] AS seed NEST items ON META(items).id = 'a'", "[1,2,3]")]
+    [InlineData("SELECT RAW (SELECT RAW i.g FROM items i ORDER BY i.g) FROM [1] AS seed NEST items AS items ON META(items).id = 'a'", "[1]")]
+    [InlineData("SELECT RAW (SELECT RAW i.g FROM items i ORDER BY i.g) FROM [1] AS seed JOIN items ON META(items).id = 'a' GROUP BY 1", "[1,2,3]")]
+    [InlineData("SELECT RAW (SELECT RAW i.g FROM items i ORDER BY i.g) FROM [1] AS seed NEST items ON META(items).id = 'a' GROUP BY 1", "[1,2,3]")]
     [InlineData("SELECT RAW b.g FROM items JOIN items AS b ON META(b).id = 'a'", "1;1;1")]
     [InlineData("SELECT RAW items.g FROM items AS a JOIN items ON META(items).id = 'a'", "1;1;1")]
     [InlineData("SELECT RAW tags FROM items UNNEST items.tags JOIN items AS b ON META(b).id = 'a'", "1;2;1;2;1;2")]
@@ -40,6 +46,7 @@ public sealed class DocumentImplicitAliasBindingTests
     }
 
     [Theory(DisplayName = "Cohesion Test [Documents] - Implicit alias: root mutation and duplicate source names are refused")]
+    [InlineData("SELECT RAW (SELECT RAW i.g FROM items i) FROM [1] AS seed JOIN items AS items ON META(items).id = 'a' GROUP BY 1", "CD05001")]
     [InlineData("UPDATE items SET items = 1", "CD02016")]
     [InlineData("UPDATE items UNSET items", "CD02016")]
     [InlineData("UPDATE items SET items.g = 1, g = 2", "CD01017")]
@@ -58,12 +65,12 @@ public sealed class DocumentImplicitAliasBindingTests
         error.Diagnostics.ShouldHaveSingleItem().Code.ShouldBe(code);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Documents] - Implicit alias: duplicate direct AST names keep the binding diagnostic")]
+    [Theory(DisplayName = "Cohesion Test [Documents] - Implicit alias: duplicate and empty direct AST names keep the binding diagnostic")]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public async Task ExecuteAsync_DuplicateAstBinding_ShouldRefuseAsync(bool join, bool emptyAlias)
+    public async Task ExecuteAsync_InvalidAstBinding_ShouldRefuseAsync(bool join, bool emptyAlias)
     {
         // Arrange
         await using var engine = DocumentDatabaseEngine.Create("implicit-ast", new());
@@ -135,12 +142,16 @@ public sealed class DocumentImplicitAliasBindingTests
         await using var session = await database.CreateSessionAsync(CancellationToken.None);
         await session.ExecuteAsync("CREATE COLLECTION items", cancellationToken: CancellationToken.None);
         await session.ExecuteAsync("CREATE INDEX ix ON items(g)", cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("CREATE COLLECTION " + name, cancellationToken: CancellationToken.None);
+        await session.ExecuteAsync("INSERT INTO " + name + " (KEY, VALUE) VALUES ('a',{g:8})", cancellationToken: CancellationToken.None);
         // Act
+        var independent = await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW (SELECT RAW i.g FROM " + name + " i) FROM " + source + " GROUP BY INDEX_NAME");
         var paths = await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW " + name + ".INDEX_NAME FROM " + source + " GROUP BY INDEX_NAME");
         var star = await DocumentSubqueryTests.RowsAsync(session, "SELECT * FROM " + source + " UNNEST PATHS p");
         var group = await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW g FROM " + source + " GROUP BY INDEX_NAME GROUP AS g");
         var capture = await DocumentSubqueryTests.RowsAsync(session, "SELECT RAW (SELECT RAW " + name + ".INDEX_NAME FROM [1] AS s) FROM " + source);
         // Assert
+        independent.ShouldHaveSingleItem().GetValue(0).ShouldBeOfType<JsonElement>().GetRawText().ShouldBe("[8]");
         paths.ShouldHaveSingleItem().GetString(0).ShouldBe("ix");
         star.ShouldHaveSingleItem().GetValue(0).ShouldBeOfType<JsonElement>().GetProperty(name).GetProperty("INDEX_NAME").GetString().ShouldBe("ix");
         group.ShouldHaveSingleItem().GetValue(0).ShouldBeOfType<JsonElement>()[0].GetProperty(name).GetProperty("INDEX_NAME").GetString().ShouldBe("ix");

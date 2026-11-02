@@ -126,7 +126,7 @@ internal sealed partial class DocumentPlanner
         void VisitQuery(OqlSelectExpression select, DocumentBindingScope? local)
         {
             if (select.Source is not null) { Visit(select.Source, local); }
-            else if (select.Collection != query.Collection || query.Alias is not null)
+            else if (!DocumentSourceName.IsImplicitCollection(query, select.Collection))
             {
                 // Bare explicit aliases are expression sources, resolved before the
                 // inner row alias is introduced. An implicit keyspace stays a keyspace.

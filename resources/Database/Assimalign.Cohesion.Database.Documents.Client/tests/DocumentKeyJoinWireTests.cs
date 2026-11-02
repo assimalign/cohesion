@@ -27,6 +27,13 @@ public sealed class DocumentKeyJoinWireTests
         var nest = await connection.QueryAsync("SELECT RAW b FROM ['a','absent',NULL,MISSING] AS k LEFT NEST items AS b ON META(b).id = k", cancellationToken: harness.Token);
         var correlated = await connection.QueryAsync("SELECT RAW (SELECT RAW b.n FROM [1] AS s JOIN items AS b ON META(b).id = META(a).id) FROM items AS a ORDER BY a.n", cancellationToken: harness.Token);
         var implicitJoin = await connection.QueryAsync("SELECT b FROM items JOIN items AS b ON META(b).id = 'a'", cancellationToken: harness.Token);
+        foreach (string form in new[] { "JOIN", "NEST" })
+        {
+            var implicitScope = await connection.QueryAsync("SELECT RAW (SELECT RAW i.n FROM items i ORDER BY i.n) FROM [1] AS seed " + form + " items ON META(items).id = 'a' GROUP BY 1", cancellationToken: harness.Token);
+            var explicitScope = await connection.QueryAsync("SELECT RAW (SELECT RAW i.n FROM items i) FROM [1] AS seed " + form + " items AS items ON META(items).id = 'a' GROUP BY items", cancellationToken: harness.Token);
+            implicitScope.Documents.Single().GetRawText().ShouldBe("[1,2]");
+            explicitScope.Documents.Single().GetRawText().ShouldBe("[1]");
+        }
         // Assert
         implicitJoin.Count.ShouldBe(2);
         joined.Select(row => row[0]).ShouldBe(new object?[] { "a", "b" });

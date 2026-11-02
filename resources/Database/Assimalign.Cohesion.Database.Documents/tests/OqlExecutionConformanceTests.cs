@@ -219,6 +219,8 @@ public sealed class OqlExecutionConformanceTests
             ],
             [OqlClauses.Join] =
             [
+                new("SELECT RAW (SELECT RAW i.name FROM items i ORDER BY i.name) FROM [1] AS seed JOIN items ON META(items).id = 'a' GROUP BY 1", [[Json("[\"alpha\",\"beta\",\"delta\",\"gamma\"]")]]),
+                new("SELECT RAW (SELECT RAW i.name FROM items i) FROM [1] AS seed JOIN items AS items ON META(items).id = 'a' GROUP BY items", [[Json("[\"alpha\"]")]]),
                 new("SELECT b.name FROM items AS a JOIN items AS b ON META(b).id = META(a).id ORDER BY b.name", [["alpha"], ["beta"], ["delta"], ["gamma"]]),
                 new("SELECT b.name FROM [{key:'A'}] AS a JOIN items AS b ON META(b).id = LOWER(key)", [["alpha"]]),
             ],

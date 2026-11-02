@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 
+using Assimalign.Cohesion.Database.Documents.Language.Internal;
 using Assimalign.Cohesion.Database.Language;
 
 namespace Assimalign.Cohesion.Database.Documents.Language;
@@ -51,7 +52,7 @@ public sealed partial class OqlQueryParser
         List<OqlSourceBindingExpression>? bindings = null;
         List<Lexeme>? refusedJoins = null;
         var variables = new HashSet<string>(StringComparer.Ordinal);
-        variables.Add(alias ?? ImplicitSourceName(collection));
+        variables.Add(alias ?? OqlSourceName.Implicit(collection));
         while (!Failed && IsSourceBindingClause())
         {
             var bindingStart = Current;
@@ -84,9 +85,9 @@ public sealed partial class OqlQueryParser
                     (refusedJoins ??= []).Add(joinToken);
                     continue;
                 }
-                right ??= ImplicitSourceName(name);
-                if (!variables.Add(right)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, joinToken); break; }
-                if (receiver.Segments[0].Name != right) { UnsupportedKeyJoin(joinToken); break; }
+                string rightName = right ?? OqlSourceName.Implicit(name);
+                if (!variables.Add(rightName)) { Error("CD00010", ErrorMessages.BindingNameDuplicate, joinToken); break; }
+                if (receiver.Segments[0].Name != rightName) { UnsupportedKeyJoin(joinToken); break; }
                 bindings.Add(new OqlJoinExpression(name, right, equality.Right, left, nest, Span(bindingStart, Previous)));
                 continue;
             }
@@ -193,11 +194,6 @@ public sealed partial class OqlQueryParser
 
     private void UnsupportedKeyJoin(Lexeme token, string suffix = " general ON predicate")
         => _diagnostics.Add(QueryDiagnostics.UnsupportedClause(token.Text.ToUpperInvariant() + suffix, Profile.Language, Span(token, token)));
-
-    private static string ImplicitSourceName(string collection)
-        => (string.Equals(collection, "COHESION_SCHEMA.INDEXES", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(collection, "COHESION_SCHEMA.OBJECT_OWNERSHIP", StringComparison.OrdinalIgnoreCase))
-            ? collection[(collection.LastIndexOf('.') + 1)..] : collection;
 
     private bool IsSourceBindingClause() => IsUnnestClause() || IsJoinClause(_position);
 

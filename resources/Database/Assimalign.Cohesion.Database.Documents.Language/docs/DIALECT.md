@@ -225,7 +225,8 @@ derived and local-value bindings have no stored identity and return NULL for met
 A nested `FROM d.items AS i`, or `FROM d AS i`
 where d is an explicit outer alias, iterates that outer value per row. A bare FROM items under
 an implicit outer items continues to name the collection; under an explicit outer items it
-correlates to that value. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
+correlates to that value. The same distinction applies to implicit versus explicit JOIN/NEST
+collection bindings, including grouped captures. This follows the [Couchbase correlation and scope contract](https://docs.couchbase.com/server/7.6/n1ql/n1ql-language-reference/subqueries.html).
 Qualified stars (`d.*`) retain their CK00001 refusal outside joined SELECT projections; see
 [key JOIN and NEST](#key-join-and-nest-1732-oq-j1).
 

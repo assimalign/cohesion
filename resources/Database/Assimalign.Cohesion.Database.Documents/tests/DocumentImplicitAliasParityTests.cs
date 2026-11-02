@@ -39,10 +39,14 @@ public sealed class DocumentImplicitAliasParityTests
 
     private static string Statement(string form, int variant)
     {
-        string filter = "items.g >= 1" + (variant == 1 ? " AND " + exists : "");
-        string value = variant == 2 || (variant == 4 && form == "SELECT") ? "CASE WHEN " + exists + " THEN items.g ELSE 0 END" : "items.g";
-        string order = variant == 3 ? "CASE WHEN " + exists + " THEN items.g ELSE 0 END" : "items.g";
-        string image = variant == 4 || (variant >= 2 && form is "UNSET" or "DELETE") || (variant == 3 && form == "UPDATE") ? "CASE WHEN " + exists + " THEN items ELSE NULL END" : "items";
+        bool combined = variant == 4 && form is not ("INSERT" or "UPSERT");
+        string filter = "items.g >= 1" + (variant == 1 || combined ? " AND " + exists : "");
+        if (variant == 3 && form is "UNSET" or "DELETE")
+        { filter = "CASE WHEN " + exists + " THEN items.g >= 1 ELSE FALSE END"; }
+        string value = variant == 2 || combined ? "CASE WHEN " + exists + " THEN items.g ELSE 0 END" : "items.g";
+        string order = variant == 3 || combined ? "CASE WHEN " + exists + " THEN items.g ELSE 0 END" : "items.g";
+        string image = variant == 4 || (variant == 2 && form is "UNSET" or "DELETE") || (variant == 3 && form == "UPDATE")
+            ? "CASE WHEN " + exists + " THEN items ELSE NULL END" : "items";
         if (form == "SELECT")
         { return "SELECT RAW {g:" + value + ",self:items.items.g,id:META(items).id} FROM items WHERE " + filter + " ORDER BY " + order; }
         if (form == "UPDATE")
@@ -61,7 +65,7 @@ public sealed class DocumentImplicitAliasParityTests
         await execute("CREATE COLLECTION items");
         await execute("CREATE COLLECTION copies");
         // 6 forms x 4 unrelated-subquery variants x 2 access configurations = 48 digest comparisons.
-        // UPDATE/DELETE have no ORDER BY; their extra variants exercise affected-image projection.
+        // UPDATE/DELETE have no ORDER BY; their variants exercise legal filter and affected-image positions.
         for (int indexed = 0; indexed < 2; indexed++)
         {
             if (indexed == 1)

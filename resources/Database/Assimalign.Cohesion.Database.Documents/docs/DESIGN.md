@@ -724,7 +724,11 @@ scan and indexed fixtures in process and over InMemory/TCP. Ordinary Release all
 and the unchanged OQ-Q3 correlation corpus guard the same source-binding contract.
 Ordinary and nested evaluators share the resolved alias; no separate SourceName fallback remains.
 An inner bare FROM items still names the collection under an implicit outer items; it correlates
-only to an explicit outer alias. Standalone ORDER BY projection aliases retain precedence.
+only to an explicit outer alias, including JOIN/NEST declarations. OqlJoinExpression retains its
+nullable explicit Alias beside its resolved Variable; scope and grouping visitors preserve that
+keyspace-versus-variable distinction. This follows Couchbase algebra/from_keyspace.go:294-303
+and algebra/from_expression.go:116-133 at 6d40d1dd. Standalone ORDER BY projection aliases retain
+precedence.
 
 DocumentNestedExecutionContext borrows the statement's DocumentOperation and database, parameter
 snapshot, frozen function catalog and cancellation token. It never creates or completes an operation,
