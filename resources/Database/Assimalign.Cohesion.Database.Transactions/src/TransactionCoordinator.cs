@@ -88,6 +88,8 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// indexes, call <see cref="AnalyzeAndScrub"/>, scrub those indexes with its plan,
     /// and call <see cref="CompleteRecovery"/> before admitting any sessions.
     /// </remarks>
+    /// <exception cref="ArgumentNullException">A required dependency is null.</exception>
+    /// <exception cref="InvalidOperationException">Another live coordinator is bound to the storage.</exception>
     public TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records)
         : this(storage, journal, records, TimeProvider.System)
     {
@@ -99,6 +101,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
     /// <param name="records">The model's stamped record access.</param>
     /// <param name="indexPruner">Prunes a bounded index batch below the supplied safe horizon.</param>
     /// <exception cref="ArgumentNullException">A required dependency is null.</exception>
+    /// <exception cref="InvalidOperationException">Another live coordinator is bound to the storage.</exception>
     public TransactionCoordinator(Storage storage, StorageJournal journal, TransactionRecordSpace records,
         Func<TransactionSequence, CancellationToken, ValueTask<long>> indexPruner)
         : this(storage, journal, records, TimeProvider.System, indexPruner ?? throw new ArgumentNullException(nameof(indexPruner)))
@@ -130,7 +133,7 @@ public sealed class TransactionCoordinator : IAsyncDisposable
         _applyGate = TransactionCheckpointInterlock.ForStorage(storage);
         _versionStore = new RecordSpaceVersionStore(storage, records, _applyGate);
         _log = new GatedJournalLog(this);
-        _applyGate.ConfigureCheckpoint(() => _log.CheckpointUnderGate(_storage), () => _insideApply.Value);
+        _applyGate.ConfigureCheckpoint(this, () => _log.CheckpointUnderGate(_storage), () => _insideApply.Value);
 
         // The manager over the gated journal log: the statement apply admits a bracket
         // only for a context the manager still holds open, and the version-purge pass
@@ -1296,8 +1299,12 @@ public sealed class TransactionCoordinator : IAsyncDisposable
 
                 _openContexts.Clear();
             }
-            if (markedEnds is not null)
-            { foreach (var context in markedEnds) { _records.TransactionEnded(context); } }
+            try
+            {
+                if (markedEnds is not null)
+                { foreach (var context in markedEnds) { _records.TransactionEnded(context); } }
+            }
+            finally { _applyGate.UnconfigureCheckpoint(this); }
         }
     }
 

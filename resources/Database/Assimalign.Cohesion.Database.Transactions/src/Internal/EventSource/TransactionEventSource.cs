@@ -464,6 +464,17 @@ internal sealed class TransactionEventSource : EventSource
         { CheckpointBlocked(storage.Name, bracketClass, owner); }
     }
 
+    [NonEvent]
+    internal void CheckpointLeaseThreadMismatch(Storage.Storage storage, long enteringThread, long disposingThread)
+    {
+        if (IsEnabled(EventLevel.Verbose, Keywords.Checkpoints))
+        { CheckpointLeaseThreadMismatch(storage.Name, enteringThread, disposingThread); }
+    }
+
+    [Event(22, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' checkpoint lease entered on thread {1} disposed on thread {2}.")]
+    private void CheckpointLeaseThreadMismatch(string database, long enteringThread, long disposingThread)
+        => WriteEvent(22, database, enteringThread, disposingThread);
+
     [Event(21, Level = EventLevel.Verbose, Keywords = Keywords.Checkpoints, Message = "Database '{0}' checkpoint deferred by {1}, owner {2}.")]
     private void CheckpointBlocked(string database, string bracketClass, long owner)
         => WriteEvent(21, database, bracketClass, owner);

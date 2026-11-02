@@ -2214,33 +2214,20 @@ writer, continuing until those counters move with a 45-second ceiling. It assert
 append-locked journal high-water mark of at most four triggers; rates remain diagnostic only.
 Linux affinity is per thread and the test makes no affinity claim there.
 
-The measured normal-load attribution is below (bytes / deferred attempts in the same sample).
-Every deferral was Statement and had its event-21 companion; busy storage brackets were zero.
-The Release KeyValuePair maximum came from its full-suite load; its isolated load later measured
-112,784 bytes and 672 Statement deferrals. Rates are recorded in the run handoff, never asserted.
-
-| Engine | Debug peak / deferrals | Release peak / deferrals |
-|---|---:|---:|
-| SQL | 102,948 / 229 | 381,276 / 151 |
-| Documents | 90,874 / 88 | 390,055 / 8 |
-| Graph | 79,456 / 20 | 80,157 / 8 |
-| KeyValuePair | 170,405 / 481 | 1,468,539 / 1,365 |
-| Blob | 93,548 / 49 | 90,476 / 53 |
-
-The four-trigger assertion passed all five Debug loads but failed SQL (5.82x), Documents (5.95x)
-and KeyValuePair (22.41x) in Release; it remains intact. The original random-payload Blob probe,
-with three additional CPU competitors, reached 741,584 bytes (11.32x) in Debug and 1,154,886
-(17.62x) in Release, with no busy raw bracket. The largest Release cycle recorded 717 commits
-after the trigger, all before the first Statement deferral: a measured scheduling gap before the
-checkpoint request, followed by service at the releasing bracket. EN-C2 must bound admission for
-a due checkpoint even before the worker reaches TryCheckpoint; EN-C1 adds no such pause.
+The earlier worker-only arming left an unbounded gap between the size trigger and its first
+TryCheckpoint. Releasing interlock holders now pull IsCheckpointDue(TimeSpan.MaxValue), so a
+size crossing services the existing deferral before the next admission without waiting for worker
+scheduling. Timeout.InfiniteTimeSpan is negative and must never select this size-only predicate. Busy
+outside brackets and uncollected operational failures suppress repeat foreground attempts; the
+worker retains retries, reporting and its offline policy. The four-trigger assertion stays intact.
 
 Every refused storage checkpoint emits event 19 once per active physical bracket, including
 untouched brackets, with its operation class, optional owner, physical sequence and a shared
 refusal identity. Unnamed brackets are Raw; sequence-adopting brackets are Adopted. Equal adopted
 sequences remain separate physical brackets. The registry reuses
 its capacity and is maintained under the existing transaction lock; completion and failed begin
-remove entries there. Event 20 reports the journal high-water mark since open, maintained for
+remove entries there. Event 19 snapshots those entries under the lock and emits them afterwards,
+so a slow in-process listener cannot hold up bracket begin or completion. Event 20 reports the journal high-water mark since open, maintained for
 both buffered and direct frames even with no listener. A final checkpoint after the writers end
 collects that mark; autonomous progress is required before that collection.
 
@@ -2255,8 +2242,9 @@ publishes its class; it is not reported as an unidentified raw bracket. Maintena
 checkpoint holders are distinguished from statements. The catalog/reclamation stress parks both
 real bracket classes while a statement queues and proves both deferred checkpoints complete.
 
-Reclamation still yields before its next bracket when a checkpoint is due, rechecking after
-waiting for admission. The model remains
+Reclamation yields before admission for due or worker-signaled work. A post-admission size-due exit
+runs the checkpoint at disposal; each committed batch awaits durability after gate release and
+before removing its retirement intent. The model remains
 sharp, with a soft size trigger and unchanged crash recovery and formats. EN-C2 owns the approved
 bounded admission pause near the journal limit (T3-27); EN-C1 adds no pause, fuzzy checkpoint or
 segmented journal. PostgreSQL's concurrent-insertion exclusion around checkpoint state capture

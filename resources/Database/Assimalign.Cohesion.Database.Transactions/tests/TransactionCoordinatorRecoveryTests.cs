@@ -24,7 +24,7 @@ namespace Assimalign.Cohesion.Database.Transactions.Tests;
 /// against real record pages and a real write-ahead journal.
 /// </summary>
 [Collection("Journal enrollment")]
-public class TransactionCoordinatorRecoveryTests
+public partial class TransactionCoordinatorRecoveryTests
 {
     [Theory(DisplayName = "Cohesion Test [Transactions] - Raw scopes service deferred checkpoints on every exit and nested disposal (#1283)")]
     [InlineData(0)]
@@ -255,6 +255,7 @@ public class TransactionCoordinatorRecoveryTests
     {
         // Arrange: minimum of three warmed rounds; no time or throughput threshold.
         using var storage = CoordinatorStorage.Create();
+        await using var coordinator = new TransactionCoordinator(storage, storage.Log, storage.Records);
         var interlock = TransactionCheckpointInterlock.ForStorage(storage);
         using var control = new SemaphoreSlim(1, 1);
         using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(30));

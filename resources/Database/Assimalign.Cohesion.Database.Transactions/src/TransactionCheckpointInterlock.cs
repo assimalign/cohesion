@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
@@ -10,7 +12,7 @@ using Assimalign.Cohesion.Database.Transactions.Internal;
 
 namespace Assimalign.Cohesion.Database.Transactions;
 
-/// <summary>Serializes physical write brackets and sharp checkpoints on one storage.</summary>
+/// <summary>Provides engine plumbing to serialize physical write brackets and sharp checkpoints on one storage.</summary>
 /// <remarks>
 /// Coordinated statements, catalog writes and reclamation share the same per-storage gate.
 /// Acquire model locks before entering; no operation inside the gate may wait for model locks.
@@ -28,12 +30,18 @@ public sealed class TransactionCheckpointInterlock
     // work; synchronous event observers must not reenter engine operations.
     private readonly object _state = new();
     private Action _checkpoint;
+    private object? _binding;
     private Func<bool>? _insideCoordinatedApply;
     private string _holder = "Admission";
     private long _owner;
     private int _rawThread;
     private int _rawDepth;
     private int _pending;
+    private bool _busy;
+    private bool _checkpointSucceeded;
+    private bool _retryRequested;
+    private readonly HashSet<long> _leases = new();
+    private long _nextLease;
     private long _unattributed;
     private ExceptionDispatchInfo? _failure;
 
@@ -61,24 +69,27 @@ public sealed class TransactionCheckpointInterlock
     /// <exception cref="ArgumentException"><paramref name="bracketClass"/> is empty.</exception>
     /// <exception cref="OperationCanceledException">Acquisition was canceled.</exception>
     /// <remarks>Dispose on the entering thread, after every bracket and page latch has ended.</remarks>
-    public IDisposable Enter(string bracketClass, long owner = 0, CancellationToken cancellationToken = default)
+    public Lease Enter(string bracketClass, long owner = 0, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(bracketClass);
         cancellationToken.ThrowIfCancellationRequested();
-        // Allocate before acquisition: an allocation failure must never orphan the gate.
-        bool coordinated = _insideCoordinatedApply?.Invoke() == true;
-        var lease = new Lease(coordinated ? null : this);
-        if (coordinated) { return lease; }
         int thread = Environment.CurrentManagedThreadId;
-        if (Volatile.Read(ref _rawThread) == thread)
+        if (_insideCoordinatedApply?.Invoke() == true) { return new Lease(this, thread, 0); }
+        bool nested = Volatile.Read(ref _rawThread) == thread;
+        if (!nested) { Wait(cancellationToken, bracketClass, owner); }
+        try
         {
-            Interlocked.Increment(ref _rawDepth);
-            return lease;
+            long identity = ++_nextLease;
+            _leases.Add(identity);
+            _rawDepth++;
+            Volatile.Write(ref _rawThread, thread);
+            return new Lease(this, thread, identity);
         }
-        Wait(cancellationToken, bracketClass, owner);
-        _rawDepth = 1;
-        Volatile.Write(ref _rawThread, thread);
-        return lease;
+        catch
+        {
+            if (!nested) { Release(); }
+            throw;
+        }
     }
 
     /// <summary>Runs a checkpoint, or transfers it to the scope currently holding the gate.</summary>
@@ -100,28 +111,39 @@ public sealed class TransactionCheckpointInterlock
         {
             // Gate release and this second look share _state: a holder that just ended
             // cannot leave a deferred request with nobody responsible for servicing it.
+            bool deferred;
+            string holder;
+            long owner;
+            // Snapshot only under state; synchronous listeners may block or reenter.
+            bool listening = TransactionEventSource.Log.IsEnabled(System.Diagnostics.Tracing.EventLevel.Verbose,
+                TransactionEventSource.Keywords.Checkpoints);
             lock (_state)
             {
-                if (!_gate.Wait(0))
+                deferred = !_gate.Wait(0);
+                holder = _holder;
+                owner = _owner;
+                if (deferred)
                 {
-                    Volatile.Write(ref _pending, 1);
-                    if (TransactionEventSource.Log.CheckpointDeferred(_storage))
-                    {
-                        if (_holder == "Admission") { _unattributed++; }
-                        else { TransactionEventSource.Log.CheckpointBlocked(_storage, _holder, _owner); }
-                    }
-                    return false;
+                    _pending = 1;
+                    _retryRequested = true;
+                    if (listening && holder == "Admission") { _unattributed++; }
                 }
+            }
+            if (deferred)
+            {
+                TransactionEventSource.Log.CheckpointDeferred(_storage);
+                if (holder != "Admission") { TransactionEventSource.Log.CheckpointBlocked(_storage, holder, owner); }
+                return false;
             }
         }
         try
         {
             SetHolder("Checkpoint", 0);
             Interlocked.Exchange(ref _pending, 0);
-            _checkpoint();
+            RunCheckpoint();
             return true;
         }
-        finally { Release(); }
+        finally { Release(allowCheckpoint: false); }
     }
 
     internal void Checkpoint(CancellationToken cancellationToken)
@@ -130,15 +152,45 @@ public sealed class TransactionCheckpointInterlock
         try
         {
             Interlocked.Exchange(ref _pending, 0);
-            _checkpoint();
+            RunCheckpoint();
         }
-        finally { Release(); }
+        finally { Release(allowCheckpoint: false); }
     }
 
-    internal void ConfigureCheckpoint(Action checkpoint, Func<bool> insideCoordinatedApply)
+    internal void ConfigureCheckpoint(object binding, Action checkpoint, Func<bool> insideCoordinatedApply)
     {
-        _checkpoint = checkpoint;
-        _insideCoordinatedApply = insideCoordinatedApply;
+        lock (_state)
+        {
+            if (_binding is not null)
+            { throw new InvalidOperationException(ErrorMessages.CheckpointInterlockAlreadyBound); }
+            _binding = binding;
+            _checkpoint = checkpoint;
+            _insideCoordinatedApply = insideCoordinatedApply;
+        }
+    }
+
+    internal void UnconfigureCheckpoint(object binding)
+    {
+        lock (_state)
+        {
+            if (!ReferenceEquals(_binding, binding)) { return; }
+            _binding = null;
+            _checkpoint = _storage.Checkpoint;
+            _insideCoordinatedApply = null;
+        }
+    }
+
+    private void RunCheckpoint()
+    {
+        lock (_state) { _pending = 0; _retryRequested = false; }
+        try { _checkpoint(); }
+        catch (StorageTransactionException exception) when (exception.Code != StorageTransactionErrorCode.ForeignStorage)
+        {
+            lock (_state) { _pending = 1; _busy = true; }
+            throw;
+        }
+        // This sharp checkpoint covered requests received while it ran too.
+        lock (_state) { _pending = 0; _busy = false; _retryRequested = false; _checkpointSucceeded = true; }
     }
 
     internal void Wait(CancellationToken cancellationToken = default, string bracketClass = "Maintenance", long owner = 0)
@@ -174,6 +226,7 @@ public sealed class TransactionCheckpointInterlock
 
     internal void SetHolder(string bracketClass, long owner)
     {
+        long deferred;
         lock (_state)
         {
             _holder = bracketClass;
@@ -181,24 +234,29 @@ public sealed class TransactionCheckpointInterlock
             // SemaphoreSlim may reserve its permit for an asynchronous waiter before
             // that waiter is scheduled. Attribute those deferrals when its admission
             // publishes the actual bracket class, rather than inventing a raw blocker.
-            long deferred = _unattributed;
+            deferred = _unattributed;
             _unattributed = 0;
-            for (long i = 0; i < deferred; i++)
-            { TransactionEventSource.Log.CheckpointBlocked(_storage, bracketClass, owner); }
         }
+        for (long i = 0; i < deferred; i++)
+        { TransactionEventSource.Log.CheckpointBlocked(_storage, bracketClass, owner); }
     }
 
-    internal void Release()
+    internal void Release(bool allowCheckpoint = true)
     {
+        // MaxValue selects size only. InfiniteTimeSpan is negative and makes every
+        // written journal interval-due. No storage work runs under the state monitor.
+        bool due = allowCheckpoint && _storage.IsCheckpointDue(TimeSpan.MaxValue);
         lock (_state)
         {
             // Claim the request or release atomically with TryCheckpoint's second
             // look. No deferral can land after the final check but before release.
-            if (Interlocked.Exchange(ref _pending, 0) == 0)
+            if (!allowCheckpoint || _failure is not null || (_busy && !_retryRequested) || (_pending == 0 && !due))
             {
                 ReleaseUnderState();
                 return;
             }
+            _pending = 0;
+            _retryRequested = false;
             // This holder already published its admission and queued attributions.
             _holder = "Checkpoint";
             _owner = 0;
@@ -212,6 +270,13 @@ public sealed class TransactionCheckpointInterlock
 
     private void ReleaseUnderState()
     {
+        if (_checkpointSucceeded)
+        {
+            _pending = 0;
+            _busy = false;
+            _retryRequested = false;
+            _checkpointSucceeded = false;
+        }
         _holder = "Admission";
         _owner = 0;
         _gate.Release();
@@ -219,14 +284,17 @@ public sealed class TransactionCheckpointInterlock
 
     private void RunDeferred()
     {
-        try { _checkpoint(); }
+        try { RunCheckpoint(); }
         catch (StorageTransactionException exception) when (exception.Code != StorageTransactionErrorCode.ForeignStorage)
         {
-            Volatile.Write(ref _pending, 1);
+            lock (_state) { _pending = 1; _busy = true; }
             TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, "BracketOpen");
         }
         catch (StorageOfflineException)
-        { TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, "StorageOffline"); }
+        {
+            lock (_state) { _pending = 0; }
+            TransactionEventSource.Log.DeferredCheckpointSkipped(_storage, "StorageOffline");
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             Volatile.Write(ref _failure, ExceptionDispatchInfo.Capture(exception));
@@ -234,20 +302,36 @@ public sealed class TransactionCheckpointInterlock
         }
     }
 
-    private void ExitRaw()
+    private void ExitRaw(int thread, long identity)
     {
-        if (Interlocked.Decrement(ref _rawDepth) != 0) { return; }
+        if (thread != Environment.CurrentManagedThreadId)
+        {
+            TransactionEventSource.Log.CheckpointLeaseThreadMismatch(_storage, thread, Environment.CurrentManagedThreadId);
+            Debug.Assert(thread == Environment.CurrentManagedThreadId, "Checkpoint leases must be disposed on their entering thread.");
+            throw new StorageTransactionException(ErrorMessages.CheckpointInterlockWrongThread);
+        }
+        // Value copies and repeated Dispose calls share the identity, without an
+        // allocation per lease. Capacity follows maximum nesting, not operation count.
+        if (identity == 0 || Volatile.Read(ref _rawThread) != thread) { return; }
+        if (!_leases.Remove(identity)) { return; }
+        if (--_rawDepth != 0) { return; }
         Volatile.Write(ref _rawThread, 0);
         Release();
     }
 
-    [System.Diagnostics.DebuggerDisplay("Checkpoint scope")]
-    [System.Diagnostics.DebuggerTypeProxy(typeof(Lease.DebugView))]
-    private sealed class Lease : IDisposable
+    /// <summary>A thread-affine engine write scope. Value copies share one disposal identity.</summary>
+    [DebuggerDisplay("Checkpoint scope")]
+    [DebuggerTypeProxy(typeof(Lease.DebugView))]
+    public readonly struct Lease : IDisposable
     {
-        private TransactionCheckpointInterlock? _owner;
-        internal Lease(TransactionCheckpointInterlock? owner) { _owner = owner; }
-        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.ExitRaw();
+        private readonly TransactionCheckpointInterlock? _owner;
+        private readonly int _thread;
+        private readonly long _identity;
+        internal Lease(TransactionCheckpointInterlock? owner, int thread, long identity)
+        { _owner = owner; _thread = thread; _identity = identity; }
+        /// <summary>Services due work and releases this scope on its entering thread.</summary>
+        /// <exception cref="StorageTransactionException">Disposed on another thread.</exception>
+        public void Dispose() => _owner?.ExitRaw(_thread, _identity);
         private sealed class DebugView
         {
             public DebugView(Lease lease) { }

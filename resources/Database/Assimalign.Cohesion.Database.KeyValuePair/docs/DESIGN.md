@@ -4,7 +4,10 @@
 
 Catalog writes now enter their file set's TransactionCheckpointInterlock, shared with the catalog
 checkpointer. The catalog monitor precedes that independent gate and storage/page latches;
-checkpoint bodies take neither the catalog monitor nor the data apply gate. Statements retain
+checkpoint bodies never acquire the data apply gate. Deferred catalog checkpoints run at the
+writer's lease disposal under the catalog monitor, so readers wait for its flush and fsync.
+Releases pull the size-only due predicate too, so the catalog services the existing deferral
+before the next admission without waiting for the checkpoint worker's first attempt. Statements retain
 the data coordinator's interlock. The four-writer load asserts the exact journal high-water mark
 and complete deferral attribution, with rates used only as diagnostics. Forced append barriers
 cover both the format-record and index-registration writes: each attributes KeyValuePairCatalog,
