@@ -53,6 +53,13 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
     /// </summary>
     public HashSet<ResourceName> RollingOut { get; } = [];
 
+    /// <summary>
+    /// Resources whose deployment removes the instances already running before it starts its own, as
+    /// the Docker platform recreates the containers of a deployment caught in a restart loop; the
+    /// removed instances stop renewing.
+    /// </summary>
+    public HashSet<ResourceName> Replacing { get; } = [];
+
     public ScaleAction Scale { get; } = new();
 
     public List<string> Deployed { get; } = [];
@@ -194,6 +201,19 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         RunningExtensions[resource.Name] = Describe(resource.Extensions);
         Seen[resource.Name] = resource;
         Running[resource.Name] = Revisions.GetValueOrDefault(resource.Name, "1");
+        if (Replacing.Contains(resource.Name))
+        {
+            foreach (KeyValuePair<InstanceKey, (TestInstance Instance, ApplicationInstanceService Service)> entry in Instances)
+            {
+                if (entry.Value.Instance.Provider == resource.Provider
+                    && entry.Value.Instance.Name == resource.Name
+                    && Instances.TryRemove(entry.Key, out _))
+                {
+                    await entry.Value.Service.StopAsync(cancellationToken);
+                }
+            }
+        }
+
         if (Silent.Contains(resource.Name) || Crashing.ContainsKey(resource.Name))
         {
             return;

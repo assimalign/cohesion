@@ -1369,12 +1369,16 @@ public sealed class ApplicationGateway : IApplicationGateway, IApplicationInstan
         // Planned before the call: an in-process provider's instances publish before it returns.
         string revision = string.Concat(Fingerprint(manifest), ":", plan.Revision);
         DeploymentId? deployment = plan.Change == ApplicationGatewayDeploymentChange.None ? null : DeploymentOf(revision, manifest, settings);
-        resource.Plan(plan.Change, revision, deployment, LeaseDuration);
+        resource.Plan(plan.Change, revision, deployment);
         ApplicationGatewayEventSource.Log.ResourcePlanned(Name, manifest, plan.Change);
         if (deployment is { } id)
         {
             ApplicationGatewayEventSource.Log.ResourceDeploying(Name, manifest, id);
             await _infrastructure.DeployResourceAsync(model, manifest, settings, id, cancellationToken).ConfigureAwait(false);
+
+            // An instance of the deployment that published before the plan counts from here, once it
+            // renews: what the call removed never renews again.
+            resource.MarkDeployed();
             await SaveAsync(cancellationToken).ConfigureAwait(false);
 
             if (!await WaitForStartAsync(model, resource, id, cancellationToken).ConfigureAwait(false))

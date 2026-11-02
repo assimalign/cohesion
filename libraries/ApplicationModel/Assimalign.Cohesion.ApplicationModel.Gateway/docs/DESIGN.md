@@ -206,8 +206,8 @@ when every deployment call had returned and covered every resource.
 anything, so a fast instance cannot publish before its aggregate exists. An instance that publishes
 before its resource is planned, such as a restarted instance of the previous definition while the
 resource waits for its dependencies, is registered with the state the previous run recorded (G23)
-but does not make the resource ready (G18), unless it repeats the deployment id the plan computes,
-in which case the plan counts it (G43).
+but does not make the resource ready (G18), unless it repeats the deployment id the plan computes
+and renews after the deployment call returned, which shows it survived the deployment (G43).
 
 **G6 — Cancellation is not teardown.** Stopping the run (`StopAsync`, or cancelling `RunAsync`) stops the gateway, during startup or
 after, and leaves what it deployed running. Teardown happens only to a resource that missed its
@@ -306,9 +306,9 @@ the resource current before the gateway calls the provider to deploy it, because
 provider's instances publish before the call returns; an instance that published earlier runs the
 previous definition and is registered without opening the gate. Since G34 the instance must also
 repeat the deployment's id: one an earlier deployment started, such as a pod of the previous
-rollout that restarts, is registered without opening the gate. Since G43 the id alone decides: an
-instance that published before the plan and repeats the id the plan computes opens the gate when
-the plan runs, if it renewed within a lease.
+rollout that restarts, is registered without opening the gate. Since G43 an instance that
+published before the plan and repeats the id the plan computes opens the gate too, by its first
+renewal after the deployment call returns.
 
 **G19 — A child gateway is one step — superseded by G26.** A parent no longer deploys its
 children, so they are not steps of its deployment. A child waits for its parent's resources itself,
@@ -363,7 +363,8 @@ plan then keeps what still applies: a plan of `None` for the same definition kee
 other plan drops the outputs and the carried instances that have not renewed or published since,
 because the platform replaces the workload; a new definition also clears the state. An instance that
 proved it runs stays registered through an update, so it does not have to publish again, and it does
-not open the startup gate either, unless it repeats the plan's deployment id (G43). *Rejected:* refusing publications until the resource is planned. An
+not open the startup gate either, unless it repeats the plan's deployment id and renews after the
+deployment call returns (G43). *Rejected:* refusing publications until the resource is planned. An
 instance restarted while a long chain deploys would fail its start until the gateway reached it.
 
 **G24 — Outputs from above travel down in deployment manifests — superseded by G26.** A parent no
@@ -497,7 +498,7 @@ the old program first (Gateway.InProcess I8).
 - **Repeated.** The instance repeats it in its manifest (`ApplicationInstanceManifest.Deployment`).
   A publication opens the gate only when it repeats the plan's id; any other is registered without
   opening it. Since G43 an early publication that repeats the id the plan computes counts too,
-  while its lease is live.
+  once the instance renews after the deployment call returns.
 
 *Rejected:*
 - The revision alone as the id. It leaves the settings' values out (G22), so after an update that a
@@ -748,39 +749,58 @@ await gateway.RunAsync(cancellationToken);
   program or a test that shares one platform object between gateways or keeps it past the gateway.
 
 **G43 — An instance that publishes before its resource is planned counts when it repeats the
-plan's deployment (2026-11-01).** An end-to-end run on kind failed this way. A gateway was stopped,
-`kubectl rollout restart` replaced its pods, and the gateway was started again. Its startup failed
-after `StartupTimeout`, naming the storefront, while the storefront's pod was ready. The restarted
-pod published as soon as the new run opened publications (G5), before the storefront's step planned
-it, and afterwards it only renewed. The rollout had not settled, so the plan was an `Update`; its
-id was the one the pod repeated, because the same inputs give the same id (G34). The registration
-had seen the resource not yet current and left the gate shut, and nothing reopened that decision,
-so the window ran out.
-- **The id decides, not the order.** When the plan makes a deployment, it scans the instances still
-  registered after it drops the carried ones (G23). It opens the gate when one of them repeats the
-  plan's id. An instance of any other deployment still leaves it shut (G34). The drop comes first
-  because a record from a persistent store still holds the pod a `rollout restart` killed, with the
-  same id; a carried instance counts only once it has renewed or published in this run.
-- **Only a live lease counts.** No lease expires until the startup windows end (G23), so a
-  registration that is still there is no evidence that its instance still runs: a pod of an
-  in-progress rollout can publish and be terminated minutes before a resource that waits on its
-  dependencies is planned. The scan counts an instance only when it renewed within a lease
-  (`LeaseDuration`). A live instance renews every third of a lease, so the restarted pod above
-  still opens the gate; a dead one leaves the window to the platform's watch and `StartupTimeout`.
-- **No registration slips between the two.** The scan runs under the lock that registration takes,
-  after the resource becomes current. A registration that takes the lock first is in the scan. One
-  that takes it later reads the resource current and its deployment set, and opens the gate itself.
-- **A closed window stays closed.** The plan leaves pending with the same atomic transition a
+plan's deployment and renews after the deployment (2026-11-01).** An end-to-end run on kind failed
+this way. A gateway was stopped, `kubectl rollout restart` replaced its pods, and the gateway was
+started again. Its startup failed after `StartupTimeout`, naming the storefront, while the
+storefront's pod was ready. The restarted pod published as soon as the new run opened publications
+(G5), before the storefront's step planned it, and afterwards it only renewed. The rollout had not
+settled, so the plan was an `Update`; its id was the one the pod repeated, because the same inputs
+give the same id (G34). The registration had seen the resource not yet current and left the gate
+shut, and nothing reopened that decision, so the window ran out.
+- **The id decides which instance counts; a renewal after the deployment decides when.** A
+  registration that repeats the plan's id runs what the plan deploys, but it predates the
+  deployment, which may still remove it. So once the provider's `DeployResourceAsync` returns, the
+  gateway marks the resource deployed, and from then on a renewal of a registered instance whose
+  manifest repeats the plan's id opens the gate. An instance the deployment removed never renews
+  again, and its replacement's publication opens the gate instead. An instance of any other
+  deployment still leaves it shut (G34), and a publication after the plan opens it as before (G18),
+  even before the mark, because an in-process provider's instances publish before the call returns.
+- **A renewal before the mark proves nothing.** One that arrives between the plan and the mark may
+  come from an instance the call is about to remove, so it does not count; the instance's next
+  renewal does. The plan opens the gate only for a plan of `None`.
+- **Carried instances count only once they prove they run.** The plan drops the carried instances
+  that have not renewed or published in this run (G23) before anything counts, because a record
+  from a persistent store still holds the pod a `rollout restart` killed, with the same id; a
+  dropped instance's renewal is refused, and it publishes again.
+- **No renewal slips past the mark.** Registration, renewal, the plan, and the mark share one lock.
+  A renewal that takes it before the mark does not count; one that takes it after reads the mark
+  and the plan's deployment, and opens the gate itself.
+- **A closed window stays closed.** A renewal leaves pending with the same atomic transition a
   registration uses (G4), so it never reopens a window that closed.
+- **Cost.** Adopting a surviving instance waits for its next renewal, up to a third of a lease
+  (`LeaseDuration / 3`, ten seconds at the default lease) after the deployment call returns. The
+  restarted pod above still opens the gate well within `StartupTimeout`.
+
+*Superseded the same day:* the plan scanned the instances still registered and opened the gate for
+one that repeated its id and had renewed within a lease. A run on Docker showed why that evidence
+came too early. Containers in a restart loop while no gateway ran published to the restarted gateway
+before the plan; the Docker plan was an `Update` with the same id, because the workload was
+unhealthy, so the scan opened the gate. `DeployResourceAsync` then removed and recreated those
+containers (Gateway.Docker GD5), and startup reported the resource ready about a tenth of a second
+later, before any new container could publish. A lease renewed before the deployment shows that the
+instance ran before it, not that it survived it. Kubernetes passed only because its `Update` after
+a rollout restart re-applies an unchanged template, so the pods survive.
 
 *Rejected:* refusing publications until the resource is planned, for G23's reason. Also rejected:
 counting every early publication, which would let a pod of an earlier rollout stand in for the
-update again (G34); and starting the expiry sweep when publications open instead of checking the
-lease in the scan, which would also expire carried instances during startup and change G23.
+update again (G34); asking the provider which instances its deployment kept, which would add a
+contract member every platform must answer for what a renewal already shows; and starting the
+expiry sweep when publications open, which would also expire carried instances during startup and
+change G23.
 
-A provider that finishes its own rollouts on a publication must accept that the publication can
-come before the plan: since G43 the Docker provider also finishes a rollout on a renewal of an
-accepted container (cohesion-platforms).
+A provider that finishes its own rollouts on a publication must accept that the instance that
+completes one can have published before the plan, and afterwards only renews: since G43 the Docker
+provider also finishes a rollout on a renewal of an accepted container (cohesion-platforms).
 
 ## AOT
 
