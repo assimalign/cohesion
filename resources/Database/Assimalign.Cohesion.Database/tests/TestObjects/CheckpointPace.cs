@@ -479,3 +479,125 @@ internal static class CheckpointPace
         }
     }
 }
+
+
+internal static class CheckpointLoad
+{
+    internal const long JournalSize = 64 * 1024;
+
+    internal static async Task RunAsync(Assimalign.Cohesion.Database.Storage.Storage storage,
+        Func<int, long, CancellationToken, Task> write, Action<string> report)
+    {
+        // Arrange: Windows process affinity includes every writer and checkpoint lane.
+        // Linux affinity is per thread; no workload-affinity claim is made there.
+        using var process = Process.GetCurrentProcess();
+        IntPtr previous = IntPtr.Zero;
+        if (OperatingSystem.IsWindows())
+        {
+            previous = process.ProcessorAffinity;
+            long selected = 0;
+            int cores = 0;
+            for (int bit = 0; bit < 63 && cores < 3; bit++)
+            {
+                long mask = 1L << bit;
+                if ((previous.ToInt64() & mask) == 0) { continue; }
+                selected |= mask;
+                cores++;
+            }
+            process.ProcessorAffinity = (IntPtr)selected;
+        }
+        using var ceiling = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        using var stop = new CancellationTokenSource();
+        using var observation = new Observation(storage.Name);
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var counts = new long[4];
+        var watch = Stopwatch.StartNew();
+        var writers = Enumerable.Range(0, 4).Select(writer => DedicatedTestTask.Run(async () =>
+        {
+            await ready.Task;
+            long next = 0;
+            while (!stop.IsCancellationRequested)
+            {
+                await write(writer, next++, ceiling.Token);
+                Interlocked.Increment(ref counts[writer]);
+                observation.Observe(storage.JournalLength);
+            }
+        }, CancellationToken.None)).ToArray();
+        try
+        {
+            // Act: a minimum exposure followed by counter-driven progress, with a hang guard.
+            ready.SetResult();
+            do
+            {
+                await Task.Delay(10, ceiling.Token);
+                foreach (var writer in writers.Where(writer => writer.IsCompleted)) { await writer; }
+            }
+            while (watch.Elapsed < TimeSpan.FromSeconds(2) || observation.Checkpoints < 4 ||
+                counts.Any(count => count < 32));
+        }
+        finally
+        {
+            stop.Cancel();
+            try { await Task.WhenAll(writers); }
+            finally
+            {
+                if (OperatingSystem.IsWindows()) { process.ProcessorAffinity = previous; }
+            }
+        }
+        // Assert: record the baseline before changing checkpoint admission.
+        long writes = counts.Sum();
+        string measured = $"{storage.Name}: writes={writes}, checkpoints={observation.Checkpoints}, " +
+            $"checkpoints/write={(double)observation.Checkpoints / writes:F6}, " +
+            $"checkpoints/s={observation.Checkpoints / watch.Elapsed.TotalSeconds:F2}, " +
+            $"peak={observation.Peak} ({(double)observation.Peak / JournalSize:F2}x), " +
+            $"deferred={observation.Deferred}, busy={observation.Busy}, seconds={watch.Elapsed.TotalSeconds:F2}";
+        report(measured);
+        counts.ShouldAllBe(count => count >= 32, measured);
+        observation.Checkpoints.ShouldBeGreaterThanOrEqualTo(4, measured);
+        observation.Errors.ShouldBe(0, measured);
+        storage.IsOffline.ShouldBeFalse(measured);
+    }
+
+    private sealed class Observation : EventListener
+    {
+        private readonly string _database;
+        private long _peak;
+        internal Observation(string database)
+        {
+            _database = database;
+            foreach (var source in EventSource.GetSources().Where(source => source.Name is
+                "Assimalign.Cohesion.Database.Storage" or "Assimalign.Cohesion.Database.Transactions"))
+            { EnableEvents(source, EventLevel.Verbose, EventKeywords.All); }
+        }
+        internal long Peak => Interlocked.Read(ref _peak);
+        internal long Checkpoints;
+        internal long Deferred;
+        internal long Busy;
+        internal long Errors;
+        internal void Observe(long value)
+        {
+            long current = Interlocked.Read(ref _peak);
+            while (value > current)
+            {
+                long before = Interlocked.CompareExchange(ref _peak, value, current);
+                if (before == current) { break; }
+                current = before;
+            }
+        }
+        protected override void OnEventWritten(EventWrittenEventArgs data)
+        {
+            if (data.EventId == 0) { Interlocked.Increment(ref Errors); return; }
+            if (data.Payload is not { Count: > 0 } payload || !Equals(payload[0], _database)) { return; }
+            if (data.EventSource.Name == "Assimalign.Cohesion.Database.Storage")
+            {
+                if (data.EventId == 5) { Observe((long)payload[2]!); }
+                if (data.EventId == 6 && Equals(payload[1], "Success")) { Interlocked.Increment(ref Checkpoints); }
+            }
+            else
+            {
+                if (data.EventId == 15) { Interlocked.Increment(ref Deferred); }
+                if (data.EventId == 16 && Equals(payload[1], "BracketOpen")) { Interlocked.Increment(ref Busy); }
+            }
+        }
+    }
+}
