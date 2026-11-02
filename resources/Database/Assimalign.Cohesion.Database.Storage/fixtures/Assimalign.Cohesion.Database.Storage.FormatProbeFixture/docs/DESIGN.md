@@ -4,6 +4,8 @@ The executable creates a real database with the selected engine, closes its init
 leaves committed catalog/root changes and stolen uncommitted physical pages in the journal.
 Environment.Exit skips unwinding the live brackets. Engine tests invoke this process, preserve
 all refused files byte for byte, or tear journal-covered pages and verify exact recovery.
+Graph cases include format-4 entities and physical registrations (CG06017), catalog versions
+(CG06019) and B-tree root stamps (CK06101).
 
 The fixture depends on the model assemblies, which use Storage:
 

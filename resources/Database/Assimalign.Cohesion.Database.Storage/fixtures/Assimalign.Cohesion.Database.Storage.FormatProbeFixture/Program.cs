@@ -104,6 +104,17 @@ internal static class Program
                 var bracket = typed.BeginTransaction(); typed.InsertEntry(bracket, record); bracket.Commit(); storage = typed;
             }
         }
+        if (storage is GraphStorage graph && args[2] is "entity" or "registration")
+        {
+            using var records = graph.GetUnitIterator(args[2] == "entity" ? 2UL : 1UL);
+            if (!records.MoveNext()) { throw new InvalidOperationException("Graph seed has no format-gated record."); }
+            var unit = records.Current;
+            byte[] bytes = unit.Data.ToArray();
+            bytes[17] = 4;
+            var bracket = graph.BeginTransaction();
+            graph.UpdateEntry(bracket, unit.PageId, unit.SlotIndex, bytes);
+            bracket.Commit();
+        }
         { // Journal each current root too, so a torn format stamp remains recoverable.
             var bracket = storage.BeginTransaction();
             for (long id = 1; id < storage.Data.Length / Page.Size; id++)
