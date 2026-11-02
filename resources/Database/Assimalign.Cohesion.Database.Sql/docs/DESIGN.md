@@ -7600,7 +7600,7 @@ bounded peer-sent names) are in the area's
 | 18 | `DeferredStepBound` | Informational | — | `engineName`, `database`, `table`, `objectName`, `kind`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
 | 19 | `DeferredStepProgress` | Verbose | — | same as 18 |
 | 20 | `DeferredStepCompleted` | Informational | — | same as 18, `outcome` (`Applied`, `Error`, `Cancelled`), `durationMilliseconds` |
-| 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (`CS03104`), `exceptionType` (no message) |
+| 21 | `DeferredStepFailed` | Error | — | same as 18, `code` (the provisioning failure code: `CS03402` or `CS03403` for a joint TYPE migration, `CS03104` otherwise), `exceptionType` (no message) |
 | 22 | `ScriptApplied` | Informational | — | `engineName`, `database`, `script`, `hash`; never the script body |
 | 23 | `TableReclamationStarted` | Informational | — | `engineName`, `database`, `objectId` (retired identity) |
 | 24 | `TableReclamationCompleted` | Informational | — | same as 23, `pages` (durable data/index frees in this process) |

@@ -820,10 +820,14 @@ function Invoke-Build {
         }
         if ($null -ne $t -and $null -ne $planTier -and $t -ne $planTier) { Add-Warn 'tier-field-vs-plan' "The Tier field says $t; the plan says $planTier. The field wins." "i$n" $null }
         if ($null -eq $t -and $null -ne $planTier) { $t = $planTier; $src = $(if ($tierItemByNum.ContainsKey($n) -and $tierItemByNum[$n].tier) { 'plan' } else { 'family' }) }
-        if ($null -eq $t -and $it.planFamilyLine) {
+        # A family line names the item's plan family whatever set its tier: an issue filed with both the
+        # Tier field and the line (every T2 family issue) still fills its family's slot. The line sets the
+        # tier only when nothing else did.
+        if ($it.planFamilyLine) {
             $slug = [string]$it.planFamilyLine.slug
             if ($familyBySlug.ContainsKey($slug)) {
-                $t = [string]$it.planFamilyLine.tier; $src = 'family-line'
+                if ($null -eq $t) { $t = [string]$it.planFamilyLine.tier; $src = 'family-line' }
+                elseif ($t -ne [string]$it.planFamilyLine.tier) { Add-Warn 'tier-field-vs-family-line' "The tier is $t; the body's family line says $([string]$it.planFamilyLine.tier). The tier wins." "i$n" $slug }
                 if (-not $familyOf.ContainsKey($n)) { $familyOf[$n] = $familyBySlug[$slug] }
                 $famLineOf[$n] = $familyBySlug[$slug]
             }

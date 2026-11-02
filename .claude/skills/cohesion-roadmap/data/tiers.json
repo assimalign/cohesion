@@ -285,9 +285,9 @@
       "name": "GRANT / REVOKE, roles",
       "today": "No",
       "expected": "Everyone",
-      "add": "T2, with the security model (#177)",
-      "tiers": ["T2"],
-      "items": { "T2": [177] },
+      "add": "T3, with the security model (#177); moved from T2 by T2 plan v3 decision 2 (owner, 2026-10-25)",
+      "tiers": ["T3"],
+      "items": { "T3": [177] },
       "unfiled": [],
       "notes": "#177 is the pre-existing security task; no language-surface item."
     },
@@ -444,10 +444,10 @@
       "name": "Operators",
       "today": "Arithmetic, comparison, LIKE, BETWEEN, IN, IS NULL, ||, CASE, COALESCE",
       "expected": "IS [NOT] DISTINCT FROM, LIKE ... ESCAPE, ILIKE, bitwise, ::",
-      "add": "T1 first two; T2 the rest",
-      "tiers": ["T1", "T2"],
+      "add": "T1 first two; T2 the rest; T3 regex (~, ~*, !~, !~*, SIMILAR TO, regexp_*) and ^ (Database T3 plan v1, 2026-11-02)",
+      "tiers": ["T1", "T2", "T3"],
       "items": { "T1": [1111] },
-      "unfiled": ["T2"],
+      "unfiled": ["T2", "T3"],
       "notes": "T2 = ILIKE, bitwise operators, the :: cast shorthand."
     },
     {
@@ -471,10 +471,10 @@
       "name": "Scalar functions",
       "today": "5 run; the rest of the lexer's list fails at run time",
       "expected": "PG ~300, SQL Server ~200, SQLite ~60 core",
-      "add": "T1 core ~40 (NULLIF, string, math, date/time, GUID); T2 JSON (JSON_VALUE, ->>)",
-      "tiers": ["T1", "T2"],
+      "add": "T1 core ~40 (NULLIF, string, math, date/time, GUID); T2 JSON (JSON_VALUE, ->>); T3 JSONB normalization, full SQL/JSON path, containment and key operators, JSON_TABLE, JSON constructors and aggregates (Database T3 plan v1, 2026-11-02)",
+      "tiers": ["T1", "T2", "T3"],
       "items": { "T1": [1120] },
-      "unfiled": ["T2"],
+      "unfiled": ["T2", "T3"],
       "notes": "#1120 fixes the T1 list at 42 names and owns the transaction-start clock ruling.",
       "bodySlugs": ["sql-functions"]
     },
@@ -553,10 +553,10 @@
       "name": "COPY ... FROM STDIN / TO STDOUT",
       "today": "No; COPY is an unknown command (SQL0002)",
       "expected": "PG COPY FROM STDIN / TO STDOUT; SQL Server BULK INSERT; MySQL LOAD DATA [LOCAL] INFILE",
-      "add": "T2: FROM STDIN and TO STDOUT; server-side files and PROGRAM get COHDBL001 (D7); BULK INSERT and LOAD DATA are not added (D1)",
-      "tiers": ["T2"],
+      "add": "T2: FROM STDIN and TO STDOUT; server-side files and PROGRAM get COHDBL001 (D7); BULK INSERT and LOAD DATA are not added (D1). T2 delivered TO STDOUT; T3 adds the query form and a credit window, and FROM STDIN moves to the bulk-load program (Database T3 plan v1, T3-11)",
+      "tiers": ["T2", "T3"],
       "items": {},
-      "unfiled": ["T2"],
+      "unfiled": ["T2", "T3"],
       "notes": "Spelling only (D7). FROM STDIN runs on #1545's bulk stream (the filed task depends on #1545), and rows pass INSERT's admission (ExecuteInsertRowsAsync, SqlPlanExecutor.InsertSelect.cs:49), as PostgreSQL COPY FROM runs ExecConstraints per row (copyfrom.c:1360). Batches commit on their own (D7 b), so COPY inside BEGIN gets a coded error, as does COPY without the negotiated bulk capability (#1656). TO STDOUT streams through DatabaseStreamingExchange, as Blob downloads do (BlobConnection.cs:503)."
     },
     {
@@ -1881,7 +1881,7 @@
       "type": "Task",
       "wbs": "L03.02.02.02.01.03",
       "language": "SQL",
-      "tier": "T2",
+      "tier": "T3",
       "family": "sql-grants",
       "title": "Add relational security behavior for principals, permissions, and schema changes"
     },

@@ -71,9 +71,23 @@ This document is the durable architecture record for the multi-model OLTP databa
 published by a model through a protected setter. Its vocabulary is operation, object name,
 position/total, running state, optional processed/total rows and failure code. It carries no SQL
 schema capability, executor, or interface. Hosting can report Degraded while an engine performs
-deferred provisioning through its own `DatabaseEngineWorkerKind.Provisioning` worker. Failures
-use the existing database-offline channel; `StorageOfflineCause.ProvisioningFailure` identifies
-failed migration work, and `RecoveryInterrupted` fences a canceled recovery from shutdown writes.
+deferred provisioning through its own `DatabaseEngineWorkerKind.Provisioning` worker.
+
+The two SQL migration paths fail differently:
+
+- **A deferred 49a step that fails** uses the existing database-offline channel (`CS03104`).
+  `StorageOfflineCause.ProvisioningFailure` identifies failed migration work, and
+  `RecoveryInterrupted` fences a canceled recovery from shutdown writes.
+- **A migration that rewrites a column type** publishes jointly (#1447). The whole migration is
+  prepared unpublished and published in one catalog commit.
+  - A failure before publication leaves the database online at the old schema (`CS03402`), and the
+    unpublished work is discarded.
+  - A publication whose commit is unconfirmed reports `CS03403`, and recovery decides old or new.
+  - Only storage-safety failures still take the database offline: a journal write or flush whose
+    outcome is unknown, an unconfirmed commit wait, a durable data-flush failure, and the
+    engine-wide write-back and checkpoint policies (owner confirmation, 2026-11-02).
+
+Publishing 49a's steps jointly as well is #1778. The SQL design records both paths.
 
 The root `IDatabaseApplicationBuilder.Build()` stays parameterless, as O34 specifies for all 18
 areas (owner decision 2026-10-11). The concrete hosting builder retains
@@ -112,7 +126,7 @@ The platform runs in two modes, matching Cohesion's identity:
 | # | Requirement | Where it lands |
 |---|---|---|
 | R7 | **Database projects.** A consumer creates an ordinary executable (`<Project Sdk="Assimalign.Cohesion.Sdk.Database">`) whose `Program.cs` composes engines and their servers, and declares the databases each engine owns with their C# schemas on the model's engine builder (`builder.AddSql("orders-sql", sql => sql.AddDatabase("sales", database => database.Schema(...)))`). `Database.Sql.Schema` owns SQL tables, custom types (domains of the SQL engine since E3) and database-scoped principals (refused at engine Build until their DDL exists, and at the SDK build with `COHDBSDK108`). Runtime and static build compilation produce the same canonical `SqlCompiledSchema` document/hash ([current format](../../../resources/Database/Assimalign.Cohesion.Database.Sql.Schema/docs/DESIGN.md#fixed-length-schema-columns-1437)); the SDK writes one artifact pair per declared database, `$(IntermediateOutputPath)cohesion/database/<database>.schema.json` and `.schema.sha256`, from the inline `database.Schema(...)` or a `SqlSchema.Create`/`Compile` declaration (owner decision 59 of 2026-10-09). The area root holds no schema type (owner decision 50 of 2026-10-09); other models own their own vocabulary. The SDK emits no resource manifest; `builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel` opts the application into management at runtime. | `Database.Sql.Schema` + `Sdk.Database` targets/Tasks (#857–#859, A3) |
-| R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: for one declared database (`CohesionDatabaseName`, optional when the project declares one), diff its compiled schema model against that database's ordinal baseline under `Migrations/<database>/` (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks, idempotent catalog hashing, and reverse-order compensation of completed reversible statements. The landed catalog remains self-committing per statement, so fully atomic destructive multi-statement DDL awaits a batch-transaction seam. | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
+| R8 | **Migrations as a build tool.** The SQL model gets a migration tool implemented in the Database SDK: for one declared database (`CohesionDatabaseName`, optional when the project declares one), diff its compiled schema model against that database's ordinal baseline under `Migrations/<database>/` (or a live catalog), emit ordered engine-dialect migration scripts, and apply with destructive compatibility checks, idempotent catalog hashing, and reverse-order compensation of completed reversible statements. The landed catalog remains self-committing per statement, so fully atomic destructive multi-statement DDL awaits a batch-transaction seam. The exception, since #1447, is a migration that rewrites a column type: all its steps publish in one catalog commit with no compensation, and a failure before publication leaves the old schema online. Other migrations keep decision 49a's per-step path (#1778 would publish them jointly too). | `Sdk.Database` Tasks (`Assimalign.Cohesion.Sdk.Database.Migration.targets`), runtime apply engine in `Database.Sql` + durable state in `Database.Sql.Catalog` |
 | R9 | **Model-specific build tools, loaded by model.** The SDK inspects `$(CohesionDatabaseModel)` on the consumer project and selects from explicit static imports (`Sdk.Database.Sql.targets`, `Sdk.Database.KeyValuePair.targets`). SQL compiles schema artifacts and generates migrations. After A3 removed the shared collection shape, KeyValuePair compilation and migration generation fail explicitly until that model supplies its own schema package and catalog/statement surface. Static allowlisted MSBuild imports — no consumer-controlled path or runtime plugin loading — keep this AOT-clean. | `sdks/Assimalign.Cohesion.Sdk.Database/Targets/` |
 
 ### 2.3 Explicit non-goals (for the MVP)

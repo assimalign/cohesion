@@ -267,7 +267,7 @@ public abstract class DatabaseTransaction : IAsyncDisposable
     /// <param name="configure">Replaces the model's context synchronously without waiting on engine locks; false refuses the change.</param>
     /// <returns>True if configuration completed; false if the model refuses, the transaction is ending or operations are running.</returns>
     /// <exception cref="ArgumentNullException">The configuration action is null.</exception>
-    // Deviates from the repo database-area.md rule 6 (state fixed at construction) per design decision: SQL SET TRANSACTION may change the isolation level before the first data statement (#1012); pending owner sign-off.
+    // Deviates from the repo database-area.md rule 6 (state fixed at construction) per design decision: SQL SET TRANSACTION may change the isolation level before the first data statement (#1012); owner sign-off 2026-11-02, recorded as rule 6's exception.
     protected bool TryConfigureIsolationLevel(IsolationLevel isolationLevel, Func<bool> configure)
     {
         ArgumentNullException.ThrowIfNull(configure);

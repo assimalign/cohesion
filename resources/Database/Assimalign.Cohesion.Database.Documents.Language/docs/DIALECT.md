@@ -148,7 +148,7 @@ The retired ODMG EXISTS binding quantifier remains a named CK00001 refusal.
 
 `value [NOT] IN (SELECT RAW ...)` uses existing array IN semantics. VALUE is accepted as RAW's
 existing synonym. A direct SELECT without RAW/VALUE in this position gives CD00014 at SELECT.
-This conservative guard is deliberately narrower than Couchbase, pending owner sign-off;
+This conservative guard is deliberately narrower than Couchbase (owner sign-off, 2026-11-02);
 an extra pair of parentheses denotes an ordinary expression in the existing value-list grammar.
 MISSING on the left propagates MISSING; NULL on the left remains NULL, even for an empty array.
 A match wins over null elements; an unmatched null element yields NULL. Nested RAW MISSING rows

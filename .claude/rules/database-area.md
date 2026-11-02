@@ -127,7 +127,11 @@ contracts in this sense and stay.
    through a protected, non-virtual one-shot setter that throws on a second call: a server
    session exists from accept, before its handshake, so its negotiated protocol version and
    authenticated principal are set this way (owner decision, 2026-10-06; O34a). State changes go
-   through protected, non-virtual methods on the base, never through overridable setters. A base that owns products filled in
+   through protected, non-virtual methods on the base, never through overridable setters. One
+   exception: a transaction's isolation level may be replaced until its first data statement,
+   because SQL `SET TRANSACTION` configures the transaction `BEGIN` opened. The protected,
+   non-virtual `DatabaseTransaction.TryConfigureIsolationLevel` refuses once an operation ran or a
+   savepoint exists (owner decision, 2026-11-02; #1012, #1769). A base that owns products filled in
    by a model assembly, such as an engine's workers and servers, accepts them through
    non-virtual `protected` attach methods. Those methods throw `InvalidOperationException` once
    composition is frozen after build.
