@@ -104,16 +104,10 @@ expression renderer, avoiding a second literal grammar; it does not pull the SQL
 carrier check explicitly requires `SqlTableReference`; a derived relation cannot
 be substituted for the fixed carrier. No reference or schema-artifact format changes.
 
-## Orchestration commands
+## Managed resources
 
-When `CohesionApplicationModel=enabled`, the `Assimalign.Cohesion.Sdk.ApplicationModel`
-manifest task writes this SDK's `CohesionCommand` defaults, `database.add-database` and
-`database.add-principal`, as bare strings in `commands`; neither sets `RequiresInputResolver`,
-the metadata that switches an entry to the object form. These advertise the Database
-default control plane's bounded command set. Typed declarations ship in
-Database.ApplicationModel, and the gateway delivers them through its generic
-`ResourceControlPlaneCommandClient`; the SDK never executes them or places payloads in
-the manifest. The schema compiler and migration path remain independent.
+The SDK emits no resource manifest, and a Database application becomes a managed resource with
+`builder.Services.AddResource(...)` from `Database.Hosting.ApplicationModel`.
 
 ## Model selection
 
