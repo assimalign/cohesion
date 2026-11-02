@@ -427,7 +427,7 @@ The integration architecture, in the order the work items landed:
   `Assimalign.Cohesion.Database` event source carries); a database a failed fsync, journal drain
   or header slot write took offline is unhealthy until it is reopened, and every lock wait on it ends with the
   coded refusal (`TransactionCoordinator.AbandonLockWaits`). `Database.Hosting`'s internal admin service exposes the aggregate over private
-  `Web.Health` routes (`/healthz`, `/readyz`, `/livez`) when explicitly started; all `/cohesion/v1` routes return 403. No production path starts the admin service today (T3 EN-A1).
+  `Web.Health` routes (`/healthz`, `/readyz`, `/livez`) when explicitly started. Under `/cohesion/v1` only the namespaced health aliases answer, to loopback callers only, and every other `/cohesion/v1` route (the retired resource control plane) returns 403. No production path starts the admin service today (T3 EN-A1).
   This realizes the observational
   surface without adding a Database-specific health abstraction or treating the wire protocol's
   `Ping` frame as readiness. Each Database application owns its context and health observations.

@@ -6,7 +6,9 @@ an ApplicationModel package.
 
 The resource integration is `Assimalign.Cohesion.Database.Hosting.ApplicationModel`, with explicit
 `builder.Services.AddResource(...)` registration. `DatabaseAdminEndpointService` exists and can
-serve Web.Health's `/healthz`, `/readyz`, and `/livez`; every `/cohesion/v1` route returns 403.
+serve Web.Health's `/healthz`, `/readyz`, and `/livez`. Under `/cohesion/v1`, only the namespaced
+health aliases (`healthz`, `readyz`, `livez`) answer, and only to loopback callers; every other
+`/cohesion/v1` route, the retired resource control plane, returns 403.
 Nothing in production starts that service today. T3 run EN-A1 binds it on the platform's `http`
 endpoint.
 
