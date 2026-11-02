@@ -41,6 +41,35 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
     /// </summary>
     public ConcurrentDictionary<ResourceName, Func<Task>> Delayed { get; } = new();
 
+    /// <summary>
+    /// Resources whose planning waits until the task the function returns completes, as a platform
+    /// slow to read what it runs does; the plan call is recorded before it waits.
+    /// </summary>
+    public ConcurrentDictionary<ResourceName, Func<Task>> PlanDelays { get; } = new();
+
+    /// <summary>
+    /// Resources whose rollout has not finished, so their plan is an update even when the platform
+    /// runs their definition, as a Kubernetes deployment whose pods are restarting.
+    /// </summary>
+    public HashSet<ResourceName> RollingOut { get; } = [];
+
+    /// <summary>
+    /// Resources whose deployment removes the instances already running before it starts its own, as
+    /// the Docker platform recreates the containers of a deployment caught in a restart loop; the
+    /// removed instances stop renewing.
+    /// </summary>
+    public HashSet<ResourceName> Replacing { get; } = [];
+
+    /// <summary>
+    /// Resources whose deployment, before it removes the running instances (<see cref="Replacing"/>),
+    /// waits until the task the function returns completes, as a platform's removal takes time
+    /// while the doomed instances still renew; the deploy call is recorded before it waits.
+    /// </summary>
+    public ConcurrentDictionary<ResourceName, Func<Task>> ReplaceDelays { get; } = new();
+
+    /// <summary>How many renewals each instance has sent the gateway, known or not.</summary>
+    public ConcurrentDictionary<InstanceKey, int> Renewals { get; } = new();
+
     public ScaleAction Scale { get; } = new();
 
     public List<string> Deployed { get; } = [];
@@ -140,7 +169,7 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         return [Scale];
     }
 
-    public ValueTask<ApplicationGatewayDeploymentPlan> PlanResourceAsync(
+    public async ValueTask<ApplicationGatewayDeploymentPlan> PlanResourceAsync(
         IApplicationModel model,
         ApplicationResourceManifest resource,
         IReadOnlyDictionary<SettingName, string> settings,
@@ -149,17 +178,22 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         Record($"plan:{resource.Name}");
         Planned[resource.Name] = settings;
         Seen[resource.Name] = resource;
+        if (PlanDelays.TryGetValue(resource.Name, out Func<Task>? delay))
+        {
+            await delay.Invoke().WaitAsync(cancellationToken);
+        }
 
         // A workload that runs other settings or extensions needs an update; the revision leaves
         // both out.
         string revision = Revisions.GetValueOrDefault(resource.Name, "1");
         ApplicationGatewayDeploymentChange change = !Running.TryGetValue(resource.Name, out string? running) ? ApplicationGatewayDeploymentChange.Create
             : running == revision
+                && !RollingOut.Contains(resource.Name)
                 && SameSettings(RunningSettings.GetValueOrDefault(resource.Name), settings)
                 && RunningExtensions.GetValueOrDefault(resource.Name, string.Empty) == Describe(resource.Extensions) ? ApplicationGatewayDeploymentChange.None
             : ApplicationGatewayDeploymentChange.Update;
 
-        return ValueTask.FromResult(new ApplicationGatewayDeploymentPlan(change, revision));
+        return new ApplicationGatewayDeploymentPlan(change, revision);
     }
 
     public async ValueTask DeployResourceAsync(
@@ -177,6 +211,24 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         RunningExtensions[resource.Name] = Describe(resource.Extensions);
         Seen[resource.Name] = resource;
         Running[resource.Name] = Revisions.GetValueOrDefault(resource.Name, "1");
+        if (Replacing.Contains(resource.Name))
+        {
+            if (ReplaceDelays.TryGetValue(resource.Name, out Func<Task>? replace))
+            {
+                await replace.Invoke().WaitAsync(cancellationToken);
+            }
+
+            foreach (KeyValuePair<InstanceKey, (TestInstance Instance, ApplicationInstanceService Service)> entry in Instances)
+            {
+                if (entry.Value.Instance.Provider == resource.Provider
+                    && entry.Value.Instance.Name == resource.Name
+                    && Instances.TryRemove(entry.Key, out _))
+                {
+                    await entry.Value.Service.StopAsync(cancellationToken);
+                }
+            }
+        }
+
         if (Silent.Contains(resource.Name) || Crashing.ContainsKey(resource.Name))
         {
             return;

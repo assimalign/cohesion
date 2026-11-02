@@ -1,6 +1,12 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Web">
-  <!-- A resource executable: Sdk.Web makes it self-contained for the host RID and adds App + App.Web. -->
+  <!--
+    A resource executable: Sdk.Web makes it self-contained for the host RID and adds App + App.Web.
+    It opts into the in-process platform, so its build emits the bridge an in-process gateway binds.
+  -->
   <PropertyGroup>
     <RootNamespace>GatewayWebResource</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Assimalign.Cohesion.ApplicationModel.Hosting.InProcess" Version="$(CohesionVersion)" />
+  </ItemGroup>
 </Project>

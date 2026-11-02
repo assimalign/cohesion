@@ -45,14 +45,17 @@ public sealed class GatewaySdkTests
     }
 
     /// <summary>
-    /// An in-process gateway references the Sdk.Web resource project it runs. Resource executables
-    /// are self-contained, so the gateway must be too: the build accepts the reference (no
-    /// NETSDK1151), and the built gateway starts and loads the resource's App.Web types (no
-    /// "No frameworks were found").
+    /// An in-process gateway references a top-level Sdk.Web resource and names it with
+    /// <c>CohesionResource</c>. The resource's build emits the bridge to its entry point, the
+    /// gateway's build binds it, and a bare <c>UseInProcess()</c> runs it: the built gateway starts,
+    /// reads the resource's endpoint output, gets an answer from it over HTTP, then stops and
+    /// disposes. Resource executables are self-contained, so the gateway must be too: the build
+    /// accepts the reference (no NETSDK1151), and the resource's App frameworks load in the
+    /// gateway's process.
     /// </summary>
     /// <returns>A task representing the build and the run.</returns>
-    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - Build: gateway referencing a Sdk.Web resource builds and runs")]
-    public async Task Build_GatewayReferencingWebResource_ShouldBuildAndRunAsync()
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - Run: in-process gateway runs a top-level Sdk.Web resource it binds from project metadata")]
+    public async Task Run_InProcessGatewayWithWebResource_ShouldServeTheResourceAsync()
     {
         // Arrange
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
@@ -60,10 +63,7 @@ public sealed class GatewaySdkTests
 
         // Act
         DotNetBuildResult build = await workspace.BuildAsync("GatewayInProcessConsumer", timeout.Token);
-
-        // Assert
         build.ExitCode.ShouldBe(0, build.Output);
-        build.Output.ShouldNotContain("NETSDK1151", Case.Sensitive);
         string bin = Path.Combine(workspace.ProjectDirectory("GatewayInProcessConsumer"), "bin");
         string apphostName = OperatingSystem.IsWindows() ? "GatewayInProcessConsumer.exe" : "GatewayInProcessConsumer";
         string apphost = Directory.GetFiles(bin, apphostName, SearchOption.AllDirectories).ShouldHaveSingleItem();
@@ -84,7 +84,32 @@ public sealed class GatewaySdkTests
         string output = await standardOutput;
         string error = await standardError;
 
+        // Assert
+        build.Output.ShouldNotContain("NETSDK1151", Case.Sensitive);
+        build.Output.ShouldNotContain("COHAPM", Case.Sensitive);
         process.ExitCode.ShouldBe(0, $"{output}{Environment.NewLine}{error}");
-        output.ShouldContain("gateway=smoke;resource=Assimalign.Cohesion.Web.Hosting", Case.Sensitive);
+        output.ShouldContain("gateway=smoke;resource=smoke-api;instances=1;answer=smoke-api answered", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// A reference with <c>ReferenceOutputAssembly="false"</c> resolves no assembly, so the gateway
+    /// could never run the program it names. The build still hands the reference to the generator,
+    /// which reports it at the referenced project instead of the run failing to find the program.
+    /// </summary>
+    /// <returns>A task representing the build.</returns>
+    [Fact(DisplayName = "Cohesion Test [Sdk.Gateway] - Build: a resource reference whose assembly the gateway does not load is reported")]
+    public async Task Build_ResourceReferenceWithoutOutputAssembly_ShouldReportItAsync()
+    {
+        // Arrange
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using ConsumerWorkspace workspace = ConsumerWorkspace.Create("GatewayUnloadedResourceConsumer", "GatewayWebResource");
+
+        // Act
+        DotNetBuildResult build = await workspace.BuildAsync("GatewayUnloadedResourceConsumer", timeout.Token);
+
+        // Assert
+        build.ExitCode.ShouldBe(0, build.Output);
+        build.Output.ShouldContain("GatewayWebResource.csproj(1,1): warning COHAPM0001", Case.Sensitive);
+        build.Output.ShouldContain("ReferenceOutputAssembly", Case.Sensitive);
     }
 }

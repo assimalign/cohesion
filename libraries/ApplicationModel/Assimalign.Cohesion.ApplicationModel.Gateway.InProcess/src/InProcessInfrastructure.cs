@@ -72,6 +72,10 @@ public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureP
     /// <summary>
     /// Creates the infrastructure with no programs, at a new in-process endpoint.
     /// </summary>
+    /// <remarks>
+    /// The caller owns what it creates. <see cref="InProcessInfrastructureBuilder"/> builds one with
+    /// the programs the gateway program's build bound already, for a gateway to own.
+    /// </remarks>
     public InProcessInfrastructure()
     {
         Endpoint = new Uri(string.Concat(InProcessPlatform.Name.Value, "://", Guid.NewGuid().ToString("N"), "/"));
@@ -128,20 +132,10 @@ public sealed class InProcessInfrastructure : IApplicationGatewayInfrastructureP
     /// <exception cref="ObjectDisposedException">The infrastructure is disposed.</exception>
     public InProcessInfrastructure AddProgram(ProviderName provider, ResourceName name, Func<string[], Task> main)
     {
-        if (provider.Value is null)
-        {
-            throw new ArgumentException(ErrorMessages.ProviderNameMissing, nameof(provider));
-        }
-
-        if (name.Value is null)
-        {
-            throw new ArgumentException(ErrorMessages.ResourceNameMissing, nameof(name));
-        }
-
-        ArgumentNullException.ThrowIfNull(main);
+        InProcessProgram program = InProcessProgram.Create(provider, name, main);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _isDisposed) != 0, this);
 
-        if (!_programs.TryAdd((provider, name), new InProcessProgram(provider, name, main)))
+        if (!_programs.TryAdd((provider, name), program))
         {
             throw new ArgumentException(Format(ErrorMessages.ProgramDuplicate, provider, name), nameof(name));
         }

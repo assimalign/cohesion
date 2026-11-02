@@ -34,6 +34,7 @@ flowchart LR
 | `IInProcessGateway` | What the gateway half registers at its endpoint: an `IApplicationInstancePublisher` that also takes attached control planes (`Attach`). |
 | `InProcessGatewayClient` (internal) | The instance's client: publishes and renews to the gateway registered at its endpoint, names that endpoint as its control plane's address, and attaches the control plane between `StartAsync` and `StopAsync`. |
 | `InProcessControlPlane` (internal) | The control plane as the gateway calls it: every call runs in the execution context the instance attached it from. |
+| `InProcessProgramAttribute` | Names the public entry point a program's build generated, and the provider of the resource it runs, for a gateway program that references it (H6). The Cohesion source generator applies it; application code does not. |
 
 ## Decisions
 
@@ -69,6 +70,21 @@ listener would, never the gateway's. The caller's context is restored once the c
 receives the manifest object itself. An invocation's content is already bytes, written by the
 gateway's serializer, and the gateway half rewraps them with the control plane's own serializer, as
 a request body would be read (ApplicationModel C5).
+
+**H6 — A program's build exposes its entry point (2026-11-01).** A gateway runs a resource's
+program by calling its entry point, and a top-level program's entry point is a private `<Main>$` in an
+internal `Program` that nothing outside its assembly can name. So the program's own build exposes it:
+in an executable that references this package and not the gateway, the Cohesion source generator
+emits a public, `[EditorBrowsable(Never)]` `InProcessEntryPoint` whose `RunAsync(string[] args)`
+calls the entry point (directly when it can name it, otherwise through an `UnsafeAccessor`, which
+works under NativeAOT), in a namespace derived from the assembly name so the bridges of several
+resources never collide. It also applies `[assembly: InProcessProgram(typeof(InProcessEntryPoint), provider)]`,
+with the area of the one `<Area>.Hosting.ApplicationModel` assembly the program references as the
+provider (none when it references none or several). A gateway program's build reads the attribute
+and binds the program (Gateway.InProcess I15). The attribute is the contract between the two
+builds, so it lives here, in the package both reference. A program that ends with a nonzero exit
+code faults the task `RunAsync` returns, as a platform takes a process that exits nonzero for one
+that failed. Design of the generators: [SourceGeneration DESIGN](../../../../analyzers/Assimalign.Cohesion.SourceGeneration/docs/DESIGN.md).
 
 ## AOT
 

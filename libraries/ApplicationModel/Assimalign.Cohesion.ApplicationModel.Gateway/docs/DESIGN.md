@@ -10,6 +10,8 @@
 > seam moved here from ApplicationModel.Definition.
 > Since 2026-10-31 the provider is also the gateway's inbound channel (G39), and the gateway starts, stops,
 > and reports its run through `StartAsync`, `StopAsync`, and `Completion` (G40).
+> Since 2026-11-01 a builder can create its platform from a factory the gateway then owns, and the
+> gateway is `IAsyncDisposable` (G42).
 
 ## Purpose
 
@@ -159,8 +161,8 @@ sequenceDiagram
 
 | Type | Role |
 | --- | --- |
-| `ApplicationGateway`, `IApplicationGateway`, `IApplicationGatewayContext` | The orchestrator. Implements `IApplicationGateway` (`Context`, `Resources`, `StartAsync`, `StopAsync`, `Completion`, G40), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationGatewayParent` (`JoinAsync`, a child's join). `Context` is what the provider's channel receives: the `Model` and the gateway as `Publisher`. `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Model`, `Children`, `StartupTimeout`, and `LeaseDuration`. `CreateBuilder(name)` creates its builder; `RunAsync(ct)`, an extension member in `ApplicationGatewayExtensions`, starts it, waits for its run, and stops it on cancellation. |
-| `ApplicationGatewayBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure, which is also the inbound channel (`UseInfrastructure`, G39), the record store (`UseStore`), the parent (`UseParent`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `Build()` builds the model and the gateway that runs it. |
+| `ApplicationGateway`, `IApplicationGateway`, `IApplicationGatewayContext` | The orchestrator. Implements `IApplicationGateway` (`Context`, `Resources`, `StartAsync`, `StopAsync`, `Completion`, G40, and `DisposeAsync`, which stops the run and disposes the platform the gateway owns, G42), `IApplicationInstancePublisher` (`PublishAsync`, the publication endpoint's logic), and `IApplicationGatewayParent` (`JoinAsync`, a child's join). `Context` is what the provider's channel receives: the `Model` and the gateway as `Publisher`. `RecordAsync` records a write's snapshot and saves the record. `ExecuteAsync` runs an operator's action on one instance and keeps a write on every instance (G38). Exposes `Name`, `Model`, `Children`, `StartupTimeout`, and `LeaseDuration`. `CreateBuilder(name)` creates its builder; `RunAsync(ct)`, an extension member in `ApplicationGatewayExtensions`, starts it, waits for its run, and stops it on cancellation. |
+| `ApplicationGatewayBuilder`, `IApplicationGatewayBuilder` | The builder a gateway program uses: `IApplicationModelBuilder` and `IApplicationGatewayBuilder` side by side (G27). The gateway half sets the infrastructure, which is also the inbound channel (`UseInfrastructure`, G39), the record store (`UseStore`), the parent (`UseParent`), how it calls its instances (`UseInstanceClient`), and `StartupTimeout` and `LeaseDuration`; `UsePlatform(factory)` sets both of a platform's roles from one object the build creates and the gateway owns (G42); `Build()` builds the model and the gateway that runs it. |
 | `IApplicationGatewayParent`, `ApplicationGatewayMembership` | A gateway as its children see it. `JoinAsync(manifest)` registers or renews a child and answers with the values of the outputs its settings use, and a lease (G26). |
 | `IApplicationGatewayInstanceClient` | The gateway's client to an instance (formerly the root's `IApplicationInstanceClient`): how the gateway calls its instances' control planes, where each manifest says, for an action and a restore (G38). The platform's gateway half supplies it through `UseInstanceClient`; a gateway without one runs no operator action (G9). |
 | `IApplicationGatewayInfrastructureProvider` | The platform, named by `Platform`: runs the gateway's inbound channel between `StartAsync(context)` and `StopAsync` (G39), plans a resource with its settings' values (`PlanResourceAsync`), deploys it with those values and the deployment's id its instances must repeat (G34), watches the deployment's workload until an instance publishes and reports one that stops first (`WatchResourceAsync`, G36), reports a deployed resource's outputs (`GetResourceOutputsAsync`), tears resources down, and supplies each resource's infrastructure actions. Every method sees a resource with only its platform's extensions. |
@@ -204,7 +206,8 @@ when every deployment call had returned and covered every resource.
 anything, so a fast instance cannot publish before its aggregate exists. An instance that publishes
 before its resource is planned, such as a restarted instance of the previous definition while the
 resource waits for its dependencies, is registered with the state the previous run recorded (G23)
-but does not make the resource ready (G18).
+but does not make the resource ready (G18), unless it repeats the deployment id the plan computes
+and renews after the deployment call returned, which shows it survived the deployment (G43).
 
 **G6 — Cancellation is not teardown.** Stopping the run (`StopAsync`, or cancelling `RunAsync`) stops the gateway, during startup or
 after, and leaves what it deployed running. Teardown happens only to a resource that missed its
@@ -303,7 +306,9 @@ the resource current before the gateway calls the provider to deploy it, because
 provider's instances publish before the call returns; an instance that published earlier runs the
 previous definition and is registered without opening the gate. Since G34 the instance must also
 repeat the deployment's id: one an earlier deployment started, such as a pod of the previous
-rollout that restarts, is registered without opening the gate.
+rollout that restarts, is registered without opening the gate. Since G43 an instance that
+published before the plan and repeats the id the plan computes opens the gate too, by its first
+renewal after the deployment call returns.
 
 **G19 — A child gateway is one step — superseded by G26.** A parent no longer deploys its
 children, so they are not steps of its deployment. A child waits for its parent's resources itself,
@@ -358,7 +363,8 @@ plan then keeps what still applies: a plan of `None` for the same definition kee
 other plan drops the outputs and the carried instances that have not renewed or published since,
 because the platform replaces the workload; a new definition also clears the state. An instance that
 proved it runs stays registered through an update, so it does not have to publish again, and it does
-not open the startup gate either. *Rejected:* refusing publications until the resource is planned. An
+not open the startup gate either, unless it repeats the plan's deployment id and renews after the
+deployment call returns (G43). *Rejected:* refusing publications until the resource is planned. An
 instance restarted while a long chain deploys would fail its start until the gateway reached it.
 
 **G24 — Outputs from above travel down in deployment manifests — superseded by G26.** A parent no
@@ -491,7 +497,8 @@ the old program first (Gateway.InProcess I8).
   life: on Kubernetes a literal value in the pod template, never a ConfigMap reference.
 - **Repeated.** The instance repeats it in its manifest (`ApplicationInstanceManifest.Deployment`).
   A publication opens the gate only when it repeats the plan's id; any other is registered without
-  opening it, like an early one (G23).
+  opening it. Since G43 an early publication that repeats the id the plan computes counts too,
+  once the instance renews after the deployment call returns.
 
 *Rejected:*
 - The revision alone as the id. It leaves the settings' values out (G22), so after an update that a
@@ -613,7 +620,9 @@ pair of packages (ApplicationModel C5). Its gateway half gives the builder three
 - the channel its instances publish through, which since G39 is the provider itself (`StartAsync`/`StopAsync`; formerly `UseTransport`, G33);
 - the instance client the gateway calls them with (`UseInstanceClient`, G38).
 
-Gateway.InProcess's `UseInProcess(infrastructure)` sets all three from one object. The gateway
+Gateway.InProcess's `UseInProcess(infrastructure)` sets all three from one object; since G42 a
+platform's verb can instead hand the builder a factory (`UsePlatform`), and the gateway owns what it
+creates. The gateway
 therefore has no default client: one built without a client deploys and receives publications, but
 an operator's action fails with `InstanceUnavailable` and names the missing client.
 *Superseded:* the HTTP instance client this library carried on the BCL's `HttpClient` (the 2026-10-30
@@ -689,6 +698,109 @@ platform's class; everything about one resource's rollout says "Deployment".
   use other options, would have changed every revision and deployment id and redeployed every
   resource after an upgrade. The same test class pins two resources' revisions and deployment ids
   as captured at `607b27a53`.
+
+**G42 — A platform from a factory, owned by the gateway (owner, 2026-11-01).** A platform's gateway
+half is one object that is both the infrastructure and the instance client (G9), and before G42 the
+gateway program created it, handed it to `UseInfrastructure` and `UseInstanceClient`, and disposed
+it after the gateway stopped. A platform's verb could not configure it in place
+(`UseKubernetes(kubernetes => ...)`), because nothing would own what the verb created. The builder
+now takes a factory, and ownership follows the rule the repository's DI uses: what a factory
+creates is owned, an instance is borrowed.
+
+```csharp
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("shop").UseInProcess(inProcess =>
+{
+    inProcess.AddProgram("Web", "orders-api", Orders.Program.RunAsync);
+});
+builder.AddResource("Web", "orders-api");
+
+await using ApplicationGateway gateway = builder.Build();
+await gateway.RunAsync(cancellationToken);
+```
+
+- **`UsePlatform<TPlatform>(Func<TPlatform> factory)`**, on `ApplicationGatewayBuilder` and
+  `IApplicationGatewayBuilder`, where `TPlatform` is both an `IApplicationGatewayInfrastructureProvider`
+  and an `IApplicationGatewayInstanceClient`. A platform's verb (`UseInProcess(configure)`,
+  `UseKubernetes(configure)`, `UseDocker(configure)`) calls it with a lambda that runs the
+  platform's builder.
+- **The factory runs last, in `Build()`.** It runs once every other check has passed, the model's
+  rules included, so a builder that is never built, or whose build fails first, creates nothing. A
+  factory that returns `null`, or a platform that names no platform, fails the build; the build
+  disposes a platform it created before it throws. A factory that throws fails the build with its
+  own exception, and the builder stays open.
+- **Each call sets the roles it names; the last call for a role wins.** `UsePlatform` fills both
+  roles and replaces what `UseInfrastructure` and `UseInstanceClient` set earlier; either of those,
+  called later, replaces the platform in its role only. A platform that no longer fills a role is
+  never created, so `UsePlatform(...).UseInfrastructure(a).UseInstanceClient(b)` calls no factory.
+  *Rejected:* replacing the whole platform on a later `UseInstanceClient`, which would leave
+  `UseKubernetes(...).UseInstanceClient(custom)` without infrastructure, and refusing the
+  combination, which forbids a test client over a real platform.
+- **`IApplicationGateway : IAsyncDisposable`.** `DisposeAsync` stops the run through `StopAsync`,
+  so it is the stop path G40 describes, and only once the run has ended, the provider's channel
+  stopped included, disposes the owned platform: asynchronously when it implements
+  `IAsyncDisposable`, otherwise through `IDisposable`. A failed build disposes synchronously first,
+  because `Build()` is synchronous. Borrowed objects are never disposed. Disposing again, or at the
+  same time, waits for the first disposal and does nothing more.
+- **A gateway disposed before it started never runs.** Its `Completion` completes successfully, so
+  nothing waits on it forever, `StartAsync` throws `ObjectDisposedException`, and `StopAsync` has
+  nothing to stop. Disposing does not tear down what the gateway deployed (G6).
+- **The instance overloads stay.** `UseInfrastructure`, `UseInstanceClient`, and each platform's
+  instance overload (`UseInProcess(infrastructure)`) still borrow what they are given, for a
+  program or a test that shares one platform object between gateways or keeps it past the gateway.
+
+**G43 — An instance that publishes before its resource is planned counts when it repeats the
+plan's deployment and renews after the deployment (2026-11-01).** An end-to-end run on kind failed
+this way. A gateway was stopped, `kubectl rollout restart` replaced its pods, and the gateway was
+started again. Its startup failed after `StartupTimeout`, naming the storefront, while the
+storefront's pod was ready. The restarted pod published as soon as the new run opened publications
+(G5), before the storefront's step planned it, and afterwards it only renewed. The rollout had not
+settled, so the plan was an `Update`; its id was the one the pod repeated, because the same inputs
+give the same id (G34). The registration had seen the resource not yet current and left the gate
+shut, and nothing reopened that decision, so the window ran out.
+- **The id decides which instance counts; a renewal after the deployment decides when.** A
+  registration that repeats the plan's id runs what the plan deploys, but it predates the
+  deployment, which may still remove it. So once the provider's `DeployResourceAsync` returns, the
+  gateway marks the resource deployed, and from then on a renewal of a registered instance whose
+  manifest repeats the plan's id opens the gate. An instance the deployment removed never renews
+  again, and its replacement's publication opens the gate instead. An instance of any other
+  deployment still leaves it shut (G34), and a publication after the plan opens it as before (G18),
+  even before the mark, because an in-process provider's instances publish before the call returns.
+- **A renewal before the mark proves nothing.** One that arrives between the plan and the mark may
+  come from an instance the call is about to remove, so it does not count; the instance's next
+  renewal does. The plan opens the gate only for a plan of `None`.
+- **Carried instances count only once they prove they run.** The plan drops the carried instances
+  that have not renewed or published in this run (G23) before anything counts, because a record
+  from a persistent store still holds the pod a `rollout restart` killed, with the same id; a
+  dropped instance's renewal is refused, and it publishes again.
+- **No renewal slips past the mark.** Registration, renewal, the plan, and the mark share one lock.
+  A renewal that takes it before the mark does not count; one that takes it after reads the mark
+  and the plan's deployment, and opens the gate itself.
+- **A closed window stays closed.** A renewal leaves pending with the same atomic transition a
+  registration uses (G4), so it never reopens a window that closed.
+- **Cost.** Adopting a surviving instance waits for its next renewal, up to a third of a lease
+  (`LeaseDuration / 3`, ten seconds at the default lease) after the deployment call returns. The
+  restarted pod above still opens the gate well within `StartupTimeout`.
+
+*Superseded the same day:* the plan scanned the instances still registered and opened the gate for
+one that repeated its id and had renewed within a lease. A run on Docker showed why that evidence
+came too early. Containers in a restart loop while no gateway ran published to the restarted gateway
+before the plan; the Docker plan was an `Update` with the same id, because the workload was
+unhealthy, so the scan opened the gate. `DeployResourceAsync` then removed and recreated those
+containers (Gateway.Docker GD5), and startup reported the resource ready about a tenth of a second
+later, before any new container could publish. A lease renewed before the deployment shows that the
+instance ran before it, not that it survived it. Kubernetes passed only because its `Update` after
+a rollout restart re-applies an unchanged template, so the pods survive.
+
+*Rejected:* refusing publications until the resource is planned, for G23's reason. Also rejected:
+counting every early publication, which would let a pod of an earlier rollout stand in for the
+update again (G34); asking the provider which instances its deployment kept, which would add a
+contract member every platform must answer for what a renewal already shows; and starting the
+expiry sweep when publications open, which would also expire carried instances during startup and
+change G23.
+
+A provider that finishes its own rollouts on a publication must accept that the instance that
+completes one can have published before the plan, and afterwards only renews: since G43 the Docker
+provider also finishes a rollout on a renewal of an accepted container (cohesion-platforms).
 
 ## AOT
 

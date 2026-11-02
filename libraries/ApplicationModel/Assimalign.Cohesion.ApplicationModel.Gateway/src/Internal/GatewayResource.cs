@@ -19,12 +19,19 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 //
 // A plan of None opens the gate at once, because the platform already runs the resource. Otherwise
 // the resource is pending until an instance of the plan's deployment registers, or closed when its
-// window closes first. An instance that registers before the plan runs the previous definition, and
-// one that repeats another deployment's id was started by an earlier deployment, such as a pod of
-// the previous rollout that restarted: both are registered without opening the gate. Both
-// transitions leave pending atomically, so a registration that races the deadline either wins or is
-// refused. Planning, registration, renewal, and expiry share one lock, so an instance that renews or
-// publishes again while its lease expires is either kept or dropped whole, never half.
+// window closes first. The deployment's id decides which instance counts: one that repeats another
+// deployment's id was started by an earlier deployment, such as a pod of the previous rollout that
+// restarted, and is registered without opening the gate. One that registered before the plan and
+// repeats the id the plan computes runs exactly what the plan deploys, such as a pod restarted from
+// the same definition while no gateway ran, but its registration predates the deployment, which may
+// still remove it: Docker recreates the containers of a deployment caught in a restart loop. So it
+// counts only when it renews after the deployment call returned (MarkDeployed), which shows it
+// survived the deployment; one the deployment removed never renews, and its replacement's
+// publication opens the gate instead. Every transition leaves pending atomically, so a registration
+// or renewal that races the deadline either wins or leaves the window closed. Planning,
+// registration, renewal, the deployment's mark, and expiry share one lock, so an instance that renews
+// or publishes again while its lease expires is either kept or dropped whole, never half, and a
+// renewal that races the mark is either before it, and does not count, or after it, and does.
 //
 // An operator's writes through the gateway run one at a time, from the call to the instance to the
 // last restore, so every instance ends with the state the record holds.
@@ -43,6 +50,10 @@ internal sealed class GatewayResource
     private ApplicationGatewayDeploymentChange _change;
     private string? _revision;
     private DeploymentId? _deployment;
+
+    // Whether the provider's call that deploys the plan's deployment returned; read and written
+    // under _leases.
+    private bool _deployed;
     private Exception? _stopCause;
     private int _stopped;
     private int _state;
@@ -111,6 +122,12 @@ internal sealed class GatewayResource
     // Applies the plan the resource's step made, with the deployment it makes unless the plan is None.
     // Call it before the provider deploys the resource, because an in-process provider's instances
     // publish before the call returns.
+    //
+    // The plan opens the gate only for a plan of None. An instance still registered that repeats the
+    // plan's id registered before the deployment, which may yet remove it, so the plan does not count
+    // it: it counts once it renews after MarkDeployed. The carried instances the plan drops are gone
+    // before then, so the pod a rollout restart killed, still in a persistent store's record with the
+    // same id, never counts.
     public void Plan(ApplicationGatewayDeploymentChange change, string revision, DeploymentId? deployment)
     {
         bool sameDefinition = Previous is not null && Previous.Revision == revision;
@@ -147,13 +164,39 @@ internal sealed class GatewayResource
         }
     }
 
+    // Records that the provider's call deploying the plan's deployment returned. Call it right after
+    // the call, before waiting for the deployment to start.
+    //
+    // Publications open before any step plans, so an instance can register first and only renew
+    // afterwards; its registration saw the resource not yet current and left the gate shut. A
+    // deployment's id is derived from what it deploys, so one that repeats the plan's id runs what the
+    // plan deploys, but it registered before the deployment, which may have removed it: Docker
+    // recreates the containers of a deployment caught in a restart loop, and a lease renewed before
+    // the call shows only that the container ran then. From the mark on, a renewal of such an instance
+    // opens the gate (TryRenew), because an instance the deployment removed never renews again. A
+    // renewal before the mark, even one after the plan, proves nothing, since the call may still
+    // remove the instance; it waits for the next one, at most a third of a lease later.
+    public void MarkDeployed()
+    {
+        lock (_leases)
+        {
+            _deployed = true;
+        }
+    }
+
     // Opens the gate when the instance repeats the plan's deployment. Returns false only when the
     // window closed, so the registration is undone and refused.
+    //
+    // A publication after the plan counts even before the deployment's mark: an in-process provider's
+    // instances publish before the call returns, and the instance published after the plan made the
+    // deployment it repeats.
     public bool TryMarkRegistered(ApplicationInstanceManifest instance)
     {
         if (!IsCurrent || _deployment is { } deployment && instance.Deployment != deployment)
         {
-            // An instance of the previous definition, or of an earlier deployment of this one.
+            // An instance that registered before the plan, which counts once it renews after the
+            // deployment's mark when it repeats the plan's deployment, or an instance of an earlier
+            // deployment.
             return !IsClosed;
         }
 
@@ -188,8 +231,13 @@ internal sealed class GatewayResource
         }
     }
 
+    // Renews a registered instance's lease. Once the deployment is marked, a renewal of an instance
+    // whose registered manifest repeats the plan's deployment opens the gate, because the instance
+    // survived the deployment (MarkDeployed); a window that closed stays closed. Returns false when
+    // the instance is not registered, so it publishes again.
     public bool TryRenew(InstanceKey key)
     {
+        bool survived = false;
         lock (_leases)
         {
             if (!_renewed.ContainsKey(key))
@@ -199,8 +247,25 @@ internal sealed class GatewayResource
 
             _renewed[key] = Stopwatch.GetTimestamp();
             _carried.Remove(key);
-            return true;
+            if (_deployed && _deployment is { } deployment && Volatile.Read(ref _state) == pending)
+            {
+                foreach (ApplicationInstanceManifest instance in Aggregate.Instances)
+                {
+                    if (instance.Key == key)
+                    {
+                        survived = instance.Deployment == deployment;
+                        break;
+                    }
+                }
+            }
         }
+
+        if (survived && Interlocked.CompareExchange(ref _state, registered, pending) == pending)
+        {
+            _registered.TrySetResult();
+        }
+
+        return true;
     }
 
     public void Unregister(InstanceKey key)

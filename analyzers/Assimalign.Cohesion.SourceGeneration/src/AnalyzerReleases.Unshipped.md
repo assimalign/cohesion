@@ -12,3 +12,6 @@ COHCMP0004 | ComponentModel | Warning | Projection duplicates an earlier integra
 COHCMP0005 | ComponentModel | Info | Contributor is present but its target seam is absent
 COHCMP0006 | ComponentModel | Warning | Consumer language version cannot declare extension members
 COHCMP0007 | ComponentModel | Warning | Disposable product is returned as an instance
+COHAPM0001 | ApplicationModel | Warning | Resource reference has no in-process program
+COHAPM0002 | ApplicationModel | Warning | In-process resource has no provider
+COHAPM0003 | ApplicationModel | Error | In-process resource is bound twice

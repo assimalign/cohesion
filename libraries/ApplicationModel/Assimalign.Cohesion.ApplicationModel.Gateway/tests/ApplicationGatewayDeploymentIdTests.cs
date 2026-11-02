@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -60,6 +61,134 @@ public sealed class ApplicationGatewayDeploymentIdTests
         current.ShouldNotBe(earlier);
         instances.ShouldContain(instance => instance.Key == restarted.Key && instance.Deployment == earlier);
         instances.ShouldContain(instance => instance.Deployment == current);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance that publishes the planned deployment before its resource is planned makes the resource ready when it renews after the deployment")]
+    public async Task PublishAsync_BeforeThePlanWithThePlannedDeployment_ShouldMakeTheResourceReady()
+    {
+        // Arrange: a first run deploys the resource. The second runs with a fresh store, while the
+        // platform's rollout of the same workload has not finished, so it plans an update to what
+        // runs; deploying it again starts nothing new, as applying an unchanged pod template does not.
+        // The lease is short, so the instance renews well within the startup window.
+        var infrastructure = new TestInfrastructure();
+        IApplicationModel model = CreateModel("hello");
+        await using (await RunningGateway.StartAsync(infrastructure, new InMemoryApplicationGatewayStore(), model))
+        {
+        }
+
+        DeploymentId running = infrastructure.RunningDeployments["orders-api"];
+        infrastructure.RollingOut.Add("orders-api");
+        infrastructure.Silent.Add("orders-api");
+        var planned = new TaskCompletionSource();
+        infrastructure.PlanDelays["orders-api"] = () => planned.Task;
+        ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, TimeSpan.FromSeconds(2), TimeSpan.FromMilliseconds(300));
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+
+        // Act: while the resource's step plans it, a restarted instance of the running workload
+        // publishes, then the plan completes and the instance keeps renewing.
+        await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "plan:orders-api") == 2);
+        TestInstance restarted = await infrastructure.StartInstanceAsync("Web", "orders-api", running);
+        planned.SetResult();
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        ApplicationInstanceManifest[] instances = [.. gateway.Resources.ShouldHaveSingleItem().Instances];
+        await stop.CancelAsync();
+        await run;
+
+        // Assert: the plan's deployment is the one the instance repeats, so its renewal after the
+        // deployment made the resource ready, and startup completed within the window.
+        infrastructure.Deployments.Last().Deployment.ShouldBe(running);
+        instances.ShouldContain(instance => instance.Key == restarted.Key && instance.Deployment == running);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance of the planned deployment that publishes before the plan and that the deployment removes does not make the resource ready")]
+    public async Task PublishAsync_BeforeThePlanByAnInstanceTheDeploymentRemoves_ShouldWaitForItsReplacement()
+    {
+        // Arrange: as above, but deploying the update removes what runs and starts its own instance
+        // only when the test lets it, as the Docker platform recreates the containers of a deployment
+        // caught in a restart loop. The lease is short, so a surviving instance would renew at once.
+        // The removal waits until the doomed instance has renewed twice inside the deploy call, as
+        // a real removal takes seconds: a gateway that took evidence before the call returned,
+        // such as one that marked the deployment before calling the platform, would count those.
+        var infrastructure = new TestInfrastructure();
+        IApplicationModel model = CreateModel("hello");
+        await using (await RunningGateway.StartAsync(infrastructure, new InMemoryApplicationGatewayStore(), model))
+        {
+        }
+
+        DeploymentId running = infrastructure.RunningDeployments["orders-api"];
+        TimeSpan lease = TimeSpan.FromMilliseconds(300);
+        infrastructure.RollingOut.Add("orders-api");
+        infrastructure.Replacing.Add("orders-api");
+        var replaced = new TaskCompletionSource();
+        infrastructure.Delayed["orders-api"] = () => replaced.Task;
+        var planned = new TaskCompletionSource();
+        infrastructure.PlanDelays["orders-api"] = () => planned.Task;
+        TestInstance? removed = null;
+        int renewedWhileRemoving = 0;
+        infrastructure.ReplaceDelays["orders-api"] = async () =>
+        {
+            int before = infrastructure.Renewals.GetValueOrDefault(removed!.Key);
+            await Eventually.WaitUntilAsync(() => infrastructure.Renewals.GetValueOrDefault(removed.Key) >= before + 2);
+            renewedWhileRemoving = infrastructure.Renewals.GetValueOrDefault(removed.Key) - before;
+        };
+        ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, TimeSpan.FromSeconds(10), lease);
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
+
+        // Act: while the resource's step plans it, an instance of the running workload publishes;
+        // the deployment then removes it, after it renewed, and its replacement starts a few
+        // renewals later.
+        await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "plan:orders-api") == 2);
+        removed = await infrastructure.StartInstanceAsync("Web", "orders-api", running);
+        planned.SetResult();
+        await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "deploy:orders-api") == 2);
+        await Eventually.WaitUntilAsync(() => !infrastructure.Instances.ContainsKey(removed.Key));
+        Task first = await Task.WhenAny(gatewayStarted, Task.Delay(lease * 3));
+        bool readyBeforeTheReplacement = first == gatewayStarted;
+        replaced.SetResult();
+        await gatewayStarted.WaitAsync(TimeSpan.FromSeconds(10));
+        ApplicationInstanceManifest[] instances = [.. gateway.Resources.ShouldHaveSingleItem().Instances];
+        await stop.CancelAsync();
+        await run;
+
+        // Assert: the removed instance proved nothing about the deployment that replaced it; only
+        // the replacement's publication made the resource ready.
+        renewedWhileRemoving.ShouldBeGreaterThanOrEqualTo(2);
+        readyBeforeTheReplacement.ShouldBeFalse();
+        infrastructure.Instances.ContainsKey(removed.Key).ShouldBeFalse();
+        instances.ShouldContain(instance => instance.Key != removed.Key && instance.Deployment == running);
+    }
+
+    [Fact(DisplayName = DisplayPrefix + "An instance of another deployment that publishes before its resource is planned does not make the resource ready")]
+    public async Task PublishAsync_BeforeThePlanWithAnotherDeployment_ShouldNotMakeTheResourceReady()
+    {
+        // Arrange: as above, but the instance that publishes early repeats a deployment the plan
+        // does not make.
+        var infrastructure = new TestInfrastructure();
+        IApplicationModel model = CreateModel("hello");
+        await using (await RunningGateway.StartAsync(infrastructure, new InMemoryApplicationGatewayStore(), model))
+        {
+        }
+
+        infrastructure.RollingOut.Add("orders-api");
+        infrastructure.Silent.Add("orders-api");
+        var planned = new TaskCompletionSource();
+        infrastructure.PlanDelays["orders-api"] = () => planned.Task;
+        ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, TimeSpan.FromSeconds(1));
+        using var stop = new CancellationTokenSource();
+        Task run = gateway.RunAsync(stop.Token, out _);
+
+        // Act
+        await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "plan:orders-api") == 2);
+        TestInstance other = await infrastructure.StartInstanceAsync("Web", "orders-api", DeploymentId.New());
+        planned.SetResult();
+        ApplicationGatewayException exception = await Should.ThrowAsync<ApplicationGatewayException>(() => run.WaitAsync(TimeSpan.FromSeconds(10)));
+
+        // Assert: the window closed without an instance of the plan's deployment.
+        exception.ErrorCode.ShouldBe(ApplicationGatewayErrorCode.StartupTimedOut);
+        exception.Message.ShouldContain("Web/orders-api", Case.Sensitive);
+        other.Deployment.ShouldNotBe(infrastructure.Deployments.Last().Deployment);
     }
 
     [Fact(DisplayName = DisplayPrefix + "Deploying the same inputs gives the same deployment, and another setting value another")]

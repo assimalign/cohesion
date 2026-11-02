@@ -111,18 +111,35 @@ registers nothing.
 `Assimalign.Cohesion.Sdk.Gateway` is a slim SDK on the base SDK. It defaults the project
 to an executable and adds one implicit reference, the
 `Assimalign.Cohesion.ApplicationModel.Gateway` package at the SDK's own version
-(`CohesionGatewayImplicitReference=false` turns it off). It generates nothing and adds no
-framework: the gateway manages resources through their platform without loading their
-runtimes. Its `Program.cs` declares the model and runs it on the platform it references:
+(`CohesionGatewayImplicitReference=false` turns it off). It adds no framework: the gateway
+manages resources through their platform without loading their runtimes. Its `Program.cs`
+declares the model and runs it on the platform it references.
+
+An in-process gateway also references each resource project it runs and names the resource
+on the reference:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="10.0.0" />
+</ItemGroup>
+<ItemGroup>
+  <ProjectReference Include="..\Shop.Orders\Shop.Orders.csproj" CohesionResource="orders-api" />
+</ItemGroup>
+```
+
+The SDK's one target hands each such reference to the Cohesion source generator, which
+registers the program that the resource's build exposed, so a bare `UseInProcess()` runs it
+with no `AddProgram` call (`CohesionProvider="Web"` on the reference overrides the provider
+the resource recorded):
 
 ```csharp
 using Assimalign.Cohesion.ApplicationModel.Gateway;
 using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
 
-await using var infrastructure = new InProcessInfrastructure();
-ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("orders").UseInProcess(infrastructure);
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("orders").UseInProcess();
 builder.AddResource("Web", "orders-api");
-await builder.Build().RunAsync();
+await using ApplicationGateway gateway = builder.Build();
+await gateway.RunAsync();
 ```
 
 A platform is a pair of packages: the gateway half the gateway project references and

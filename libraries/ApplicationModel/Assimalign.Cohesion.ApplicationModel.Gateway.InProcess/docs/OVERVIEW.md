@@ -7,18 +7,34 @@ the gateway calls their control planes with. Each resource is a program the gate
 program references. Deploying a resource calls the program's entry point on a thread of its own, in
 an environment of its own.
 
-```csharp
-await using var infrastructure = new InProcessInfrastructure();
-infrastructure
-    .AddProgram("Web", "orders-api", Orders.Program.MainAsync)
-    .AddProgram("Web", "storefront", Storefront.Program.MainAsync);
+```xml
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <ItemGroup>
+    <PackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Shop.Orders\Shop.Orders.csproj" CohesionResource="orders-api" />
+    <ProjectReference Include="..\Shop.Storefront\Shop.Storefront.csproj" CohesionResource="storefront" />
+  </ItemGroup>
+</Project>
+```
 
-ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess(infrastructure);
+```csharp
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("local").UseInProcess();
 IApplicationResourceDefinition orders = builder.AddResource("Web", "orders-api");
 builder.AddResource("Web", "storefront").WithSetting("Orders:Url", orders.Endpoint);
 
-await builder.Build().RunAsync(cancellationToken);
+await using ApplicationGateway gateway = builder.Build();
+await gateway.RunAsync(cancellationToken);
 ```
+
+The build binds each referenced resource's program: the resource's build exposes its entry point,
+top-level statements included, and the gateway's build registers it, so a bare `UseInProcess()`
+runs every resource the project references and the gateway owns the infrastructure it builds.
+`UseInProcess(inProcess => ...)` sets `inProcess.Options.StopTimeout` or binds a program the build
+does not, with `AddProgram(provider, name, main)`. A gateway program that creates the
+infrastructure itself (`new InProcessInfrastructure()` and `UseInProcess(infrastructure)`) binds
+every program with `AddProgram` and disposes the infrastructure once the gateway has stopped.
 
 Each program is an ordinary application that opts into the platform. A Web program calls
 `WebApplication.CreateBuilder(args)` and `builder.Services.AddResource(name, resource => resource.UseInProcess())`
@@ -29,7 +45,7 @@ every platform it opts into.
 
 The gateway deploys in dependency order, so `storefront` starts only once `orders-api` has
 published, with `Orders:Url` set to the address `orders-api` serves. Programs outlive the gateway's
-run: disposing the infrastructure stops them, the last deployed first.
+run: disposing the infrastructure, or the gateway that owns it, stops them, the last deployed first.
 
 **Depends on:** ApplicationModel.Gateway (`IApplicationGatewayInfrastructureProvider`, `IApplicationGatewayInstanceClient`,
 `ApplicationGatewayBuilder`), ApplicationModel.Hosting (the control plane it calls), and
