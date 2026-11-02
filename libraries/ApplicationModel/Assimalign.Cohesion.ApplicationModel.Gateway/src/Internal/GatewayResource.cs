@@ -24,11 +24,11 @@ namespace Assimalign.Cohesion.ApplicationModel.Gateway.Internal;
 // previous rollout that restarted, and is registered without opening the gate, while one that
 // registered before the plan and repeats the id the plan computes runs exactly what the plan
 // deploys, such as a pod restarted from the same definition while no gateway ran, so the plan opens
-// the gate for it while its lease is live. Both transitions leave pending atomically, so a registration that races the
-// deadline either wins or is refused. Planning, registration, renewal, and expiry share one lock, so
-// an instance that renews or publishes again while its lease expires is either kept or dropped
-// whole, never half, and a registration that races the plan is either in the plan's scan or sees
-// the resource current.
+// the gate for it while its lease is live. Both transitions leave pending atomically, so a
+// registration that races the deadline either wins or is refused. Planning, registration, renewal,
+// and expiry share one lock, so an instance that renews or publishes again while its lease expires
+// is either kept or dropped whole, never half, and a registration that races the plan is either in
+// the plan's scan or sees the resource current.
 //
 // An operator's writes through the gateway run one at a time, from the call to the instance to the
 // last restore, so every instance ends with the state the record holds.
