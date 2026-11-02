@@ -3501,6 +3501,13 @@ and the database is usable. Existing worker failure health still applies to actu
 EventSource IDs 23/24 report reclamation started/completed with engine, database and retired id;
 completion includes pages reclaimed by that process (after a crash it counts remaining work).
 
+Context-count assertions in SQL tests capture the coordinator's unchanged open-context snapshot
+through an internal, test-only barrier under reclamation's existing run lock (#1764, #1782).
+The lock waits for any discovery pin to end and excludes the next discovery until the copy is
+complete; a separate idle poll would leave a race before enumeration. Pending reclamations may
+remain behind live readers, and every application context (including leaked builders and statement
+pins) is still counted. The hook adds no work to production paths and uses only SQL's own test grant.
+
 `SqlTableReclamationTests` forces batches during Build and verifies zero reclamation for typed and
 scripted empty/populated drops. Its real worker tests cover name reuse, multiple drops, old snapshots,
 mid-scan rollback, shutdown and 49a reservations. Three concurrent sessions repeatedly CREATE/DROP

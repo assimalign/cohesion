@@ -48,6 +48,15 @@ internal sealed class SqlTableReclamation
     internal Action<ulong, CancellationToken>? BeforeBatchCommit { get; set; }
     internal Action<ulong, int>? AfterBatch { get; set; }
 
+    // Tests wait for an in-flight discovery pin to roll back and capture while
+    // still excluding the next discovery. Waiting for HasWork alone leaves a
+    // gap before enumeration and can wait forever behind a leaked builder.
+    // This hook uses only the existing run lock and costs nothing when unused.
+    internal IReadOnlyList<TransactionContext> GetOpenContextsAtIdleForTesting()
+    {
+        lock (_runLock) { return _database.Coordinator.GetOpenContexts(); }
+    }
+
     internal void Request()
     {
         Volatile.Write(ref _discover, 1);

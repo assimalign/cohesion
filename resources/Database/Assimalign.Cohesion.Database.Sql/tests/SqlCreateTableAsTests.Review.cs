@@ -80,7 +80,7 @@ public sealed partial class SqlCreateTableAsTests
         await ReclaimAsync(database, timeout.Token);
         database.DataStorage.HasOwnerPages(owner).ShouldBeFalse();
         database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
         await ExecAsync(session, "CREATE TABLE copy AS SELECT * FROM src WITH NO DATA", timeout.Token);
     }
 
@@ -138,7 +138,7 @@ public sealed partial class SqlCreateTableAsTests
         await ReclaimAsync(database, timeout.Token);
         database.DataStorage.HasOwnerPages(owner).ShouldBeFalse();
         database.Catalog.GetPendingTableReclamations().ShouldBeEmpty();
-        database.Coordinator.GetOpenContexts().ShouldBeEmpty();
+        database.TableReclamation.GetOpenContextsAtIdleForTesting().ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Sql] - CTAS: completion counts copied rows and zero for empty, no-data and skipped builds")]
