@@ -27,6 +27,7 @@ internal sealed partial class SqlPlanExecutor
             => schemaName.Equals(SqlPlanner.DefaultSchema, StringComparison.OrdinalIgnoreCase) && names.Contains(name);
         bool IsTarget(SqlCatalogTable table) => IsTargetName(table.Schema, table.Name);
         var image = _catalog.CaptureSnapshot();
+        var registrations = _indexManager.ExportRegistrations();
         var planner = new SqlPlanner(_catalog, null, _definitions.Functions, cancellationToken);
         var plans = schema.Tables.Where(table => names.Contains(table.Name)).Select(table =>
             (Declaration: table, Plan: (SqlCreateTablePlan)planner.Plan(
@@ -115,7 +116,16 @@ internal sealed partial class SqlPlanExecutor
                     CheckDomain(table, domain, row, evaluator);
                 }
             }
-            bool keepsOwner = old is not null && script.Plan.Operations.Where(operation =>
+            var tableIndexes = indexes.Where(index => index.TableObjectId == table.ObjectId).ToArray();
+            bool keepsOwner = old is not null && old.Columns.Count == table.Columns.Count &&
+                table.Columns.Select((column, ordinal) =>
+                    column.Name.Equals(old.Columns[ordinal].Name, StringComparison.OrdinalIgnoreCase) &&
+                    values[ordinal] is SqlBoundColumn identity && identity.Ordinal == ordinal).All(identity => identity) &&
+                image.GetIndexes(old.ObjectId).Where(index => !SameJointIndex(index, tableIndexes)).All(index =>
+                    !registrations.Any(registration => registration.ObjectId == old.ObjectId &&
+                        registration.Definition.Name.Equals(index.Name, StringComparison.OrdinalIgnoreCase) &&
+                        _indexManager.PageOwner(registration) == old.ObjectId)) &&
+                script.Plan.Operations.Where(operation =>
                 string.Equals(operation.ParentName ?? operation.ObjectName, table.Name, StringComparison.OrdinalIgnoreCase)).All(operation =>
                     operation.Kind is SqlSchemaMigrationOperationKind.AddIndex or SqlSchemaMigrationOperationKind.DropIndex or
                         SqlSchemaMigrationOperationKind.AddConstraint or SqlSchemaMigrationOperationKind.DropConstraint ||
@@ -124,14 +134,13 @@ internal sealed partial class SqlPlanExecutor
             if (keepsOwner)
             {
                 // Frozen missing tails and physical ordinals belong to the kept heap.
-                var columns = table.Columns.Select((column, ordinal) => new SqlCatalogColumn(column.Name, column.Type,
-                    column.IsNullable, old!.Columns[ordinal].DefaultLiteral, column.Collation, column.DomainName,
+                var columns = table.Columns.Select((column, ordinal) => new SqlCatalogColumn(old!.Columns[ordinal].Name, old.Columns[ordinal].Type,
+                    column.IsNullable, old.Columns[ordinal].DefaultLiteral, old.Columns[ordinal].Collation, old.Columns[ordinal].DomainName,
                     old.Columns[ordinal].DefaultFunctionCalls, old.Columns[ordinal].Identity, old.Columns[ordinal].MissingValueLiteral)
                     { RecastDefault = old.Columns[ordinal].RecastDefault }).ToArray();
                 table = new SqlCatalogTable(old!.ObjectId, table.Schema, table.Name, columns, table.PrimaryKeyColumns,
                     table.Owner, table.OwningSchema, table.Constraints, old.DroppedColumnOrdinals);
             }
-            var tableIndexes = indexes.Where(index => index.TableObjectId == table.ObjectId).ToArray();
             if (keepsOwner)
             {
                 // Retain the registered spelling as well as its tree. SQL names
@@ -198,6 +207,20 @@ internal sealed partial class SqlPlanExecutor
         var failures = new List<Exception>(3);
         try
         {
+            // Validate new row constraints before allocating or building any trees.
+            // Identity columns need no conversion or scan for an index-only change.
+            foreach (var item in keeping.Where(item => NeedsJointRowValidation(item.Previous!, item.Shape)))
+            {
+                foreach (var row in Scan(item.Shape, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
+                {
+                    for (int ordinal = 0; ordinal < row.Values.Length; ordinal++)
+                    {
+                        if (item.Previous!.Columns[ordinal].IsNullable && !item.Shape.Columns[ordinal].IsNullable)
+                        { _ = CoerceForColumn(row.Values[ordinal], item.Shape.Columns[ordinal]); }
+                    }
+                    ValidateRows(item.Shape, [row.Values], statement, cancellationToken, checksOnly: true);
+                }
+            }
             _catalog.ReserveStorageReplacement(previous, null, (table, id) =>
             {
                 var shape = changed.First(item => item.Previous!.ObjectId == table.ObjectId).Shape;
@@ -256,14 +279,6 @@ internal sealed partial class SqlPlanExecutor
                         () => { }, cancellationToken, index, owner).ConfigureAwait(false);
                     stage("AfterTreeBuild");
                 }
-                // Validation reads the existing heap at current visibility under the
-                // joint X locks, including rows committed before lock admission.
-                foreach (var row in Scan(item.Shape, statement, cancellationToken, ConstraintCurrentSnapshot(statement)))
-                {
-                    for (int ordinal = 0; ordinal < row.Values.Length; ordinal++)
-                    { _ = CoerceForColumn(row.Values[ordinal], item.Shape.Columns[ordinal]); }
-                    ValidateRows(item.Shape, [row.Values], statement, cancellationToken, checksOnly: true);
-                }
             }
             foreach (var item in changed)
             {
@@ -290,7 +305,7 @@ internal sealed partial class SqlPlanExecutor
                 foreach (var constraint in child.Constraints.Where(constraint => constraint.Kind == SqlCatalogConstraintKind.Reference))
                 {
                     var parent = final.Single(table => table.Schema.Equals(constraint.ReferencedSchema, StringComparison.OrdinalIgnoreCase) && table.Name.Equals(constraint.ReferencedTable, StringComparison.OrdinalIgnoreCase));
-                    if (!preparedAll.Contains(child) && !preparedAll.Contains(parent)) { continue; }
+                    if (!NeedsJointReferenceValidation(child, constraint, parent, descriptions)) { continue; }
                     var reference = BindReference(child, constraint, parent, statement, cancellationToken);
                     if (preparedAll.Contains(parent)) { ConstraintLookup(reference.ParentKey, statement, descriptions.Where(index => index.TableObjectId == parent.ObjectId).ToArray()); }
                     foreach (var row in Scan(child, statement, cancellationToken, snapshot))
@@ -366,6 +381,34 @@ internal sealed partial class SqlPlanExecutor
             if (failures.Count != before) { throw new AggregateException(failures); }
         }
     }
+
+    private static bool NeedsJointRowValidation(SqlCatalogTable previous, SqlCatalogTable target)
+        => target.Columns.Where((column, ordinal) => !column.IsNullable && previous.Columns[ordinal].IsNullable).Any() ||
+            target.Constraints.Any(constraint => constraint.Kind == SqlCatalogConstraintKind.Check &&
+                !previous.Constraints.Any(old => SameJointConstraint(constraint, old)));
+
+    private bool NeedsJointReferenceValidation(SqlCatalogTable child, SqlCatalogConstraint constraint,
+        SqlCatalogTable parent, IReadOnlyList<SqlCatalogIndex> descriptions)
+    {
+        if (!_catalog.TryGetTable(child.Schema, child.Name, out var oldChild) || child.ObjectId != oldChild.ObjectId ||
+            !_catalog.TryGetTable(parent.Schema, parent.Name, out var oldParent) || parent.ObjectId != oldParent.ObjectId ||
+            !oldChild.Constraints.Any(old => SameJointConstraint(constraint, old))) { return true; }
+        var previous = _catalog.GetIndexes(parent.ObjectId).Where(index => index.IsUnique && index.Predicate is null &&
+            SameConstraintColumns(index.ColumnNames, constraint.ReferencedColumns)).ToArray();
+        var current = (descriptions.Any(index => index.TableObjectId == parent.ObjectId)
+            ? descriptions.Where(index => index.TableObjectId == parent.ObjectId) : _catalog.GetIndexes(parent.ObjectId))
+            .Where(index => index.IsUnique && index.Predicate is null && SameConstraintColumns(index.ColumnNames, constraint.ReferencedColumns)).ToArray();
+        return previous.Length != current.Length || current.Any(index => !SameJointIndex(index, previous));
+    }
+
+    private static bool SameJointConstraint(SqlCatalogConstraint left, SqlCatalogConstraint right)
+        => left.Kind == right.Kind && left.Name.Equals(right.Name, StringComparison.OrdinalIgnoreCase) &&
+            left.Columns.SequenceEqual(right.Columns, StringComparer.OrdinalIgnoreCase) &&
+            string.Equals(left.ReferencedSchema, right.ReferencedSchema, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(left.ReferencedTable, right.ReferencedTable, StringComparison.OrdinalIgnoreCase) &&
+            left.ReferencedColumns.SequenceEqual(right.ReferencedColumns, StringComparer.OrdinalIgnoreCase) &&
+            left.CheckExpression == right.CheckExpression && left.CheckFunctionCalls.SequenceEqual(right.CheckFunctionCalls) &&
+            left.OnDelete == right.OnDelete && left.OnUpdate == right.OnUpdate;
 
     private static SqlCatalogTable WithOwner(SqlCatalogTable shape, ulong id)
         => new(id, shape.Schema, shape.Name, shape.Columns, shape.PrimaryKeyColumns, shape.Owner, shape.OwningSchema, shape.Constraints);

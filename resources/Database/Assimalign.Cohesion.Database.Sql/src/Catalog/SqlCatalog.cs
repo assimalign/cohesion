@@ -1147,9 +1147,14 @@ public sealed partial class SqlCatalog
     }
 
     /// <summary>
-    /// Loads the persisted index registrations.
+    /// Loads the persisted logical index registrations.
     /// </summary>
-    /// <returns>The stored registrations, empty when none were saved.</returns>
+    /// <remarks>
+    /// ObjectId identifies the logical table. A tree's physical page owner lives in its root
+    /// header and can differ from that table identity. These registrations alone are not safe
+    /// inputs for re-attaching trees: the SQL engine resolves physical owners before attachment.
+    /// </remarks>
+    /// <returns>The stored logical registrations, empty when none were saved.</returns>
     /// <exception cref="StorageOfflineException">The catalog storage is offline; reopen the database before reading or changing its metadata.</exception>
     public IReadOnlyList<BTreeIndexRegistration> GetIndexRegistrations()
     {

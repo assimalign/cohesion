@@ -20,15 +20,13 @@ internal sealed class SqlIndexManager
         (left, right) => left.Item1 == right.Item1 && StringComparer.OrdinalIgnoreCase.Equals(left.Item2, right.Item2),
         value => HashCode.Combine(value.Item1, StringComparer.OrdinalIgnoreCase.GetHashCode(value.Item2)));
     private readonly BTreeIndexManager _normal;
-    private readonly BTreeIndexManagerOptions? _options;
+    private readonly BTreeIndexManagerOptions _options;
     private readonly object _sync = new();
     private readonly Dictionary<(ulong, string), Entry> _alternate = new(_keys);
     private readonly Dictionary<(ulong, string), Entry> _prepared = new(_keys);
     private readonly Dictionary<long, ulong> _owners = new();
     private readonly List<BTreeIndexManager> _maintenance = new();
     private int _prunePosition;
-
-    private SqlIndexManager(BTreeIndexManager normal) { _normal = normal; _maintenance.Add(normal); }
 
     private SqlIndexManager(BTreeIndexManagerOptions options, IReadOnlySet<ulong> forbiddenOwners, ulong nextIdentity)
     {
@@ -61,13 +59,12 @@ internal sealed class SqlIndexManager
 
     internal static SqlIndexManager Create(BTreeIndexManagerOptions options, IReadOnlySet<ulong> forbiddenOwners, ulong nextIdentity)
         => new(options, forbiddenOwners, nextIdentity);
-    public static implicit operator SqlIndexManager(BTreeIndexManager manager) => new(manager);
     private static (ulong, string) Key(ulong table, string name) => (table, name);
 
     private BTreeIndexManager CreatePhysical(IReadOnlyList<BTreeIndexRegistration>? indexes = null)
         => BTreeIndexManager.Create(new BTreeIndexManagerOptions
         {
-            Storage = _options!.Storage, TransactionSource = _options.TransactionSource,
+            Storage = _options.Storage, TransactionSource = _options.TransactionSource,
             // SQL pre-acquires unique keys by LOGICAL heap identity before apply.
             // Physical owner identities must never introduce a second key-lock
             // namespace or a wait while holding the coordinator's apply gate.

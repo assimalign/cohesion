@@ -128,7 +128,7 @@ internal sealed partial class SqlSchemaProvisioner
         IDisposable? metadata = null;
         bool saved = false;
         bool spaceRefused = false;
-        var failed = new DatabaseProvisioningProgress("JointMigration", schema.Name, 1, intent.StepCount, false,
+        var failed = new DatabaseProvisioningProgress("JointMigration", schema.Name, 1, script.Steps.Count, false,
             failureCode: SqlProvisioningCodes.JointFailed);
         var failures = new System.Collections.Generic.List<Exception>(3);
         try
@@ -185,7 +185,7 @@ internal sealed partial class SqlSchemaProvisioner
             Exception cause = failures.Count == 1 ? failure : new AggregateException(failures);
             var coded = JointFailure(cause);
             EnsureFailureTrace(schema);
-            TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: intent.StepCount);
+            TraceStage("JointMigration", SqlProvisioningCodes.JointFailed, stepCount: script.Steps.Count);
             TraceFailure(coded);
             if (ReferenceEquals(cause, failure) && (failure is OperationCanceledException or OutOfMemoryException)) { throw; }
             throw coded;
@@ -202,11 +202,11 @@ internal sealed partial class SqlSchemaProvisioner
             cancellationToken.ThrowIfCancellationRequested();
             epoch = _database.TableReclamation.EnterStatement();
             BeginDeferredTrace(migration, 0);
-            PublishProgress(migration.Intent.Steps[0], migration.Intent.StepCount, running: true, 0);
+            PublishProgress(migration.Intent.Steps[0], migration.ProvisioningStepCount, running: true, 0);
             var statement = new SqlStatementContext(migration.Locks, _database.Coordinator, migration.Schema.Name,
                 _database.Name, provisioningProgress: (processed, total) =>
                 {
-                    PublishProgress(migration.Intent.Steps[0], migration.Intent.StepCount, true, processed, total);
+                    PublishProgress(migration.Intent.Steps[0], migration.ProvisioningStepCount, true, processed, total);
                     TraceDeferredProgress(migration, migration.Intent.Steps[0], processed, total);
                     DeferredProgress?.Invoke(processed, total);
                 }, checkpointCopy: true);
@@ -245,7 +245,7 @@ internal sealed partial class SqlSchemaProvisioner
                 // Publication may already be durable. Leave trees and intent to recovery;
                 // neither discard nor reclamation may decide the commit's outcome here.
                 _database.ReportProvisioning(new DatabaseProvisioningProgress("JointMigration", migration.Schema.Name,
-                    1, migration.Intent.StepCount, false, failureCode: SqlProvisioningCodes.JointUnconfirmed));
+                    1, migration.ProvisioningStepCount, false, failureCode: SqlProvisioningCodes.JointUnconfirmed));
                 var unconfirmed = CodedMigrationFailure(SqlProvisioningCodes.JointUnconfirmed,
                     ErrorMessages.JointPublicationUnconfirmed, failure);
                 FailDeferredTrace(migration, 0, unconfirmed);

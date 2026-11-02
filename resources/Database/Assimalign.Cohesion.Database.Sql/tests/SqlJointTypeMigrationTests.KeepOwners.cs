@@ -149,6 +149,14 @@ public sealed partial class SqlJointTypeMigrationTests
         long allocations = database.TableReclamation.CaptureAllocationCount();
         long rewritten = 0;
         long copiedPrevious = 0;
+        long decoded = 0, buildDecoded = 0;
+        bool building = false;
+        database.SchemaProvisioner.JointStage = stage =>
+        {
+            if (stage == "BeforeTreeBuild") { building = true; }
+            if (stage == "AfterTreeBuild") { building = false; }
+        };
+        SqlPlanExecutor.RowDecoded = _ => { if (building) { buildDecoded++; } else { decoded++; } };
         if (!keepsOwner)
         {
             // Negative control: run the old executor's all-rewrite classification
@@ -186,11 +194,13 @@ public sealed partial class SqlJointTypeMigrationTests
             allocated.ShouldBeLessThan(keepsOwner ? 150 : 300);
             allocated.ShouldBeGreaterThan(keepsOwner ? 100 : 250);
             database.SchemaProvisioner.JointSpaceReplacementBytes.ShouldBeLessThan(3 * allocated * 8192);
-            _output.WriteLine($"32768 rows: keepsOwner={keepsOwner}; indexed-table rewrites={rewritten - 1}; total rewrites={rewritten}; allocated pages={allocated}; tree pages={treePages}; R={database.SchemaProvisioner.JointSpaceReplacementBytes}");
+            _output.WriteLine($"32768 rows: keepsOwner={keepsOwner}; indexed-table rewrites={rewritten - 1}; total rewrites={rewritten}; validation/copy decodes={decoded}; index-build decodes={buildDecoded}; allocated pages={allocated}; tree pages={treePages}; R={database.SchemaProvisioner.JointSpaceReplacementBytes}");
+            decoded.ShouldBe(keepsOwner ? 1 : 32769);
+            buildDecoded.ShouldBe(keepsOwner ? 65536 : 0);
             await using var reader = await database.CreateSessionAsync(guard.Token);
             (await RowsAsync(reader, "SELECT COUNT(*) FROM items WHERE v=7", guard.Token)).Single()[0].ShouldBe(32768L);
         }
-        finally { SqlPlanExecutor.RewriteStage = null; }
+        finally { SqlPlanExecutor.RewriteStage = null; SqlPlanExecutor.RowDecoded = null; }
     }
 
     [Theory(DisplayName = "Cohesion Test [Sql] - Joint owner keeping: CHECK, NOT NULL, UNIQUE and FK refusals preserve the old schema online")]
@@ -253,6 +263,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await using var engine = await Builder(new CrashCaptureSqlStorageStrategy()).BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
         var source = OwnerDeclaration(false, [new("old", ["w"], false)]);
+        var target = OwnerDeclaration(true, [new("old", ["w"], false), new("ix_v", ["v"], false)]);
         await database.ApplySchemaAsync(source, guard.Token);
         await using var writer = await database.CreateSessionAsync(guard.Token);
         await writer.ExecuteAsync("INSERT INTO items VALUES(7,8)", cancellationToken: guard.Token);
@@ -265,7 +276,7 @@ public sealed partial class SqlJointTypeMigrationTests
         };
 
         // Act
-        await Should.ThrowAsync<Exception>(async () => await database.ApplySchemaAsync(OwnerDeclaration(true), stop.Token));
+        await Should.ThrowAsync<Exception>(async () => await database.ApplySchemaAsync(target, stop.Token));
 
         // Assert
         database.OfflineError.ShouldBeNull();
@@ -276,7 +287,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await DrainReclamationAsync(database, guard.Token);
         database.DataStorage.HasOwnerPages(heap).ShouldBeTrue();
         database.SchemaProvisioner.JointStage = null;
-        await database.ApplySchemaAsync(OwnerDeclaration(true), guard.Token);
+        await database.ApplySchemaAsync(target, guard.Token);
         Table(database).ObjectId.ShouldBe(heap);
     }
 
@@ -288,16 +299,18 @@ public sealed partial class SqlJointTypeMigrationTests
         var storage = new CrashCaptureSqlStorageStrategy();
         var stages = new Dictionary<string, CrashCaptureSqlStorageStrategy>();
         CrashCaptureSqlStorageStrategy.CrashPointRecorder recorder;
-        var source = OwnerDeclaration(false, [new("ix_v", ["w"], false)]);
-        var target = OwnerDeclaration(true, [new("ix_v", ["v"], false), new("ix_w", ["w"], true)]);
+        var source = CrashOwnerDeclaration(1).Compile();
+        var targetDeclaration = CrashOwnerDeclaration(2);
+        var target = targetDeclaration.Compile();
         ulong heap;
         await using (var engine = await Builder(storage).BuildAsync(guard.Token))
         {
             var database = await engine.CreateDatabaseAsync("typed", guard.Token);
+            await database.ApplySchemaAsync(CrashOwnerDeclaration(0).Compile(), guard.Token);
             await database.ApplySchemaAsync(source, guard.Token);
             heap = Table(database).ObjectId;
             await using var writer = await database.CreateSessionAsync(guard.Token);
-            await writer.ExecuteAsync("INSERT INTO items VALUES(7,8),(9,10)", cancellationToken: guard.Token);
+            await writer.ExecuteAsync("INSERT INTO items VALUES(7,8,11),(9,10,12)", cancellationToken: guard.Token);
             database.SchemaProvisioner.JointStage = stage => stages[stage] = storage.CaptureDurableImages();
 
             // Act
@@ -311,27 +324,34 @@ public sealed partial class SqlJointTypeMigrationTests
         int old = 0, changed = 0;
         foreach (var image in stages.Values.Concat(Enumerable.Range(0, recorder.Count).Select(recorder.Open)))
         {
-            await using var reopened = await Builder(image).BuildAsync(guard.Token);
-            var database = await reopened.OpenDatabaseAsync("typed", guard.Token);
-            bool applied = database.Catalog.SchemaState!.ContentHash == target.Hash;
-            if (applied) { changed++; } else { old++; }
-            database.Catalog.SchemaState.ContentHash.ShouldBe(applied ? target.Hash : source.Hash);
-            Table(database).ObjectId.ShouldBe(heap);
-            database.Catalog.GetIndexes(heap).Count.ShouldBe(applied ? 2 : 1);
-            await using (var reader = await database.CreateSessionAsync(guard.Token))
+            foreach (bool resume in new[] { false, true })
             {
-                (await RowsAsync(reader, "SELECT v FROM items WHERE w=8", guard.Token)).Single()[0].ShouldBe(7);
-                (await RowsAsync(reader, "SELECT w FROM items WHERE v=9", guard.Token)).Single()[0].ShouldBe(10);
-            }
-            await DrainReclamationAsync(database, guard.Token);
-            database.DataStorage.HasOwnerPages(heap).ShouldBeTrue();
-            database.Catalog.PendingMigration.ShouldBeNull();
-            var liveTreeOwners = database.IndexManager.ExportRegistrations().Select(database.IndexManager.PageOwner).Append(heap).ToHashSet();
-            for (long page = 1; page < database.DataStorage.PageManager.PageCount; page++)
-            {
-                if (!database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
-                using var handle = database.DataStorage.PageManager.GetPage((PageId)page);
-                if (handle.Page.Type == PageType.Index) { liveTreeOwners.ShouldContain(handle.Page.OwnerId); }
+                var builder = Builder(image.CaptureDurableImages());
+                if (resume) { builder.AddDatabase("typed", db => db.Schema(targetDeclaration)); }
+                await using var reopened = await builder.BuildAsync(guard.Token);
+                var database = await reopened.OpenDatabaseAsync("typed", guard.Token);
+                await WaitDoneAsync(database, guard.Token);
+                bool applied = database.Catalog.SchemaState!.ContentHash == target.Hash;
+                if (resume) { applied.ShouldBeTrue(); }
+                if (applied) { changed++; } else { old++; }
+                database.Catalog.SchemaState.ContentHash.ShouldBe(applied ? target.Hash : source.Hash);
+                Table(database).ObjectId.ShouldBe(heap);
+                database.Catalog.GetIndexes(heap).Count.ShouldBe(applied ? 2 : 1);
+                await using (var reader = await database.CreateSessionAsync(guard.Token))
+                {
+                    (await RowsAsync(reader, "SELECT v FROM items WHERE w=8", guard.Token)).Single()[0].ShouldBe(7);
+                    (await RowsAsync(reader, "SELECT w FROM items WHERE v=9", guard.Token)).Single()[0].ShouldBe(10);
+                }
+                await DrainReclamationAsync(database, guard.Token);
+                database.DataStorage.HasOwnerPages(heap).ShouldBeTrue();
+                database.Catalog.PendingMigration.ShouldBeNull();
+                var liveTreeOwners = database.IndexManager.ExportRegistrations().Select(database.IndexManager.PageOwner).ToHashSet();
+                for (long page = 1; page < database.DataStorage.PageManager.PageCount; page++)
+                {
+                    if (!database.DataStorage.FreeSpaceMap.IsAllocated((PageId)page)) { continue; }
+                    using var handle = database.DataStorage.PageManager.GetPage((PageId)page);
+                    if (handle.Page.Type == PageType.Index) { liveTreeOwners.ShouldContain(handle.Page.OwnerId); }
+                }
             }
         }
         old.ShouldBeGreaterThan(0);
@@ -508,13 +528,16 @@ public sealed partial class SqlJointTypeMigrationTests
         using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(90));
         await using var engine = await Builder(new CrashCaptureSqlStorageStrategy()).BuildAsync(guard.Token);
         var database = await engine.CreateDatabaseAsync("typed", guard.Token);
-        await database.ApplySchemaAsync(OwnerDeclaration(false, [new("ix_v", ["v"], false, Predicate: "v < 0")]), guard.Token);
+        await database.ApplySchemaAsync(OwnerDeclaration(false), guard.Token);
         SeedRaw(database, [7, 8], 2048);
+        await database.ApplySchemaAsync(OwnerDeclaration(true, [new("ix_v", ["v"], false, Predicate: "v < 0")]), guard.Token);
+        ulong heap = Table(database).ObjectId;
 
         // Act
-        await database.ApplySchemaAsync(OwnerDeclaration(true), guard.Token);
+        await database.ApplySchemaAsync(OwnerDeclaration(false, [new("ix_v", ["v"], false)]), guard.Token);
 
         // Assert
+        Table(database).ObjectId.ShouldBe(heap);
         var registration = database.IndexManager.ExportRegistrations().Single();
         long pages = IndexOwnerPages(database, database.IndexManager.PageOwner(registration));
         pages.ShouldBeGreaterThan(1);
@@ -569,7 +592,7 @@ public sealed partial class SqlJointTypeMigrationTests
         await using var snapshot = await old.BeginTransactionAsync(IsolationLevel.Snapshot, guard.Token);
 
         // Act
-        await database.ApplySchemaAsync(OwnerDeclaration(true), guard.Token);
+        await database.ApplySchemaAsync(OwnerDeclaration(true, [new("old_w", ["w"], false), new("ix_v", ["v"], false)]), guard.Token);
 
         // Assert
         (await RowsAsync(old, "SELECT i.v,r.v FROM items i CROSS JOIN rewrite r WHERE i.w=8", guard.Token))

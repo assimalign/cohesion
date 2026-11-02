@@ -196,6 +196,8 @@ public sealed partial class SqlCatalog
             dropped ??= [];
             kept ??= [];
             treeOwners ??= [];
+            foreach (var table in kept)
+            { EnsurePhysicalLayoutKept(_tables[(table.Schema, table.Name)].Table, table); }
             var allReplacements = replacements.Concat(kept).ToArray();
             ValidateStorageReplacement(dropped, null);
             foreach (var table in replacements)
@@ -240,8 +242,8 @@ public sealed partial class SqlCatalog
                 { Sequences = _sequences.Count == 0 ? [] : Array.AsReadOnly(_sequencesById.Values.Where(sequence => ids.Contains(sequence.OwnerTableId)).ToArray()) };
             var tableRecords = allReplacements.Select(EncodeTable).ToArray();
             var indexRecords = indexes.Select(EncodeIndex).ToArray();
-            PrepareKeptReadVersions(kept);
             beforeTransaction?.Invoke();
+            PrepareKeptReadVersions(kept);
             using var transaction = _storage.BeginTransaction();
             var tableSlots = allReplacements.Select((table, index) => new TableSlot(table,
                 UpsertRecord(transaction, _tables.TryGetValue((table.Schema, table.Name), out var existing) ? existing.Location : null, tableRecords[index]))).ToArray();

@@ -29,8 +29,7 @@ public sealed partial class SqlCatalog
             var previous = _tables[(table.Schema, table.Name)].Table;
             _keptReadVersions.GetValue(previous, static _ => new object());
         }
-        // Allocate before commit. If publication fails these are still current
-        // descriptions, so allowing their reads is harmless and needs no undo.
+        // Allocate after space admission and before commit.
     }
 
     private bool IsKeptReadVersion(SqlCatalogTable table)
@@ -70,7 +69,8 @@ public sealed partial class SqlCatalog
             .Where(item => item.Owner != item.Registration.ObjectId).ToArray();
         var intents = owners.Select(item =>
         {
-            var location = _storage.InsertRow(transaction, item.Owner, SqlReclamationRecord.Encode(item.Owner, "dbo", item.Registration.Definition.Name));
+            var table = _tables.Values.Single(slot => slot.Table.ObjectId == item.Registration.ObjectId).Table;
+            var location = _storage.InsertRow(transaction, item.Owner, SqlReclamationRecord.Encode(item.Owner, table.Schema, table.Name));
             return (item.Owner, Intent: new SqlReclamationIntent(location.PageId, location.SlotIndex));
         }).ToArray();
         _pendingReclamations.EnsureCapacity(_pendingReclamations.Count + intents.Length + additionalOwners);

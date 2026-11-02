@@ -8232,7 +8232,7 @@ two questions for the planner: *what objects exist* (with stable identities) and
 #### Catalog: Standalone sequences and shared allocation (#1717, SQ-S1)
 
 SQL format **28** introduced kind **18** sequence definitions and kind **19** reservations;
-format **29** introduced kind 18 ownership; current format **33** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
+format **29** introduced kind 18 ownership; current format **35** retains it and refuses earlier files. Kind 18 stores object id, SQL namespace, relation name, integer type, START,
 INCREMENT, MINVALUE, MAXVALUE, CACHE and CYCLE as a typed tuple. Kind 19 stores object id,
 durable endpoint and a called flag; a false flag persists an explicit restart before first use.
 Earlier database formats are refused by the existing format gate; compiled-schema v11 is current.
@@ -8559,7 +8559,7 @@ Typed-schema worker handoff and joint crash/wire convergence are described in SQ
 CS02064 identifies a missing assignment cast for an old value, USING result or default (42804).
 Existing constraint, conversion, view, locking and storage codes retain their conditions.
 SQL format 27 introduced table extension 7's RecastDefault Boolean beside each missing-value literal
-(format 28 added sequence records; the current format is 34); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
+(format 28 added sequence records; the current format is 35); earlier SQL files are refused without an upgrade reader. Compiled-schema v11, dense row encoding,
 replacement markers and reclamation intents are unchanged. The language assembly
 adds the public sealed SqlAlterColumnTypeAction leaf and SqlExpressionRenderer.Render(SqlAlterTableExpression)
 overload; canonical rendering quotes the AST's decoded domain name, including names whose actual
@@ -8838,10 +8838,14 @@ rewrite locks; tablecmds.c:15618-15624 refuses dependent views. No reference cod
 
 #### Joint tables that keep their physical owner (#1777, SQ-A4)
 
-Within a joint TYPE migration, classification is per table. Index add/drop and constraint
-add/drop (CHECK, NOT NULL, UNIQUE and either end of a foreign key) keep the heap owner.
-Only a nullability change may accompany these column declarations; every other column,
-default, order or primary-key change still rewrites. Kind 9 records Joint/KeepOwner or
+Within a joint TYPE migration, classification is per table. Additive indexes and constraint
+changes (CHECK, NOT NULL, UNIQUE and either end of a foreign key) can keep the heap owner.
+Every column must be an identity conversion at the same ordinal, with equal counts and names;
+only IsNullable changes on the old physical column facets. Native-domain storage or facet
+changes, defaults, column order and primary-key changes rewrite. Dropping or replacing any
+heap-owned tree also forces RewriteOwner so its pages are reclaimed. Drops and replacements
+of alternate trees can keep the heap because kind 14 reclaims their separate owners. General
+heap-owned DROP INDEX page reclamation remains #1808. Kind 9 records Joint/KeepOwner or
 Joint/RewriteOwner for each existing target. Empty Build, RunMigrationsInline, ApplySchemaAsync
 and the worker use this same metadata classification. The joint X-lock protocol is unchanged:
 owned sequences, then every touched table, in ascending identity order, through publication.
@@ -8851,8 +8855,10 @@ Kept heaps preserve their dropped physical ordinals, frozen missing values, iden
 and default-assignment flags. Retained published trees are reused. New or same-name replacement
 trees build through the deferred 64-version index builder with original row locations and MVCC
 stamps. They remain outside the live index directory until the single catalog publication.
-CHECK and NOT NULL validate every currently visible row under the joint locks, uniqueness
-validates the built tree, and both ends of foreign keys validate against the complete final state.
+New CHECK and NOT NULL constraints validate currently visible rows under the joint locks before
+any tree builds. Index-only changes decode no heap rows beyond the index builder's scans.
+Uniqueness validates the built tree. Foreign keys validate against the final state only when
+child rows, the reference definition, parent rows or the parent's matching key indexes changed.
 Drops remain planned until that commit. A failed validation retains the old schema online
 with CS03402; cancellation and disposal release the same locks and unpublished reservations.
 
@@ -8864,10 +8870,16 @@ Published aliases swap under the catalog monitor after its commit, using preallo
 old resolved handles remain protected by statement/transaction reclamation fences. The catalog
 also retains old kept-table descriptions through weak read-version markers while their physical
 owner is live or pending reclamation, so joins in older snapshots can scan that unchanged layout.
-These markers allocate before commit and cannot retain a history of table descriptions forever.
+These markers allocate after publication-space admission and before commit, so a space refusal
+leaves current descriptions on the read fast path. Weak keys cannot retain table histories forever.
+Publication checks EnsurePhysicalLayoutKept under the catalog lock for every kept description.
 The lock order is table X -> apply gate -> tree/page latches for building, and snapshot gate -> catalog monitor
 -> index directory monitor for publication; the directory never calls back into the catalog.
 Maintenance selects one physical manager per call, preserving the global 64-leaf budget.
+With N alternate managers each manager runs once per N+1 purge passes, and small trees can
+leave part of the budget unused. Indexing reports entries removed, not leaves visited; using
+the remaining budget would need a new public Indexing member, so that improvement is deferred
+to #1808 rather than widening the boundary for this implementation.
 SQL still acquires unique-key locks by logical heap identity before entering the apply gate;
 alternate managers omit Indexing's redundant key-lock acquisition, so physical tree owners
 cannot introduce a second lock namespace or a wait inside that gate.
@@ -8889,7 +8901,8 @@ table; it charges no heap copy and no retained tree. The bracket watchdog, 16 Mi
 and engine reserve also cover these builds and the retirement of separate tree owners.
 
 SQL format 35 fences the changed logical-registration/physical-owner relationship and the
-classification steps. A format-34 reader would attach a tree using the heap identity and tag
+classification records. These metadata choices are excluded from provisioning, trace and event
+StepCount values, which count executable steps only. A format-34 reader would attach a tree using the heap identity and tag
 subsequent splits incorrectly, so the existing gate refuses 34; no compatibility reader is added.
 No record encoding, compiled-schema format, shared Indexing format or wire message changes.
 The nonparallel SqlJointTypeMigrationTests.KeepOwners corpus measures 32,768 rows with an
@@ -8898,6 +8911,8 @@ counter-driven lock admission, and reopens tree/publication crash images. Postgr
 src/backend/commands/tablecmds.c:5897-5930 likewise separates checks from physical rewrites.
 That fixture reduces indexed-table rewrites from 32,768 rows to zero and total prepared pages
 from 275 to 137: 136 index pages plus one page for the other table's single rewritten row.
+The index builder decodes 65,536 versions (count plus build); the index-only table needs zero
+additional validation decodes. The other table's single copied row adds one decode.
 
 #### Catalog: Recoverable table rewrite and ordinal compaction (#1265)
 
