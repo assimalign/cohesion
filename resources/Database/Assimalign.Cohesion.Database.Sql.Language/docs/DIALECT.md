@@ -2500,13 +2500,12 @@ database is refused too. Format 6 (#1241) keeps format 5's rows and index trees
 but records each table's dropped-column positions in the catalog and decodes
 rows through them, so a format-5 database is refused too. The engine has no
 upgrade path (#1152). It refuses to
-open a database on any format but 20 — older or newer — with an error that names
+open a database on any format but 34 — older or newer — with an error that names
 the database, the format it found and the format it supports. The check reads
 only the database's catalog and runs before the engine opens the data files, so
-a refused open never touches them. A cleanly
-closed database is left byte-identical. A crashed one keeps its journals: the
-catalog files get only the storage layer's own crash recovery, which does not
-depend on the format. To move an older database to the current engine, export
+a refused open never touches them. Catalog and data format checks read Storage's
+recovered read-only view before either original file set opens for writing (#1744).
+Clean and crashed databases are left byte-identical, including their journals. To move an older database to the current engine, export
 its data with the engine that wrote it (which can still open it), drop the
 database (`DropDatabaseAsync`), create it again and reload the data. A database
 whose creation was interrupted before its format was recorded reads as format 1

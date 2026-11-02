@@ -1974,7 +1974,7 @@ on this implementation) is:
 | Shared Indexing | `Indexing/src/BTreeIndexManager.cs:115` EnsureFormat and `Indexing/src/BTreeIndex.cs:164` EnsureFormat, reading every registered root |
 | Graph | `Graph/src/Storage/GraphStore.cs:164` EnsureIndexFormat (entity headers via `Graph/src/Internal/Storage/GraphRecordCodec.cs:21`, registration version at `Graph/src/Storage/GraphStore.Indexes.cs:296`, roots); `Graph/src/Catalog/GraphCatalog.cs:91` EnsureFormat (every catalog record version via `Graph/src/Internal/Catalog/GraphCatalogCodec.cs:79`) |
 | Documents | `Documents/src/Catalog/DocumentCatalog.cs:124` EnsureIndexFormat (metadata kind/version headers via `Documents/src/Internal/Catalog/DocumentCatalogCodec.cs:64` EnsureHeader and `:181` EnsureVersion; registrations at `Documents/src/Catalog/DocumentCatalog.Indexes.cs:536`; roots) |
-| SQL, catalog and data | `Sql/src/SqlDatabaseEngine.cs:913` OpenCatalog (table-extension version at `Sql/src/Catalog/SqlCatalog.cs:1941`, index-record version at `:2122`); `Sql/src/SqlDatabase.cs:298` ThrowIfFormatIsNotCurrent; `Sql/src/Internal/Provisioning/SqlSchemaProvisioner.cs:70` ValidateRecordedFormats; `Sql/src/SqlDatabase.cs:273` EnsureIndexFormats (data roots); shared storage gates on both sets |
+| SQL, catalog and data | `Sql/src/SqlDatabaseEngine.cs:913` OpenCatalog (table-extension version at `Sql/src/Catalog/SqlCatalog.cs:1941`, index-record version at `:2122`); `Sql/src/SqlDatabase.cs:296` ThrowIfFormatIsNotCurrent; `Sql/src/Internal/Provisioning/SqlSchemaProvisioner.cs:70` ValidateRecordedFormats; `Sql/src/SqlDatabase.cs:273` EnsureIndexFormats (data roots); shared storage gates on both sets |
 | KeyValuePair, catalog and data | `KeyValuePair/src/KeyValueDatabase.cs:259` ThrowIfFormatIsNotCurrent; `KeyValuePair/src/KeyValueDatabase.cs:232` EnsureIndexFormats (data roots); shared storage gates on both sets |
 | Blob | `Blob/src/BlobDatabase.cs:89` EnsureFormats, decoding owner-zero records with `Blob/src/Internal/Catalog/BlobCatalogCodec.cs:73` catalog-version gate |
 | Cache | No persisted database-open format gate; it owns no storage file set |
@@ -2201,11 +2201,10 @@ shutdown checkpoint would only restamp the header's modification time and rewrit
 the journal's checkpoint record, and under a deferred open-time checkpoint it would
 truncate records the owner never analyzed. Skipping it is crash-equivalent (as if
 the process stopped right after recovery, which the next open already handles), and
-it is what lets an engine refuse a database at open — the SQL engine's data-storage
-format gate — without writing on the way out: a cleanly closed file set stays
-byte-identical, and a crashed one keeps the journal the engine that wrote it needs.
-The open itself still runs recovery, so a crashed file set's data pages do receive
-the format-agnostic physical redo before the owner can decide to refuse it.
+it also avoids writes when an instance-level recheck refuses an open. Engine format
+preflights use the recovered read-only view described above (#1744), whose disposal
+always skips shutdown writes. A refused clean or crashed file set stays byte-identical;
+only an accepted open acquires writable handles and runs physical redo.
 
 With a background checkpointer (#902) checkpoints race live transactions, so the
 emptiness check hardened from "no page write locks" to an **active-transaction count**

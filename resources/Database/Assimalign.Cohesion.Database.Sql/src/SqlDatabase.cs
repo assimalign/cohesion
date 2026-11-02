@@ -286,11 +286,9 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// are #1152): an older database must be dropped and recreated, and a newer one
     /// belongs to the engine that wrote it. The engine calls this on the catalog
     /// alone, before it opens the data file set, so a refused open never touches
-    /// the data files. The catalog file set gets only what opening any storage
-    /// does: a cleanly closed one is left byte-identical, and a crashed one gets
-    /// the storage layer's format-agnostic physical recovery and keeps its journal
-    /// (an untouched storage closes without writing), so the engine that wrote the
-    /// database can still open it.
+    /// the data files. The catalog reads Storage's recovered read-only view (#1744),
+    /// leaving every original file byte-identical for clean and crashed databases,
+    /// so the engine that wrote the database can still recover and open it.
     /// </summary>
     /// <param name="name">The database name, for the message.</param>
     /// <param name="version">The format version recorded in the database's catalog.</param>
