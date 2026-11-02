@@ -27,9 +27,16 @@ internal sealed class GatewayForwarder : IApplicationInstanceGatewayClient
         return _infrastructure.Gateway!.PublishAsync(Address(manifest), cancellationToken);
     }
 
-    public ValueTask<bool> RenewAsync(ApplicationInstanceManifest manifest, CancellationToken cancellationToken = default)
+    public async ValueTask<bool> RenewAsync(ApplicationInstanceManifest manifest, CancellationToken cancellationToken = default)
     {
-        return _infrastructure.Gateway!.RenewAsync(Address(manifest), cancellationToken);
+        try
+        {
+            return await _infrastructure.Gateway!.RenewAsync(Address(manifest), cancellationToken);
+        }
+        finally
+        {
+            _infrastructure.Renewals.AddOrUpdate(manifest.Key, 1, static (_, count) => count + 1);
+        }
     }
 
     // The test platform's instance client finds the instance among the platform's running ones.

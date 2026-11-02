@@ -60,6 +60,16 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
     /// </summary>
     public HashSet<ResourceName> Replacing { get; } = [];
 
+    /// <summary>
+    /// Resources whose deployment, before it removes the running instances (<see cref="Replacing"/>),
+    /// waits until the task the function returns completes, as a platform's removal takes time
+    /// while the doomed instances still renew; the deploy call is recorded before it waits.
+    /// </summary>
+    public ConcurrentDictionary<ResourceName, Func<Task>> ReplaceDelays { get; } = new();
+
+    /// <summary>How many renewals each instance has sent the gateway, known or not.</summary>
+    public ConcurrentDictionary<InstanceKey, int> Renewals { get; } = new();
+
     public ScaleAction Scale { get; } = new();
 
     public List<string> Deployed { get; } = [];
@@ -203,6 +213,11 @@ internal sealed class TestInfrastructure : IApplicationGatewayInfrastructureProv
         Running[resource.Name] = Revisions.GetValueOrDefault(resource.Name, "1");
         if (Replacing.Contains(resource.Name))
         {
+            if (ReplaceDelays.TryGetValue(resource.Name, out Func<Task>? replace))
+            {
+                await replace.Invoke().WaitAsync(cancellationToken);
+            }
+
             foreach (KeyValuePair<InstanceKey, (TestInstance Instance, ApplicationInstanceService Service)> entry in Instances)
             {
                 if (entry.Value.Instance.Provider == resource.Provider

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -106,6 +107,9 @@ public sealed class ApplicationGatewayDeploymentIdTests
         // Arrange: as above, but deploying the update removes what runs and starts its own instance
         // only when the test lets it, as the Docker platform recreates the containers of a deployment
         // caught in a restart loop. The lease is short, so a surviving instance would renew at once.
+        // The removal waits until the doomed instance has renewed twice inside the deploy call, as
+        // a real removal takes seconds: a gateway that took evidence before the call returned,
+        // such as one that marked the deployment before calling the platform, would count those.
         var infrastructure = new TestInfrastructure();
         IApplicationModel model = CreateModel("hello");
         await using (await RunningGateway.StartAsync(infrastructure, new InMemoryApplicationGatewayStore(), model))
@@ -120,16 +124,26 @@ public sealed class ApplicationGatewayDeploymentIdTests
         infrastructure.Delayed["orders-api"] = () => replaced.Task;
         var planned = new TaskCompletionSource();
         infrastructure.PlanDelays["orders-api"] = () => planned.Task;
+        TestInstance? removed = null;
+        int renewedWhileRemoving = 0;
+        infrastructure.ReplaceDelays["orders-api"] = async () =>
+        {
+            int before = infrastructure.Renewals.GetValueOrDefault(removed!.Key);
+            await Eventually.WaitUntilAsync(() => infrastructure.Renewals.GetValueOrDefault(removed.Key) >= before + 2);
+            renewedWhileRemoving = infrastructure.Renewals.GetValueOrDefault(removed.Key) - before;
+        };
         ApplicationGateway gateway = RunningGateway.Create(infrastructure, new InMemoryApplicationGatewayStore(), model, TimeSpan.FromSeconds(10), lease);
         using var stop = new CancellationTokenSource();
         Task run = gateway.RunAsync(stop.Token, out Task gatewayStarted);
 
         // Act: while the resource's step plans it, an instance of the running workload publishes;
-        // the deployment then removes it, and its replacement starts a few renewals later.
+        // the deployment then removes it, after it renewed, and its replacement starts a few
+        // renewals later.
         await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "plan:orders-api") == 2);
-        TestInstance removed = await infrastructure.StartInstanceAsync("Web", "orders-api", running);
+        removed = await infrastructure.StartInstanceAsync("Web", "orders-api", running);
         planned.SetResult();
         await Eventually.WaitUntilAsync(() => infrastructure.Events().Count(call => call == "deploy:orders-api") == 2);
+        await Eventually.WaitUntilAsync(() => !infrastructure.Instances.ContainsKey(removed.Key));
         Task first = await Task.WhenAny(gatewayStarted, Task.Delay(lease * 3));
         bool readyBeforeTheReplacement = first == gatewayStarted;
         replaced.SetResult();
@@ -140,6 +154,7 @@ public sealed class ApplicationGatewayDeploymentIdTests
 
         // Assert: the removed instance proved nothing about the deployment that replaced it; only
         // the replacement's publication made the resource ready.
+        renewedWhileRemoving.ShouldBeGreaterThanOrEqualTo(2);
         readyBeforeTheReplacement.ShouldBeFalse();
         infrastructure.Instances.ContainsKey(removed.Key).ShouldBeFalse();
         instances.ShouldContain(instance => instance.Key != removed.Key && instance.Deployment == running);
