@@ -13,6 +13,30 @@ namespace Assimalign.Cohesion.Sdk.Database.Tests;
 
 public class DatabaseModelTargetsTests
 {
+    [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Targets: retired orchestration metadata is absent")]
+    public void Evaluate_DefaultProps_ShouldLeaveRetiredOrchestrationMetadataUnset()
+    {
+        // Arrange
+        using var directory = new TemporaryDirectory();
+        using var projects = new ProjectCollection();
+
+        // Act
+        Project project = LoadProject(directory, projects, "Sql");
+
+        // Assert
+        foreach (string name in new[] { "CohesionResourceKind", "CohesionControlPlaneEndpoint", "CohesionControlPlanePath",
+            "CohesionWorkloadKind", "CohesionReplicas", "CohesionMaxReplicas" })
+        {
+            project.GetPropertyValue(name).ShouldBeEmpty();
+        }
+        foreach (string name in new[] { "CohesionEndpoint", "CohesionProbe", "CohesionMount" })
+        {
+            project.GetItems(name).ShouldBeEmpty();
+        }
+        project.GetPropertyValue("_CohesionDatabaseTaskAssembly").ShouldNotBeEmpty();
+        project.GetPropertyValue("CohesionDatabaseModel").ShouldBe("Sql");
+    }
+
     [Fact(DisplayName = "Cohesion Test [Sdk.Database] - Targets: schema artifacts use the TFM intermediate path")]
     public void Evaluate_WithTargetFrameworkIntermediatePath_ShouldUseItForSchemaArtifacts()
     {

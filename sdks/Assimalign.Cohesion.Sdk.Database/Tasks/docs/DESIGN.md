@@ -380,7 +380,7 @@ and COHDBSDK206 reporting boundary. Assembly-local Defaults/Types bindings live 
 and retain the linked owning namespaces. Private fixture constants use repository casing;
 compiler identifiers, generated artifact contents, schema format and extraction behavior are unchanged.
 
-MSBuild item declarations use one item type per group while retaining their original order and conditions. Resource commands, endpoint/probe/mount defaults, schema artifact ownership and FileWrites registration are unchanged. Compiler preview settings come from the shared build; the task and test projects retain their explicit AOT contract.
+MSBuild item declarations use one item type per group while retaining their original order and conditions. Sdk.Database.props carries task wiring and CohesionDatabase properties only; retired orchestration properties and endpoint/probe/mount defaults are removed (#1785). Schema artifact ownership and FileWrites registration are unchanged. Compiler preview settings come from the shared build; the task and test projects retain their explicit AOT contract.
 
 ## Error message producers and catalog carriers
 
