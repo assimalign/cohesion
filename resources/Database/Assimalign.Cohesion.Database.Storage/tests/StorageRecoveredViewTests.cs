@@ -205,23 +205,24 @@ public sealed class StorageRecoveredViewTests
     {
         // Arrange.
         (byte[] Data, byte[] Journal) image;
-        using (var seed = TornStorage.Create()) { seed.Insert("committed"); image = seed.CaptureDurable(); }
+        using (var seed = TornStorage.Create(name: "probe-telemetry")) { seed.Insert("committed"); image = seed.CaptureDurable(); }
         using var recorder = new EventSourceRecorder(StorageEventSource.Log, EventLevel.Verbose);
+        using (var unrelated = TornStorage.Create(name: "unrelated-probe-telemetry")) { }
         long gauge = StorageEventSource.Log.CurrentStorages;
 
         // Act and assert: a refusal after this preflight would have no Storage lifecycle events.
         using (var probe = ProbeStorage.Open(image))
         {
             StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
-            recorder.Events.ShouldBeEmpty();
+            ForProbe(recorder).ShouldBeEmpty();
         }
-        recorder.Events.ShouldBeEmpty();
+        ForProbe(recorder).ShouldBeEmpty();
         using (var real = TornStorage.Open(image)) { StorageEventSource.Log.CurrentStorages.ShouldBe(gauge + 1); }
 
         // Assert.
-        recorder.Events.Count(e => e.EventName == "RecoveryStart").ShouldBe(1);
-        recorder.Events.Count(e => e.EventName == "RecoveryStop").ShouldBe(1);
-        recorder.Events.Count(e => e.EventName == "StorageClosed").ShouldBe(1);
+        ForProbe(recorder).Count(e => e.EventName == "RecoveryStart").ShouldBe(1);
+        ForProbe(recorder).Count(e => e.EventName == "RecoveryStop").ShouldBe(1);
+        ForProbe(recorder).Count(e => e.EventName == "StorageClosed").ShouldBe(1);
         StorageEventSource.Log.CurrentStorages.ShouldBe(gauge);
     }
 
@@ -264,6 +265,10 @@ public sealed class StorageRecoveredViewTests
         // Assert.
         allocated.ShouldBe(0);
     }
+
+    private static IEnumerable<EventWrittenEventArgs> ForProbe(EventSourceRecorder recorder)
+        => recorder.Events.Where(e => e.PayloadNames?.IndexOf("database") is >= 0
+            && Equals(e.Payload![e.PayloadNames.IndexOf("database")], "probe-telemetry"));
 
     private static byte[] SmallRecords(int pages, int deltas)
     {

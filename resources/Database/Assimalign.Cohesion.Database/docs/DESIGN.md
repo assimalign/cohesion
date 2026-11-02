@@ -71,7 +71,7 @@ column names, types, order, nullability and SQL's measured SELECT/TableScan coun
 
 Each `CohesionSharedSource` declaration names its owner and required `Module`. Database's engine
 helpers live in `shared/Engine/`, with the model projects selecting `Module="Engine"`. Other
-Database owners expose `Diagnostics`, `Parameters`, `Encoding`, `Types` and `Defaults` modules.
+Database owners expose `Diagnostics`, `Parameters`, `Encoding`, `Types`, `Defaults` and Storage's `JournalFormat` modules. JournalFormat owns the only journal frame codec and analysis; its conservative pre-scan stops at the first in-file full image before delegating to a recovered probe.
 The move preserves helper contents and their internal, assembly-local type identities. Test-only
 linked support remains ordinary Compile items. Every project ItemGroup contains one item type,
 preserving declaration metadata and evaluation order when groups split during integration.

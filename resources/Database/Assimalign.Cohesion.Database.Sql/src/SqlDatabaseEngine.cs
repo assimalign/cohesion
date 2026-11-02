@@ -795,9 +795,9 @@ public sealed class SqlDatabaseEngine : DatabaseEngine
                 {
                     try
                     {
-                        // Gate both sets through recovered read-only views. This scope closes
-                        // their read handles before acquiring any writable handle.
-                        if (creationPending || _strategy.RequiresRecovery(name, catalog: true) || _strategy.RequiresRecovery(name, catalog: false))
+                        // When replay is needed, gate both sets through recovered read-only views
+                        // and close their read handles before acquiring any writable handle.
+                        if (creationPending || _strategy.RequiresRecovery(name, catalog: true, cancellationToken) || _strategy.RequiresRecovery(name, catalog: false, cancellationToken))
                         {
                             using var probeStorage = catalogProbe?.Open() ?? _strategy.OpenStorage(name, catalog: true, cancellationToken, readOnly: true);
                             DatabaseRecoveryPreflight.AssertRecovered(probeStorage);

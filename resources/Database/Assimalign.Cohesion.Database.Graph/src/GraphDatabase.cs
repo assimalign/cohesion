@@ -83,7 +83,7 @@ public sealed partial class GraphDatabase : DatabaseInstance
         // page as it attaches the tree. That happens inside the store's open, after
         // the recovery scrub has written to the database, so the check runs here
         // first: a database whose indexes or catalog this engine cannot read is refused before
-        // any write. The engine first runs this gate through Storage's recovered read-only view (#1744).
+        // any write. When replay is needed, the engine first gates Storage's recovered read-only view (#1744).
         try { EnsureFormats(name, storage); }
         catch { Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
 

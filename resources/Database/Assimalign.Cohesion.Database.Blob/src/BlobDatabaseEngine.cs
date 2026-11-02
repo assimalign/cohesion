@@ -83,6 +83,9 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
     /// </summary>
     internal const string DataFileSet = "blob";
 
+    // Deterministic work observation at the model gate; no diagnostic or public seam.
+    internal Action? FormatCheckStarting { get; set; }
+
     private readonly BlobDatabaseEngineOptions _options;
     private readonly Dictionary<string, BlobDatabase> _databases = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _sync = new();
@@ -653,13 +656,16 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
             BlobStorage? storage = null;
             try
             {
+                bool formatsChecked = false;
                 if (!create && (_options.StorageStrategy is not null || DatabaseRecoveryPreflight.Required(directory, _memory, name, DataFileSet)))
                 {
                     using var probe = _options.StorageStrategy is { } probeStrategy
                         ? probeStrategy.OpenStorage(name, null, readOnly: true)
                         : OpenStorage(directory, _memory, name, create: false, null, readOnly: true);
                     DatabaseRecoveryPreflight.AssertRecovered(probe);
+                    FormatCheckStarting?.Invoke();
                     BlobDatabase.EnsureFormats(probe);
+                    formatsChecked = true;
                 }
                 storage = _options.StorageStrategy is { } strategy
                     ? create ? strategy.CreateStorage(name, _options.Durability) : strategy.OpenStorage(name, _options.Durability)
@@ -681,7 +687,7 @@ public sealed class BlobDatabaseEngine : DatabaseEngine
 
                 // A created database reports the name it was created with; an opened one the
                 // spelling its storage header kept from its creation, whatever spelling opened it.
-                var database = new BlobDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create);
+                var database = new BlobDatabase(create ? name : DatabaseFileNames.GetOpenedName(name, storage.Name), this, storage, recover: !create, formatsChecked);
                 _databases.Add(name, database);
                 return new ValueTask<DatabaseInstance>(database);
             }

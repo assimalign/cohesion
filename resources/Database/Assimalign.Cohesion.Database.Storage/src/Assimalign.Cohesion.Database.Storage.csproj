@@ -8,6 +8,6 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.FileSystem.Physical" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="RecoveryPreflight" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="JournalFormat" />
 	</ItemGroup>
 </Project>

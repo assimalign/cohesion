@@ -152,7 +152,7 @@ public sealed partial class GraphStore
     /// this engine reads (<see cref="BTreeIndexManager.FormatVersion"/>), reading record
     /// headers, registrations and each tree's root page. An engine calls it before the
     /// coordinator's recovery scrub, so a database whose indexes it cannot read is
-    /// refused before any write through Storage's recovered read-only view (#1744).
+    /// refused before any write, using Storage's recovered read-only view when replay is needed (#1744).
     /// <see cref="Open"/> checks again as it
     /// attaches the trees. Registration records carry no MVCC stamps, so they read the
     /// same before and after the scrub.

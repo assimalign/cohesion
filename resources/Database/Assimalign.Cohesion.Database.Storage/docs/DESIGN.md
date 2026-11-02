@@ -1937,12 +1937,14 @@ An open over a data stream whose `CanWrite` is false is a recovered read-only vi
 model storage factories own these streams; no new public interface or producer-to-consumer
 visibility grant is needed. When journal analysis finds applicable page records, engines acquire read-only handles for every
 file set, perform all format gates, dispose the probes, then open the originals for physical recovery.
-The frame reader and analysis are source-shared internal code in Storage's RecoveryPreflight module;
+The frame reader and analysis are source-shared internal code in Storage's JournalFormat module;
 no public API or visibility grant bridges this check. With no applicable records, engines skip the
 full probe and gate the writable open before logical recovery: empty physical plans write nothing,
 checkpointOnOpen is false, and an unwritten store writes nothing on disposal. SQL and KeyValuePair
 skip only when both sets need no recovery; otherwise catalog gates precede the data probe and both
-sets are gated before writable handles open. The preliminary journal-only analysis never masks a
+sets are gated before writable handles open. The preliminary scan stops at the first full image of
+an existing page above zero; only journals without such an image need full analysis. It checks
+cancellation between frames, including SQL's open token, and never masks a
 catalog refusal with a data I/O failure. An anchor-only journal conservatively retains the probe.
 Custom internal strategies without a raw-source precheck conservatively retain it too. Refusal,
 cancellation and probe disposal issue no writes, truncation, checkpoint, backup or sidecar creation.
@@ -1951,11 +1953,16 @@ throws resource-backed `NotSupportedException`, without a new Database diagnosti
 
 The header and both valid checkpoint chains are read first. The existing journal analysis verifies
 frames and classifies commits. Analysis counts applicable records per page. Prefix sums allocate one exact flat long[] grouped
-by page, and a streaming pass fills it with frame offsets selected by ShouldApply. No payload,
-per-record object or growing per-page list survives. Each requested page is reconstructed in one
-scratch page from its offsets in file order, then checksum-stamped. A reusable sequential journal
-chunk re-decodes each frame's header and borrows its payload until Apply returns; replay does not
-allocate or issue a positional read for every small record. Replay uses the indexed scan's verified
+by page, and a streaming pass fills it with locations selected by ShouldApply: a 48-bit offset in
+the low bits and a 16-bit frame length in the high bits. Frames exceeding 65,535 bytes or offsets
+exceeding 48 bits are refused as CK06003. Every range must fill exactly its planned count; overflow
+and underfill also refuse as corruption. No payload, per-record object or growing per-page list
+survives. Each requested page is reconstructed in one scratch page in file order, then checksum-stamped.
+Replay coalesces consecutive frames for that page only while each gap is at most 4 KiB and the
+span is at most 256 KiB; otherwise it reads exactly one frame. Thus scattered replay reads only
+the page's frame bytes, while clustered replay amortizes read calls. Replay rechecks magic,
+body-length bounds, indexed length and decoded page identity; version errors name the page-local
+frame number. It borrows each payload until Apply returns and uses the indexed scan's verified
 length, with no per-record length queries. `StorageRecovery.GetPlans`,
 `ShouldApply` and `Apply` are shared with physical recovery: protected anchors, page zero, absent
 uncommitted extensions, commit selection, images, deltas and base-LSN checks have one implementation.
@@ -1968,7 +1975,7 @@ the data stream and journal append/truncation guards reject mutation.
 Let R be retained applicable page records, D distinct indexed pages, P file pages, T journal transaction identities, G the
 number of distinct pages gates read and C the buffer capacity. Storage's retained page bytes are
 at most `8192 * (min(G, C) + 1)`; the extra page is the reconstruction scratch page. The retained
-record index charges exactly 8R bytes for frame offsets, 28 bytes per dictionary capacity slot
+record index charges exactly 8R bytes for packed frame locations, 28 bytes per dictionary capacity slot
 (8-byte key, 8-byte start/count range, 8-byte entry metadata and 4-byte bucket), and 160 bytes of
 conservative object/array headers. With the pre-sized dictionary's capacity slack this is at most
 `8 * R + 56 * D + 256` bytes (`RetainedIndexBytes`, an allocation-free getter). Existing
@@ -1983,7 +1990,7 @@ SQL's private block overlay has been removed in favor of this one mechanism.
 
 A probe is invisible to Storage lifecycle telemetry: no HeaderReadFallback, RecoveryStart,
 RecoveryStop, JournalTailLost, open/close counting or current-storages gauge transition. Only the
-real writable open reports recovery. An engine refuses a strategy result whose Data.CanWrite is
+real writable open reports recovery. Probe pool reads neither increment page-reads nor emit PageChecksumFailed; checksum verification and refusal still run. An engine refuses a strategy result whose Data.CanWrite is
 true at its probe boundary with a resource-backed internal invariant exception. Making probe mode
 explicit in the protected Storage construction API would widen a shipped boundary, so this pass
 uses the existing read-only Data contract and the engine assertion instead.
@@ -2019,7 +2026,7 @@ compare every file through engine disposal; current-format cases tear journal-co
 and data pages and assert exact committed bytes after recovery and a second reopen. Storage tests
 compare every probe page with real recovery over mixed histories and protected anchors; the
 existing 1,000-history oracle still checks physical writes in order. The unread-journal and many-small-record
-tests assert retained-byte ceilings and a journal-read-call ceiling; durations never decide outcomes.
+tests assert retained-byte ceilings, per-page replay byte and call ceilings for contiguous and round-robin layouts, and the pre-scan frame ceiling; durations never decide outcomes.
 A missing image is checked before the physical redo cache can evict and write another page.
 
 ### Checkpoints

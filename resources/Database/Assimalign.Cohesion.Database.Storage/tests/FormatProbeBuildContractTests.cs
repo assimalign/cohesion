@@ -11,6 +11,24 @@ namespace Assimalign.Cohesion.Database.Storage.Tests;
 // These are build/source ownership contracts; running Storage must not compile engine test inputs.
 public sealed class FormatProbeBuildContractTests
 {
+    [Fact(DisplayName = "Cohesion Test [Storage] - Build contract: Storage and all engines explicitly select JournalFormat (#1744)")]
+    public void Compile_StorageAndEngines_ShouldSelectJournalFormat()
+    {
+        // Arrange: shared-source opt-ins are a build contract, not a runtime source-shape pin.
+        string[] projects = ["Storage", "Sql", "Documents", "Graph", "KeyValuePair", "Blob"];
+
+        // Act and assert.
+        foreach (string project in projects)
+        {
+            string name = "Assimalign.Cohesion.Database." + project;
+            var source = XDocument.Load(Source($"{name}/src/{name}.csproj"));
+            source.Descendants("CohesionSharedSource").ShouldContain(item =>
+                (string?)item.Attribute("Include") == "Assimalign.Cohesion.Database.Storage"
+                && (string?)item.Attribute("Module") == "JournalFormat");
+        }
+        Directory.Exists(Source("Assimalign.Cohesion.Database.Storage/shared/JournalFormat")).ShouldBeTrue();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Storage] - Probe fixture: Storage tests exclude the engine process launcher (#1744)")]
     public void Compile_StorageTests_ShouldExcludeEngineLauncher()
     {
@@ -39,19 +57,6 @@ public sealed class FormatProbeBuildContractTests
         targets.ShouldNotContain("MSBuildProjectName", Case.Sensitive);
         string design = File.ReadAllText(Source("Assimalign.Cohesion.Database.Storage/fixtures/Assimalign.Cohesion.Database.Storage.FormatProbeFixture/docs/DESIGN.md"));
         design.ShouldContain("five engine test projects", Case.Sensitive);
-    }
-
-    [Fact(DisplayName = "Cohesion Test [Storage] - Probe: each reconstructed page has one scratch clear site (#1744)")]
-    public void Read_RecoveredPage_ShouldHaveOnlyOneScratchClearSite()
-    {
-        // Arrange.
-        string source = File.ReadAllText(Source("Assimalign.Cohesion.Database.Storage/src/Internal/Recovery/StorageRecoveredStream.cs"));
-
-        // Act: a source work counter pins the redundant memset, without a timing assertion.
-        int clears = source.Split("Array.Clear(_page)", StringSplitOptions.None).Length - 1;
-
-        // Assert.
-        clears.ShouldBe(1);
     }
 
     private static string Source(string relative)

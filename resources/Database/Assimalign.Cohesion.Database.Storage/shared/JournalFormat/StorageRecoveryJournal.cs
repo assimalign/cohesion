@@ -7,7 +7,7 @@ using System.Threading;
 
 using Assimalign.Cohesion.FileSystem;
 
-// Deviates from the repo RootNamespace rule: stateless recovery readers are compiled
+// Deviates from the repo RootNamespace rule: JournalFormat codec and analysis are compiled
 // into Storage and each engine without exposing a public implementation bridge.
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
@@ -19,6 +19,18 @@ internal static class StorageRecoveryJournal
     // A mismatched frame delegates to the full probe, preserving header/format refusal order.
     internal static bool RequiresRecovery(StorageStream journal, long dataLength, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        // A full image of an existing page must be restored regardless of commit. The first
+        // such image is enough to require a probe; only the no-image path needs planning.
+        foreach (var frame in ReadFrames(journal, readAhead: false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (frame.Span[0] != currentVersion) { return true; }
+            var record = DecodeRecord(frame);
+            long pageId = (long)record.PageId;
+            if (record.Type == JournalRecordType.FullPageImage && pageId > 0
+                && pageId < dataLength / Units.Page.Size) { return true; }
+        }
         bool unsupported = false;
         IEnumerable<JournalRecord> Records()
         {
@@ -148,7 +160,7 @@ internal static class StorageRecoveryJournal
         return new StorageRecoveryAnalysis(lastLsn, maxSequence, checkpointLsn, committed, pages);
     }
 
-    internal static IEnumerable<ReadOnlyMemory<byte>> ReadFrames(IFileSystemFileHandle handle, long verifiedPrefix = 0)
+    internal static IEnumerable<ReadOnlyMemory<byte>> ReadFrames(IFileSystemFileHandle handle, long verifiedPrefix = 0, bool readAhead = true)
     {
         byte[] chunk = [];
 
@@ -164,7 +176,7 @@ internal static class StorageRecoveryJournal
 
             while (position + framePrefixSize <= length)
             {
-                if (!Fill(handle, ref chunk, ref chunkOffset, ref chunkCount, position, framePrefixSize, length))
+                if (!Fill(handle, ref chunk, ref chunkOffset, ref chunkCount, position, framePrefixSize, length, readAhead))
                 {
                     break;
                 }
@@ -179,7 +191,7 @@ internal static class StorageRecoveryJournal
                 }
 
                 int frameLength = framePrefixSize + bodyLength + sizeof(uint);
-                if (!Fill(handle, ref chunk, ref chunkOffset, ref chunkCount, position, frameLength, length))
+                if (!Fill(handle, ref chunk, ref chunkOffset, ref chunkCount, position, frameLength, length, readAhead))
                 {
                     break;
                 }
@@ -208,7 +220,7 @@ internal static class StorageRecoveryJournal
 
     internal const int readChunkSize = 256 * 1024;
 
-    internal static bool Fill(IFileSystemFileHandle handle, ref byte[] chunk, ref long chunkOffset, ref int chunkCount, long position, int count, long length)
+    internal static bool Fill(IFileSystemFileHandle handle, ref byte[] chunk, ref long chunkOffset, ref int chunkCount, long position, int count, long length, bool readAhead = true)
     {
         if (position >= chunkOffset && position + count <= chunkOffset + chunkCount)
         {
@@ -227,7 +239,7 @@ internal static class StorageRecoveryJournal
             chunk = grown;
         }
 
-        int wanted = (int)Math.Min(chunk.Length, length - position);
+        int wanted = readAhead ? (int)Math.Min(chunk.Length, length - position) : count;
         int total = 0;
         while (total < wanted)
         {

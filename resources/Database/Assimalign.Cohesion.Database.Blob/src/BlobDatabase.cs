@@ -56,7 +56,7 @@ public sealed class BlobDatabase : DatabaseInstance
     // Test seam at the snapshot cleanup boundary, including operations without a pin.
     internal Action? BeforeSnapshotPinRelease { get; set; }
 
-    internal BlobDatabase(DatabaseName name, BlobDatabaseEngine engine, BlobStorage storage, bool recover)
+    internal BlobDatabase(DatabaseName name, BlobDatabaseEngine engine, BlobStorage storage, bool recover, bool formatsChecked = false)
         : base(name, engine)
     {
         _engine = engine;
@@ -80,7 +80,15 @@ public sealed class BlobDatabase : DatabaseInstance
 
         if (recover)
         {
-            EnsureFormats(storage);
+            try
+            {
+                if (!formatsChecked)
+                {
+                    engine.FormatCheckStarting?.Invoke();
+                    EnsureFormats(storage);
+                }
+            }
+            catch { Coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
             Coordinator.AnalyzeAndScrub();
             Coordinator.CompleteRecovery();
         }

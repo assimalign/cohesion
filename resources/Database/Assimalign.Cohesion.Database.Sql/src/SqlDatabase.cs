@@ -286,7 +286,7 @@ public sealed partial class SqlDatabase : DatabaseInstance
     /// are #1152): an older database must be dropped and recreated, and a newer one
     /// belongs to the engine that wrote it. The engine calls this on the catalog
     /// alone, before it opens the data file set, so a refused open never touches
-    /// the data files. The catalog reads Storage's recovered read-only view (#1744),
+    /// the data files. When replay is needed, the catalog reads Storage's recovered read-only view (#1744),
     /// leaving every original file byte-identical for clean and crashed databases,
     /// so the engine that wrote the database can still recover and open it.
     /// </summary>

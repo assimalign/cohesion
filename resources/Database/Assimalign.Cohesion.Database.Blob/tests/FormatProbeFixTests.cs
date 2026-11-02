@@ -50,13 +50,14 @@ public sealed class FormatProbeFixTests
             using (var warm = BlobStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "telemetry-bootstrap")) { }
             var eventSource = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage");
             using var recorder = new EventSourceRecorder(eventSource, EventLevel.Verbose);
+            EmitUnrelatedStorageEvents();
 
             // Act.
             await engine.OpenDatabaseAsync("probe", CancellationToken.None);
 
             // Assert.
-            recorder.Events.Count(e => e.EventName == "RecoveryStart").ShouldBe(1);
-            recorder.Events.Count(e => e.EventName == "RecoveryStop").ShouldBe(1);
+            ForDatabase(recorder).Count(e => e.EventName == "RecoveryStart").ShouldBe(1);
+            ForDatabase(recorder).Count(e => e.EventName == "RecoveryStop").ShouldBe(1);
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }
@@ -76,20 +77,17 @@ public sealed class FormatProbeFixTests
             using (var warm = BlobStorage.Create(new MemoryStream(), new MemoryStream(), new MemoryStream(), "telemetry-bootstrap")) { }
             var eventSource = EventSource.GetSources().Single(source => source.Name == "Assimalign.Cohesion.Database.Storage");
             using var recorder = new EventSourceRecorder(eventSource, EventLevel.Verbose);
+            EmitUnrelatedStorageEvents();
 
             // Act.
             await Should.ThrowAsync<DatabaseException>(async () => await engine.OpenDatabaseAsync("probe", CancellationToken.None));
             await engine.DisposeAsync();
 
             // Assert: a real recovery pair proves the writable open ran before refusal.
-            recorder.Events.Count(e => e.EventName == "RecoveryStart").ShouldBe(1);
-            recorder.Events.Count(e => e.EventName == "RecoveryStop").ShouldBe(1);
-            recorder.Events.Count(e => e.EventName == "StorageClosed").ShouldBe(1);
+            ForDatabase(recorder).Count(e => e.EventName == "RecoveryStart").ShouldBe(1);
+            ForDatabase(recorder).Count(e => e.EventName == "RecoveryStop").ShouldBe(1);
+            ForDatabase(recorder).Count(e => e.EventName == "StorageClosed").ShouldBe(1);
             FormatProbeCrash.AssertUnchanged(root, before);
-            var repository = new DirectoryInfo(AppContext.BaseDirectory);
-            while (repository is not null && !Directory.Exists(Path.Combine(repository.FullName, "resources", "Database"))) { repository = repository.Parent; }
-            string source = File.ReadAllText(Path.Combine(repository!.FullName, "resources", "Database", "Assimalign.Cohesion.Database.Blob", "src", "BlobDatabaseEngine.cs"));
-            source.ShouldContain("DatabaseRecoveryPreflight.Required(directory, _memory, name, DataFileSet)", Case.Sensitive);
         }
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }
@@ -113,19 +111,18 @@ public sealed class FormatProbeFixTests
         finally { if (Directory.Exists(root)) { Directory.Delete(root, recursive: true); } }
     }
 
-    [Fact(DisplayName = "Cohesion Test [Blob] - Preflight: catalog validation accepts only the storage it uses (#1744)")]
-    public void EnsureFormats_BlobPreflight_ShouldHaveNoUnusedNameParameter()
+    private static IEnumerable<EventWrittenEventArgs> ForDatabase(EventSourceRecorder recorder)
+        => recorder.Events.Where(e => e.PayloadNames?.IndexOf("database") is >= 0
+            && e.Payload![e.PayloadNames.IndexOf("database")] is string database
+            && (database == "probe" || database == "probe/catalog"));
+
+    private static void EmitUnrelatedStorageEvents()
     {
-        // Arrange.
-        var repository = new DirectoryInfo(AppContext.BaseDirectory);
-        while (repository is not null && !Directory.Exists(Path.Combine(repository.FullName, "resources", "Database"))) { repository = repository.Parent; }
-        string source = File.ReadAllText(Path.Combine(repository!.FullName, "resources", "Database", "Assimalign.Cohesion.Database.Blob", "src", "BlobDatabase.cs"));
-
-        // Act.
-        string parameters = source.Split("internal static void EnsureFormats(", StringSplitOptions.None)[1].Split(')')[0];
-
-        // Assert.
-        parameters.ShouldBe("BlobStorage storage");
+        using var data = new MemoryStream();
+        using var journal = new MemoryStream();
+        using var backup = new MemoryStream();
+        using (var seed = BlobStorage.Create(data, journal, backup, "telemetry-unrelated")) { }
+        using var unrelated = BlobStorage.Open(new MemoryStream(data.ToArray()), new MemoryStream(journal.ToArray()), new MemoryStream(backup.ToArray()));
     }
 
     private sealed class IgnoringProbeStrategy : BlobStorageStrategy

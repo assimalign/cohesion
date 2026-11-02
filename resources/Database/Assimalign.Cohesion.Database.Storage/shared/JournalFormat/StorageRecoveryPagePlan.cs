@@ -1,4 +1,4 @@
-// Deviates from the repo RootNamespace rule: stateless recovery readers are compiled
+// Deviates from the repo RootNamespace rule: JournalFormat codec and analysis are compiled
 // into Storage and each engine without exposing a public implementation bridge.
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 

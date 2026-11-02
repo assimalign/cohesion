@@ -267,8 +267,8 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
     internal static StorageJournal OpenReadOnly(StorageStream stream)
         => new StorageJournal(stream, stream, leaveOpen: true, readOnly: true);
 
-    // Offsets were selected from verified frames during probe initialization. Page ranges
-    // preserve file order; Fill reuses the same chunk across all records of a page.
+    // Locations pack a 48-bit offset and 16-bit frame length. Read only this page's frames,
+    // coalescing nearby frames while every gap is <= 4 KiB and the span is <= 256 KiB.
     internal IEnumerable<JournalRecord> ReadRecoveryPageRecords(long[] offsets, int start, int count)
     {
         lock (_mediumLock)
@@ -282,18 +282,34 @@ public sealed class StorageJournal : IAsyncDisposable, IDisposable
             {
                 for (int i = start; i < start + count; i++)
                 {
-                    long offset = offsets[i];
-                    if (!Fill(_handle, ref chunk, ref chunkOffset, ref chunkCount, offset, framePrefixSize, length))
+                    long offset = offsets[i] & 0x0000FFFFFFFFFFFFL;
+                    int frameLength = (int)((ulong)offsets[i] >> 48);
+                    if (offset < chunkOffset || offset + frameLength > chunkOffset + chunkCount)
                     {
-                        throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalReadAtCoreFailure, _handle.Length, framePrefixSize, offset));
+                        long end = offset + frameLength;
+                        for (int next = i + 1; next < start + count; next++)
+                        {
+                            long nextOffset = offsets[next] & 0x0000FFFFFFFFFFFFL;
+                            long nextEnd = nextOffset + (int)((ulong)offsets[next] >> 48);
+                            if (nextOffset < end || nextOffset - end > 4096 || nextEnd - offset > readChunkSize) { break; }
+                            end = nextEnd;
+                        }
+                        if (!StorageRecoveryJournal.Fill(_handle, ref chunk, ref chunkOffset, ref chunkCount,
+                            offset, checked((int)(end - offset)), length, readAhead: false))
+                        {
+                            throw new StorageCorruptionException(ErrorMessages.RecoveryIndexFrameBounds);
+                        }
                     }
-                    int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(chunk.AsSpan((int)(offset - chunkOffset)));
-                    int frameLength = checked(framePrefixSize + bodyLength + sizeof(uint));
-                    if (!Fill(_handle, ref chunk, ref chunkOffset, ref chunkCount, offset, frameLength, length))
+                    var prefix = chunk.AsSpan((int)(offset - chunkOffset), framePrefixSize);
+                    int bodyLength = BinaryPrimitives.ReadInt32LittleEndian(prefix);
+                    int magic = BinaryPrimitives.ReadInt32LittleEndian(prefix[sizeof(int)..]);
+                    if (magic != magicValue || bodyLength < bodyHeaderSize
+                        || bodyLength > int.MaxValue - framePrefixSize - sizeof(uint)
+                        || (long)framePrefixSize + bodyLength + sizeof(uint) != frameLength)
                     {
-                        throw new StorageCorruptionException(string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.StorageJournalReadAtCoreFailure, _handle.Length, frameLength, offset));
+                        throw new StorageCorruptionException(ErrorMessages.RecoveryIndexFrameBounds);
                     }
-                    yield return DecodeRecord(chunk.AsMemory((int)(offset - chunkOffset) + framePrefixSize, bodyLength), i + 1);
+                    yield return DecodeRecord(chunk.AsMemory((int)(offset - chunkOffset) + framePrefixSize, bodyLength), i - start + 1);
                 }
             }
             finally { ArrayPool<byte>.Shared.Return(chunk); }

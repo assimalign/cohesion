@@ -224,7 +224,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 try
                 {
                     stream.ReadPage(pageId, frame.Buffer);
-                    StorageEventSource.Log.CountPageRead();
+                    if (!IsReadOnly) { StorageEventSource.Log.CountPageRead(); }
                     verifyingChecksum = true;
                     PageChecksum.Verify(frame.Buffer, pageId);
                     verifyingChecksum = false;
@@ -232,7 +232,7 @@ internal sealed unsafe class StorageBufferPool : IDisposable
                 }
                 catch
                 {
-                    if (verifyingChecksum) { StorageEventSource.Log.PageChecksumFailed(this, pageId); }
+                    if (verifyingChecksum && !IsReadOnly) { StorageEventSource.Log.PageChecksumFailed(this, pageId); }
                     throw;
                 }
             }

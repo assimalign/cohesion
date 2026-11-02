@@ -112,4 +112,7 @@
   <data name="ExceptionDescribeStorageOffline4" xml:space="preserve"><value>a write</value></data>
   <data name="MixedThreadMutableScopes" xml:space="preserve"><value>Nested mutable scopes for a page must use the same thread. Dispose the existing scopes before opening a writer on another thread.</value></data>
   <data name="PinnedDirtyPages" xml:space="preserve"><value>Dirty pages remain pinned. Release their handles before a full flush or checkpoint.</value></data>
+  <data name="RecoveryIndexCountMismatch" xml:space="preserve"><value>The journal's page record count changed while building its recovered view.</value></data>
+  <data name="RecoveryIndexFrameBounds" xml:space="preserve"><value>A recovered page's journal frame has an invalid magic, length or offset.</value></data>
+  <data name="RecoveryIndexPageMismatch" xml:space="preserve"><value>A recovered page's journal frame names a different page.</value></data>
 </root>

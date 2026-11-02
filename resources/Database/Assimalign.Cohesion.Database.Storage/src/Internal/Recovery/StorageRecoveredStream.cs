@@ -7,7 +7,7 @@ using Assimalign.Cohesion.Database.Storage.Units;
 
 namespace Assimalign.Cohesion.Database.Storage.Internal;
 
-// A lazy recovered view over an owned read-only data stream. Only frame offsets and
+// A lazy recovered view over an owned read-only data stream. Only packed frame locations and
 // page ranges survive the journal scan. The pool caches the pages read by gates.
 [System.Diagnostics.DebuggerDisplay("StorageRecoveredStream")]
 [System.Diagnostics.DebuggerTypeProxy(typeof(StorageRecoveredStream.DebugView))]
@@ -62,12 +62,29 @@ internal sealed class StorageRecoveredStream : Stream
             {
                 long pageId = (long)record.PageId;
                 var range = _records[pageId];
-                _offsets[range.Start + range.Count] = offset;
+                if (range.Count >= plans[pageId].RecordCount)
+                {
+                    throw new StorageCorruptionException(record.PageId, ErrorMessages.RecoveryIndexCountMismatch);
+                }
+                int frameLength = StorageJournal.RecoveryFrameOverhead + record.Payload.Length;
+                if (frameLength > ushort.MaxValue || (ulong)offset > 0x0000FFFFFFFFFFFFUL)
+                {
+                    throw new StorageCorruptionException(record.PageId, ErrorMessages.RecoveryIndexFrameBounds);
+                }
+                _offsets[range.Start + range.Count] = (long)(((ulong)frameLength << 48) | (ulong)offset);
                 _records[pageId] = range with { Count = range.Count + 1 };
                 _recordCount++;
                 _length = Math.Max(_length, (pageId + 1) * Page.Size);
             }
             offset += StorageJournal.RecoveryFrameOverhead + record.Payload.Length;
+        }
+        foreach (var (pageId, range) in _records)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (range.Count != plans[pageId].RecordCount)
+            {
+                throw new StorageCorruptionException((PageId)pageId, ErrorMessages.RecoveryIndexCountMismatch);
+            }
         }
         return new StorageRecoveryResult(analysis.MaxSequence, analysis.CheckpointLsn, new HashSet<long>(plans.Keys));
     }
@@ -99,7 +116,7 @@ internal sealed class StorageRecoveredStream : Stream
             int take = Math.Min(count - read, Page.Size - inPage);
             if (_records.TryGetValue(pageId, out var records))
             {
-                ReadPage(records);
+                ReadPage(pageId, records);
                 _page.AsSpan(inPage, take).CopyTo(buffer[read..]);
             }
             else { ReadSource(_position, buffer.Slice(read, take)); }
@@ -109,13 +126,17 @@ internal sealed class StorageRecoveredStream : Stream
         return count;
     }
 
-    private void ReadPage(PageRecords records)
+    private void ReadPage(long pageId, PageRecords records)
     {
         Array.Clear(_page);
         bool imaged = false;
         foreach (var record in _journal!.ReadRecoveryPageRecords(_offsets, records.Start, records.Count))
         {
             _cancellationToken.ThrowIfCancellationRequested();
+            if ((long)record.PageId != pageId)
+            {
+                throw new StorageCorruptionException((PageId)pageId, ErrorMessages.RecoveryIndexPageMismatch);
+            }
             StorageRecovery.Apply(record, _page, imaged);
             imaged = true;
         }

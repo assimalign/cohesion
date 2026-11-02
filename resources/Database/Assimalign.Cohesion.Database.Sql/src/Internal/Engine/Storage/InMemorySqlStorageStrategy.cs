@@ -28,8 +28,8 @@ internal sealed class InMemorySqlStorageStrategy : SqlStorageStrategy
         _durability = durability;
     }
 
-    internal override bool RequiresRecovery(string databaseName, bool catalog)
-        => DatabaseRecoveryPreflight.Required(null, _files, databaseName, GetFileSet(catalog));
+    internal override bool RequiresRecovery(string databaseName, bool catalog, CancellationToken cancellationToken = default)
+        => DatabaseRecoveryPreflight.Required(null, _files, databaseName, GetFileSet(catalog), cancellationToken);
 
     /// <inheritdoc />
     public override SqlStorage CreateStorage(string databaseName, bool catalog)

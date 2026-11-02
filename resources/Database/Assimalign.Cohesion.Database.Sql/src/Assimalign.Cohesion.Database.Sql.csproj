@@ -24,7 +24,7 @@
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Execution" Module="Parameters" />
 		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Sql.Language" Module="Types" />
         <CohesionSharedSource Include="Assimalign.Cohesion.Database" Module="Engine" />
-		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="RecoveryPreflight" />
+		<CohesionSharedSource Include="Assimalign.Cohesion.Database.Storage" Module="JournalFormat" />
 	</ItemGroup>
 	<ItemGroup>
 		<CohesionValueType Include="ValueObjects\SqlObjectName.cs" ObjectRuntimeType="String"
