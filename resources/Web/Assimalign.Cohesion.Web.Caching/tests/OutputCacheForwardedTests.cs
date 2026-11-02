@@ -129,13 +129,10 @@ public class OutputCacheForwardedTests
         context.Request.Headers[HttpHeaderKey.XForwardedProto] = "https";
         context.Request.Headers[HttpHeaderKey.XForwardedHost] = forwardedHost;
 
-        TestPipelineBuilder builder = new();
-        builder.UseForwardedHeaders(options =>
-        {
-            options.Headers = ForwardedHeaderNames.XForwarded;
-            options.KnownProxies.Add(_trustedProxy.Address);
-        });
-        IWebApplicationMiddleware forwarded = builder.LastMiddleware.ShouldNotBeNull();
+        ForwardedHeadersBuilder forwardedHeaders = new();
+        forwardedHeaders.Options.Headers = ForwardedHeaderNames.XForwarded;
+        forwardedHeaders.Options.KnownProxies.Add(_trustedProxy.Address);
+        IWebApplicationMiddleware forwarded = forwardedHeaders.Build();
 
         await forwarded.InvokeAsync(context, _ => Task.CompletedTask);
 
@@ -146,10 +143,17 @@ public class OutputCacheForwardedTests
     {
         if (useForwardedHeaders)
         {
-            factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+            factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
         }
 
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = _longDuration));
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(policy => policy.Duration = _longDuration));
+
+        if (useForwardedHeaders)
+        {
+            factory.Application.UseForwardedHeaders();
+        }
+
+        factory.Application.UseOutputCache();
         factory.Application.Use(async (context, next) =>
         {
             int n = invoke();

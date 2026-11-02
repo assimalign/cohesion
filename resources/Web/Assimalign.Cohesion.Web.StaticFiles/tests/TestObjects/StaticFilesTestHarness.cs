@@ -38,13 +38,42 @@ internal static class StaticSite
 }
 
 /// <summary>
+/// Builds the static-files middleware through <see cref="StaticFilesBuilder"/>, as
+/// <c>builder.Services.AddStaticFiles(files =&gt; ...)</c> does, over an explicit mount.
+/// </summary>
+internal static class StaticFilesMount
+{
+    public static IWebApplicationMiddleware Build(IFileSystem fileSystem, Action<StaticFilesOptions>? configure = null)
+    {
+        StaticFilesBuilder files = new StaticFilesBuilder().UseFileSystem(fileSystem);
+        configure?.Invoke(files.Options);
+
+        return files.Build();
+    }
+}
+
+/// <summary>
 /// Minimal <see cref="IWebApplicationPipelineBuilder"/> that composes middleware in registration
 /// order — the same shape the real <c>WebApplication</c> builder produces — without pulling in
-/// the hosting/DI stack. Mirrors the Web.Health test harness.
+/// the hosting/DI stack. Mirrors the Web.Health test harness. A context-aware verb such as
+/// <c>UseStaticFiles()</c> composes over an application context whose
+/// <see cref="IWebApplicationContext.Middleware"/> lists what the test registered, as
+/// <c>builder.Services.AddStaticFiles(...)</c> would, and whose web root the test chooses.
 /// </summary>
 internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 {
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware = new();
+    private readonly TestApplicationContext _context = new();
+
+    /// <summary>Gets the middleware the application registered.</summary>
+    public List<IWebApplicationMiddleware> Registered => _context.Registered;
+
+    /// <summary>Gets or sets the application's web root.</summary>
+    public FileSystemPath? WebRootPath
+    {
+        get => _context.WebRootPath;
+        set => _context.WebRootPath = value;
+    }
 
     public IWebApplicationPipelineBuilder Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
@@ -56,7 +85,7 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
         => Use(next => context => middleware.InvokeAsync(context, next));
 
     public IWebApplicationPipelineBuilder Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
-        => throw new NotSupportedException();
+        => Use(next => middleware.Invoke(_context, next));
 
     public IWebApplicationPipeline Build()
     {
@@ -77,6 +106,23 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 
         public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
             => _middleware.Invoke(context);
+    }
+
+    private sealed class TestApplicationContext : IWebApplicationContext
+    {
+        public List<IWebApplicationMiddleware> Registered { get; } = [];
+
+        public FileSystemPath? ContentRootPath => null;
+
+        public FileSystemPath? WebRootPath { get; set; }
+
+        public IEnumerable<IWebApplicationMiddleware> Middleware => Registered;
+
+        public IEnumerable<IWebApplicationServer> Servers => [];
+
+        public IEnumerable<IHttpFeature> Features => [];
+
+        public IEnumerable<IWebApplicationSetting> Settings => [];
     }
 }
 

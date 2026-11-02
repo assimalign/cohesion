@@ -37,15 +37,6 @@ public abstract class HostContext : IHostContext
     public abstract IEnumerable<IHostService> HostedServices { get; }
 
     /// <summary>
-    /// Gets or sets the optional pipeline that wraps complete runs of this host.
-    /// </summary>
-    /// <remarks>
-    /// The runner is captured when the host's <c>RunAsync</c> extension begins. Setting this
-    /// property does not affect a run that is already active.
-    /// </remarks>
-    public IHostRunner? Runner { get; set; }
-
-    /// <summary>
     /// Returns a task that completes when shutdown is requested or the host begins stopping,
     /// stops, or fails. The signal resets on a later start, so each run produces a fresh signal.
     /// </summary>
@@ -159,33 +150,5 @@ public abstract class HostContext : IHostContext
 
         shutdownSource?.TrySetResult();
         shutdownCallback.Invoke();
-    }
-
-    internal bool TryShutdown(
-        Func<bool> isCurrentRun,
-        Action? onAccepted = null)
-    {
-        Action? shutdownCallback;
-        TaskCompletionSource? shutdownSource;
-
-        lock (_lock)
-        {
-            if (_state is not HostState.Started ||
-                !isCurrentRun.Invoke() ||
-                _shutdownCallback is null)
-            {
-                return false;
-            }
-
-            shutdownCallback = _shutdownCallback;
-            onAccepted?.Invoke();
-            _isShutdownRequested = true;
-            shutdownSource = _shutdownSource;
-            _shutdownSource = null;
-        }
-
-        shutdownSource?.TrySetResult();
-        shutdownCallback.Invoke();
-        return true;
     }
 }

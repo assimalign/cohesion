@@ -9,20 +9,16 @@ explicit API without introducing a DI-specific hosting layer.
 
 ## Public application composition
 
-Web application and resource authors can register typed checks, inline probes, or
-`Hosting.Health` contributors through Web.Hosting's adapter in the
-`Assimalign.Cohesion.Web.Hosting.Health` namespace:
+Web application and resource authors can register typed checks and inline probes:
 
 ```csharp
 using Assimalign.Cohesion.Web.Health;
-using Assimalign.Cohesion.Web.Hosting.Health;
 
 IHealthCheckService health = new HealthChecksBuilder()
     .AddCheck(
         "self",
         () => HealthCheckResult.Healthy(),
         tags: new[] { HealthTags.Ready, HealthTags.Live })
-    .AddContributor(databaseContributor)
     .Build();
 
 pipeline.MapHealthChecks(health);
@@ -35,13 +31,11 @@ only while composing the builder; `Build()` snapshots them into an immutable
 `IHealthCheckService`. The service is supplied to endpoint middleware explicitly, so request-time
 service location is unnecessary.
 
-## Hosting contributor integration
+## Hosting integration
 
-The `AddContributor` adapter ships in `Assimalign.Cohesion.Web.Hosting`, keeping the
-`Assimalign.Cohesion.Web.Hosting.Health` namespace (owner decision 57, 2026-10-13). That module
-references this model and `Hosting.Health`; this package references only the Web root. No Web
-root or feature library may reference the hosting module. The adapter is included with hosting,
-not supplied by an optional package.
+A Web application registers its checks here directly; a managed resource joins its gateway through
+`Web.Hosting.ApplicationModel`, which does not read these checks. This package references only the Web root, and no
+Web root or feature library may reference the hosting module.
 
 ## Status model and aggregation
 
@@ -76,8 +70,6 @@ serialization. Diagnostic data is handled through a closed primitive-value switc
 fallback. Custom behavior is available through `IHealthResponseWriter`.
 
 The registration, evaluation, and default response path remains trim- and NativeAOT-compatible.
-The contributor adapter and its tests live in `Assimalign.Cohesion.Web.Hosting` under
-`src/Health/` and `tests/Health/`, respectively (owner decision 57, 2026-10-13).
 
 ## Exception detail
 
@@ -156,8 +148,7 @@ but that is not the only consumption model and does not change App.Web's public 
 
 ## Diagnostics
 
-The internal `HealthCheckEventSource` is named `Assimalign.Cohesion.Web.Health`. It also reports
-`Hosting.Health` contributors adapted by Web.Hosting; the adapter raises no second report.
+The internal `HealthCheckEventSource` is named `Assimalign.Cohesion.Web.Health`.
 
 | Id | Event | Level | Payload |
 | --- | --- | --- | --- |
@@ -194,8 +185,8 @@ event. This is an observable diagnostics change on decision 15's terms, with no 
 - **A DI-specific registration surface.** Composition remains explicit and container-neutral.
 - **Runtime registry mutation.** The built service is an immutable snapshot.
 - **Request-time service location.** Endpoint middleware receives the service directly.
-- **An in-process health publisher.** This package evaluates and serves health; it does not publish
-  control-plane state.
+- **An in-process health publisher.** This package evaluates and serves health; it does not push
+  health state to another component.
 - **Reflection-based response serialization.** The default response path is statically authored.
 
 ## Exception messages (#1467)

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.MediaHub.Hosting.ApplicationModel</RootNamespace>
+		<Description>Runs a Cohesion MediaHub application as a managed resource instance: it joins the gateway that runs it through the client of the platform the resource opted into, and exposes the actions the application adds.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.MediaHub" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.MediaHub.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+	</ItemGroup>
+</Project>

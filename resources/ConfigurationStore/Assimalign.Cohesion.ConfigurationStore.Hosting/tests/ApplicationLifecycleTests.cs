@@ -50,7 +50,6 @@ public class ApplicationLifecycleTests
         application.Context.HostedServices.Take(2).ShouldBe(
             new IHostService[] { firstService, secondService });
         application.Context.HostedServices.Count().ShouldBe(3);
-        ((HostContext)application.Context).Runner.ShouldBeNull();
         events.ShouldBe(new[]
         {
             "first:start",

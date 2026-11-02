@@ -273,16 +273,17 @@ public class CookiePolicyConsentTests
         int evaluations = 0;
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.CheckConsentNeeded = context =>
+            policy.Options.CheckConsentNeeded = context =>
             {
                 Interlocked.Increment(ref evaluations);
                 return context.Request.Headers.TryGetValue(new HttpHeaderKey("X-Region"), out HttpHeaderValue region)
                     && region.Value == "eu";
             };
-            options.OnRejected = recorder.Record;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             context.Response.Cookies.Add(new HttpCookie("a", "1"));
@@ -350,16 +351,17 @@ public class CookiePolicyConsentTests
         bool? resolvedIsApplications = null;
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddCookiePolicy(policy =>
+        {
+            policy.Options.CheckConsentNeeded = _ => false;
+            policy.Options.OnRejected = recorder.Record;
+        });
         factory.Application.Use(async (context, next) =>
         {
             context.Features.Set<ICookieConsentFeature>(new GlobalPrivacyControlConsentFeature(context));
             await next.Invoke(context);
         });
-        factory.Application.UseCookiePolicy(options =>
-        {
-            options.CheckConsentNeeded = _ => false;
-            options.OnRejected = recorder.Record;
-        });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             consentFeatures = context.Features.OfType<ICookieConsentFeature>().Count();
@@ -385,15 +387,16 @@ public class CookiePolicyConsentTests
         // Arrange
         bool? hasConsent = null;
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.CheckConsentNeeded = _ => true;
-            options.ConsentCookieName = "gdpr";
-            options.ConsentCookieValue = "accepted";
-            options.ConsentCookie.MaxAge = TimeSpan.FromDays(180);
-            options.ConsentCookie.SameSite = HttpCookieSameSiteMode.Strict;
-            options.ConsentCookie.IsEssential = false;
+            policy.Options.CheckConsentNeeded = _ => true;
+            policy.Options.ConsentCookieName = "gdpr";
+            policy.Options.ConsentCookieValue = "accepted";
+            policy.Options.ConsentCookie.MaxAge = TimeSpan.FromDays(180);
+            policy.Options.ConsentCookie.SameSite = HttpCookieSameSiteMode.Strict;
+            policy.Options.ConsentCookie.IsEssential = false;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             ICookieConsentFeature consent = context.Features.Get<ICookieConsentFeature>().ShouldNotBeNull();
@@ -415,12 +418,13 @@ public class CookiePolicyConsentTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.CheckConsentNeeded = _ => true;
-            options.HttpOnly = CookieHttpOnlyPolicy.Always;
-            options.Secure = CookieSecurePolicy.Always;
+            policy.Options.CheckConsentNeeded = _ => true;
+            policy.Options.HttpOnly = CookieHttpOnlyPolicy.Always;
+            policy.Options.Secure = CookieSecurePolicy.Always;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Features.Get<ICookieConsentFeature>().ShouldNotBeNull().GrantConsent());
 
@@ -436,11 +440,12 @@ public class CookiePolicyConsentTests
     private static WebApplicationTestFactory CreateFactory(RejectionRecorder recorder)
     {
         WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.CheckConsentNeeded = _ => true;
-            options.OnRejected = recorder.Record;
+            policy.Options.CheckConsentNeeded = _ => true;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         return factory;
     }
 

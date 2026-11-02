@@ -1,9 +1,3 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Web">
-  <PropertyGroup>
-    <!-- Opt-in to orchestration: change the next line to <CohesionApplicationModel>enabled</CohesionApplicationModel>.
-         Generates resource.json, Resource.g.cs and ResourceControlPlane.g.cs; Assimalign.Cohesion.Web.ApplicationModel
-         owns the generated default control plane. Without it this is a plain executable that a gateway cannot reference. -->
-    <CohesionApplicationModel>disabled</CohesionApplicationModel>
-  </PropertyGroup>
   <!-- Sdk.Web copies wwwroot/** and appsettings*.json to the build and publish output. -->
 </Project>

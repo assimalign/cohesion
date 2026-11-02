@@ -11,9 +11,9 @@ namespace Assimalign.Cohesion.Web.Cors;
 /// Register <c>UseCors</c> after <c>UseRouting</c>, so the request's endpoint and its
 /// <see cref="CorsMetadata"/> are known when it runs, and ahead of every middleware that can reject a
 /// preflight (authentication challenges, authorization, rate limiting, antiforgery): a preflight carries no
-/// credentials, and the middleware answers it before any of them runs. Composition is dependency-free: the
-/// policies are built and validated when <c>UseCors</c> is called, and no request-time service location
-/// occurs.
+/// credentials, and the middleware answers it before any of them runs. The policies come from
+/// <c>builder.Services.AddCors(...)</c>, which builds and validates them when the application is composed;
+/// <c>UseCors</c> takes no configuration of its own.
 /// </remarks>
 public static class CorsExtensions
 {
@@ -26,10 +26,13 @@ public static class CorsExtensions
         /// </summary>
         /// <remarks>
         /// <para>
-        /// The policy for a request is the endpoint's <see cref="CorsMetadata"/> (<c>RequireCors</c>,
-        /// <c>DisableCors</c>), else the default policy (<see cref="CorsOptions.AddDefaultPolicy(CorsPolicy)"/>).
-        /// With neither, the middleware leaves the request alone. With no configuration at all, only endpoints
-        /// that carry an inline policy are governed.
+        /// The policies are the ones <c>builder.Services.AddCors(...)</c> registered as the application's
+        /// <c>cors</c> setting. The policy for a request is the endpoint's <see cref="CorsMetadata"/>
+        /// (<c>RequireCors</c>, <c>DisableCors</c>), else the default policy
+        /// (<see cref="CorsOptions.AddDefaultPolicy(CorsPolicy)"/>). With neither, the middleware leaves the
+        /// request alone. Without <c>AddCors</c>, only endpoints that carry an inline policy are governed.
+        /// The default policy is read on each request, so a value an operator surface sets on the setting
+        /// applies from the next request.
         /// </para>
         /// <para>
         /// Register it after <c>UseRouting</c>. Registered ahead of it, the middleware sees no endpoint and
@@ -45,22 +48,17 @@ public static class CorsExtensions
         /// <c>UseCors</c> before <c>UseOutputCache</c>, so cache hits register this callback too.
         /// </para>
         /// </remarks>
-        /// <param name="configure">An optional callback that registers the default policy and named policies.</param>
         /// <returns>The same pipeline builder, for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException"><paramref name="configure"/> adds an invalid origin, method or header name.</exception>
-        /// <exception cref="InvalidOperationException">
-        /// <paramref name="configure"/> registers an invalid policy, a second default policy, or a duplicate
-        /// policy name.
-        /// </exception>
-        public IWebApplicationPipelineBuilder UseCors(Action<CorsOptions>? configure = null)
+        public IWebApplicationPipelineBuilder UseCors()
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            CorsOptions options = new();
-            configure?.Invoke(options);
-
-            return builder.Use(new CorsMiddleware(options));
+            return builder.Use(static (context, next) =>
+            {
+                var middleware = new CorsMiddleware(CorsSetting.Find(context));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
     }
 }

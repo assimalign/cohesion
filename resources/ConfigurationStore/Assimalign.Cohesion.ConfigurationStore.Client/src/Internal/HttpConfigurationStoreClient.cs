@@ -13,24 +13,20 @@ namespace Assimalign.Cohesion.ConfigurationStore.Client.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
 {
-    private const string commandRoute = "/cohesion/v1/commands";
     private const string namespaceRoute = "/cohesion/v1/namespaces";
 
     private readonly ClientCredential _credential;
     private readonly Uri _endpoint;
     private readonly HttpMessageInvoker _transport;
-    private readonly bool _commandControlPlanePath;
 
     internal HttpConfigurationStoreClient(
         Uri endpoint,
         ClientCredential credential,
-        HttpMessageInvoker transport,
-        bool commandControlPlanePath = false)
+        HttpMessageInvoker transport)
     {
         _endpoint = endpoint;
         _credential = credential;
         _transport = transport;
-        _commandControlPlanePath = commandControlPlanePath;
     }
 
     public async Task<IReadOnlyList<string>> ListNamespacesAsync(
@@ -88,61 +84,6 @@ internal sealed class HttpConfigurationStoreClient : IConfigurationStoreClient
         return values is null
             ? throw new JsonException("The configuration-store endpoint returned a null namespace document.")
             : new ReadOnlyDictionary<string, string?>(values);
-    }
-
-    public async Task SendCommandAsync(
-        ResourceCommand command,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-
-        using HttpRequestMessage request = CreateRequest(
-            HttpMethod.Post,
-            commandRoute,
-            "application/octet-stream");
-        request.Content = new ByteArrayContent(
-            JsonSerializer.SerializeToUtf8Bytes(
-                command,
-                ConfigurationStoreClientJsonContext.Default.ResourceCommand));
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-
-        using HttpResponseMessage response = await _transport
-            .SendAsync(request, cancellationToken)
-            .ConfigureAwait(false);
-
-        response.EnsureSuccessStatusCode();
-    }
-
-    public ValueTask<ResourceCommandObservation> ObserveCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
-        ObserveAsync(command, HttpMethod.Post, cancellationToken);
-
-    public ValueTask<ResourceCommandObservation> DeleteCommandAsync(ResourceCommand command, CancellationToken cancellationToken = default) =>
-        ObserveAsync(command, HttpMethod.Delete, cancellationToken);
-
-    private async ValueTask<ResourceCommandObservation> ObserveAsync(ResourceCommand command, HttpMethod method, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(command);
-        using HttpRequestMessage request = CreateRequest(method, _commandControlPlanePath ? "/commands" : commandRoute, "application/json");
-        request.Content = new ByteArrayContent(JsonSerializer.SerializeToUtf8Bytes(command, ConfigurationStoreClientJsonContext.Default.ResourceCommand));
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        using HttpResponseMessage response = await _transport.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        byte[] content = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        string status = response.IsSuccessStatusCode ? method == HttpMethod.Delete ? "Deleted" : "Applied" : "Rejected";
-        string? detail = response.IsSuccessStatusCode ? null : $"Configuration command '{command.Kind}' was refused: HTTP {(int)response.StatusCode} {response.ReasonPhrase}.";
-        if (content.Length > 0 && response.Content.Headers.ContentType?.MediaType == "application/json")
-        {
-            using JsonDocument document = JsonDocument.Parse(content);
-            JsonElement root = document.RootElement;
-            if (root.TryGetProperty("status", out JsonElement observed) && observed.ValueKind is JsonValueKind.String)
-            {
-                status = observed.GetString()!;
-            }
-            if (root.TryGetProperty("detail", out JsonElement reason) && reason.ValueKind is JsonValueKind.String)
-            {
-                detail = reason.GetString();
-            }
-        }
-        return new ResourceCommandObservation(response.IsSuccessStatusCode ? status : "Rejected", detail);
     }
 
     private HttpRequestMessage CreateRequest(

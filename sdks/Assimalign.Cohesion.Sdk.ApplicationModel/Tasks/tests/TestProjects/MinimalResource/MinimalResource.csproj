@@ -1,6 +1,0 @@
-<Project Sdk="Assimalign.Cohesion.Sdk.Web">
-  <PropertyGroup>
-    <RootNamespace>MinimalResource</RootNamespace>
-    <CohesionApplicationModel>enabled</CohesionApplicationModel>
-  </PropertyGroup>
-</Project>

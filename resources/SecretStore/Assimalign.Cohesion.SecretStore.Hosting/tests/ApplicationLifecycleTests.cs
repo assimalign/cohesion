@@ -8,7 +8,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.SecretStore;
 
 namespace Assimalign.Cohesion.SecretStore.Hosting.Tests;
@@ -20,14 +19,11 @@ public class ApplicationLifecycleTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = ResourceRuntime.CreateScope(SecretStoreTestHost.CreateContext(
-            SecretStoreTestHost.GetEndpoint(),
-            directory.Path,
-            gatewayName: null));
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
         List<string> events = [];
         RecordingService firstService = new("first", events);
         RecordingService secondService = new("second", events);
-        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
         SecretStoreApplicationContext? factoryContext = null;
         var factoryCount = 0;
 
@@ -62,11 +58,8 @@ public class ApplicationLifecycleTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = ResourceRuntime.CreateScope(SecretStoreTestHost.CreateContext(
-            SecretStoreTestHost.GetEndpoint(),
-            directory.Path,
-            gatewayName: null));
-        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
 
         // Act and assert
         Should.Throw<ArgumentNullException>(() => builder.AddService((IHostService)null!));
@@ -79,11 +72,8 @@ public class ApplicationLifecycleTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = ResourceRuntime.CreateScope(SecretStoreTestHost.CreateContext(
-            SecretStoreTestHost.GetEndpoint(),
-            directory.Path,
-            gatewayName: null));
-        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder();
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
+        SecretStoreApplicationBuilder builder = SecretStoreTestHost.CreateBuilder(directory.Path);
         builder.AddService(_ => null!);
 
         // Act
@@ -98,11 +88,8 @@ public class ApplicationLifecycleTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = ResourceRuntime.CreateScope(SecretStoreTestHost.CreateContext(
-            SecretStoreTestHost.GetEndpoint(),
-            directory.Path,
-            gatewayName: null));
-        await using SecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
+        await using SecretStoreApplication application = SecretStoreTestHost.CreateBuilder(directory.Path).Build();
         using var cancellationTokenSource = new CancellationTokenSource();
         cancellationTokenSource.Cancel();
 
@@ -118,11 +105,8 @@ public class ApplicationLifecycleTests
     {
         // Arrange
         using var directory = new TemporaryDirectory();
-        using IDisposable scope = ResourceRuntime.CreateScope(SecretStoreTestHost.CreateContext(
-            SecretStoreTestHost.GetEndpoint(),
-            directory.Path,
-            gatewayName: null));
-        SecretStoreApplication application = SecretStoreTestHost.CreateBuilder().Build();
+        using IDisposable scope = SecretStoreTestHost.EnterEnvironment();
+        SecretStoreApplication application = SecretStoreTestHost.CreateBuilder(directory.Path).Build();
         IHostService endpointService = application.Context.HostedServices.Last();
         await ((IHost)application).StartAsync();
 

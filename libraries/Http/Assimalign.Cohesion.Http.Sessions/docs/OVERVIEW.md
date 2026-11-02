@@ -25,8 +25,8 @@ HttpSessionOptions options = new()
 `CookieName` requires a non-empty RFC 6265 token. `CookiePath` requires an RFC 6265 path-value:
 US-ASCII with no semicolon or control characters; the empty path is valid. Invalid strings throw
 `ArgumentException` from their implicit conversion when assigned, with parameter `value`.
-`default` bypasses struct validation, so both Web.Sessions `UseSessions` overloads refuse it
-before registering middleware, using the existing option-specific message and parameter `configure`.
+`default` bypasses struct validation, so Web.Sessions' `AddSessions` refuses it before
+registering middleware, using the existing option-specific message and parameter `Options`.
 
 Since 10.0.0-preview.1, the `CookieName` and `CookiePath` property types change from `string` to
 `HttpCookieName` and `HttpCookiePath` (#1473). Valid string assignments keep their spelling; code

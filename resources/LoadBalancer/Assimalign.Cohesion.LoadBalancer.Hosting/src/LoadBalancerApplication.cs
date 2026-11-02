@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class LoadBalancerApplication : Host<LoadBalancerApplicationContex
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(LoadBalancerApplication).Assembly);
-    }
-
-    internal static LoadBalancerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new LoadBalancerApplicationBuilder(args, resourceAssembly);
+        return new LoadBalancerApplicationBuilder(args);
     }
 
     private sealed class DebugView

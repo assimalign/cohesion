@@ -4,12 +4,15 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 
+using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Testing;
 
 using Shouldly;
 
 using Xunit;
 
+using HttpMethod = Assimalign.Cohesion.Http.HttpMethod;
+using HttpStatusCode = Assimalign.Cohesion.Http.HttpStatusCode;
 using NetHttpStatusCode = System.Net.HttpStatusCode;
 
 namespace Assimalign.Cohesion.Web.StaticFiles.Tests;
@@ -92,19 +95,20 @@ public sealed class StaticFilesWebRootTests : IDisposable
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Web root: options are configured once, not per request")]
-    public async Task UseStaticFiles_Configure_ShouldRunOnce()
+    public async Task AddStaticFiles_Configure_ShouldRunOnce()
     {
-        // Arrange
+        // Arrange — a registration that names no file system serves the web root UseStaticFiles() mounts.
         using CancellationTokenSource cancellation = new(_testTimeout);
         string webRoot = Directory.CreateDirectory(Path.Combine(_contentRootPath, "wwwroot")).FullName;
         File.WriteAllText(Path.Combine(webRoot, "app.css"), "body{}");
         int configured = 0;
         await using WebApplicationTestFactory factory = CreateFactory();
-        factory.Application.UseStaticFiles(options =>
+        factory.Builder.Services.AddStaticFiles(files =>
         {
             configured++;
-            options.CacheControl = "public, max-age=60";
+            files.Options.CacheControl = "public, max-age=60";
         });
+        factory.Application.UseStaticFiles();
         using HttpClient client = factory.CreateClient();
 
         // Act
@@ -119,13 +123,55 @@ public sealed class StaticFilesWebRootTests : IDisposable
         configured.ShouldBe(1);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Web root: invalid options fail when the middleware is added")]
-    public async Task UseStaticFiles_InvalidOptions_ShouldThrowAtRegistration()
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - Web root: invalid options fail when the middleware is registered")]
+    public async Task AddStaticFiles_InvalidOptions_ShouldThrowAtRegistration()
     {
         // Arrange
         await using WebApplicationTestFactory factory = CreateFactory();
 
         // Act + Assert
-        Should.Throw<ArgumentException>(() => factory.Application.UseStaticFiles(options => options.DefaultDocuments.Add("../escape.html")));
+        Should.Throw<ArgumentException>(() => factory.Builder.Services.AddStaticFiles(
+            files => files.Options.DefaultDocuments.Add("../escape.html")));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - UseStaticFiles: Without a registration it should serve the web root with the default options")]
+    public async Task UseStaticFiles_WithoutRegistration_ShouldServeTheWebRootWithTheDefaults()
+    {
+        // Arrange
+        string webRoot = Directory.CreateDirectory(Path.Combine(_contentRootPath, "wwwroot")).FullName;
+        File.WriteAllText(Path.Combine(webRoot, "index.html"), "<html>home</html>");
+        TestPipelineBuilder pipeline = new() { WebRootPath = FileSystemPath.Parse(webRoot) };
+        TestHttpContext context = new("/", HttpMethod.Get);
+
+        // Act
+        pipeline.UseStaticFiles();
+        await pipeline.Build().ExecuteAsync(context);
+
+        // Assert — the default documents answer the web root's directory.
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        context.ReadResponseBody().ShouldBe("<html>home</html>");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - UseStaticFiles: A registration without a file system should serve the web root with its options")]
+    public async Task UseStaticFiles_RegistrationWithoutFileSystem_ShouldServeTheWebRootWithItsOptions()
+    {
+        // Arrange
+        string webRoot = Directory.CreateDirectory(Path.Combine(_contentRootPath, "wwwroot")).FullName;
+        File.WriteAllText(Path.Combine(webRoot, "app.css"), "body{}");
+        StaticFilesBuilder files = new();
+        files.Options.RequestPath = new HttpPath("/assets");
+        files.Options.CacheControl = "public, max-age=60";
+        TestPipelineBuilder pipeline = new() { WebRootPath = FileSystemPath.Parse(webRoot) };
+        pipeline.Registered.Add(files.Build());
+        TestHttpContext context = new("/assets/app.css", HttpMethod.Get);
+
+        // Act
+        pipeline.UseStaticFiles();
+        await pipeline.Build().ExecuteAsync(context);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Ok);
+        context.ReadResponseBody().ShouldBe("body{}");
+        context.Response.Headers[HttpHeaderKey.CacheControl].Value.ShouldBe("public, max-age=60");
     }
 }

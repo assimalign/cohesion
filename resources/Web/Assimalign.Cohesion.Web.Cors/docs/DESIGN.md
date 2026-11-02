@@ -17,9 +17,11 @@ of authorization (#155) and antiforgery (#1057); a preflight protects them only 
 will not send without one.
 
 The package owns one immutable policy (`CorsPolicy`) and its builder, one options object (`CorsOptions`),
-one sealed metadata carrier (`CorsMetadata`), the `UseCors` pipeline verb, the `RequireCors` and
-`DisableCors` convention verbs, and the internal evaluation. It has no feature interface: nothing downstream
-needs the CORS decision.
+the `CorsBuilder` behind the `builder.Services.AddCors(...)` registration verb, one sealed metadata carrier
+(`CorsMetadata`), the `UseCors()` pipeline verb, the `RequireCors` and `DisableCors` convention verbs, and
+the internal evaluation. It has no feature interface: nothing downstream needs the CORS decision. What it
+registers is the application's `cors` setting, which an operator surface may change while the application
+runs.
 
 ## The protocol in one picture
 
@@ -148,8 +150,25 @@ The policy for a request is chosen in this order:
 An endpoint that names an unregistered policy fails with `InvalidOperationException` when a request reaches
 it, the same posture Web.RateLimiting takes for an unknown policy name.
 
-The options are captured when `UseCors` runs. The middleware copies the default policy and the named
-policies into a frozen dictionary, so options changed later cannot change a running pipeline.
+## Registration: `AddCors` configures, `UseCors` places
+
+`builder.Services.AddCors(cors => ...)` is a component integration (`[assembly: ComponentIntegration]`
+in `Properties/ComponentIntegrations.cs`, builder template over `CorsBuilder`), with a
+`(services, cors)` overload. It registers the application's `cors` setting, an
+`IWebApplicationSetting<CorsPolicy?>` singleton listed on `IWebApplicationContext.Settings`.
+`CorsBuilder.Build` snapshots `CorsBuilder.Options`: changing the options afterwards has no effect. The
+setting's value is the default policy; the named policies are frozen in it.
+
+`UseCors()` takes no configuration (owner decision, 2026-10-28: configuration on a `Use` verb is an
+anti-pattern). It finds the last `cors` setting `AddCors` registered when the pipeline is built, and its
+middleware reads the default policy from the setting on each request. An operator surface that replaces the
+value, such as a resource's control plane, changes the policy from the next request; nothing else in the
+pipeline is rebuilt. Without `AddCors`, the middleware governs only endpoints that carry an inline policy.
+
+*Rejected:* configuring on `UseCors(options => ...)`, the previous shape. It split one feature's
+configuration across two call sites and kept the policies out of the registrations an operator surface can
+enumerate, so a Web application could be managed as a resource only if it were rewritten. *Limit:* a policy
+built with `SetIsOriginAllowed` holds code, which an operator surface cannot read back or write as data.
 
 The convention verbs are generic extension members over routing's `IRouterConventionBuilder`, so one verb
 serves a route and a group and returns the receiver's builder type: `RequireCors(name)`,

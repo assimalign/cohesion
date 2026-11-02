@@ -418,4 +418,103 @@ public class WebSocketMiddlewareTests
         received.CloseStatus.ShouldBe(WebSocketCloseStatus.PolicyViolation);
         stateAfterDrain.ShouldBe(WebSocketState.CloseSent);
     }
+
+    [Fact(DisplayName = "Cohesion Test [Web.WebSockets] - UseWebSockets: Should place the policy the application registered")]
+    public async Task UseWebSockets_WithRegisteredMiddleware_ShouldPlaceIt()
+    {
+        // Arrange — the registration allows an origin the default policy refuses.
+        PolicyTestContext context = PolicyTestContext.CreateHandshake(origin: "https://chat.example");
+        bool continued = false;
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(TestPipelineBuilder.BuildWebSockets(options => options.AllowedOrigins.Add("https://chat.example")));
+        builder.UseWebSockets();
+        builder.Use(next => inner =>
+        {
+            continued = true;
+            return Task.CompletedTask;
+        });
+
+        // Act
+        await builder.Build().ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        continued.ShouldBeTrue();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.WebSockets] - UseWebSockets: Should place the last registration when the policy is registered twice")]
+    public async Task UseWebSockets_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange — any origin, then the default policy: the last one refuses a cross-site handshake.
+        PolicyTestContext context = PolicyTestContext.CreateHandshake(origin: "https://attacker.example");
+        bool continued = false;
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(TestPipelineBuilder.BuildWebSockets(options => options.AllowAnyOrigin = true));
+        builder.Registered.Add(TestPipelineBuilder.BuildWebSockets());
+        builder.UseWebSockets();
+        builder.Use(next => inner =>
+        {
+            continued = true;
+            return Task.CompletedTask;
+        });
+
+        // Act
+        await builder.Build().ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        continued.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.WebSockets] - UseWebSockets: Should place the default policy when the application registered none")]
+    public async Task UseWebSockets_WithoutRegistration_ShouldPlaceTheDefaultPolicy()
+    {
+        // Arrange — the default policy passes a same-origin handshake and refuses a cross-site one.
+        PolicyTestContext sameOrigin = PolicyTestContext.CreateHandshake(origin: "https://app.example", scheme: HttpScheme.Https, host: "app.example");
+        PolicyTestContext crossSite = PolicyTestContext.CreateHandshake(origin: "https://attacker.example", scheme: HttpScheme.Https, host: "app.example");
+        int continued = 0;
+        TestPipelineBuilder builder = new();
+        builder.UseWebSockets();
+        builder.Use(next => inner =>
+        {
+            continued++;
+            return Task.CompletedTask;
+        });
+        IWebApplicationPipeline pipeline = builder.Build();
+
+        // Act
+        await pipeline.ExecuteAsync(sameOrigin, CancellationToken.None);
+        await pipeline.ExecuteAsync(crossSite, CancellationToken.None);
+
+        // Assert
+        continued.ShouldBe(1);
+        crossSite.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.WebSockets] - Build: A change to the options after Build should not reach the policy")]
+    public async Task Build_OptionsChangedAfterBuild_ShouldKeepTheSnapshot()
+    {
+        // Arrange — an origin allowed after Build is not allowed by the policy Build returned.
+        PolicyTestContext context = PolicyTestContext.CreateHandshake(origin: "https://chat.example");
+        WebSocketsBuilder webSockets = new();
+        IWebApplicationMiddleware middleware = webSockets.Build();
+        webSockets.Options.AllowedOrigins.Add("https://chat.example");
+        webSockets.Options.AllowAnyOrigin = true;
+
+        bool continued = false;
+        TestPipelineBuilder builder = new();
+        builder.Registered.Add(middleware);
+        builder.UseWebSockets();
+        builder.Use(next => inner =>
+        {
+            continued = true;
+            return Task.CompletedTask;
+        });
+
+        // Act
+        await builder.Build().ExecuteAsync(context, CancellationToken.None);
+
+        // Assert
+        continued.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
 }

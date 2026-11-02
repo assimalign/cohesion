@@ -1,16 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.IdentityHub;
 using Assimalign.Cohesion.IdentityHub.Hosting.Internal;
-using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.IdentityHub.Hosting;
 
@@ -32,15 +28,13 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
 
     private readonly string[] _args;
     private readonly string _environmentName;
+    private readonly string _contentRootPath;
     private readonly IdentityHubApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext _resourceContext;
     private bool _isBuilt;
 
-    internal IdentityHubApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal IdentityHubApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
 
         _args = (string[])args.Clone();
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -49,28 +43,12 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        _resourceContext = ResourceRuntime.Current;
-        ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-        if (loggerFactory is not null)
-        {
-            Services.AddSingleton<ILoggerFactory>(loggerFactory);
-        }
-        if (telemetry is not null)
-        {
-            // Registered ahead of every AddService call, so telemetry starts first and stops last.
-            Services.AddSingleton<IHostService>(telemetry);
-        }
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException(
-                "The registered IdentityHub control-plane factory returned null.");
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
 
-        _environmentName = _resourceContext.EnvironmentName;
+        _environmentName = AppEnvironment.GetEnvironmentName();
+        _contentRootPath = AppContext.BaseDirectory;
         _context = new IdentityHubApplicationContext(
             _environmentName,
-            System.IO.FileSystemPath.Parse(_resourceContext.ContentRootPath));
+            System.IO.FileSystemPath.Parse(_contentRootPath));
     }
 
     /// <summary>
@@ -195,8 +173,8 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
     /// </summary>
     /// <returns>The configured identity hub application.</returns>
     /// <exception cref="InvalidOperationException">
-    /// The builder has already built an application, a registered client is invalid, a registered
-    /// host service factory returns <see langword="null"/>, or the data mount has no filesystem path.
+    /// The builder has already built an application, a registered client is invalid, or a registered
+    /// host service factory returns <see langword="null"/>.
     /// </exception>
     /// <exception cref="ArgumentException">A command-line endpoint or data option is invalid or missing its value.</exception>
     public IdentityHubApplication Build()
@@ -218,10 +196,8 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
             return new IdentityEndpointService(
                 endpoint,
                 dataPath,
-                registrations.Audiences,
                 registrations.Clients,
-                _controlPlane,
-                _resourceContext,
+                _environmentName,
                 _context);
         });
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
@@ -243,15 +219,9 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
             _ = _context.ServiceProvider.GetRequiredService<IdentityHubRegistrations>();
             _context.ResolveHostedServices();
 
-            var application = new IdentityHubApplication(
+            return new IdentityHubApplication(
                 new IdentityHubApplicationOptions { Environment = _environmentName },
                 _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
         }
         catch (Exception exception)
         {
@@ -287,16 +257,6 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
 
     private Uri ResolveEndpoint()
     {
-        if (_controlPlane?.ObservedEndpoints.TryGetValue("https", out Uri? observed) is true)
-        {
-            return observed;
-        }
-
-        if (_resourceContext.Endpoints.TryGetValue("https", out Uri? supplied))
-        {
-            return supplied;
-        }
-
         return ParseArgument("--endpoint") is string configured
             ? ParseEndpoint(configured)
             : new Uri(DefaultEndpoint, UriKind.Absolute);
@@ -304,19 +264,8 @@ public sealed class IdentityHubApplicationBuilder : IIdentityHubApplicationBuild
 
     private string ResolveDataPath()
     {
-        if (_resourceContext.Mounts.TryGetValue("data", out ResourceMount? mount))
-        {
-            if (string.IsNullOrWhiteSpace(mount.Path))
-            {
-                throw new InvalidOperationException(
-                    "The IdentityHub 'data' volume must expose a file-system path.");
-            }
-
-            return Path.GetFullPath(mount.Path);
-        }
-
         string? configured = ParseArgument("--data");
-        return Path.GetFullPath(configured ?? Path.Combine(_resourceContext.ContentRootPath, "data"));
+        return Path.GetFullPath(configured ?? Path.Combine(_contentRootPath, "data"));
     }
 
     private string? ParseArgument(string name)

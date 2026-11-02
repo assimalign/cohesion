@@ -1,15 +1,8 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
-  <PropertyGroup>
-    <CohesionApplicationName>__APPLICATION_NAME__</CohesionApplicationName>
-    <CohesionGateways>InProcess;Local</CohesionGateways>
-    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
-  </PropertyGroup>
+  <!-- Sdk.Gateway references Assimalign.Cohesion.ApplicationModel.Gateway. The platform the model runs on is the one
+       package added here: the in-process platform. A cohesion-platforms gateway package, such as
+       Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes, replaces it (README.md). -->
   <ItemGroup>
-    <!-- Add enabled members here; a composite can itself be referenced by an outer gateway.
-    <CohesionResourceReference Include="../Example.Api/Example.Api.csproj" />
-    -->
-    <!-- Store, certificate-authority and trust providers are opt-in packages that Program.cs registers explicitly.
-    <CohesionPackageReference Include="Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration" Version="$(CohesionVersion)" />
-    -->
+    <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
   </ItemGroup>
 </Project>

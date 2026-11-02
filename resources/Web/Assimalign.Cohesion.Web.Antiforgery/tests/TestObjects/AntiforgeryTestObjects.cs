@@ -36,6 +36,8 @@ internal sealed class TestWebApplicationBuilder : IWebApplicationBuilder
     public IWebApplicationBuilder AddServer(IWebApplicationServer server) => throw new NotSupportedException();
 
     public IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server) => throw new NotSupportedException();
+    public IWebApplicationBuilder AddSetting(IWebApplicationSetting setting) => throw new NotSupportedException();
+    public IWebApplicationBuilder AddSetting(Func<IWebApplicationContext, IWebApplicationSetting> setting) => throw new NotSupportedException();
 
     public IWebApplicationBuilder AddPipeline(IWebApplicationPipeline pipeline) => throw new NotSupportedException();
 
@@ -58,6 +60,7 @@ internal sealed class TestWebApplicationContext : IWebApplicationContext
     public IEnumerable<IWebApplicationMiddleware> Middleware => Array.Empty<IWebApplicationMiddleware>();
     public IEnumerable<IWebApplicationServer> Servers => Array.Empty<IWebApplicationServer>();
     public IEnumerable<IHttpFeature> Features { get; }
+    public IEnumerable<IWebApplicationSetting> Settings => global::System.Array.Empty<IWebApplicationSetting>();
 }
 
 /// <summary>

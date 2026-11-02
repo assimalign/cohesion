@@ -16,9 +16,9 @@ namespace Assimalign.Cohesion.Web.RateLimiting;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A policy is built once, at builder time, and lives for the application lifetime (the middleware
-/// holds it; the pipeline exposes no disposal hook, so the accepted posture is process-lifetime —
-/// see the package DESIGN.md). Build a policy either directly from a
+/// A policy is built once, when the application registers rate limiting, and lives for the
+/// application lifetime (the middleware holds it but does not dispose its limiter, so the accepted
+/// posture is process-lifetime — see the package DESIGN.md). Build a policy either directly from a
 /// <see cref="PartitionedRateLimiter{TResource}"/> or, more conveniently, with one of the
 /// <see cref="Create{TKey}(Func{IHttpContext, RateLimitPartition{TKey}}, int, IEqualityComparer{TKey})"/>
 /// factories that wrap the BCL <c>RateLimitPartition.Get*</c> partition factories.

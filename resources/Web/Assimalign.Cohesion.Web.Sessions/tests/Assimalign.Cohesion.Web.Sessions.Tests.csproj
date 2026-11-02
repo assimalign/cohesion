@@ -18,6 +18,10 @@
 		<CohesionProjectReference Include="Assimalign.Cohesion.Http.Streaming" />
 	</ItemGroup>
 	<ItemGroup>
+		<!-- The builder.Services.Add<Feature> verbs (AddSessions, AddForwardedHeaders) are component integrations this generator projects. -->
+		<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />
+	</ItemGroup>
+	<ItemGroup>
 		<CohesionPackageReference Include="Microsoft.NET.Test.Sdk" />
 		<CohesionPackageReference Include="coverlet.collector" />
 		<CohesionPackageReference Include="Shouldly" />

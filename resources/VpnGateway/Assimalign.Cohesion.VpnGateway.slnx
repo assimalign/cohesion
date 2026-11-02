@@ -30,22 +30,23 @@
 	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting/tests/">
 		<Project Path="Assimalign.Cohesion.VpnGateway.Hosting/tests/Assimalign.Cohesion.VpnGateway.Hosting.Tests.csproj" />
 	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/" />
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/docs/">
+		<File Path="Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/docs/DESIGN.md" />
+		<File Path="Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/docs/OVERVIEW.md" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/src/">
+		<Project Path="Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/src/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel.csproj" />
+	</Folder>
+	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/tests/">
+		<Project Path="Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel/tests/Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel.Tests.csproj" />
+	</Folder>
 	<Folder Name="/VpnGateway/refs/" >
 		<Project Path="../../libraries/Hosting/Assimalign.Cohesion.Hosting/src/Assimalign.Cohesion.Hosting.csproj" />
 		<Project Path="../../libraries/Core/Assimalign.Cohesion.Core/src/Assimalign.Cohesion.Core.csproj" />
-	</Folder>
-	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/">
-		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/README.md" />
-	</Folder>
-	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/">
-		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/DESIGN.md" />
-		<File Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/docs/OVERVIEW.md" />
-	</Folder>
-	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/src/">
-		<Project Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/src/Assimalign.Cohesion.VpnGateway.ApplicationModel.csproj" />
-	</Folder>
-	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.ApplicationModel/tests/">
-		<Project Path="Assimalign.Cohesion.VpnGateway.ApplicationModel/tests/Assimalign.Cohesion.VpnGateway.ApplicationModel.Tests.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting/src/Assimalign.Cohesion.ApplicationModel.Hosting.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess/src/Assimalign.Cohesion.ApplicationModel.Hosting.InProcess.csproj" />
+		<Project Path="../../libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.csproj" />
 	</Folder>
 	<Folder Name="/VpnGateway/Assimalign.Cohesion.VpnGateway.Refs/">
 		<File Path="Assimalign.Cohesion.VpnGateway.Refs/Directory.Build.props" />

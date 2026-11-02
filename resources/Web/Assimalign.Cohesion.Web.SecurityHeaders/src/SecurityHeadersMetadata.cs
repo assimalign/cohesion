@@ -59,8 +59,8 @@ public sealed class SecurityHeadersMetadata
 
     /// <summary>
     /// Creates metadata that adjusts the pipeline's policy for the endpoint: the callback receives a copy
-    /// of the policy configured on the <c>UseSecurityHeaders</c> that serves the request, and the endpoint's
-    /// responses carry the result.
+    /// of the policy of the security-headers middleware that serves the request (the one
+    /// <c>AddSecurityHeaders</c> registered, or the defaults), and the endpoint's responses carry the result.
     /// </summary>
     /// <param name="configure">
     /// The adjustment, for example <c>policy =&gt; policy.Framing = FramingPolicy.SameOrigin</c>. It runs the

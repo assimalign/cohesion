@@ -130,12 +130,6 @@ address type. A declared endpoint's HOST/PORT/SCHEME values describe its bind ad
 separately advertised PUBLIC_URL remains available through the URI reader. Dependency URLs may
 carry an optional path.
 
-The default application-key credential profile constants are not in Core. They are
-`Assimalign.Cohesion.Hosting.Resources.ResourceCredentialProfile`, beside the resource credential
-verifier seam, because every gateway and hosting module that mints or verifies the default
-credential already references Hosting.Resources; the base ApplicationModel and the platform
-gateways never use them.
-
 `UriExtensions` is a single C# 14 extension block in the `System` namespace for the endpoint
 behavior the BCL does not supply directly: `CreateEndpoint`, `TryCreateEndpoint`,
 `TryParseEndpoint`, `ThrowIfNotEndpoint`, `IsEndpoint`, `EndpointPath`, and
@@ -147,13 +141,37 @@ literals are unbracketed and internationalized hosts use their ASCII-compatible 
 
 `AppEnvironment` owns the single environment-name rule:
 `COHESION_ENVIRONMENT ?? DOTNET_ENVIRONMENT ?? "Production"`. ApplicationModel delegates to this
-Core rule rather than parsing process variables itself. Every `AppEnvironment` reader has a
-process-environment and a dictionary overload so the ambient
-`Assimalign.Cohesion.Hosting.Resources.ResourceContext` can carry the same keys without duplicating
-their parsing rules.
+Core rule rather than parsing process variables itself. Every `AppEnvironment` reader has an
+environment overload and a dictionary overload, so a carrier of the same keys reuses their parsing
+rules.
 
-`ResourceContext` and `ResourceRuntime` live in `Assimalign.Cohesion.Hosting.Resources`, not
-Core; they are the in-process carrier delivered by runtime-contract item 12.
+### `AppEnvironmentScope` is the in-process carrier (2026-10-29)
+
+The runtime contract delivers every variable to an in-process resource through an "ambient
+context", and stops it on an "outer host signal" (RUNTIME_CONTRACT.md). That carrier is Core's
+`AppEnvironmentScope`: a frozen set of variables and a shutdown `CancellationToken`. A host of
+programs, such as Gateway.InProcess, enters one (`AppEnvironment.Enter`) on the flow it runs each
+program on, and `AppEnvironment.Current` flows with the execution context into everything the program
+starts. Inside a scope:
+
+- `GetValue`, and every reader without a dictionary, reads the scope's variables first.
+- A contract variable (`COHESION_` prefix, compared without case as Windows compares variable
+  names) that the scope does not set reads as unset, so one program never reads another's gateway,
+  endpoints, or configuration from the process. Every other variable, such as `PATH`, reads through
+  to the process.
+- `GetValues` is the merged snapshot, which the environment-variable configuration source loads.
+- `RegisterShutdown(callback)` registers on the scope's `Shutdown` instead of the process's
+  SIGINT, SIGQUIT, and SIGTERM, which stay with the host of programs. Outside a scope it registers
+  the signals, cancels each one's default action, and calls the callback instead. Every entry-point
+  run uses it: Hosting's `RunAsync` and the application-model gateway's (2026-10-29), so a program
+  that stops on signals in its own process stops on its scope in a host of programs, with no change.
+
+It lives in Core because every reader of the contract already does, and both sides of the line,
+the Configuration and Hosting readers and the gateway that writes the scope, reference Core. *Rejected:* a typed context
+carrying the same keys, which every reader would have to know. `Variables.Prefix` is internal, so the
+contract test, which reads `public const string` declarations, still sees exactly the documented
+variables. `Variables.Configuration(key)` builds the bridge variable of a whole colon-separated key
+(`Orders:Url` becomes `…CONFIG__Orders__Url`), the form a gateway writes a setting in.
 
 ## `FileSystemPath.Merge` navigates; it does not confine
 
@@ -182,8 +200,8 @@ away when the prefix names a drive or a UNC share, rather than preserving it:
 | `\\?\Volume{guid}\a`, `\\.\pipe\name`, `\\?\GLOBALROOT\...` | `ArgumentException` |
 
 Why it matters: the .NET host fully qualifies an application path at or past `MAX_PATH` (260)
-with `\\?\`, so `AppContext.BaseDirectory`, and `ResourceContext.ContentRootPath` derived from
-it, arrive prefixed. Every area hosting module parses one of them at startup, so rejecting the
+with `\\?\`, so `AppContext.BaseDirectory`, and every content root derived from it, arrive
+prefixed. Every area hosting module parses one of them at startup, so rejecting the
 `?` stopped every Cohesion application installed under a deep directory.
 
 Why normalize rather than preserve:
@@ -332,7 +350,7 @@ bool isMatch = pattern.IsMatch("settings/appsettings.json");
 string environmentName = AppEnvironment.GetEnvironmentName();
 ```
 
-`AppEnvironment.Variables.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; Hosting.Resources owns protected-file reading and TLS chain validation. The constant, runtime table, and golden variable list remain in identical order.
+`AppEnvironment.Variables.TrustBundlePath` is the additive transport trust-anchor path immediately after the bootstrap path. Its contents are certificates only; the variable is reserved (`docs/RUNTIME_CONTRACT.md`), and the platform that sets it owns reading the file and validating chains. The constant, runtime table, and golden variable list remain in identical order.
 
 ## Build-generated resources (#1467)
 

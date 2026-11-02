@@ -18,20 +18,21 @@ maps request spans, metrics, operator events and access logs to their Web or tra
 
 ## The dependency rule
 
-Hosting isolation follows O34 (owner decision, 2026-09-15), with integrations folded into the
-runtime module by decision 57 (2026-10-13):
+Hosting isolation follows O34 (owner decision, 2026-09-15):
 
 > **Roots and feature libraries reference no `Assimalign.Cohesion.Hosting*` library
 > (COHRES004) or Web hosting-family integration (COHRES001).**
-> `Web.Hosting` integrates `Hosting.Health` and `Hosting.Resources` itself, keeping its
-> `.Hosting.Health` and `.Hosting.Resources` public namespaces. No separate Web hosting-family
-> package exists. A future integration package is only for an integration that must not land in
-> every framework that carries the module. The module may reference any Web library except `Web.Testing`,
-> `Web.ApplicationModel`, `Web.ApplicationModel.Orchestration`, the `App.Web` producers, and test, example, sample, and fixture
+> `Web.Hosting` is a plain host. The one Web hosting-family package is the application-model
+> integration `Web.Hosting.ApplicationModel`, which references `Web.Hosting` (the one reference
+> `COHRES001` sanctions by name) and makes an application a managed resource
+> (`builder.Services.AddResource(name, resource => resource.UseInProcess())`). Any further
+> integration package is only for an integration that must not land in every framework that
+> carries the module. The module may reference any Web library except `Web.Testing`,
+> `Web.Hosting.ApplicationModel`, the `App.Web` producers, and test, example, sample, and fixture
 > projects (COHRES002, relaxed by owner decision 2026-10-09; before that, only the Web root and
 > its own hosting family).
-> `Web.Testing` exempts only `Web.Hosting` to drive the runtime and its control plane; `Web.ApplicationModel` retains its
-> COHAM001-fenced `Hosting.Resources` reference.
+> `Web.Testing` and `Web.Hosting.ApplicationModel` each exempt only `Web.Hosting`. No Web package
+> resolves an `ApplicationModel.Gateway*` assembly (COHRES003).
 
 Why the rule exists:
 
@@ -48,17 +49,17 @@ Why the rule exists:
   delivers the family to applications, so an app using `Sdk.Web` sees every Web assembly without
   any project wiring, and builder verbs ship with their feature (see *Feature registration*
   below). Each reference `Web.Hosting` takes ships its closure in every framework that carries
-  `Web.Hosting`: `App.Web` and, privately, all 17 other area frameworks. It takes three:
-  `Web.Routing` for the pipeline terminal, `Web.Server` for the public engine and its per-exchange
-  features, and `Web.Health` for the integrated health adapter (decisions 33 and 57).
+  `Web.Hosting`: `App.Web` and, privately, the five other area frameworks whose hosting modules serve HTTP
+  (ConfigurationStore, Database, IdentityHub, LogSpace, SecretStore). It takes two:
+  `Web.Routing` for the pipeline terminal and `Web.Server` for the public engine and its
+  per-exchange features (decisions 33 and 57).
 - **The root holds no feature contracts** (owner decision 33, #1379). An `IHttpFeature` contract
   lives with the package that publishes it: the endpoint and the path base in `Web.Routing`, the
   request id, response completion and drain signal in `Web.Server`. The root keeps the base
   contracts and composition seams (`IWebApplication*`, the pipeline, `Use`/`UseWhen`/`Run`).
-- **The exclusions** follow from earlier decisions: `Web.Testing` references `Web.Hosting`, so the
-  reverse is a cycle; the realization-plan design keeps the runtime off `Web.ApplicationModel`
-  (generated code in the consumer executable joins the two); the `App.Web` producers are packaging
-  shells that reference `Web.Hosting`; and harnesses never ship.
+- **The exclusions** follow from earlier decisions: `Web.Testing` and
+  `Web.Hosting.ApplicationModel` reference `Web.Hosting`, so the reverse is a cycle; the `App.Web`
+  producers are packaging shells that reference `Web.Hosting`; and harnesses never ship.
 
 **The rule is build-enforced — centrally, for every resource area.** The Web rule is the local
 instance of the repo-wide *resource hosting-isolation rule* in
@@ -66,11 +67,10 @@ instance of the repo-wide *resource hosting-isolation rule* in
 `resources/<Area>/` ships one `Assimalign.Cohesion.<Area>.Hosting`, no library in the area may
 reference it (`COHRES001`, checked against both the project-reference graph and the resolved
 assembly closure), and the hosting module may directly reference any same-area library except
-the area's `Testing`, `ApplicationModel`, `ApplicationModel.Orchestration`, framework producers,
-and harness projects, and may not resolve the two ApplicationModel packages by any route
+the area's `Testing`, `Hosting.ApplicationModel`, framework producers, and harness projects
 (`COHRES002`). A project with a sanctioned, user-approved exception opts out
 per-assembly via the `CohesionHostingIsolationExemptions` property in its own csproj —
-`Web.Testing` declares the standing exemption this way. Test, example, and sample projects are
+`Web.Testing` declares the standing exemption this way; `Web.Hosting.ApplicationModel` needs none, because `COHRES001` sanctions its reference by name. Test, example, and sample projects are
 exempt — the rule constrains shipped libraries, not harnesses — and every Web library builds in
 CI (`.github/workflows/resource-web.yml`) so the guard executes on each push. The `App.Web`
 framework producers, `Assimalign.Cohesion.Web.Refs` and `Assimalign.Cohesion.Web.Runtime`, are
@@ -85,13 +85,20 @@ an application:
 
 - **Registration verbs are component integrations on `builder.Services`.** Each feature package
   declares `[assembly: ComponentIntegration(...)]` targeting
-  `Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder.AddSingleton` with
-  `Contract = typeof(IHttpFeature)`, and the generator projects the verb into the application, so
-  neither the package nor `Web.Hosting` takes a reference for it. `Sdk.Web` applications get the
+  `Assimalign.Cohesion.DependencyInjection.IServiceProviderBuilder.AddSingleton`, and the generator
+  projects the verb into the application, so neither the package nor `Web.Hosting` takes a reference
+  for it. The contract is what the feature's pipeline verb reads: `IWebApplicationMiddleware` for the
+  configured middleware (most features), `IWebApplicationSetting` for a value an operator may change
+  (CORS), or `IHttpFeature` for state each exchange carries. `Sdk.Web` applications get the
   generator from the App framework; in-repo projects add
   `<CohesionAnalyzerReference Include="Assimalign.Cohesion.SourceGeneration" />`.
 - **Pipeline verbs stay `extension(...)` members** of the feature package: `Use<Feature>` on
   `IWebApplicationPipelineBuilder`, `Map*` on the pipeline and router surfaces.
+- **`Add` configures, `Use` places** (owner decision, 2026-10-28). Every `Use<Feature>()` is
+  parameterless: it places what its `Add` verb registered (the last registration; every mount, for
+  static files), the defaults when nothing is registered, or fails the pipeline's composition with a
+  message naming the `Add` verb when the feature has no safe default (`UseForwardedHeaders`,
+  `UseHostFiltering`, `UseQueryConditionals`, `UseRewrite`, `UseHttpLogging`).
 - **Every `IHttpFeature` registration is a singleton.** `Web.Hosting` rejects a scoped or transient
   one, one registered under a narrower contract, and a disposable instance or implementation type at
   `Build`, and a disposable feature a factory registration produces at the pipeline build, where the
@@ -109,6 +116,23 @@ an application:
 | `Web.Serialization` | `AddContentSerialization(serialization => ...)`, `AddJsonSerialization(resolver, ...)` | builder template (`ContentSerializationBuilder`); static factory (`SerializationComponents`) |
 | `Web.Validation` | `AddValidation(validation => validation.Options.AddProfile(...))` | builder template (`ValidationBuilder`) |
 | `Web.OpenApi` | `AddOpenApi()`, `AddOpenApi(openApi => openApi.Options.Title = ...)` | builder template (`OpenApiBuilder`) |
+| `Web.Cors` | `AddCors(cors => cors.Options.AddDefaultPolicy(...))` | builder template (`CorsBuilder`), registers the `cors` setting |
+| `Web.ErrorHandling` | `AddStatusCodePages(pages => pages.Options.Responder = ...)` | builder template (`StatusCodePagesBuilder`), registers middleware |
+| `Web.ForwardedHeaders` | `AddForwardedHeaders(forwarded => forwarded.Options.Headers = ...)` | builder template (`ForwardedHeadersBuilder`), registers middleware |
+| `Web.HttpsPolicy` | `AddHttpsRedirection(...)`, `AddHsts(hsts => hsts.Options.Preload = true)` | builder templates (`HttpsRedirectionBuilder`, `HstsBuilder`), register middleware |
+| `Web.HostFiltering` | `AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add(...))` | builder template (`HostFilteringBuilder`), registers middleware |
+| `Web.Caching` | `AddOutputCache(cache => cache.UseStore(store).Options.AddBasePolicy(...))` | builder template (`OutputCacheBuilder`), registers middleware |
+| `Web.Compression` | `AddResponseCompression(...)`, `AddRequestDecompression(...)` | builder templates (`ResponseCompressionBuilder`, `RequestDecompressionBuilder`), register middleware |
+| `Web.CookiePolicy` | `AddCookiePolicy(cookies => cookies.Options.Secure = ...)` | builder template (`CookiePolicyBuilder`), registers middleware |
+| `Web.Diagnostics` | `AddHttpLogging((services, logging) => logging.UseLoggerFactory(...))` | builder template (`HttpLoggingBuilder`), registers middleware |
+| `Web.Query` | `AddQueryValidation(...)`, `AddQueryConditionals(conditionals => conditionals.UseResourceValidators(...))` | builder templates (`WebQueryValidationBuilder`, `WebQueryConditionalsBuilder`), register middleware |
+| `Web.RateLimiting` | `AddRateLimiting(limits => limits.Options.GlobalPolicy = ...)` | builder template (`RateLimitingBuilder`), registers middleware |
+| `Web.RequestTimeouts` | `AddRequestTimeouts(timeouts => timeouts.Options.DefaultPolicy = ...)` | builder template (`RequestTimeoutsBuilder`), registers middleware |
+| `Web.Rewrite` | `AddRewrite(rewrite => rewrite.Options.AddRedirect(...))` | builder template (`RewriteBuilder`), registers middleware |
+| `Web.SecurityHeaders` | `AddSecurityHeaders(headers => headers.Options.ReferrerPolicy = ...)` | builder template (`SecurityHeadersBuilder`), registers middleware |
+| `Web.Sessions` | `AddSessions(sessions => sessions.UseStore(store))` | builder template (`SessionsBuilder`), registers middleware |
+| `Web.StaticFiles` | `AddStaticFiles(files => files.UseFileSystem(fileSystem))` | builder template (`StaticFilesBuilder`), registers a mount |
+| `Web.WebSockets` | `AddWebSockets(webSockets => webSockets.Options.AllowedOrigins.Add(...))` | builder template (`WebSocketsBuilder`), registers middleware |
 
 Every registration verb is a builder template unless it has a required value argument. The
 template's configure callback is optional (owner decision 39, 2026-10-10, #1395), so a verb with
@@ -164,25 +188,27 @@ The working checklist also lives in `.claude/rules/web-area.md`:
 5. **Docs** — `docs/OVERVIEW.md` + `docs/DESIGN.md` and a row in the project map below.
    Public API reference belongs in [cohesion-docs](https://github.com/assimalign/cohesion-docs).
 
-The runtime consumes the root and three feature packages: `Web.Routing`, `Web.Server`, and
-`Web.Health`; feature libraries remain rooted in Web. Health and resource integrations live
-inside Web.Hosting, whose control plane reads Web.Server's completion feature. Arrows show references.
+The runtime consumes the root and two feature packages, `Web.Routing` and `Web.Server`; feature
+libraries remain rooted in Web. The application-model integration, `Web.Hosting.ApplicationModel`,
+references the runtime and `ApplicationModel.Hosting`; no Web library references it. Arrows show
+references.
 
 ```mermaid
 flowchart LR
     Host["Web.Hosting"] --> Root["Web"]
     Host --> Routing["Web.Routing"]
     Host --> Server["Web.Server"]
-    Host --> Health["Web.Health"]
     Routing --> Root
     Server --> Root
     Server --> Routing
-    Host --> HR["Hosting.Resources"]
-    Host --> HH["Hosting.Health"]
-    Host --> JWT["IdentityModel.Token.JsonWebToken"]
-    Health --> Root
+    WHA["Web.Hosting.ApplicationModel"] --> Host
+    WHA --> Instance["ApplicationModel.Hosting"]
     Feature["Web feature libraries"] --> Root
+    Feature -.->|"COHRES001 ✗"| Host
 ```
+
+A feature library may never reference `Web.Hosting` (`COHRES001`), the dotted edge above; only
+`Web.Testing` holds the standing exemption that lets it; `Web.Hosting.ApplicationModel` is the one integration `COHRES001` sanctions by name.
 
 Web.Hosting references Web.Server for its public server engine. Web.Server references Web.Routing
 for the `http.route` template; Web.Routing must never reference Web.Server, which would form a cycle.
@@ -194,7 +220,8 @@ The engine has no Hosting or connection-driver dependency and can be constructed
 | --- | --- |
 | `Assimalign.Cohesion.Web` | The root: pipeline and composition abstractions (`IWebApplication*`, `WebApplicationMiddleware`) and the composition verbs `Use`, `UseWhen` and `Run` every library builds against; no `IHttpFeature` contract (#1379) |
 | `Assimalign.Cohesion.Web.Server` | Public `WebApplicationServer` engine and `WebApplicationServerOptions`, plus the seven per-exchange feature contracts it installs. Owns dispatch, drain, response callbacks, client-fault reports, request identity, spans, metrics and operator diagnostics under `Assimalign.Cohesion.Web.Server`. References Web.Routing for `http.route`; requires no hosting module or connection driver. |
-| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server lifecycle through `UseServer`/`AddServer` and an internal, non-owning wrapper, concrete-builder `AddService`, builder-time DI/config/logging composition, HTTP policy defaults and TCP/QUIC helpers. Constructs the Web.Server engine. Integrates Hosting.Health with Web.Health and serves the shared resource control plane with ES256 verification and deferred stop. Its `WebHostingEventSource` owns control-plane diagnostics. References Web.Routing, Web.Server and Web.Health (decision 57). |
+| `Assimalign.Cohesion.Web.Hosting` | The runtime module: host, server lifecycle through `UseServer`/`AddServer` and an internal, non-owning wrapper, concrete-builder `AddService`, builder-time DI/config/logging composition, HTTP policy defaults and TCP/QUIC helpers. Constructs the Web.Server engine. References Web.Routing and Web.Server; carries no health or resource integration. |
+| [`Assimalign.Cohesion.Web.Hosting.ApplicationModel`](Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/OVERVIEW.md) | The application-model integration: `builder.Services.AddResource(name, resource => ...)` makes the application a managed resource instance on the platforms it opts into (`UseInProcess()`); its actions come from registered settings (the `cors` setting becomes the `cors` action) and from `AddAction`. References Web.Hosting (sanctioned by `COHRES001` by name), Web.Cors, DependencyInjection, Hosting and ApplicationModel.Hosting; carries no transport. Unmanaged, it registers nothing. |
 | `Assimalign.Cohesion.Web.Routing` | Router, route patterns/constraints, endpoint metadata bag, link generation; `UseRouting` selects the endpoint and the pipeline terminal runs it (#1054), so policy middleware registered after `UseRouting` reads the matched endpoint. Owns the endpoint contract (`IRouterEndpointFeature`), the standard terminal (`WebApplicationTerminal`) and the branches that end in it (`Map(path)`, `MapWhen`, `IRouterPathBaseFeature`), moved from the root (#1379) |
 | `Assimalign.Cohesion.Web.Api` | Endpoint mapping over the router: plain `Map`/`MapGet` terminal middleware plus source-generated typed-delegate binding (`(int id, IHttpContext) => ...` — route/query/header/body/form + uploaded files + injections, 400/413/415 outcomes), returned values written with content negotiation (`string` as `text/plain`, `null` as 204), `COHWEB` compile errors for handlers it cannot bind, and neutral endpoint-description metadata (`EndpointParameterMetadata`, `EndpointResponseMetadata`, plus the `WithTags`/`WithSummary`/`WithDescription`/`ExcludeFromDescription` verbs) for documentation adapters; the interceptor generator lives in `analyzers/Assimalign.Cohesion.SourceGeneration.Web` |
 | `Assimalign.Cohesion.Web.Serialization` | The content-serialization registry: media-type-keyed request-reader/response-writer halves, `AddJsonSerialization` over a source-generated resolver (AOT), and the `ReadContentAsync`/`WriteContentAsync` call sites |
@@ -225,7 +252,6 @@ The engine has no Hosting or connection-driver dependency and can be constructed
 | `Assimalign.Cohesion.Web.Caching` | Server-owned output caching: `UseOutputCache` serves cacheable GET/HEAD responses from an async, tag-aware store without invoking the endpoint (base + named policies, per-endpoint sealed metadata read from the endpoint `UseRouting` published, a cache key that honors the response's own `Vary`, `Age` on hit); cache-or-bypass rides the #755 typed `Cache-Control` primitives (no-store/private/`Set-Cookie`/non-200/authenticated bypass); default in-memory store over `Caching.InMemory` with SizeLimit accounting and tag eviction, distributed backends deferred to `IOutputCacheStore` adapters. Register after `UseRouting` and ahead of `UseResponseCompression`, so endpoint metadata applies and a stored variant is never mis-served across `Accept-Encoding` |
 | `Assimalign.Cohesion.Web.Diagnostics` | HTTP request/response logging middleware (field flags, allowlist redaction, bounded body capture) + the W3C/NCSA access-log file provider riding `Assimalign.Cohesion.Logging` |
 | `Assimalign.Cohesion.Web.Testing` | In-memory test factory for the runtime (sanctioned Web.Hosting reference) |
-| `Assimalign.Cohesion.Web.ApplicationModel` | Declarative Web resource model and the enabled resource's default control-plane factory |
 | `Assimalign.Cohesion.Web.Refs` / `.Runtime` | Producers of the `App.Web` shared framework: the `Assimalign.Cohesion.App.Web.Ref` targeting pack and the `Assimalign.Cohesion.App.Web.Runtime.<rid>` runtime packs, built from the member list in the Runtime producer's `Directory.Build.props`, which the Refs producer imports. Assembly and package names keep the `App` segment (`.claude/rules/build-system.md`, "Framework producer projects") |
 
 Layering: L3 platform. Everything here builds on the L1 protocol stack (`libraries/Http`,
@@ -240,12 +266,7 @@ container is the only composition registry: the feature packages' projected
 root `IWebApplicationBuilder` verbs (`AddFeature`, `AddServer`) are explicit-interface shims over
 `Services.AddSingleton<IHttpFeature>` and `Services.AddSingleton<IWebApplicationServer>`, resolved
 once at pipeline build and host start (`resource-areas.md`, "Hosting composition — DI is the
-dependency control"). `Web.ApplicationModel` references
-only the shared ApplicationModel and
-`Hosting.Resources` contracts; that resource-runtime package brings the plain Hosting lifecycle,
-the `Hosting.Health` contribution contracts, and the Windows-only ProtectedData BCL facade into
-its permitted closure. `Web.Hosting` discovers generated registrations through the
-`Hosting.Resources` `ResourceRuntime`.
+dependency control").
 
 Per-project documentation lives in each project's `docs/OVERVIEW.md` and `docs/DESIGN.md`.
 Start with the [Routing overview](Assimalign.Cohesion.Web.Routing/docs/OVERVIEW.md) for route-table

@@ -39,7 +39,8 @@ public class ResponseCompressionForwardedTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Application.UseForwardedHeaders();
         factory.Application.UseResponseCompression();
         WriteLargeJson(factory);
         using HttpClient client = factory.CreateClient();
@@ -60,8 +61,10 @@ public class ResponseCompressionForwardedTests
         // Arrange
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
-        factory.Application.UseResponseCompression(options => options.EnableForHttps = true);
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddResponseCompression(compression => compression.Options.EnableForHttps = true);
+        factory.Application.UseForwardedHeaders();
+        factory.Application.UseResponseCompression();
         WriteLargeJson(factory);
         using HttpClient client = factory.CreateClient();
 
@@ -139,13 +142,10 @@ public class ResponseCompressionForwardedTests
 
     private static async Task RunBehindForwardedHeadersAsync(TestHttpContext context)
     {
-        TestPipelineBuilder builder = new();
-        builder.UseForwardedHeaders(options =>
-        {
-            options.Headers = ForwardedHeaderNames.XForwarded;
-            options.KnownProxies.Add(_trustedProxy.Address);
-        });
-        IWebApplicationMiddleware forwarded = builder.LastMiddleware.ShouldNotBeNull();
+        ForwardedHeadersBuilder forwardedHeaders = new();
+        forwardedHeaders.Options.Headers = ForwardedHeaderNames.XForwarded;
+        forwardedHeaders.Options.KnownProxies.Add(_trustedProxy.Address);
+        IWebApplicationMiddleware forwarded = forwardedHeaders.Build();
 
         ResponseCompressionMiddleware compression = new(new ResponseCompressionOptions());
 

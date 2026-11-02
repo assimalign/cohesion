@@ -7,8 +7,9 @@ Arm the per-exchange abort primitive the protocol core already ships (#703:
 global default, per-endpoint overrides on the #150 endpoint-metadata seam, and an
 ASP.NET-parity translation of expiry into a 504 (or a clean protocol-level abort once the
 response has started). The package is a plain Web feature library under the middleware-first
-composition model: one `UseRequestTimeouts` verb, values captured at builder time, no service
-container, no request-time service location, no transport changes.
+composition model: one registration verb, `builder.Services.AddRequestTimeouts(...)`, that captures
+the values, one pipeline verb, `UseRequestTimeouts()`, that places the result, no service location
+in the package, no request-time service location, no transport changes.
 
 ## Why expiry does NOT trip the transport cancel while the response is writable
 
@@ -191,10 +192,31 @@ registered — or is suspended for an attached debugger — no feature exists an
   only its downstream. Registered ahead of `UseRouting`, the global default still governs every
   request, but an endpoint whose metadata carries a timeout fails at dispatch (see "Fail closed"
   above).
-- Registration is expected once per pipeline. Nesting is not harmful (the innermost scope's
+- Placement is expected once per pipeline. Nesting is not harmful (the innermost scope's
   token is what downstream observes) but has no defined use.
 - Debugger suspension (`Debugger.IsAttached`, checked per request) skips the entire scope —
   no timer, no decoration, no feature — mirroring ASP.NET. It still acknowledges the endpoint.
+
+## Registration: `AddRequestTimeouts` configures, `UseRequestTimeouts` places (2026-10-28)
+
+`builder.Services.AddRequestTimeouts(timeouts => ...)` is a generated component integration over
+`RequestTimeoutsBuilder` (`src/Properties/ComponentIntegrations.cs`, both builder templates). The
+builder's `Options` is the existing `RequestTimeoutOptions`; the options validate themselves on
+assignment (a `RequestTimeoutPolicy` refuses a non-positive timeout when it is created, and
+`TimeProvider` refuses `null`), so `Build()` has nothing left to reject. `Build()` snapshots the
+default policy, the time provider and the debugger switch into the middleware, which registers as an
+`IWebApplicationMiddleware` singleton; a later change to a retained options object reaches nothing.
+`UseRequestTimeouts()` takes no arguments: it places the last `RequestTimeoutMiddleware` it finds in
+`IWebApplicationContext.Middleware`, or one built from the defaults (no global timeout: only endpoint
+policies and handler-armed timeouts are enforced) when the application registered none. The
+routing acknowledgement name stays `UseRequestTimeouts`, so routing's dispatch failure still names
+the verb to place.
+
+*Rejected:* configuration on the pipeline verb, the former `UseRequestTimeouts(Action<RequestTimeoutOptions>?)`
+and `UseRequestTimeouts(TimeSpan)` overloads. They split one feature's settings across two call
+sites and kept them out of the registrations the host enumerates. The `TimeSpan` shortcut was not
+carried over to the builder either: `Options.DefaultPolicy = new RequestTimeoutPolicy { Timeout = ... }`
+is the one spelling, as it is for ASP.NET Core's `AddRequestTimeouts`.
 
 ## AOT posture
 

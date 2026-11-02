@@ -426,7 +426,7 @@ public sealed class DatabaseCompositionTests
                 ContentRootPath = FileSystemPath.Parse(directory.FullName),
                 Environment = "Testing",
             };
-            var builder = new DatabaseApplicationBuilder(options, resourceAssembly: null, args);
+            var builder = new DatabaseApplicationBuilder(options, args);
             args[0] = "--Phase29:Arguments=mutated";
             var provider = new TestConfigurationProvider();
             builder.Configuration.AddProvider(_ => provider);

@@ -121,14 +121,14 @@ The orchestrator re-checked the findings in §1 by reading or running the code.
 
 | Bucket | Area | Defects found | Candidates |
 | --- | --- | --- | --- |
-| H | ApplicationModel | **[Certain, survey]** A probe path such as `Http = "ready"` passes manifest and plan validation, then throws during reconcile. A mount source of `parameter:` followed by spaces passes, then resolves as unresolved input. `ApplicationName.Parse` and the generated conversions bypass `ValidateApplicationName`. A `with`-expression bypasses `ApplicationCredential`'s checks. | 5 |
-| I | SecretStore | **[Certain, survey]** `store:key:extra` passes `AddSecret`, then fails at delivery. The certificate leaf names `.`, `..` and backslash pass composition, then fail at execution. SAN names are unchecked until issuance. Reserved paths are refused only at delivery. | 5 |
+| H | ApplicationModel | **Withdrawn 2026-10-31.** The surveyed manifest, mount-source, application-name and credential types were removed by the application-model restart. | 0 |
+| I | SecretStore | **[Certain, survey]** The full certificate retrieval reference in `SecretStore.Client` is unchecked. The four command-surface candidates left with the retired `SecretStore` definition package on 2026-10-31. | 1 |
 | J | OpenTelemetry | **[Certain]** A malformed `TraceId`/`SpanId` throws during export, and the batch loop discards the whole batch with it. | 2 |
 | K | Amqp | **[Certain, survey]** Unicode `AmqpSymbol` values are encoded as symbols, which AMQP defines as ASCII. A `default` symbol throws when hashed. A max frame size below 512 is accepted. | 2 |
 | L | Dns | **[Certain, survey]** `DnsTxtRecord` keeps the caller's list, so a later overlong string truncates its length byte while the full payload is written. `DnsName` accepts `a..`. | 2 |
 | M | Content.Yaml | **[Certain, survey]** Programmatic anchors and tags are emitted without checks; a space, newline or `>` changes token boundaries. A negative indent throws at emit. | 3 |
 | N | Security.DataProtection | **[Certain, survey]** `new KeyDocument("../escape", ...)` passes construction and is refused only by the repository. | 1 |
-| O | Numeric guards and retained options | **[Certain, survey]** Problems the surveys found in several areas: <ul><li>negative QUIC backlog and stream limits are accepted and then fail every incoming connection;</li><li>DNS and gateway options are retained, so later assignments bypass validation;</li><li>NaN passes the cache-compaction and memory-pool ratio guards;</li><li>a negative object-pool retention limit is accepted;</li><li>an OIDC `MaxAge` of `-1` flags a new token;</li><li>`Configuration.Key` hashes `default` and empty differently while comparing them equal.</li></ul> | 15 |
+| O | Numeric guards and retained options | **[Certain, survey]** Problems the surveys found in several areas: <ul><li>negative QUIC backlog and stream limits are accepted and then fail every incoming connection;</li><li>DNS options are retained, so later assignments bypass validation;</li><li>NaN passes the cache-compaction and memory-pool ratio guards;</li><li>a negative object-pool retention limit is accepted;</li><li>an OIDC `MaxAge` of `-1` flags a new token;</li><li>`Configuration.Key` hashes `default` and empty differently while comparing them equal.</li></ul> | 13 |
 | P | Generator hooks | §6 | — |
 
 ## 5. Decisions for the owner
@@ -141,12 +141,12 @@ The orchestrator re-checked the findings in §1 by reading or running the code.
 - **V3 — Numbers stay primitives.** Numeric ranges stay primitives with composition guards (§3.1). *Recommended.*
 - **V4 — The rule.** Add the value-object standard to `general-rules.md` and `checklist.md`. *Recommended.*
 - **V5 — Structs.** Keep struct value objects, plus the boundary `default` check, rather than switching to a class kind. *Recommended.*
-- **V6 — Generator hooks (§6).** Build them in the backlog item that first needs them. The first is bucket H, whose credential value needs a redacted `ToString`. None of A–G needs one. *Recommended.*
+- **V6 — Generator hooks (§6).** Build them in the backlog item that first needs them. None of A–G needs one; bucket H, whose credential value needed a redacted `ToString`, was withdrawn on 2026-10-31. *Recommended.*
 - **V7 — Advisories.** Create private GHSA drafts for #1474 and #1475 once fixed, to publish with the next preview, as the earlier Stage findings were. *Recommended.*
 
 ## 6. Generator gaps the surveys found
 
-Not needed by A–G; needed by bucket H or by migrating hand-written types:
+Not needed by A–G; needed by migrating hand-written types (bucket H, which also needed them, was withdrawn on 2026-10-31):
 - **A normalization hook.** Store a canonical form after validation: a lower-cased origin, a host without its trailing dot, a trimmed vocabulary value, `HttpPath`'s null-to-root. Reported by four surveys.
 - **Member opt-outs.** Suppress or replace the generated `ToString`/`DebuggerDisplay` (credential redaction), equality and hashing (DNS trailing-dot equivalence), or the JSON converter. Customize the constructor's exception type and parameter name, for example `ArgumentOutOfRangeException`.
 - **Span validation for wire-facing string types.** Reject a span without allocating, and create the string once. This blocks generating `HttpHeaderKey`, `Configuration.Key` or `FileName` without a per-request cost.
@@ -242,25 +242,15 @@ Generated from the survey output: one row per candidate, with the first site and
 | Query/form key identity | Generate scaffolding for existing Assimalign.Cohesion.Http.HttpQueryKey | `libraries/Http/Assimalign.Cohesion.Http/src/ValueObjects/HttpQueryKey.cs:16` | none found |
 | Raw request authority carrier | Generate scaffolding for existing Assimalign.Cohesion.Http.HttpHost | `libraries/Http/Assimalign.Cohesion.Http/src/ValueObjects/HttpHost.cs:40` | [Certain] Permissive construction is documented behavior, not an established validation defect. |
 
-### H — ApplicationModel (backlog) (5)
+### H — ApplicationModel (withdrawn) (0)
+
+Withdrawn on 2026-10-31: the five surveyed types (mount-source expression, resource HTTP probe path, application name, credential scheme and credential value) were removed by the application-model restart.
+
+### I — SecretStore (backlog) (1)
 
 | Concept | Proposed type | Where | Defect today |
 | --- | --- | --- | --- |
-| Mount-source expression | New Assimalign.Cohesion.ApplicationModel.ResourceMountSource | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Manifests/ResourceManifest.cs:395` | [Certain] parameter: followed only by spaces passes manifest validation because it checks suffix length, and provider validation skips parameter sources. |
-| Absolute resource HTTP probe and control-plane path | New Assimalign.Cohesion.ApplicationModel.ResourceHttpPath existing HttpPath has different acceptance and defau | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Manifests/ResourceManifestProbe.cs:22` | [Certain] Http='ready' passes manifest and plan validation, then throws in ProbeSpec.Http during LocalPlanController.ReconcileAsync -> LocalResourcePreparer.PrepareAsync. |
-| Application identity | Reuse existing Assimalign.Cohesion.ApplicationModel.ApplicationName; add IsValid | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Assimalign.Cohesion.ApplicationModel.csproj:21` | [Certain] Build already rejects invalid application names. |
-| Application credential authentication scheme | New Assimalign.Cohesion.ApplicationModel.ApplicationCredentialScheme | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Providers/ApplicationCredential.cs:23` | [Certain] 'Bad Scheme' can be constructed and is rejected only during telemetry resolution. |
-| Single-line application credential value | New Assimalign.Cohesion.ApplicationModel.ApplicationCredentialValue conditional on secret-safe generated prese | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Providers/ApplicationCredential.cs:28` | [Certain] A nonblank credential with line breaks can be constructed and cached, then fail in RequireBearer or telemetry resolution. |
-
-### I — SecretStore (backlog) (5)
-
-| Concept | Proposed type | Where | Defect today |
-| --- | --- | --- | --- |
-| Secret-only command source expression | New SecretStoreCommandSource namespace Assimalign.Cohesion.ApplicationModel | `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/Extensions/SecretStoreResourceCommandExtensions.cs:40` | [Certain] 'store:key:extra' passes AddSecret's first-colon check and opaque command-payload composition, then fails SecretStoreAddSecretInputResolver.ResolveAsync at line 114 because IsResourceSource forbids another colon. |
-| Unprefixed certificate leaf name | New SecretStoreCertificateLeafName namespace Assimalign.Cohesion.ApplicationModel | `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/Extensions/SecretStoreResourceCommandExtensions.cs:65` | [Certain] IssueCertificate accepts '.', '..' and backslash-containing names during composition. |
-| Logical path permitted for an add-secret command | New SecretStoreCommandPath namespace Assimalign.Cohesion.ApplicationModel | `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/Extensions/SecretStoreResourceCommandExtensions.cs:35` | [Certain] Reserved paths compose successfully and are rejected only by StoreCommandSecretAsync during delivery. |
 | Full certificate retrieval reference | New SecretStoreCertificateName namespace Assimalign.Cohesion.SecretStore.Client. Keep Root='ca/root' and leaf- | `resources/SecretStore/Assimalign.Cohesion.SecretStore.Client/src/Abstractions/ISecretStoreClient.cs:58` | [Certain] Invalid nonblank names are sent over HTTP before rejection. |
-| Each DNS-or-IP certificate subject alternative name | New SecretStoreCertificateAlternativeName namespace Assimalign.Cohesion.ApplicationModel. Existing DnsName doe | `resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/src/Extensions/SecretStoreResourceCommandExtensions.cs:59` | [Certain] Non-IP strings reach AddDnsName at authority line 757 only during issuance. |
 
 ### J — OpenTelemetry (backlog) (2)
 
@@ -297,7 +287,7 @@ Generated from the survey output: one row per candidate, with the first site and
 | --- | --- | --- | --- |
 | Storage-safe data-protection key document name | New Assimalign.Cohesion.Security.DataProtection.KeyDocumentName | `libraries/Security/Assimalign.Cohesion.Security.DataProtection/src/KeyDocument.cs:17` | [Certain] new KeyDocument("../escape", content) passes its constructor and fails only at FileSystemKeyRepository.StoreKey -> ValidateName, before writing. |
 
-### O — Numeric guards and retained options (backlog) (15)
+### O — Numeric guards and retained options (backlog) (13)
 
 | Concept | Proposed type | Where | Defect today |
 | --- | --- | --- | --- |
@@ -312,13 +302,11 @@ Generated from the survey output: one row per candidate, with the first site and
 | Maximum recursive name-server sub-resolution depth | New Assimalign.Cohesion.Dns.DnsNameServerResolutionDepthLimit | `libraries/Dns/Assimalign.Cohesion.Dns.Client/src/IterativeDnsResolverOptions.cs:121` | [Certain] Initial negative values fail construction, but later negative assignment to retained options suppresses the sub-resolution branch. |
 | Maximum permitted authentication age | New Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect.OpenIdConnectMaximumAuthenticationAge | `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols.OpenIdConnect/src/OpenIdConnectIdTokenValidationOptions.cs:67` | [Certain] With MaxAge=-1, zero ClockSkew and AuthTime equal to ValidateAt, the comparison reports MaxAgeExceeded for a newly authenticated token instead of refusing the policy value. |
 | Configuration key segment | Reuse Assimalign.Cohesion.Configuration.Key | `libraries/Configuration/Assimalign.Cohesion.Configuration/src/ValueObjects/Key.cs:11` | [Certain] Validation already occurs at construction. |
-| Consecutive liveness-failure threshold | New Assimalign.Cohesion.ApplicationModel.Gateway.LivenessFailureThreshold | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/LocalGatewayOptions.cs:77` | [Certain] Initial options are validated by both gateway constructors. |
-| Maximum restart attempts | New Assimalign.Cohesion.ApplicationModel.Gateway.RestartAttemptLimit | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/LocalGatewayOptions.cs:98` | [Certain] Constructors validate initial options, but retained mutable options can subsequently receive a negative limit without revalidation. |
 | Cache compaction fraction | New Assimalign.Cohesion.Caching.InMemory.CacheCompactionPercentage | `libraries/Cache/Assimalign.Cohesion.Caching.InMemory/src/MemoryCacheOptions.cs:73` | [Certain] The current <=0 or >1 guard accepts NaN. |
 | Object-pool retention limit | New Assimalign.Cohesion.ObjectPool.ObjectPoolRetentionLimit | `libraries/ObjectPool/Assimalign.Cohesion.ObjectPool/src/Extensions/ObjectPoolExtensions.cs:62` | [Certain] Negative limits reach pool operations without rejection, and Return still retains its first object. |
 
 <details>
-<summary>Declined: 98 candidates (already validated, a guard suffices, or the semantics go beyond the generator)</summary>
+<summary>Declined: 80 candidates (already validated, a guard suffices, or the semantics go beyond the generator)</summary>
 
 | Concept | Proposed type | Where | Defect today |
 | --- | --- | --- | --- |
@@ -370,8 +358,6 @@ Generated from the survey output: one row per candidate, with the first site and
 | Maximum concurrent connection upgrades, including TLS handshakes | New Assimalign.Cohesion.Connections.ConnectionUpgradeLimit | `libraries/Connections/Assimalign.Cohesion.Connections/src/Extensions/ConnectionLayerExtensions.cs:73` | [Certain] Both public boundaries already reject invalid values during composition. |
 | Validated, wire-exact protocol endpoint location | New Assimalign.Cohesion.IdentityModel.Protocols.ProtocolEndpointLocation | `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/shared/EndpointLocation.cs:18` | none found |
 | Explicit endpoint port | New Assimalign.Cohesion.EndpointPort | `libraries/Core/Assimalign.Cohesion.Core/src/System/UriExtensions.cs:52` | [Certain] Initial invalid values already fail endpoint creation or return false from parsing. |
-| Resource shutdown grace in seconds | New Assimalign.Cohesion.Hosting.Resources.ResourceStopGraceSeconds | `libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/ResourceRuntime.cs:244` | [Certain] Public registration already rejects invalid values. |
-| Fully qualified resource content root | New Assimalign.Cohesion.Hosting.Resources.ResourceContentRoot retain conversion to existing FileSystemPath | `libraries/Hosting/Assimalign.Cohesion.Hosting.Resources/src/ResourceContext.cs:224` | [Certain] Both current construction routes validate; no delayed failure was established. |
 | Endpoint URI scheme | New Assimalign.Cohesion.UriScheme | `libraries/Core/Assimalign.Cohesion.Core/src/System/UriExtensions.cs:42` | [Certain] Endpoint creation already validates. |
 | Endpoint host component input | New Assimalign.Cohesion.EndpointHost | `libraries/Core/Assimalign.Cohesion.Core/src/System/UriExtensions.cs:47` | none found |
 | Endpoint path component without query or fragment | New Assimalign.Cohesion.EndpointPath | `libraries/Core/Assimalign.Cohesion.Core/src/System/UriExtensions.cs:57` | [Certain] Both builders already enforce this exclusion rule; no missing composition failure was found. |
@@ -385,17 +371,6 @@ Generated from the survey output: one row per candidate, with the first site and
 | Canonical protocol transport binding | Reuse Assimalign.Cohesion.IdentityModel.Protocols.ProtocolBinding | `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/src/ValueObjects/ProtocolBinding.cs:31` | none found |
 | Canonical protocol party role | Reuse Assimalign.Cohesion.IdentityModel.Protocols.ProtocolRole | `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/src/ValueObjects/ProtocolRole.cs:26` | none found |
 | Canonical protocol endpoint kind | Reuse Assimalign.Cohesion.IdentityModel.Protocols.ProtocolEndpointKind | `libraries/IdentityModel/Assimalign.Cohesion.IdentityModel.Protocols/src/ValueObjects/ProtocolEndpointKind.cs:28` | none found |
-| Resource ports and the automatic-allocation sentinel | New Assimalign.Cohesion.ApplicationModel.ResourcePort and RequestedResourcePort | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Manifests/ResourceManifest.cs:497` | [Certain] Normal builder and manifest paths already validate during composition. |
-| Registered mount-source provider name | New Assimalign.Cohesion.ApplicationModel.ResourceSourceName | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Internal/Providers/ResourceSourceProviderDictionary.cs:18` | none found |
-| Digest-pinned opaque container image reference | New Assimalign.Cohesion.ApplicationModel.Gateway.DigestPinnedImageReference | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/Extensions/ApplicationGatewayResourceExtensions.cs:35` | [Certain] AddContainer already validates at composition. |
-| Positive replica count | New Assimalign.Cohesion.ApplicationModel.ResourceReplicaCount | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Manifests/ResourceManifest.cs:628` | [Certain] Build validates manifest and planned counts, so no delayed operation failure was found. |
-| Positive graceful-stop budget in seconds | New Assimalign.Cohesion.ApplicationModel.ResourceStopGraceSeconds | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Manifests/ResourceManifest.cs:647` | [Certain] Both manifest and plan checks run during normal composition; no delayed failure was established. |
-| Resource endpoint URI scheme | New Assimalign.Cohesion.ApplicationModel.ResourceEndpointScheme | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Planning/ResourcePlanValidator.cs:271` | [Certain] Normal generated plans are checked during Build. |
-| Hexadecimal manifest or closure SHA-256 digest | New Assimalign.Cohesion.ApplicationModel.ManifestDigest | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Documents/ApplicationExportResource.cs:107` | [Certain] Export validation already checks syntax before supported serialization/import operations. |
-| Single-line planner diagnostic label | New Assimalign.Cohesion.ApplicationModel.ResourcePlannerName | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/Internal/ApplicationBuilder.cs:709` | [Certain] Invalid labels already fail during Build, before diagnostic output. |
-| Fully qualified in-process content root | New Assimalign.Cohesion.ApplicationModel.Gateway.InProcess.InProcessContentRoot | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway.InProcess/src/Extensions/InProcessResourceDescriptorExtensions.cs:54` | [Certain] Both methods already reject relative roots during registration. |
-| Platform-neutral artifact reference | Generate existing Assimalign.Cohesion.ApplicationModel.ArtifactRef | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel/src/ValueObjects/ArtifactRef.cs:13` | [Certain] Direct construction can currently create blank references, but converter/plan paths reject them. |
-| Local certificate filename stem | New Assimalign.Cohesion.ApplicationModel.Gateway.LocalCertificateLeafName | `libraries/ApplicationModel/Assimalign.Cohesion.ApplicationModel.Gateway/src/Internal/GatewayCertificateAuthority.cs:41` | [Certain] Validation currently occurs during issuance after directory/root setup. |
 | Markdown heading level | New Assimalign.Cohesion.Content.Markdown.MarkdownHeadingLevel | `libraries/Content/Assimalign.Cohesion.Content.Markdown/src/Nodes/MarkdownHeading.cs:25` | none found |
 | Ordered Markdown list start | New Assimalign.Cohesion.Content.Markdown.MarkdownListStart | `libraries/Content/Assimalign.Cohesion.Content.Markdown/src/Nodes/MarkdownList.cs:28` | [Certain] Negative assignments already fail. |
 | Unsigned 16.16 fixed-point value | Generate existing FPoint over UInt owning RootNamespace is Assimalign.Cohesion.Content.Media | `libraries/Content/Assimalign.Cohesion.Content.Media/src/ValueTypes/FPoint.cs:5` | [Certain] No input-validation or delayed-failure bug is removed. |
@@ -412,13 +387,8 @@ Generated from the survey output: one row per candidate, with the first site and
 | Positive resilience rate-limiter permit count | New Assimalign.Cohesion.Resilience.RateLimitPermitCount | `libraries/Resilience/Assimalign.Cohesion.Resilience.RateLimiting/src/RateLimiterStrategyOptions.cs:20` | none found |
 | Positive OTLP queue or batch record count | New Assimalign.Cohesion.OpenTelemetry.OtlpRecordCount | `libraries/OpenTelemetry/Assimalign.Cohesion.OpenTelemetry/src/OtlpExporterOptions.cs:21` | none found |
 | Nonnegative validation-queue capacity | New Assimalign.Cohesion.ObjectValidation.ValidationQueueCapacity | `libraries/ObjectValidation/Assimalign.Cohesion.ObjectValidation/src/ValidationItemQueue.cs:30` | none found |
-| Identity command client and audience identifiers | New IdentityCommandIdentifier namespace Assimalign.Cohesion.ApplicationModel | `resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/src/Extensions/IdentityHubResourceCommandExtensions.cs:66` | none found |
-| Identity command credential mount source | New IdentityHubCredentialSource namespace Assimalign.Cohesion.ApplicationModel | `resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/src/Extensions/IdentityHubResourceCommandExtensions.cs:45` | [Certain] Literal sources already fail composition. |
 | Logical secret seed path | New SecretStoreSeedPath namespace Assimalign.Cohesion.SecretStore | `resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/src/SecretStoreApplicationBuilder.cs:111` | none found |
 | Configuration entry key | New ConfigurationEntryKey namespace Assimalign.Cohesion.ConfigurationStore. Existing Configuration.Key has inc | `resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/src/Internal/ConfigurationNamespaceBuilder.cs:16` | [Certain] Existing composition paths already reject invalid keys; no deferred invalid-key failure established. |
-| Single-segment namespace created by a declaration command | New ConfigurationDeclaredNamespaceName namespace Assimalign.Cohesion.ApplicationModel | `resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/src/Extensions/ConfigurationStoreResourceCommandExtensions.cs:27` | none found |
-| Rezolvr record name or CNAME target | New RezolvrRecordName namespace Assimalign.Cohesion.ApplicationModel. Existing DnsName does not enforce this o | `resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/src/Extensions/RezolvrResourceCommandExtensions.cs:61` | [Certain] Composition already validates names. |
-| Positive record lifetime in seconds | New RezolvrRecordTtlSeconds namespace Assimalign.Cohesion.ApplicationModel | `resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/src/Extensions/RezolvrResourceCommandExtensions.cs:28` | [Certain] Both declaration verbs already reject zero and negatives; no deferred TTL failure found on those paths. |
 | Log query result limit | New LogQueryLimit namespace Assimalign.Cohesion.LogSpace.Hosting | `resources/LogSpace/Assimalign.Cohesion.LogSpace.Hosting/src/Internal/LogSpaceHttp.cs:107` | [Certain] The HTTP boundary already validates every request before calling storage; no bypassing public option was found. |
 
 </details>

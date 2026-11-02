@@ -66,17 +66,22 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 
 /// <summary>
 /// The application context <see cref="TestPipelineBuilder"/> hands component factories: no content root,
-/// no web root, nothing registered.
+/// no web root, and in <see cref="Middleware"/> only what a test registered, as
+/// <c>builder.Services.AddRewrite(...)</c> would.
 /// </summary>
 internal sealed class TestApplicationContext : IWebApplicationContext
 {
+    /// <summary>Gets the middleware the application registered.</summary>
+    public List<IWebApplicationMiddleware> Registered { get; } = new();
+
     public FileSystemPath? ContentRootPath => null;
 
     public FileSystemPath? WebRootPath => null;
 
-    public IEnumerable<IWebApplicationMiddleware> Middleware => Array.Empty<IWebApplicationMiddleware>();
+    public IEnumerable<IWebApplicationMiddleware> Middleware => Registered;
 
     public IEnumerable<IWebApplicationServer> Servers => Array.Empty<IWebApplicationServer>();
 
     public IEnumerable<IHttpFeature> Features => Array.Empty<IHttpFeature>();
+    public IEnumerable<IWebApplicationSetting> Settings => global::System.Array.Empty<IWebApplicationSetting>();
 }

@@ -4,8 +4,9 @@
 
 Two directions of transparent body compression, packaged together (no ASP.NET-style micro-package
 split) as plain Web feature middleware under the middleware-first composition model. Each direction
-is one `Use*` verb, options captured at builder time, no service container, no request-time service
-location, no transport changes. Compression rides the BCL codecs only (`GZipStream`, `BrotliStream`,
+is one `Add*` registration verb that captures the options and one parameterless `Use*` verb that
+places the result (see "Registration" below), no service location in the package, no request-time
+service location, no transport changes. Compression rides the BCL codecs only (`GZipStream`, `BrotliStream`,
 `ZLibStream`), so the package is AOT/trim-clean with no external dependencies.
 
 The correctness of the response half hinges on the response-body write path and header-commit
@@ -195,7 +196,7 @@ status. A decoder's own failure still becomes `400` here. A transport limit fail
 ### Ordering requirement
 
 Because the guard surfaces during the handler's body read, `UseRequestDecompression` must be
-registered **after** `UseErrorHandling`: the exception boundary must sit *outside* it so that,
+placed **after** `UseErrorHandling`: the exception boundary must sit *outside* it so that,
 between this middleware and the handler, there is no catch-all to intercept the guard's exception
 before this middleware's own catch converts it to a clean `413`/`400`. Error handling is
 conventionally the outermost middleware, so this is the natural order.
@@ -266,8 +267,8 @@ It changes no public API, rejection status, or compression behavior.
   sender gets a `400`.
 - **No HEAD length mirroring.** A bodyless HEAD is left alone; precisely mirroring the coded
   `Content-Length` a GET would produce is a separate transport concern.
-- **No per-endpoint metadata surface.** Compression is a pipeline-wide policy configured at builder
-  time; a handler opts its own response out through `IResponseCompressionFeature`, and finer-grained
+- **No per-endpoint metadata surface.** Compression is a pipeline-wide policy configured where it is
+  registered; a handler opts its own response out through `IResponseCompressionFeature`, and finer-grained
   per-route control belongs to whatever source-generated mapping layer arrives later.
 - **No Microsoft.Extensions dependencies, no separate hosting wiring.** The package composes purely
   against the Web root's builder seams and ships to applications via `App.Web`.
@@ -285,15 +286,40 @@ type-only exclusions. EventSource templates, log messages and response bodies re
 existing ownership. This is a conventions change with no public API or behavior break against
 10.0.0-preview.1.
 
+## Registration: `Add` configures, `Use` places (2026-10-28)
+
+`builder.Services.AddResponseCompression(compression => ...)` and
+`builder.Services.AddRequestDecompression(decompression => ...)` are generated component integrations
+over `ResponseCompressionBuilder` and `RequestDecompressionBuilder` (`src/Properties/ComponentIntegrations.cs`,
+both builder templates). Each builder's `Options` is the existing options type. `Build()` creates the
+middleware, which validates what the setters cannot: at least one coding enabled, and every
+`MimeTypes` pattern (compiled once into the matcher), both `ArgumentException`. The middleware
+snapshots every value it reads per request (the HTTPS opt-in, the threshold, the level, the
+decompressed-size guard), so a retained options object changes nothing after registration. The
+middleware registers as an `IWebApplicationMiddleware` singleton.
+
+`UseResponseCompression()` and `UseRequestDecompression()` take no arguments: each places the last
+registration of its middleware it finds in `IWebApplicationContext.Middleware`, or one built from
+the defaults when the application registered none (gzip and Brotli, the seeded media types, a
+1 KiB threshold, `Fastest`, HTTPS off; a 100 MiB guard). Both have safe defaults, so neither fails
+without a registration.
+
+*Rejected:* configuration callbacks on the pipeline verbs, the former
+`UseResponseCompression(Action<ResponseCompressionOptions>?)` and
+`UseRequestDecompression(Action<RequestDecompressionOptions>?)`. They split a feature's settings across
+two call sites and kept them out of the registrations the host enumerates.
+
 ## Composition-time option validation (#1477)
 
 `MinimumResponseSizeBytes` and `MaxDecompressedSizeBytes` retain their primitive types and refuse
 negative assignments with resource-backed `ArgumentOutOfRangeException` guards. Zero remains a
-valid response threshold or decompressed-body limit. Setter validation also prevents a retained
-options object from introducing an invalid limit after registration.
+valid response threshold or decompressed-body limit. Since 2026-10-28 the middleware snapshots its
+options when it is built, so a retained options object changes nothing after registration; setter
+validation still refuses an invalid value where it is assigned.
 
-`UseResponseCompression` compiles only media-type patterns with one slash and nonempty RFC 9110
-tokens on both sides, reusing `HttpFieldName.IsValid` for that token grammar. Concrete types and
+`AddResponseCompression` (before 2026-10-28, `UseResponseCompression`) compiles only media-type
+patterns with one slash and nonempty RFC 9110 tokens on both sides, reusing
+`HttpFieldName.IsValid` for that token grammar. Concrete types and
 `type/*` remain supported, as does the already documented `*/*` full wildcard. A star within a
 token is matched literally; it does not introduce another wildcard syntax. Surrounding SP/HTAB
 are trimmed as before. Blank entries, the bare `*` alias, parameters, controls, and malformed

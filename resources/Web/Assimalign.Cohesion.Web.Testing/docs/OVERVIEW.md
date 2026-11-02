@@ -2,18 +2,13 @@
 
 ## Purpose
 
-Full-pipeline integration testing for both manually composed Web applications and enabled Web
-resource executables. The manual factory uses the in-memory connection driver. The
-`FromProgram<Program>()` factory invokes the executable under an invocation-local
-`Hosting.Resources` `ResourceContext`, waits for its registered default control plane, and
-uses its ambient loopback `http` endpoint.
+Full-pipeline integration testing for composed Web applications over the in-memory connection
+driver.
 
 ## Scope
 
 - `IWebApplicationTestFactory` / `WebApplicationTestFactory` — the per-test application host.
-- `IWebApplicationProgramTestFactory` — exposes the Program invocation's `ResourceContext`.
-- `WebApplicationTestFactoryOptions` — protocol selection and client base address.
-- `WebApplicationProgramTestFactoryOptions` — context, arguments, and lifecycle budgets.
+- `WebApplicationTestFactoryOptions` — protocol selection, client base address, and content root.
 - `WebApplicationTestProtocol` — `Http1` (default) or prior-knowledge `Http2`. HTTP/3 is a
   documented non-goal (see `DESIGN.md`).
 
@@ -60,16 +55,6 @@ await using WebApplicationTestFactory factory = new(new WebApplicationTestFactor
 });
 ```
 
-Drive the exact Program used in production:
-
-```csharp
-await using IWebApplicationProgramTestFactory factory =
-    WebApplicationTestFactory.FromProgram<Program>();
-
-using HttpClient client = factory.CreateClient();
-string health = await client.GetStringAsync("/healthz");
-```
-
 ## Dependencies
 
 - `Assimalign.Cohesion.Web.Hosting` — the `WebApplicationBuilder` / `WebApplication`
@@ -80,9 +65,8 @@ string health = await client.GetStringAsync("/healthz");
   dialing factory).
 - `Assimalign.Cohesion.Connections` — the `Connection` contract and duplex-pipe stream
   adapter the client side rides.
-- `Assimalign.Cohesion.Hosting` — host lifecycle capture for the Program-backed mode.
-- `Assimalign.Cohesion.Hosting.Resources` — ambient resource scopes, entry registration,
-  resource context, and control-plane bridge for that mode.
+- `Assimalign.Cohesion.Hosting` — the host lifecycle the application runs on.
+- `Assimalign.Cohesion.DependencyInjection` — the builder's `Services` registrations.
 
 The client side is otherwise pure BCL (`SocketsHttpHandler`, `HttpClient`).
 

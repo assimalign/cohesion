@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class NatGatewayApplication : Host<NatGatewayApplicationContext>, 
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(NatGatewayApplication).Assembly);
-    }
-
-    internal static NatGatewayApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new NatGatewayApplicationBuilder(args, resourceAssembly);
+        return new NatGatewayApplicationBuilder(args);
     }
 
     private sealed class DebugView

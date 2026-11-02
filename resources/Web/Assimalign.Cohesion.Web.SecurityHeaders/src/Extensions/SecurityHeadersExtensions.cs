@@ -1,34 +1,35 @@
 using System;
+using System.Linq;
 
 using Assimalign.Cohesion.Web.SecurityHeaders.Internal;
 
 namespace Assimalign.Cohesion.Web.SecurityHeaders;
 
 /// <summary>
-/// Pipeline-builder members that add browser security headers to a web application's responses.
+/// Pipeline-builder members that place the browser security-headers middleware in a web application's
+/// pipeline.
 /// </summary>
 public static class SecurityHeadersExtensions
 {
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds middleware that stages the security headers on every response that passes through it. With
-        /// no configuration it emits the safe defaults: <c>X-Content-Type-Options: nosniff</c>,
+        /// Places the middleware that stages the security headers on every response that passes through it:
+        /// the middleware the application registered with <c>builder.Services.AddSecurityHeaders(headers =&gt; ...)</c>,
+        /// or one with the safe defaults when it registered none: <c>X-Content-Type-Options: nosniff</c>,
         /// <c>Content-Security-Policy: frame-ancestors 'none'</c> with <c>X-Frame-Options: DENY</c>, and
         /// <c>Referrer-Policy: strict-origin-when-cross-origin</c>.
         /// </summary>
-        /// <param name="configure">
-        /// An optional callback that adjusts the policy, starting from the safe defaults: opt into a
-        /// Content Security Policy (with per-request nonces), Permissions-Policy and the cross-origin
-        /// isolation fields, change the framing or referrer policy, or turn a default off. The policy is
-        /// captured when this method returns.
-        /// </param>
         /// <returns>The same pipeline builder for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentOutOfRangeException">An enumeration property of the policy holds an undefined value.</exception>
         /// <remarks>
         /// <para>
-        /// <b>Register it at the front</b>, after <c>UseHttpLogging</c> and ahead of the exception boundary
+        /// The policy is configured where it is registered (<see cref="SecurityHeadersBuilder"/>); this verb only
+        /// positions it. When the application registered the headers more than once, the last registration
+        /// wins.
+        /// </para>
+        /// <para>
+        /// <b>Place it at the front</b>, after <c>UseHttpLogging</c> and ahead of the exception boundary
         /// (<c>UseErrorHandling</c>), static files, and <c>UseRouting</c>; it reads no client identity, so it
         /// may also precede <c>UseForwardedHeaders</c>. A response a middleware ahead of it writes never
         /// passes through it. The headers are staged through <see cref="IWebResponseStartingFeature"/>
@@ -43,15 +44,17 @@ public static class SecurityHeadersExtensions
         /// per-request Content Security Policy nonce from <see cref="ISecurityHeadersFeature"/>.
         /// </para>
         /// </remarks>
-        public IWebApplicationPipelineBuilder UseSecurityHeaders(Action<SecurityHeadersPolicy>? configure = null)
+        public IWebApplicationPipelineBuilder UseSecurityHeaders()
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            SecurityHeadersPolicy policy = new();
-            configure?.Invoke(policy);
+            return builder.Use(static (context, next) =>
+            {
+                IWebApplicationMiddleware middleware = context.Middleware.OfType<SecurityHeadersMiddleware>().LastOrDefault()
+                    ?? new SecurityHeadersBuilder().Build();
 
-            // A copy, so a reference the callback kept cannot reconfigure the pipeline after composition.
-            return builder.Use(new SecurityHeadersMiddleware(new SecurityHeadersPolicy(policy)));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
     }
 }

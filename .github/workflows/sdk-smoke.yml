@@ -11,7 +11,7 @@ on:
       - "scripts/**"
       - "libraries/App/**"
       - "libraries/ApplicationModel/**"
-      - "libraries/Caching/**"
+      - "libraries/Cache/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
       - "libraries/FileSystem/**"
@@ -23,9 +23,8 @@ on:
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
-      - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.Hosting.ApplicationModel/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/**"
-      - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
       - "resources/Database/Assimalign.Cohesion.Database.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.Execution/**"
       - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
@@ -39,11 +38,8 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.Transactions/**"
       - "resources/Database/Assimalign.Cohesion.Database.Types/**"
       - "resources/Database/Assimalign.Cohesion.Database/**"
-      - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/**"
       - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/**"
-      - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/**"
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/**"
-      - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
       - "resources/Web/**"
       - "fixtures/SdkSmoke/**"
@@ -61,7 +57,7 @@ on:
       - "scripts/**"
       - "libraries/App/**"
       - "libraries/ApplicationModel/**"
-      - "libraries/Caching/**"
+      - "libraries/Cache/**"
       - "libraries/Connections/**"
       - "libraries/Core/**"
       - "libraries/FileSystem/**"
@@ -73,9 +69,8 @@ on:
       - "libraries/Security/Assimalign.Cohesion.Security.DataProtection/**"
       - "resources/*/Assimalign.Cohesion.*.Refs/**"
       - "resources/*/Assimalign.Cohesion.*.Runtime/**"
-      - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.ApplicationModel/**"
+      - "resources/*/Assimalign.Cohesion.*.Hosting.ApplicationModel/**"
       - "resources/ConfigurationStore/Assimalign.Cohesion.ConfigurationStore.Hosting/**"
-      - "resources/Database/Assimalign.Cohesion.Database.ApplicationModel/**"
       - "resources/Database/Assimalign.Cohesion.Database.Client/**"
       - "resources/Database/Assimalign.Cohesion.Database.Execution/**"
       - "resources/Database/Assimalign.Cohesion.Database.Hosting/**"
@@ -89,11 +84,8 @@ on:
       - "resources/Database/Assimalign.Cohesion.Database.Transactions/**"
       - "resources/Database/Assimalign.Cohesion.Database.Types/**"
       - "resources/Database/Assimalign.Cohesion.Database/**"
-      - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.ApplicationModel/**"
       - "resources/IdentityHub/Assimalign.Cohesion.IdentityHub.Hosting/**"
-      - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.ApplicationModel/**"
       - "resources/Rezolvr/Assimalign.Cohesion.Rezolvr.Hosting/**"
-      - "resources/SecretStore/Assimalign.Cohesion.SecretStore.ApplicationModel/**"
       - "resources/SecretStore/Assimalign.Cohesion.SecretStore.Hosting/**"
       - "resources/Web/**"
       - "fixtures/SdkSmoke/**"
@@ -234,9 +226,7 @@ jobs:
         # One leg per OS builds all of them: the inner list is a single matrix value.
         projects: [[
             "Assimalign.Cohesion.Sdk.Tasks",
-            "Assimalign.Cohesion.Sdk.ApplicationModel.Tasks",
-            "Assimalign.Cohesion.Sdk.Database.Tasks",
-            "Assimalign.Cohesion.Sdk.Gateway.Tasks"
+            "Assimalign.Cohesion.Sdk.Database.Tasks"
           ]]
     steps:
       - name: Checkout
@@ -318,56 +308,14 @@ jobs:
           Import-Module ./scripts/modules/CohesionPackaging.psm1 -Force
           $repository = (Get-Location).Path
           $packageDirectory = Join-Path $repository "_out/release/packages"
-          # No area client package is a gateway dependency. Database.Client and Database.Sql.Client
-          # stay because the base/ApplicationModel SDK harness's EnabledWeb consumer references them;
-          # Database.Sql.Client's closure is now Database.Client + Database.Sql.Protocol (no engine); the Database.Sql engine family and
-          # FileSystem/FileSystem.Physical, so those are packed too (NU1101 otherwise).
-          # Web and Web.Routing are absent: Gateway.ControlPlane routes its own endpoints, and every
-          # other Web consumer here receives them through the App.Web framework, not as packages.
+          # The slim Sdk.Gateway references one package, ApplicationModel.Gateway; these are it and its
+          # closure. No other package-boundary consumer here restores a library package.
           $packageIds = @(
             "Assimalign.Cohesion.ApplicationModel"
+            "Assimalign.Cohesion.ApplicationModel.Definition"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
-            "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
-            "Assimalign.Cohesion.Connections"
-            "Assimalign.Cohesion.Connections.StreamAbort"
-            "Assimalign.Cohesion.Connections.StreamLimits"
-            "Assimalign.Cohesion.Connections.Tcp"
-            "Assimalign.Cohesion.Connections.Tls"
+            "Assimalign.Cohesion.ApplicationModel.Protocol"
             "Assimalign.Cohesion.Core"
-            "Assimalign.Cohesion.Database"
-            "Assimalign.Cohesion.Database.ApplicationModel"
-            "Assimalign.Cohesion.Database.Client"
-            "Assimalign.Cohesion.Database.Sql.Client"
-            "Assimalign.Cohesion.Database.Sql.Protocol"
-            "Assimalign.Cohesion.Database.Sql"
-            "Assimalign.Cohesion.Database.Sql.Language"
-            "Assimalign.Cohesion.Database.Sql.Schema"
-            "Assimalign.Cohesion.Database.Execution"
-            "Assimalign.Cohesion.Database.Indexing"
-            "Assimalign.Cohesion.Database.Language"
-            "Assimalign.Cohesion.Database.Protocol"
-            "Assimalign.Cohesion.Database.Security"
-            "Assimalign.Cohesion.Database.Storage"
-            "Assimalign.Cohesion.Database.Transactions"
-            "Assimalign.Cohesion.Database.Types"
-            "Assimalign.Cohesion.FileSystem"
-            "Assimalign.Cohesion.FileSystem.Physical"
-            "Assimalign.Cohesion.Hosting"
-            "Assimalign.Cohesion.Hosting.Health"
-            "Assimalign.Cohesion.Hosting.Resources"
-            "Assimalign.Cohesion.Http"
-            "Assimalign.Cohesion.Http.Connections"
-            "Assimalign.Cohesion.IdentityHub.ApplicationModel"
-            "Assimalign.Cohesion.IdentityModel"
-            "Assimalign.Cohesion.IdentityModel.Token"
-            "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken"
-            "Assimalign.Cohesion.LogSpace.ApplicationModel"
-            "Assimalign.Cohesion.Rezolvr.ApplicationModel"
-            "Assimalign.Cohesion.SecretStore.ApplicationModel"
-            "Assimalign.Cohesion.Security.DataProtection"
-            "Assimalign.Cohesion.Web.ApplicationModel"
           )
 
           $inventoryById = @{}
@@ -397,58 +345,14 @@ jobs:
           $version = & ./scripts/Get-CohesionVersion.ps1 -RepoRoot (Get-Location).Path
           $required = @(
             "Assimalign.Cohesion.ApplicationModel"
+            "Assimalign.Cohesion.ApplicationModel.Definition"
             "Assimalign.Cohesion.ApplicationModel.Gateway"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.ControlPlane"
-            "Assimalign.Cohesion.ApplicationModel.Gateway.InProcess"
-            "Assimalign.Cohesion.ConfigurationStore.ApplicationModel"
-            "Assimalign.Cohesion.Connections"
-            "Assimalign.Cohesion.Connections.StreamAbort"
-            "Assimalign.Cohesion.Connections.StreamLimits"
-            "Assimalign.Cohesion.Connections.Tcp"
-            "Assimalign.Cohesion.Connections.Tls"
+            "Assimalign.Cohesion.ApplicationModel.Protocol"
             "Assimalign.Cohesion.Core"
-            "Assimalign.Cohesion.Database"
-            "Assimalign.Cohesion.Database.ApplicationModel"
-            "Assimalign.Cohesion.Database.Client"
-            "Assimalign.Cohesion.Database.Sql.Client"
-            "Assimalign.Cohesion.Database.Sql.Protocol"
-            "Assimalign.Cohesion.Database.Sql"
-            "Assimalign.Cohesion.Database.Sql.Language"
-            "Assimalign.Cohesion.Database.Sql.Schema"
-            "Assimalign.Cohesion.Database.Execution"
-            "Assimalign.Cohesion.Database.Indexing"
-            "Assimalign.Cohesion.Database.Language"
-            "Assimalign.Cohesion.Database.Protocol"
-            "Assimalign.Cohesion.Database.Security"
-            "Assimalign.Cohesion.Database.Storage"
-            "Assimalign.Cohesion.Database.Transactions"
-            "Assimalign.Cohesion.Database.Types"
-            "Assimalign.Cohesion.FileSystem"
-            "Assimalign.Cohesion.FileSystem.Physical"
-            "Assimalign.Cohesion.Hosting"
-            "Assimalign.Cohesion.Hosting.Health"
-            "Assimalign.Cohesion.Hosting.Resources"
-            "Assimalign.Cohesion.Http"
-            "Assimalign.Cohesion.Http.Connections"
-            "Assimalign.Cohesion.IdentityHub.ApplicationModel"
-            "Assimalign.Cohesion.IdentityModel"
-            "Assimalign.Cohesion.IdentityModel.Token"
-            "Assimalign.Cohesion.IdentityModel.Token.JsonWebToken"
-            "Assimalign.Cohesion.LogSpace.ApplicationModel"
-            "Assimalign.Cohesion.Rezolvr.ApplicationModel"
             "Assimalign.Cohesion.Sdk"
-            "Assimalign.Cohesion.Sdk.ApplicationModel"
-            "Assimalign.Cohesion.Sdk.ConfigurationStore"
             "Assimalign.Cohesion.Sdk.Database"
             "Assimalign.Cohesion.Sdk.Gateway"
-            "Assimalign.Cohesion.Sdk.IdentityHub"
-            "Assimalign.Cohesion.Sdk.LogSpace"
-            "Assimalign.Cohesion.Sdk.Rezolvr"
-            "Assimalign.Cohesion.Sdk.SecretStore"
             "Assimalign.Cohesion.Sdk.Web"
-            "Assimalign.Cohesion.SecretStore.ApplicationModel"
-            "Assimalign.Cohesion.Security.DataProtection"
-            "Assimalign.Cohesion.Web.ApplicationModel"
           )
           $missing = @($required | Where-Object {
             -not (Test-Path -LiteralPath "_out/release/packages/$($_).$version.nupkg" -PathType Leaf)
@@ -466,7 +370,7 @@ jobs:
           retention-days: 1
 
   gateway-smoke:
-    name: "Gateway package smoke [${{ matrix.os }}]"
+    name: "SDK package-boundary tests [${{ matrix.os }}]"
     needs: gateway-packages
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -512,19 +416,8 @@ jobs:
             throw "Base SDK package-boundary tests failed with exit code $LASTEXITCODE."
           }
 
-      - name: Run ApplicationModel SDK package-boundary tests
-        shell: pwsh
-        run: |
-          dotnet test `
-              ./sdks/Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/tests/Assimalign.Cohesion.Sdk.ApplicationModel.Tests.csproj `
-              --configuration Release `
-              --nologo
-          if ($LASTEXITCODE -ne 0) {
-            throw "ApplicationModel SDK package-boundary tests failed with exit code $LASTEXITCODE."
-          }
-
-      # Independent of the base and ApplicationModel SDK tests above: a failure there must not
-      # hide whether the Database schema compiler and migrations still pass.
+      # Independent of the base SDK tests above: a failure there must not hide whether the
+      # Database schema compiler and migrations still pass.
       - name: Run Database SDK tests
         if: ${{ !cancelled() }}
         shell: pwsh
@@ -537,7 +430,11 @@ jobs:
             throw "Database SDK tests failed with exit code $LASTEXITCODE."
           }
 
+      # The slim Gateway SDK: a package-only consumer compiles against the implicit gateway package, and
+      # an in-process consumer that references a Sdk.Web resource project builds and runs (App and
+      # App.Web runtime packs come from the gateway-packages job's strict framework pack).
       - name: Run Gateway package-boundary tests
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           dotnet test `
@@ -546,181 +443,4 @@ jobs:
               --nologo
           if ($LASTEXITCODE -ne 0) {
             throw "Gateway package-boundary tests failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Publish self-contained Gateway sample
-        shell: pwsh
-        run: |
-          $workspace = Join-Path $env:RUNNER_TEMP "cohesion-gateway-smoke"
-          $source = "sdks/Assimalign.Cohesion.Sdk.Gateway/samples/GatewaySmoke"
-          $env:NUGET_PACKAGES = Join-Path $workspace ".nuget/packages"
-          $env:DOTNET_CLI_HOME = Join-Path $workspace ".dotnet"
-          New-Item -ItemType Directory -Path $workspace -Force | Out-Null
-          Copy-Item -Path "$source/*" -Destination $workspace -Recurse -Force
-
-          $packageFeed = (Resolve-Path -LiteralPath "_out/packages").Path
-          $version = (& ./scripts/Get-CohesionVersion.ps1).Trim()
-          ./scripts/sdks/New-SdkConsumerGlobalJson.ps1 `
-              -PackageDirectory $packageFeed `
-              -Version $version `
-              -OutputDirectory $workspace `
-              -SdkPackageId @(
-                  'Assimalign.Cohesion.Sdk'
-                  'Assimalign.Cohesion.Sdk.Gateway'
-                  'Assimalign.Cohesion.Sdk.Web'
-                  'Assimalign.Cohesion.Sdk.Database'
-              )
-
-          $nugetPath = Join-Path $workspace "NuGet.Config"
-          [xml] $nuget = Get-Content -LiteralPath $nugetPath -Raw
-          $localSource = @($nuget.configuration.packageSources.add) |
-              Where-Object { $_.key -eq "cohesion-local" } |
-              Select-Object -First 1
-          if ($null -eq $localSource) {
-            throw "Gateway smoke NuGet.Config has no cohesion-local package source."
-          }
-          $localSource.value = $packageFeed
-          $nuget.Save($nugetPath)
-
-          $publishDirectory = Join-Path $env:RUNNER_TEMP "cohesion-gateway-publish-${{ matrix.rid }}"
-          dotnet publish `
-              (Join-Path $workspace "Gateway/Gateway.csproj") `
-              --configuration Release `
-              --runtime "${{ matrix.rid }}" `
-              --self-contained true `
-              --output $publishDirectory `
-              --nologo `
-              -p:CohesionGatewayAot=false
-          if ($LASTEXITCODE -ne 0) {
-            throw "Gateway sample publish failed with exit code $LASTEXITCODE."
-          }
-
-      - name: Verify generated surface and run Gateway sample
-        shell: pwsh
-        run: |
-          $gatewayDirectory = Join-Path $env:RUNNER_TEMP "cohesion-gateway-smoke/Gateway"
-          $generated = @(
-            Get-ChildItem -LiteralPath "$gatewayDirectory/obj/Release" -Recurse -Filter "Gateway.g.cs" -File |
-              Sort-Object LastWriteTime -Descending
-          )
-          if ($generated.Count -eq 0) {
-            throw "Sdk.Gateway did not generate Gateway.g.cs."
-          }
-
-          $source = Get-Content -LiteralPath $generated[0].FullName -Raw
-          # The generated surface is manifests, in-process bindings registered by manifest identity,
-          # and gateway selection; Program.cs composes each resource with its hand-written area verb.
-          $expectedMembers = @(
-            "CreateBuilder"
-            "public static class Manifests"
-            "ResourceManifest GatewaySmokeWeb ="
-            "ResourceManifest GatewaySmokeDatabase ="
-            "Manifests.GatewaySmokeWeb.InProcess("
-            "Manifests.GatewaySmokeDatabase.InProcess("
-            "UseGateway"
-          )
-          foreach ($expected in $expectedMembers) {
-            if (-not $source.Contains($expected, [System.StringComparison]::Ordinal)) {
-              throw "Generated Gateway.g.cs is missing '$expected'."
-            }
-          }
-          foreach ($unexpected in @("CohesionGatewayResourceExtensions", "AddGatewaySmokeWeb(", "AddGatewaySmokeDatabase(")) {
-            if ($source.Contains($unexpected, [System.StringComparison]::Ordinal)) {
-              throw "Generated Gateway.g.cs still emits '$unexpected'; the SDK no longer generates per-resource verbs."
-            }
-          }
-          if ($source.Contains("AddAllResources", [System.StringComparison]::Ordinal)) {
-            throw "Generated Gateway.g.cs still emits AddAllResources; the gateway names what it composes."
-          }
-
-          $publishDirectory = Join-Path $env:RUNNER_TEMP "cohesion-gateway-publish-${{ matrix.rid }}"
-          $appHost = if ($IsWindows) {
-            Join-Path $publishDirectory "Gateway.exe"
-          }
-          else {
-            Join-Path $publishDirectory "Gateway"
-          }
-          if (-not (Test-Path -LiteralPath $appHost -PathType Leaf)) {
-            throw "Published Gateway apphost was not found at '$appHost'."
-          }
-
-          $json = (& $appHost --mode describe --gateway local --environment Local | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0) {
-            throw "Published Gateway sample exited with code $LASTEXITCODE."
-          }
-          $model = $json | ConvertFrom-Json
-          if ($model.schema -ne "cohesion/model/v1" -or $model.application -ne "gateway-smoke") {
-            throw "Published Gateway sample returned an unexpected model document."
-          }
-          $web = @($model.resources) | Where-Object { $_.name -eq "gateway-smoke-web" }
-          if ($null -eq $web -or @($web.dependencies) -notcontains "gateway-smoke-database") {
-            throw "Published Gateway sample omitted the inferred Web-to-Database dependency."
-          }
-
-          foreach ($resource in @("gateway-smoke-web", "gateway-smoke-database")) {
-            $contentManifest = Join-Path $publishDirectory "cohesion/resources/$resource/.cohesion-resource.json"
-            if (-not (Test-Path -LiteralPath $contentManifest -PathType Leaf)) {
-              throw "Published Gateway sample omitted the isolated '$resource' content root."
-            }
-          }
-
-          & $appHost --gateway inprocess --smoke
-          if ($LASTEXITCODE -ne 0) {
-            throw "Published Gateway in-process smoke exited with code $LASTEXITCODE."
-          }
-
-      - name: Publish NativeAOT in-process Gateway sample
-        if: runner.os == 'Linux'
-        shell: pwsh
-        run: |
-          $workspace = Join-Path $env:RUNNER_TEMP "cohesion-gateway-smoke"
-          $publishDirectory = Join-Path $env:RUNNER_TEMP "cohesion-gateway-publish-aot-linux-x64"
-          dotnet publish `
-              (Join-Path $workspace "Gateway/Gateway.csproj") `
-              --configuration Release `
-              --runtime linux-x64 `
-              --self-contained true `
-              --output $publishDirectory `
-              --nologo `
-              -p:CohesionGatewayAot=true
-          if ($LASTEXITCODE -ne 0) {
-            throw "NativeAOT Gateway sample publish failed with exit code $LASTEXITCODE."
-          }
-
-          $appHost = Join-Path $publishDirectory "Gateway"
-          if (-not (Test-Path -LiteralPath $appHost -PathType Leaf)) {
-            throw "NativeAOT Gateway apphost was not found at '$appHost'."
-          }
-
-          & $appHost --gateway inprocess --smoke
-          if ($LASTEXITCODE -ne 0) {
-            throw "NativeAOT Gateway in-process smoke exited with code $LASTEXITCODE."
-          }
-
-      - name: Publish NativeAOT in-process Gateway container
-        if: runner.os == 'Linux'
-        shell: pwsh
-        run: |
-          $workspace = Join-Path $env:RUNNER_TEMP "cohesion-gateway-smoke"
-          $archive = Join-Path $env:RUNNER_TEMP "gateway-smoke-linux-x64.oci.tar.gz"
-          dotnet publish `
-              (Join-Path $workspace "Gateway/Gateway.csproj") `
-              --configuration Release `
-              --runtime linux-x64 `
-              --self-contained true `
-              --nologo `
-              -t:PublishContainer `
-              -p:EnableSdkContainerSupport=true `
-              -p:CohesionGatewayAot=true `
-              -p:ContainerImageFormat=OCI `
-              "-p:ContainerArchiveOutputPath=$archive" `
-              -p:ContainerRepository=gateway-smoke `
-              -p:ContainerImageTag=ci
-          if ($LASTEXITCODE -ne 0) {
-            throw "NativeAOT Gateway container publish failed with exit code $LASTEXITCODE."
-          }
-
-          $containerArchive = Get-Item -LiteralPath $archive -ErrorAction Stop
-          if ($containerArchive.Length -eq 0) {
-            throw "NativeAOT Gateway container archive '$archive' is empty."
           }

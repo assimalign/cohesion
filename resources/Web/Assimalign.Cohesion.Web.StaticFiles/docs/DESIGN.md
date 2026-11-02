@@ -3,7 +3,8 @@
 ## Design intent
 
 Serve files from a mounted `IFileSystem` as a single middleware-first feature package: one
-`UseStaticFiles` verb on `IWebApplicationPipelineBuilder`, one internal
+registration verb, `builder.Services.AddStaticFiles(files => ...)`, one `UseStaticFiles()` verb on
+`IWebApplicationPipelineBuilder` that places what it registered, one internal
 `IWebApplicationMiddleware` that writes responses imperatively, and zero request-time
 composition. The package is deliberately a *composer of protocol primitives* — conditional
 requests, range selection, content negotiation, and content-type mapping all come from
@@ -32,15 +33,16 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   calling the mount, because every provider merges a relative path against its own root while
   a leading `/` is absolute in the provider's namespace (the drive root for the physical
   provider).
-- **The parameterless verb serves the web root, never the content root (#1045).**
-  `UseStaticFiles()` mounts `IWebApplicationContext.WebRootPath` — `wwwroot` under the content
-  root by default, resolved by the hosting runtime — and passes every request through when the
-  application has no web root. Until 2026-09 it mounted `ContentRootPath`, which Web.Hosting
-  never set, so it fell back to the process working directory; `.json` is a served content type,
-  which exposed `appsettings*.json`. Its options are configured once and validated when the
-  verb is called, exactly like the explicit `UseStaticFiles(IFileSystem, ...)` overloads (they
-  used to be rebuilt on every request). Web-root options are validated again at pipeline build
-  before the deferred snapshot, so mutations made after registration cannot bypass validation.
+- **Without an explicit mount, the web root is served, never the content root (#1045).**
+  A registration that names no file system, and `UseStaticFiles()` without a registration, mount
+  `IWebApplicationContext.WebRootPath` — `wwwroot` under the content root by default, resolved by
+  the hosting runtime — and pass every request through when the application has no web root.
+  Until 2026-09 the parameterless verb mounted `ContentRootPath`, which Web.Hosting never set, so it
+  fell back to the process working directory; `.json` is a served content type, which exposed
+  `appsettings*.json`. The options are configured once, where the middleware is registered, and
+  `StaticFilesBuilder.Build` validates and snapshots them (they used to be rebuilt on every
+  request). `UseStaticFiles()` only mounts the web root under that snapshot when the pipeline is
+  built, so an options object changed after registration is never read.
 - **Middleware-first, no result types.** The 2026-07-10 direction withdrew `IResult`; this
   package writes status, headers, and body directly on `IHttpResponse`. The `#864` edge
   (serializer registry / `OnError`) was dropped from this item accordingly — errors here are
@@ -155,9 +157,10 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   to `HttpHeaderValue` or per-request response writing. This is a behavior break against
   10.0.0-preview.1: malformed mappings and fallbacks formerly passed registration, and empty
   mapping values were silently ignored. They now throw `ArgumentException` during composition.
-  Web-root registrations (`UseStaticFiles` and `MapFallbackToFile`) check again immediately
-  before their deferred snapshot at pipeline build, including when the web root is unavailable;
-  mutating a captured options object after registration cannot bypass the field-value check.
+  `AddStaticFiles` snapshots the options when it registers the middleware, so a captured options
+  object mutated afterwards is never read. `MapFallbackToFile` snapshots at pipeline build and
+  checks again immediately before it, including when the web root is unavailable; mutating its
+  captured options object after registration cannot bypass the field-value check.
 - **A name with no extension has no type (#1186).** The gate asks
   `HttpContentTypes.TryGetFromFileName` for the logical file name, and a name with no dot
   (`html`, `json`) or a dotfile (`.json`) maps to nothing, so it is blocked like any unmapped
@@ -168,9 +171,9 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   file named `gltf`. That is a silent runtime change for a key that used to type an
   extensionless file, such as `apple-app-site-association` (which Apple requires to have no
   extension): the key is still accepted and never matches, so the request passes through. Type
-  such files with a dedicated mount that holds only them and whose fallback is the type,
-  `UseStaticFiles(wellKnownRoot, o => { o.RequestPath = new HttpPath("/.well-known");
-  o.ServeUnknownContentTypes = true; o.FallbackContentType = "application/json"; })`, or from a
+  such files with a dedicated mount that holds only them and whose fallback is the type (a
+  `StaticFilesBuilder` over `wellKnownRoot` with `RequestPath = "/.well-known"`,
+  `ServeUnknownContentTypes = true` and `FallbackContentType = "application/json"`), or from a
   handler with `SendFileAsync(fileSystem, path, "application/json")`.
 - **8.3 short-name aliases are refused with `404`.** A volume that generates short names (NTFS
   with 8.3 generation on, and FAT) opens `upload.htmlx` through its alias `UPLOAD~1.HTM`. The
@@ -208,6 +211,32 @@ ranges, and `HEAD` in the package (see "Response helpers" below).
   shrank aborts the response with `EndOfStreamException`, as a short range always did. Copying
   "to the end" instead would let a file replaced between its metadata read and its open
   desynchronize HTTP/1.1 framing.
+
+## Registration: `AddStaticFiles` configures, `UseStaticFiles` places (2026-10-28)
+
+`builder.Services.AddStaticFiles(files => ...)` is a generated component integration over
+`StaticFilesBuilder`: `files.Options` holds the options and `files.UseFileSystem(fileSystem)` names the
+mount. It builds the middleware once, which validates and snapshots the options (the request path,
+default-document names, `Cache-Control`, and content-type fields), and registers it as an
+`IWebApplicationMiddleware`. `UseStaticFiles()` takes no arguments and places every such registration
+it finds in `IWebApplicationContext.Middleware`, in registration order, or the default options when the
+application registered none.
+
+The web root is the one value only the application context has, so it is the one thing the verb adds:
+a registration that named no file system, and the defaults, are completed with a read-only mount of
+`WebRootPath` when the pipeline is built (or with nothing, when there is no web root). That is not
+configuration — the registration chose the web root by naming no mount. Placed any other way, such a
+registration has nothing to serve and passes every request on.
+
+**Mounts add up.** Unlike features whose registrations replace each other (the last registration of
+HSTS wins), each static-files registration is a mount, so `UseStaticFiles()` places all of them: a request
+goes to the first mount that serves it, and one no mount serves passes to the next middleware. An asset
+folder under `/assets` beside the web root is two `AddStaticFiles` calls and one `UseStaticFiles()`.
+Nothing is registered per placement, so calling `UseStaticFiles()` twice places the same mounts twice. *Rejected:* `UseStaticFiles(Action<StaticFilesOptions>)`, `UseStaticFiles(IFileSystem)`, and
+`UseStaticFiles(IFileSystem, Action<StaticFilesOptions>)`, the former shapes; configuration on a pipeline
+verb splits a feature's settings across two call sites and keeps them out of the registrations the host
+enumerates. `MapFallbackToFile(..., Action<StaticFilesOptions>)` keeps its options: it is a route verb,
+and its options describe the one file the route answers with.
 
 ## Request flow
 
@@ -251,9 +280,10 @@ the Web dependency rule). Register `UseStaticFiles()` ahead of `UseRouting()`, s
 served before routing, and the fallback answers only what remains.
 
 The route is registered when `MapFallbackToFile` is called, and a composition-time component resolves
-its web-root mount when the containing pipeline is built. This matches `UseStaticFiles` and makes
-both mount diagnostics report once per registration per pipeline build, including nested branches.
-The fallback handler uses that composed mount; requests never repeat the mount lookup or its event.
+its web-root mount when the containing pipeline is built. This matches `UseStaticFiles()`, which
+mounts the web root when the pipeline is built, and makes both mount diagnostics report once per
+placement per pipeline build, including nested branches. The fallback handler uses that composed
+mount; requests never repeat the mount lookup or its event.
 
 ## Response helpers: `SendFileAsync` and `WriteStreamAsync` (#1061)
 
@@ -389,11 +419,12 @@ over the same engine and add nothing AOT-relevant. The package inherits `IsAotCo
 ## Error model
 
 No package-specific exception types. `FileSystemException` from mount lookups is absorbed
-into not-found/pass-through semantics; `ArgumentException` from `UseStaticFiles` validation
-(bad prefix, bad default-document name, unparseable `Cache-Control`, invalid content-type field)
-surfaces at composition time. A file that shrinks mid-copy, whether a range or the full body, aborts
-the response with `EndOfStreamException` rather than silently serving wrong bytes (matching the h2
-truncated-body abort posture); one that grew is cut at its declared length.
+into not-found/pass-through semantics; `ArgumentException` from option validation (bad prefix,
+bad default-document name, unparseable `Cache-Control`, invalid content-type field) surfaces at
+registration: `StaticFilesBuilder.Build`, which `AddStaticFiles` calls, or `MapFallbackToFile`. A
+file that shrinks mid-copy, whether a range or the full body, aborts the response with
+`EndOfStreamException` rather than silently serving wrong bytes (matching the h2 truncated-body abort
+posture); one that grew is cut at its declared length.
 
 The response helpers throw only for caller mistakes, synchronously, before anything is written:
 `ArgumentNullException` for a missing argument, and `ArgumentException` for a content type that is
@@ -415,10 +446,13 @@ supplies `IWebRequestIdFeature` for rejected-request correlation; no ambient act
 | 3 | TraversalRejected | Verbose | reason, prefix, requestId |
 | 4 | MountLookupFailed | Warning | prefix, exceptionType, suppressedCount:int |
 
-`WebRootMounted` and `WebRootUnavailable` describe each web-root registration at pipeline build,
-including a `UseStaticFiles` inside `Map` / `UseWhen` branches and a `MapFallbackToFile` route. They are
-never repeated for requests. The consumer is `UseStaticFiles` or `MapFallbackToFile`. An explicit
-`IFileSystem` mount has no application web root and does not raise these two web-root events.
+`WebRootMounted` and `WebRootUnavailable` describe each web-root mount at pipeline build: every
+`UseStaticFiles()` placement of a registration that names no file system (or of the defaults),
+including inside `Map` / `UseWhen` branches, and every `MapFallbackToFile` route. They are never
+repeated for requests, and registering the middleware raises neither. The consumer is
+`UseStaticFiles` or `MapFallbackToFile`. A registration with an explicit file system
+(`StaticFilesBuilder.UseFileSystem`) has no application web root and does not raise these two
+web-root events.
 
 The root and prefix are application-configured mount identifiers permitted by the source's scope;
 the prefix is normalized to empty for the site root and otherwise has no trailing slash. No requested
@@ -478,8 +512,9 @@ Default documents retain their public string collection, but composition parses 
 existing `System.IO.FileName` snapshot consumed by the middleware. The existing bare-name and
 dot-name restrictions run before parsing; invalid file characters and names over 255 characters
 now fail with a resource-backed `ArgumentException` before a directory request can reach the
-resolver. Web-root registrations repeat this validation before their deferred snapshot, so a
-captured options object cannot introduce an invalid name after registration.
+resolver. `AddStaticFiles` snapshots the names at registration, and `MapFallbackToFile` repeats this
+validation before its deferred snapshot, so a captured options object cannot introduce an invalid
+name after registration.
 
 `MapFallbackToFile` applies the traversal gate and parses the configured mount-relative path
 with `FileSystemPath.Parse` when the route is registered. The normalized relative path is retained

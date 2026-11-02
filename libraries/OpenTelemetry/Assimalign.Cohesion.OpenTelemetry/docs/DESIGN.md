@@ -2,7 +2,7 @@
 
 ## Intent and boundaries
 
-This implements design item 31b ruling R-1: OTLP/HTTP JSON export of logs, using BCL HttpClient and System.Text.Json. Core is the only direct project dependency. Hosting.Telemetry owns the Logging adapter; this package is transport-only, with internal implementation types. There is no receiver or instrumentation SDK here, no gRPC and no protobuf binary encoder. Protobuf is deferred. Traces and metrics are reserved in OtlpSignal but deferred. libraries/Logging has no span or instrument primitive; ILoggerEntry (Abstractions/ILoggerEntry.cs) is its only structured diagnostics record. Emitters use the BCL ActivitySource and Meter instead (the Web server's `Assimalign.Cohesion.Web.Server`, #1064), so a trace or metric exporter would subscribe through ActivityListener and MeterListener (#317).
+This implements design item 31b ruling R-1: OTLP/HTTP JSON export of logs, using BCL HttpClient and System.Text.Json. Core is the only direct project dependency. This package is transport-only, with internal implementation types, and no Logging adapter ships: a caller maps its entries to `OtlpLogRecord` itself. There is no receiver or instrumentation SDK here, no gRPC and no protobuf binary encoder. Protobuf is deferred. Traces and metrics are reserved in OtlpSignal but deferred. libraries/Logging has no span or instrument primitive; ILoggerEntry (Abstractions/ILoggerEntry.cs) is its only structured diagnostics record. Emitters use the BCL ActivitySource and Meter instead (the Web server's `Assimalign.Cohesion.Web.Server`, #1064), so a trace or metric exporter would subscribe through ActivityListener and MeterListener (#317).
 
 ## JSON mapping and AOT
 
@@ -19,7 +19,7 @@ assignments, before the exporter can enqueue them.
 
 AnyValue has exactly one selected member: stringValue, boolValue, intValue (decimal string), doubleValue, arrayValue or kvlistValue. CLR integers, booleans, finite floating point values, arrays and string-keyed dictionaries map accordingly; unknown values use ToString, and null becomes the string "null". Nested values are bounded to depth 16 and arrays to 2048 elements. One resourceLogs entry contains process resource attributes; scopeLogs groups by Category with scope.name set to it. Requests POST application/json to the configured base plus /v1/logs.
 
-The adapter maps Logging levels as follows (None is suppressed):
+A caller that adapts Logging entries maps levels as follows (None is suppressed):
 
 | Level | Number | Text |
 |---|---:|---|
@@ -32,7 +32,7 @@ The adapter maps Logging levels as follows (None is suppressed):
 | Event | 10 | EVENT |
 | None | omitted | omitted |
 
-Exceptions map to exception.type, exception.message and exception.stacktrace. Logging has no scope stack: BeginScope emits a seed entry and correlates Id/ParentId. The adapter exports those as cohesion.log.id/cohesion.log.parent_id attributes, without inventing spans or a scope API.
+Exceptions map to exception.type, exception.message and exception.stacktrace. Logging has no scope stack: BeginScope emits a seed entry and correlates Id/ParentId. An adapter exports those as cohesion.log.id/cohesion.log.parent_id attributes, without inventing spans or a scope API.
 
 ## Lifecycle and failure model
 
@@ -46,11 +46,11 @@ The mapping follows the [OTLP JSON specification](https://opentelemetry.io/docs/
 
 TryEnqueue never blocks or throws; a bounded channel drops oldest and counts drops. A periodic worker drains batches. Exports use at most three attempts within Timeout; permanent 4xx responses drop, while 429, 5xx and transport failures use bounded backoff and respect Retry-After. Partial-success rejections are counted and never retried. FailedExportCount counts failed attempts; DroppedCount counts queue overflow and abandoned shutdown records. Disposal drains within Timeout. No unbounded retry or collector network activity is required for host startup.
 
-Hosting.Telemetry registers an IHostService to flush within the lesser of five seconds and host cancellation; factory disposal alone is insufficient. HandlerFactory supplies caller-owned trust policy to the exporter-owned HttpClient; redirects and cookies are disabled by default.
+No host service ships for the exporter: its owner flushes it when the host stops, bounded by host cancellation, before disposing it. HandlerFactory supplies caller-owned trust policy to the exporter-owned HttpClient; redirects and cookies are disabled by default.
 
 ## gRPC deferral
 
-The Cohesion HTTP server has no application/grpc framing or service dispatch. Trailers no longer stand in the way: decision 18 (docs/libraries/Http/DECISIONS.md, ADR 2) ships response trailers on HTTP/2 and HTTP/3, so a handler could stage grpc-status on IHttpResponse.Trailers there, while HTTP/1.1 keeps the unsupported collection. Request trailers are read on all three versions. LocalPlanController.CanRealize already refuses gRPC probes. Implementing gRPC still requires that separate server capability — message framing, serialization, and service dispatch — not just changing a content type; gRPC hosting stays outside the HTTP/Web program.
+The Cohesion HTTP server has no application/grpc framing or service dispatch. Trailers no longer stand in the way: decision 18 (docs/libraries/Http/DECISIONS.md, ADR 2) ships response trailers on HTTP/2 and HTTP/3, so a handler could stage grpc-status on IHttpResponse.Trailers there, while HTTP/1.1 keeps the unsupported collection. Request trailers are read on all three versions. Implementing gRPC still requires that separate server capability — message framing, serialization, and service dispatch — not just changing a content type; gRPC hosting stays outside the HTTP/Web program.
 
 ## Compatibility with 10.0.0-preview.1
 

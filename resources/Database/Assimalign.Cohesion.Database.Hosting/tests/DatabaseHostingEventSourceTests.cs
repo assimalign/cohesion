@@ -8,7 +8,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -18,7 +17,6 @@ using Xunit;
 using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting.Tests;
 
@@ -226,63 +224,16 @@ public sealed partial class DatabaseHostingEventSourceTests
         failed.Payload[3].ShouldBeOfType<string>().ShouldContain("dispose probe", Case.Sensitive);
     }
 
-    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Resource commands: Should report handled and rejected operations once with bounded identifiers")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ResourceCommand_HandledOrRejected_ShouldReportOnce(bool delete)
-    {
-        // Arrange
-        await using var engine = SqlDatabaseEngine.Create("commands", new SqlDatabaseEngineOptions());
-        var builder = DatabaseApplication.CreateBuilder();
-        builder.AddEngine(engine);
-        await using var application = builder.Build();
-        var handler = new DatabaseResourceCommandHandler("database.add-database", application.Context);
-        var command = new ResourceCommand("id", handler.Kind, "owner", "commands/app", Encoding.UTF8.GetBytes("""{"database":"app","engine":"commands"}"""));
-        if (delete)
-        {
-            await handler.ExecuteAsync(command, CancellationToken.None);
-        }
-        using var recorder = new HostingEventRecorder(EventLevel.Informational);
-
-        // Act
-        if (delete)
-        {
-            await handler.DeleteAsync(command, CancellationToken.None);
-        }
-        else
-        {
-            await handler.ExecuteAsync(command, CancellationToken.None);
-        }
-        var refused = new DatabaseResourceCommandHandler("database.add-principal", application.Context);
-        var rejectedCommand = command with
-        {
-            Kind = refused.Kind,
-            Key = new string('k', 300),
-            Payload = Encoding.UTF8.GetBytes("""{"database":"app","name":"private-payload"}"""),
-        };
-        await Should.ThrowAsync<ResourceCommandRejectedException>(async () =>
-        {
-            if (delete) { await refused.DeleteAsync(rejectedCommand, CancellationToken.None); }
-            else { await refused.ExecuteAsync(rejectedCommand, CancellationToken.None); }
-        });
-
-        // Assert
-        string operation = delete ? "Delete" : "Execute";
-        Event(recorder, 13, "ResourceCommandHandled", "kind", "key", "operation").Payload.ShouldBe([handler.Kind, command.Key, operation]);
-        Event(recorder, 14, "ResourceCommandRejected", "kind", "key", "operation", "exceptionType").Payload
-            .ShouldBe([refused.Kind, new string('k', 256) + "...", operation, typeof(ResourceCommandRejectedException).FullName]);
-        recorder.Events.SelectMany(entry => entry.Payload ?? []).ShouldNotContain("private-payload");
-    }
-
     [Fact(DisplayName = "Cohesion Test [Database.Hosting] - AdminEndpointFailed: Should report a real listener bind failure once")]
     public async Task AdminEndpoint_OccupiedPort_ShouldReportFailureOnce()
     {
-        // Arrange
+        // Arrange: no host composes the admin endpoint since the resource integration was removed
+        // (#1759), so the test registers it as an owned service of a real application.
         using var occupied = new TcpListener(IPAddress.Loopback, 0);
         occupied.Start();
         var endpoint = new Uri($"http://127.0.0.1:{((IPEndPoint)occupied.LocalEndpoint).Port}");
-        using var scope = ResourceRuntime.CreateScope(new ResourceContext(endpoints: new Dictionary<string, Uri> { ["admin"] = endpoint }));
-        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions(), typeof(DatabaseHostingEventSourceTests).Assembly);
+        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions());
+        builder.AddService(context => new DatabaseAdminEndpointService(endpoint, context));
         var application = builder.Build();
         using var recorder = new HostingEventRecorder(EventLevel.Error);
 
@@ -316,7 +267,6 @@ public sealed partial class DatabaseHostingEventSourceTests
     {
         // Arrange
         await using var application = DatabaseApplication.CreateBuilder().Build();
-        var command = new ResourceCommand("id", "database.add-database", "owner", new string('k', 300), ReadOnlyMemory<byte>.Empty);
         var endpoint = new Uri("http://localhost:12345");
         var failure = new IOException("probe");
         DatabaseHostingEventSource.Log.IsEnabled().ShouldBeFalse();
@@ -348,80 +298,10 @@ public sealed partial class DatabaseHostingEventSourceTests
                 log.ApplicationStartFailed(application.Context, failure);
                 log.ApplicationStopped(application.Context, started);
                 log.ApplicationDisposeFailed(application.Context, 1, failure);
-                log.ResourceCommandHandled(command, "Execute");
-                log.ResourceCommandRejected(command, "Execute", failure);
                 log.AdminEndpointFailed(endpoint, "Start", failure);
             }
             return started;
         }
-    }
-
-    [Theory(DisplayName = "Cohesion Test [Database.Hosting] - Disabled tracing: Real command dispatch should allocate only its core baseline")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ResourceCommand_NoListener_ShouldAllocateOnlyTheCoreBaseline(bool delete)
-    {
-        // Arrange: the real handler parses and resolves an in-memory SQL engine on every call.
-        // Repeated Execute deliveries retain the declared database; repeated Delete deliveries
-        // find it already absent. Both are normal idempotent control-plane operations.
-        await using var engine = SqlDatabaseEngine.Create("allocations", new SqlDatabaseEngineOptions());
-        var builder = new DatabaseApplicationBuilder(new DatabaseApplicationOptions { ReopenOfflineDatabases = false });
-        builder.AddEngine(engine);
-        await using var application = builder.Build();
-        var handler = new DatabaseResourceCommandHandler("database.add-database", application.Context);
-        var command = new ResourceCommand("id", handler.Kind, "owner", "allocations/app",
-            Encoding.UTF8.GetBytes("""{"database":"app","engine":"allocations"}"""));
-        await handler.ExecuteAsync(command, CancellationToken.None);
-        if (delete) { await handler.DeleteAsync(command, CancellationToken.None); }
-        DatabaseHostingEventSource.Log.IsEnabled().ShouldBeFalse();
-        Func<ValueTask<ReadOnlyMemory<byte>>> core = delete
-            ? () => handler.DeleteCoreAsync(command, CancellationToken.None)
-            : () => handler.ExecuteCoreAsync(command, CancellationToken.None);
-        Func<ValueTask<ReadOnlyMemory<byte>>> dispatch = delete
-            ? () => handler.DeleteAsync(command, CancellationToken.None)
-            : () => handler.ExecuteAsync(command, CancellationToken.None);
-        // The test host disables tiering so a paired measurement cannot straddle
-        // JIT promotion, even when CPU pressure delays the background compiler.
-        Measure(core, 100);
-        Measure(dispatch, 100);
-        const int iterations = 10_000;
-
-        // Act
-        long baseline = FewestBytes(core, iterations);
-        long allocated = FewestBytes(dispatch, iterations);
-
-        // Assert
-        baseline.ShouldBeGreaterThan(0);
-        allocated.ShouldBe(baseline);
-        engine.TryGetDatabase("app", out _).ShouldBe(!delete);
-        DatabaseHostingEventSource.Log.IsEnabled().ShouldBeFalse();
-    }
-
-    // DatabaseEventSourceTests.FewestBytes uses the same three-round minimum: incidental runtime
-    // allocations can land on the thread, whereas a per-command regression affects every round.
-    private static long FewestBytes(Func<ValueTask<ReadOnlyMemory<byte>>> execute, int iterations)
-    {
-        long fewest = long.MaxValue;
-        for (int round = 0; round < 3; round++)
-        {
-            fewest = Math.Min(fewest, Measure(execute, iterations));
-        }
-        return fewest;
-    }
-
-    private static long Measure(Func<ValueTask<ReadOnlyMemory<byte>>> execute, int iterations)
-    {
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int index = 0; index < iterations; index++)
-        {
-            var pending = execute();
-            if (!pending.IsCompletedSuccessfully)
-            {
-                throw new InvalidOperationException("The measured command did not complete synchronously.");
-            }
-            _ = pending.Result;
-        }
-        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     private static EventWrittenEventArgs Event(HostingEventRecorder recorder, int id, string name, params string[] payloadNames)

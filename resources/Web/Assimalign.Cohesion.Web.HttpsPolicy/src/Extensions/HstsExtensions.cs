@@ -1,6 +1,5 @@
 using System;
-using System.Globalization;
-using System.Text;
+using System.Linq;
 
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web;
@@ -9,7 +8,7 @@ using Assimalign.Cohesion.Web.HttpsPolicy.Internal;
 namespace Assimalign.Cohesion.Web.HttpsPolicy;
 
 /// <summary>
-/// Pipeline-builder extension that wires HTTP Strict Transport Security (RFC 6797) emission into the
+/// Pipeline-builder extension that places HTTP Strict Transport Security (RFC 6797) emission in the
 /// Web application middleware pipeline.
 /// </summary>
 public static class HstsExtensions
@@ -17,28 +16,23 @@ public static class HstsExtensions
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds middleware that emits the <c>Strict-Transport-Security</c> field — composed once from
-        /// the supplied options — on secure responses only (RFC 6797 §7.2), skipping the excluded hosts
-        /// (loopback by default).
+        /// Places the middleware that emits the <c>Strict-Transport-Security</c> field on secure
+        /// responses only (RFC 6797 §7.2), skipping the excluded hosts: the middleware the application
+        /// registered with <c>builder.Services.AddHsts(hsts =&gt; ...)</c>, or one with the default policy
+        /// when it registered none.
         /// </summary>
-        /// <param name="configure">
-        /// An optional callback to configure the <c>max-age</c>, the <c>includeSubDomains</c> and
-        /// <c>preload</c> directives, and the excluded hosts. When <see langword="null"/>, the defaults
-        /// apply (365-day <c>max-age</c>, both directives off, loopback excluded).
-        /// </param>
         /// <returns>The same <see cref="IWebApplicationPipelineBuilder"/> for chaining.</returns>
         /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// The configured <c>max-age</c> is negative, or an excluded-host pattern is invalid (empty,
-        /// port-bearing, malformed, or misusing the <c>*</c> wildcard).
-        /// </exception>
         /// <remarks>
         /// <para>
-        /// Register this <em>before the exception boundary</em> (and generally near the front of the
+        /// The policy is configured where it is registered (<see cref="HstsBuilder"/>); this verb only
+        /// positions it. The default policy is a 365-day <c>max-age</c>, neither directive, and loopback
+        /// excluded. When the application registered HSTS more than once, the last registration wins.
+        /// </para>
+        /// <para>
+        /// Place this <em>before the exception boundary</em> (and generally near the front of the
         /// pipeline): the field is applied after the pipeline unwinds, so placing the boundary inside
-        /// this middleware means a reset error response served over TLS still carries the policy. The
-        /// header value and the excluded-host matcher are built here, at builder time; the middleware
-        /// resolves nothing per request.
+        /// this middleware means a reset error response served over TLS still carries the policy.
         /// </para>
         /// <para>
         /// Connection security is the effective typed scheme
@@ -52,55 +46,17 @@ public static class HstsExtensions
         /// of the stack.
         /// </para>
         /// </remarks>
-        public IWebApplicationPipelineBuilder UseHsts(Action<HstsOptions>? configure = null)
+        public IWebApplicationPipelineBuilder UseHsts()
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            HstsOptions options = new();
-            configure?.Invoke(options);
-
-            if (options.MaxAge < TimeSpan.Zero)
+            return builder.Use(static (context, next) =>
             {
-                throw new ArgumentException(
-                    string.Format(CultureInfo.CurrentCulture, ErrorMessages.HstsMaxAgeInvalid, options.MaxAge),
-                    nameof(configure));
-            }
+                IWebApplicationMiddleware middleware = context.Middleware.OfType<HstsMiddleware>().LastOrDefault()
+                    ?? new HstsBuilder().Build();
 
-            string headerValue = ComposeHeaderValue(options);
-
-            // No exclusions is the empty-allowlist case HttpHostMatcher.Create rejects; represent it as
-            // a null matcher (emit on every secure host) rather than compiling one. A non-empty list is
-            // precompiled once — an invalid pattern throws here, at builder time.
-            HttpHostMatcher? excludedHosts = options.ExcludedHosts.Count == 0
-                ? null
-                : HttpHostMatcher.Create(options.ExcludedHosts);
-
-            return builder.Use(new HstsMiddleware(headerValue, excludedHosts));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
-    }
-
-    /// <summary>
-    /// Composes the RFC 6797 field value <c>max-age=&lt;seconds&gt;[; includeSubDomains][; preload]</c>
-    /// once from the captured options. The <c>max-age</c> is emitted as whole seconds.
-    /// </summary>
-    private static string ComposeHeaderValue(HstsOptions options)
-    {
-        long seconds = (long)options.MaxAge.TotalSeconds;
-
-        StringBuilder builder = new();
-        builder.Append("max-age=");
-        builder.Append(seconds.ToString(CultureInfo.InvariantCulture));
-
-        if (options.IncludeSubDomains)
-        {
-            builder.Append("; includeSubDomains");
-        }
-
-        if (options.Preload)
-        {
-            builder.Append("; preload");
-        }
-
-        return builder.ToString();
     }
 }

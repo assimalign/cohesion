@@ -1,9 +1,8 @@
 # ConfigurationStore
 
 ConfigurationStore is the L3 resource area for durable, named configuration namespaces. Its
-default host serves namespace snapshots and declarative mutations over the resource control-plane
-endpoint; values are configuration rather than secrets and are stored as plain JSON beneath the
-`data` volume.
+default host serves namespace snapshots over its `/cohesion/v1` endpoint; values are configuration
+rather than secrets and are stored as plain JSON beneath the `data` directory. A ConfigurationStore application becomes a managed resource instance with `Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel`: `builder.Services.AddResource("settings", resource => resource.UseInProcess())` joins the gateway that runs it through the platform it opted into.
 
 ## Project map
 
@@ -13,35 +12,33 @@ An arrow means "references": `ConfigurationStore.Hosting --> ConfigurationStore`
 ```mermaid
 flowchart LR
     P0["ConfigurationStore — area root"]
-    P1["ConfigurationStore.ApplicationModel"]
     P2["ConfigurationStore.Client"]
     P3["ConfigurationStore.Hosting — runtime module"]
-    P4["ConfigurationStore.ApplicationModel.Orchestration — opt-in"]
+    PAM["ConfigurationStore.Hosting.ApplicationModel — resource integration"]
+    AMH["Assimalign.Cohesion.ApplicationModel.Hosting — L2"]
     CORE["Assimalign.Cohesion.Core — L1"]
     HOSTFAM["Assimalign.Cohesion.Hosting family — L2"]
-    APPMODEL["Assimalign.Cohesion.ApplicationModel — L2"]
     PRIV["other areas, referenced privately"]
     P0 --> CORE
-    P1 --> APPMODEL
-    P1 --> HOSTFAM
     P2 --> CORE
     P3 --> P0
     P3 --> HOSTFAM
     P3 -->|"private"| PRIV
-    P4 --> APPMODEL
-    P4 --> P2
-    P1 -.->|"COHRES001 ✗"| P3
-    P4 -.->|"COHRES004 ✗"| HOSTFAM
+    PAM --> P3
+    PAM --> P0
+    PAM --> AMH
+    AMH --> HOSTFAM
+    P0 -.->|"COHRES001 ✗"| P3
 ```
 
-Solid edges are the references this area permits. The dotted edges are the ones the build
-rejects. `COHRES001`: **no library in the area may reference its own `ConfigurationStore.Hosting`
-runtime module**, and the declarative `.ApplicationModel` package in particular never does —
-generated code in an opted-in consumer executable joins the two sides at run time through
-`Assimalign.Cohesion.Hosting.Resources.ResourceRuntime` instead. `COHRES004`: the area root and its
-feature libraries, the opt-in `.ApplicationModel.Orchestration` package included, reference no
-`Assimalign.Cohesion.Hosting*` library at all — which is also why the Orchestration package never
-references `.ApplicationModel` (whose `Hosting.Resources` reference it would inherit).
+Solid edges are the references this area permits. The dotted edge is the one `COHRES001`
+rejects: **no library in the area may reference its own `ConfigurationStore.Hosting` runtime
+module**. The area root, the client, and any feature library likewise reference no
+`Assimalign.Cohesion.Hosting*` library at all (`COHRES004`).
+
+The one exception is the resource integration, `ConfigurationStore.Hosting.ApplicationModel`,
+which joins the runtime module to the application model's hosting; `COHRES001` sanctions that
+reference by the integration's exact name, with no exemption property.
 
 The full reference graph for every Cohesion assembly, including the exact external dependencies
 collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
@@ -49,40 +46,31 @@ collapsed above, is in [docs/DEPENDENCIES.md](../../docs/DEPENDENCIES.md).
 ## Projects
 
 - `Assimalign.Cohesion.ConfigurationStore` defines the public area-root application and builder contracts alongside the existing loader abstraction.
-- `Assimalign.Cohesion.ConfigurationStore.ApplicationModel` supplies the manifest-backed typed resource, strict StatefulSet planner, and default control plane.
-- `Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration` is the opt-in gateway provider package: `builder.UseConfigurationStore(store)` registers a `ConfigurationStoreSourceProvider` that resolves `<store>:<namespace>` Configuration mounts through the store's control plane. It references only `Assimalign.Cohesion.ApplicationModel` and the client, and is NuGet-only.
-- `Assimalign.Cohesion.ConfigurationStore.Client` is the thin, Core-only HTTP protocol client that the opt-in orchestration package uses on a gateway's behalf to read configuration namespace snapshots. A gateway never references it directly.
-- `Assimalign.Cohesion.ConfigurationStore.Hosting` provides the concrete creation entry point, durable store, ES256 bootstrap verification, and HTTP protocol host.
+- `Assimalign.Cohesion.ConfigurationStore.Client` is the thin, Core-only HTTP protocol client that reads configuration namespace snapshots; a program that reads the store references it directly.
+- `Assimalign.Cohesion.ConfigurationStore.Hosting` provides the concrete creation entry point, durable store, and HTTP protocol host.
+- `Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel` registers the application as a managed resource instance (`builder.Services.AddResource(name, ...)`) on the platform its gateway names, with the actions the application adds.
 
 ## Layering and dependencies
 
-As an L3 service platform, ConfigurationStore composes the shared Hosting, Hosting.Resources,
-IdentityModel, and private Web transport primitives rather than defining a second lifecycle or HTTP
-stack. The ApplicationModel package remains orchestration-only and COHAM001-guarded.
+As an L3 service platform, ConfigurationStore composes the shared Hosting and private Web transport
+primitives rather than defining a second lifecycle or HTTP stack. The resource integration,
+`ConfigurationStore.Hosting.ApplicationModel`, builds on the instance-side
+`Assimalign.Cohesion.ApplicationModel.Hosting` contracts, which the App kernel framework carries.
 
-The client is Core-only, never references `*.Hosting` or an ApplicationModel assembly, and is not
-delivered through the `App.ConfigurationStore` shared framework. The gateway library references no
-client: the ConfigurationStore wire knowledge for mount sources lives in the opt-in
-`.ApplicationModel.Orchestration` package, which implements the `IResourceSourceProvider` seam from
-`Assimalign.Cohesion.ApplicationModel` over this client, and command delivery uses the gateway's
-generic control-plane client. A gateway resolves a `<store>:<namespace>` mount only when its
-`Program.cs` calls `builder.UseConfigurationStore(store)`; without it `Build()` rejects the mount
-and names this package and verb. Gateway platform
-implementation assemblies continue to avoid ConfigurationStore ApplicationModel packages. A gateway
-project that references a ConfigurationStore resource project receives the area ApplicationModel
-package from `Sdk.Gateway` and calls its hand-written `builder.AddConfigurationStore(Manifests.<Name>)`
-verb for the typed resource and planner.
+The client is Core-only, never references `*.Hosting` or an application-model assembly, and is not
+delivered through the `App.ConfigurationStore` shared framework. A gateway references neither the
+client nor the store's runtime: it declares the resource generically
+(`builder.AddResource("ConfigurationStore", "settings")`) and runs the actions the instance's
+application adds through the platform the instance runs on.
 
 ## Project documentation
 
 - [Root overview](./Assimalign.Cohesion.ConfigurationStore/docs/OVERVIEW.md)
 - [Root design](./Assimalign.Cohesion.ConfigurationStore/docs/DESIGN.md)
-- [ApplicationModel overview](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/OVERVIEW.md)
-- [ApplicationModel design](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel/docs/DESIGN.md)
-- [ApplicationModel.Orchestration overview](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/docs/OVERVIEW.md)
-- [ApplicationModel.Orchestration design](./Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration/docs/DESIGN.md)
 - [Hosting overview](./Assimalign.Cohesion.ConfigurationStore.Hosting/docs/OVERVIEW.md)
 - [Hosting design](./Assimalign.Cohesion.ConfigurationStore.Hosting/docs/DESIGN.md)
+- [Resource integration overview](./Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel/docs/OVERVIEW.md)
+- [Resource integration design](./Assimalign.Cohesion.ConfigurationStore.Hosting.ApplicationModel/docs/DESIGN.md)
 - [Client overview](./Assimalign.Cohesion.ConfigurationStore.Client/docs/OVERVIEW.md)
 - [Client design](./Assimalign.Cohesion.ConfigurationStore.Client/docs/DESIGN.md)
 

@@ -1,6 +1,7 @@
 # Assimalign.Cohesion.Web.CookiePolicy — Overview
 
-Cookie-policy enforcement for the Cohesion Web pipeline. `UseCookiePolicy` makes every cookie the
+Cookie-policy enforcement for the Cohesion Web pipeline. The policy that
+`builder.Services.AddCookiePolicy` registers and `UseCookiePolicy` places makes every cookie the
 application appends through `context.Response.Cookies` pass the site's policy before it reaches a
 `Set-Cookie` field. The policy covers consent for non-essential cookies, the `Secure`, `HttpOnly`,
 and minimum `SameSite` floors, the RFC 6265bis requirements a browser enforces by ignoring a cookie,
@@ -9,9 +10,12 @@ and the 400-day lifetime cap. The cookie model it enforces against lives in
 
 ## What it provides
 
-- **`UseCookiePolicy(Action<CookiePolicyOptions>?)`** — a pipeline verb on
-  `IWebApplicationPipelineBuilder`. It validates and captures the options at registration and
-  replaces each exchange's response cookie feature, so `Web.Sessions`, `Web.Authentication.Cookie`,
+- **`builder.Services.AddCookiePolicy(policy => ...)`** — the registration verb, a generated
+  component integration over `CookiePolicyBuilder`. It validates and captures `policy.Options` at
+  registration.
+- **`UseCookiePolicy()`** — the pipeline verb on `IWebApplicationPipelineBuilder`. It places the
+  registered policy (the last registration, or the default policy when there is none), which replaces
+  each exchange's response cookie feature, so `Web.Sessions`, `Web.Authentication.Cookie`,
   `Http.Antiforgery`, and application code are all covered without changes of their own.
 - **`CookiePolicyOptions`**:
   - `Secure`: `SameAsRequest` by default, which follows the effective scheme, so a trusted
@@ -36,19 +40,25 @@ removed.
 
 ## Usage
 
+Configuration lives on the `Add` verb only ("Add configures, Use places"):
+
 ```csharp
 using Assimalign.Cohesion.Web.CookiePolicy;
 using Assimalign.Cohesion.Web.ForwardedHeaders;
 
-app.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+builder.Services.AddCookiePolicy(policy =>
+{
+    policy.Options.MinimumSameSitePolicy = HttpCookieSameSiteMode.Lax;
+    policy.Options.CheckConsentNeeded = context => IsInConsentRegion(context);
+    policy.Options.OnRejected = rejection => log.CookieDropped(rejection.Cookie.Name, rejection.Reason);
+});
+
+WebApplication app = builder.Build();
+app.UseForwardedHeaders();
 
 // Early: before anything that writes cookies.
-app.UseCookiePolicy(options =>
-{
-    options.MinimumSameSitePolicy = HttpCookieSameSiteMode.Lax;
-    options.CheckConsentNeeded = context => IsInConsentRegion(context);
-    options.OnRejected = rejection => log.CookieDropped(rejection.Cookie.Name, rejection.Reason);
-});
+app.UseCookiePolicy();
 
 app.UseSessions();
 app.UseAuthentication();
@@ -75,8 +85,8 @@ The Cookie authentication ticket is essential by default, so a consent requireme
 sign-in.
 
 The consent name and value accept string assignments through their value types' implicit conversions.
-An out-of-grammar string throws `ArgumentException` at assignment. `UseCookiePolicy` refuses a
-`default` name or value, and an empty consent value, with `ParamName = "configure"`; an empty string
+An out-of-grammar string throws `ArgumentException` at assignment. `AddCookiePolicy` refuses a
+`default` name or value, and an empty consent value, with `ParamName = "Options"`; an empty string
 is valid cookie-value grammar but cannot record consent. The policy captures the typed values once
 at registration. These property types change the current PR's API; recompile consumers, retaining
 string literals for valid assignments or supplying the cookie value types. The consent properties

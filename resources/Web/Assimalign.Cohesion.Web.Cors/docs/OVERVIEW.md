@@ -39,13 +39,11 @@ It never references `Assimalign.Cohesion.Web.Hosting` or any `Assimalign.Cohesio
 using Assimalign.Cohesion.Web.Cors;
 using Assimalign.Cohesion.Web.Routing;
 
-IRouterBuilder routes = app.UseRouting();
-
-// After UseRouting, ahead of authorization, rate limiting, antiforgery and output caching.
-app.UseCors(options =>
+// AddCors configures; UseCors only places the middleware.
+builder.Services.AddCors(cors =>
 {
     // Every endpoint without CORS metadata: the single-page application's origin.
-    options.AddDefaultPolicy(policy => policy
+    cors.Options.AddDefaultPolicy(policy => policy
         .WithOrigins("https://app.example")
         .WithMethods("PUT", "DELETE")
         .WithHeaders("Content-Type", "Authorization")
@@ -54,10 +52,16 @@ app.UseCors(options =>
         .SetPreflightMaxAge(TimeSpan.FromMinutes(10)));
 
     // A named policy endpoints opt into.
-    options.AddPolicy("partners", policy => policy
+    cors.Options.AddPolicy("partners", policy => policy
         .SetIsOriginAllowed(origin => origin.StartsWith("https://", StringComparison.Ordinal)
             && origin.EndsWith(".partners.example", StringComparison.Ordinal)));
 });
+
+var app = builder.Build();
+IRouterBuilder routes = app.UseRouting();
+
+// After UseRouting, ahead of authorization, rate limiting, antiforgery and output caching.
+app.UseCors();
 
 app.MapGet("/catalog", GetCatalogAsync).RequireCors("partners");
 

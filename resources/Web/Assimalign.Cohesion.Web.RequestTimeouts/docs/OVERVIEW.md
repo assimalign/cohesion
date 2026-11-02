@@ -7,8 +7,9 @@ package is the policy layer that arms it.
 
 ## What it does
 
-- **Global default policy** — configured at builder time on `UseRequestTimeouts`, applied to
-  every request the middleware sees.
+- **Global default policy** — configured where the middleware is registered,
+  `builder.Services.AddRequestTimeouts(timeouts => ...)`, and applied to every request the middleware
+  that `UseRequestTimeouts()` places sees.
 - **Per-endpoint policies** — a sealed `RequestTimeoutMetadata` carrier attached to a route's
   endpoint-metadata bag (the #150 seam) overrides the default, resolved last-wins from the
   endpoint `UseRouting` publishes. An endpoint can also opt out entirely via
@@ -31,19 +32,26 @@ package is the policy layer that arms it.
 
 ## Usage
 
+Configuration lives on the `Add` verb only ("Add configures, Use places"). `UseRequestTimeouts()`
+takes no arguments: it places the middleware `AddRequestTimeouts` registered, or one with the
+defaults (no global timeout) when the application registered none.
+
 ```csharp
-IRouterBuilder routes = application.UseRouting();
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRouting();
 
-// Register AFTER UseRouting, so the middleware reads the published endpoint's policy.
-// Global default: every request gets 30 seconds.
-application.UseRequestTimeouts(TimeSpan.FromSeconds(30));
-
-// Or configured: 504 with a problem+json payload.
-application.UseRequestTimeouts(options => options.DefaultPolicy = new RequestTimeoutPolicy
+// Global default: every request gets 30 seconds, answered with 504 when it runs out.
+builder.Services.AddRequestTimeouts(timeouts => timeouts.Options.DefaultPolicy = new RequestTimeoutPolicy
 {
     Timeout = TimeSpan.FromSeconds(30),
-    WriteProblemDetails = true,
+    WriteProblemDetails = true,                  // optional: an RFC 9457 problem+json payload
 });
+
+WebApplication application = builder.Build();
+IRouterBuilder routes = application.UseRouting();
+
+// Place it AFTER UseRouting, so the middleware reads the published endpoint's policy.
+application.UseRequestTimeouts();
 
 // Per-endpoint override / disable where the endpoint is mapped (a route group takes the same verbs).
 application.MapGet("/report", handler).WithRequestTimeout(TimeSpan.FromMinutes(2));
@@ -54,9 +62,13 @@ routes.Map(new Route(HttpMethod.Get, "/export", exportHandler,
     new RouterRouteMetadataCollection(new RequestTimeoutMetadata(TimeSpan.FromMinutes(5)))));
 ```
 
-Registered ahead of `UseRouting`, the global default still governs every request, but no endpoint
+Placed ahead of `UseRouting`, the global default still governs every request, but no endpoint
 is known when the middleware runs: an endpoint whose metadata carries a timeout fails with
 `InvalidOperationException` when it is dispatched, instead of running unbounded.
+
+There is no `TimeSpan` shortcut for the global default: set `Options.DefaultPolicy` to a
+`RequestTimeoutPolicy`, as ASP.NET Core's `AddRequestTimeouts` does. When the application registers
+the middleware more than once, the last registration wins.
 
 ## Public surface
 
@@ -64,9 +76,10 @@ is known when the middleware runs: an endpoint whose metadata carries a timeout 
 | --- | --- |
 | `RequestTimeoutPolicy` | The policy value: `Timeout` (null = disabled), `StatusCode` (default 504), `WriteProblemDetails`, `WriteResponse` |
 | `RequestTimeoutMetadata` | Sealed endpoint-metadata carrier for a policy; `Disabled` opts an endpoint out. Names `UseRequestTimeouts` as required middleware (`IRouteMiddlewareMetadata`) when it carries a timeout |
+| `RequestTimeoutsBuilder` | What `builder.Services.AddRequestTimeouts(timeouts => ...)` configures: `Options`, and `Build()`, which snapshots them into the middleware |
 | `RequestTimeoutOptions` | Middleware options: `DefaultPolicy`, `TimeProvider`, `SuspendWhenDebuggerAttached` |
 | `IRequestTimeoutFeature` | Per-exchange feature: `Token`, `Disable()`, `SetTimeout(TimeSpan)` |
-| `WebApplicationExtensions` | `UseRequestTimeouts(...)` pipeline verbs |
+| `WebApplicationExtensions` | `UseRequestTimeouts()`, which places the registered middleware |
 | `RequestTimeoutRouteConventionExtensions` | `WithRequestTimeout(TimeSpan)`, `WithRequestTimeout(RequestTimeoutPolicy)` and `DisableRequestTimeout()` on a mapped route or a route group |
 
 ## Dependencies

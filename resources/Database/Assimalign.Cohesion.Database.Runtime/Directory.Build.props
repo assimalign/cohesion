@@ -80,9 +80,9 @@
     <ItemGroup>
         <!--
             Deliberately EXCLUDED from the MVP framework:
-            - Database.Testing - the packaged resource-program test harness. It
-              drives Database.Hosting under a test-scoped ResourceContext but is
-              tooling for tests, never part of an application's runtime closure.
+            - Database.Testing - the packaged program test harness. It runs a
+              database program's entry point for tests, so it is tooling for
+              tests, never part of an application's runtime closure.
             - Database.SampleHost - the non-packable real-process E2E resource
               executable, an acceptance fixture at
               Database.Testing/fixtures/Assimalign.Cohesion.Database.SampleHost; never shipped.

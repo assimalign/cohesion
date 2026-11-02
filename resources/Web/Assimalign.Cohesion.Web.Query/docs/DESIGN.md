@@ -68,14 +68,49 @@ empty query is meaningful is the application's call.
 unbindable filter) is an application judgment made while interpreting the query — middleware
 cannot know it generically. Applications answer `422` themselves at that point.
 
-## Options snapshot at `Use` time
+## Options snapshot at registration
 
-`UseQueryValidation` snapshots `WebQueryValidationOptions` into the middleware when it runs —
-the accepted set becomes an immutable `HttpAcceptQuery` (serialized once), the response set an
-array. Mutating the options object afterwards has no effect, matching the Web pipeline's
-builder-time composition model (the same freeze posture as route groups). The
-`InvalidContentTypeStatusCode` setter validates `400`/`415` at assignment, so a bad policy fails
-at composition, not per request.
+`AddQueryValidation` (`WebQueryValidationBuilder.Build`) snapshots `WebQueryValidationOptions` into
+the middleware when it builds it — the accepted set becomes an immutable `HttpAcceptQuery`
+(serialized once), the response set an array. Mutating the options object afterwards has no
+effect, matching the Web pipeline's builder-time composition model (the same freeze posture as
+route groups). The `InvalidContentTypeStatusCode` setter validates `400`/`415` at assignment, so a
+bad policy fails inside the registration callback, not per request.
+
+## Registration: `Add` configures, `Use` places (2026-10-28)
+
+`builder.Services.AddQueryValidation(validation => ...)` and
+`builder.Services.AddQueryConditionals(conditionals => conditionals.UseResourceValidators(provider))`
+are generated component integrations over `WebQueryValidationBuilder` and
+`WebQueryConditionalsBuilder`. Each builds its middleware once and registers it as a
+container-owned `IWebApplicationMiddleware` singleton; the package takes no DI reference.
+`UseQueryValidation()` and `UseQueryConditionals()` take no arguments: each places the last
+registration of its middleware it finds in `IWebApplicationContext.Middleware`.
+
+- **Validation has safe defaults.** Without a registration, `UseQueryValidation()` places a
+  middleware with the default options: any syntactically valid `Content-Type`, no response
+  negotiation, and `400` for untyped query content. That is what `UseQueryValidation()` without a
+  callback always meant.
+- **Conditionals have no default.** The middleware needs the target resource's current
+  validators, and only the application can resolve them, so `WebQueryConditionalsBuilder` keeps
+  the provider as a builder method, `UseResourceValidators`, named for what it supplies. `Build`
+  throws `InvalidOperationException` when it was never called, so `AddQueryConditionals()` without
+  it fails at registration, and `UseQueryConditionals()` without a registration fails the pipeline
+  composition with an `InvalidOperationException` that names `AddQueryConditionals`.
+
+*Rejected:* the former `UseQueryValidation(Action<WebQueryValidationOptions>? configure)` and
+`UseQueryConditionals(WebQueryResourceValidatorsProvider validatorsProvider)`; configuration on a
+pipeline verb split a feature's settings across two call sites and kept them out of the
+registrations the host enumerates.
+
+*Deviation, recorded:* the Web-area rule for registration verbs (owner decision 39) keeps a
+required value argument on a static `<Feature>Components` factory, so a missing value is a
+compile-time error rather than a registration-time throw (`AddJsonSerialization(resolver)` is the
+precedent). The resource-validators provider is such a value, but the 2026-10-28 migration brief
+makes it the builder method `UseResourceValidators` instead, with `Build` throwing when it is
+missing — the same no-default shape as `AddForwardedHeaders`. A missing provider therefore fails
+at registration (application startup) instead of at compile time. The marker is in
+`src/Properties/ComponentIntegrations.cs`.
 
 ## Redirect helpers never emit 301/302 for a query (§ 2.5)
 
@@ -123,8 +158,10 @@ Two surfaces, one evaluation path:
   handlers, which typically learn the resource's validators mid-flight. Call before executing
   the query; a `true` from the try-form means `304`/`412` was written and the query must not
   run (RFC 9110 § 13.1.2).
-- **`UseQueryConditionals(provider)`** (middleware) — for resources whose validators are cheap
-  to resolve up front. The `WebQueryResourceValidatorsProvider` returns `null` when validators
+- **`UseQueryConditionals()`** (middleware, registered with
+  `AddQueryConditionals(conditionals => conditionals.UseResourceValidators(provider))`) — for
+  resources whose validators are cheap to resolve up front. The
+  `WebQueryResourceValidatorsProvider` returns `null` when validators
   are unknown (pass through, no evaluation). On `Proceed` the middleware stamps
   `ETag`/`Last-Modified` onto the response — app-overridable — so clients can condition their
   next query; this is also the seam the server output cache (`Web.Caching`) composes with.
@@ -135,7 +172,9 @@ that own those flows (static files, output caching), not to this package.
 ## Error model
 
 No new exception types. Rejections are imperative status writes; option misuse throws BCL
-argument exceptions at composition time.
+argument exceptions at composition time. A conditionals registration without a provider, or a
+`UseQueryConditionals()` without a registration, throws `InvalidOperationException` (see
+"Registration" above).
 
 ## AOT posture
 
@@ -151,7 +190,8 @@ code, no serialization.
 - **No `OPTIONS` handling or standalone `Accept-Query` advertisement endpoint** — the
   advertisement rides the responses of the resource itself.
 - **No DI, no configuration binding, no request-time service location** — options and
-  delegates only, per the Web-area feature-package rules.
+  delegates only, per the Web-area feature-package rules. The `Add` verbs are generated into the
+  application, so the container stays out of this package.
 
 ## Exception messages (#1467)
 

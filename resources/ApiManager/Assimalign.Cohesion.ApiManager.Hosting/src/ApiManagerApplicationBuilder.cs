@@ -1,14 +1,10 @@
 using System;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.ApiManager;
 using Assimalign.Cohesion.ApiManager.Hosting.Internal;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.ApiManager.Hosting;
 
@@ -25,12 +21,10 @@ namespace Assimalign.Cohesion.ApiManager.Hosting;
 public sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
 {
     private readonly ApiManagerApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
 
     private bool _isBuilt;
 
-    internal ApiManagerApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal ApiManagerApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -39,24 +33,8 @@ public sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered ApiManager control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
 
-        _context = new ApiManagerApplicationContext(_resourceContext);
+        _context = new ApiManagerApplicationContext();
     }
 
     /// <summary>
@@ -121,19 +99,6 @@ public sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The API manager application has already been built.");
 
-        if (_controlPlane is not null)
-        {
-            _controlPlane.AddHealthContributor(_context);
-            if (_resourceContext!.Endpoints.TryGetValue("http", out Uri? endpoint))
-            {
-                _controlPlane.ObserveEndpoint("http", endpoint);
-
-                // Registered after every AddService call, so the endpoint starts last and stops first.
-                Services.AddSingleton<IHostService>(_ => new ApiManagerControlPlaneEndpointService(
-                    endpoint, _controlPlane, _resourceContext, _context));
-            }
-        }
-
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<IApiManagerApplicationContext>(_context);
 
@@ -151,13 +116,7 @@ public sealed class ApiManagerApplicationBuilder : IApiManagerApplicationBuilder
         {
             _context.ResolveHostedServices();
 
-            var application = new ApiManagerApplication(new ApiManagerApplicationOptions(), _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
+            return new ApiManagerApplication(new ApiManagerApplicationOptions(), _context);
         }
         catch (Exception exception)
         {

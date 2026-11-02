@@ -10,7 +10,7 @@ using Assimalign.Cohesion.Cli.Internal;
 
 namespace Assimalign.Cohesion.Cli.Tests;
 
-/// <summary>Tests project markers and state/application resolution without MSBuild evaluation.</summary>
+/// <summary>Tests gateway project discovery without MSBuild evaluation.</summary>
 public sealed class GatewayDiscoveryTests
 {
     /// <summary>The SDK name part is matched case-insensitively.</summary>
@@ -66,51 +66,5 @@ public sealed class GatewayDiscoveryTests
         GatewayDiscovery.ResolveProject(fixture.Root, "Gateway/Gateway.csproj").ShouldBe(first);
         (await fixture.Application().ExecuteAsync(["run", "--project", "Gateway/Gateway.csproj"], CancellationToken.None)).ShouldBe(0);
         fixture.Runner.Calls[0].Arguments[2].ShouldBe(first);
-    }
-
-    /// <summary>Application identity follows explicit selection, project properties, props, then local directories.</summary>
-    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Application: Should honor the complete precedence chain")]
-    public void ResolveApplication_WithProperties_ShouldHonorPrecedence()
-    {
-        using var fixture = new CliFixture();
-        string project = fixture.Gateway("<CohesionApplicationName>primary</CohesionApplicationName><CohesionApplication>alias</CohesionApplication>");
-        fixture.Write("Directory.Build.props", "<Project><PropertyGroup><CohesionApplication>parent</CohesionApplication></PropertyGroup></Project>");
-
-        GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, "explicit").ShouldBe("explicit");
-        GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, null).ShouldBe("primary");
-        fixture.Gateway("<CohesionApplication>alias</CohesionApplication>");
-        GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, null).ShouldBe("alias");
-        fixture.Gateway("");
-        GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, null).ShouldBe("parent");
-        fixture.Write("Gateway/Directory.Build.props", "<Project><PropertyGroup><CohesionApplication>nearest</CohesionApplication></PropertyGroup></Project>");
-        GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, null).ShouldBe("nearest");
-        fixture.Write("Gateway/Directory.Build.props", "<Project />");
-        Directory.CreateDirectory(Path.Combine(fixture.StateRoot, "only"));
-        GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, null).ShouldBe("only");
-        Directory.CreateDirectory(Path.Combine(fixture.StateRoot, "second"));
-        Should.Throw<CliException>(() => GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, null)).Message.ShouldContain("--app");
-    }
-
-    /// <summary>The default state root belongs to the gateway project, independent of the invoking directory.</summary>
-    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - StateRoot: Should resolve beside gateway or use override")]
-    public void GetStateRoot_WithOverride_ShouldUseCallerRelativePath()
-    {
-        using var fixture = new CliFixture();
-        string project = fixture.Gateway();
-
-        GatewayDiscovery.GetStateRoot(project, null, fixture.Root).ShouldBe(fixture.StateRoot);
-        GatewayDiscovery.GetStateRoot(project, "custom", fixture.Root).ShouldBe(Path.Combine(fixture.Root, "custom"));
-    }
-
-    /// <summary>Names cannot redirect the state readers into private keys or another application.</summary>
-    [Fact(DisplayName = "Cohesion Test [Tooling.Cli] - Application: Should reject traversal and unresolved properties")]
-    public void ResolveApplication_WithUnsafeName_ShouldFail()
-    {
-        using var fixture = new CliFixture();
-        string project = fixture.Gateway();
-        foreach (string name in new[] { "..", "../trust", "x/y", "x\\y", "C:escape", "$(Application)" })
-        {
-            Should.Throw<CliException>(() => GatewayDiscovery.ResolveApplication(project, fixture.StateRoot, name));
-        }
     }
 }

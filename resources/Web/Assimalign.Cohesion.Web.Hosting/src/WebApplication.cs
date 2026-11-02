@@ -208,24 +208,18 @@ public sealed class WebApplication : Host<WebApplicationContext>, IWebApplicatio
     }
 
     /// <summary>
-    /// Creates a Web application builder that honors an enabled resource's generated
-    /// control-plane registration and ambient invocation context.
+    /// Creates the builder of an entry-point Web application: it reads the default configuration
+    /// (appsettings, <c>COHESION_CONFIG__</c> environment variables, the command line) and, when
+    /// nothing else is configured, listens on the default endpoints.
     /// </summary>
     /// <param name="args">The application command-line arguments.</param>
     /// <returns>A new Web application builder.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
     public static WebApplicationBuilder CreateBuilder(string[] args)
     {
-        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(WebApplication).Assembly;
-        return CreateBuilder(args, resourceAssembly);
-    }
-
-    internal static WebApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
         ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
 
-        return new WebApplicationBuilder(new WebApplicationOptions(), resourceAssembly, args);
+        return new WebApplicationBuilder(new WebApplicationOptions(), args);
     }
 
     public static WebApplicationBuilder CreateBuilder(WebApplicationOptions options)

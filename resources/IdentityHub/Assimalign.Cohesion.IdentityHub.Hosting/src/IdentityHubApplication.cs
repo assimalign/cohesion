@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,18 +61,7 @@ public sealed class IdentityHubApplication : Host<IdentityHubApplicationContext>
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(IdentityHubApplication).Assembly;
-        return new IdentityHubApplicationBuilder(args, resourceAssembly);
-    }
-
-    internal static IdentityHubApplicationBuilder CreateBuilder(
-        string[] args,
-        Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-
-        return new IdentityHubApplicationBuilder(args, resourceAssembly);
+        return new IdentityHubApplicationBuilder(args);
     }
 
     private sealed class DebugView

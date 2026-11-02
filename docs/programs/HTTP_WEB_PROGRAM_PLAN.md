@@ -6,6 +6,8 @@
 
 This file is temporary scaffolding for the duration of the program. When the Web resource is assembled and this backlog is drained, fold anything durable into the relevant `docs/DESIGN.md` files and delete this doc.
 
+> **Application model (2026-10-31).** Entries that name `Hosting.Resources`, `Web.Hosting.Resources`, `Web.ApplicationModel`, `<Area>.ApplicationModel(.Orchestration)`, the resource control plane and its commands, or COHAM001 are the record of their sessions. The 2026-10-27 restart retired all of them: a Web application becomes a managed resource through `Web.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`); see its [design](../../resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md) and the [ApplicationModel area design](../libraries/ApplicationModel/DESIGN.md).
+
 ---
 
 ## 1. How to run this across multiple sessions (read first)
@@ -1486,6 +1488,7 @@ Decision 32 is the owner's, made on 2026-10-09 after the lineup.
       - Test, example, sample and fixture projects. They are harnesses.
     - **The two ApplicationModel exclusions hold by any route.** The build also rejects either package in the hosting module's resolved closure, so a library the module may now reference cannot bring one in. The other exclusions are checked on direct references.
     - COHRES001, COHRES003, COHRES004 and COHAM001 are unchanged. `CohesionHostingIsolationExemptions` still waives COHRES002, which now matters only for the excluded categories.
+    - **Superseded in part by the application-model restart (2026-10-27 to 2026-10-31).** The `<Area>.ApplicationModel` and `.Orchestration` packages, COHAM001, and the realization-plan design were removed, so those two exclusions and the closure check went with them. COHRES002 now excludes `<Area>.Testing`, the area integration `<Area>.Hosting.ApplicationModel` (it references the module, so the reverse is a cycle), the producers, and harnesses (`.claude/rules/resource-areas.md`).
     - **The framework-closure consequence.** Each reference a hosting module takes ships its closure in every framework that carries the module. `Web.Hosting` is a private member of all 17 other area frameworks, so each reference it takes is a membership change in all of them. A hosting module references only what the runtime needs.
     - **What it unblocks.** The Web root's features can leave the root: the endpoint and path base to `Web.Routing`, and the request id, response completion and drain to a new `Web.Server`, both referenced by `Web.Hosting`.
     - **What it does not change.** Registering a feature never needs a hosting-module reference to it: feature verbs still ship with the feature package.
@@ -1675,10 +1678,9 @@ Filed on 2026-09-30 as #1045–#1066 and moved into §4 as Stages 5–10, which 
 | 6.1–6.3 | #1054–#1056 | 7.1, 7.2 | #3 (+#109–#111), #155 | | |
 
 **Docs drift** to fix alongside the items that touch these files:
-- The area README lists `Web.Cors` as a working library and undercounts `Web.Hosting.Resources` consumers.
+- The area README lists `Web.Cors` as a working library.
 - Routing README and DESIGN still name functions, controllers and results.
 - These notes are stale: ProblemDetails "future `OnError`", Query "future server output cache", Hosting "31f follow-up", Diagnostics "until #778".
 - Authentication docs name `IHttpAuthenticationFeature`; the code type is `IAuthenticationFeature`.
 - The Http.Connections DESIGN cites a `DESIGN_SUGGESTION.md` that doesn't exist.
-- `DEVELOPER_EXPERIENCE_DESIGN.md:720` cites the old `frameworks/` path.
 - The OpenApi README marks five unreleased packages "Implemented".

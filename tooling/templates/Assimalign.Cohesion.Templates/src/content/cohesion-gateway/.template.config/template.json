@@ -54,8 +54,7 @@
       "parameters": {
         "source": "firstSegment",
         "toLower": true
-      },
-      "replaces": "__ORGANIZATION_NAME__"
+      }
     },
     "applicationName": {
       "type": "parameter",

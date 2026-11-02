@@ -25,6 +25,9 @@ primitives from `Assimalign.Cohesion.Http` (#755) — it re-implements no header
 ## Dependencies
 
 - `Assimalign.Cohesion.Web` — the root pipeline-builder seam the `UseOutputCache` verb composes against.
+- `Assimalign.Cohesion.Core`'s `ComponentIntegration` shared source — declares `AddOutputCache` as a
+  component integration the consumer's generator projects onto `builder.Services`; the package takes no
+  DI reference.
 - `Assimalign.Cohesion.Web.Routing` — the published route match (endpoint, route values) and the endpoint-metadata seam.
 - `Assimalign.Cohesion.Web.Server` — successful response completion, after starting callbacks, gates storage.
 - `Assimalign.Cohesion.Http` — the `IHttpContext` surface and the #755 `HttpCacheControl` / `HttpFreshness`
@@ -44,18 +47,31 @@ A policy's `MaximumBodySize` override must be positive or null. Zero and negativ
 policy to turn caching off.
 
 ```csharp
-var routes = app.UseRouting();
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRouting();
 
-// Base-policy mode: cache every GET/HEAD for one minute.
-app.UseOutputCache(options => options.AddBasePolicy(policy => policy.Duration = TimeSpan.FromMinutes(1)));
+// Hold the store to evict by tag. Without UseStore the middleware creates, and disposes with the
+// application, an in-memory store sized from Options.SizeLimit.
+InMemoryOutputCacheStore store = new();
 
-// Opt-in mode: no base policy; cache only endpoints that ask for it.
-app.UseOutputCache(options => options.AddPolicy("catalog", policy =>
+builder.Services.AddOutputCache(cache =>
 {
-    policy.Duration = TimeSpan.FromMinutes(5);
-    policy.VaryByQuery("page");
-    policy.Tag("catalog");
-}));
+    cache.UseStore(store);
+
+    // Opt-in mode (no base policy): cache only endpoints that ask for it, here by name. Add
+    // cache.Options.AddBasePolicy(policy => policy.Duration = TimeSpan.FromMinutes(1)) to cache
+    // every GET/HEAD instead (base-policy mode).
+    cache.Options.AddPolicy("catalog", policy =>
+    {
+        policy.Duration = TimeSpan.FromMinutes(5);
+        policy.VaryByQuery("page");
+        policy.Tag("catalog");
+    });
+});
+
+WebApplication app = builder.Build();
+var routes = app.UseRouting();
+app.UseOutputCache();   // after UseRouting, ahead of UseResponseCompression
 
 // Declare it where the endpoint is mapped, or on a group; a route can opt out of its group.
 IRouterGroupBuilder catalog = app.MapGroup("/catalog").CacheOutput("catalog");
@@ -72,8 +88,14 @@ routes.Map(new Route(HttpMethod.Get, "/offers",
 await store.EvictByTagAsync("catalog");
 ```
 
-Register `UseOutputCache` **after** `UseRouting`, and **before** `UseResponseCompression` and any
-content-negotiated write (see `DESIGN.md` for why the ordering is load-bearing). Registered ahead of
+Configuration lives on the `Add` verb only ("Add configures, Use places"). `AddOutputCache` builds the
+middleware from `OutputCacheBuilder` (`cache.Options` and `cache.UseStore`) and registers it;
+`UseOutputCache()` takes no arguments and places it. Without a registration it places the defaults:
+opt-in mode over a new in-memory store. When the application registers the cache more than once, the
+last registration wins. A store passed to `UseStore` stays the application's to dispose.
+
+Place `UseOutputCache` **after** `UseRouting`, and **before** `UseResponseCompression` and any
+content-negotiated write (see `DESIGN.md` for why the ordering is load-bearing). Placed ahead of
 `UseRouting`, only the base policy applies: endpoint metadata cannot opt an endpoint in, and a response
 from an endpoint that carries it is never stored, so an opt-out still holds.
 

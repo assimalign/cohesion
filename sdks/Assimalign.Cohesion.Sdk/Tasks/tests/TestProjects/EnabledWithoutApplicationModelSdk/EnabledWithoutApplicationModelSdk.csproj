@@ -1,6 +1,0 @@
-<Project Sdk="Assimalign.Cohesion.Sdk">
-  <PropertyGroup>
-    <RootNamespace>EnabledWithoutApplicationModelSdk</RootNamespace>
-    <CohesionApplicationModel>enabled</CohesionApplicationModel>
-  </PropertyGroup>
-</Project>

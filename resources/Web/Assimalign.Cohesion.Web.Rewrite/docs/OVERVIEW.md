@@ -2,8 +2,9 @@
 
 URL rewriting and redirect rules for the Cohesion Web pipeline (issue #782). A Cohesion application serves
 its own traffic, with no IIS or nginx rewrite tier assumed in front of it, so canonical URLs, legacy-path
-migration and internal rewrites have to be expressible in the application. `UseRewrite(rules => ...)`
-registers code-first rules that run, in order, ahead of static files and routing.
+migration and internal rewrites have to be expressible in the application.
+`builder.Services.AddRewrite(rewrite => ...)` registers code-first rules, and `UseRewrite()` places them
+ahead of static files and routing, where they run in order.
 
 ## Scope
 
@@ -43,11 +44,14 @@ It never references `Assimalign.Cohesion.Web.Hosting` or any `Assimalign.Cohesio
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Rewrite;
 
-app.UseForwardedHeaders(...);   // behind a proxy, so the helpers read the client's scheme and host
-app.UseHostFiltering(...);
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
-// Ahead of UseStaticFiles and UseRouting.
-app.UseRewrite(rules => rules
+// Behind a proxy, so the helpers read the client's scheme and a validated host.
+builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("example.com"));
+
+// The rules are configured where they are registered.
+builder.Services.AddRewrite(rewrite => rewrite.Options
     // Redirects first: a redirect built after a rewrite would send the client to the rewritten URL.
     .AddRedirectToHttps()
     .AddRedirectToNonWww()
@@ -59,10 +63,24 @@ app.UseRewrite(rules => rules
     .AddRewrite("^/products/(\\d+)$", "/product?id=$1")
     .AddRewrite(context => context.HttpContext.Request.Headers.ContainsKey("X-Mobile"), "/mobile"));
 
+WebApplication app = builder.Build();
+
+app.UseForwardedHeaders();
+app.UseHostFiltering();
+
+// Ahead of UseStaticFiles and UseRouting.
+app.UseRewrite();
+
 app.UseStaticFiles();
 app.UseRouting();
 app.MapGet("/product", (int id) => ...);   // binds the rewritten query
 ```
+
+Configuration lives on `AddRewrite` only ("Add configures, Use places"). `UseRewrite()` takes no arguments:
+it places the last rule set the application registered. The rules have no default, so placing it without a
+registration fails the application's start with an error that names `AddRewrite`. A rule that cannot be
+built (an invalid pattern, or a target naming a group the pattern does not define) throws inside the
+`AddRewrite` call.
 
 Inside an endpoint, `context.Request.Path` is the rewritten path, and the URL the client sent is
 `context.Features.Get<IRewriteFeature>()?.OriginalPath`.

@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class EventHubApplication : Host<EventHubApplicationContext>, IEve
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(EventHubApplication).Assembly);
-    }
-
-    internal static EventHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new EventHubApplicationBuilder(args, resourceAssembly);
+        return new EventHubApplicationBuilder(args);
     }
 
     private sealed class DebugView

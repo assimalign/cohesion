@@ -6,12 +6,13 @@ namespace Assimalign.Cohesion.Web.Query;
 using Assimalign.Cohesion.Http;
 
 /// <summary>
-/// Options for the QUERY request-validation middleware (see <c>UseQueryValidation</c>):
-/// the resource's advertised <c>Accept-Query</c> set, the representations it can produce,
-/// and the status-code policy for a missing or malformed <c>Content-Type</c>.
+/// Options for the QUERY request-validation middleware, configured through
+/// <see cref="WebQueryValidationBuilder.Options"/> in <c>builder.Services.AddQueryValidation(validation =&gt; ...)</c>
+/// and placed by <c>UseQueryValidation</c>: the resource's advertised <c>Accept-Query</c> set, the
+/// representations it can produce, and the status-code policy for a missing or malformed <c>Content-Type</c>.
 /// </summary>
 /// <remarks>
-/// The middleware snapshots these options when <c>UseQueryValidation</c> runs — mutations after
+/// The middleware snapshots these options when <c>AddQueryValidation</c> builds it — mutations after
 /// registration have no effect, matching the builder-time composition model of the Web pipeline.
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("WebQueryValidationOptions")]

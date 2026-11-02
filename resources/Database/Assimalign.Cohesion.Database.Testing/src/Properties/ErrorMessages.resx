@@ -4,16 +4,11 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="DatabaseApplicationTestFactoryFailure" xml:space="preserve"><value>The startup timeout must be greater than zero.</value></data>
   <data name="DatabaseApplicationTestFactoryFailure2" xml:space="preserve"><value>The shutdown timeout must be greater than zero.</value></data>
-  <data name="DatabaseApplicationTestFactoryFailure3" xml:space="preserve"><value>The probe interval must be greater than zero.</value></data>
-  <data name="ApplicationTestFactoryArgument" xml:space="preserve"><value>The test resource context must provide the Database '{0}' endpoint.</value></data>
-  <data name="TestFactoryStartAsyncTimeout" xml:space="preserve"><value>The Database resource did not report ready within {0}.</value></data>
-  <data name="FactoryWaitForReadinessAsyncFailure" xml:space="preserve"><value>The resource program exited before its Database control plane reported ready.</value></data>
-  <data name="FactoryRequestStopAsyncHttpRequest" xml:space="preserve"><value>The Database control plane rejected graceful stop with HTTP {0}.</value></data>
   <data name="TestFactoryResolveEntryPointFailure" xml:space="preserve"><value>Assembly '{0}' has no executable entry point.</value></data>
   <data name="TestFactoryResolveEntryPointFailure2" xml:space="preserve"><value>Type '{0}' is not the entry-point Program for assembly '{1}'.</value></data>
   <data name="TestFactoryResolveEntryPointFailure3" xml:space="preserve"><value>The resource program entry point must be static.</value></data>
   <data name="TestFactoryResolveEntryPointFailure4" xml:space="preserve"><value>The resource program entry point must accept no parameters or one string[] parameter.</value></data>
   <data name="TestFactoryResolveEntryPointFailure5" xml:space="preserve"><value>The resource program entry point return type '{0}' is not supported.</value></data>
+  <data name="ProgramExitCodeNonZero" xml:space="preserve"><value>The program's entry point returned exit code {0}.</value></data>
 </root>

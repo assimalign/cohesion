@@ -8,12 +8,15 @@ partitioning and queueing, are available through the policy model.
 
 ## Scope
 
+- **Registration and placement**: `builder.Services.AddRateLimiting(rateLimiting => ...)` configures
+  everything below on `RateLimitingBuilder.Options` and registers the middleware; `UseRateLimiting()`
+  places it in the pipeline.
 - **A global limiter** (`RateLimitingOptions.GlobalPolicy`) applied to every request, acquired up-front
   with the limiter's full queueing semantics. This is the primary flood shield.
-- **Named policies** (`options.AddPolicy(name, policy)`) attached to individual endpoints through the
-  sealed `RateLimitingMetadata` carrier in the routing metadata bag. A per-endpoint policy is evaluated
-  *in addition to* the global limiter, read from the endpoint `UseRouting` publishes and acquired
-  asynchronously, so queueing limiters work per endpoint too.
+- **Named policies** (`rateLimiting.Options.AddPolicy(name, policy)`) attached to individual endpoints
+  through the sealed `RateLimitingMetadata` carrier in the routing metadata bag. A per-endpoint policy
+  is evaluated *in addition to* the global limiter, read from the endpoint `UseRouting` publishes and
+  acquired asynchronously, so queueing limiters work per endpoint too.
 - **Partitioned limiting** with AOT-safe partition-key selectors: `RateLimitPartitionKeys.ClientAddress`
   (composing the forwarded-headers trust model), `RateLimitPartitionKeys.Header`, and any typed selector
   delegate.
@@ -41,17 +44,18 @@ It never references `Assimalign.Cohesion.Web.Hosting` (the resource hosting-isol
 ```csharp
 using System.Threading.RateLimiting;
 
+using Assimalign.Cohesion.Web.Hosting;
 using Assimalign.Cohesion.Web.RateLimiting;
 using Assimalign.Cohesion.Web.Routing;
 using Assimalign.Cohesion.Web.Routing.Metadata;
 
-IRouterBuilder routes = app.UseRouting();
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 // A global limiter partitioned by the effective client address, plus a tighter named
-// policy for an expensive endpoint. Registered after UseRouting, so the endpoint is known.
-app.UseRateLimiting(options =>
+// policy for an expensive endpoint, configured where rate limiting is registered.
+builder.Services.AddRateLimiting(rateLimiting =>
 {
-    options.GlobalPolicy = RateLimitingPolicy.Create(context =>
+    rateLimiting.Options.GlobalPolicy = RateLimitingPolicy.Create(context =>
         RateLimitPartition.GetFixedWindowLimiter(
             RateLimitPartitionKeys.ClientAddress(context),
             _ => new FixedWindowRateLimiterOptions
@@ -61,16 +65,23 @@ app.UseRateLimiting(options =>
                 QueueLimit = 0,
             }));
 
-    options.AddPolicy("expensive", RateLimitingPolicy.Create(context =>
+    rateLimiting.Options.AddPolicy("expensive", RateLimitingPolicy.Create(context =>
         RateLimitPartition.GetConcurrencyLimiter(
             RateLimitPartitionKeys.ClientAddress(context),
             _ => new ConcurrencyLimiterOptions { PermitLimit = 5, QueueLimit = 10 })));
 
-    options.OnRejected = async (rejection, cancellationToken) =>
+    rateLimiting.Options.OnRejected = async (rejection, cancellationToken) =>
     {
         // Optional: own the response. The default is a bodyless 429 + Retry-After.
     };
 });
+
+WebApplication app = builder.Build();
+
+IRouterBuilder routes = app.UseRouting();
+
+// Placed after UseRouting, so the endpoint is known.
+app.UseRateLimiting();
 
 // Attach the named policy where the endpoint is mapped, or to every route of a group.
 app.MapGet("/report", BuildReportAsync).RequireRateLimiting("expensive");
@@ -86,9 +97,15 @@ routes.Map(new Route(
     new RouterRouteMetadataCollection(new RateLimitingMetadata("expensive"))));
 ```
 
-Register `UseRateLimiting` after `UseForwardedHeaders` (so client-address keys see the effective client
+Configuration lives on the `Add` verb only ("Add configures, Use places"). `UseRateLimiting()` takes no
+arguments: it places the middleware `AddRateLimiting` registered (the last registration when there are
+several), or one with the defaults when the application registered none. The defaults set no global limit
+and no named policy, so only endpoints that carry an inline policy are limited, and a request for an
+endpoint that names a policy fails with `InvalidOperationException`.
+
+Place `UseRateLimiting` after `UseForwardedHeaders` (so client-address keys see the effective client
 identity) and after `UseRouting` (so the request's endpoint and its `RateLimitingMetadata` are known when
-it runs). Registered ahead of `UseRouting`, the global limiter still applies, but an endpoint that names a
+it runs). Placed ahead of `UseRouting`, the global limiter still applies, but an endpoint that names a
 policy fails with `InvalidOperationException` when it is dispatched instead of running without its limit.
 
 See `docs/DESIGN.md` for the policy model, the partition-key trust posture, the per-endpoint metadata

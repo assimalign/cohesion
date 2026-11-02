@@ -29,8 +29,6 @@ internal sealed class CliFixture : IDisposable
 
     internal string Root { get; } = Path.Combine(Repository, "_out", "verify-40", "tests", Guid.NewGuid().ToString("N")[..8]);
     internal string Home => Path.Combine(Root, "home");
-    internal string StateRoot => Path.Combine(Root, "Gateway", ".cohesion");
-    internal string ApplicationDirectory => Path.Combine(StateRoot, "sample");
     internal StringWriter Output { get; } = new();
     internal StringWriter Error { get; } = new();
     internal RecordingProcessRunner Runner { get; } = new();
@@ -53,7 +51,7 @@ internal sealed class CliFixture : IDisposable
         return fullPath;
     }
 
-    internal string Gateway(string properties = "<CohesionApplicationName>sample</CohesionApplicationName>",
+    internal string Gateway(string properties = "<OutputType>Exe</OutputType>",
         string sdk = "Assimalign.Cohesion.Sdk.Gateway", string path = "Gateway/Gateway.csproj") =>
         Write(path, $"<Project Sdk=\"{sdk}\"><PropertyGroup>{properties}</PropertyGroup></Project>");
 

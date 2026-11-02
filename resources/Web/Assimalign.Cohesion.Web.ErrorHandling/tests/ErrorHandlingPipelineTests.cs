@@ -191,4 +191,77 @@ public class ErrorHandlingPipelineTests
         document.RootElement.GetProperty("status").GetInt32().ShouldBe(404);
         document.RootElement.GetProperty("title").GetString().ShouldBe("Not Found");
     }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - E2E: The boundary options AddErrorHandling registers are the ones UseErrorHandling places")]
+    public async Task AddErrorHandling_WithDeveloperDetails_ShouldRenderTheDetailThroughTheBoundary()
+    {
+        // Arrange — the generated verb registers the hook with the boundary's options; UseErrorHandling() places it.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddErrorHandling(errors => errors.Options.IncludeDeveloperDetails = true);
+        factory.Application.UseErrorHandling();
+        factory.Application.Use((context, next) => throw new InvalidOperationException("the key ring is unavailable"));
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/faulting", cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.InternalServerError);
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        document.RootElement.GetProperty("detail").GetString().ShouldBe("the key ring is unavailable");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - E2E: The responder AddStatusCodePages registers is the one UseStatusCodePages places")]
+    public async Task AddStatusCodePages_WithResponder_ShouldRenderTheTerminal404ThroughIt()
+    {
+        // Arrange — the generated verb registers the configured middleware; UseStatusCodePages() places it.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddStatusCodePages(pages => pages.Options.Responder = async context =>
+        {
+            context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain; charset=utf-8";
+            await context.Response.Body.WriteAsync("nothing here"u8.ToArray(), context.RequestCancelled);
+        });
+        factory.Application.UseStatusCodePages();
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/missing", cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("nothing here");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - E2E: Status-code pages AddStatusCodePages builds from the service provider should be the ones UseStatusCodePages places")]
+    public async Task AddStatusCodePages_WithServiceProviderCallback_ShouldRenderThroughTheResponder()
+    {
+        // Arrange — the provider overload builds when the pipeline first resolves the registration.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddStatusCodePages((services, pages) => pages.Options.Responder = async context =>
+        {
+            context.Response.Headers[HttpHeaderKey.ContentType] = "text/plain; charset=utf-8";
+            await context.Response.Body.WriteAsync("built on resolve"u8.ToArray(), context.RequestCancelled);
+        });
+        factory.Application.UseStatusCodePages();
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/missing", cancellationToken);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync(cancellationToken)).ShouldBe("built on resolve");
+    }
 }

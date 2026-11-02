@@ -1,12 +1,8 @@
 <Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
-  <PropertyGroup>
-    <CohesionApplicationName>acme</CohesionApplicationName>
-    <CohesionGateways>InProcess;Local</CohesionGateways>
-    <CohesionGatewayInProcess>true</CohesionGatewayInProcess>
-  </PropertyGroup>
+  <!-- Sdk.Gateway references Assimalign.Cohesion.ApplicationModel.Gateway. The platform the model runs on is the one
+       package added here: the in-process platform. A cohesion-platforms gateway package, such as
+       Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes, replaces it (README.md). -->
   <ItemGroup>
-    <CohesionResourceReference Include="..\Acme.Api\Acme.Api.csproj" />
-    <!-- InProcess needs a compile-time entry anchor for each composable member, including transitive members. -->
-    <CohesionResourceReference Include="..\Acme.Database\Acme.Database.csproj" />
+    <CohesionPackageReference Include="Assimalign.Cohesion.ApplicationModel.Gateway.InProcess" Version="$(CohesionVersion)" />
   </ItemGroup>
 </Project>

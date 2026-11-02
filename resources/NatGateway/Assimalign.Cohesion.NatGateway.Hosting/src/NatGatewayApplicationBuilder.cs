@@ -1,12 +1,8 @@
 using System;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.NatGateway;
 using Assimalign.Cohesion.NatGateway.Hosting.Internal;
 
@@ -25,12 +21,10 @@ namespace Assimalign.Cohesion.NatGateway.Hosting;
 public sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuilder
 {
     private readonly NatGatewayApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
 
     private bool _isBuilt;
 
-    internal NatGatewayApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal NatGatewayApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -39,24 +33,8 @@ public sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuilder
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered NatGateway control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
 
-        _context = new NatGatewayApplicationContext(_resourceContext);
+        _context = new NatGatewayApplicationContext();
     }
 
     /// <summary>
@@ -121,19 +99,6 @@ public sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuilder
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The NAT gateway application has already been built.");
 
-        if (_controlPlane is not null)
-        {
-            _controlPlane.AddHealthContributor(_context);
-            if (_resourceContext!.Endpoints.TryGetValue("http", out Uri? endpoint))
-            {
-                _controlPlane.ObserveEndpoint("http", endpoint);
-
-                // Registered after every AddService call, so the endpoint starts last and stops first.
-                Services.AddSingleton<IHostService>(_ => new NatGatewayControlPlaneEndpointService(
-                    endpoint, _controlPlane, _resourceContext, _context));
-            }
-        }
-
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<INatGatewayApplicationContext>(_context);
 
@@ -151,13 +116,7 @@ public sealed class NatGatewayApplicationBuilder : INatGatewayApplicationBuilder
         {
             _context.ResolveHostedServices();
 
-            var application = new NatGatewayApplication(new NatGatewayApplicationOptions(), _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
+            return new NatGatewayApplication(new NatGatewayApplicationOptions(), _context);
         }
         catch (Exception exception)
         {

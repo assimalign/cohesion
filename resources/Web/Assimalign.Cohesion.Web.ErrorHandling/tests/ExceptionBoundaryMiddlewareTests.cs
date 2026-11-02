@@ -18,7 +18,8 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Tests;
 /// Coverage for the exception-boundary middleware (<c>UseErrorHandling</c>): fault capture and the
 /// <see cref="IHttpExceptionFeature"/> publication, dispatch through the shipped <c>OnError</c> chain,
 /// the no-clobber guard, the developer-detail toggle, and the diagnostics-observation hook. The verb
-/// is driven over a minimal pipeline harness so the middleware runs exactly as the runtime composes it.
+/// is driven over a minimal pipeline harness so the middleware runs exactly as the runtime composes it:
+/// it reads the boundary's options from the hook the application registered.
 /// </summary>
 public class ExceptionBoundaryMiddlewareTests
 {
@@ -29,6 +30,17 @@ public class ExceptionBoundaryMiddlewareTests
         return composition.Build();
     }
 
+    /// <summary>
+    /// The hook <c>builder.Services.AddErrorHandling(errors =&gt; ...)</c> registers with the boundary's
+    /// options. Which handlers an exchange consults is set on the exchange per test, as the host stamps it.
+    /// </summary>
+    private static IErrorHandlingFeature Registration(Action<ExceptionBoundaryOptions>? configure)
+    {
+        ErrorHandlingBuilder errors = new();
+        configure?.Invoke(errors.Options);
+        return errors.Build();
+    }
+
     private static async Task<TestHttpContext> RunAsync(
         Action<ExceptionBoundaryOptions>? configure,
         Func<IHttpContext, Task> downstream,
@@ -37,7 +49,8 @@ public class ExceptionBoundaryMiddlewareTests
         IWebClientFaultFeature? clientFault = null)
     {
         TestPipelineBuilder builder = new();
-        builder.UseErrorHandling(configure);
+        builder.RegisteredFeatures.Add(Registration(configure));
+        builder.UseErrorHandling();
         builder.Run(downstream);
         IWebApplicationPipeline pipeline = builder.Build();
 
@@ -408,11 +421,12 @@ public class ExceptionBoundaryMiddlewareTests
         int observed = 0;
 
         TestPipelineBuilder builder = new();
-        builder.UseErrorHandling(options => options.OnException = (_, _) =>
+        builder.RegisteredFeatures.Add(Registration(options => options.OnException = (_, _) =>
         {
             observed++;
             return ValueTask.CompletedTask;
-        });
+        }));
+        builder.UseErrorHandling();
         builder.Run(_ => throw new OperationCanceledException());
         IWebApplicationPipeline pipeline = builder.Build();
 
@@ -449,5 +463,91 @@ public class ExceptionBoundaryMiddlewareTests
 
         // Act / Assert
         Should.Throw<ArgumentNullException>(() => builder.UseErrorHandling());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - UseErrorHandling: Should place the boundary with the options the application registered")]
+    public async Task UseErrorHandling_WithRegisteredOptions_ShouldPlaceTheBoundaryWithThem()
+    {
+        // Arrange
+        TestPipelineBuilder builder = new();
+        builder.RegisteredFeatures.Add(Registration(options => options.IncludeDeveloperDetails = true));
+        builder.UseErrorHandling();
+        builder.Run(_ => throw new InvalidOperationException("registered-detail"));
+        TestHttpContext context = new();
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        using JsonDocument document = JsonDocument.Parse(context.ResponseBodyText());
+        document.RootElement.GetProperty("detail").GetString().ShouldBe("registered-detail");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - UseErrorHandling: The last registration's options should win")]
+    public async Task UseErrorHandling_TwoRegistrations_ShouldUseTheLastOptions()
+    {
+        // Arrange
+        int first = 0;
+        int last = 0;
+        TestPipelineBuilder builder = new();
+        builder.RegisteredFeatures.Add(Registration(options => options.OnException = (_, _) =>
+        {
+            first++;
+            return ValueTask.CompletedTask;
+        }));
+        builder.RegisteredFeatures.Add(Registration(options => options.OnException = (_, _) =>
+        {
+            last++;
+            return ValueTask.CompletedTask;
+        }));
+        builder.UseErrorHandling();
+        builder.Run(_ => throw new InvalidOperationException("boom"));
+
+        // Act
+        await builder.Build().ExecuteAsync(new TestHttpContext());
+
+        // Assert
+        first.ShouldBe(0);
+        last.ShouldBe(1);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - UseErrorHandling: Without a registration it should place the boundary with the production defaults")]
+    public async Task UseErrorHandling_WithoutRegistration_ShouldPlaceTheDefaults()
+    {
+        // Arrange
+        TestPipelineBuilder builder = new();
+        builder.UseErrorHandling();
+        builder.Run(_ => throw new InvalidOperationException("default-detail"));
+        TestHttpContext context = new();
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert — a 500 problem without developer detail.
+        context.Response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        context.Features.Get<IHttpExceptionFeature>().ShouldNotBeNull();
+        context.ResponseBodyText().ShouldContain("about:blank", Case.Sensitive);
+        context.ResponseBodyText().ShouldNotContain("default-detail", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.ErrorHandling] - AddErrorHandling: Options changed after registration should not reach the boundary")]
+    public async Task UseErrorHandling_OptionsChangedAfterRegistration_ShouldKeepTheRegisteredOptions()
+    {
+        // Arrange — Build copies the options into the hook, as the generated verb calls it when it registers.
+        ErrorHandlingBuilder errors = new();
+        IErrorHandlingFeature registered = errors.Build();
+        errors.Options.IncludeDeveloperDetails = true;
+        TestPipelineBuilder builder = new();
+        builder.RegisteredFeatures.Add(registered);
+        builder.UseErrorHandling();
+        builder.Run(_ => throw new InvalidOperationException("late-detail"));
+        TestHttpContext context = new();
+
+        // Act
+        await builder.Build().ExecuteAsync(context);
+
+        // Assert
+        context.ResponseBodyText().ShouldNotContain("late-detail", Case.Sensitive);
     }
 }

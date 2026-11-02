@@ -3,13 +3,12 @@ using System.Diagnostics;
 using System.Diagnostics.Tracing;
 
 using Assimalign.Cohesion.Database.Storage;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting.Internal;
 
 /// <summary>
-/// The Database hosting module's diagnostics: application lifecycle, resource commands, the
-/// admin endpoint, and each attempt to reopen a database its engine reports offline.
+/// The Database hosting module's diagnostics: application lifecycle, the admin endpoint, health
+/// transitions, and each attempt to reopen a database its engine reports offline.
 /// </summary>
 /// <remarks>
 /// Internal by the repository's EventSource convention (<c>.claude/rules/event-source.md</c>): a
@@ -185,25 +184,6 @@ internal sealed class DatabaseHostingEventSource : EventSource
     }
 
     [NonEvent]
-    public void ResourceCommandHandled(ResourceCommand command, string operation)
-    {
-        if (IsEnabled(EventLevel.Informational, EventKeywords.None))
-        {
-            ResourceCommandHandled(Bound(command.Kind), Bound(command.Key), operation);
-        }
-    }
-
-    [NonEvent]
-    public void ResourceCommandRejected(ResourceCommand command, string operation, Exception exception)
-    {
-        if (IsEnabled(EventLevel.Warning, EventKeywords.None))
-        {
-            // A command's message may repeat its payload. Keep only its type (plan D8).
-            ResourceCommandRejected(Bound(command.Kind), Bound(command.Key), operation, exception.GetType().FullName ?? exception.GetType().Name);
-        }
-    }
-
-    [NonEvent]
     public void AdminEndpointFailed(Uri endpoint, string operation, Exception exception)
     {
         if (IsEnabled(EventLevel.Error, EventKeywords.None))
@@ -285,13 +265,8 @@ internal sealed class DatabaseHostingEventSource : EventSource
     private void ApplicationDisposeFailed(string hostId, int failureCount, string exceptionType, string exceptionMessage)
         => WriteEvent(12, hostId, failureCount, exceptionType, exceptionMessage);
 
-    [Event(13, Level = EventLevel.Informational, Message = "Handled resource command {0} '{1}' ({2}).")]
-    private void ResourceCommandHandled(string kind, string key, string operation)
-        => WriteEvent(13, kind, key, operation);
-
-    [Event(14, Level = EventLevel.Warning, Message = "Rejected resource command {0} '{1}' ({2}): {3}")]
-    private void ResourceCommandRejected(string kind, string key, string operation, string exceptionType)
-        => WriteEvent(14, kind, key, operation, exceptionType);
+    // Ids 13 (ResourceCommandHandled) and 14 (ResourceCommandRejected) stay retired: the resource
+    // command handler that raised them was removed with the application-model restart (#1759).
 
     [Event(15, Level = EventLevel.Error, Message = "Database admin endpoint {0} failed during {1}: {2}: {3}")]
     private void AdminEndpointFailed(string endpoint, string operation, string exceptionType, string exceptionMessage)

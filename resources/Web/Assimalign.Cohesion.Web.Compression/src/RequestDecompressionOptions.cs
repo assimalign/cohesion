@@ -3,8 +3,9 @@ using System;
 namespace Assimalign.Cohesion.Web.Compression;
 
 /// <summary>
-/// Builder-time configuration for request decompression, captured when
-/// <c>UseRequestDecompression</c> is called. Its one knob is the decompressed-size guard that bounds
+/// Configuration for request decompression, set on <see cref="RequestDecompressionBuilder.Options"/>
+/// where <c>builder.Services.AddRequestDecompression(decompression =&gt; ...)</c> registers the
+/// middleware, and captured when it is built. Its one knob is the decompressed-size guard that bounds
 /// how many bytes a coded request body may inflate to before the request is rejected.
 /// </summary>
 /// <remarks>

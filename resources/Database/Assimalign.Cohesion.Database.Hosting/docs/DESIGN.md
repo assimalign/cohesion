@@ -17,7 +17,7 @@ flowchart LR
     Model["Database model packages"] --> Root
 ```
 
-COHRES001–004 remain enforced. Existing private Web hosting/health references serve the pre-existing enabled-resource admin integration. Phase 29 adds no ApplicationModel surface, manifest, resource command, resource control plane, or orchestration behavior. The existing `ResourceRuntime.HostBuilt` hook remains in place so an installed `HostContext.Runner` still controls complete runs through `IHostRunner` / `IHostRun`.
+COHRES001–004 remain enforced. The retired resource integration was removed on 2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
 
 ## Build and configuration
 
@@ -29,16 +29,16 @@ The builder exposes the four host-level pieces `WebApplicationBuilder` exposes, 
 
 | Builder member | Type | Created | At Build |
 | --- | --- | --- | --- |
-| `Environment` | `HostEnvironment` | from `Options.Environment` (`production` when unset) and `Options.ContentRootPath`, which an enabled resource's ambient context sets first | registered as `IHostEnvironment`; the application context's `Environment` |
+| `Environment` | `HostEnvironment` | from `Options.Environment` (`production` when unset) and `Options.ContentRootPath` | registered as `IHostEnvironment`; the application context's `Environment` |
 | `Configuration` | `ConfigurationManager` | empty; `CreateBuilder(args)` adds the default sources | registered as `IConfiguration`; owned and disposed by the application |
-| `Logging` | `LoggerFactoryBuilder` | empty; an enabled resource's telemetry adds its exporter | built once into the application's `LoggerFactory`, registered as `ILoggerFactory`, owned and disposed after the provider |
+| `Logging` | `LoggerFactoryBuilder` | empty | built once into the application's `LoggerFactory`, registered as `ILoggerFactory`, owned and disposed after the provider |
 | `Services` | `ServiceProviderBuilder` | `EnableDynamicCode = false`, `ValidateOnBuild`, `ValidateScopes` | checked, given the three registrations above, made read-only, built once into the application's `ServiceProvider` |
 
 The root `IDatabaseApplicationBuilder` gains none of them: model packages and other feature code compose against the root without the container, configuration or logging (COHRES004, `resource-areas.md`). The engine factories of `AddEngine(name, factory)` run at Build, after the container closed, so their `DatabaseApplicationBuildContext` carries the built counterparts, not the builders: `Environment` (`HostEnvironment`, the builder's instance), `Configuration` (`ConfigurationManager`, the builder's instance), `Services` (the built `ServiceProvider`; the DependencyInjection library's provider type is public, so the context names it rather than `IServiceProvider`) and `LoggerFactory` (the built `LoggerFactory`). One build context exists per application, and every named factory receives it.
 
-`CreateBuilder(args)` adds the default configuration sources when it creates the builder, in order: optional `appsettings.json` and `appsettings.{Environment}.json` under the content root, environment variables prefixed `COHESION_CONFIG__`, then the ambient resource settings as `--key=value` arguments ahead of the caller's arguments, as Web adds them; later values win, and a provider the application adds afterwards wins over all of them. Environment uses the existing Hosting default; `Local` remains `Local`. JSON reload is disabled. `CreateBuilder()` and `new DatabaseApplicationBuilder(options)` start with an empty configuration, as Web's do. The manager loads each provider as it is added, so a provider that fails to load fails the call that added it, not Build, and a provider added after Build loads into the running configuration; engine factories read the configuration once, at Build, so nothing is recomposed. The default sources' physical file system is allocated when the builder is created and owned by the application from Build, which disposes it after the configuration.
+`CreateBuilder(args)` adds the default configuration sources when it creates the builder, in order: optional `appsettings.json` and `appsettings.{Environment}.json` under the content root, environment variables prefixed `COHESION_CONFIG__`, then the caller's arguments, as Web adds them; later values win, and a provider the application adds afterwards wins over all of them. Environment uses the existing Hosting default; `Local` remains `Local`. JSON reload is disabled. `CreateBuilder()` and `new DatabaseApplicationBuilder(options)` start with an empty configuration, as Web's do. The manager loads each provider as it is added, so a provider that fails to load fails the call that added it, not Build, and a provider added after Build loads into the running configuration; engine factories read the configuration once, at Build, so nothing is recomposed. The default sources' physical file system is allocated when the builder is created and owned by the application from Build, which disposes it after the configuration.
 
-The content root `CreateBuilder(args)` reads those files under is the ambient resource's `ContentRootPath` when an enabled resource sets one, else `AppContext.BaseDirectory`: the overload creates fresh options and loads the sources before it returns, so a plain application cannot set the path for it. `Options.ContentRootPath`, like `Options.Environment`, applies to `new DatabaseApplicationBuilder(options)`, and only as the builder is created: both are read into `Environment` then, a later change to `Options` changes neither, and Build's options snapshot takes both from `Environment`, so the application's options and its context never disagree.
+The content root `CreateBuilder(args)` reads those files under is `AppContext.BaseDirectory`: the overload creates fresh options and loads the sources before it returns, so a plain application cannot set the path for it. `Options.ContentRootPath`, like `Options.Environment`, applies to `new DatabaseApplicationBuilder(options)`, and only as the builder is created: both are read into `Environment` then, a later change to `Options` changes neither, and Build's options snapshot takes both from `Environment`, so the application's options and its context never disagree.
 
 `Build` creates the application's one service provider and one logger factory. `Services` and `Logging` are the concrete builders, so a caller can still build them directly: `((IServiceProviderBuilder)builder.Services).Build()` yields a separate provider the application never uses, which creates its singletons a second time and is the caller's to dispose, and `builder.Logging.Build()` yields a separate logger factory, after which the application's own Build fails because the logging builder builds once. `WebApplicationBuilder` exposes the same two builders the same way; the deferred facades they replace (below) refused both calls.
 
@@ -81,19 +81,11 @@ A factory transfers a fresh product, and cleans up partial allocations if it thr
 
 Additional services start in registration order, then servers; shutdown drains servers first and stops services in reverse.
 
-## Command identity (#1421)
-
-The add-database handler validates command keys and tracks the databases it created with
-OrdinalIgnoreCase, matching DatabaseName identity. Replaying or deleting the declaration
-under a different case retains the same ownership; it cannot claim an unrelated existing
-database. The handshake policy for invalid database names is unchanged.
-
 ## Provisioning (B1 of the engine extensibility design)
 
-SQL completes an interrupted empty creation during its engine build and through the
-add-database command (#1158). The model validates the empty data/catalog state and
-finishes dbo and the format marker before publication; Hosting keeps the same model-neutral
-create call and command ownership checks. A catalog with user data and no marker is refused.
+SQL completes an interrupted empty creation during its engine build (#1158). The model validates
+the empty data/catalog state and finishes dbo and the format marker before publication. A catalog
+with user data and no marker is refused.
 
 Decision 49a defers populated-table work to SQL's engine-owned worker. Hosting reads the root
 `DatabaseInstance.Provisioning` observation without referencing SQL: operation/object,
@@ -118,18 +110,18 @@ owner decision 2026-10-11). Its explicit implementation forwards to the concrete
 token. `Program.cs` retains the concrete builder returned by `DatabaseApplication.CreateBuilder` when
 it needs cancellable construction; model factories still read `IDatabaseApplicationContext.BuildCancellationToken`.
 
-The module holds no schema knowledge and provisions nothing. A model's engine builder declares the databases its engine owns, and the engine's own build opens or creates each of them and completes inline provisioning before it returns (`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.2 and §5.3). The model verb's factory runs that build inside the application's `Build()`. Servers start when the application starts, after inline work and reservation of deferred tables. Deferred provisioning can continue while the server accepts work: affected-table admission waits for completion, while other tables and the admin endpoint remain available.
+The module holds no schema knowledge and provisions nothing. A model's engine builder declares the databases its engine owns, and the engine's own build opens or creates each of them and completes inline provisioning before it returns (`docs/programs/DATABASE_ENGINE_EXTENSIBILITY_DESIGN.md` §5.2 and §5.3). The model verb's factory runs that build inside the application's `Build()`. Servers start when the application starts, after inline work and reservation of deferred tables. Deferred provisioning can continue while the server accepts work: affected-table admission waits for completion, while other tables remain available.
 
 - **What was deleted** (owner decisions 49 to 54 of 2026-10-09): `Provision(engine, schema)` and `Provision(engineName, schema)`, `AddDatabase(engine, name, schema)` and `AddDatabase(engineName, name, schema)`, `Schemas`, their validators, and the internal `DefaultDatabaseProvisioner` host service that opened or created a database and applied a compiled schema in `StartAsync`, under `StartupTimeout`.
-- **The cost, revised by decision 49a:** open, recovery and cheap migration steps run in application Build, outside StartupTimeout. Build accepts a caller cancellation token. Populated-table data-scaling steps run on the engine-owned worker after Build has reserved their tables; the admin endpoint can then listen and report Degraded progress.
+- **The cost, revised by decision 49a:** open, recovery and cheap migration steps run in application Build, outside StartupTimeout. Build accepts a caller cancellation token. Populated-table data-scaling steps run on the engine-owned worker after Build has reserved their tables.
 - **Failed inline provisioning fails Build.** The model's build disposes its engine before it throws, and the application's Build rollback disposes every product built before it.
 - **Failed deferred provisioning takes only that database offline.** Build may already have returned. Invalid existing rows or another deferred-step failure retain the durable target for recovery, report `CS03104`, and change that database's health from Degraded to Unhealthy. The application's other databases continue serving; the existing reopen policy governs retry.
 
-`DatabaseApplication` remains `Host<DatabaseApplicationContext>` and its context remains `HostContext` / `IHealthContributor`. `Run`, `RunAsync`, and `AsService` use the Hosting extensions. Embedded applications can use engines immediately after Build, or Run to wait for host shutdown without a listener.
+`DatabaseApplication` remains `Host<DatabaseApplicationContext>` and its context remains `HostContext`. `Run`, `RunAsync`, and `AsService` use the Hosting extensions. Embedded applications can use engines immediately after Build, or Run to wait for host shutdown without a listener.
 
 The application permits one start lifecycle. Repeated Start while started is a host no-op; restart after Stop or a failed start is rejected through the protected start hook, including interface/Run paths. Stop before first Start does not consume the attempt. Concurrent Start/Stop/Dispose is unsupported; concurrent Dispose calls alone share one cleanup task. Dispose is idempotent, stops if needed, and attempts all application-owned roots after failures. Provider/configuration outlive products that depend on them. Sessions remain caller-owned and must finish before application disposal. Borrowed SQL/KeyValue servers may terminally close their listeners during Stop despite remaining caller-owned for disposal.
 
-Health observes distinct engines, states and workers from the frozen runtime registry. Existing enabled-resource admin endpoints, telemetry order and health aggregation remain compatible; this phase does not extend those systems.
+Health observes distinct engines, states and workers from the frozen runtime registry.
 
 Health also reports offline databases (#1243). A database whose journal or data fsync failed, whose journal's append buffer failed to drain (#1252), whose header slot write failed (#1268), or whose engine gave up on it after a background worker kept failing on it or its journal passed the engine's cap (owner decision 25) refuses every request until it is reopened, while its engine stays `Running`, so the engine state alone left health `Healthy`. The contribution reads each engine's `OfflineDatabases`, adds the databases the reopen service is still reopening (below), records `engine.N.offlineDatabaseCount`, `engine.N.offlineDatabases`, the total `offlineDatabaseCount` and `reopenOfflineDatabases`, and for each offline database `engine.N.offline.M.name`, its `cause` (the `StorageOfflineCause` name, read through `DatabaseEngine.GetOfflineError`) and, once a reopen failed, `reopenAttempts` and `reopenFault` (the exception type). It is `Unhealthy` while any database is offline, naming each as `engine/database (cause; n failed reopen attempt(s), last ExceptionType)`, and turns healthy again once every one is open. Like the worker faults, the output carries exception types only, never messages, because the endpoint is unauthenticated. Without the reopen service it turns healthy once the database is reopened (`OpenDatabaseAsync`, in process) or the process restarts and opens it again; an orchestrator that restarts an unhealthy process recovers it the way PostgreSQL's postmaster does after a `PANIC` (`restart_after_crash`, on by default, `src/backend/postmaster/postmaster.c:248`; the "reinitializing" restart at `3245-3252`). Hosting has no remote reopen command (an open owner decision, recorded with the #1243 review).
 
@@ -168,8 +160,6 @@ The module raises its own events through one internal event source, named for th
 | 10 | `ApplicationStartFailed` | Error | `hostId`, `exceptionType`, `exceptionMessage` |
 | 11 | `ApplicationStopped` | Informational | `hostId`, `durationMilliseconds` |
 | 12 | `ApplicationDisposeFailed` | Error | `hostId`, `failureCount`, `exceptionType`, `exceptionMessage` (first collected failure) |
-| 13 | `ResourceCommandHandled` | Informational | `kind`, `key`, `operation` (`Execute` or `Delete`) |
-| 14 | `ResourceCommandRejected` | Warning | `kind`, `key`, `operation`, `exceptionType` |
 | 15 | `AdminEndpointFailed` | Error | `endpoint` (scheme and authority only), `operation` (`Start`, `Stop`, `Dispose`), `exceptionType`, `exceptionMessage` |
 | 16 | `HealthDegraded` | Warning | `hostId`, `engineName`, `database`, `reason` (`Provisioning`/`Offline`), `cause` (offline cause or empty), `operation`, `objectName`, `position`, `stepCount`, `rowsProcessed`, `totalRows` |
 | 17 | `HealthRestored` | Informational | same as 16; the condition and last observed progress that cleared |
@@ -219,7 +209,7 @@ applications: Release adds zero bytes per check, and Debug allocates 16 fewer by
 removing the result local from the async state machine. Probe, provenance and logs are under
 `_out/provisioning-review`.
 
-Build reports only after the resource integration hook succeeds. The existing host lifecycle hooks
+The existing host lifecycle hooks
 report actual start/stop transitions; repeated start/stop no-ops write nothing. The shared host's
 `OnStartFailedAsync` hook (#1441, owner decision 2026-10-11) writes event 10 once per accepted failed start,
 after rollback and the host's transition to `Failed`, on direct start and complete-run paths. The
@@ -236,49 +226,30 @@ the propagated failure or a later start's record. A hook failure or reporting ti
 measure their own operation only while an Informational listener is attached; a listener attaching
 mid-operation sees zero duration. These are lifetime names, not EventSource Start/Stop activity pairs.
 Disposal reports its aggregate once, before throwing it; repeated disposal shares that same result.
-Commands report each handled delivery, including an idempotent no-op, or its rejection. Command
-kind/key are bounded to 256 characters (plus `...`), and rejection messages are omitted because
-they may quote payload data. Malformed JSON is also a rejection. With no listener, command methods
-return their original core directly; only enabled tracing enters a pooled async wrapper.
 Admin start/stop/disposal exceptions are recorded and rethrown unchanged; expected cancellation is
-silent. Disabled lifecycle, command and admin hooks allocate zero bytes and read no timestamp.
+silent. Disabled lifecycle and admin hooks allocate zero bytes and read no timestamp.
 
-No counters: the attempts are on the health contribution. The engine's own events (a worker's failures, the database it took offline) are on the root's `Assimalign.Cohesion.Database` source. `DatabaseHostingEventSourceTests` checks the name, strict manifest, real reopen and application transitions, commands, disposal and admin bind failure, exact payloads, and disabled-write allocations. The disabled-cost checks also drive real Execute
-and Delete command dispatch against an in-memory SQL engine, comparing each warmed path with its
-unchanged core baseline using the minimum of three allocation rounds. The test project disables
+No counters: the attempts are on the health contribution. The engine's own events (a worker's failures, the database it took offline) are on the root's `Assimalign.Cohesion.Database` source. `DatabaseHostingEventSourceTests` checks the name, strict manifest, real reopen and application transitions, disposal and admin bind failure, exact payloads, and disabled-write allocations. The test project disables
 tiered compilation in Debug and Release so paired measurements use one JIT tier under
 CPU pressure; time-based warmup cannot ensure the background compiler has finished.
-The internal handler exposes
-those cores only within its assembly and to its owning tests; no public diagnostics seam is added.
 
 The public static `CreateBuilder(name)` on each model engine provides deferred standalone composition and the bridge for hosting-aware engine factories that also need nested servers. It returns the model's sealed engine builder (`SqlDatabaseEngineBuilder`, …), whose `AddServer` and `AddWorker` factories receive the model's engine typed, since phase 4 of the concrete-types plan, and whose `Options` and `AddDatabase` are the same on every model since B3. Configuration and service reads still occur in the hosting callback, outside the model package.
 
 ## Standalone admin control plane (#1431)
 
-Without a gateway identity, the admin listener serves `/cohesion/v1` and every path below it only
+The admin listener serves `/cohesion/v1` and every path below it only
 for transport peers at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`. Other, absent, and non-IP
 remote endpoints receive 403; the status makes the development-only restriction explicit. Forwarded
-headers do not establish locality. The guard precedes Database's own namespaced health mappings,
-which otherwise short-circuit the shared Web.Hosting control-plane middleware.
+headers do not establish locality. The guard precedes Database's own namespaced health mappings.
 
 Bare `/healthz`, `/readyz`, and `/livez` remain open for orchestrators and load balancers. Loopback
-probes keep the Database health report and its server-accepting readiness gate. Gateway-managed
-behavior is unchanged, including its existing unauthenticated namespaced health aliases; other
-managed control-plane routes retain their credential checks.
+probes keep the Database health report and its server-accepting readiness gate.
 
 This is a behavioral breaking change from 10.0.0-preview.1 (owner decision 46, accepted on
 decision 15's preview terms): a reachable
 standalone admin listener previously accepted remote control-plane requests without credentials.
-Use a loopback connection for standalone development or a gateway identity for remote management.
 
 Model server factories supply `IDuplexConnectionListener` instances to their model options. Each server owns accepted `IDuplexConnection` sessions and closes them during its drain; listener disposal does not transfer connection ownership to the hosting module.
-
-## Database command key comparison (#1158)
-
-Command keys and ResolveEngine use OrdinalIgnoreCase for the engine segment, matching the
-existing command ownership dictionary. Database names use the same comparison required by
-the area name rule. An engine selected by a case variant therefore resolves consistently
-with key validation and replay ownership.
 
 ## Dedicated test actors (#1285)
 

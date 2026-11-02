@@ -20,11 +20,17 @@ namespace Assimalign.Cohesion.Web.RateLimiting.Tests;
 /// <summary>
 /// Minimal <see cref="IWebApplicationPipelineBuilder"/> that composes middleware in registration order —
 /// the same shape the real <c>WebApplication</c> builder produces — without pulling in the hosting/DI
-/// stack, so the middleware can be driven through its public verb.
+/// stack. Its application context lists what a test put in <see cref="Registered"/>, as
+/// <c>builder.Services.AddRateLimiting(...)</c> would, so <c>UseRateLimiting()</c> places that middleware
+/// when the pipeline is built.
 /// </summary>
 internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 {
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware = new();
+    private readonly TestApplicationContext _context = new();
+
+    /// <summary>Gets the middleware the application registered.</summary>
+    public List<IWebApplicationMiddleware> Registered => _context.Registered;
 
     public IWebApplicationPipelineBuilder Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
@@ -36,7 +42,7 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
         => Use(next => context => middleware.InvokeAsync(context, next));
 
     public IWebApplicationPipelineBuilder Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
-        => throw new NotSupportedException();
+        => Use(next => middleware.Invoke(_context, next));
 
     public IWebApplicationPipeline Build()
     {
@@ -57,6 +63,23 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 
         public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
             => _middleware.Invoke(context);
+    }
+
+    private sealed class TestApplicationContext : IWebApplicationContext
+    {
+        public List<IWebApplicationMiddleware> Registered { get; } = [];
+
+        public FileSystemPath? ContentRootPath => null;
+
+        public FileSystemPath? WebRootPath => null;
+
+        public IEnumerable<IWebApplicationMiddleware> Middleware => Registered;
+
+        public IEnumerable<IWebApplicationServer> Servers => [];
+
+        public IEnumerable<IHttpFeature> Features => [];
+
+        public IEnumerable<IWebApplicationSetting> Settings => [];
     }
 }
 

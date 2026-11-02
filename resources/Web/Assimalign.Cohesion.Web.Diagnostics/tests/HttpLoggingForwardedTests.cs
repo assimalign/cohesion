@@ -23,7 +23,7 @@ namespace Assimalign.Cohesion.Web.Diagnostics.Tests;
 
 /// <summary>
 /// Proxy-awareness coverage (#1050): access-log entries carry the effective client address, scheme,
-/// and host, with the transport peer kept beside a forwarded client. End-to-end cases register
+/// and host, with the transport peer kept beside a forwarded client. End-to-end cases place
 /// <c>UseHttpLogging</c> first and the real forwarded-headers middleware after it over
 /// <see cref="WebApplicationTestFactory"/> (whose in-memory peer is trusted as a local transport but
 /// has no IP); unit cases drive both middleware over <see cref="LoggingTestContext"/> with a plaintext
@@ -44,9 +44,12 @@ public class HttpLoggingForwardedTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services
+            .AddHttpLogging(logging => logging.UseLoggerFactory(loggerFactory))
+            .AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
         factory.Application
-            .UseHttpLogging(loggerFactory)
-            .UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded)
+            .UseHttpLogging()
+            .UseForwardedHeaders()
             .Use((context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -77,8 +80,9 @@ public class HttpLoggingForwardedTests
         using ILoggerFactory loggerFactory = new LoggerFactoryBuilder().AddProvider(recorded).Build();
 
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLoggerFactory(loggerFactory));
         factory.Application
-            .UseHttpLogging(loggerFactory)
+            .UseHttpLogging()
             .Use((context, next) =>
             {
                 context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -120,9 +124,12 @@ public class HttpLoggingForwardedTests
                 .Build();
 
             await using WebApplicationTestFactory factory = new();
+            factory.Builder.Services
+                .AddHttpLogging(logging => logging.UseLoggerFactory(loggerFactory))
+                .AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
             factory.Application
-                .UseHttpLogging(loggerFactory)
-                .UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded)
+                .UseHttpLogging()
+                .UseForwardedHeaders()
                 .Use((context, next) =>
                 {
                     context.Response.StatusCode = CohesionHttpStatusCode.Ok;
@@ -216,19 +223,13 @@ public class HttpLoggingForwardedTests
 
     private static (IWebApplicationMiddleware Logging, IWebApplicationMiddleware Forwarded) BuildPipeline(ILoggerFactory loggerFactory)
     {
-        TestPipelineBuilder builder = new();
+        IWebApplicationMiddleware logging = new HttpLoggingBuilder().UseLoggerFactory(loggerFactory).Build();
 
-        builder.UseHttpLogging(loggerFactory);
-        IWebApplicationMiddleware logging = builder.LastMiddleware.ShouldNotBeNull();
+        ForwardedHeadersBuilder forwarded = new();
+        forwarded.Options.Headers = ForwardedHeaderNames.All;
+        forwarded.Options.KnownProxies.Add(_trustedProxy.Address);
 
-        builder.UseForwardedHeaders(options =>
-        {
-            options.Headers = ForwardedHeaderNames.All;
-            options.KnownProxies.Add(_trustedProxy.Address);
-        });
-        IWebApplicationMiddleware forwarded = builder.LastMiddleware.ShouldNotBeNull();
-
-        return (logging, forwarded);
+        return (logging, forwarded.Build());
     }
 
     private static Task<HttpResponseMessage> SendProxiedAsync(HttpClient client, string uri, CancellationToken cancellationToken)

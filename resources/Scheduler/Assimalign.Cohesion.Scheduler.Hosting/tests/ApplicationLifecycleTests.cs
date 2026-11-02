@@ -1,12 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Net.Sockets;
-using System.Reflection;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -14,7 +8,6 @@ using Shouldly;
 using Xunit;
 
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Scheduler;
 using Assimalign.Cohesion.Scheduler.Timer;
 
@@ -257,78 +250,6 @@ public class ApplicationLifecycleTests
         error.Message.ShouldContain("declared with AddJob", Case.Sensitive);
     }
 
-    [Fact(DisplayName = "Cohesion Test [Scheduler.Hosting] - Control plane: serves probes and authenticated management")]
-    public async Task ControlPlane_WithAmbientHttpEndpoint_ShouldServeResourceRoutes()
-    {
-        int port = GetAvailablePort();
-        var endpoint = new Uri($"http://127.0.0.1:{port}");
-        using var identity = new TestBootstrapIdentity("tests", "test-gateway");
-        string credential = identity.Issue("scheduler");
-        Assembly entryAssembly = typeof(ApplicationLifecycleTests).Assembly;
-        ResourceRuntime.RegisterControlPlane(
-            entryAssembly,
-            static () => ResourceControlPlane.Create());
-        var untrustedResourceContext = new ResourceContext(
-            applicationName: "tests",
-            resourceName: "scheduler",
-            environmentName: "Development",
-            gatewayName: null,
-            contentRootPath: null,
-            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
-            mounts: null,
-            settings: null,
-            references: null,
-            bootstrapCredential: ReadOnlyMemory<byte>.Empty,
-            applicationTrustKey: identity.PublicKey,
-            ambientValues: null);
-        using (ResourceRuntime.CreateScope(untrustedResourceContext))
-        {
-            SchedulerApplicationBuilder untrustedBuilder = CreateResourceBuilder(entryAssembly);
-            InvalidOperationException error = Should.Throw<InvalidOperationException>(
-                () => untrustedBuilder.Build());
-            error.Message.ShouldContain("gateway identity", Case.Insensitive);
-        }
-
-        var resourceContext = new ResourceContext(
-            applicationName: "tests",
-            resourceName: "scheduler",
-            environmentName: "Development",
-            gatewayName: "test-gateway",
-            contentRootPath: null,
-            endpoints: new Dictionary<string, Uri> { ["http"] = endpoint },
-            mounts: null,
-            settings: null,
-            references: null,
-            bootstrapCredential: Encoding.UTF8.GetBytes(credential),
-            applicationTrustKey: identity.PublicKey,
-            ambientValues: null);
-
-        using (ResourceRuntime.CreateScope(resourceContext))
-        {
-            SchedulerApplicationBuilder builder = CreateResourceBuilder(entryAssembly);
-            await using SchedulerApplication application = builder.Build();
-            await ((IHost)application).StartAsync();
-            using var client = new HttpClient { BaseAddress = endpoint };
-
-            HttpResponseMessage health = await client.GetAsync("/healthz");
-            HttpResponseMessage unauthorized = await client.GetAsync("/cohesion/v1/endpoints");
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-                "Bearer",
-                credential);
-            HttpResponseMessage endpoints = await client.GetAsync("/cohesion/v1/endpoints");
-            HttpResponseMessage stop = await client.PostAsync("/cohesion/v1/stop", content: null);
-
-            health.StatusCode.ShouldBe(HttpStatusCode.OK);
-            unauthorized.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-            endpoints.StatusCode.ShouldBe(HttpStatusCode.OK);
-            string endpointDocument = await endpoints.Content.ReadAsStringAsync();
-            endpointDocument.ShouldContain(endpoint.ToEndpointString());
-            endpointDocument.ShouldNotContain(endpoint.ToString());
-            stop.StatusCode.ShouldBe(HttpStatusCode.Accepted);
-            await ((IHost)application).StopAsync();
-        }
-    }
-
     private sealed class RecordingService : IHostService
     {
         private readonly string _name;
@@ -435,29 +356,5 @@ public class ApplicationLifecycleTests
 
         public Task RunAsync(CancellationToken cancellationToken = default) =>
             _run?.Invoke(cancellationToken) ?? Task.CompletedTask;
-    }
-
-    private static SchedulerApplicationBuilder CreateResourceBuilder(Assembly resourceAssembly)
-    {
-        MethodInfo createBuilder = typeof(SchedulerApplication).GetMethod(
-            "CreateBuilder",
-            BindingFlags.Static | BindingFlags.NonPublic,
-            binder: null,
-            [typeof(string[]), typeof(Assembly)],
-            modifiers: null)
-            ?? throw new InvalidOperationException("The internal resource builder overload was not found.");
-        return (SchedulerApplicationBuilder)(createBuilder.Invoke(
-            obj: null,
-            parameters: [Array.Empty<string>(), resourceAssembly])
-            ?? throw new InvalidOperationException("The internal resource builder returned null."));
-    }
-
-    private static int GetAvailablePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 }

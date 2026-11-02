@@ -69,11 +69,12 @@ public class RequestBodyCancellationTests
                 options.UseHttp2(memory);
             }
         });
-        factory.Application.UseErrorHandling(options => options.OnException = (_, _) =>
+        factory.Builder.Services.AddErrorHandling(errors => errors.Options.OnException = (_, _) =>
         {
             Interlocked.Increment(ref exceptionCallbacks);
             return ValueTask.CompletedTask;
         });
+        factory.Application.UseErrorHandling();
         factory.Application.Use(async (context, next) =>
         {
             IWebClientFaultFeature? clientFault = context.Features.Get<IWebClientFaultFeature>();

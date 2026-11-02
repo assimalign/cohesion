@@ -41,18 +41,20 @@ public class WebSocketOptionsTests
         options.KeepAliveTimeout.ShouldBe(TimeSpan.FromSeconds(10));
     }
 
-    [Theory(DisplayName = "Cohesion Test [Web.WebSockets] - UseWebSockets: An allowed origin that is not a serialized origin fails when the middleware is added")]
+    [Theory(DisplayName = "Cohesion Test [Web.WebSockets] - AddWebSockets: An allowed origin that is not a serialized origin fails when the middleware is registered")]
     [InlineData("*")]
     [InlineData("null")]
     [InlineData("https://app.example/")]
     [InlineData("app.example")]
-    public void UseWebSockets_InvalidAllowedOrigin_ThrowsArgumentException(string origin)
+    public void AddWebSockets_InvalidAllowedOrigin_ThrowsArgumentException(string origin)
     {
         // Arrange
         TestPipelineBuilder builder = new();
 
-        // Act / Assert
-        Should.Throw<ArgumentException>(() => builder.UseWebSockets(options => options.AllowedOrigins.Add(origin)));
+        // Act / Assert — the build that registration runs throws, so nothing is registered.
+        Should.Throw<ArgumentException>(() => builder.Registered.Add(
+            TestPipelineBuilder.BuildWebSockets(options => options.AllowedOrigins.Add(origin))));
+        builder.Registered.ShouldBeEmpty();
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.WebSockets] - UseWebSockets: A null builder throws")]

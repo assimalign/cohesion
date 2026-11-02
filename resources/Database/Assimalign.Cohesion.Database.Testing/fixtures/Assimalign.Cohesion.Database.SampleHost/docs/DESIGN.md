@@ -13,9 +13,9 @@ and `sample.schema.sha256`. At run time the engine's build, inside application `
 the same declaration, then creates or opens `sample` and provisions it before the server is
 attached to a running host, so the server never accepts a connection ahead of the schema.
 
-The fixture is owned by `Database.Testing`; its tests exercise the generated resource manifest,
-control plane, SQL round trips, restart durability, and the parity of the SDK hash with the hash
-the running host recorded.
+The fixture is owned by `Database.Testing`. The retired resource integration was removed on
+2026-10-31 with the application-model restart (assimalign/cohesion#1759), and the area's resource
+integration returns as `Assimalign.Cohesion.Database.Hosting.ApplicationModel`.
 
 The sequence below shows the build and run of the fixture.
 

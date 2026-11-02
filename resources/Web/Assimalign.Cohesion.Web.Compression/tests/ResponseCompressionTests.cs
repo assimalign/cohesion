@@ -240,6 +240,47 @@ public class ResponseCompressionTests
         response.Headers.Vary.ShouldContain("Accept-Encoding");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.Compression] - E2E: The threshold AddResponseCompression registers is the one UseResponseCompression applies")]
+    public async Task AddResponseCompression_ZeroThreshold_ShouldCompressASmallBody()
+    {
+        // Arrange — the generated verb registers the configured middleware; UseResponseCompression() places
+        // it. The default 1 KiB threshold would leave this body uncompressed.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddResponseCompression(compression => compression.Options.MinimumResponseSizeBytes = 0);
+        factory.Application.UseResponseCompression();
+        WriteJson(factory, CompressionPayloads.SmallJson);
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await SendAsync(client, "gzip", cancellation.Token);
+        byte[] body = await response.Content.ReadAsByteArrayAsync(cancellation.Token);
+
+        // Assert
+        response.Content.Headers.ContentEncoding.ShouldContain("gzip");
+        CompressionPayloads.Utf8(CompressionPayloads.GzipDecompress(body)).ShouldBe(CompressionPayloads.SmallJson);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Compression] - E2E: Codings configured through the provider overload of AddResponseCompression should be the ones offered")]
+    public async Task AddResponseCompression_ProviderCallback_ShouldOfferTheConfiguredCoding()
+    {
+        // Arrange — Brotli switched off: a client accepting both gets gzip, not the default Brotli.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddResponseCompression((services, compression) => compression.Options.EnableBrotli = false);
+        factory.Application.UseResponseCompression();
+        WriteJson(factory, CompressionPayloads.LargeJson);
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await SendAsync(client, "gzip, br", cancellation.Token);
+        byte[] body = await response.Content.ReadAsByteArrayAsync(cancellation.Token);
+
+        // Assert
+        response.Content.Headers.ContentEncoding.ShouldContain("gzip");
+        CompressionPayloads.Utf8(CompressionPayloads.GzipDecompress(body)).ShouldBe(CompressionPayloads.LargeJson);
+    }
+
     private static void WriteJson(WebApplicationTestFactory factory, string json)
     {
         factory.Application.Use(async (context, next) =>

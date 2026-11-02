@@ -10,10 +10,8 @@ namespace Assimalign.Cohesion.Web.Health;
 /// The builder is the single composition seam: registrations are added while the host is being
 /// built and the check set is frozen when <see cref="Build"/> is called. There is no runtime
 /// mutation surface — a running host cannot add or remove checks. Application and resource authors
-/// construct a <see cref="HealthChecksBuilder"/>, then register
-/// <see cref="IHealthCheck"/> implementations, inline probes, or
-/// host health contributor instances through the adapter in <c>Assimalign.Cohesion.Web.Hosting</c>,
-/// using the <c>Assimalign.Cohesion.Web.Hosting.Health</c> namespace.
+/// construct a <see cref="HealthChecksBuilder"/>, then register <see cref="IHealthCheck"/>
+/// implementations or inline probes.
 /// </remarks>
 public interface IHealthChecksBuilder
 {

@@ -1,12 +1,8 @@
 using System;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
-using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.NotificationHub;
 using Assimalign.Cohesion.NotificationHub.Hosting.Internal;
 
@@ -25,12 +21,10 @@ namespace Assimalign.Cohesion.NotificationHub.Hosting;
 public sealed class NotificationHubApplicationBuilder : INotificationHubApplicationBuilder
 {
     private readonly NotificationHubApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
 
     private bool _isBuilt;
 
-    internal NotificationHubApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal NotificationHubApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -39,24 +33,8 @@ public sealed class NotificationHubApplicationBuilder : INotificationHubApplicat
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered NotificationHub control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
-        }
 
-        _context = new NotificationHubApplicationContext(_resourceContext);
+        _context = new NotificationHubApplicationContext();
     }
 
     /// <summary>
@@ -121,19 +99,6 @@ public sealed class NotificationHubApplicationBuilder : INotificationHubApplicat
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The notification hub application has already been built.");
 
-        if (_controlPlane is not null)
-        {
-            _controlPlane.AddHealthContributor(_context);
-            if (_resourceContext!.Endpoints.TryGetValue("http", out Uri? endpoint))
-            {
-                _controlPlane.ObserveEndpoint("http", endpoint);
-
-                // Registered after every AddService call, so the endpoint starts last and stops first.
-                Services.AddSingleton<IHostService>(_ => new NotificationHubControlPlaneEndpointService(
-                    endpoint, _controlPlane, _resourceContext, _context));
-            }
-        }
-
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<INotificationHubApplicationContext>(_context);
 
@@ -151,13 +116,7 @@ public sealed class NotificationHubApplicationBuilder : INotificationHubApplicat
         {
             _context.ResolveHostedServices();
 
-            var application = new NotificationHubApplication(new NotificationHubApplicationOptions(), _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
+            return new NotificationHubApplication(new NotificationHubApplicationOptions(), _context);
         }
         catch (Exception exception)
         {

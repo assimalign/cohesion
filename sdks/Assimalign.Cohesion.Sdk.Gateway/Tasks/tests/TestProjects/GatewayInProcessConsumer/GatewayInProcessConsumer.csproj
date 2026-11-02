@@ -1,0 +1,9 @@
+<Project Sdk="Assimalign.Cohesion.Sdk.Gateway">
+  <!-- An in-process gateway references the resource programs it runs. -->
+  <PropertyGroup>
+    <RootNamespace>GatewayInProcessConsumer</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GatewayWebResource\GatewayWebResource.csproj" />
+  </ItemGroup>
+</Project>

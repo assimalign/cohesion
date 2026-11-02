@@ -11,7 +11,7 @@ Rules specific to the Database resource area. The concrete-first deviation appli
 projects under `resources/Database/`. This file also loads for `Sdk.Database` and Database Studio
 because they bind the area's type names (the extractor's metadata-name strings, Studio's engine
 casts). Code in those projects keeps the general rules, interface-first included. The rules here
-layer on `resource-areas.md`, whose hosting-isolation rules (COHRES001–004, COHAM001) apply
+layer on `resource-areas.md`, whose hosting-isolation rules (COHRES001–004) apply
 here unchanged. The plan that moves the existing code onto these rules, phase by phase, is
 `docs/programs/DATABASE_CONCRETE_TYPES_PLAN.md` (epic #1255, phases #1256–#1264); the owner
 decision is O34a in `docs/DEVELOPER_EXPERIENCE_DESIGN.md`.
@@ -45,7 +45,7 @@ phase lands, its existing interfaces stay, but nothing new is built on them.
 
 ## Where interfaces survive
 
-Exactly five. After phase 8, `rg "public interface" resources/Database --glob '**/src/**'` lists
+Exactly four. After phase 8, `rg "public interface" resources/Database --glob '**/src/**'` lists
 only these.
 
 | Interface | Project | Why it stays |
@@ -53,7 +53,6 @@ only these.
 | `IDatabaseApplication` | Database (root) | The cross-area composition seam fixed by O34 for all 18 areas. `DatabaseApplication` already derives from `Host<DatabaseApplicationContext>`, and C# has single inheritance. |
 | `IDatabaseApplicationBuilder` | Database (root) | Same seam. Root verbs are explicit-interface shims (`resource-areas.md`). Only its signatures are retyped: `AddEngine(DatabaseEngine)` and `AddEngine(string name, Func<IDatabaseApplicationContext, DatabaseEngine>)`, whose name the hosting layer reserves at registration (owner decision 52 of 2026-10-09). |
 | `IDatabaseApplicationContext` | Database (root) | Same seam. `DatabaseApplicationContext` already derives from `HostContext`. |
-| `IDatabaseResourceDescriptor` | Database.ApplicationModel | The 17-area `I<Area>ResourceDescriptor` pattern. It extends the library-owned `IResourceCommandDescriptor`. It is orchestration, not an engine model. |
 | `IDatabaseApplicationTestFactory` | Database.Testing | Parity with Web.Testing's `IWebApplicationTestFactory`. It is the test-harness surface, not an engine model. |
 
 Hosting-library contracts the area implements (`IHostService`, `IHealthContributor`,

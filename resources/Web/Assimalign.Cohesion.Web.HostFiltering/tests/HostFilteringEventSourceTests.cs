@@ -56,6 +56,11 @@ public sealed class HostFilteringEventSourceTests
         using EventSourceRecorder recorder = new(source, EventLevel.Verbose);
         using CancellationTokenSource cancellation = new(TimeSpan.FromSeconds(30));
         await using WebApplicationTestFactory factory = new();
+        if (forwarded)
+        {
+            factory.Builder.Services.AddForwardedHeaders(forwardedHeaders => forwardedHeaders.Options.Headers = ForwardedHeaderNames.XForwarded);
+        }
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
         string requestId = string.Empty;
         factory.Application.Use((context, next) =>
         {
@@ -64,9 +69,9 @@ public sealed class HostFilteringEventSourceTests
         });
         if (forwarded)
         {
-            factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+            factory.Application.UseForwardedHeaders();
         }
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        factory.Application.UseHostFiltering();
         bool reachedNext = false;
         factory.Application.Use((context, next) =>
         {
@@ -128,6 +133,7 @@ public sealed class HostFilteringEventSourceTests
         InMemoryConnectionListener listener = new();
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
         builder.Server.UseServer(options => options.UseHttp1(listener));
+        builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
         WebApplication application = builder.Build();
         string requestId = string.Empty;
         application.Use((context, next) =>
@@ -135,7 +141,7 @@ public sealed class HostFilteringEventSourceTests
             requestId = context.Features.Get<IWebRequestIdFeature>()!.RequestId.ToHexString();
             return next(context);
         });
-        application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        application.UseHostFiltering();
         IWebApplicationServer server = application.Context.Servers.Single();
         await server.StartAsync(cancellation.Token);
         long before = HostFilteringEventSource.Log.RejectedRequests;
@@ -171,13 +177,14 @@ public sealed class HostFilteringEventSourceTests
         // Arrange
         using EventSourceRecorder recorder = new(HostFilteringEventSource.Log, EventLevel.Verbose);
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
         string requestId = string.Empty;
         factory.Application.Use((context, next) =>
         {
             requestId = context.Features.Get<IWebRequestIdFeature>()!.RequestId.ToHexString();
             return next(context);
         });
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        factory.Application.UseHostFiltering();
         factory.Application.Use((context, next) => Task.CompletedTask);
         using HttpClient client = factory.CreateClient();
         long before = HostFilteringEventSource.Log.RejectedRequests;

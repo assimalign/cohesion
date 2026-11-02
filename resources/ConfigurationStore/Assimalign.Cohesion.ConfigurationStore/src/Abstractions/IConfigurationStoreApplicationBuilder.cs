@@ -12,7 +12,7 @@ public interface IConfigurationStoreApplicationBuilder
     /// </summary>
     /// <remarks>
     /// Declared values seed a namespace only when no durable namespace document exists.
-    /// Later command mutations therefore survive application restarts.
+    /// A durable document therefore survives a restart with a changed declaration.
     /// </remarks>
     /// <param name="name">The namespace name.</param>
     /// <param name="configure">The callback that declares initial key/value entries.</param>

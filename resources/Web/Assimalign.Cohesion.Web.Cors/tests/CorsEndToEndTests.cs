@@ -42,9 +42,10 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.AllowAnyOrigin()));
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin()));
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Get, "/items", Ok());
 
         using HttpClient client = factory.CreateClient();
@@ -66,9 +67,10 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Get, "/items", Ok());
 
         using HttpClient client = factory.CreateClient();
@@ -89,10 +91,11 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
         int invocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Get, "/items", Ok(() => Interlocked.Increment(ref invocations)));
 
         using HttpClient client = factory.CreateClient();
@@ -147,11 +150,12 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
-
-        IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options
+        factory.Builder.Services.AddCors(cors => cors.Options
             .AddDefaultPolicy(policy => policy.WithOrigins(App))
             .AddPolicy("partners", policy => policy.WithOrigins(Other)));
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Get, "/partners", Ok()).RequireCors("partners");
         routes.Map(CohesionHttpMethod.Get, "/items", Ok());
 
@@ -173,11 +177,12 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
-
-        IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options
+        factory.Builder.Services.AddCors(cors => cors.Options
             .AddPolicy("group", policy => policy.WithOrigins(App))
             .AddPolicy("route", policy => policy.WithOrigins(Other)));
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        factory.Application.UseCors();
 
         IRouterGroupBuilder api = routes.MapGroup("/api");
         api.Map(CohesionHttpMethod.Get, "special", Ok()).RequireCors("route");
@@ -206,10 +211,11 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod()));
         int invocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod()));
+        factory.Application.UseCors();
         IRouterGroupBuilder admin = routes.MapGroup("/admin").RequireCors(policy => policy.AllowAnyOrigin().AllowAnyMethod());
         admin.Map(CohesionHttpMethod.Delete, "cache", Ok(() => Interlocked.Increment(ref invocations))).DisableCors();
 
@@ -234,12 +240,13 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
-
-        IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy
             .WithOrigins(App)
             .WithMethods("PUT")
             .WithHeaders("Content-Type", "X-Request-Id")));
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        factory.Application.UseCors();
         routes.Map([CohesionHttpMethod.Put, CohesionHttpMethod.Patch], "/items/{id:int}", Ok());
 
         using HttpClient client = factory.CreateClient();
@@ -271,13 +278,14 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
-
-        IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy
             .WithOrigins(App)
             .WithMethods("PUT")
             .WithExposedHeaders("ETag", "X-Total-Count")
             .SetPreflightMaxAge(TimeSpan.FromHours(1))));
+
+        IRouterBuilder routes = factory.Application.UseRouting();
+        factory.Application.UseCors();
         routes.Map([CohesionHttpMethod.Get, CohesionHttpMethod.Put], "/items", Ok());
 
         using HttpClient client = factory.CreateClient();
@@ -351,10 +359,11 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod()));
         int optionsInvocations = 0;
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin().AllowAnyMethod()));
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Options, "/items", Ok(() => Interlocked.Increment(ref optionsInvocations)));
         routes.Map(CohesionHttpMethod.Delete, "/items", Ok()).RequireCors(policy => policy.WithOrigins(Other).WithMethods("DELETE"));
 
@@ -403,11 +412,12 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.AllowAnyOrigin()));
         InvalidOperationException? dispatchFailure = null;
         int invocations = 0;
 
         ObserveDispatchFailures(factory, exception => dispatchFailure = exception);
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.AllowAnyOrigin()));
+        factory.Application.UseCors();
 
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/private", Ok(() => Interlocked.Increment(ref invocations))).DisableCors();
@@ -464,9 +474,10 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Application.UseCors();
         factory.Application.UseErrorHandling();
         routes.Map(CohesionHttpMethod.Get, "/boom", new RouterRouteHandler(_ => throw new InvalidOperationException("fault")));
 
@@ -489,9 +500,10 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
         factory.Application.UseErrorHandling();
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Get, "/boom", new RouterRouteHandler(_ => throw new InvalidOperationException("fault")));
         using HttpClient client = factory.CreateClient();
 
@@ -513,7 +525,8 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App)));
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App)));
+        factory.Application.UseCors();
         factory.Application.Use(async (context, next) =>
         {
             context.Response.Headers[HttpHeaderKey.AccessControlAllowOrigin] = "*";
@@ -541,7 +554,8 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.Interceptors.Add(new HttpResponseStreamingInterceptor()));
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Application.UseCors();
         int calls = 0;
         HttpErrorCode? refusalCode = null;
         factory.Application.Use(async (context, next) =>
@@ -585,7 +599,8 @@ public class CorsEndToEndTests
         // the refused response to prepare its buffered 500.
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App).AllowCredentials()));
+        factory.Application.UseCors();
         int calls = 0;
         factory.Application.Use((context, next) =>
         {
@@ -627,9 +642,10 @@ public class CorsEndToEndTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = WebApplicationTestProtocol.Http2 });
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => cors.Options.AddDefaultPolicy(policy => policy.WithOrigins(App).WithMethods("PUT").WithHeaders("Content-Type")));
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(options => options.AddDefaultPolicy(policy => policy.WithOrigins(App).WithMethods("PUT").WithHeaders("Content-Type")));
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Put, "/items", Ok());
 
         using HttpClient client = factory.CreateClient();
@@ -654,9 +670,10 @@ public class CorsEndToEndTests
     {
         WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddCors(cors => configure(cors.Options));
 
         IRouterBuilder routes = factory.Application.UseRouting();
-        factory.Application.UseCors(configure);
+        factory.Application.UseCors();
         routes.Map(CohesionHttpMethod.Get, "/items", Ok());
 
         return factory;

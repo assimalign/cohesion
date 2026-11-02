@@ -185,20 +185,29 @@ public class HostTests
         host.Context.State.ShouldBe(HostState.Stopped);
     }
 
-    [Fact(DisplayName = DisplayPrefix + "Pre-cancelled run notifies the normal observer sequence")]
-    public async Task RunAsync_WithPreCancelledToken_ShouldNotifyObserver()
+    [Fact(DisplayName = DisplayPrefix + "Pre-cancelled run runs the complete lifecycle once")]
+    public async Task RunAsync_WithPreCancelledToken_ShouldRunTheLifecycleOnce()
     {
         // Arrange
-        var runner = new RecordingRunObserver();
-        var host = new TestHost(new TestHostOptions());
+        var events = new List<TestLifecycleService.Lifecycle>();
+        var options = new TestHostOptions();
+        options.HostedServices.Add(new TestLifecycleService(events.Add));
+        var host = new TestHost(options);
         await using IHost lifetime = host;
-        host.Context.Runner = runner;
 
         // Act
         await host.RunAsync(new CancellationToken(canceled: true)).WaitAsync(TimeSpan.FromSeconds(5));
 
         // Assert
-        runner.Events.ShouldBe(new[] { "Started", "Stopping", "Stopped" });
+        events.ShouldBe(new[]
+        {
+            TestLifecycleService.Lifecycle.Starting,
+            TestLifecycleService.Lifecycle.Start,
+            TestLifecycleService.Lifecycle.Started,
+            TestLifecycleService.Lifecycle.Stopping,
+            TestLifecycleService.Lifecycle.Stop,
+            TestLifecycleService.Lifecycle.Stopped,
+        });
         host.Context.State.ShouldBe(HostState.Stopped);
     }
 

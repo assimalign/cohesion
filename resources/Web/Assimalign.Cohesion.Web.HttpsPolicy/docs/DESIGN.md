@@ -312,6 +312,18 @@ member *name* is unchanged; only the wire value moved. Blast radius was one line
 the misspelled string appeared nowhere else, and the HTTP/2 HPACK / HTTP/3 QPACK
 static tables already carried the correct lowercase `strict-transport-security`.
 
+## Registration: `Add` configures, `Use` places (2026-10-28)
+
+`builder.Services.AddHttpsRedirection(redirection => ...)` and `builder.Services.AddHsts(hsts => ...)`
+are generated component integrations over `HttpsRedirectionBuilder` and `HstsBuilder`. Each builds its
+middleware once, which validates the options (the status, port, `max-age`, and excluded-host patterns),
+and registers it as an `IWebApplicationMiddleware`. `UseHttpsRedirection()` and `UseHsts()` take no
+arguments: each places the last registration of its middleware it finds in
+`IWebApplicationContext.Middleware`, or one with the defaults when the application registered none.
+Nothing is registered per pipeline branch, so placing a verb twice places the same instance.
+*Rejected:* configuration callbacks on the pipeline verbs, the former shape; they split a feature's
+settings across two call sites and keep them out of the registrations the host enumerates.
+
 ## Ordering / composition summary
 
 The pipeline order behind a TLS-terminating proxy, drawn as the exchange it

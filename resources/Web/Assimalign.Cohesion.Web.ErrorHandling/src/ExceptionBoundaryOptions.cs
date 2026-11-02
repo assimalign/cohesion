@@ -6,10 +6,11 @@ using Assimalign.Cohesion.Http;
 namespace Assimalign.Cohesion.Web.ErrorHandling;
 
 /// <summary>
-/// Builder-time configuration for the exception-boundary middleware (<c>UseErrorHandling</c>): the
-/// developer-detail toggle, the fault-observation hook, and the diagnostics-suppression predicate.
-/// Everything here is captured once when the pipeline is composed, so the boundary resolves nothing
-/// from a service provider at request time.
+/// Configuration of the exception boundary <c>UseErrorHandling()</c> places, set where the
+/// <c>OnError</c> hook is registered (<see cref="ErrorHandlingBuilder.Options"/> in
+/// <c>builder.Services.AddErrorHandling(errors =&gt; ...)</c>): the developer-detail toggle, the
+/// fault-observation hook, and the diagnostics-suppression predicate. Everything here is copied once,
+/// when the hook is built, so the boundary resolves nothing from a service provider at request time.
 /// </summary>
 public sealed class ExceptionBoundaryOptions
 {

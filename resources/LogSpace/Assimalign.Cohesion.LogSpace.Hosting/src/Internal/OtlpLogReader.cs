@@ -8,7 +8,7 @@ namespace Assimalign.Cohesion.LogSpace.Hosting.Internal;
 
 internal static class OtlpLogReader
 {
-    internal static List<StoredLog> Read(JsonElement root, string? authenticatedResource)
+    internal static List<StoredLog> Read(JsonElement root)
     {
         var result = new List<StoredLog>();
         if (!root.TryGetProperty("resourceLogs", out JsonElement groups)) { return result; }
@@ -16,9 +16,7 @@ internal static class OtlpLogReader
         {
             Dictionary<string, JsonElement> resourceAttributes = resourceLogs.TryGetProperty("resource", out JsonElement resource)
                 ? ReadAttributes(resource) : new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-            string service = resourceAttributes.TryGetValue("service.name", out var name) ? name.ToString() : authenticatedResource ?? string.Empty;
-            if (authenticatedResource is not null && service != authenticatedResource)
-            { throw new UnauthorizedAccessException("service.name must match the authenticated emitting resource."); }
+            string service = resourceAttributes.TryGetValue("service.name", out var name) ? name.ToString() : string.Empty;
             if (!resourceLogs.TryGetProperty("scopeLogs", out JsonElement scopes)) { continue; }
             foreach (JsonElement scope in scopes.EnumerateArray())
             {

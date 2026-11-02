@@ -3,22 +3,21 @@
 Cohesion ships a family of MSBuild SDKs: one per resource area and one for
 application gateways. They chain through a common base
 (`Assimalign.Cohesion.Sdk`), which itself chains through `Microsoft.NET.Sdk`.
-Resource manifests, generated resource APIs, and images live in the auxiliary
-`Assimalign.Cohesion.Sdk.ApplicationModel` package, imported by enabled area SDKs.
+None of them generates application-model sources: a resource makes itself a
+managed instance in its `Program.cs`, and a gateway declares its model in its own.
 Pick the SDK that matches what you're building:
 
 | SDK | Use when… |
 | --- | --- |
 | `Assimalign.Cohesion.Sdk`          | Cohesion library, or an explicitly configured executable with no resource-area behavior. |
-| `Assimalign.Cohesion.Sdk.ApplicationModel` | Resource manifest, generated resource surface, and image tooling for area-SDK authors. |
 | `Assimalign.Cohesion.Sdk.Web`      | HTTP / web-surface application. [Design and NativeAOT diagnostics](Assimalign.Cohesion.Sdk.Web/Tasks/docs/DESIGN.md). |
 | `Assimalign.Cohesion.Sdk.Database` | Database-resident application (migrations, seeded schemas, etc.). |
-| `Assimalign.Cohesion.Sdk.Gateway`  | Application gateway generated from resource manifests and contributed providers. |
+| `Assimalign.Cohesion.Sdk.Gateway`  | Application gateway: an executable that declares an application model and runs it on a platform. |
 
 Every resource area under `resources/` has a matching SDK (`Sdk.ApiManager`,
 `Sdk.ConfigurationStore`, `Sdk.EventHub`, …). `Sdk.Gateway` is deliberately not
-a resource-area SDK: it is the NuGet-only orchestration composition root and has
-no matching `Assimalign.Cohesion.App.Gateway` framework.
+a resource-area SDK: it references one NuGet package and has no matching
+`Assimalign.Cohesion.App.Gateway` framework.
 
 ## Consumption
 
@@ -37,8 +36,8 @@ project body still wins. All of them supply `TargetFramework=net10.0`,
 `Nullable=enable`, and `IsAotCompatible=true`. Defaults are conditional on empty
 values, so `-p:` properties and later consumer assignments are honored. Resource
 executables do not multi-target, and a language-version override also requires
-overriding `EnablePreviewFeatures`. Gateway remains an executable independently of
-the area-SDK marker. See the base SDK's
+overriding `EnablePreviewFeatures`. Gateway defaults to an executable without the
+area-SDK marker, so it stays framework-dependent. See the base SDK's
 [project defaults](./Assimalign.Cohesion.Sdk/Tasks/docs/DESIGN.md#project-defaults-and-evaluation)
 for import ordering and override constraints.
 
@@ -58,10 +57,6 @@ minimum pin set is:
     }
 }
 ```
-
-No ApplicationModel SDK pin is required. An enabled area SDK imports it with
-`Version="$(CohesionVersion)"`, where the value was frozen into the importing SDK
-at pack time. Gateway uses the same exact-version import unconditionally.
 
 The SDK is resolved by NuGet's built-in MSBuild SDK resolver — the same machinery
 that handles `Microsoft.NET.Sdk.Web`, `Microsoft.NET.Sdk.Worker`, etc. Works in
@@ -93,84 +88,49 @@ property is unset, no settings source is generated or compiled. See the base
 SDK [overview](./Assimalign.Cohesion.Sdk/Tasks/docs/OVERVIEW.md) and
 [design](./Assimalign.Cohesion.Sdk/Tasks/docs/DESIGN.md).
 
-## Application-model SDK boundary
+## Managed resources
 
-The base SDK defaults `CohesionApplicationModel` to `disabled` and contains no
-resource, manifest, certificate, image, or orchestration targets. Area SDKs
-conditionally import `Assimalign.Cohesion.Sdk.ApplicationModel` after the project
-body when the property is `enabled`; this timing sees the consumer's choice while
-still placing enabled-resource host defaults before `Microsoft.NET.Sdk.targets`.
-A base-only project that enables the property fails with COHSDK011 and directs the
-author to an area SDK or an explicit ApplicationModel SDK import.
+No SDK has an application-model switch, and no build step generates a manifest or a
+resource accessor. An application of an area makes itself a managed resource in its
+`Program.cs`, through the area's `Assimalign.Cohesion.<Area>.Hosting.ApplicationModel`
+integration, which the `App.<Area>` framework carries:
 
-Third-party area SDKs use the same shipped-package imports:
-
-```xml
-<Import Project="Sdk.targets"
-        Sdk="Assimalign.Cohesion.Sdk.ApplicationModel"
-        Version="$(CohesionVersion)"
-        Condition="'$(CohesionApplicationModel)' == 'enabled'" />
-<Import Project="Sdk.targets"
-        Sdk="Assimalign.Cohesion.Sdk"
-        Condition="'$(_CohesionApplicationModelSdkImported)' != 'true'" />
-```
-
-See the ApplicationModel SDK [overview](./Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/OVERVIEW.md)
-and [design](./Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/DESIGN.md).
-
-## Gateway SDK boundary
-
-`Assimalign.Cohesion.Sdk.Gateway` always enables `CohesionApplicationModel` and
-builds an executable Composite resource. Its MSBuild task reads referenced
-`resource.json` documents and generates `Gateway.CreateBuilder(args)`, one
-`Manifests.<Name>` member per captured manifest, boundary-crossing `Externals`,
-referenced gateway `Applications` and their `References`, and provider-driven
-`UseGateway(args)`. It generates no resource verbs. The gateway's `Program.cs` names
-what it composes, one hand-written call per resource: the verb of the area's
-ApplicationModel package over the generated manifest, with the area's options as an
-instance, or `AddResource` for a kind that has no ApplicationModel in reach.
 
 ```csharp
-using Assimalign.Cohesion.ApplicationModel;
+WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.Services.AddResource("orders-api", resource => resource.UseInProcess());
+```
 
-IApplicationBuilder builder = Gateway.CreateBuilder(args);
-builder.AddWeb(Manifests.OrdersApi, new WebResourceOptions { Replicas = 2 });
-builder.AddResource(Manifests.OrdersWorker);
-builder.UseGateway(args);
+Each platform the resource runs on is a package the project references, such as
+`Assimalign.Cohesion.ApplicationModel.Hosting.InProcess` for `UseInProcess()`. Started
+without a platform in its environment, the application runs unmanaged and the call
+registers nothing.
+
+## Gateway SDK
+
+`Assimalign.Cohesion.Sdk.Gateway` is a slim SDK on the base SDK. It defaults the project
+to an executable and adds one implicit reference, the
+`Assimalign.Cohesion.ApplicationModel.Gateway` package at the SDK's own version
+(`CohesionGatewayImplicitReference=false` turns it off). It generates nothing and adds no
+framework: the gateway manages resources through their platform without loading their
+runtimes. Its `Program.cs` declares the model and runs it on the platform it references:
+
+```csharp
+using Assimalign.Cohesion.ApplicationModel.Gateway;
+using Assimalign.Cohesion.ApplicationModel.Gateway.InProcess;
+
+await using var infrastructure = new InProcessInfrastructure();
+ApplicationGatewayBuilder builder = ApplicationGateway.CreateBuilder("orders").UseInProcess(infrastructure);
+builder.AddResource("Web", "orders-api");
 await builder.Build().RunAsync();
 ```
 
-A third-party ApplicationModel package extends composition the same way, with its own
-`extension(IApplicationBuilder)` verb over `ResourceManifest`; Gateway keeps no
-resource-kind table for it to join. In-process bindings are registered by manifest
-identity in `Gateway.CreateBuilder(args)`, so they apply whichever verb adds the
-resource.
-
-The SDK injects an area's ApplicationModel package (and, in process, its
-`App.<Area>` framework) only for the areas of the resource projects the gateway
-references; any other area package is the gateway's own explicit reference. No area
-client or provider package is injected by convention: resource commands travel
-through the gateway's generic control-plane command client, and store,
-certificate-authority, and trust providers come from opt-in
-`<Area>.ApplicationModel.Orchestration` packages that the gateway references and
-registers explicitly in `Program.cs`.
-
-Providers are not discovered by reflection. Packages contribute
-`CohesionGatewayProvider` items through `buildTransitive` props; the
-semicolon-delimited `<CohesionGateways>` property selects which provider packages
-are restored. Each item names its provider, gateway type, options type, and whether
-the package requires JIT. Cohesion source therefore never names a platform type.
-
-The orchestration plane is delivered through PackageReferences, never an
-`App.Gateway` framework. In-process composition is the narrow exception that adds
-the explicit resource-area frameworks needed by nested project references.
-
-The current implementation remains guarded while external Docker/Kubernetes provider
-contributions and a first-restore manifest dependency channel are incomplete. The
-SDK's derived dependency set must not be expanded to every area merely to hide the
-restore-order gap; see
-[`Sdk.Gateway` design](./Assimalign.Cohesion.Sdk.Gateway/Tasks/docs/DESIGN.md) for the
-required restore-visible producer contract and release gates.
+A platform is a pair of packages: the gateway half the gateway project references and
+registers on its builder (`Assimalign.Cohesion.ApplicationModel.Gateway.InProcess`, or a
+`cohesion-platforms` package such as `Assimalign.Cohesion.ApplicationModel.Gateway.Kubernetes`),
+and the instance half each resource opts into. See the
+[`Sdk.Gateway` overview](./Assimalign.Cohesion.Sdk.Gateway/Tasks/docs/OVERVIEW.md) and
+[design](./Assimalign.Cohesion.Sdk.Gateway/Tasks/docs/DESIGN.md).
 
 ## Framework reference policy and the App hosting kernel
 
@@ -190,16 +150,15 @@ table. A base-SDK executable opts into the hosting kernel explicitly:
 
 Each of the 18 resource-area SDKs defaults to executable output and implicitly
 includes both `Assimalign.Cohesion.App` and `Assimalign.Cohesion.App.<Area>` under
-the same `CohesionAutoIncludeAppFramework` switch. `Sdk.Gateway` stays NuGet-only
-unless in-process composition is active, when it adds App plus only the referenced
-areas' frameworks.
+the same `CohesionAutoIncludeAppFramework` switch. `Sdk.Gateway` adds no framework.
 
 `Assimalign.Cohesion.App` is the hosting kernel, not the general library catalog.
-Its single root list names Hosting and its Health, Resources, and Telemetry siblings;
-the CommandLine, EnvironmentVariables, FileSystem, and Json configuration providers;
-Logging.Console and Logging.EventSource; OpenTelemetry; DependencyInjection; FileSystem.Physical; and
-Connections. Generated resource accessors and every area hosting module depend on
-Connections, so the shared kernel carries it once. The
+Its single root list names Hosting; ApplicationModel.Hosting, the instance side every
+area's `Hosting.ApplicationModel` integration builds on; the CommandLine, EnvironmentVariables,
+FileSystem, and Json configuration providers; Logging.Console and Logging.EventSource;
+OpenTelemetry; DependencyInjection; FileSystem.Physical; and Connections with its StreamAbort,
+StreamLimits, and Tls siblings. Every area hosting module depends on Connections, so the shared kernel
+carries it once. The
 pack manifest is derived from their transitive Assimalign project-reference closure
 plus the App umbrella assembly. Libraries outside that closure remain ordinary
 NuGet packages and are referenced when used. The framework reference resolves — via the

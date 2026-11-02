@@ -1,69 +1,21 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<RootNamespace>Assimalign.Cohesion.ApplicationModel</RootNamespace>
+		<Description>Cohesion application model identity: the names every plane of an application shares, from a resource's provider and name to the platform it runs on, and the resource identity its definition, its deployment, and its instances all carry.</Description>
 	</PropertyGroup>
 	<ItemGroup>
 		<CohesionProjectReference Include="Assimalign.Cohesion.Core" />
 	</ItemGroup>
 	<ItemGroup>
-		<CohesionValueType 
-			Include="ValueObjects\ResourceName.cs" 
-			ObjectRuntimeType="String" 
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel" 
-			ObjectAccessModifier="public" 
-			ObjectHasImplicitOperators="true" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceId.cs"
-			ObjectRuntimeType="Guid"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true" />
-		<CohesionValueType
-			Include="ValueObjects\ApplicationName.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\EnvironmentName.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceHttpPath.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\ResourceMountSource.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal" />
-		<CohesionValueType
-			Include="ValueObjects\ApplicationCredentialScheme.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="true"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="OrdinalIgnoreCase" />
-		<CohesionValueType
-			Include="ValueObjects\ApplicationCredentialValue.cs"
-			ObjectRuntimeType="String"
-			ObjectNamespace="Assimalign.Cohesion.ApplicationModel"
-			ObjectAccessModifier="public"
-			ObjectHasImplicitOperators="false"
-			ObjectHasIsValidMethod="true"
-			ObjectComparison="Ordinal"
-			ObjectHasCustomToString="true" />
+		<!-- The hyphenated-words grammar platform names share with Protocol's action names and
+		     Definition's output and extension names. -->
+		<CohesionSharedSource Include="Assimalign.Cohesion.ApplicationModel" Module="Names" />
+	</ItemGroup>
+	<ItemGroup>
+		<CohesionValueType Include="ValueObjects\ResourceId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\ResourceName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
+		<CohesionValueType Include="ValueObjects\ProviderId.cs" ObjectRuntimeType="Guid" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" />
+		<CohesionValueType Include="ValueObjects\ProviderName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="OrdinalIgnoreCase" />
+		<CohesionValueType Include="ValueObjects\PlatformName.cs" ObjectRuntimeType="String" ObjectNamespace="Assimalign.Cohesion.ApplicationModel" ObjectAccessModifier="public" ObjectHasImplicitOperators="true" ObjectHasIsValidMethod="true" ObjectComparison="Ordinal" />
 	</ItemGroup>
 </Project>

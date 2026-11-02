@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Database.Testing.TestHost;
 /// </summary>
 public sealed class Program
 {
-    /// <summary>Runs the fixture until its Database control plane requests shutdown.</summary>
+    /// <summary>Runs the fixture until its scope's shutdown stops its host.</summary>
     /// <param name="args">The resource arguments.</param>
     /// <returns>A task that completes after graceful shutdown.</returns>
     public static async Task Main(string[] args)

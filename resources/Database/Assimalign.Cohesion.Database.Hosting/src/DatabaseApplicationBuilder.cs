@@ -2,23 +2,17 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Configuration.CommandLine;
 using Assimalign.Cohesion.Configuration.Json;
-using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.Logging;
-using Assimalign.Cohesion.Web.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Hosting;
 
@@ -40,7 +34,7 @@ namespace Assimalign.Cohesion.Database.Hosting;
 /// <para>
 /// <b>The application level</b> of the three composition levels (B1 of the engine extensibility
 /// design, owner decisions 52 and 54 of 2026-10-09): host infrastructure, host services, health,
-/// the control plane, the reopen policy, and which engines exist. It holds no database, schema,
+/// the reopen policy, and which engines exist. It holds no database, schema,
 /// function or model type: a model's engine builder declares and provisions its databases while
 /// it is built. Every engine is registered by name, so the name is reserved when the engine is
 /// registered, before any factory runs; there is one registration path per kind of thing.
@@ -53,11 +47,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     private readonly DatabaseApplicationOptions _options;
     private readonly List<(DatabaseEngine? Instance, string Name, Func<DatabaseApplicationContext, DatabaseEngine>? Factory)> _engines = [];
     private readonly List<(IHostService? Instance, Func<DatabaseApplicationContext, IHostService>? Factory)> _serviceRegistrations = [];
-    private readonly List<IHealthContributor> _healthContributors = [];
     private readonly PhysicalFileSystem? _contentRoot;
-    private readonly IHostService? _telemetry;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
     private int _buildAttempted;
 
     /// <summary>Initializes a builder with host settings.</summary>
@@ -70,22 +60,12 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// The configuration starts empty, as <c>new WebApplicationBuilder(options)</c>'s does:
     /// <see cref="DatabaseApplication.CreateBuilder(string[])"/> adds the default sources.
     /// </remarks>
-    public DatabaseApplicationBuilder(DatabaseApplicationOptions options) : this(options, null, null) { }
+    public DatabaseApplicationBuilder(DatabaseApplicationOptions options) : this(options, null) { }
 
-    internal DatabaseApplicationBuilder(DatabaseApplicationOptions options, Assembly? resourceAssembly, string[]? args = null)
+    internal DatabaseApplicationBuilder(DatabaseApplicationOptions options, string[]? args)
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        ResourceContext? resourceContext = null;
-        if (resourceAssembly is not null && ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException(ErrorMessages.DatabaseApplicationBuilderFailure);
-            resourceContext = ResourceRuntime.Current;
-            _resourceContext = resourceContext;
-            _options.Environment = resourceContext.EnvironmentName;
-            _options.ContentRootPath = FileSystemPath.Parse(resourceContext.ContentRootPath);
-            ResourceRuntime.RegisterConnectionFactoryResolver(CreateConnectionFactory);
-        }
 
         Environment = new HostEnvironment(_options.Environment ?? "production")
         {
@@ -94,7 +74,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         Configuration = new ConfigurationManager();
         if (args is not null)
         {
-            _contentRoot = AddDefaultConfiguration(args, resourceContext);
+            _contentRoot = AddDefaultConfiguration(args);
         }
 
         Logging = new LoggerFactoryBuilder();
@@ -104,13 +84,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-
-        if (_controlPlane is not null && resourceContext is not null
-            && ResourceTelemetry.Configure(resourceContext, Logging, out IHostService? telemetry))
-        {
-            // Started first and stopped last (Build puts it ahead of every other service).
-            _telemetry = telemetry;
-        }
     }
 
     /// <summary>
@@ -127,7 +100,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
     /// <summary>
     /// Gets the application's host environment: its name and content root, read from
-    /// <see cref="Options"/> (or the ambient resource context) when the builder was created.
+    /// <see cref="Options"/> when the builder was created.
     /// </summary>
     /// <remarks>
     /// Registered in <see cref="Services"/> as <see cref="IHostEnvironment"/> at Build; the
@@ -142,7 +115,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <see cref="DatabaseApplication.CreateBuilder(string[])"/> adds the default sources when it
     /// creates the builder: optional <c>appsettings.json</c> and
     /// <c>appsettings.{Environment}.json</c> under the content root, environment variables prefixed
-    /// <c>COHESION_CONFIG__</c>, then the ambient resource settings and the command-line arguments;
+    /// <c>COHESION_CONFIG__</c>, then the command-line arguments;
     /// later sources win. Registered in <see cref="Services"/> as <see cref="IConfiguration"/> at
     /// Build and owned by the application, which disposes it. A provider added after Build is
     /// loaded into the running configuration, but recomposes nothing: engine factories read the
@@ -157,8 +130,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// <remarks>
     /// Build builds the factory once, registers it in <see cref="Services"/> as
     /// <see cref="ILoggerFactory"/>, and hands it to the engine factories; the application owns and
-    /// disposes it after every service and engine. The builder refuses changes after Build. An
-    /// enabled resource's telemetry adds its exporter here when the builder is created.
+    /// disposes it after every service and engine. The builder refuses changes after Build.
     /// <see cref="Build"/> creates the application's one logger factory; building this builder
     /// directly yields a separate factory the application never uses, and makes the application's
     /// Build fail, since the builder builds once. <c>WebApplicationBuilder</c>'s <c>Logging</c> is
@@ -181,21 +153,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// dispose. <c>WebApplicationBuilder</c>'s <c>Services</c> is the same.
     /// </remarks>
     public ServiceProviderBuilder Services { get; }
-
-    internal IResourceControlPlane? ControlPlane => _controlPlane;
-
-    /// <summary>Registers a named health contribution using the existing host integration.</summary>
-    /// <param name="name">The contribution name.</param>
-    /// <param name="check">The evaluator.</param>
-    /// <returns>This builder.</returns>
-    public DatabaseApplicationBuilder AddHealthCheck(string name, ResourceHealthCheck check)
-    {
-        EnsureMutable();
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentNullException.ThrowIfNull(check);
-        _healthContributors.Add(new DelegateHealthContributor(name, check));
-        return this;
-    }
 
     /// <summary>Registers a caller-owned engine.</summary>
     /// <param name="engine">The borrowed engine.</param>
@@ -279,11 +236,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         try
         {
             var application = new DatabaseApplication(composition);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
             DatabaseHostingEventSource.Log.ApplicationBuilt(application.Context, composition.Services.Count);
             return application;
         }
@@ -398,18 +350,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
             }
 
             context.FreezeRegistries(engines, servers);
-            if (_telemetry is not null)
-            {
-                hostServices.Add(_telemetry);
-                ownership.Services.Add(_telemetry);
-            }
-
             var lifecycleProducts = new HashSet<object>(servers, ReferenceEqualityComparer.Instance);
-            foreach (IHostService service in hostServices)
-            {
-                lifecycleProducts.Add(service);
-            }
-
             foreach (var registration in _serviceRegistrations)
             {
                 IHostService service = registration.Instance ?? registration.Factory!(context)
@@ -430,7 +371,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
 
                 hostServices.Add(service);
             }
-            ConfigureExistingResourceIntegration(hostServices, engines, servers, context, ownership);
 
             // The module's own reopen service (owner decision 22): started with the other services,
             // before the servers, and stopped after the servers drained. It supervises every engine
@@ -561,12 +501,11 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     /// Adds the default configuration sources, in order: optional <c>appsettings.json</c> and
     /// <c>appsettings.{Environment}.json</c> under the content root (the options' content root, or
     /// the application base directory), environment variables prefixed <c>COHESION_CONFIG__</c>,
-    /// then the ambient resource settings and the command-line arguments. Later sources win.
+    /// then the command-line arguments. Later sources win.
     /// </summary>
     /// <param name="args">The command-line arguments.</param>
-    /// <param name="resourceContext">The ambient resource context, or null for a plain application.</param>
     /// <returns>The content root's read-only file system, which the application owns from Build.</returns>
-    private PhysicalFileSystem AddDefaultConfiguration(string[] args, ResourceContext? resourceContext)
+    private PhysicalFileSystem AddDefaultConfiguration(string[] args)
     {
         var contentRoot = new PhysicalFileSystem(new PhysicalFileSystemOptions
         {
@@ -580,7 +519,7 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
                 .AddJsonFile(contentRoot, "appsettings.json", optional: true)
                 .AddJsonFile(contentRoot, $"appsettings.{Environment.Name}.json", optional: true)
                 .AddEnvironmentVariables("COHESION_CONFIG__")
-                .AddCommandLine(PrependAmbientSettings(args, resourceContext));
+                .AddCommandLine([.. args]);
         }
         catch
         {
@@ -589,26 +528,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
         }
 
         return contentRoot;
-    }
-
-    // The ambient resource settings as command-line arguments ahead of the caller's, so the
-    // caller's win, as WebApplicationBuilder adds them.
-    private static string[] PrependAmbientSettings(string[] args, ResourceContext? resourceContext)
-    {
-        if (resourceContext is null || resourceContext.Settings.Count == 0)
-        {
-            return [.. args];
-        }
-
-        var combined = new string[resourceContext.Settings.Count + args.Length];
-        int index = 0;
-        foreach ((string key, string value) in resourceContext.Settings)
-        {
-            combined[index++] = $"--{key}={value}";
-        }
-
-        args.CopyTo(combined, index);
-        return combined;
     }
 
     // Every engine is registered by name, so a duplicate is refused here, before any factory runs
@@ -636,75 +555,6 @@ public sealed class DatabaseApplicationBuilder : IDatabaseApplicationBuilder
     }
 
     IDatabaseApplication IDatabaseApplicationBuilder.Build() => Build();
-
-    private static object? CreateConnectionFactory(string protocol) => string.Equals(protocol, "tcp", StringComparison.OrdinalIgnoreCase) ? new TcpConnectionFactory() : null;
-
-    private void ConfigureExistingResourceIntegration(
-        List<IHostService> services,
-        List<DatabaseEngine> engines,
-        List<DatabaseServer> servers,
-        DatabaseApplicationContext context,
-        DatabaseApplicationOwnership ownership)
-    {
-        if (_controlPlane is not null)
-        {
-            foreach (string kind in _controlPlane.AcceptedCommandKinds)
-            {
-                if (kind is "database.add-database" or "database.add-principal")
-                {
-                    _controlPlane.RegisterCommandHandler(new DatabaseResourceCommandHandler(kind, context));
-                }
-            }
-            var controlPlaneContributors = new List<IHealthContributor> { context };
-            var registeredContributors = new HashSet<IHealthContributor>(ReferenceEqualityComparer.Instance);
-            registeredContributors.Add(context);
-
-            foreach (IHealthContributor contributor in _healthContributors)
-            {
-                if (registeredContributors.Add(contributor))
-                {
-                    controlPlaneContributors.Add(contributor);
-                }
-            }
-
-            foreach (IHealthContributor contributor in services
-                .Concat<object>(engines)
-                .Concat(servers)
-                .OfType<IHealthContributor>())
-            {
-                if (registeredContributors.Add(contributor))
-                {
-                    controlPlaneContributors.Add(contributor);
-                }
-            }
-
-            foreach (IHealthContributor contributor in controlPlaneContributors)
-            {
-                _controlPlane.AddHealthContributor(contributor);
-            }
-
-            if ((_controlPlane.ObservedEndpoints.TryGetValue("admin", out Uri? endpoint) ||
-                (_resourceContext is not null &&
-                 _resourceContext.Endpoints.TryGetValue("admin", out endpoint))))
-            {
-                if (_resourceContext?.GatewayName is not null)
-                {
-                    ResourceControlPlaneMiddleware.Validate(_resourceContext);
-                }
-                _controlPlane.ObserveEndpoint("admin", endpoint);
-                var adminService = new DatabaseAdminEndpointService(
-                    endpoint,
-                    _controlPlane,
-                    _resourceContext!,
-                    context,
-                    controlPlaneContributors);
-                services.Add(adminService);
-                ownership.Services.Add(adminService);
-            }
-        }
-
-
-    }
 
     private sealed class DebugView
     {

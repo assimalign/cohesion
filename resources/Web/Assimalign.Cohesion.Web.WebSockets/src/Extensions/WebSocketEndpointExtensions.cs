@@ -31,7 +31,7 @@ namespace Assimalign.Cohesion.Web.WebSockets;
 /// </para>
 /// <para>
 /// The WebSocket policy guards every handshake the endpoint accepts: the one <c>UseWebSockets</c>
-/// configured when it is registered, otherwise the default policy, which refuses a cross-site
+/// placed when it is in the pipeline, otherwise the default policy, which refuses a cross-site
 /// handshake with <c>403</c>. The returned route builder takes the route's policies as for any
 /// endpoint (<c>RequireAuthorization</c>, <c>RequireCors</c>, <c>RequireRateLimiting</c>,
 /// <c>WithName</c>). A socket outlives any request timeout, so an application with a request-timeout

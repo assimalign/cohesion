@@ -34,8 +34,11 @@ public class HostFilteringForwardedTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("public.example"));
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("public.example"));
+
+        factory.Application.UseForwardedHeaders();
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -54,8 +57,11 @@ public class HostFilteringForwardedTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("public.example"));
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("public.example"));
+
+        factory.Application.UseForwardedHeaders();
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -75,7 +81,8 @@ public class HostFilteringForwardedTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("public.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("public.example"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -97,8 +104,11 @@ public class HostFilteringForwardedTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("public.example"));
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("public.example"));
+
+        factory.Application.UseHostFiltering();
+        factory.Application.UseForwardedHeaders();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -117,12 +127,15 @@ public class HostFilteringForwardedTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         await using WebApplicationTestFactory factory = new();
 
-        factory.Application.UseForwardedHeaders(options =>
+        factory.Builder.Services.AddForwardedHeaders(forwarded =>
         {
-            options.Headers = ForwardedHeaderNames.XForwarded;
-            options.TrustLocalTransports = false;
+            forwarded.Options.Headers = ForwardedHeaderNames.XForwarded;
+            forwarded.Options.TrustLocalTransports = false;
         });
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("public.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("public.example"));
+
+        factory.Application.UseForwardedHeaders();
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();

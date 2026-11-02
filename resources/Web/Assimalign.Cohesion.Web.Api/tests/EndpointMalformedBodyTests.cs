@@ -54,8 +54,9 @@ public class EndpointMalformedBodyTests
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
         factory.Builder.Services.AddRouting();
         factory.Builder.Services.AddJsonSerialization(ApiTestJsonContext.Default);
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLoggerFactory(loggerFactory));
 
-        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+        factory.Application.UseHttpLogging();
         factory.Application.UseRouting();
         factory.Application.MapPost("/widgets", (Widget widget) =>
         {
@@ -99,8 +100,9 @@ public class EndpointMalformedBodyTests
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddHttpLogging(logging => logging.UseLoggerFactory(loggerFactory));
 
-        factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
+        factory.Application.UseHttpLogging();
         factory.Application.UseRouting();
         factory.Application.MapPost("/upload", ([FromForm] string title) =>
         {
@@ -287,13 +289,15 @@ public class EndpointMalformedBodyTests
 
             factory.Builder.Services.AddRouting();
             factory.Builder.Services.AddJsonSerialization(ApiTestJsonContext.Default);
-
-            factory.Application.UseHttpLogging(loggerFactory.Create(new HttpLoggingOptions().Category));
-            factory.Application.UseErrorHandling(options => options.OnException = (_, _) =>
+            factory.Builder.Services.AddHttpLogging(logging => logging.UseLoggerFactory(loggerFactory));
+            factory.Builder.Services.AddErrorHandling(errors => errors.Options.OnException = (_, _) =>
             {
                 Interlocked.Increment(ref _observed);
                 return ValueTask.CompletedTask;
             });
+
+            factory.Application.UseHttpLogging();
+            factory.Application.UseErrorHandling();
             factory.Application.UseRouting();
             factory.Application.MapPost("/widgets", (Widget widget) =>
             {

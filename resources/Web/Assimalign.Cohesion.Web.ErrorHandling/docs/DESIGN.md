@@ -9,12 +9,13 @@ the application, not by whichever feature happened to throw.
 
 The package carries two layers. The **`OnError` hook** (#864) is the composition surface —
 `builder.Services.AddErrorHandling(errors => errors.OnError(...))` registers the handler chain and the
-terminal problem+json default.
-The **pipeline exception boundary** (#881) is the consumer: `UseErrorHandling()` installs the
+terminal problem+json default, and carries the boundary's options (`errors.Options`).
+The **pipeline exception boundary** (#881) is the consumer: `UseErrorHandling()` places the
 middleware that catches faults escaping downstream, publishes them as an `IHttpExceptionFeature`,
-and dispatches through the hook; `UseStatusCodePages()` upgrades a bodyless `4xx`/`5xx` terminal
-response (including the pipeline's bodyless 404) into a problem+json body. The boundary does not
-redesign the chain — it consumes the same `IErrorHandler` registrations.
+and dispatches through the hook; `UseStatusCodePages()` places the middleware
+`builder.Services.AddStatusCodePages(pages => ...)` registered, which upgrades a bodyless `4xx`/`5xx`
+terminal response (including the pipeline's bodyless 404) into a problem+json body. The boundary does
+not redesign the chain — it consumes the same `IErrorHandler` registrations.
 
 ## The faults-vs-outcomes line (the rule this package enforces)
 
@@ -93,9 +94,32 @@ Three layers, outermost last:
 that invariant and owns response hygiene (clearing half-set headers/status). The hook cannot
 un-send a committed response head, so it does not pretend to.
 
+## Registration: `AddErrorHandling` and `AddStatusCodePages` configure, `UseErrorHandling` and `UseStatusCodePages` place (2026-10-28)
+
+The boundary's options moved from `UseErrorHandling(Action<ExceptionBoundaryOptions>)` onto
+`ErrorHandlingBuilder.Options`. `Build()` copies them into the `IErrorHandlingFeature` hook it returns,
+which `builder.Services.AddErrorHandling(errors => ...)` registers as before (the feature carries them
+internally; the public contract is unchanged). `UseErrorHandling()` takes no arguments: when the
+pipeline is built it reads the options of the last `ErrorHandlingFeature` in
+`IWebApplicationContext.Features` and places the boundary over them, or over the production defaults
+(no developer detail, no observer, no suppression) when none is registered, as for a hook a custom
+`IErrorHandlingFeature` implementation supplies. The options ride on the existing hook rather than on
+a second `Add` verb for the boundary: the hook is already the application's one error-handling
+registration, and the last registration supplies both the handlers the host stamps onto every exchange
+and the options the boundary runs with, so the two cannot disagree.
+
+`builder.Services.AddStatusCodePages(pages => ...)` is a generated component integration over
+`StatusCodePagesBuilder`: it builds the middleware once, copying the responder, and registers it as an
+`IWebApplicationMiddleware`. `UseStatusCodePages()` takes no arguments and places the last such
+registration it finds in `IWebApplicationContext.Middleware`, or the problem+json default when the
+application registered none. Neither builder has an option to validate. *Rejected:*
+`UseErrorHandling(Action<ExceptionBoundaryOptions>)` and `UseStatusCodePages(Action<StatusCodePagesOptions>)`,
+the former shapes; configuration on a pipeline verb splits a feature's settings across two call sites
+and keeps them out of the registrations the host enumerates.
+
 ## The exception boundary (#881)
 
-`UseErrorHandling()` installs `ExceptionBoundaryMiddleware` — the pipeline layer-2 fault handler of
+`UseErrorHandling()` places `ExceptionBoundaryMiddleware` — the pipeline layer-2 fault handler of
 the three-layer model above. It wraps everything downstream in a `try/catch` and, on a fault:
 
 - **Publishes `IHttpExceptionFeature`** onto the exchange (the caught exception + the request path) so
@@ -223,7 +247,7 @@ unit test preserves existing application-fault behavior.
 
 ## Status-code pages and the 404 terminal (#881)
 
-`UseStatusCodePages()` installs `StatusCodePagesMiddleware`, which runs after `next` and upgrades a
+`UseStatusCodePages()` places `StatusCodePagesMiddleware`, which runs after `next` and upgrades a
 **bodyless** `4xx`/`5xx` terminal response into a body — RFC 9457 problem+json by default, or a custom
 responder. It acts only when the response is genuinely bodyless (no `Content-Type`, no positive
 `Content-Length`, no buffered body) and unstarted, so it never clobbers a body a handler already wrote or

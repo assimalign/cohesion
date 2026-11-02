@@ -7,7 +7,6 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -21,15 +20,16 @@ using Xunit;
 
 namespace Assimalign.Cohesion.Templates.Tests;
 
-/// <summary>Verifies the package as a dotnet new consumer, including both landing-zone topologies.</summary>
-public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture>
+/// <summary>Verifies the package as a dotnet new consumer.</summary>
+public sealed class TemplateTests : IClassFixture<TemplatePackageFixture>
 {
-    // Each opt-in store verb and the one package that supplies it: a gateway references the package
-    // exactly when its Program.cs registers the provider, since nothing is registered by convention.
-    private static readonly (string Verb, string Package)[] _orchestrationVerbs =
+    // Elements of the retired generated application model. No template project may set one: a
+    // gateway declares its model in Program.cs, and a resource registers itself with AddResource.
+    private static readonly string[] _retiredElements =
     [
-        ("UseSecretStore", "Assimalign.Cohesion.SecretStore.ApplicationModel.Orchestration"),
-        ("UseConfigurationStore", "Assimalign.Cohesion.ConfigurationStore.ApplicationModel.Orchestration")
+        "CohesionApplicationModel", "CohesionResourceReference", "CohesionResourceName", "CohesionEndpoint",
+        "CohesionSetting", "CohesionMount", "CohesionProbe", "CohesionCommand", "CohesionGateways",
+        "CohesionGatewayInProcess", "CohesionApplicationName"
     ];
 
     private readonly TemplateWorkspace _workspace;
@@ -43,7 +43,7 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
     [Fact(DisplayName = "Cohesion Test [Templates] - Instantiate: Every template follows the scaffold contract")]
     public async Task Instantiate_AllTemplates_ShouldFollowScaffoldContractAsync()
     {
-        // Arrange: the source roster and unique identities must match the signed-off design exactly.
+        // Arrange: the source roster and unique identities must match the design exactly.
         string[] configs = Directory.GetFiles(TemplateRepository.ContentRoot, "template.json", SearchOption.AllDirectories);
         configs.Length.ShouldBe(TemplateRepository.Roster.Length);
         string[] identities = configs.Select(file =>
@@ -56,31 +56,22 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
             .ShouldBe(TemplateRepository.Roster.Order().ToArray());
         AssertNoRetiredContent(TemplateRepository.ContentRoot, emitted: false);
         string[] contentProjects = SourceProjects(TemplateRepository.ContentRoot);
-        contentProjects.Length.ShouldBe(37);
+        contentProjects.Length.ShouldBe(TemplateRepository.Roster.Length + 2);
         foreach (string project in contentProjects)
         {
             AssertLocalLaunchProfile(project);
         }
 
         // Act and assert: the installed package, rather than raw content copying, owns every output.
-        string? singleLanding = null;
         foreach (string template in TemplateRepository.Roster)
         {
-            string name = template == "cohesion-app" ? "Acme" : template == "cohesion-landing-zone" ? "Example" : "Northwind.Service";
+            string name = template == "cohesion-app" ? "Acme" : "Northwind.Service";
             string output = await _workspace.InstantiateAsync(template, name, cancellationToken: CancellationToken.None);
             AssertScaffold(output, template, name);
-            if (template == "cohesion-landing-zone")
-            {
-                singleLanding = output;
-            }
         }
-
-        string federated = await _workspace.InstantiateAsync("cohesion-landing-zone", "Example", "federated");
-        AssertScaffold(federated, "cohesion-landing-zone", "Example", "federated");
-        AssertTopologyDifferences(singleLanding!, federated);
     }
 
-    /// <summary>Checks name replacement and the explicit gateway application-name override.</summary>
+    /// <summary>Checks name replacement and the explicit gateway-name override.</summary>
     /// <returns>A task representing template instantiation and identity checks.</returns>
     [Fact(DisplayName = "Cohesion Test [Templates] - Identity: Name replacement and gateway override are explicit")]
     public async Task Instantiate_CustomIdentity_ShouldReplaceNamesAsync()
@@ -88,20 +79,18 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
         string application = await _workspace.InstantiateAsync("cohesion-app", "Northwind");
         AssertScaffold(application, "cohesion-app", "Northwind");
         File.Exists(Path.Combine(application, "Northwind.Api", "Northwind.Api.csproj")).ShouldBeTrue();
-        XDocument.Load(Path.Combine(application, "Directory.Build.props")).Descendants("CohesionApplication").Single().Value.ShouldBe("northwind");
-        string landing = await _workspace.InstantiateAsync("cohesion-landing-zone", "Northwind", "federated");
-        AssertScaffold(landing, "cohesion-landing-zone", "Northwind", "federated");
+        File.ReadAllText(Path.Combine(application, "Northwind.Api", "Program.cs"))
+            .ShouldContain("AddResource(\"northwind-api\"", Case.Sensitive);
         string gateway = await _workspace.InstantiateAsync("cohesion-gateway", "Northwind.Gateway", applicationName: "orders");
         AssertScaffold(gateway, "cohesion-gateway", "Northwind.Gateway", applicationName: "orders");
-        XDocument.Load(Path.Combine(gateway, "Northwind.Gateway.csproj")).Descendants("CohesionApplicationName").Single().Value.ShouldBe("orders");
     }
 
-    private async Task BuildTemplateAsync(string template, string? topology = null, CancellationToken cancellationToken = default)
+    private async Task BuildTemplateAsync(string template, CancellationToken cancellationToken = default)
     {
-        string name = template == "cohesion-app" ? "Acme" : template == "cohesion-landing-zone" ? "Example" : "Northwind.Service";
-        string output = await _workspace.InstantiateAsync(template, name, topology, cancellationToken: cancellationToken);
+        string name = template == "cohesion-app" ? "Acme" : "Northwind.Service";
+        string output = await _workspace.InstantiateAsync(template, name, cancellationToken: cancellationToken);
         // Assert canonical shipped pins before the single feed-version substitution.
-        AssertScaffold(output, template, name, topology ?? "single");
+        AssertScaffold(output, template, name);
         await _workspace.BuildAsync(output, cancellationToken);
         if (template == "cohesion-spa")
         {
@@ -121,25 +110,15 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
                 index is null ? null : (client, token) => AssertSpaRoutesAsync(client, index, token));
             body.ShouldContain(template == "cohesion-web" ? "Hello from" : "<html", Case.Insensitive);
         }
+
+        // Nothing is generated from a project file any more: no manifest and no resource or gateway surface.
         foreach (string project in SourceProjects(output))
         {
-            XDocument document = XDocument.Load(project);
-            bool enabled = document.Root!.Attribute("Sdk")!.Value.EndsWith(".Gateway", StringComparison.Ordinal)
-                || document.Descendants("CohesionApplicationModel").Single().Value == "enabled";
             string obj = Path.Combine(Path.GetDirectoryName(project)!, "obj");
-            string[] manifests = Directory.Exists(obj)
-                ? Directory.GetFiles(obj, "resource.json", SearchOption.AllDirectories)
-                    .Where(file => Path.GetFileName(Path.GetDirectoryName(file)) == "cohesion").ToArray()
-                : [];
-            if (enabled)
-            {
-                manifests.ShouldNotBeEmpty($"{project} must generate its opted-in manifest.");
-            }
-            else
-            {
-                manifests.ShouldBeEmpty($"{project} must remain a plain executable.");
-                Directory.GetFiles(obj, "Resource*.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();
-            }
+            Directory.Exists(obj).ShouldBeTrue($"{project} did not build.");
+            Directory.GetFiles(obj, "resource.json", SearchOption.AllDirectories).ShouldBeEmpty();
+            Directory.GetFiles(obj, "Resource*.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();
+            Directory.GetFiles(obj, "Gateway*.g.cs", SearchOption.AllDirectories).ShouldBeEmpty();
         }
     }
 
@@ -182,7 +161,7 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
         }
     }
 
-    private static void AssertScaffold(string output, string template, string name, string topology = "single", string? applicationName = null)
+    private static void AssertScaffold(string output, string template, string name, string? applicationName = null)
     {
         using JsonDocument global = TemplateRepository.ReadJson(Path.Combine(output, "global.json"));
         using JsonDocument repositoryGlobal = TemplateRepository.ReadJson(Path.Combine(TemplateRepository.Root, "global.json"));
@@ -201,43 +180,45 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
         }
 
         string[] projects = SourceProjects(output);
-        projects.Length.ShouldBe(template == "cohesion-app" ? 3 : template == "cohesion-landing-zone" ? topology == "federated" ? 24 : 25 : 1);
-        bool multi = template is "cohesion-app" or "cohesion-landing-zone";
+        projects.Length.ShouldBe(template == "cohesion-app" ? 3 : 1);
+        // The gateway's name is its own code: the lowercased solution name for the app, the explicit
+        // --applicationName or the lowercased first name segment for a standalone gateway.
+        string gatewayName = template == "cohesion-app"
+            ? name.ToLowerInvariant()
+            : applicationName ?? name.Split('.')[0].ToLowerInvariant();
+        int gateways = 0;
         foreach (string project in projects)
         {
-            File.Exists(Path.Combine(Path.GetDirectoryName(project)!, "Program.cs")).ShouldBeTrue(project);
+            string program = File.ReadAllText(Path.Combine(Path.GetDirectoryName(project)!, "Program.cs"));
             AssertLocalLaunchProfile(project);
             XDocument document = XDocument.Load(project);
-            string sdk = document.Root!.Attribute("Sdk")!.Value;
-            if (sdk.EndsWith(".Gateway", StringComparison.Ordinal))
+            foreach (string element in _retiredElements)
             {
-                document.Descendants("CohesionApplicationModel").ShouldBeEmpty();
-                document.Descendants("CohesionResourceReferencesAreRuntime").ShouldBeEmpty();
-                string relativeProject = Path.GetRelativePath(output, project).Replace('\\', '/');
-                bool localOnly = template == "cohesion-landing-zone"
-                    && (relativeProject.StartsWith("Networking/", StringComparison.Ordinal)
-                        || relativeProject.StartsWith("Gateway/", StringComparison.Ordinal));
-                document.Descendants("CohesionGateways").Single().Value.ShouldBe(localOnly ? "Local" : "InProcess;Local");
-                if (!localOnly)
-                {
-                    document.Descendants("CohesionGatewayInProcess").Single().Value.ShouldBe("true");
-                }
-
-                AssertGatewayComposition(project, document);
+                document.Descendants(element).ShouldBeEmpty($"{project} sets the retired {element}.");
             }
-            else
+
+            // Every package the content adds explicitly is pinned to the SDK's own version.
+            foreach (XElement reference in document.Descendants("CohesionPackageReference"))
             {
-                document.Descendants("CohesionApplicationModel").Single().Value.ShouldBe(multi ? "enabled" : "disabled");
-                if (!multi)
-                {
-                    string text = File.ReadAllText(project);
-                    text.ShouldContain("<CohesionApplicationModel>enabled</CohesionApplicationModel>", Case.Sensitive);
-                    text.ShouldContain("ResourceControlPlane.g.cs", Case.Sensitive);
-                    text.ShouldContain($"Assimalign.Cohesion.{sdk.Split('.').Last()}.ApplicationModel", Case.Sensitive);
-                    File.ReadAllText(Path.Combine(Path.GetDirectoryName(project)!, "Program.cs")).ShouldNotContain("Resource.", Case.Sensitive);
-                }
+                reference.Attribute("Version")?.Value.ShouldBe("$(CohesionVersion)", $"{project} must pin its package to the SDK version.");
+            }
+
+            if (document.Root!.Attribute("Sdk")!.Value == "Assimalign.Cohesion.Sdk.Gateway")
+            {
+                gateways++;
+                program.ShouldContain($"ApplicationGateway.CreateBuilder(\"{gatewayName}\")", Case.Sensitive);
+                program.ShouldContain(".RunAsync(", Case.Sensitive);
+            }
+            else if (program.Contains(".AddResource(", StringComparison.Ordinal))
+            {
+                // A resource that registers itself opts into a platform whose instance half it references.
+                program.ShouldContain("UseInProcess()", Case.Sensitive);
+                document.Descendants("CohesionPackageReference").Select(reference => reference.Attribute("Include")!.Value)
+                    .ShouldContain("Assimalign.Cohesion.ApplicationModel.Hosting.InProcess");
             }
         }
+
+        gateways.ShouldBe(template is "cohesion-app" or "cohesion-gateway" ? 1 : 0);
 
         foreach (string file in projects.Concat(Directory.GetFiles(output, "Directory.Build.props", SearchOption.AllDirectories)))
         {
@@ -251,33 +232,8 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
             document.Descendants("PackageReference").ShouldBeEmpty();
         }
 
-        AssertStoreSourcesStayInApplication(output);
-
-        string app = multi ? name.ToLowerInvariant() : applicationName ?? name.Split('.')[0].ToLowerInvariant();
-        XDocument.Load(Path.Combine(output, "Directory.Build.props")).Descendants("CohesionApplication").Single().Value.ShouldBe(app);
-        if (template == "cohesion-landing-zone")
-        {
-            foreach (string domain in new[] { "Identity", "Networking", "Platform", "Zones/AppA", "Zones/AppB", "Zones/AppC" })
-            {
-                XDocument props = XDocument.Load(Path.Combine(output, domain, "Directory.Build.props"));
-                props.Descendants("CohesionApplication").Single().Value.ShouldBe(domain.Split('/').Last().ToLowerInvariant());
-                props.Descendants("Import").Single().Attribute("Project")!.Value.ShouldContain("GetPathOfFileAbove", Case.Sensitive);
-            }
-
-            Directory.Exists(Path.Combine(output, "Gateway")).ShouldBe(topology == "single");
-            File.Exists(Path.Combine(output, name + (topology == "single" ? ".K8s.slnx" : ".Federated.slnx"))).ShouldBeTrue();
-            Directory.Exists(Path.Combine(output, ".topologies")).ShouldBeFalse();
-            foreach (string zone in new[] { "AppA", "AppB", "AppC" })
-            {
-                string api = Path.Combine(output, "Zones", zone, $"{name}.{zone}.Api");
-                File.Exists(Path.Combine(api, "appsettings.Local.json")).ShouldBeTrue();
-                File.Exists(Path.Combine(api, "appsettings.Development.json")).ShouldBeFalse();
-            }
-        }
-
         string ignore = File.ReadAllText(Path.Combine(output, ".gitignore"));
-        ignore.ShouldContain(".cohesion/", Case.Sensitive);
-        ignore.ShouldContain("parameters.json", Case.Sensitive);
+        ignore.ShouldNotContain(".cohesion/", Case.Sensitive);
         ignore.ShouldNotContain("appsettings", Case.Sensitive);
         File.Exists(Path.Combine(output, ".github", "workflows", "credential-guard.yml")).ShouldBeTrue();
         XDocument nuget = XDocument.Load(Path.Combine(output, "nuget.config"));
@@ -297,79 +253,6 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
 
     private static string[] SourceProjects(string output) => Directory.GetFiles(output, "*.csproj", SearchOption.AllDirectories);
 
-    // Sdk.Gateway generates Manifests members, not Add<Member>() verbs: Program.cs composes with the
-    // hand-written area verbs, and each provider it registers comes from an explicit package reference
-    // pinned to the SDK's own version.
-    private static void AssertGatewayComposition(string project, XDocument document)
-    {
-        string program = string.Join('\n', File.ReadAllLines(Path.Combine(Path.GetDirectoryName(project)!, "Program.cs"))
-            .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
-        RetiredGeneratedVerb().IsMatch(program).ShouldBeFalse($"{project} calls a retired generated Add<Member>() verb.");
-        string[] packages = document.Descendants("CohesionPackageReference")
-            .Select(reference => reference.Attribute("Include")!.Value).ToArray();
-        foreach (XElement reference in document.Descendants("CohesionPackageReference"))
-        {
-            string? version = reference.Attribute("Version")?.Value;
-            version.ShouldBe("$(CohesionVersion)", $"{project} must pin its package to the SDK version.");
-        }
-
-        foreach ((string verb, string package) in _orchestrationVerbs)
-        {
-            bool registers = program.Contains(verb + "(", StringComparison.Ordinal);
-            (packages.Contains(package, StringComparer.Ordinal) == registers).ShouldBeTrue(
-                $"{project} calls {verb} exactly when it references {package}.");
-        }
-    }
-
-    // Owner decision 4: a '<store>:<key>' mount source names a store of the consuming resource's own
-    // application. Cross-application store sources are a documented follow-up; until then such a
-    // secret is a parameter: source.
-    private static void AssertStoreSourcesStayInApplication(string output)
-    {
-        (XDocument Document, string Name, string Application)[] resources = SourceProjects(output)
-            .Select(project => (Project: project, Document: XDocument.Load(project)))
-            .Where(entry => entry.Document.Descendants("CohesionResourceName").Any())
-            .Select(entry => (entry.Document, entry.Document.Descendants("CohesionResourceName").Single().Value,
-                ApplicationOf(output, entry.Project)))
-            .ToArray();
-        foreach ((XDocument document, string name, string application) in resources)
-        {
-            foreach (string source in document.Descendants("CohesionMount")
-                .Select(mount => mount.Attribute("Source")?.Value)
-                .OfType<string>()
-                .Where(source => !source.StartsWith("parameter:", StringComparison.Ordinal)
-                    && !source.StartsWith("literal:", StringComparison.Ordinal)))
-            {
-                string store = source[..source.IndexOf(':', StringComparison.Ordinal)];
-                string[] owners = resources.Where(resource => resource.Name == store)
-                    .Select(resource => resource.Application).ToArray();
-                (owners.Length == 1 && owners[0] == application).ShouldBeTrue(
-                    $"{name} ({application}) mounts '{source}', whose store belongs to [{string.Join(", ", owners)}].");
-            }
-        }
-    }
-
-    // The nearest Directory.Build.props that writes CohesionApplication decides a project's application.
-    private static string ApplicationOf(string output, string project)
-    {
-        string root = Path.GetFullPath(output);
-        for (DirectoryInfo? directory = new FileInfo(project).Directory;
-            directory is not null && directory.FullName.StartsWith(root, StringComparison.OrdinalIgnoreCase);
-            directory = directory.Parent)
-        {
-            string props = Path.Combine(directory.FullName, "Directory.Build.props");
-            if (File.Exists(props) && XDocument.Load(props).Descendants("CohesionApplication").SingleOrDefault() is XElement application)
-            {
-                return application.Value;
-            }
-        }
-
-        throw new InvalidOperationException($"{project} has no CohesionApplication in its Directory.Build.props chain.");
-    }
-
-    [GeneratedRegex(@"\bAdd[A-Z][A-Za-z0-9]*\(\s*\)")]
-    private static partial Regex RetiredGeneratedVerb();
-
     private static void AssertLocalLaunchProfile(string project)
     {
         string file = Path.Combine(Path.GetDirectoryName(project)!, "Properties", "launchSettings.json");
@@ -380,39 +263,13 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
         profile.Value.GetProperty("commandName").GetString().ShouldBe("Project");
         if (XDocument.Load(project).Root!.Attribute("Sdk")!.Value == "Assimalign.Cohesion.Sdk.Gateway")
         {
-            // The apphost supplies Local when unset; a profile must not override
-            // an explicit COHESION_ENVIRONMENT supplied by the caller.
+            // A gateway profile must not override an explicit COHESION_ENVIRONMENT supplied by the caller.
             profile.Value.TryGetProperty("environmentVariables", out _).ShouldBeFalse();
             return;
         }
         JsonProperty environment = profile.Value.GetProperty("environmentVariables").EnumerateObject().Single();
         environment.Name.ShouldBe("COHESION_ENVIRONMENT");
         environment.Value.GetString().ShouldBe("Local");
-    }
-
-    private static void AssertTopologyDifferences(string single, string federated)
-    {
-        string[] singleFiles = Directory.GetFiles(single, "*", SearchOption.AllDirectories)
-            .Select(file => Path.GetRelativePath(single, file).Replace('\\', '/')).ToArray();
-        string[] federatedFiles = Directory.GetFiles(federated, "*", SearchOption.AllDirectories)
-            .Select(file => Path.GetRelativePath(federated, file).Replace('\\', '/')).ToArray();
-        singleFiles.Except(federatedFiles).Order().ToArray().ShouldBe(new[]
-        {
-            "Example.K8s.slnx", "Gateway/Example.Gateway/Example.Gateway.csproj",
-            "Gateway/Example.Gateway/Program.cs", "Gateway/Example.Gateway/appsettings.json",
-            "Gateway/Example.Gateway/Properties/launchSettings.json"
-        }.Order().ToArray());
-        federatedFiles.Except(singleFiles).ToArray().ShouldBe(["Example.Federated.slnx"]);
-        string[] differences = singleFiles.Intersect(federatedFiles)
-            .Where(file => File.ReadAllText(Path.Combine(single, file)) != File.ReadAllText(Path.Combine(federated, file)))
-            .Order().ToArray();
-        differences.ShouldBe(new[]
-        {
-            "README.md", "Identity/Example.Identity.Gateway/appsettings.json",
-            "Networking/Example.Networking.Gateway/appsettings.json", "Platform/Example.Platform.Gateway/appsettings.json",
-            "Zones/AppA/Example.AppA.Gateway/appsettings.json", "Zones/AppB/Example.AppB.Gateway/appsettings.json",
-            "Zones/AppC/Example.AppC.Gateway/appsettings.json"
-        }.Order().ToArray());
     }
 
     private static void AssertNoRetiredContent(string directory, bool emitted)
@@ -424,6 +281,12 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
             string text = File.ReadAllText(file);
             text.ShouldNotContain("Aspire");
             text.ShouldNotContain("!!REPLACE_WITH_", Case.Sensitive);
+            // The retired generated surface: manifests, generated accessors and gateway builders.
+            foreach (string retired in new[] { "Manifests.", "Resource.References", "Resource.Endpoints", "Resource.Mounts", "UseGateway(", "ResourceContext", "ApplicationModel.Orchestration" })
+            {
+                text.ShouldNotContain(retired, Case.Sensitive);
+            }
+
             foreach (string token in new[] { "packageSource" + "Credentials", "ClearText" + "Password", "gh" + "p_", "github_" + "pat_" })
             {
                 text.ShouldNotContain(token, Case.Sensitive);
@@ -440,44 +303,29 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
     }
 
     /// <summary>Builds the app scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-app", DisplayName = "Cohesion Test [Templates] - Build: app generates only enabled manifests")]
-    public Task Build_App_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-app");
-
-    /// <summary>Builds the landing-zone scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-landing-zone", DisplayName = "Cohesion Test [Templates] - Build: landing-zone generates only enabled manifests")]
-    public Task Build_LandingZoneSingle_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-landing-zone");
-
-    /// <summary>Builds the landing-zone:federated scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-landing-zone", DisplayName = "Cohesion Test [Templates] - Build: landing-zone:federated generates only enabled manifests")]
-    public Task Build_LandingZoneFederated_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-landing-zone", "federated");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-app", DisplayName = "Cohesion Test [Templates] - Build: app builds with no generated resource surface")]
+    public Task Build_App_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-app");
 
     /// <summary>Builds the gateway scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-gateway", DisplayName = "Cohesion Test [Templates] - Build: gateway generates only enabled manifests")]
-    public Task Build_Gateway_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-gateway");
-
-    /// <summary>Builds the composite scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-composite", DisplayName = "Cohesion Test [Templates] - Build: composite generates only enabled manifests")]
-    public Task Build_Composite_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-composite");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-gateway", DisplayName = "Cohesion Test [Templates] - Build: gateway builds with no generated resource surface")]
+    public Task Build_Gateway_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-gateway");
 
     /// <summary>Builds the web scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-web", DisplayName = "Cohesion Test [Templates] - Build: web generates only enabled manifests")]
-    public Task Build_Web_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-web");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-web", DisplayName = "Cohesion Test [Templates] - Build: web builds and answers")]
+    public Task Build_Web_ShouldBuildAndAnswerAsync() => BuildTemplateAsync("cohesion-web");
 
-    /// <summary>Builds the SPA scaffold and verifies client routes, missing assets and manifest opt-in.</summary>
+    /// <summary>Builds the SPA scaffold and verifies client routes and missing assets.</summary>
     /// <returns>A task representing consumer build and request verification.</returns>
     [TemplateFeedFact("cohesion-spa", DisplayName = "Cohesion Test [Templates] - Build: SPA serves client routes and preserves missing asset responses")]
     public Task Build_Spa_ShouldServeClientRoutesAndPreserveMissingAssetsAsync() => BuildTemplateAsync("cohesion-spa");
 
     /// <summary>Builds the database scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-database", DisplayName = "Cohesion Test [Templates] - Build: database generates only enabled manifests")]
-    public Task Build_Database_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-database");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-database", DisplayName = "Cohesion Test [Templates] - Build: database builds with no generated resource surface")]
+    public Task Build_Database_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-database");
 
     /// <summary>
     /// Starts the generated standalone database once. Its server listens only after application
@@ -593,22 +441,22 @@ public sealed partial class TemplateTests : IClassFixture<TemplatePackageFixture
     }
 
     /// <summary>Builds the secretstore scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-secretstore", DisplayName = "Cohesion Test [Templates] - Build: secretstore generates only enabled manifests")]
-    public Task Build_SecretStore_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-secretstore");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-secretstore", DisplayName = "Cohesion Test [Templates] - Build: secretstore builds with no generated resource surface")]
+    public Task Build_SecretStore_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-secretstore");
 
     /// <summary>Builds the configurationstore scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-configurationstore", DisplayName = "Cohesion Test [Templates] - Build: configurationstore generates only enabled manifests")]
-    public Task Build_ConfigurationStore_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-configurationstore");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-configurationstore", DisplayName = "Cohesion Test [Templates] - Build: configurationstore builds with no generated resource surface")]
+    public Task Build_ConfigurationStore_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-configurationstore");
 
     /// <summary>Builds the identityhub scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-identityhub", DisplayName = "Cohesion Test [Templates] - Build: identityhub generates only enabled manifests")]
-    public Task Build_IdentityHub_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-identityhub");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-identityhub", DisplayName = "Cohesion Test [Templates] - Build: identityhub builds with no generated resource surface")]
+    public Task Build_IdentityHub_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-identityhub");
 
     /// <summary>Builds the rezolvr scaffold against its available package closure.</summary>
-    /// <returns>A task representing consumer build and manifest verification.</returns>
-    [TemplateFeedFact("cohesion-rezolvr", DisplayName = "Cohesion Test [Templates] - Build: rezolvr generates only enabled manifests")]
-    public Task Build_Rezolvr_ShouldHonorOrchestrationAsync() => BuildTemplateAsync("cohesion-rezolvr");
+    /// <returns>A task representing consumer build verification.</returns>
+    [TemplateFeedFact("cohesion-rezolvr", DisplayName = "Cohesion Test [Templates] - Build: rezolvr builds with no generated resource surface")]
+    public Task Build_Rezolvr_ShouldBuildWithoutGeneratedSurfaceAsync() => BuildTemplateAsync("cohesion-rezolvr");
 }

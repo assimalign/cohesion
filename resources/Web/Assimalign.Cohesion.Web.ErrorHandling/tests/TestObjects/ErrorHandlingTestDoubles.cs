@@ -144,11 +144,21 @@ internal sealed class FakeClientFaultFeature : IWebClientFaultFeature
 /// A minimal <see cref="IWebApplicationPipelineBuilder"/> that composes middleware in registration
 /// order — the same shape the real <c>WebApplication</c> builder produces, with the same silent
 /// <c>Task.CompletedTask</c> terminal — so the pipeline verbs (<c>UseErrorHandling</c>,
-/// <c>UseStatusCodePages</c>) can be driven without the hosting/DI stack.
+/// <c>UseStatusCodePages</c>) can be driven without the hosting/DI stack. They compose over an
+/// application context whose <see cref="IWebApplicationContext.Features"/> and
+/// <see cref="IWebApplicationContext.Middleware"/> list what the test registered, as
+/// <c>builder.Services.AddErrorHandling(...)</c> and <c>builder.Services.AddStatusCodePages(...)</c> would.
 /// </summary>
 internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 {
     private readonly List<Func<WebApplicationMiddleware, WebApplicationMiddleware>> _middleware = new();
+    private readonly TestApplicationContext _context = new();
+
+    /// <summary>Gets the request features the application registered.</summary>
+    public List<IHttpFeature> RegisteredFeatures => _context.RegisteredFeatures;
+
+    /// <summary>Gets the middleware the application registered.</summary>
+    public List<IWebApplicationMiddleware> RegisteredMiddleware => _context.RegisteredMiddleware;
 
     public IWebApplicationPipelineBuilder Use(Func<WebApplicationMiddleware, WebApplicationMiddleware> middleware)
     {
@@ -160,7 +170,7 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
         => Use(next => context => middleware.InvokeAsync(context, next));
 
     public IWebApplicationPipelineBuilder Use(Func<IWebApplicationContext, WebApplicationMiddleware, WebApplicationMiddleware> middleware)
-        => throw new NotSupportedException();
+        => Use(next => middleware.Invoke(_context, next));
 
     /// <summary>Appends an inline terminal-style middleware (does not call <c>next</c>).</summary>
     public IWebApplicationPipelineBuilder Run(Func<IHttpContext, Task> handler)
@@ -185,5 +195,24 @@ internal sealed class TestPipelineBuilder : IWebApplicationPipelineBuilder
 
         public Task ExecuteAsync(IHttpContext context, CancellationToken cancellationToken = default)
             => _middleware.Invoke(context);
+    }
+
+    private sealed class TestApplicationContext : IWebApplicationContext
+    {
+        public List<IHttpFeature> RegisteredFeatures { get; } = [];
+
+        public List<IWebApplicationMiddleware> RegisteredMiddleware { get; } = [];
+
+        public FileSystemPath? ContentRootPath => null;
+
+        public FileSystemPath? WebRootPath => null;
+
+        public IEnumerable<IWebApplicationMiddleware> Middleware => RegisteredMiddleware;
+
+        public IEnumerable<IWebApplicationServer> Servers => [];
+
+        public IEnumerable<IHttpFeature> Features => RegisteredFeatures;
+
+        public IEnumerable<IWebApplicationSetting> Settings => [];
     }
 }

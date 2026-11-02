@@ -117,6 +117,28 @@ public class HttpsRedirectionEndToEndTests
         }
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.HttpsPolicy] - E2E: The status AddHttpsRedirection registers is the one UseHttpsRedirection answers with")]
+    public async Task AddHttpsRedirection_WithPermanentStatus_ShouldRedirectWith308()
+    {
+        // Arrange — the generated verb registers the configured middleware; UseHttpsRedirection() places it.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+        RawHttp1Application application = await RawHttp1Application.StartAsync(cancellationToken,
+            builder => builder.Services.AddHttpsRedirection(redirection =>
+                redirection.Options.StatusCode = CohesionHttpStatusCode.PermanentRedirect));
+
+        await using (application)
+        {
+            // Act
+            string response = await application.ExchangeAsync("GET /admin HTTP/1.1\r\nHost: example.com\r\n\r\n", cancellationToken);
+
+            // Assert
+            response.ShouldStartWith("HTTP/1.1 308");
+            ReadHeader(response, "Location").ShouldBe("https://example.com/admin");
+            application.TerminalInvocations.ShouldBe(0);
+        }
+    }
+
     private static string? ReadHeader(string response, string name)
     {
         foreach (string line in response.Split("\r\n"))
@@ -156,11 +178,12 @@ public class HttpsRedirectionEndToEndTests
 
         public int TerminalInvocations => Volatile.Read(ref _terminalInvocations.Value);
 
-        public static async Task<RawHttp1Application> StartAsync(CancellationToken cancellationToken)
+        public static async Task<RawHttp1Application> StartAsync(CancellationToken cancellationToken, Action<WebApplicationBuilder>? configure = null)
         {
             WebApplicationBuilder builder = WebApplication.CreateBuilder();
             InMemoryConnectionListener listener = new();
             builder.Server.UseServer(options => options.UseHttp1(listener));
+            configure?.Invoke(builder);
 
             WebApplication application = builder.Build();
             StrongBox<int> terminalInvocations = new(0);

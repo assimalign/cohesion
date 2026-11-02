@@ -13,7 +13,7 @@ namespace Assimalign.Cohesion.Web.StaticFiles.Tests;
 
 public sealed class StaticFilesCompositionValidationTests
 {
-    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - UseStaticFiles: Invalid default file names fail during registration")]
+    [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - AddStaticFiles: Invalid default file names fail during registration")]
     [InlineData("bad?.html")]
     [InlineData("bad*.html")]
     [InlineData("bad\".html")]
@@ -23,28 +23,29 @@ public sealed class StaticFilesCompositionValidationTests
     [InlineData("bad:.html")]
     [InlineData("bad\0.html")]
     [InlineData("bad\u001f.html")]
-    public void UseStaticFiles_InvalidDefaultDocument_ShouldThrowAtComposition(string document)
+    public void AddStaticFiles_InvalidDefaultDocument_ShouldThrowAtRegistration(string document)
     {
-        // Arrange
+        // Arrange — an explicit mount and the web root validate alike.
         using InMemoryFileSystem site = StaticSite.Create(("index.html", "content"));
-        TestPipelineBuilder explicitMount = new();
-        TestPipelineBuilder webRoot = new();
-        Action<StaticFilesOptions> configure = options => options.DefaultDocuments.Add(document);
+        StaticFilesBuilder explicitMount = new StaticFilesBuilder().UseFileSystem(site);
+        StaticFilesBuilder webRoot = new();
+        explicitMount.Options.DefaultDocuments.Add(document);
+        webRoot.Options.DefaultDocuments.Add(document);
 
         // Act and assert
-        Should.Throw<ArgumentException>(() => explicitMount.UseStaticFiles(site, configure));
-        Should.Throw<ArgumentException>(() => webRoot.UseStaticFiles(configure));
+        Should.Throw<ArgumentException>(() => explicitMount.Build());
+        Should.Throw<ArgumentException>(() => webRoot.Build());
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - UseStaticFiles: Overlong default names fail during registration")]
-    public void UseStaticFiles_OverlongDefaultDocument_ShouldThrowAtComposition()
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - AddStaticFiles: Overlong default names fail during registration")]
+    public void AddStaticFiles_OverlongDefaultDocument_ShouldThrowAtRegistration()
     {
         // Arrange
-        TestPipelineBuilder builder = new();
-        string document = new('x', FileName.MaxLength + 1);
+        StaticFilesBuilder files = new();
+        files.Options.DefaultDocuments.Add(new string('x', FileName.MaxLength + 1));
 
         // Act and assert
-        Should.Throw<ArgumentException>(() => builder.UseStaticFiles(options => options.DefaultDocuments.Add(document)));
+        Should.Throw<ArgumentException>(() => files.Build());
     }
 
     [Theory(DisplayName = "Cohesion Test [Web.StaticFiles] - MapFallbackToFile: Unparseable paths fail during registration")]

@@ -12,7 +12,6 @@ using Xunit;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Http.Connections;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Logging;
 using Assimalign.Cohesion.Testing;
 using Assimalign.Cohesion.Web.Diagnostics;
@@ -26,12 +25,11 @@ namespace Assimalign.Cohesion.Web.Hosting.Tests;
 public sealed class WebDefaultEventSourceForwardingTests
 {
     private const string serverSource = "Assimalign.Cohesion.Web.Server";
-    private const string hostingSource = "Assimalign.Cohesion.Web.Hosting";
     private const string tcpSource = "Assimalign.Cohesion.Connections.Tcp";
     private const string dependencyInjectionSource = "Assimalign.Cohesion.DependencyInjection";
     private const string accessLogCategory = "Assimalign.Cohesion.Web.Diagnostics.HttpLogging";
 
-    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Default forwarding: Entry points forward both Web.Server and Web.Hosting without TCP or dependency-injection events")]
+    [Fact(DisplayName = "Cohesion Test [Web Hosting] - Default forwarding: Entry points forward Web.Server without TCP or dependency-injection events")]
     public async Task Build_WithAnEntryPoint_ShouldForwardWebWithoutTransportOrContainerEvents()
     {
         // Arrange — initialize the real TCP provider so a separate listener can prove it raises events.
@@ -55,7 +53,6 @@ public sealed class WebDefaultEventSourceForwardingTests
         try
         {
             await ((IWebApplication)application).StartAsync(CancellationToken.None);
-            WebHostingEventSource.Log.StopAccepted(new ResourceContext(resourceName: "forwarding-test"), new FakeHttpContext(), deferred: false);
             await ((IWebApplication)application).StopAsync(CancellationToken.None);
 
             // Assert — each excluded provider actually emitted while forwarding was active.
@@ -68,8 +65,6 @@ public sealed class WebDefaultEventSourceForwardingTests
                 Equals(entry.Attributes["EventName"], "ServerBound")).Attributes["serverId"]!;
             ServerEntries(recorded, serverId, "ServerBound").ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Information);
             ServerEntries(recorded, serverId, "ServerStopped").ShouldHaveSingleItem();
-            recorded.Entries.Where(entry => entry.Category == hostingSource &&
-                Equals(entry.Attributes["EventName"], "StopAccepted")).ShouldHaveSingleItem();
             recorded.Entries.ShouldNotContain(entry => entry.Category.StartsWith("Assimalign.Cohesion.Connections.", StringComparison.Ordinal));
             recorded.Entries.ShouldNotContain(entry => entry.Category == dependencyInjectionSource);
             factory.Forwarders.ShouldHaveSingleItem().Name.ShouldBe("EventSource");
@@ -177,9 +172,10 @@ public sealed class WebDefaultEventSourceForwardingTests
         builder.Logging.AddProvider(recorded).AddRule(rule);
         TcpConnectionListener listener = CreateListener();
         builder.Server.UseServer(options => options.UseHttp1(listener));
+        builder.Services.AddHttpLogging((services, logging) => logging.UseLoggerFactory(services.GetRequiredService<ILoggerFactory>()));
         await using WebApplication application = builder.Build();
         ILoggerFactory factory = application.Context.ServiceProvider.GetRequiredService<ILoggerFactory>();
-        application.UseHttpLogging(factory);
+        application.UseHttpLogging();
         application.Use((context, next) =>
         {
             context.Response.StatusCode = Assimalign.Cohesion.Http.HttpStatusCode.Ok;

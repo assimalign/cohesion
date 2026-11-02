@@ -7,13 +7,14 @@ using Assimalign.Cohesion.Web.Routing;
 namespace Assimalign.Cohesion.Web.Rewrite;
 
 /// <summary>
-/// Pipeline-builder members that add URL rewriting and redirect rules to a web application.
+/// Pipeline-builder members that place URL rewriting and redirect rules in a web application's pipeline.
 /// </summary>
 /// <remarks>
-/// Register <c>UseRewrite</c> ahead of <c>UseStaticFiles</c> and <c>UseRouting</c>, so both see the
+/// Place <c>UseRewrite</c> ahead of <c>UseStaticFiles</c> and <c>UseRouting</c>, so both see the
 /// rewritten URL, and after <c>UseForwardedHeaders</c> and <c>UseHostFiltering</c>, so the canonicalization
 /// redirects read the effective scheme and a validated host (docs/resources/Web/MIDDLEWARE_ORDER.md).
-/// Composition is dependency-free: the rules are built and validated when <c>UseRewrite</c> is called, and no
+/// Composition is dependency-free: the rules are built and validated where
+/// <c>builder.Services.AddRewrite(rewrite =&gt; ...)</c> registers them (<see cref="RewriteBuilder"/>), and no
 /// request-time service location occurs.
 /// </remarks>
 public static class RewriteExtensions
@@ -21,16 +22,26 @@ public static class RewriteExtensions
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Adds middleware that evaluates the rules <paramref name="configure"/> registers, in order, for every
-        /// request: an internal rewrite hands the rest of the pipeline the rewritten path and query, and a
-        /// redirect answers the request and ends the pipeline.
+        /// Places the rewrite middleware the application registered with
+        /// <c>builder.Services.AddRewrite(rewrite =&gt; ...)</c>. It evaluates the registered rules, in order,
+        /// for every request: an internal rewrite hands the rest of the pipeline the rewritten path and query,
+        /// and a redirect answers the request and ends the pipeline.
         /// </summary>
+        /// <returns>The same pipeline builder, for chaining.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <remarks>
+        /// <para>
+        /// The rules and the bound on rule passes are configured where the middleware is registered
+        /// (<see cref="RewriteBuilder"/>); this verb only positions it. The rules have no default, so composing
+        /// the pipeline fails with an <see cref="InvalidOperationException"/> when the application registered
+        /// none. When it registered more than one, the last registration wins, and placing the verb more than
+        /// once, in a <c>Map(path)</c> branch included, places that same middleware each time.
+        /// </para>
         /// <para>
         /// A rewrite does not change the request the middleware received. The rest of the pipeline receives a
         /// view of the exchange whose <c>Request.Path</c> and <c>Request.Query</c> are the rewritten values and
         /// whose every other member is the original's, and <see cref="IRewriteFeature"/> keeps the original
-        /// values readable while that pipeline runs. Middleware registered ahead of <c>UseRewrite</c>, and the
+        /// values readable while that pipeline runs. Middleware placed ahead of <c>UseRewrite</c>, and the
         /// server's request telemetry, keep the original values: a component that holds the context it handed
         /// to <c>next</c> still sees the original path after <c>next</c> returns. The <c>http.route</c> the
         /// server reports is the route the rewritten path matched.
@@ -42,20 +53,17 @@ public static class RewriteExtensions
         /// pipeline never reach the rules.
         /// </para>
         /// </remarks>
-        /// <param name="configure">Registers the rules and sets the bound on rule passes.</param>
-        /// <returns>The same pipeline builder, for chaining.</returns>
-        /// <exception cref="ArgumentNullException"><paramref name="builder"/> or <paramref name="configure"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException"><paramref name="configure"/> registers a rule with an invalid pattern or target.</exception>
-        /// <exception cref="ArgumentOutOfRangeException"><paramref name="configure"/> registers a rule with an invalid status, flow or match target.</exception>
-        public IWebApplicationPipelineBuilder UseRewrite(Action<RewriteOptions> configure)
+        public IWebApplicationPipelineBuilder UseRewrite()
         {
             ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(configure);
 
-            RewriteOptions options = new();
-            configure(options);
+            return builder.Use(static (context, next) =>
+            {
+                IWebApplicationMiddleware middleware = context.Middleware.OfType<RewriteMiddleware>().LastOrDefault()
+                    ?? throw new InvalidOperationException(ErrorMessages.RewriteNotRegistered);
 
-            return builder.Use(new RewriteMiddleware(options.Rules.ToArray(), options.MaxPasses));
+                return exchange => middleware.InvokeAsync(exchange, next);
+            });
         }
     }
 }

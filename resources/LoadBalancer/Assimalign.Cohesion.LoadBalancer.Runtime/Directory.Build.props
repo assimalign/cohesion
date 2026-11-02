@@ -17,24 +17,8 @@
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.App.LoadBalancer" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer" />
         <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer.Hosting" />
+        <CohesionFrameworkAssembly Include="Assimalign.Cohesion.LoadBalancer.Hosting.ApplicationModel" />
 
-        <!-- LoadBalancer.ApplicationModel is NuGet-only. -->
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Quic" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Security" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Connections.Tcp" />
         <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Connections" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ExtendedConnect" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.Forwarded" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.ProtocolUpgrade" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Http.RequestLimits" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.IdentityModel.Token.JsonWebToken" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Health" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Hosting" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Routing" />
-        <CohesionFrameworkPrivateAssembly Include="Assimalign.Cohesion.Web.Server" />
     </ItemGroup>
 </Project>

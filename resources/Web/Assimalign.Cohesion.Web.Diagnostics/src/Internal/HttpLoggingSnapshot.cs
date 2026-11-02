@@ -10,8 +10,8 @@ using Assimalign.Cohesion.Logging;
 
 /// <summary>
 /// The immutable middleware-side view of <see cref="HttpLoggingOptions"/>, frozen when
-/// <c>UseHttpLogging</c> composes the pipeline. Mutations to the options object after
-/// composition are invisible by design — there is no request-time configuration.
+/// <see cref="HttpLoggingBuilder.Build"/> builds the middleware. Mutations to the options object
+/// afterwards are invisible by design — there is no request-time configuration.
 /// </summary>
 internal sealed class HttpLoggingSnapshot
 {

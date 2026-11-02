@@ -7,48 +7,24 @@ using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Health;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.VpnGateway.Hosting;
 
 /// <summary>
 /// Provides the VpnGateway application environment and runtime composition.
 /// </summary>
-[global::System.Diagnostics.DebuggerDisplay("VpnGatewayApplicationContext {Name,nq}")]
+[global::System.Diagnostics.DebuggerDisplay("VpnGatewayApplicationContext")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
-public sealed class VpnGatewayApplicationContext : HostContext, IVpnGatewayApplicationContext, IHealthContributor
+public sealed class VpnGatewayApplicationContext : HostContext, IVpnGatewayApplicationContext
 {
     private IServiceProvider? _serviceProvider;
     private IReadOnlyList<IHostService> _hostedServices = Array.Empty<IHostService>();
     private readonly IHostEnvironment _environment;
     private int _isServiceProviderDisposed;
 
-    internal VpnGatewayApplicationContext(ResourceContext? resourceContext = null)
+    internal VpnGatewayApplicationContext()
     {
-        _environment = new HostEnvironment(resourceContext?.EnvironmentName ?? "production")
-        {
-            ContentRootPath = resourceContext is null ? (FileSystemPath?)null : FileSystemPath.Parse(resourceContext.ContentRootPath),
-        };
-    }
-
-    /// <summary>
-    /// Gets the name used for this application health contribution.
-    /// </summary>
-    public string Name => "VpnGateway";
-
-    /// <summary>
-    /// Reports the health of the application.
-    /// </summary>
-    /// <param name="cancellationToken">The token that cancels the health check.</param>
-    /// <returns>The current application health contribution.</returns>
-    /// <exception cref="OperationCanceledException">The cancellation token is cancelled.</exception>
-    public ValueTask<HealthContribution> CheckAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(State is HostState.Failed
-            ? HealthContribution.Unhealthy("The VpnGateway host failed.")
-            : HealthContribution.Healthy());
+        _environment = new HostEnvironment("production");
     }
 
     /// <summary>
@@ -110,12 +86,10 @@ public sealed class VpnGatewayApplicationContext : HostContext, IVpnGatewayAppli
             _target = value;
         }
 
-        public string Name => _target.Name;
         public FileSystemPath? ContentRootPath => _target.ContentRootPath;
         public IHostEnvironment Environment => _target.Environment;
         public IEnumerable<IHostService> HostedServices => _target.HostedServices;
         public HostId HostId => _target.HostId;
         public global::Assimalign.Cohesion.Hosting.HostState State => _target.State;
-        public global::Assimalign.Cohesion.Hosting.IHostRunner? Runner => _target.Runner;
     }
 }

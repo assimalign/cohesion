@@ -1,12 +1,12 @@
 # LogSpace Hosting overview
 
-LogSpaceApplication.CreateBuilder(args).Build() composes the ambient resource. An enabled otlp endpoint registers the receiver and a dedicated segment flush service. query hosts management and GET /cohesion/v1/logs; a plain unregistered host remains an ordered collection of explicit services. SinkHost demonstrates the ambient contract.
+The area's resource integration is `Assimalign.Cohesion.LogSpace.Hosting.ApplicationModel` (`builder.Services.AddResource(...)`), which references this module; this module references no application-model library.
 
-POST /v1/logs requires application/json and a signed ES256 telemetry token. Query accepts resource, since (ISO-8601), limit (default 100/max 1000), and cursor, returning application/x-ndjson and X-Cohesion-Next-Cursor when more scanning is possible. Query pages are bounded to four million characters (plus at most one bounded record). Query and management require the sink's ordinary bootstrap/dev credential; telemetry scope is rejected.
+Nothing registers the OTLP receiver or the query handler yet. The OTLP routes check no caller identity, so they stay unregistered until an access decision is made. POST /v1/logs requires application/json. Query accepts resource, since (ISO-8601), limit (default 100/max 1000), and cursor, returning application/x-ndjson and X-Cohesion-Next-Cursor when more scanning is possible. Query pages are bounded to four million characters (plus at most one bounded record).
 
-Without a gateway identity, query and management under `/cohesion/v1` accept only transport peers
+Query under `/cohesion/v1` accepts only transport peers
 at `127.0.0.1`, `::1`, or IPv4-mapped `127.0.0.1`; other callers receive `403 Forbidden`. Forwarded
-headers do not change this decision. Bare health probes remain open. This tightens standalone
+headers do not change this decision. This tightens standalone
 behavior from 10.0.0-preview.1.
 
 ## Concrete composition (T10 / O34)

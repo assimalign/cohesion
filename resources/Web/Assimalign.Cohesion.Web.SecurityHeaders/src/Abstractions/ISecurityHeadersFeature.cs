@@ -11,7 +11,7 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// <remarks>
 /// <para>
 /// Resolve it with <c>context.Features.Get&lt;ISecurityHeadersFeature&gt;()</c>. When
-/// <c>UseSecurityHeaders</c> is not registered ahead of the handler, the lookup returns
+/// <c>UseSecurityHeaders</c> does not place the middleware ahead of the handler, the lookup returns
 /// <see langword="null"/>.
 /// </para>
 /// <para>
@@ -19,7 +19,7 @@ namespace Assimalign.Cohesion.Web.SecurityHeaders;
 /// (<see cref="ContentSecurityPolicySourceListBuilder.Nonce"/>) of the response's
 /// <c>Content-Security-Policy</c> and <c>Content-Security-Policy-Report-Only</c> fields, so the value a
 /// handler writes into its markup is the value the policy allows. A nested <c>UseSecurityHeaders</c>
-/// reuses the feature an outer registration installed, so one exchange has one nonce.
+/// reuses the feature an outer placement installed, so one exchange has one nonce.
 /// </para>
 /// <para>
 /// An application may install its own implementation before the middleware runs, for example a test

@@ -35,42 +35,6 @@
         "toLower": true
       }
     },
-    "firstSegment": {
-      "type": "generated",
-      "generator": "regex",
-      "parameters": {
-        "source": "name",
-        "steps": [
-          {
-            "regex": "\\..*$",
-            "replacement": ""
-          }
-        ]
-      }
-    },
-    "organization": {
-      "type": "generated",
-      "generator": "casing",
-      "parameters": {
-        "source": "firstSegment",
-        "toLower": true
-      },
-      "replaces": "__ORGANIZATION_NAME__"
-    },
-    "applicationName": {
-      "type": "parameter",
-      "dataType": "string",
-      "description": "Application identity; defaults to the lowercased first project-name segment."
-    },
-    "application": {
-      "type": "generated",
-      "generator": "coalesce",
-      "parameters": {
-        "sourceVariableName": "applicationName",
-        "fallbackVariableName": "organization"
-      },
-      "replaces": "__APPLICATION_NAME__"
-    },
     "resource": {
       "type": "generated",
       "generator": "regex",

@@ -12,7 +12,7 @@ using Xunit;
 using Assimalign.Cohesion.Database.Hosting.Internal;
 using Assimalign.Cohesion.Database.Sql;
 using Assimalign.Cohesion.Database.Sql.Schema;
-using Assimalign.Cohesion.Hosting.Health;
+using Assimalign.Cohesion.Web.Health;
 
 using Assimalign.Cohesion.Database.Storage.Tests.TestObjects;
 

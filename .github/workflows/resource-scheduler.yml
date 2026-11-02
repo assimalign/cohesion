@@ -5,6 +5,9 @@ on:
       - 'resources/Scheduler/**'
       - '!resources/Scheduler/**/*.slnx'
       - '!resources/Scheduler/**/*.md'
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
+      # change to the application model reruns the area.
+      - 'libraries/ApplicationModel/**'
       - '.github/workflows/resource-scheduler.yml'
       # Shared build infrastructure that every project in this workflow compiles with.
       - '.github/actions/build/**'
@@ -51,9 +54,9 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.Scheduler',
-            'Assimalign.Cohesion.Scheduler.ApplicationModel',
             'Assimalign.Cohesion.Scheduler.Cron',
             'Assimalign.Cohesion.Scheduler.Hosting',
+            'Assimalign.Cohesion.Scheduler.Hosting.ApplicationModel',
             'Assimalign.Cohesion.Scheduler.Timer'
         ]]
     steps:

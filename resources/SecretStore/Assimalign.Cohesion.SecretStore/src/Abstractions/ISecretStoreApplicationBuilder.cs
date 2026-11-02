@@ -34,17 +34,15 @@ public interface ISecretStoreApplicationBuilder
     /// </summary>
     /// <remarks>
     /// Durable certificate-authority state always wins over composition-time seed material. On a
-    /// first start, paired initial PEM material is used when supplied; otherwise a configured
-    /// Platform endpoint selects gateway-mediated intermediate enrollment. When neither is configured,
-    /// <see cref="CertificateAuthorityOptions.SelfSeedWhenNoPlatform"/> controls whether the store
-    /// creates a self-signed development root. A failed configured Platform enrollment never
-    /// silently falls back to an unrelated self-signed root.
+    /// first start, paired initial PEM material is used when supplied; otherwise
+    /// <see cref="CertificateAuthorityOptions.SelfSeed"/> controls whether the store creates a
+    /// self-signed development root.
     /// </remarks>
     /// <param name="configure">An optional callback that configures the certificate authority.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentException">
-    /// The common name is empty; the Platform enrollment endpoint is not absolute HTTPS; configured
-    /// PEM material is empty; or an initial certificate and private key are not supplied together.
+    /// The common name is empty, configured PEM material is empty, or an initial certificate and
+    /// private key are not supplied together.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// A certificate authority has already been declared, or no first-start authority source is
@@ -59,7 +57,7 @@ public interface ISecretStoreApplicationBuilder
     /// <returns>The configured secret store application.</returns>
     /// <exception cref="InvalidOperationException">
     /// The builder has already built an application, a registered service factory returns
-    /// <see langword="null"/>, or the ambient endpoint or data mount cannot host the store.
+    /// <see langword="null"/>, or the configured endpoint or data directory cannot host the store.
     /// </exception>
     ISecretStoreApplication Build();
 }

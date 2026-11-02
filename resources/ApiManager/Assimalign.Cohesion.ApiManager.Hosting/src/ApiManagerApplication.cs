@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class ApiManagerApplication : Host<ApiManagerApplicationContext>, 
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(ApiManagerApplication).Assembly);
-    }
-
-    internal static ApiManagerApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new ApiManagerApplicationBuilder(args, resourceAssembly);
+        return new ApiManagerApplicationBuilder(args);
     }
 
     private sealed class DebugView

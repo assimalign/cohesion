@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class IoTHubApplication : Host<IoTHubApplicationContext>, IIoTHubA
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(IoTHubApplication).Assembly);
-    }
-
-    internal static IoTHubApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new IoTHubApplicationBuilder(args, resourceAssembly);
+        return new IoTHubApplicationBuilder(args);
     }
 
     private sealed class DebugView

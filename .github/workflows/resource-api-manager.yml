@@ -5,6 +5,9 @@ on:
       - 'resources/ApiManager/**'
       - '!resources/ApiManager/**/*.slnx'
       - '!resources/ApiManager/**/*.md'
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
+      # change to the application model reruns the area.
+      - 'libraries/ApplicationModel/**'
       - '.github/workflows/resource-api-manager.yml'        # When Pipeline File Changes
       # Shared build infrastructure that every project in this workflow compiles with.
       - '.github/actions/build/**'
@@ -51,8 +54,8 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.ApiManager',
-            'Assimalign.Cohesion.ApiManager.ApplicationModel',
-            'Assimalign.Cohesion.ApiManager.Hosting'
+            'Assimalign.Cohesion.ApiManager.Hosting',
+            'Assimalign.Cohesion.ApiManager.Hosting.ApplicationModel'
         ]]
     steps:
       - uses: actions/checkout@v7

@@ -18,7 +18,6 @@ public sealed class ValidateCohesionSdkPinsTask : Task
     private static readonly HashSet<string> _cohesionSdkPackageIds = new(StringComparer.OrdinalIgnoreCase)
     {
         BaseSdkPackageId,
-		"Assimalign.Cohesion.Sdk.ApplicationModel",
         "Assimalign.Cohesion.Sdk.ApiManager",
         "Assimalign.Cohesion.Sdk.ConfigurationStore",
         "Assimalign.Cohesion.Sdk.Database",

@@ -27,8 +27,14 @@ public class StaticFilesEndToEndTests
 
     private static WebApplicationTestFactory CreateFactory(InMemoryFileSystem site, Action<StaticFilesOptions>? configure = null)
     {
+        // The generated verb registers the configured middleware; UseStaticFiles() places it.
         var factory = new WebApplicationTestFactory();
-        factory.Application.UseStaticFiles(site, configure);
+        factory.Builder.Services.AddStaticFiles(files =>
+        {
+            files.UseFileSystem(site);
+            configure?.Invoke(files.Options);
+        });
+        factory.Application.UseStaticFiles();
         return factory;
     }
 
@@ -269,7 +275,12 @@ public class StaticFilesEndToEndTests
         using InMemoryFileSystem site = StaticSite.Create(("app.css", "body{}"));
 
         await using var factory = new WebApplicationTestFactory();
-        factory.Application.UseStaticFiles(site, options => options.RequestPath = new HttpPath("/static"));
+        factory.Builder.Services.AddStaticFiles(files =>
+        {
+            files.UseFileSystem(site);
+            files.Options.RequestPath = new HttpPath("/static");
+        });
+        factory.Application.UseStaticFiles();
         factory.Application.Use(async (context, next) =>
         {
             context.Response.StatusCode = HttpStatusCode.Forbidden;
@@ -285,5 +296,33 @@ public class StaticFilesEndToEndTests
         served.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         unmatched.StatusCode.ShouldBe(NetHttpStatusCode.Forbidden);
         (await unmatched.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("downstream");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.StaticFiles] - E2E: A mount AddStaticFiles builds from the service provider should be the one UseStaticFiles places")]
+    public async Task AddStaticFiles_WithServiceProviderCallback_ShouldPlaceTheMountBuiltOnFirstResolve()
+    {
+        // Arrange — the provider overload builds when the pipeline first resolves the registration.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        using InMemoryFileSystem site = StaticSite.Create(("app.css", "body{}"));
+        int built = 0;
+
+        await using var factory = new WebApplicationTestFactory();
+        factory.Builder.Services.AddStaticFiles((services, files) =>
+        {
+            built++;
+            files.UseFileSystem(site);
+            files.Options.RequestPath = new HttpPath("/assets");
+        });
+        factory.Application.UseStaticFiles();
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage first = await client.GetAsync("/assets/app.css", cancellation.Token);
+        using HttpResponseMessage second = await client.GetAsync("/assets/app.css", cancellation.Token);
+
+        // Assert
+        first.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        (await second.Content.ReadAsStringAsync(cancellation.Token)).ShouldBe("body{}");
+        built.ShouldBe(1);
     }
 }

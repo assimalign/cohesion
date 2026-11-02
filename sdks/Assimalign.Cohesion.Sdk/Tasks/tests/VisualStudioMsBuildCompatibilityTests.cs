@@ -10,7 +10,7 @@ namespace Assimalign.Cohesion.Sdk.Tests;
 /// <summary>
 /// Visual Studio evaluates projects with .NET Framework MSBuild. Property functions that exist only
 /// on .NET Core, such as the two-argument <c>Path.GetFullPath(path, basePath)</c>, evaluate under
-/// <c>dotnet build</c> and then fail every orchestration-enabled project's load in the IDE with
+/// <c>dotnet build</c> and then fail every Cohesion SDK project's load in the IDE with
 /// "Invalid static method invocation syntax". The shipped SDK files must stay evaluable on both.
 /// </summary>
 public sealed class VisualStudioMsBuildCompatibilityTests

@@ -14,8 +14,8 @@ await using IConfigurationStoreApplication application = builder.Build();
 await application.RunAsync();
 ```
 
-Declarations are first-start seeds. The Hosting implementation preserves later command mutations
-across restarts and does not overwrite an existing durable namespace document.
+Declarations are first-start seeds. The Hosting implementation does not overwrite an existing
+durable namespace document, so values on disk survive a restart with a changed declaration.
 
 - [Overview](./docs/OVERVIEW.md)
 - [Design](./docs/DESIGN.md)

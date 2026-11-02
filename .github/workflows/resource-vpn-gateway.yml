@@ -5,6 +5,9 @@ on:
       - 'resources/VpnGateway/**'
       - '!resources/VpnGateway/**/*.slnx'
       - '!resources/VpnGateway/**/*.md'
+      # The area's Hosting.ApplicationModel integration builds on ApplicationModel.Hosting, so a
+      # change to the application model reruns the area.
+      - 'libraries/ApplicationModel/**'
       - '.github/workflows/resource-vpn-gateway.yml'
       # Shared build infrastructure that every project in this workflow compiles with.
       - '.github/actions/build/**'
@@ -51,8 +54,8 @@ jobs:
         # that .github/actions/build receives whole. The release inventory guard reads this list.
         projects: [[
             'Assimalign.Cohesion.VpnGateway',
-            'Assimalign.Cohesion.VpnGateway.ApplicationModel',
-            'Assimalign.Cohesion.VpnGateway.Hosting'
+            'Assimalign.Cohesion.VpnGateway.Hosting',
+            'Assimalign.Cohesion.VpnGateway.Hosting.ApplicationModel'
         ]]
     steps:
       - uses: actions/checkout@v7

@@ -5,10 +5,10 @@ using System.Globalization;
 namespace Assimalign.Cohesion.Web.Caching;
 
 /// <summary>
-/// Builder-time options for the output-cache middleware
-/// (<see cref="OutputCacheExtensions.UseOutputCache(IWebApplicationPipelineBuilder, Action{OutputCacheOptions})"/>).
-/// Composition is dependency-free: the base and named policies, size caps, and clock are captured at
-/// builder time; no service container, configuration binding, or request-time service location occurs.
+/// Builder-time options for the output-cache middleware: <see cref="OutputCacheBuilder.Options"/>, which
+/// <c>builder.Services.AddOutputCache(cache =&gt; ...)</c> configures. Composition is dependency-free: the
+/// base and named policies, size caps, and clock are captured when the middleware is built; no service
+/// container, configuration binding, or request-time service location occurs.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -62,7 +62,8 @@ public sealed class OutputCacheOptions
 
     /// <summary>
     /// Gets or sets the cumulative byte budget of the default in-memory store. Ignored when an application
-    /// supplies its own <see cref="IOutputCacheStore"/>. Defaults to 64&#8239;MiB. Must be positive.
+    /// supplies its own <see cref="IOutputCacheStore"/> (<see cref="OutputCacheBuilder.UseStore"/>).
+    /// Defaults to 64&#8239;MiB. Must be positive.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The assigned value is not positive.</exception>
     public long SizeLimit
@@ -130,6 +131,32 @@ public sealed class OutputCacheOptions
     /// Resolves a named policy registered through <see cref="AddPolicy"/>.
     /// </summary>
     internal bool TryGetPolicy(string name, out OutputCachePolicy? policy) => _policies.TryGetValue(name, out policy);
+
+    /// <summary>
+    /// Copies these options, the base and named policies included, for the middleware
+    /// <see cref="OutputCacheBuilder.Build"/> creates: it reads them on every request, so a change made
+    /// to these options afterwards must not reach it.
+    /// </summary>
+    internal OutputCacheOptions Snapshot()
+    {
+        // Copies every member; a member added to the options needs a line here, or a built middleware
+        // sees only its default. The backing fields hold values their setters already validated.
+        OutputCacheOptions snapshot = new()
+        {
+            BasePolicy = BasePolicy?.Clone(),
+            TimeProvider = TimeProvider,
+        };
+
+        snapshot._maximumBodySize = _maximumBodySize;
+        snapshot._sizeLimit = _sizeLimit;
+
+        foreach (KeyValuePair<string, OutputCachePolicy> policy in _policies)
+        {
+            snapshot._policies.Add(policy.Key, policy.Value.Clone());
+        }
+
+        return snapshot;
+    }
 
     private sealed class DebugView
     {

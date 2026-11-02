@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,18 +61,7 @@ public sealed class ConfigurationStoreApplication : Host<ConfigurationStoreAppli
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(ConfigurationStoreApplication).Assembly;
-        return new ConfigurationStoreApplicationBuilder(args, resourceAssembly);
-    }
-
-    internal static ConfigurationStoreApplicationBuilder CreateBuilder(
-        string[] args,
-        Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-
-        return new ConfigurationStoreApplicationBuilder(args, resourceAssembly);
+        return new ConfigurationStoreApplicationBuilder(args);
     }
 
     private sealed class DebugView

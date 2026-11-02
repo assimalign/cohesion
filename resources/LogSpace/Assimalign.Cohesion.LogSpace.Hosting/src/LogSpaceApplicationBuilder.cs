@@ -1,15 +1,10 @@
 using System;
-using System.IO;
-using System.Reflection;
 using System.Threading.Tasks;
 
 using Assimalign.Cohesion.DependencyInjection;
 using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
-using Assimalign.Cohesion.Hosting.Telemetry;
 using Assimalign.Cohesion.LogSpace;
 using Assimalign.Cohesion.LogSpace.Hosting.Internal;
-using Assimalign.Cohesion.Logging;
 
 namespace Assimalign.Cohesion.LogSpace.Hosting;
 
@@ -26,12 +21,10 @@ namespace Assimalign.Cohesion.LogSpace.Hosting;
 public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
 {
     private readonly LogSpaceApplicationContext _context;
-    private readonly IResourceControlPlane? _controlPlane;
-    private readonly ResourceContext? _resourceContext;
 
     private bool _isBuilt;
 
-    internal LogSpaceApplicationBuilder(string[] args, Assembly resourceAssembly)
+    internal LogSpaceApplicationBuilder(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
         Services = new ServiceProviderBuilder(new ServiceProviderOptions
@@ -40,38 +33,8 @@ public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
             ValidateOnBuild = true,
             ValidateScopes = true,
         });
-        if (ResourceRuntime.TryCreateControlPlane(resourceAssembly, out IResourceControlPlane? controlPlane))
-        {
-            _controlPlane = controlPlane ?? throw new InvalidOperationException("The registered LogSpace control-plane factory returned null.");
-            _resourceContext = ResourceRuntime.Current;
-            ILoggerFactory? loggerFactory = ResourceTelemetry.Configure(_resourceContext, out IHostService? telemetry);
-            if (loggerFactory is not null)
-            {
-                Services.AddSingleton<ILoggerFactory>(loggerFactory);
-            }
-            if (telemetry is not null)
-            {
-                // Registered ahead of every AddService call, so telemetry starts first and stops last.
-                Services.AddSingleton<IHostService>(telemetry);
-            }
-            Services.AddSingleton<IResourceControlPlane>(_controlPlane);
 
-            if (_resourceContext.Endpoints.ContainsKey("otlp"))
-            {
-                // One segment store backs the flush service, the OTLP receiver, and the query endpoint.
-                ResourceContext resourceContext = _resourceContext;
-                Services.AddSingleton<LogSegmentStore>(_ => new LogSegmentStore(
-                    resourceContext.GetMount("data", Path.Combine(resourceContext.ContentRootPath, "logs")).Path
-                        ?? throw new InvalidOperationException("LogSpace data requires a filesystem mount.")));
-
-                // Registered ahead of every AddService call, so segments flush for the whole lifetime
-                // of the other services.
-                Services.AddSingleton<IHostService>(serviceProvider =>
-                    new SegmentFlushService(serviceProvider.GetRequiredService<LogSegmentStore>()));
-            }
-        }
-
-        _context = new LogSpaceApplicationContext(_resourceContext);
+        _context = new LogSpaceApplicationContext();
     }
 
     /// <summary>
@@ -136,25 +99,6 @@ public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
     {
         InvalidOperationException.ThrowIf(_isBuilt, "The LogSpace application has already been built.");
 
-        if (_controlPlane is not null)
-        {
-            _controlPlane.AddHealthContributor(_context);
-
-            // Registered after every AddService call, so the endpoints start last and stop first.
-            if (_resourceContext!.Endpoints.TryGetValue("query", out Uri? queryEndpoint))
-            {
-                _controlPlane.ObserveEndpoint("query", queryEndpoint);
-                Services.AddSingleton<IHostService>(serviceProvider => new LogSpaceControlPlaneEndpointService(
-                    queryEndpoint, _controlPlane, _resourceContext, _context, serviceProvider.GetService<LogSegmentStore>()));
-            }
-            if (_resourceContext.Endpoints.TryGetValue("otlp", out Uri? otlpEndpoint))
-            {
-                _controlPlane.ObserveEndpoint("otlp", otlpEndpoint);
-                Services.AddSingleton<IHostService>(serviceProvider => new OtlpReceiverEndpointService(
-                    otlpEndpoint, serviceProvider.GetRequiredService<LogSegmentStore>(), _resourceContext, _context));
-            }
-        }
-
         Services.AddSingleton<IHostEnvironment>(_context.Environment);
         Services.AddSingleton<ILogSpaceApplicationContext>(_context);
 
@@ -172,13 +116,7 @@ public sealed class LogSpaceApplicationBuilder : ILogSpaceApplicationBuilder
         {
             _context.ResolveHostedServices();
 
-            var application = new LogSpaceApplication(new LogSpaceApplicationOptions(), _context);
-            if (_controlPlane is not null)
-            {
-                ResourceRuntime.HostBuilt(application, _controlPlane);
-            }
-
-            return application;
+            return new LogSpaceApplication(new LogSpaceApplicationOptions(), _context);
         }
         catch (Exception exception)
         {

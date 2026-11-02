@@ -19,9 +19,11 @@ namespace Assimalign.Cohesion.Web.Query.Tests;
 
 /// <summary>
 /// RFC 10008 &#167; 2.6 tests for conditional QUERY handling: the precondition helpers parse the
-/// request's <c>If-*</c> fields and reuse the core <c>HttpConditionalRequest</c> evaluator, and
-/// <c>UseQueryConditionals</c> answers <c>304</c> / <c>412</c> end to end without executing the
-/// query — exactly as the equivalent conditional GET.
+/// request's <c>If-*</c> fields and reuse the core <c>HttpConditionalRequest</c> evaluator, and the
+/// middleware the generated <c>AddQueryConditionals</c> verb registers and
+/// <c>UseQueryConditionals()</c> places answers <c>304</c> / <c>412</c> end to end without executing
+/// the query — exactly as the equivalent conditional GET. Placement is covered too: the last of two
+/// registrations wins, and there is no default to place without one.
 /// </summary>
 public class WebQueryConditionalTests
 {
@@ -123,7 +125,8 @@ public class WebQueryConditionalTests
         var factory = new WebApplicationTestFactory();
         var executed = new StrongBox<bool>();
 
-        factory.Application.UseQueryConditionals(_ => ValueTask.FromResult(validators));
+        factory.Builder.Services.AddQueryConditionals(conditionals => conditionals.UseResourceValidators(_ => ValueTask.FromResult(validators)));
+        factory.Application.UseQueryConditionals();
         factory.Application.Use(async (context, next) =>
         {
             executed.Value = true;
@@ -290,5 +293,84 @@ public class WebQueryConditionalTests
         // Assert
         response.StatusCode.ShouldBe(NetHttpStatusCode.OK);
         executed.Value.ShouldBeTrue();
+    }
+
+    // ============================================================================
+    // Registration (AddQueryConditionals) and placement (UseQueryConditionals)
+    // ============================================================================
+
+    [Fact(DisplayName = "Cohesion Test [Web.Query] - UseQueryConditionals: Should place the last registration when conditionals are registered twice")]
+    public async Task UseQueryConditionals_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange — the first registration resolves ETag "v1", the last "v2".
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        await using WebApplicationTestFactory factory = new();
+        var executed = new StrongBox<bool>();
+
+        factory.Builder.Services
+            .AddQueryConditionals(conditionals => conditionals.UseResourceValidators(
+                _ => ValueTask.FromResult<WebQueryResourceValidators?>(new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v1") })))
+            .AddQueryConditionals(conditionals => conditionals.UseResourceValidators(
+                _ => ValueTask.FromResult<WebQueryResourceValidators?>(new WebQueryResourceValidators { ETag = HttpEntityTag.Strong("v2") })));
+        factory.Application.UseQueryConditionals();
+        factory.Application.Use((context, next) =>
+        {
+            executed.Value = true;
+            context.Response.StatusCode = HttpStatusCode.Ok;
+            return Task.CompletedTask;
+        });
+
+        await factory.StartAsync(cancellation.Token);
+        using HttpClient client = factory.CreateClient();
+
+        using var request = new HttpRequestMessage(_queryMethod, "/search")
+        {
+            Content = new StringContent("{\"q\":1}", Encoding.UTF8, "application/json"),
+        };
+        request.Headers.TryAddWithoutValidation("If-None-Match", "\"v2\"").ShouldBeTrue();
+
+        // Act
+        using HttpResponseMessage response = await client.SendAsync(request, cancellation.Token);
+
+        // Assert — "v2" matches only the last registration's validators.
+        response.StatusCode.ShouldBe(NetHttpStatusCode.NotModified);
+        executed.Value.ShouldBeFalse();
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Query] - UseQueryConditionals: Without a registered provider the application should fail to start")]
+    public async Task UseQueryConditionals_WithoutRegistration_ShouldFailToStart()
+    {
+        // Arrange — only the application can resolve its resources' validators, so there is no default.
+        await using WebApplicationTestFactory factory = new();
+        factory.Application.UseQueryConditionals();
+
+        // Act / Assert — composing the pipeline, which starting the application does, names the verb to call.
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => ((IWebApplication)factory.Application).StartAsync());
+        exception.Message.ShouldContain("AddQueryConditionals", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Query] - AddQueryConditionals: A registration without UseResourceValidators should fail at registration")]
+    public async Task AddQueryConditionals_WithoutResourceValidators_ShouldThrowAtRegistration()
+    {
+        // Arrange
+        await using WebApplicationTestFactory factory = new();
+
+        // Act / Assert — the builder has no default provider, so the bare verb and an empty callback both fail.
+        InvalidOperationException bare = Should.Throw<InvalidOperationException>(
+            () => factory.Builder.Services.AddQueryConditionals());
+        Should.Throw<InvalidOperationException>(
+            () => factory.Builder.Services.AddQueryConditionals(conditionals => { }));
+        bare.Message.ShouldContain("UseResourceValidators", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Query] - UseResourceValidators: A null provider should be rejected")]
+    public void UseResourceValidators_NullProvider_ShouldThrow()
+    {
+        // Arrange
+        WebQueryConditionalsBuilder conditionals = new();
+
+        // Act / Assert
+        Should.Throw<ArgumentNullException>(() => conditionals.UseResourceValidators(null!));
     }
 }

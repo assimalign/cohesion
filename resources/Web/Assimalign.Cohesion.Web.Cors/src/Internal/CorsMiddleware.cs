@@ -53,14 +53,11 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
         HttpHeaderKey.Vary,
     ];
 
-    private readonly CorsPolicy? _defaultPolicy;
-    private readonly FrozenDictionary<string, CorsPolicy> _policies;
+    private readonly CorsSetting _setting;
 
-    public CorsMiddleware(CorsOptions options)
+    public CorsMiddleware(CorsSetting setting)
     {
-        // A private copy: options changed after UseCors returns cannot change a running pipeline.
-        _defaultPolicy = options.DefaultPolicy;
-        _policies = options.Policies.ToFrozenDictionary(StringComparer.Ordinal);
+        _setting = setting;
     }
 
     public Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
@@ -147,7 +144,8 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
     {
         if (metadata is null)
         {
-            return _defaultPolicy;
+            // Read on each request: an operator surface may replace the default policy at run time.
+            return _setting.Value;
         }
 
         if (metadata.IsDisabled)
@@ -160,7 +158,7 @@ internal sealed class CorsMiddleware : IWebApplicationMiddleware
             return inline;
         }
 
-        if (_policies.TryGetValue(metadata.PolicyName!, out CorsPolicy? named))
+        if (_setting.Policies.TryGetValue(metadata.PolicyName!, out CorsPolicy? named))
         {
             return named;
         }

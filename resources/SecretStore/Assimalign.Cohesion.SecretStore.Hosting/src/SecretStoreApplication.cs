@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -71,18 +70,7 @@ public sealed class SecretStoreApplication : Host<SecretStoreApplicationContext>
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        Assembly resourceAssembly = Assembly.GetEntryAssembly() ?? typeof(SecretStoreApplication).Assembly;
-        return new SecretStoreApplicationBuilder(args, resourceAssembly);
-    }
-
-    internal static SecretStoreApplicationBuilder CreateBuilder(
-        string[] args,
-        Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-
-        return new SecretStoreApplicationBuilder(args, resourceAssembly);
+        return new SecretStoreApplicationBuilder(args);
     }
 
     private sealed class DebugView

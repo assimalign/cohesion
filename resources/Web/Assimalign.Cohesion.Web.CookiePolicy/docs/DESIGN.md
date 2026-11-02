@@ -8,8 +8,9 @@ this package answers *"is this well-formed cookie **allowed**, and if not, is it
 dropped?"* Those decisions depend on deployment posture and on the user's consent, not on the RFC
 grammar.
 
-`UseCookiePolicy(...)` replaces the exchange's response cookie feature. From then on, every cookie
-appended through `context.Response.Cookies` is judged before it reaches a `Set-Cookie` field:
+The policy `builder.Services.AddCookiePolicy(policy => ...)` registers and `UseCookiePolicy()` places
+replaces the exchange's response cookie feature. From then on, every cookie appended through
+`context.Response.Cookies` is judged before it reaches a `Set-Cookie` field:
 
 - **consent** for non-essential cookies;
 - the **floors**: `Secure`, `HttpOnly`, and a minimum `SameSite`;
@@ -234,11 +235,13 @@ The rules consult consent only through `ICookieConsentFeature.CanTrack`, and `Us
 its own feature only when the exchange has none. The first consent feature installed on an exchange
 therefore decides for every registration:
 
-- **Nested registrations.** A branch may register its own policy, for example
-  `app.Map("/admin", b => b.UseCookiePolicy(...))`. The inner registration wraps the outer one's
-  collection, so **attribute rules compose**: both registrations' rules apply to each appended cookie.
-  The inner registration reuses the outer registration's consent feature instead of installing its own.
-  Two independent consent states would let a grant made through one feature be refused by the other.
+- **Nested policies.** A branch may place a policy of its own. `UseCookiePolicy()` places the one
+  registered policy wherever it is called, so a branch with different rules places a middleware built
+  from its own `CookiePolicyBuilder`, for example `app.Map("/admin", b => b.Use(adminPolicy.Build()))`.
+  The inner policy wraps the outer one's collection, so **attribute rules compose**: both policies'
+  rules apply to each appended cookie. The inner policy reuses the outer policy's consent feature
+  instead of installing its own. Two independent consent states would let a grant made through one
+  feature be refused by the other.
 - **An application-supplied feature.** Consent kept somewhere other than the consent cookie, such as a
   consent-management platform's signal or the `Sec-GPC` request header, plugs in as an
   `ICookieConsentFeature` installed before `UseCookiePolicy` runs. `CheckConsentNeeded` and the consent
@@ -262,9 +265,23 @@ legacy `SameSite=None` bugs, is obsolete. An application that needs a different 
 Beyond the hook, a dropped cookie is absent from `response.Cookies` (`Contains` is `false`) and from the
 `Set-Cookie` fields.
 
+## Registration: `AddCookiePolicy` configures, `UseCookiePolicy` places (2026-10-28)
+
+The policy is configured only where it is registered. `builder.Services.AddCookiePolicy(policy => ...)`
+is a generated component integration over `CookiePolicyBuilder`: it builds the middleware once, which
+validates the options and captures them (`CookiePolicyRules`), and registers it as an
+`IWebApplicationMiddleware`. A validation failure throws from the registration with `ParamName` =
+`Options`. `UseCookiePolicy()` takes no arguments and places the last such registration it finds in
+`IWebApplicationContext.Middleware`, or the default policy when the application registered none.
+Nothing is registered per placement, so placing the verb in a branch as well places the same policy
+again; a branch with rules of its own places a middleware built from its own builder (see "One consent
+decision per exchange"). *Rejected:* the former `UseCookiePolicy(Action<CookiePolicyOptions>)`;
+configuration on a pipeline verb splits a feature's settings across two call sites and keeps them out of
+the registrations the host enumerates.
+
 ## Where it goes in the pipeline
 
-Register `UseCookiePolicy` early: after `UseForwardedHeaders` and `UseHostFiltering`, and before
+Place `UseCookiePolicy()` early: after `UseForwardedHeaders` and `UseHostFiltering`, and before
 `UseRouting`, `UseSessions`, `UseAuthentication`, and anything else that writes cookies.
 
 The design tolerates other placements, but early is still the recommendation:
@@ -308,8 +325,9 @@ any other cookie. The defaults of the two packages are chosen to compose safely:
 - **Assignment:** `ConsentCookieName` is `HttpCookieName` and `ConsentCookieValue` is
   `HttpCookieValue`. Assigning an out-of-grammar string throws `ArgumentException` from the
   conversion before the setter runs, including inside the registration callback.
-- **Registration:** `ArgumentNullException` for a `null` builder. `ArgumentException` (`ParamName` =
-  `configure`) for an undefined enum value, a lifetime cap outside (0, 400 days], a `null`
+- **Registration:** `ArgumentNullException` from `UseCookiePolicy()` for a `null` builder.
+  `ArgumentException` (`ParamName` = `Options`) from `CookiePolicyBuilder.Build`, which
+  `AddCookiePolicy` calls, for an undefined enum value, a lifetime cap outside (0, 400 days], a `null`
   `TimeProvider`, a `default` consent cookie name or value, an empty consent value, a non-positive
   `Max-Age`, or an `Expires`. `default` skips value-type construction, so `CookiePolicyRules.Create`
   checks the underlying values directly. The name guard retains the message "The consent cookie
@@ -359,7 +377,8 @@ parser (`TestObjects/SetCookieField.cs`), not by the model under test.
 
 - `CookiePolicyOptionsTests` covers the documented defaults, assignment-time grammar rejection,
   default and empty consent-value guards with their messages and parameter names, every other
-  registration-time validation failure, and that options changed after registration have no effect.
+  registration-time validation failure, that options changed after registration have no effect, that
+  the last registration wins, and that `UseCookiePolicy()` places the default policy without one.
 - `CookiePolicyAttributeTests` covers the `Secure` modes, the `HttpOnly` modes, the minimum-`SameSite`
   matrix (raise, never lower), attribute preservation on a rewrite, and the no-cookie response.
 - `CookiePolicyRfc6265bisComplianceTests` covers `__Secure-` and `__Host-` (upgrade, and each violation
@@ -373,7 +392,7 @@ parser (`TestObjects/SetCookieField.cs`), not by the model under test.
   the consent cookie; an application-supplied consent feature (`Sec-GPC`); and the feature's presence.
 - `CookiePolicyInterceptionTests` covers adoption of queued cookies (in order), on-the-way-out appends,
   `Remove`/`Contains` identity, copy-on-write, a shared instance across requests, composition over a
-  pre-installed feature, raw header adoption, and nested registration in a branch.
+  pre-installed feature, raw header adoption, and a nested policy in a branch.
 - `CookiePolicyForwardedTests` covers the effective scheme: a trusted proxy's `https` and `http`, a
   spoofed header without the middleware, the policy registered ahead of `UseForwardedHeaders`, and the
   `Secure` floor satisfying `Reject` rules.

@@ -91,23 +91,9 @@ internal sealed class CliApplication
                 case "new":
                     return await NewAsync(arguments, cancellationToken).ConfigureAwait(false);
                 case "run":
-                case "deploy":
-                case "trust":
-                    return await GatewayAsync(args[0], arguments, cancellationToken).ConfigureAwait(false);
+                    return await RunAsync(arguments, cancellationToken).ConfigureAwait(false);
                 case "publish":
                     return await PublishAsync(arguments, cancellationToken).ConfigureAwait(false);
-                case "parameter":
-                case "status":
-                    string? projectOption = arguments.TakeValue("--project");
-                    string? stateOption = arguments.TakeValue("--state-root");
-                    string? appOption = arguments.TakeValue("--app");
-                    string project = GatewayDiscovery.ResolveProject(_workingDirectory, projectOption);
-                    string stateRoot = GatewayDiscovery.GetStateRoot(project, stateOption, _workingDirectory);
-                    string app = GatewayDiscovery.ResolveApplication(project, stateRoot, appOption);
-                    var state = new LocalStateCommands(_input, _output, _http, _environment ?? Environment.GetEnvironmentVariable);
-                    return args[0] == "parameter"
-                        ? await state.ParameterAsync(arguments, stateRoot, app, cancellationToken).ConfigureAwait(false)
-                        : await state.StatusAsync(arguments, stateRoot, app, cancellationToken).ConfigureAwait(false);
                 case "login":
                     return await new DeviceLogin(_http, _output, _error, _homeDirectory, _delay, _timeProvider)
                         .ExecuteAsync(arguments, cancellationToken).ConfigureAwait(false);
@@ -162,7 +148,6 @@ internal sealed class CliApplication
 
     private Task<int> PublishAsync(Arguments args, CancellationToken cancellationToken = default)
     {
-        bool inContainer = args.TakeFlag("--in-container");
         string? selected = args.TakeValue("--project");
         string? positional = args.TakeFirst();
         if (selected is not null && positional is not null)
@@ -172,102 +157,22 @@ internal sealed class CliApplication
         string project = positional ?? (selected is null
             ? GatewayDiscovery.ResolveProject(_workingDirectory, null)
             : Path.GetFullPath(selected, _workingDirectory));
-        return DotnetAsync(inContainer
-            ? ["publish", project, "-t:CohesionPublishImage", "-p:_CohesionImageInContainer=true", .. args.Remaining]
-            : ["publish", project, .. args.Remaining], cancellationToken);
+        return DotnetAsync(["publish", project, .. args.Remaining], cancellationToken);
     }
 
-    private Task<int> GatewayAsync(string verb, Arguments args, CancellationToken cancellationToken = default)
+    private Task<int> RunAsync(Arguments args, CancellationToken cancellationToken = default)
     {
         string? projectOption = args.TakeValue("--project");
-        string? gateway = args.TakeValue("--gateway");
         Func<string, string?> readEnvironment = _environment ?? Environment.GetEnvironmentVariable;
         bool hasEnvironmentVariable =
             !string.IsNullOrWhiteSpace(readEnvironment("COHESION_ENVIRONMENT"))
             || !string.IsNullOrWhiteSpace(readEnvironment("DOTNET_ENVIRONMENT"));
-        var mapped = new List<string>();
-        if (gateway is not null)
-        {
-            mapped.AddRange(["--gateway", gateway]);
-        }
-        if (verb == "deploy")
-        {
-            mapped.AddRange(["--mode", "apply"]);
-        }
-        if (verb == "run" && !hasEnvironmentVariable)
-        {
-            string[] remaining = args.Remaining;
-            bool hasEnvironmentArgument = Array.Exists(remaining, argument =>
-                string.Equals(argument, "--environment", StringComparison.OrdinalIgnoreCase)
-                || argument.StartsWith("--environment=", StringComparison.OrdinalIgnoreCase));
-            // Passthrough options retain the gateway parser's last-value precedence.
-            string? effectiveGateway = gateway;
-            for (int index = 0; index < remaining.Length; index++)
-            {
-                string argument = remaining[index];
-                if (string.Equals(argument, "--gateway", StringComparison.OrdinalIgnoreCase))
-                {
-                    effectiveGateway = index + 1 < remaining.Length ? remaining[++index] : string.Empty;
-                }
-                else if (argument.StartsWith("--gateway=", StringComparison.OrdinalIgnoreCase))
-                {
-                    effectiveGateway = argument["--gateway=".Length..];
-                }
-            }
-            if (!hasEnvironmentArgument && (effectiveGateway is null
-                || string.Equals(effectiveGateway, "local", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(effectiveGateway, "inprocess", StringComparison.OrdinalIgnoreCase)))
-            {
-                mapped.AddRange(["--environment", "Local"]);
-            }
-        }
-        if (verb == "trust")
-        {
-            string? command = args.TakeFirst();
-            switch (command)
-            {
-                case "issue":
-                    string developer = args.TakeValue("--developer")
-                        ?? throw new CliException("trust issue requires --developer <name>.");
-                    mapped.AddRange(["--mode", "trust-issue", "--developer", developer]);
-                    break;
-                case "add":
-                    if (args.Has("--against"))
-                    {
-                        throw new CliException("trust add --against is deferred to #982; select the verifying application's gateway project instead.");
-                    }
-                    string peer = args.TakeFirst() ?? throw new CliException("trust add requires <peer> --from <export-url|file>.");
-                    string source = args.TakeValue("--from") ?? throw new CliException("trust add requires --from <export-url|file>.");
-                    mapped.AddRange(["--mode", "trust-add", "--peer", peer, "--from", source]);
-                    while (args.TakeFirst(allowOptionLike: true) is string argument)
-                    {
-                        if (argument == "--allow")
-                        {
-                            string kinds = args.TakeFirst() ?? throw new CliException("--allow requires a value.");
-                            mapped.AddRange(["--allow", kinds]);
-                        }
-                        else if (argument.StartsWith("--allow=", StringComparison.Ordinal))
-                        {
-                            string kinds = argument["--allow=".Length..];
-                            if (string.IsNullOrWhiteSpace(kinds)) { throw new CliException("--allow requires a value."); }
-                            mapped.AddRange(["--allow", kinds]);
-                        }
-                        else
-                        {
-                            mapped.Add(argument);
-                        }
-                    }
-                    break;
-                default:
-                    throw new CliException("trust requires add or issue.");
-            }
-        }
         string project = GatewayDiscovery.ResolveProject(_workingDirectory, projectOption);
         // SDK 10.0.401 retains the caller's cwd in the verified dotnet-run probe.
-        // Set it explicitly so gateway state and relative arguments are project-local.
+        // Set it explicitly so relative arguments are project-local.
         // dotnet launch profiles override inherited variables; preserve an explicit shell environment.
         string[] launchOptions = hasEnvironmentVariable ? ["--no-launch-profile"] : [];
-        return _processes.RunAsync("dotnet", ["run", "--project", project, .. launchOptions, "--", .. mapped, .. args.Remaining],
+        return _processes.RunAsync("dotnet", ["run", "--project", project, .. launchOptions, "--", .. args.Remaining],
             Path.GetDirectoryName(project)!, cancellationToken);
     }
 

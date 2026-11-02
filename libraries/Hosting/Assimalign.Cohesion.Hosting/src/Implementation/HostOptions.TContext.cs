@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Threading;
 
+using Assimalign.Cohesion.Hosting.Internal;
+
 namespace Assimalign.Cohesion.Hosting;
 
 /// <summary>
@@ -33,8 +35,9 @@ public abstract class HostOptions<TContext> where TContext : HostContext
     /// for an ordinary host is 30 seconds.
     /// </summary>
     /// <remarks>
-    /// An installed <see cref="IHostRunner"/> can adjust this value for the run through
-    /// <see cref="IHostRun.ShutdownTimeout"/> before it executes the host lifetime.
+    /// A shutdown signal drains a host run within this budget, so keep it below the platform's
+    /// grace period, the time between its SIGTERM and its SIGKILL (30 seconds by default on
+    /// Kubernetes).
     /// </remarks>
     public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -42,4 +45,7 @@ public abstract class HostOptions<TContext> where TContext : HostContext
     /// Sets the environment name of the Host. The environment name can be set manually. Otherwise it is set via environment variables within the process.
     /// </summary>
     public string? Environment { get; set; } = AppEnvironment.GetEnvironmentName();
+
+    // Registers the process's shutdown signals for one RunAsync; tests replace it to raise a signal.
+    internal Func<Action, IDisposable> ShutdownSignals { get; set; } = HostShutdownSignals.Register;
 }

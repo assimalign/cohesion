@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -62,14 +61,7 @@ public sealed class RezolvrApplication : Host<RezolvrApplicationContext>, IRezol
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        return CreateBuilder(args, Assembly.GetEntryAssembly() ?? typeof(RezolvrApplication).Assembly);
-    }
-
-    internal static RezolvrApplicationBuilder CreateBuilder(string[] args, Assembly resourceAssembly)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        ArgumentNullException.ThrowIfNull(resourceAssembly);
-        return new RezolvrApplicationBuilder(args, resourceAssembly);
+        return new RezolvrApplicationBuilder(args);
     }
 
     private sealed class DebugView

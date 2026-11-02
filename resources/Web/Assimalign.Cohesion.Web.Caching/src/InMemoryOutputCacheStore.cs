@@ -21,9 +21,10 @@ namespace Assimalign.Cohesion.Web.Caching;
 /// <remarks>
 /// <para>
 /// The store is safe to construct and hold in application code: an application that wants to invalidate
-/// cached responses by tag can pass the same instance to <c>UseOutputCache(store, …)</c> and later call
+/// cached responses by tag can hand the same instance to <see cref="OutputCacheBuilder.UseStore"/>
+/// (<c>builder.Services.AddOutputCache(cache =&gt; cache.UseStore(store))</c>) and later call
 /// <see cref="EvictByTagAsync"/> on it directly (the per-request <see cref="IOutputCacheFeature"/> wraps
-/// this same surface for handlers).
+/// this same surface for handlers). A store the application supplies stays its own to dispose.
 /// </para>
 /// <para>
 /// <b>Time-to-live.</b> Entries expire by absolute time-to-live (<see cref="OutputCacheEntry.ValidFor"/>),

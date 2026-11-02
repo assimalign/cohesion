@@ -1,21 +1,24 @@
 # Assimalign.Cohesion.Database.Testing
 
-Integration testing for SDK-enabled Cohesion database resource programs. The package's
-`DatabaseApplicationTestFactory.FromProgram<TProgram>()` entry point invokes the resource's
-real `Program.Main` under an isolated `Hosting.Resources` `ResourceContext`, waits for the
-generated Database admin plane to report readiness, and requests graceful shutdown through that
-same plane.
+Integration testing for Cohesion database programs. The package's
+`DatabaseApplicationTestFactory.FromProgram<TProgram>()` entry point runs the program's real
+`Program.Main` on a background thread inside its own Core `AppEnvironmentScope`, and `StopAsync`
+requests shutdown through that scope and waits for `Main` to return; a non-zero exit code throws.
+The retired resource integration (an isolated `ResourceContext`, and readiness and stop through
+the generated admin plane) was removed on 2026-10-31 with the application-model restart
+(assimalign/cohesion#1759), so `StartAsync` returns once the entry point is running, without
+waiting for readiness.
 
-The resource stays an ordinary top-level `Program.cs`:
+The program stays an ordinary top-level `Program.cs`:
 
 ```csharp
 DatabaseApplicationBuilder builder = DatabaseApplication.CreateBuilder(args);
 builder.AddSql("app-sql", sql =>
 {
-    sql.Options.RootPath = Resource.Mounts.Data.Path;
+    sql.Options.RootPath = builder.Configuration["App:DataPath"] ?? "data";
     sql.AddDatabase("app", database => database.Schema(schema =>
         schema.Table<Account>(table => table.Key(account => account.Id))));
-    sql.AddServer(server => server.Listen(Resource.Endpoints.Db));
+    sql.AddServer(server => server.Listen(new Uri("cohesion-db://127.0.0.1:5740")));
 });
 
 await using DatabaseApplication application = builder.Build();
@@ -27,25 +30,18 @@ public partial class Program { }
 The test references that executable and drives the same entry point used out of process:
 
 ```csharp
-await using DatabaseApplicationTestFactory factory =
-    DatabaseApplicationTestFactory.FromProgram<global::Program>();
+await using DatabaseApplicationTestFactory factory = DatabaseApplicationTestFactory.FromProgram<global::Program>(
+    new DatabaseApplicationTestFactoryOptions { Arguments = ["--App:DataPath=" + dataPath] });
 
 await factory.StartAsync();
-Uri endpoint = factory.ResourceContext.Endpoints["db"];
 
-// Exercise the resource through Database.Client, then stop it gracefully.
+// Exercise the program through Database.Client, then stop it gracefully.
 await factory.StopAsync();
 ```
 
-By default, each factory allocates distinct loopback `db` and `admin` endpoints and owns a
-temporary `data` directory. Endpoint and reference dictionaries carry validated `System.Uri`
-values. Supply `DatabaseApplicationTestFactoryOptions.ResourceContext` (a `Hosting.Resources`
-context) when a test needs fixed
-endpoints, mounts, settings, or references.
-
 - The package has no assertion helpers and no test-framework dependency.
-- Factories use the generated Database control plane at `/readyz` and
-  `/cohesion/v1/stop`; they do not add a test-only bootstrap path.
+- Factories stop the program through its scope's shutdown, the way a signal stops it out of
+  process; they add no test-only bootstrap path.
 - The compiler-rooted entry point plus the generic preservation annotation make the
   sanctioned `Assembly.EntryPoint` invocation trim/NativeAOT safe.
 - No assembly scanning, dynamic loading, or runtime code generation is used.

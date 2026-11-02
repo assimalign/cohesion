@@ -22,10 +22,10 @@ using NetHttpStatusCode = System.Net.HttpStatusCode;
 namespace Assimalign.Cohesion.Web.HostFiltering.Tests;
 
 /// <summary>
-/// End-to-end coverage for allowed-hosts enforcement (issue #781): the
-/// <c>UseHostFiltering</c> verb compiles the allowlist once at registration and its
-/// middleware — registered first, per the package's ordering contract — rejects mismatching
-/// hosts ahead of everything registered after it. HttpClient-driven cases ride
+/// End-to-end coverage for allowed-hosts enforcement (issue #781): the generated
+/// <c>AddHostFiltering</c> verb compiles the allowlist once at registration, and the middleware
+/// <c>UseHostFiltering()</c> places — first, per the package's ordering contract — rejects
+/// mismatching hosts ahead of everything placed after it. HttpClient-driven cases ride
 /// <see cref="WebApplicationTestFactory"/> (origin-form HTTP/1.1 and HTTP/2 <c>:authority</c>);
 /// the missing-Host and absolute-form cases speak raw HTTP/1.1 over an in-memory connection,
 /// because <see cref="HttpClient"/> always emits a <c>Host</c> header and only ever sends
@@ -62,7 +62,8 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -89,7 +90,8 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
+        factory.Application.UseHostFiltering();
 
         bool laterMiddlewareRan = false;
         factory.Application.Use((context, next) =>
@@ -123,7 +125,8 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -145,7 +148,8 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -165,7 +169,8 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("*.example.com"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("*.example.com"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -191,7 +196,8 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("[::1]"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("[::1]"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -213,7 +219,8 @@ public class HostFilteringTests
         CancellationToken cancellationToken = cancellation.Token;
 
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("*"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("*"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -232,25 +239,114 @@ public class HostFilteringTests
     {
         // Arrange — a port-bearing pattern is a configuration error: it would otherwise never
         // match (filtering ignores ports) and must fail loudly when the matcher compiles,
-        // which happens inside the UseHostFiltering call.
+        // which happens inside the AddHostFiltering call.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        WebApplication application = builder.Build();
 
         // Act & Assert
         Should.Throw<ArgumentException>(
-            () => application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example:8080")));
+            () => builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example:8080")));
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: An empty allowlist should fail at registration rather than deny every request")]
     public void HostFiltering_EmptyAllowlist_ShouldFailAtRegistration()
     {
-        // Arrange — calling the verb opts in to filtering; an empty allowlist would compile
+        // Arrange — registering opts in to filtering; an empty allowlist would compile
         // to deny-all, so it is rejected as a configuration error.
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        WebApplication application = builder.Build();
 
         // Act & Assert
-        Should.Throw<ArgumentException>(() => application.UseHostFiltering(_ => { }));
+        Should.Throw<ArgumentException>(() => builder.Services.AddHostFiltering(_ => { }));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - AddHostFiltering: A bare registration should fail at registration, because there is no default allowlist")]
+    public void AddHostFiltering_WithoutConfiguration_ShouldFailAtRegistration()
+    {
+        // Arrange — the bare verb builds the defaults, and the default allowlist is empty.
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+
+        // Act & Assert
+        Should.Throw<ArgumentException>(() => builder.Services.AddHostFiltering());
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - UseHostFiltering: Should place the last registration when host filtering is registered twice")]
+    public async Task UseHostFiltering_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("first.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("last.example"));
+        factory.Application.UseHostFiltering();
+        UseTerminalOkHandler(factory.Application);
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage last = await client.GetAsync("http://last.example/", cancellationToken);
+        using HttpResponseMessage first = await client.GetAsync("http://first.example/", cancellationToken);
+
+        // Assert — only the last registration's allowlist is enforced.
+        last.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        first.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - UseHostFiltering: Without a registered allowlist the application should fail to start")]
+    public async Task UseHostFiltering_WithoutRegistration_ShouldFailToStart()
+    {
+        // Arrange — there is no default allowlist to fall back to.
+        await using WebApplicationTestFactory factory = new();
+        WebApplication app = factory.Application;
+        app.UseHostFiltering();
+
+        // Act / Assert — composing the pipeline, which starting the application does, names the verb to call.
+        InvalidOperationException exception = await Should.ThrowAsync<InvalidOperationException>(
+            () => ((IWebApplication)app).StartAsync());
+        exception.Message.ShouldContain("AddHostFiltering", Case.Sensitive);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - AddHostFiltering: A service-provider callback should register the allowlist UseHostFiltering enforces")]
+    public async Task AddHostFiltering_ServiceProviderCallback_ShouldRegisterTheAllowlist()
+    {
+        // Arrange — the provider overload builds on first resolve, when the pipeline is composed.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        CancellationToken cancellationToken = cancellation.Token;
+
+        bool configured = false;
+
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddHostFiltering((services, hosts) =>
+        {
+            configured = services is not null;
+            hosts.Options.AllowedHosts.Add("allowed.example");
+        });
+        factory.Application.UseHostFiltering();
+        UseTerminalOkHandler(factory.Application);
+
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage allowed = await client.GetAsync("http://allowed.example/", cancellationToken);
+        using HttpResponseMessage denied = await client.GetAsync("http://denied.example/", cancellationToken);
+
+        // Assert
+        configured.ShouldBeTrue();
+        allowed.StatusCode.ShouldBe(NetHttpStatusCode.OK);
+        denied.StatusCode.ShouldBe(NetHttpStatusCode.BadRequest);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - AddHostFiltering: A service-provider callback with an empty allowlist should fail when the pipeline is composed")]
+    public async Task AddHostFiltering_ServiceProviderCallbackWithEmptyAllowlist_ShouldFailAtStart()
+    {
+        // Arrange — the provider overload defers the build, and with it the allowlist check, to first resolve.
+        await using WebApplicationTestFactory factory = new();
+        Should.NotThrow(() => factory.Builder.Services.AddHostFiltering((services, hosts) => { }));
+        WebApplication app = factory.Application;
+        app.UseHostFiltering();
+
+        // Act / Assert
+        await Should.ThrowAsync<ArgumentException>(() => ((IWebApplication)app).StartAsync());
     }
 
     [Fact(DisplayName = "Cohesion Test [Web.HostFiltering] - HostFiltering: HTTP/2 requests should be validated through the resolved :authority")]
@@ -265,7 +361,8 @@ public class HostFilteringTests
         {
             Protocol = WebApplicationTestProtocol.Http2,
         });
-        factory.Application.UseHostFiltering(options => options.AllowedHosts.Add("allowed.example"));
+        factory.Builder.Services.AddHostFiltering(hosts => hosts.Options.AllowedHosts.Add("allowed.example"));
+        factory.Application.UseHostFiltering();
         UseTerminalOkHandler(factory.Application);
 
         using HttpClient client = factory.CreateClient();
@@ -405,9 +502,10 @@ public class HostFilteringTests
         InMemoryConnectionListener listener = new();
 
         builder.Server.UseServer(options => options.UseHttp1(listener));
+        builder.Services.AddHostFiltering(hosts => configureFiltering(hosts.Options));
 
         WebApplication application = builder.Build();
-        application.UseHostFiltering(configureFiltering);
+        application.UseHostFiltering();
         UseTerminalOkHandler(application);
 
         IWebApplicationServer server = application.Context.ServiceProvider.GetRequiredService<IWebApplicationServer>();

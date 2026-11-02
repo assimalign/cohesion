@@ -126,4 +126,7 @@
   <data name="KnownProxyNull" xml:space="preserve">
     <value>{0} contains a null entry.</value>
   </data>
+  <data name="ForwardedHeadersNotRegistered" xml:space="preserve">
+    <value>UseForwardedHeaders places the middleware that builder.Services.AddForwardedHeaders(forwarded =&gt; ...) registers, and no trust model is registered. Register the headers your trusted proxy manages first.</value>
+  </data>
 </root>

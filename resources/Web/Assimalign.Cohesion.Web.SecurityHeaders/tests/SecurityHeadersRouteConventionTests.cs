@@ -63,11 +63,12 @@ public class SecurityHeadersRouteConventionTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
         factory.Builder.Services.AddRouting();
-        factory.Application.UseSecurityHeaders(policy =>
+        factory.Builder.Services.AddSecurityHeaders(headers =>
         {
-            policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.DefaultSrc(sources => sources.Self()));
-            policy.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin;
+            headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.DefaultSrc(sources => sources.Self()));
+            headers.Options.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin;
         });
+        factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/partner", Ok())
             .WithSecurityHeaders(policy => policy.Framing = FramingPolicy.AllowFrom("https://partner.example.com"));
@@ -83,6 +84,32 @@ public class SecurityHeadersRouteConventionTests
         Header(response, "X-Content-Type-Options").ShouldBe("nosniff");
     }
 
+    [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Conventions: An adjustment should start from the policy as it was registered")]
+    public async Task WithSecurityHeaders_PolicyMutatedAfterRegistration_ShouldAdjustTheRegisteredSnapshot()
+    {
+        // Arrange — an adjustment is derived from the middleware's own policy on its endpoint's first
+        // response, long after this mutation; AddSecurityHeaders built the middleware from a copy.
+        using CancellationTokenSource cancellation = new(TestTimeout);
+        SecurityHeadersPolicy? captured = null;
+        await using WebApplicationTestFactory factory = CreateFactory();
+        factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddSecurityHeaders(headers => captured = headers.Options);
+        captured!.ReferrerPolicy = ReferrerPolicy.UnsafeUrl;
+        captured.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin;
+        factory.Application.UseSecurityHeaders();
+        IRouterBuilder routes = factory.Application.UseRouting();
+        routes.Map(CohesionHttpMethod.Get, "/embed", Ok()).WithSecurityHeaders(policy => policy.Framing = FramingPolicy.SameOrigin);
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await client.GetAsync("/embed", cancellation.Token);
+
+        // Assert
+        Header(response, "X-Frame-Options").ShouldBe("SAMEORIGIN");
+        Header(response, "Referrer-Policy").ShouldBe("strict-origin-when-cross-origin");
+        Header(response, "Cross-Origin-Opener-Policy").ShouldBeNull();
+    }
+
     [Fact(DisplayName = "Cohesion Test [Web.SecurityHeaders] - Conventions: A replacement should take the place of the pipeline's policy")]
     public async Task WithSecurityHeaders_Replacement_ShouldReplaceThePipelinePolicy()
     {
@@ -90,11 +117,12 @@ public class SecurityHeadersRouteConventionTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
         factory.Builder.Services.AddRouting();
-        factory.Application.UseSecurityHeaders(policy =>
+        factory.Builder.Services.AddSecurityHeaders(headers =>
         {
-            policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.DefaultSrc(sources => sources.Self()));
-            policy.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin;
+            headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.DefaultSrc(sources => sources.Self()));
+            headers.Options.CrossOriginOpenerPolicy = CrossOriginOpenerPolicy.SameOrigin;
         });
+        factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/api", Ok())
             .WithSecurityHeaders(new SecurityHeadersPolicy { ReferrerPolicy = ReferrerPolicy.NoReferrer });
@@ -138,7 +166,8 @@ public class SecurityHeadersRouteConventionTests
         using CancellationTokenSource cancellation = new(TestTimeout);
         await using WebApplicationTestFactory factory = CreateFactory();
         factory.Builder.Services.AddRouting();
-        factory.Application.UseSecurityHeaders(policy => policy.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameOrigin);
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.CrossOriginResourcePolicy = CrossOriginResourcePolicy.SameOrigin);
+        factory.Application.UseSecurityHeaders();
         IRouterBuilder routes = factory.Application.UseRouting();
         routes.Map(CohesionHttpMethod.Get, "/raw", new RouterRouteHandler(context =>
         {

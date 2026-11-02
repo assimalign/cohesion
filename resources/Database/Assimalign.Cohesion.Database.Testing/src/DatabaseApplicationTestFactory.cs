@@ -1,25 +1,16 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Net.Sockets;
 using System.Reflection;
-using System.Text;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
-
-using Assimalign.Cohesion.Database.Testing.Internal;
-using Assimalign.Cohesion.Hosting;
-using Assimalign.Cohesion.Hosting.Resources;
 
 namespace Assimalign.Cohesion.Database.Testing;
 
 /// <summary>
-/// Invokes a Cohesion database resource's real <c>Program.Main</c> under a test-scoped
-/// <see cref="ResourceContext"/> and manages it through the generated Database control plane.
+/// Invokes a Cohesion database program's real <c>Program.Main</c> inside an
+/// <see cref="AppEnvironmentScope"/> of its own, and stops it through that scope's shutdown signal.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,33 +22,28 @@ namespace Assimalign.Cohesion.Database.Testing;
 /// runtime code generation.
 /// </para>
 /// <para>
-/// A top-level resource program must expose its compiler-generated marker to its test project
+/// A top-level program must expose its compiler-generated marker to its test project
 /// with <c>public partial class Program { }</c>. Its normal top-level statements remain the
 /// only composition path; the factory does not require a test-only bootstrap or interface.
+/// </para>
+/// <para>
+/// The program runs on a background thread of its own, which starts without the caller's
+/// execution context and enters a fresh scope first, so the program inherits nothing ambient from
+/// the test. A host the program runs inside that scope stops when <see cref="StopAsync"/> signals
+/// the scope's shutdown, not on the process's shutdown signals.
 /// </para>
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("DatabaseApplicationTestFactory")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory.DebugView))]
 public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFactory
 {
-    private const string adminEndpointName = "admin";
-    private const string databaseEndpointName = "db";
-    private const string dataMountName = "data";
-    private const string readinessPath = "/readyz";
-    private const string stopPath = "/cohesion/v1/stop";
-
-    private readonly Assembly _assembly;
+    private readonly MethodInfo _entryPoint;
     private readonly string[] _arguments;
-    private readonly TimeSpan _startupTimeout;
     private readonly TimeSpan _shutdownTimeout;
-    private readonly TimeSpan _probeInterval;
-    private readonly string? _ownedDataPath;
     private readonly Lock _gate = new();
-    private readonly CancellationTokenSource _startupCancellation = new();
+    private readonly CancellationTokenSource _shutdown = new();
 
-    private IResourceEntryInvocation? _invocation;
-    private IHost? _host;
-    private Task? _start;
+    private Task? _program;
     private bool _isStarted;
     private bool _isDisposed;
 
@@ -69,13 +55,6 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(options.Arguments);
 
-        if (options.StartupTimeout <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(options),
-                options.StartupTimeout,
-                ErrorMessages.DatabaseApplicationTestFactoryFailure);
-        }
         if (options.ShutdownTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(
@@ -83,39 +62,11 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
                 options.ShutdownTimeout,
                 ErrorMessages.DatabaseApplicationTestFactoryFailure2);
         }
-        if (options.ProbeInterval <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(options),
-                options.ProbeInterval,
-                ErrorMessages.DatabaseApplicationTestFactoryFailure3);
-        }
 
-        _assembly = entryPoint.DeclaringType!.Assembly;
+        _entryPoint = entryPoint;
         _arguments = (string[])options.Arguments.Clone();
-        _startupTimeout = options.StartupTimeout;
         _shutdownTimeout = options.ShutdownTimeout;
-        _probeInterval = options.ProbeInterval;
-
-        if (options.ResourceContext is null)
-        {
-            (ResourceContext, _ownedDataPath) = CreateDefaultContext(entryPoint.DeclaringType!);
-        }
-        else
-        {
-            ResourceContext = options.ResourceContext;
-        }
-
-        if (!ResourceContext.Endpoints.ContainsKey(adminEndpointName))
-        {
-            throw new ArgumentException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ApplicationTestFactoryArgument, adminEndpointName),
-                nameof(options));
-        }
     }
-
-    /// <inheritdoc />
-    public ResourceContext ResourceContext { get; }
 
     /// <inheritdoc />
     public bool IsStarted
@@ -130,14 +81,14 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
     }
 
     /// <summary>
-    /// Creates a factory for the resource program declared by <typeparamref name="TProgram"/>,
-    /// using an isolated default test context.
+    /// Creates a factory for the program declared by <typeparamref name="TProgram"/>, with default
+    /// options.
     /// </summary>
     /// <typeparam name="TProgram">
-    /// The resource executable's top-level <c>Program</c> marker. Declare it public and partial
-    /// in the resource project so the test project can name it.
+    /// The executable's top-level <c>Program</c> marker. Declare it public and partial in the
+    /// executable project so the test project can name it.
     /// </typeparam>
-    /// <returns>An unstarted factory for the resource program.</returns>
+    /// <returns>An unstarted factory for the program.</returns>
     /// <exception cref="InvalidOperationException">
     /// The marker's assembly has no supported static entry point, or its entry point is not
     /// declared by <typeparamref name="TProgram"/>.
@@ -151,16 +102,17 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
     }
 
     /// <summary>
-    /// Creates a factory for the resource program declared by <typeparamref name="TProgram"/>
-    /// with explicit invocation options.
+    /// Creates a factory for the program declared by <typeparamref name="TProgram"/> with explicit
+    /// invocation options.
     /// </summary>
     /// <typeparam name="TProgram">
-    /// The resource executable's top-level <c>Program</c> marker. Declare it public and partial
-    /// in the resource project so the test project can name it.
+    /// The executable's top-level <c>Program</c> marker. Declare it public and partial in the
+    /// executable project so the test project can name it.
     /// </typeparam>
-    /// <param name="options">The context, arguments, and lifecycle budgets for the invocation.</param>
-    /// <returns>An unstarted factory for the resource program.</returns>
+    /// <param name="options">The arguments and shutdown budget for the invocation.</param>
+    /// <returns>An unstarted factory for the program.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The shutdown timeout is not positive.</exception>
     /// <exception cref="InvalidOperationException">
     /// The marker's assembly has no supported static entry point, or its entry point is not
     /// declared by <typeparamref name="TProgram"/>.
@@ -178,70 +130,44 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
     }
 
     /// <inheritdoc />
-    public async Task StartAsync(CancellationToken cancellationToken = default)
+    public Task StartAsync(CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        Task start;
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return Task.FromCanceled(cancellationToken);
+        }
 
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-            if (_isStarted)
+            if (_program is null)
             {
-                return;
+                _program = Launch();
+                _isStarted = true;
             }
-
-            _start ??= StartCoreAsync(_startupCancellation.Token);
-            start = _start;
         }
 
-        using var timeout = new CancellationTokenSource(_startupTimeout);
-        using var startup = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken,
-            timeout.Token);
-
-        try
-        {
-            await start.WaitAsync(startup.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            _startupCancellation.Cancel();
-            await TryAbortStartAsync().ConfigureAwait(false);
-            throw;
-        }
-        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
-        {
-            _startupCancellation.Cancel();
-            await TryAbortStartAsync().ConfigureAwait(false);
-            throw new TimeoutException(
-                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.TestFactoryStartAsyncTimeout, _startupTimeout));
-        }
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        IResourceEntryInvocation? invocation;
+        Task? program;
 
         lock (_gate)
         {
-            invocation = _invocation;
+            program = _program;
         }
 
-        if (invocation is null)
+        if (program is null)
         {
             return;
         }
 
-        if (!invocation.Completion.IsCompleted)
-        {
-            await RequestStopAsync(invocation.Completion, cancellationToken).ConfigureAwait(false);
-        }
-
-        await invocation.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _shutdown.CancelAsync().ConfigureAwait(false);
+        await program.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         lock (_gate)
         {
@@ -250,10 +176,10 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
     }
 
     /// <summary>
-    /// Gracefully stops the resource program when it was started, then removes the temporary
-    /// data mount owned by a default-context factory. Disposal is idempotent.
+    /// Signals the program's shutdown when it was started and waits, up to the configured shutdown
+    /// timeout, for its entry point to return. Disposal is idempotent.
     /// </summary>
-    /// <returns>A task that completes when the factory has released its resources.</returns>
+    /// <returns>A task that completes when the factory has released the program.</returns>
     public async ValueTask DisposeAsync()
     {
         lock (_gate)
@@ -266,181 +192,78 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
             _isDisposed = true;
         }
 
-        _startupCancellation.Cancel();
         using var shutdown = new CancellationTokenSource(_shutdownTimeout);
-        try
-        {
-            await StopAsync(shutdown.Token).ConfigureAwait(false);
-        }
-        finally
-        {
-            IHost? host;
-            lock (_gate)
-            {
-                host = _host;
-            }
-
-            if (host is not null)
-            {
-                await host.DisposeAsync().ConfigureAwait(false);
-            }
-
-            DeleteOwnedDataPath();
-        }
+        await StopAsync(shutdown.Token).ConfigureAwait(false);
     }
 
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2026",
-        Justification = "FromProgram<TProgram> roots all public and non-public methods on the validated entry-point type.")]
-    private async Task StartCoreAsync(CancellationToken cancellationToken)
+    // The entry point runs on a background thread of its own, as a process's main thread runs a
+    // program: the thread enters the program's scope first, and a background thread does not keep
+    // the test process alive.
+    private Task Launch()
     {
-        IResourceEntryInvocation invocation;
-        using (ResourceRuntime.CreateScope(ResourceContext))
+        var exited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        AppEnvironmentScope scope = AppEnvironmentScope.Create(new Dictionary<string, string>(), _shutdown.Token);
+        var thread = new Thread(() =>
         {
-            invocation = ResourceRuntime.InvokeEntry(_assembly, _arguments);
-        }
-
-        lock (_gate)
-        {
-            _invocation = invocation;
-        }
-
-        IHost host = await invocation.HostReady.WaitAsync(cancellationToken).ConfigureAwait(false);
-        lock (_gate)
-        {
-            _host = host;
-        }
-
-        await WaitForReadinessAsync(invocation.Completion, cancellationToken).ConfigureAwait(false);
-
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-            _isStarted = true;
-        }
-    }
-
-    private async Task WaitForReadinessAsync(Task program, CancellationToken cancellationToken)
-    {
-        Uri admin = ResourceContext.Endpoints[adminEndpointName];
-        using var client = new HttpClient { BaseAddress = admin };
-
-        while (true)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (program.IsCompleted)
+            using (AppEnvironment.Enter(scope))
             {
-                await program.ConfigureAwait(false);
-                throw new InvalidOperationException(
-                    ErrorMessages.FactoryWaitForReadinessAsyncFailure);
-            }
-
-            try
-            {
-                using HttpResponseMessage response = await client
-                    .GetAsync(readinessPath, cancellationToken)
-                    .ConfigureAwait(false);
-                if (response.StatusCode == HttpStatusCode.OK)
+                try
                 {
-                    return;
+                    InvokeEntryPoint();
+                    exited.TrySetResult();
+                }
+                catch (Exception exception)
+                {
+                    // Deliberately broad: whatever the program threw ends its run, as a crash ends
+                    // a process. StopAsync surfaces it; nothing escapes the thread.
+                    exited.TrySetException(exception);
                 }
             }
-            catch (HttpRequestException)
-            {
-                // The admin listener has not bound yet; retry within the startup budget.
-            }
-
-            await Task.Delay(_probeInterval, cancellationToken).ConfigureAwait(false);
-        }
-    }
-
-    private async Task RequestStopAsync(Task program, CancellationToken cancellationToken)
-    {
-        Uri admin = ResourceContext.Endpoints[adminEndpointName];
-        using var client = new HttpClient { BaseAddress = admin };
-
-        while (!program.IsCompleted)
+        })
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Post, stopPath);
-                AuthorizeControlPlaneRequest(request);
-                using HttpResponseMessage response = await client
-                    .SendAsync(request, cancellationToken)
-                    .ConfigureAwait(false);
-                if (response.IsSuccessStatusCode)
-                {
-                    return;
-                }
+            IsBackground = true,
+            Name = _entryPoint.DeclaringType?.Assembly.GetName().Name,
+        };
 
-                throw new HttpRequestException(
-                    string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.FactoryRequestStopAsyncHttpRequest, (int)response.StatusCode));
-            }
-            catch (HttpRequestException) when (!program.IsCompleted)
-            {
-                await Task.Delay(_probeInterval, cancellationToken).ConfigureAwait(false);
-            }
-            catch (HttpRequestException) when (program.IsCompleted)
-            {
-                return;
-            }
-        }
+        thread.UnsafeStart();
+        return exited.Task;
     }
 
-    private async Task TryAbortStartAsync()
+    private void InvokeEntryPoint()
     {
-        using var shutdown = new CancellationTokenSource(_shutdownTimeout);
+        object?[]? arguments = _entryPoint.GetParameters().Length == 0
+            ? null
+            : new object?[] { (string[])_arguments.Clone() };
+
+        object? result;
         try
         {
-            await StopAsync(shutdown.Token).ConfigureAwait(false);
+            result = _entryPoint.Invoke(null, arguments);
         }
-        catch (OperationCanceledException) when (shutdown.IsCancellationRequested)
+        catch (TargetInvocationException exception) when (exception.InnerException is not null)
         {
-            ScheduleStopAfterDelayedBuild();
-        }
-        catch (Exception)
-        {
-            // Startup cancellation and timeout are the primary failures. A Program fault that
-            // races its best-effort shutdown must not replace the caller's original exception.
-        }
-    }
-
-    private void ScheduleStopAfterDelayedBuild()
-    {
-        IResourceEntryInvocation? invocation;
-        lock (_gate)
-        {
-            invocation = _invocation;
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
         }
 
-        if (invocation is not null)
+        int exitCode = 0;
+        switch (result)
         {
-            _ = StopAfterDelayedBuildAsync(invocation);
+            case Task<int> exitTask:
+                exitCode = exitTask.GetAwaiter().GetResult();
+                break;
+            case Task task:
+                task.GetAwaiter().GetResult();
+                break;
+            case int code:
+                exitCode = code;
+                break;
         }
-    }
 
-    private async Task StopAfterDelayedBuildAsync(IResourceEntryInvocation invocation)
-    {
-        try
+        if (exitCode != 0)
         {
-            Task completed = await Task
-                .WhenAny(invocation.HostReady, invocation.Completion)
-                .ConfigureAwait(false);
-            if (ReferenceEquals(completed, invocation.Completion))
-            {
-                await invocation.Completion.ConfigureAwait(false);
-                return;
-            }
-
-            using var shutdown = new CancellationTokenSource(_shutdownTimeout);
-            await RequestStopAsync(invocation.Completion, shutdown.Token).ConfigureAwait(false);
-            await invocation.Completion.WaitAsync(shutdown.Token).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            // Detached cleanup cannot surface through the already-completed StartAsync call.
+            throw new InvalidOperationException(
+                string.Format(System.Globalization.CultureInfo.CurrentCulture, ErrorMessages.ProgramExitCodeNonZero, exitCode));
         }
     }
 
@@ -485,106 +308,11 @@ public sealed class DatabaseApplicationTestFactory : IDatabaseApplicationTestFac
         return entryPoint;
     }
 
-    private static (ResourceContext Context, string DataPath) CreateDefaultContext(Type programType)
-    {
-        string dataPath = Path.Combine(
-            Path.GetTempPath(),
-            "cohesion-database-testing",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dataPath);
-
-        int databasePort = ReservePort();
-        int adminPort;
-        do
-        {
-            adminPort = ReservePort();
-        }
-        while (adminPort == databasePort);
-
-        var endpoints = new Dictionary<string, Uri>(StringComparer.OrdinalIgnoreCase)
-        {
-            [databaseEndpointName] = Uri.CreateEndpoint("cohesion-db", "127.0.0.1", databasePort),
-            [adminEndpointName] = Uri.CreateEndpoint("http", "127.0.0.1", adminPort),
-        };
-        var mounts = new Dictionary<string, ResourceMount>(StringComparer.OrdinalIgnoreCase)
-        {
-            [dataMountName] = new ResourceMount(dataPath),
-        };
-
-        string resourceName = programType.Assembly.GetName().Name ?? programType.Name;
-        using var identity = new TestBootstrapIdentity("tests", "inprocess");
-        string bootstrapCredential = identity.Issue(resourceName);
-        return (
-            new ResourceContext(
-                applicationName: "tests",
-                resourceName: resourceName,
-                environmentName: "Testing",
-                gatewayName: "inprocess",
-                contentRootPath: AppContext.BaseDirectory,
-                endpoints: endpoints,
-                mounts: mounts,
-                settings: null,
-                references: null,
-                bootstrapCredential: Encoding.UTF8.GetBytes(bootstrapCredential),
-                applicationTrustKey: identity.PublicKey,
-                ambientValues: null),
-            dataPath);
-    }
-
-    private static int ReservePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        try
-        {
-            return ((IPEndPoint)listener.LocalEndpoint).Port;
-        }
-        finally
-        {
-            listener.Stop();
-        }
-    }
-
-    private void AuthorizeControlPlaneRequest(HttpRequestMessage request)
-    {
-        if (!ResourceContext.BootstrapCredential.IsEmpty)
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue(
-                "Bearer",
-                Encoding.UTF8.GetString(ResourceContext.BootstrapCredential.Span));
-        }
-    }
-
-    private void DeleteOwnedDataPath()
-    {
-        if (_ownedDataPath is null || !Directory.Exists(_ownedDataPath))
-        {
-            return;
-        }
-
-        try
-        {
-            Directory.Delete(_ownedDataPath, recursive: true);
-        }
-        catch (IOException)
-        {
-            // A failed assertion should not be hidden by best-effort fixture cleanup.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // A failed assertion should not be hidden by best-effort fixture cleanup.
-        }
-    }
-
     private sealed class DebugView
     {
-        private readonly global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory _target;
-
         public DebugView(global::Assimalign.Cohesion.Database.Testing.DatabaseApplicationTestFactory value)
         {
-            _target = value;
+            _ = value;
         }
-
-        public global::Assimalign.Cohesion.Hosting.Resources.ResourceContext ResourceContext => _target.ResourceContext;
     }
 }

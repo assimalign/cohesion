@@ -2,13 +2,15 @@
 
 Forwarded-headers resolution for Cohesion web applications: the front-of-pipeline
 middleware that resolves the effective client address/scheme/host behind proxies under
-an explicit trust model, and the builder verb that composes it.
+an explicit trust model, and the verbs that register and place it.
 
 ## Scope
 
-- **`UseForwardedHeaders`** — the pipeline verb (on `IWebApplicationPipelineBuilder`)
-  that validates and snapshots the trust model at composition time and registers the
-  resolving middleware.
+- **`AddForwardedHeaders` and `UseForwardedHeaders()`** — the registration verb on
+  `builder.Services` validates and snapshots the trust model (`ForwardedHeadersBuilder.Options`)
+  and registers the resolving middleware; the parameterless pipeline verb places it. There is no
+  default trust model, so placing the middleware without registering one fails the application's
+  start.
 - **`ForwardedHeadersOptions`** — the trust model: `Headers`
   (`ForwardedHeaderNames` header selection), `KnownProxies` / `KnownNetworks` (CIDR),
   `ForwardLimit`, and `TrustLocalTransports` for non-IP (Unix domain socket /
@@ -28,12 +30,15 @@ rules.
 ## Usage
 
 ```csharp
-app.UseForwardedHeaders(options =>
+builder.Services.AddForwardedHeaders(forwarded =>
 {
-    options.Headers = ForwardedHeaderNames.XForwarded;          // what the proxy manages
-    options.KnownNetworks.Add(IPNetwork.Parse("10.0.0.0/8"));   // who is allowed to forward
-    options.ForwardLimit = 2;                                    // how deep the chain may go
+    forwarded.Options.Headers = ForwardedHeaderNames.XForwarded;          // what the proxy manages
+    forwarded.Options.KnownNetworks.Add(IPNetwork.Parse("10.0.0.0/8"));   // who is allowed to forward
+    forwarded.Options.ForwardLimit = 2;                                    // how deep the chain may go
 });
+
+WebApplication app = builder.Build();
+app.UseForwardedHeaders();
 // ...every identity-consuming middleware follows...
 ```
 

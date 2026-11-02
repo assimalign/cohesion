@@ -28,7 +28,8 @@ public class CookiePolicyForwardedTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Application.UseForwardedHeaders();
         factory.Application.UseCookiePolicy();
         UseWriter(factory);
 
@@ -44,7 +45,8 @@ public class CookiePolicyForwardedTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Application.UseForwardedHeaders();
         factory.Application.UseCookiePolicy();
         UseWriter(factory);
 
@@ -75,8 +77,9 @@ public class CookiePolicyForwardedTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
         factory.Application.UseCookiePolicy();
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Application.UseForwardedHeaders();
         UseWriter(factory);
 
         // Act
@@ -92,13 +95,15 @@ public class CookiePolicyForwardedTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseForwardedHeaders(options => options.Headers = ForwardedHeaderNames.XForwarded);
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddForwardedHeaders(forwarded => forwarded.Options.Headers = ForwardedHeaderNames.XForwarded);
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.PrefixViolation = CookieViolationAction.Reject;
-            options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.PrefixViolation = CookieViolationAction.Reject;
+            policy.Options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseForwardedHeaders();
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             context.Response.Cookies.Add(new HttpCookie("__Host-id", "1"));

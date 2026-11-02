@@ -71,6 +71,7 @@ internal sealed class TestApplicationContext : IWebApplicationContext
     public IEnumerable<IWebApplicationServer> Servers => Array.Empty<IWebApplicationServer>();
 
     public IEnumerable<IHttpFeature> Features => Array.Empty<IHttpFeature>();
+    public IEnumerable<IWebApplicationSetting> Settings => global::System.Array.Empty<IWebApplicationSetting>();
 }
 
 internal sealed class TestHttpContext : HttpContext

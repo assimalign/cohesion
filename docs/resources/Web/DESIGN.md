@@ -1,44 +1,43 @@
 # Web area design
 
-## Control-plane integration
+## Application-model integration
 
-Web.Hosting integrates Hosting.Resources and Hosting.Health itself (owner decision 57,
-2026-10-13). Its public middleware stays in the `Assimalign.Cohesion.Web.Hosting.Resources`
-namespace under `src/Resources/`; the health adapter stays in
-`Assimalign.Cohesion.Web.Hosting.Health` under `src/Health/`. There are no separate packages
-for either integration. The module references the Web root, Web.Server, Web.Health,
-Hosting.Resources, Hosting.Health, and IdentityModel.Token.JsonWebToken for these integrations.
-COHRES001 prevents Web roots and features from referencing it. Web.Testing names only
-Web.Hosting in its explicit exemption.
+Web.Hosting is a plain host. It references the Web root, Web.Routing, Web.Server, and non-Web
+infrastructure (Hosting, DependencyInjection, configuration, logging, file system, the HTTP
+transport, and the connection drivers), and no application-model package. COHRES001 prevents Web
+roots and features from referencing it.
 
-Web.Hosting and Database.Hosting use the same terminal, with Web.Server's
-IWebResponseCompletionFeature seam for deferred stop. The seam lived in the Web root until
-#1379 moved the server's per-exchange contracts to Web.Server (owner decision 33). A real
-Program factory compares the Web wrapper with the direct verb as a composition regression.
-The integration owns authentication and AOT-safe JSON; each area host owns its listener,
-readiness gate, and lifecycle. The hosting context owns the retained verifier key internally.
+A Web application becomes a managed resource instance through
+[Web.Hosting.ApplicationModel](../../../resources/Web/Assimalign.Cohesion.Web.Hosting.ApplicationModel/docs/DESIGN.md),
+the area's one application-model integration:
+`builder.Services.AddResource("orders-api", resource => resource.UseInProcess())`. The package
+references Web.Hosting, the one reference `COHRES001` sanctions by the integration's exact name, plus Web.Cors,
+DependencyInjection, Hosting, and ApplicationModel.Hosting, and it carries no transport: the
+platform the resource opts into publishes for it and carries the gateway's calls in. Unmanaged, it
+registers nothing; managed, it registers one `IHostService` factory, and the resource's actions come
+from the settings the application's features registered (the `cors` setting becomes the `cors`
+action). It is a public member of App.Web; ApplicationModel.Hosting arrives with the App kernel.
 
-The integrations are public through Web.Hosting in App.Web and private in each other area
-framework. Cross-area hosting implementation references use the coordinated
-CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. Web.Health now joins
-the 16 area framework closures that lacked it; Database already carried it. Area ApplicationModel
-packages remain NuGet-only, and Web.Hosting's resolved closure carries neither Web.ApplicationModel
-nor Web.ApplicationModel.Orchestration. Database's health adapter preserves its readiness-only
-accepting gate while Web.Health retains an independent model with no Hosting reference.
+Web.Hosting is a private member of five other area frameworks, App.ConfigurationStore,
+App.Database, App.IdentityHub, App.LogSpace and App.SecretStore, whose hosting modules serve HTTP
+through a nested WebApplication. Each references it privately through the coordinated
+CohesionPrivateProjectReference / CohesionFrameworkPrivateAssembly pair. Web.Testing and
+Web.Hosting.ApplicationModel are the only Web packages that reference Web.Hosting.
 
-See [the hosting design](../../../resources/Web/Assimalign.Cohesion.Web.Hosting/docs/DESIGN.md#resource-control-plane)
-for the exact protocol and the public response-completion contract.
-
-Database references the Web hosting module, which integrates the shared health and resource contracts.
+Arrows mean "references".
 
 ```mermaid
 flowchart LR
-    DbHost["Database.Hosting"] --> WebHost["Web.Hosting"]
+    App["The application's Program.cs"] --> WHA["Web.Hosting.ApplicationModel"]
+    App --> Platform["ApplicationModel.Hosting.InProcess"]
+    WHA --> WebHost["Web.Hosting"]
+    WHA --> Instance["ApplicationModel.Hosting"]
+    WHA --> Cors["Web.Cors"]
+    Platform --> Instance
     WebHost --> Web["Web"]
     WebHost --> Server["Web.Server"]
-    WebHost --> Health["Web.Health"]
-    WebHost --> Resources["Hosting.Resources"]
-    WebHost --> Contributors["Hosting.Health"]
+    WebHost --> Routing["Web.Routing"]
+    DbHost["Database.Hosting"] --> WebHost
 ```
 
 ## Diagnostic signal ownership
@@ -54,10 +53,9 @@ exists. Each owner reports its own events rather than forwarding another package
 | How much dispatched work is active, and how long does it take? | `Meter` named `Assimalign.Cohesion.Web.Server` | Web.Server | `http.server.active_requests` and `http.server.request.duration`, including Web middleware's rejection statuses. |
 | Did HTTP reject a request or fail a protocol operation? | `Meter` and `EventSource` named `Assimalign.Cohesion.Http.Connections` (#1300) | HTTP transport | Pre-dispatch rejection statuses, HTTP/2 and HTTP/3 protocol errors, request-rate enforcement and slow-reader response aborts. These are not Web application faults. |
 | Did a listener bind, drain or stop, and did server machinery fail? | `EventSource` named `Assimalign.Cohesion.Web.Server` | Web.Server | Lifecycle, bind/accept/connection failures, completion-callback failures, refused response heads, capacity waits and drain timeouts, correlated by process-unique `serverId`. Peer-ended connections are Verbose and do not increment `connection-faults`. |
-| Did the host disable the control plane or reject management work? | `EventSource` named `Assimalign.Cohesion.Web.Hosting` | Web.Hosting | Control-plane configuration, credential rejection, malformed commands and accepted stop; the `rejected-credentials` counter remains exact. |
 | Which application fault reached the exception boundary? | `EventSource` named `Assimalign.Cohesion.Web.ErrorHandling` | Web exception boundary | Pipeline and handler failures, expected faults and abandoned responses; client-caused and cancelled exchanges do not become application-fault counts. |
 | Which middleware rejected or degraded an exchange, and why? | The owning Web assembly's `EventSource` | Web feature package | Bounded rejection reasons and exact attribution counters for authentication, authorization, antiforgery, edge policies, timeouts, rate limits, compression, forms and content handling. There are no duplicate request start/stop events or general request counters. |
-| Did health or control-plane work fail? | `Web.Health`, `Web.Hosting` and `Hosting.Resources` event sources | Web health/HTTP control surface, or shared control-plane producer | Health transitions and failed checks; HTTP authentication/command-input failures; producer-owned contributor failures and command outcomes. |
+| Did health work fail? | `EventSource` named `Assimalign.Cohesion.Web.Health` | Web.Health | Health transitions and failed checks. |
 | Did the underlying connection or TLS handshake fail? | Connections driver event sources; runtime `System.Net.Security` | Connection transport and TLS runtime | Listener, connection and stream lifecycle, driver counters and TLS handshake diagnostics. These sources are outside default Web forwarding. |
 | What should the application's HTTP access log contain? | `ILogger` entries, default category `Assimalign.Cohesion.Web.Diagnostics.HttpLogging` | Web.Diagnostics middleware | Explicitly composed access logging at Information with its own redaction options. The `Web.Diagnostics` EventSource reports failures of logging itself, rather than duplicating access entries. |
 
@@ -81,8 +79,7 @@ the exact `Assimalign.Cohesion.Http.Connections` name into configured logging si
 register no default listener, and an application-selected forwarder or
 `EnableEventSourceForwarding = false` takes precedence. Forwarding changes neither providers nor
 filter rules, so the HTTP access log's Information level is preserved. Event listeners observe the
-whole process: `serverId`, `resourceName` and request identifiers provide attribution when several
-servers or control planes coexist. Control-plane events share the Web.Hosting provider, so the
-entry-point forwarder observes them through the same Web prefix.
+whole process: `serverId` and request identifiers provide attribution when several servers
+coexist.
 EventSource counters are inspected separately from forwarded events, and Web feature Meter
 instruments remain the distinct #317 workstream.

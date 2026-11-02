@@ -6,7 +6,6 @@
 .DESCRIPTION
     Copies the repository's .NET SDK settings and pins the requested Cohesion SDKs at
     the package version under test. Root global.json does not need Cohesion SDK pins.
-    ApplicationModel is an implicit import and should not be included in SdkPackageId.
 #>
 [CmdletBinding()]
 param(

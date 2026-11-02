@@ -194,17 +194,18 @@ public sealed class SecurityHeadersEventSourceTests
         string requestId = ActivityTraceId.CreateRandom().ToHexString();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Services.AddRouting();
+        factory.Builder.Services.AddSecurityHeaders(headers =>
+        {
+            if (noCsp)
+            {
+                headers.Options.Framing = null;
+            }
+        });
         if (readOnly)
         {
             factory.Application.Use((context, next) => next.Invoke(new SecurityHeadersReadOnlyContext(context)));
         }
-        factory.Application.UseSecurityHeaders(policy =>
-        {
-            if (noCsp)
-            {
-                policy.Framing = null;
-            }
-        });
+        factory.Application.UseSecurityHeaders();
         var route = factory.Application.UseRouting().Map(CohesionHttpMethod.Get, "/", new RouterRouteHandler(context =>
         {
             context.Response.StatusCode = notModified ? CohesionHttpStatusCode.NotModified : CohesionHttpStatusCode.Ok;
@@ -278,12 +279,13 @@ public sealed class SecurityHeadersEventSourceTests
         long before = source.UnprotectedResponses;
         string requestId = ActivityTraceId.CreateRandom().ToHexString();
         await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.ScriptSrc(sources => sources.Nonce())));
         factory.Application.Use((context, next) =>
         {
             context.Features.Set<ISecurityHeadersFeature>(new FixedNonceFeature("invalid nonce"));
             return next.Invoke(context);
         });
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.ScriptSrc(sources => sources.Nonce())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.Use((context, next) => Task.CompletedTask);
         using HttpClient client = factory.CreateClient();
         using HttpRequestMessage request = CreateRequest("/", requestId);
@@ -315,6 +317,7 @@ public sealed class SecurityHeadersEventSourceTests
         int startingCallbacks = 0;
         TaskCompletionSource completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
+        factory.Builder.Services.AddSecurityHeaders(headers => headers.Options.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.ScriptSrc(sources => sources.Nonce())));
         factory.Application.Use((context, next) =>
         {
             context.Features.Set<ISecurityHeadersFeature>(nonce);
@@ -325,7 +328,7 @@ public sealed class SecurityHeadersEventSourceTests
             }, null);
             return next.Invoke(context);
         });
-        factory.Application.UseSecurityHeaders(policy => policy.ContentSecurityPolicy = ContentSecurityPolicy.Create(csp => csp.ScriptSrc(sources => sources.Nonce())));
+        factory.Application.UseSecurityHeaders();
         factory.Application.UseWebSockets();
         factory.Application.Use(async (context, next) =>
         {

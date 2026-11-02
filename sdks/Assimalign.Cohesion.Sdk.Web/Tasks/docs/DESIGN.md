@@ -3,19 +3,16 @@
 ## Design intent
 
 Sdk.Web composes the base Cohesion SDK, the App hosting kernel, and the App.Web framework for an
-HTTP application. Its Web defaults describe resource endpoints and probes, preserve the application's
-choices, and enable the runtime support required to deliver Web EventSource diagnostics under
+HTTP application. Its Web defaults preserve the application's choices and enable the runtime support required to deliver Web EventSource diagnostics under
 NativeAOT. Application startup and middleware composition remain in the application's `Program.cs`.
 
 ## Family map
 
-The Web SDK imports the base SDK; an application with orchestration enabled also imports the
-ApplicationModel SDK. Its implicit framework references depend on the shared App and App.Web packs.
+The Web SDK imports the base SDK. Its implicit framework references depend on the shared App and App.Web packs.
 
 ```mermaid
 flowchart LR
     Web["Assimalign.Cohesion.Sdk.Web"] --> Base["Assimalign.Cohesion.Sdk"]
-    Web -->|"when enabled"| Model["Assimalign.Cohesion.Sdk.ApplicationModel"]
     Web --> App["Assimalign.Cohesion.App"]
     Web --> Surface["Assimalign.Cohesion.App.Web"]
 ```
@@ -24,18 +21,17 @@ flowchart LR
 | --- | --- |
 | `Assimalign.Cohesion.Sdk.Web` | Executable marker, Web defaults, static-asset copying, and implicit framework references. |
 | `Assimalign.Cohesion.Sdk` | .NET SDK chaining, common build defaults, and framework registrations. |
-| `Assimalign.Cohesion.Sdk.ApplicationModel` | Resource manifests and generated resource surface when `CohesionApplicationModel=enabled`. |
-| `Assimalign.Cohesion.App` / `.Web` | Hosting kernel and HTTP/Web compile-time and runtime framework closure. |
+| `Assimalign.Cohesion.App` / `.Web` | Hosting kernel and HTTP/Web compile-time and runtime framework closure, including `Web.Hosting.ApplicationModel`, whose `builder.Services.AddResource(...)` makes the application a managed resource. |
 
 ## Import ordering and overrides
 
 `Sdk/Sdk.props` marks the project as a resource executable before importing the base SDK, then adds
 App and App.Web framework references unless `CohesionAutoIncludeAppFramework=false`. It imports
-`Targets/Sdk.Web.props` before the consumer's project body. `Sdk/Sdk.targets` imports the matching
-ApplicationModel SDK for an enabled resource, or the base targets directly otherwise.
+`Targets/Sdk.Web.props` before the consumer's project body. `Sdk/Sdk.targets` imports the base targets, then
+`Targets/Sdk.Web.targets`.
 
-Web orchestration defaults use conditional properties and named endpoint/probe items. A consumer can
-update the `http` endpoint or replace property values. `wwwroot/**` files copy to both build and publish
+The SDK declares no endpoints, probes, or other manifest items: application-model composition
+is code. `wwwroot/**` files copy to both build and publish
 output unless the consumer replaces the item metadata. The SDK also enables the generated Web API
 interceptor namespace required for typed route handlers.
 
@@ -119,7 +115,7 @@ Get-Item _out/aot-web-no-events/Assimalign.Cohesion.Web.AotGuard.exe, _out/aot-w
 
 ### Verification boundaries
 
-`WebEventSourceSupportTests` in the ApplicationModel SDK's area-default test project evaluates the
+`WebEventSourceSupportTests` in the base SDK's test project evaluates the
 shipped Web props with MSBuild and `PublishAot=true`. Cases cover the unset default and explicit
 true/false values before the import, after it, and on the command line. These evaluations require no
 package feed or application build.

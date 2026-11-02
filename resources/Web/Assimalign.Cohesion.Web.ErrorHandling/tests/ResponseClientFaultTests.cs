@@ -26,11 +26,12 @@ public class ResponseClientFaultTests
         context.Features.Set<IWebResponseClientFaultFeature>(new FakeResponseClientFaultFeature(true));
         context.Features.Set(new ErrorHandlingBuilder().OnError(handler).Build());
         TestPipelineBuilder builder = new();
-        builder.UseErrorHandling(options => options.OnException = (_, _) =>
+        builder.RegisteredFeatures.Add(Registration(options => options.OnException = (_, _) =>
         {
             observed++;
             return ValueTask.CompletedTask;
-        });
+        }));
+        builder.UseErrorHandling();
         builder.Run(_ => throw wrapped);
 
         // Act — await directly: Shouldly 4.3 synthesizes TaskCanceledException for a cancelled task,
@@ -66,11 +67,12 @@ public class ResponseClientFaultTests
         TestHttpContext context = new();
         context.Features.Set<IWebResponseClientFaultFeature>(new FakeResponseClientFaultFeature(false));
         TestPipelineBuilder builder = new();
-        builder.UseErrorHandling(options => options.OnException = (_, exception) =>
+        builder.RegisteredFeatures.Add(Registration(options => options.OnException = (_, exception) =>
         {
             observed = exception;
             return ValueTask.CompletedTask;
-        });
+        }));
+        builder.UseErrorHandling();
         builder.Run(_ => throw fault);
 
         // Act
@@ -80,6 +82,16 @@ public class ResponseClientFaultTests
         observed.ShouldBeSameAs(fault);
         context.CancelRequested.ShouldBeFalse();
         context.Response.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+    }
+
+    /// <summary>
+    /// The hook <c>builder.Services.AddErrorHandling(errors =&gt; ...)</c> registers with the boundary's options.
+    /// </summary>
+    private static IErrorHandlingFeature Registration(Action<ExceptionBoundaryOptions> configure)
+    {
+        ErrorHandlingBuilder errors = new();
+        configure(errors.Options);
+        return errors.Build();
     }
 
     private sealed class FakeResponseClientFaultFeature : IWebResponseClientFaultFeature

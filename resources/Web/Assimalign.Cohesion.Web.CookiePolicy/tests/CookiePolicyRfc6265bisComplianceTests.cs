@@ -52,11 +52,12 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.PrefixViolation = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.PrefixViolation = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             context.Response.Cookies.Add(new HttpCookie("__Secure-id", "1"));
@@ -105,12 +106,13 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.Secure = CookieSecurePolicy.None;
-            options.PrefixViolation = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.Secure = CookieSecurePolicy.None;
+            policy.Options.PrefixViolation = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Response.Cookies.Add(new HttpCookie("__Host-id", "1", new HttpCookieOptions
             {
@@ -133,11 +135,12 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.PrefixViolation = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.PrefixViolation = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Response.Cookies.Add(new HttpCookie("__Host-id", "1", new HttpCookieOptions { Secure = true, Path = "/" })));
 
@@ -161,11 +164,12 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.PrefixViolation = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.PrefixViolation = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Response.Cookies.Add(new HttpCookie(name, "1")));
 
@@ -188,11 +192,12 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.PrefixViolation = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.PrefixViolation = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Response.Cookies.Add(new HttpCookie(name, "1", new HttpCookieOptions { Domain = "example.com", Path = "/x" })));
 
@@ -236,11 +241,12 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             context.Response.Cookies.Add(new HttpCookie("embed", "1", new HttpCookieOptions { SameSite = HttpCookieSameSiteMode.None }));
@@ -265,12 +271,13 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.Secure = CookieSecurePolicy.Always;
-            options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.Secure = CookieSecurePolicy.Always;
+            policy.Options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Response.Cookies.Add(new HttpCookie("embed", "1", new HttpCookieOptions { SameSite = HttpCookieSameSiteMode.None })));
 
@@ -288,12 +295,13 @@ public class CookiePolicyRfc6265bisComplianceTests
         // Arrange
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.MinimumSameSitePolicy = HttpCookieSameSiteMode.Lax;
-            options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
-            options.OnRejected = recorder.Record;
+            policy.Options.MinimumSameSitePolicy = HttpCookieSameSiteMode.Lax;
+            policy.Options.SameSiteNoneWithoutSecure = CookieViolationAction.Reject;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Response.Cookies.Add(new HttpCookie("embed", "1", new HttpCookieOptions { SameSite = HttpCookieSameSiteMode.None })));
 
@@ -367,11 +375,12 @@ public class CookiePolicyRfc6265bisComplianceTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.TimeProvider = new FixedTimeProvider(CookiePolicyTestHost.Now);
-            options.MaxLifetime = TimeSpan.FromDays(30);
+            policy.Options.TimeProvider = new FixedTimeProvider(CookiePolicyTestHost.Now);
+            policy.Options.MaxLifetime = TimeSpan.FromDays(30);
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
             context.Response.Cookies.Add(new HttpCookie("a", "1", new HttpCookieOptions
             {
@@ -414,11 +423,12 @@ public class CookiePolicyRfc6265bisComplianceTests
         // cookie live for an hour on a conforming user agent, whatever its Expires says.
         RejectionRecorder recorder = new();
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.CheckConsentNeeded = _ => true;
-            options.OnRejected = recorder.Record;
+            policy.Options.CheckConsentNeeded = _ => true;
+            policy.Options.OnRejected = recorder.Record;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             context.Response.Cookies.Add(new HttpCookie("live", "1", new HttpCookieOptions
@@ -455,11 +465,12 @@ public class CookiePolicyRfc6265bisComplianceTests
     {
         // Arrange
         await using WebApplicationTestFactory factory = new(new WebApplicationTestFactoryOptions { Protocol = protocol });
-        factory.Application.UseCookiePolicy(options =>
+        factory.Builder.Services.AddCookiePolicy(policy =>
         {
-            options.TimeProvider = new FixedTimeProvider(CookiePolicyTestHost.Now);
-            options.MinimumSameSitePolicy = HttpCookieSameSiteMode.Lax;
+            policy.Options.TimeProvider = new FixedTimeProvider(CookiePolicyTestHost.Now);
+            policy.Options.MinimumSameSitePolicy = HttpCookieSameSiteMode.Lax;
         });
+        factory.Application.UseCookiePolicy();
         CookiePolicyTestHost.UseCookieWriter(factory.Application, context =>
         {
             context.Response.Cookies.Add(new HttpCookie("a", "1", new HttpCookieOptions { Expires = CookiePolicyTestHost.Now.AddYears(2) }));
@@ -479,7 +490,8 @@ public class CookiePolicyRfc6265bisComplianceTests
     private static WebApplicationTestFactory CreateFactoryAtFixedTime()
     {
         WebApplicationTestFactory factory = new();
-        factory.Application.UseCookiePolicy(options => options.TimeProvider = new FixedTimeProvider(CookiePolicyTestHost.Now));
+        factory.Builder.Services.AddCookiePolicy(policy => policy.Options.TimeProvider = new FixedTimeProvider(CookiePolicyTestHost.Now));
+        factory.Application.UseCookiePolicy();
         return factory;
     }
 

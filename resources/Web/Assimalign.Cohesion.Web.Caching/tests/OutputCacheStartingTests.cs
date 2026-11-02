@@ -34,6 +34,7 @@ public class OutputCacheStartingTests
         using CancellationTokenSource cancellation = new(_timeout);
         await using WebApplicationTestFactory factory = new();
         int invocations = 0;
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(_ => { }));
         factory.Application.Use(async (context, next) =>
         {
             context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
@@ -44,7 +45,7 @@ public class OutputCacheStartingTests
             }, null);
             await next(context);
         });
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(_ => { }));
+        factory.Application.UseOutputCache();
         factory.Application.Use(async (context, _) =>
         {
             int invocation = Interlocked.Increment(ref invocations);
@@ -72,6 +73,7 @@ public class OutputCacheStartingTests
         using CancellationTokenSource cancellation = new(_timeout);
         await using WebApplicationTestFactory factory = new();
         int invocations = 0;
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(_ => { }));
         factory.Application.Use(async (context, next) =>
         {
             context.Features.Get<IWebResponseStartingFeature>()!.OnStarting(_ =>
@@ -81,7 +83,7 @@ public class OutputCacheStartingTests
             }, null);
             await next(context);
         });
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(_ => { }));
+        factory.Application.UseOutputCache();
         factory.Application.Use(async (context, _) =>
         {
             Interlocked.Increment(ref invocations);
@@ -117,7 +119,8 @@ public class OutputCacheStartingTests
         using CancellationTokenSource cancellation = new(_timeout);
         await using WebApplicationTestFactory factory = new();
         int invocations = 0;
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(_ => { }));
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(_ => { }));
+        factory.Application.UseOutputCache();
         factory.Application.Use(async (context, _) =>
         {
             Interlocked.Increment(ref invocations);
@@ -157,6 +160,7 @@ public class OutputCacheStartingTests
         HttpHeaderKey name = new("X-Final");
         TaskCompletionSource<string> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
         int invocations = 0;
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(_ => { }));
         factory.Application.Use(async (context, next) =>
         {
             await next(context);
@@ -167,7 +171,7 @@ public class OutputCacheStartingTests
                 return ValueTask.CompletedTask;
             });
         });
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(_ => { }));
+        factory.Application.UseOutputCache();
         factory.Application.Use(async (context, _) =>
         {
             Interlocked.Increment(ref invocations);
@@ -209,6 +213,7 @@ public class OutputCacheStartingTests
             Protocol = http2 ? WebApplicationTestProtocol.Http2 : WebApplicationTestProtocol.Http1,
         });
         int invocations = 0;
+        factory.Builder.Services.AddOutputCache(cache => cache.Options.AddBasePolicy(_ => { }));
         factory.Application.Use(async (context, next) =>
         {
             if (context.Request.Headers.ContainsKey(new HttpHeaderKey("X-Fail")))
@@ -218,7 +223,7 @@ public class OutputCacheStartingTests
             }
             await next(context);
         });
-        factory.Application.UseOutputCache(options => options.AddBasePolicy(_ => { }));
+        factory.Application.UseOutputCache();
         factory.Application.Use(async (context, _) =>
         {
             int invocation = Interlocked.Increment(ref invocations);

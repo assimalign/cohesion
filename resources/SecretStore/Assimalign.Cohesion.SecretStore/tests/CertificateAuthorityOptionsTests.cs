@@ -1,5 +1,3 @@
-using System;
-
 using Assimalign.Cohesion.SecretStore.Tests.TestObjects;
 
 using Shouldly;
@@ -9,17 +7,15 @@ namespace Assimalign.Cohesion.SecretStore.Tests;
 
 public sealed class CertificateAuthorityOptionsTests
 {
-    [Fact(DisplayName = "Cohesion Test [SecretStore] - CertificateAuthorityOptions: defaults to standalone self-seeding")]
-    public void CertificateAuthorityOptions_WhenCreated_ShouldDefaultToStandaloneSelfSeeding()
+    [Fact(DisplayName = "Cohesion Test [SecretStore] - CertificateAuthorityOptions: defaults to self-seeding")]
+    public void CertificateAuthorityOptions_WhenCreated_ShouldDefaultToSelfSeeding()
     {
         // Arrange and Act
         CertificateAuthorityOptions options = new();
 
         // Assert
         options.CommonName.ShouldBe("Cohesion SecretStore Certificate Authority");
-        options.SelfSeedWhenNoPlatform.ShouldBeTrue();
-        options.PlatformEnrollmentEndpoint.ShouldBeNull();
-        options.PlatformCertificate.ShouldBeNull();
+        options.SelfSeed.ShouldBeTrue();
         options.InitialCertificate.ShouldBeNull();
         options.InitialPrivateKey.ShouldBeNull();
     }
@@ -29,8 +25,8 @@ public sealed class CertificateAuthorityOptionsTests
     {
         // Arrange
         byte[] secret = [1, 2, 3];
-        byte[] platformCertificate = [4, 5, 6];
-        Uri enrollmentEndpoint = new("https://platform.example.test/secrets/v1/enroll");
+        byte[] certificate = [4, 5, 6];
+        byte[] privateKey = [7, 8];
         RecordingSecretStoreApplicationBuilder builder = new();
 
         // Act
@@ -38,10 +34,10 @@ public sealed class CertificateAuthorityOptionsTests
             .AddSecret("apps/api/client-secret", secret)
             .AddCertificateAuthority(options =>
             {
-                options.CommonName = "AppA Intermediate CA";
-                options.SelfSeedWhenNoPlatform = false;
-                options.PlatformEnrollmentEndpoint = enrollmentEndpoint;
-                options.PlatformCertificate = platformCertificate;
+                options.CommonName = "AppA Root CA";
+                options.SelfSeed = false;
+                options.InitialCertificate = certificate;
+                options.InitialPrivateKey = privateKey;
             });
 
         secret[0] = 9;
@@ -52,10 +48,11 @@ public sealed class CertificateAuthorityOptionsTests
         builder.Secrets[0].Path.ShouldBe("apps/api/client-secret");
         builder.Secrets[0].Value.ShouldBe([1, 2, 3]);
         CertificateAuthorityOptions options = builder.CertificateAuthority.ShouldNotBeNull();
-        options.CommonName.ShouldBe("AppA Intermediate CA");
-        options.SelfSeedWhenNoPlatform.ShouldBeFalse();
-        options.PlatformEnrollmentEndpoint.ShouldBe(enrollmentEndpoint);
-        options.PlatformCertificate.ShouldNotBeNull();
-        options.PlatformCertificate.Value.ToArray().ShouldBe([4, 5, 6]);
+        options.CommonName.ShouldBe("AppA Root CA");
+        options.SelfSeed.ShouldBeFalse();
+        options.InitialCertificate.ShouldNotBeNull();
+        options.InitialCertificate.Value.ToArray().ShouldBe([4, 5, 6]);
+        options.InitialPrivateKey.ShouldNotBeNull();
+        options.InitialPrivateKey.Value.ToArray().ShouldBe([7, 8]);
     }
 }

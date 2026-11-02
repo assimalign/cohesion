@@ -323,13 +323,41 @@ for that path.
 
 Two routes, both over the same store:
 
-- The application constructs an `InMemoryOutputCacheStore` (or any `IOutputCacheStore`), passes it to the
-  `UseOutputCache(store, …)` overload, and calls `store.EvictByTagAsync(tag)` directly.
+- The application constructs an `InMemoryOutputCacheStore` (or any `IOutputCacheStore`), hands it to the
+  builder (`builder.Services.AddOutputCache(cache => cache.UseStore(store))`), and calls
+  `store.EvictByTagAsync(tag)` directly.
 - A handler resolves `IOutputCacheFeature` from `context.Features` and calls its `EvictByTagAsync` — a thin,
   stateless handle over the same store, installed on every exchange.
 
 An `IChangeToken` bridge (mapping a tag to a foundation change token) was considered and **not taken** — the
 explicit `EvictByTagAsync` surface is simpler and sufficient; a token bridge can layer additively later.
+
+## Registration: `AddOutputCache` configures, `UseOutputCache` places (2026-10-28)
+
+`builder.Services.AddOutputCache(cache => ...)` is a generated component integration over
+`OutputCacheBuilder`, declared in `src/Properties/ComponentIntegrations.cs` with both builder templates.
+The builder owns the options (`cache.Options`: base and named policies, size caps, clock) and the store
+(`cache.UseStore(store)`). Its `Build` copies the options, policies included, because the middleware
+reads them on every request: a change made afterwards cannot reach it. Without a supplied store it then
+creates an `InMemoryOutputCacheStore` sized from `SizeLimit` on `TimeProvider`, and the verb registers
+the middleware as an `IWebApplicationMiddleware` singleton. The options validate on assignment (sizes,
+durations, field names, a duplicate policy name), so a bad value fails where the cache is registered.
+
+`UseOutputCache()` takes no arguments. It places the last registration of the middleware it finds in
+`IWebApplicationContext.Middleware`, or, when the application registered none, one with the defaults:
+opt-in mode (no base policy) over a new in-memory store. Placing it twice places the same registered
+instance, so both positions share one store. `OutputCachePolicyNotRegistered` now names
+`AddOutputCache` as the place a named policy is registered.
+
+**Store ownership.** The middleware owns the in-memory store it creates and disposes it when it is
+disposed; the container `AddOutputCache` registers it in does that when the application is disposed.
+Before 2026-10-28 the default store was never disposed. A store passed to `UseStore` is borrowed, as the
+store overload's was: the application disposes it. The defaults `UseOutputCache()` builds without a
+registration are not container-owned, so that store is not disposed either, as before.
+
+*Rejected:* configuration on the pipeline verb, the former `UseOutputCache(configure)` and
+`UseOutputCache(store, configure)`. They split one feature's settings across two call sites and kept them
+out of the registrations the host enumerates.
 
 ## AOT posture
 
@@ -424,7 +452,8 @@ no advisory, CWE or severity applies. No cache key or tag payload is introduced 
 - **QUERY caching** until a request-content key seam exists (see the QUERY posture above).
 - **Caching non-`200` statuses** by default (conservative; additive to widen).
 - **Owning DI/config/logging.** Feature packages never take the hosting module (`COHRES001`); the store is
-  supplied to `UseOutputCache`, not resolved from a container.
+  handed to `OutputCacheBuilder.UseStore`, and the package never resolves it from a container (an
+  application may, in the callback of the generated `AddOutputCache((services, cache) => ...)` overload).
 
 ## Scope-creep candidates (recorded, not taken)
 
@@ -470,6 +499,14 @@ transport, each forwarded host and each forwarded scheme gets its own entry whil
 without the middleware a spoofed `X-Forwarded-Host` does not partition the cache; at the unit level, keys
 built for plaintext requests from a trusted proxy address follow the forwarded host rather than the wire
 host.
+
+`tests/OutputCacheRegistrationTests.cs` covers "Add configures, Use places" over a pipeline builder whose
+application context lists what the test registered: `UseOutputCache()` places the registered middleware,
+the last of two registrations, or the opt-in defaults without one; `Build` copies the options (a later
+policy or size change does not reach the built middleware); and disposing the middleware disposes the
+in-memory store it created but never a store passed to `UseStore`. The end-to-end tests register through
+the generated `AddOutputCache` verb, one of them twice to prove the last registration is placed in a
+real application.
 
 ## Exception messages (#1467, #1471)
 

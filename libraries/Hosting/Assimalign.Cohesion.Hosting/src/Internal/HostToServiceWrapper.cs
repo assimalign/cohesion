@@ -99,7 +99,7 @@ internal sealed class HostToServiceWrapper : IHostService
                 $"Nested host '{_host.Id}' completed startup without reaching the Started state.");
         }
 
-        // A nested host owns its shutdown request but not a runner invocation. Observe the
+        // A nested host owns its shutdown request, but no RunAsync waits on it. Observe the
         // public context signal and translate it directly into the same serialized stop path
         // the parent uses. The generation check prevents a late observer from an earlier run
         // from stopping a restarted child.

@@ -123,4 +123,10 @@
   <data name="RedirectLocationInvalid" xml:space="preserve">
     <value>The redirect location must be non-empty and contain no control character or space.</value>
   </data>
+  <data name="QueryConditionalsNotRegistered" xml:space="preserve">
+    <value>UseQueryConditionals places the middleware that builder.Services.AddQueryConditionals(conditionals =&gt; ...) registers, and none is registered. Register the provider of the resource's validators first.</value>
+  </data>
+  <data name="QueryResourceValidatorsNotSet" xml:space="preserve">
+    <value>Conditional QUERY evaluation needs the target resource's current validators. Call conditionals.UseResourceValidators(provider) in builder.Services.AddQueryConditionals(conditionals =&gt; ...).</value>
+  </data>
 </root>

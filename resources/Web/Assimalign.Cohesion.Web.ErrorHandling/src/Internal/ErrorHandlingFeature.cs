@@ -10,18 +10,27 @@ namespace Assimalign.Cohesion.Web.ErrorHandling.Internal;
 /// <summary>
 /// The <c>OnError</c> chain behind <see cref="IErrorHandlingFeature"/>: an application singleton
 /// seeded onto every exchange. <see cref="ErrorHandlingBuilder.Build"/> hands it a snapshot of the
-/// registrations, so the chain is immutable and the per-request read path takes no lock.
+/// registrations, so the chain is immutable and the per-request read path takes no lock. It also
+/// carries the exception boundary's options, which <c>UseErrorHandling()</c> reads from the last
+/// registration when it places the boundary.
 /// </summary>
 [global::System.Diagnostics.DebuggerDisplay("ErrorHandlingFeature")]
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class ErrorHandlingFeature : IErrorHandlingFeature
 {
     private readonly IErrorHandler[] _handlers;
+    private readonly ExceptionBoundaryOptions _boundaryOptions;
 
-    internal ErrorHandlingFeature(IErrorHandler[] handlers)
+    internal ErrorHandlingFeature(IErrorHandler[] handlers, ExceptionBoundaryOptions boundaryOptions)
     {
         _handlers = handlers;
+        _boundaryOptions = boundaryOptions;
     }
+
+    /// <summary>
+    /// Gets the exception boundary's options, copied when the hook was built.
+    /// </summary>
+    internal ExceptionBoundaryOptions BoundaryOptions => _boundaryOptions;
 
     /// <inheritdoc />
     public string Name => nameof(ErrorHandlingFeature);

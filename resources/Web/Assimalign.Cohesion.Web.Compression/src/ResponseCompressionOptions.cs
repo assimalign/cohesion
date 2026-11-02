@@ -5,10 +5,11 @@ using System.IO.Compression;
 namespace Assimalign.Cohesion.Web.Compression;
 
 /// <summary>
-/// Builder-time configuration for response compression, captured when
-/// <c>UseResponseCompression</c> is called. Governs which client codings are offered, which
-/// response media types are eligible, the size threshold below which a response is left
-/// uncompressed, the compression level, and the BREACH-cautious HTTPS opt-in.
+/// Configuration for response compression, set on <see cref="ResponseCompressionBuilder.Options"/>
+/// where <c>builder.Services.AddResponseCompression(compression =&gt; ...)</c> registers the middleware,
+/// and captured when it is built. Governs which client codings are offered, which response media
+/// types are eligible, the size threshold below which a response is left uncompressed, the
+/// compression level, and the BREACH-cautious HTTPS opt-in.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,7 +42,7 @@ public sealed class ResponseCompressionOptions
     /// <remarks>
     /// A request counts as <c>https</c> when its effective scheme is HTTPS: a direct TLS connection, or
     /// TLS terminated at a trusted proxy that the forwarded-headers middleware
-    /// (<c>UseForwardedHeaders</c>, registered ahead of <c>UseResponseCompression</c>) resolved. Behind
+    /// (<c>UseForwardedHeaders</c>, placed ahead of <c>UseResponseCompression</c>) resolved. Behind
     /// a TLS-terminating proxy without that middleware the application sees <c>http</c>, and responses
     /// are compressed.
     /// </remarks>

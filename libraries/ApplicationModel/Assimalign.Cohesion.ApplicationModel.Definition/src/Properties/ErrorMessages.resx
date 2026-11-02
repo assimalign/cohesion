@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="GatewayNameInvalid" xml:space="preserve"><value>A gateway name is 1 to 63 lowercase ASCII letters, digits, or hyphens, starting with a letter and ending with a letter or digit.</value></data>
+  <data name="PermissionInvalid" xml:space="preserve"><value>A permission is dot-separated segments of lowercase ASCII letters and digits in hyphen-separated words, at most 128 characters.</value></data>
+  <data name="GatewayNameMissing" xml:space="preserve"><value>A gateway name is required.</value></data>
+  <data name="ProviderNameMissing" xml:space="preserve"><value>A provider name is required.</value></data>
+  <data name="ResourceNameMissing" xml:space="preserve"><value>A resource name is required.</value></data>
+  <data name="PermissionMissing" xml:space="preserve"><value>A permission is required; a default permission is not one.</value></data>
+  <data name="OutputNameInvalid" xml:space="preserve"><value>An output name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="OutputNameMissing" xml:space="preserve"><value>An output name is required; a default output name is not one.</value></data>
+  <data name="SettingNameInvalid" xml:space="preserve"><value>A setting name is colon-separated segments of ASCII letters, digits, underscores, hyphens, and periods, at most 256 characters.</value></data>
+  <data name="SettingNameMissing" xml:space="preserve"><value>A setting name is required; a default setting name is not one.</value></data>
+  <data name="PlatformNameMissing" xml:space="preserve"><value>A platform name is required; a default platform name is not one.</value></data>
+  <data name="ExtensionNameInvalid" xml:space="preserve"><value>An extension name is lowercase ASCII letters and digits in hyphen-separated words, at most 64 characters.</value></data>
+  <data name="ExtensionNameMissing" xml:space="preserve"><value>An extension name is required; a default extension name is not one.</value></data>
+  <data name="ExtensionValueMissing" xml:space="preserve"><value>An extension needs a JSON value; a default JsonElement is not one.</value></data>
+  <data name="ApplicationExtensionValueMissing" xml:space="preserve"><value>Extension '{0}' for platform '{1}' of resource '{2}/{3}' in gateway '{4}' has no JSON value.</value></data>
+  <data name="ApplicationExtensionDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' declares extension '{3}' for platform '{4}' more than once.</value></data>
+  <data name="ApplicationSettingOutputSelf" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' cannot use the resource's own output '{3}': a resource's outputs exist only once it is deployed.</value></data>
+  <data name="ApplicationSettingOutputUnknown" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' uses an output of '{3}/{4}' in gateway '{5}', which this gateway does not declare.</value></data>
+  <data name="ApplicationSettingValueMissing" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' must have exactly one of a value and an output.</value></data>
+  <data name="ApplicationSettingDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' declares setting '{3}' more than once.</value></data>
+  <data name="ApplicationSettingNotDependency" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses an output of '{4}/{5}' in gateway '{6}', which the resource does not depend on.</value></data>
+  <data name="ApplicationResourceDuplicate" xml:space="preserve"><value>Gateway '{0}' already declares resource '{1}/{2}'.</value></data>
+  <data name="ApplicationDependencySelf" xml:space="preserve"><value>Resource '{0}/{1}' cannot depend on itself.</value></data>
+  <data name="ApplicationDependencyForeign" xml:space="preserve"><value>Resource '{0}/{1}' was not declared in this application set's hierarchy.</value></data>
+  <data name="ApplicationCompositionClosed" xml:space="preserve"><value>The application has been built; its sets and dependencies can no longer change.</value></data>
+  <data name="ApplicationAlreadyBuilt" xml:space="preserve"><value>The application builder has already built its application.</value></data>
+  <data name="ApplicationManifestListMissing" xml:space="preserve"><value>The manifest of gateway '{0}' is missing a resource, gateway, dependency, setting, or extension list.</value></data>
+  <data name="ApplicationManifestEntryNull" xml:space="preserve"><value>The manifest of gateway '{0}' contains a null entry.</value></data>
+  <data name="ApplicationDependencyUnknown" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' depends on '{3}/{4}' in gateway '{5}', which the manifest does not declare.</value></data>
+  <data name="ApplicationDependencyDuplicate" xml:space="preserve"><value>Resource '{0}/{1}' in gateway '{2}' declares its dependency on '{3}/{4}' in gateway '{5}' more than once.</value></data>
+  <data name="ApplicationDependencyCycle" xml:space="preserve"><value>The resource dependencies form a cycle: {0}. A resource that must change one it depends on does so at run time, through an action that resource exposes.</value></data>
+  <data name="ApplicationPermissionDuplicate" xml:space="preserve"><value>A dependency of resource '{0}/{1}' names permission '{2}' more than once.</value></data>
+  <data name="ApplicationParentSelf" xml:space="preserve"><value>Gateway '{0}' cannot name itself as its parent.</value></data>
+  <data name="ApplicationParentAlreadySet" xml:space="preserve"><value>Gateway '{0}' already joins parent '{1}'; a gateway joins one parent.</value></data>
+  <data name="ApplicationSettingGatewayUnknown" xml:space="preserve"><value>Setting '{0}' of resource '{1}/{2}' in gateway '{3}' uses output '{4}' of '{5}/{6}' in gateway '{7}', which is neither this gateway nor the parent it joins.</value></data>
+</root>

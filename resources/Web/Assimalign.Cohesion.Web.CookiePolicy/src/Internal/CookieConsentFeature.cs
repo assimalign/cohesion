@@ -14,7 +14,7 @@ namespace Assimalign.Cohesion.Web.CookiePolicy.Internal;
 /// most once, and the request's cookies are parsed only when a non-essential cookie is appended while
 /// consent is needed or the application asks. The policy installs this feature only when the exchange
 /// has no <see cref="ICookieConsentFeature"/> yet, so consent is decided once per exchange: a nested
-/// <c>UseCookiePolicy</c> registration reuses the outer registration's instance, and a consent feature
+/// cookie policy (a branch that places its own) reuses the outer policy's instance, and a consent feature
 /// the application installed earlier takes this one's place.
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("CookieConsentFeature")]

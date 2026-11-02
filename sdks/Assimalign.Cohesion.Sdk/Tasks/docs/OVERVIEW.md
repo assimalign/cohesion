@@ -2,10 +2,8 @@
 
 `Assimalign.Cohesion.Sdk` is Cohesion's general-purpose base MSBuild SDK. It
 chains to `Microsoft.NET.Sdk` and can be used for ordinary libraries and
-executables. Resource manifests, generated resource APIs, container images, and
-orchestration belong to the separate
-[`Assimalign.Cohesion.Sdk.ApplicationModel`](../../../Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/OVERVIEW.md)
-package.
+executables. It generates no application-model sources: a resource makes itself a
+managed instance in its `Program.cs`, and a gateway declares its model in its own.
 
 ## Project defaults
 
@@ -20,7 +18,6 @@ The base SDK supplies conditional defaults for every base and layered consumer:
 | `ImplicitUsings` | `disable` |
 | `Nullable` | `enable` |
 | `IsAotCompatible` | `true` |
-| `CohesionApplicationModel` | `disabled` |
 | `DisableTransitiveFrameworkReferenceDownloads` | `true` |
 
 Every ordinary default is conditional on an empty value. Command-line global
@@ -32,8 +29,8 @@ The base SDK registers every Cohesion framework but includes none implicitly.
 An executable that uses the base SDK opts into the hosting kernel with an
 explicit `FrameworkReference`; resource-area SDKs add the kernel and their area
 framework unless `CohesionAutoIncludeAppFramework=false`. The kernel carries
-Connections once because generated resource accessors and every area hosting
-module depend on it.
+Connections and ApplicationModel.Hosting once because every area hosting module
+and every area integration depend on them.
 
 ## Base build tooling
 
@@ -50,18 +47,6 @@ Strongly typed settings emit public, nullable-aware types and an AOT-safe
 `Bind(IConfiguration)` method made from explicit configuration reads. No source
 is generated when `CohesionAppSettingsClass` is absent.
 
-## Application-model boundary
-
-An area SDK imports `Assimalign.Cohesion.Sdk.ApplicationModel` when the consumer
-sets `CohesionApplicationModel=enabled`; Gateway imports it unconditionally.
-The auxiliary SDK is resolved at the area SDK's exact `$(CohesionVersion)` and
-does not need another `global.json` pin.
-
-A project that enables the application model while using only the base SDK fails
-with COHSDK011. Use a resource-area SDK or add the explicit import documented by
-the ApplicationModel SDK. This guard prevents an enabled-looking project from
-silently omitting manifests and generated source.
-
 ## SDK pin validation
 
 During restore and build, the base SDK walks upward to the nearest `global.json`.
@@ -77,9 +62,5 @@ tooling that must inspect a temporarily inconsistent tree.
 | Code | Severity | Meaning |
 | --- | --- | --- |
 | COHSDK002 | Error | Cohesion SDK pins disagree, or the nearest pinned .NET SDK is invalid or too old. |
-| COHSDK011 | Error | `CohesionApplicationModel=enabled` but the ApplicationModel SDK was not imported. |
-
-Resource, manifest, certificate, and image diagnostics are documented by the
-[ApplicationModel SDK](../../../Assimalign.Cohesion.Sdk.ApplicationModel/Tasks/docs/DESIGN.md#diagnostics).
 
 See [DESIGN.md](./DESIGN.md) for import ordering and implementation contracts.

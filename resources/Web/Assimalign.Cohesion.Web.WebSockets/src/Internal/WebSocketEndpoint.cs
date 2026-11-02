@@ -20,8 +20,9 @@ namespace Assimalign.Cohesion.Web.WebSockets.Internal;
 /// <para>
 /// When <c>UseWebSockets</c> ran ahead of the endpoint, it already refused a malformed or cross-site
 /// handshake and installed its policy decorator. Otherwise the endpoint applies the default policy
-/// itself, exactly as <c>UseWebSockets()</c> with default options would: an endpoint mapped for
-/// sockets is never left without the cross-site hijacking defense.
+/// itself, exactly as <c>UseWebSockets()</c> does when the application registered none: an endpoint
+/// mapped for sockets is never left without the cross-site hijacking defense. A policy the
+/// application registered with <c>AddWebSockets</c> applies only where <c>UseWebSockets()</c> places it.
 /// </para>
 /// </remarks>
 [global::System.Diagnostics.DebuggerDisplay("WebSocketEndpoint")]

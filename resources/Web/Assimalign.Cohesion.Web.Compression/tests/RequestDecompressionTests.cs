@@ -134,7 +134,8 @@ public class RequestDecompressionTests
         using CancellationTokenSource cancellation = new(_testTimeout);
         byte[] bomb = CompressionPayloads.GzipCompress(new byte[100_000]);
         await using WebApplicationTestFactory factory = new();
-        factory.Application.UseRequestDecompression(options => options.MaxDecompressedSizeBytes = 1024);
+        factory.Builder.Services.AddRequestDecompression(decompression => decompression.Options.MaxDecompressedSizeBytes = 1024);
+        factory.Application.UseRequestDecompression();
         EchoBody(factory);
         using HttpClient client = factory.CreateClient();
 
@@ -217,6 +218,44 @@ public class RequestDecompressionTests
 
         // Act
         byte[] echoed = await PostAsync(client, original, contentEncoding: null, cancellation.Token);
+
+        // Assert
+        echoed.ShouldBe(original);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Compression] - E2E: A guard configured through the provider overload of AddRequestDecompression should reject an over-large body")]
+    public async Task AddRequestDecompression_ProviderCallback_ShouldRejectWith413()
+    {
+        // Arrange — the provider overload builds when the container first resolves the middleware.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        byte[] bomb = CompressionPayloads.GzipCompress(new byte[100_000]);
+        await using WebApplicationTestFactory factory = new();
+        factory.Builder.Services.AddRequestDecompression((services, decompression) =>
+            decompression.Options.MaxDecompressedSizeBytes = 1024);
+        factory.Application.UseRequestDecompression();
+        EchoBody(factory);
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        using HttpResponseMessage response = await PostRawAsync(client, bomb, "gzip", cancellation.Token);
+
+        // Assert
+        response.StatusCode.ShouldBe(NetHttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Compression] - E2E: Without AddRequestDecompression the default guard should decode a body under 100 MiB")]
+    public async Task UseRequestDecompression_WithoutRegistration_ShouldDecodeUnderTheDefaultGuard()
+    {
+        // Arrange — 100,000 decoded bytes: rejected by the 1 KiB guard above, inside the default guard.
+        using CancellationTokenSource cancellation = new(_testTimeout);
+        byte[] original = new byte[100_000];
+        await using WebApplicationTestFactory factory = new();
+        factory.Application.UseRequestDecompression();
+        EchoBody(factory);
+        using HttpClient client = factory.CreateClient();
+
+        // Act
+        byte[] echoed = await PostAsync(client, CompressionPayloads.GzipCompress(original), "gzip", cancellation.Token);
 
         // Assert
         echoed.ShouldBe(original);

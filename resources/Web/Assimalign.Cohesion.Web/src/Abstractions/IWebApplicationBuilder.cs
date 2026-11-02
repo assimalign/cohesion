@@ -83,6 +83,35 @@ public interface IWebApplicationBuilder
     IWebApplicationBuilder AddServer(Func<IWebApplicationContext, IWebApplicationServer> server);
 
     /// <summary>
+    /// Adds a setting the application lists on <see cref="IWebApplicationContext.Settings"/>.
+    /// </summary>
+    /// <remarks>
+    /// The raw registration path, like <see cref="AddFeature(IHttpFeature)"/>: a feature package
+    /// registers its settings with its own <c>builder.Services.Add&lt;Feature&gt;(...)</c> verb. A
+    /// setting is a singleton shared by every component that reads it.
+    /// </remarks>
+    /// <param name="setting">The setting.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="setting"/> is null.</exception>
+    IWebApplicationBuilder AddSetting(IWebApplicationSetting setting);
+
+    /// <summary>
+    /// Adds a setting created from the application context, listed like one added with
+    /// <see cref="AddSetting(IWebApplicationSetting)"/>.
+    /// </summary>
+    /// <remarks>
+    /// The factory runs once, the first time the application's settings are resolved after
+    /// <see cref="Build"/>.
+    /// </remarks>
+    /// <param name="setting">The factory that creates the setting.</param>
+    /// <returns>The same builder for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="setting"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The factory returns <see langword="null"/> when the application's settings are resolved.
+    /// </exception>
+    IWebApplicationBuilder AddSetting(Func<IWebApplicationContext, IWebApplicationSetting> setting);
+
+    /// <summary>
     /// Replaces the default request pipeline with a prebuilt pipeline.
     /// </summary>
     /// <remarks>

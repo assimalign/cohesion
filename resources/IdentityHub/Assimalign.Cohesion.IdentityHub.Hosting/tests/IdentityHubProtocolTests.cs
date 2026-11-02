@@ -353,56 +353,6 @@ public sealed class IdentityHubProtocolTests
         }
     }
 
-    [Fact(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Control plane: bootstrap JWT protects every namespaced route")]
-    public async Task ControlPlane_WithBootstrapJwt_ShouldEnforceMissingWrongAudienceAndValidCredentials()
-    {
-        // Arrange
-        using var data = new TemporaryDirectory();
-        using var identity = new TestBootstrapIdentity();
-        Uri endpoint = IdentityHubTestHost.GetEndpoint();
-        IdentityHubApplicationBuilder builder = IdentityHubTestHost.CreateBuilder(
-            data.Path,
-            endpoint,
-            gatewayName: identity.Subject,
-            applicationTrustKey: identity.PublicKey);
-        await using IdentityHubApplication application = builder.Build();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        await ((IHost)application).StartAsync(timeout.Token);
-
-        try
-        {
-            using var client = new HttpClient();
-            Uri managedRoute = new(endpoint, "/cohesion/v1/healthz");
-
-            // Act.
-            using HttpResponseMessage publicDiscovery = await client.GetAsync(
-                new Uri(endpoint, "/.well-known/openid-configuration"),
-                timeout.Token);
-            using HttpResponseMessage missing = await client.GetAsync(managedRoute, timeout.Token);
-            using HttpResponseMessage wrongAudience = await SendBearerAsync(
-                client,
-                managedRoute,
-                identity.Issue("another-resource"),
-                timeout.Token);
-            using HttpResponseMessage valid = await SendBearerAsync(
-                client,
-                managedRoute,
-                identity.Issue("identity"),
-                timeout.Token);
-
-            // Assert.
-            publicDiscovery.StatusCode.ShouldBe(HttpStatusCode.OK);
-            missing.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-            missing.Headers.WwwAuthenticate.ToString().ShouldBe("Bearer");
-            wrongAudience.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-            valid.StatusCode.ShouldBe(HttpStatusCode.OK);
-        }
-        finally
-        {
-            await ((IHost)application).StopAsync(timeout.Token);
-        }
-    }
-
     [Fact(DisplayName = "Cohesion Test [IdentityHub.Hosting] - Security headers: the approval page and the JSON endpoints carry one strict policy")]
     public async Task SecurityHeaders_OnApprovalPageAndDiscovery_ShouldCarryTheStrictPolicy()
     {
@@ -482,17 +432,6 @@ public sealed class IdentityHubProtocolTests
         IReadOnlyDictionary<string, string> values,
         CancellationToken cancellationToken)
         => client.PostAsync(uri, new FormUrlEncodedContent(values), cancellationToken);
-
-    private static Task<HttpResponseMessage> SendBearerAsync(
-        HttpClient client,
-        Uri uri,
-        string token,
-        CancellationToken cancellationToken)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return client.SendAsync(request, cancellationToken);
-    }
 
     private static AuthenticationHeaderValue CreateBasicAuthorization(string clientId, string secret)
         => new(

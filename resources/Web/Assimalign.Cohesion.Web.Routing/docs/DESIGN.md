@@ -299,9 +299,8 @@ Protect an internal endpoint with something the client cannot assert:
 - authorization on the route or its group (`RequireAuthorization`, `Web.Authorization`), or
 - the connection's local endpoint (`context.ConnectionInfo.LocalPort` or `LocalIp`), which the
   transport takes from the socket: an internal listener that only internal callers can reach.
-  Check it in a middleware or branch on it with `MapWhen` (the `Web.Hosting` control plane
-  gates its port this way), or serve internal endpoints from a separate application bound only to
-  that listener.
+  Check it in a middleware or branch on it with `MapWhen`, or serve internal endpoints from a
+  separate application bound only to that listener.
 
 `RouteHostForwardedTests` pins the matches a client gets when it asserts the internal host or a port
 through a trusted proxy, so nothing comes to rely on the constraint as a gate.

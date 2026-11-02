@@ -23,10 +23,10 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .AddRewrite("^/a$", "/b")
             .AddRewrite("^/b$", "/c")
-            .AddRewrite("^/a$", "/never"));
+            .AddRewrite("^/a$", "/never")));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -42,9 +42,9 @@ public class RewriteRuleEvaluationTests
         // Arrange — both match /items; the first rewrites it away, so the second never sees /items.
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .AddRewrite("^/items$", "/first")
-            .AddRewrite("^/items$", "/second"));
+            .AddRewrite("^/items$", "/second")));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -60,9 +60,9 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .AddRewrite("^/a$", "/b", RewriteFlow.SkipRemainingRules)
-            .AddRewrite("^/b$", "/c"));
+            .AddRewrite("^/b$", "/c")));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -78,7 +78,7 @@ public class RewriteRuleEvaluationTests
         // Arrange — a guard that keeps /api out of the catch-all rewrite below it.
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .Add(context =>
             {
                 if (context.Path.StartsWith(new HttpPath("/api/")))
@@ -86,7 +86,7 @@ public class RewriteRuleEvaluationTests
                     context.SkipRemainingRules();
                 }
             })
-            .AddRewrite("^/(.*)$", "/spa/index.html"));
+            .AddRewrite("^/(.*)$", "/spa/index.html")));
         builder.Run(probe.InvokeAsync);
         TestHttpContext api = new("/api/orders");
         TestHttpContext page = new("/settings");
@@ -109,9 +109,9 @@ public class RewriteRuleEvaluationTests
         // the rewritten URL.
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .AddRewrite("^/old$", "/internal")
-            .AddRedirect("^/internal$", "/exposed", HttpStatusCode.MovedPermanently));
+            .AddRedirect("^/internal$", "/exposed", HttpStatusCode.MovedPermanently)));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -129,7 +129,7 @@ public class RewriteRuleEvaluationTests
         // Arrange — collapse repeated slashes one pass at a time.
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^(.*)//(.*)$", "$1/$2", RewriteFlow.Restart));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^(.*)//(.*)$", "$1/$2", RewriteFlow.Restart)));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -145,9 +145,9 @@ public class RewriteRuleEvaluationTests
         // Arrange — the first rule only matches what the second rule produces.
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .AddRewrite("^/v2/(.*)$", "/api/$1")
-            .AddRewrite("^/legacy/(.*)$", "/v2/$1", RewriteFlow.Restart));
+            .AddRewrite("^/legacy/(.*)$", "/v2/$1", RewriteFlow.Restart)));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -163,9 +163,9 @@ public class RewriteRuleEvaluationTests
         // Arrange
         int evaluations = 0;
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .Add(_ => evaluations++)
-            .AddRewrite("^/(.*)$", "/x$1", RewriteFlow.Restart));
+            .AddRewrite("^/(.*)$", "/x$1", RewriteFlow.Restart)));
         builder.Run(_ => Task.CompletedTask);
 
         // Act
@@ -186,11 +186,11 @@ public class RewriteRuleEvaluationTests
         // Arrange — "/a//b//c" needs two restarts, so three passes.
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules =>
+        builder.Use(TestRewriteMiddleware.Build(rules =>
         {
             rules.MaxPasses = maxPasses;
             rules.AddRewrite("^(.*)//(.*)$", "$1/$2", RewriteFlow.Restart);
-        });
+        }));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -227,7 +227,7 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^/old$", "/new").AddRedirect("^/gone$", "/"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/old$", "/new").AddRedirect("^/gone$", "/")));
         builder.Run(probe.InvokeAsync);
         TestHttpContext context = new("/current", "a=1");
 
@@ -246,7 +246,7 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite("^/same$", "/same"));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/same$", "/same")));
         builder.Run(probe.InvokeAsync);
         TestHttpContext context = new("/same");
 
@@ -263,7 +263,7 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.Add(_ => throw new InvalidOperationException("A rule ran for OPTIONS *.")));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.Add(_ => throw new InvalidOperationException("A rule ran for OPTIONS *."))));
         builder.Run(probe.InvokeAsync);
         TestHttpContext context = new("*");
         context.Request.Method = HttpMethod.Options;
@@ -281,7 +281,7 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(_ => { });
+        builder.Use(TestRewriteMiddleware.Build(_ => { }));
         builder.Run(probe.InvokeAsync);
         TestHttpContext context = new("/anything");
 
@@ -298,9 +298,9 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.AddRewrite(
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.AddRewrite(
             context => context.HttpContext.Request.Headers.ContainsKey("X-Mobile"),
-            "/mobile?layout=compact"));
+            "/mobile?layout=compact")));
         builder.Run(probe.InvokeAsync);
         TestHttpContext mobile = new("/home", "a=1");
         mobile.Request.Headers["X-Mobile"] = "1";
@@ -323,9 +323,9 @@ public class RewriteRuleEvaluationTests
     {
         // Arrange
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .AddRewrite("^/a$", "/b")
-            .AddRedirect(context => context.Path.Value == "/b", "/target", HttpStatusCode.RedirectKeepVerb));
+            .AddRedirect(context => context.Path.Value == "/b", "/target", HttpStatusCode.RedirectKeepVerb)));
         builder.Run(_ => Task.CompletedTask);
 
         // Act
@@ -353,14 +353,14 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.Add(context =>
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.Add(context =>
         {
             if (context.Path.Value == "/retired")
             {
                 context.HttpContext.Response.StatusCode = 410;
                 context.EndResponse();
             }
-        }));
+        })));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -377,8 +377,8 @@ public class RewriteRuleEvaluationTests
         // Arrange
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.Add(context =>
-            context.Rewrite(new HttpPath("/search"), new HttpQuery("q=" + context.Path.Value.TrimStart('/')).Parse())));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.Add(context =>
+            context.Rewrite(new HttpPath("/search"), new HttpQuery("q=" + context.Path.Value.TrimStart('/')).Parse()))));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -395,11 +395,11 @@ public class RewriteRuleEvaluationTests
     {
         // Arrange
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.Add(context =>
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.Add(context =>
         {
             context.Redirect("/elsewhere", HttpStatusCode.Found);
             context.Rewrite(new HttpPath("/other"));
-        }));
+        })));
         builder.Run(_ => Task.CompletedTask);
 
         // Act & Assert
@@ -414,7 +414,7 @@ public class RewriteRuleEvaluationTests
     {
         // Arrange
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.Add(context => context.Redirect(location, HttpStatusCode.Found)));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.Add(context => context.Redirect(location, HttpStatusCode.Found))));
         builder.Run(_ => Task.CompletedTask);
 
         // Act & Assert
@@ -426,7 +426,7 @@ public class RewriteRuleEvaluationTests
     {
         // Arrange
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules.Add(context => context.Rewrite(new HttpPath("*"))));
+        builder.Use(TestRewriteMiddleware.Build(rules => rules.Add(context => context.Rewrite(new HttpPath("*")))));
         builder.Run(_ => Task.CompletedTask);
 
         // Act & Assert
@@ -440,9 +440,9 @@ public class RewriteRuleEvaluationTests
         TenantRule tenant = new();
         DownstreamProbe probe = new();
         TestPipelineBuilder builder = new();
-        builder.UseRewrite(rules => rules
+        builder.Use(TestRewriteMiddleware.Build(rules => rules
             .AddRewrite("^/t/([a-z]+)/(.*)$", "/$2?tenant=$1")
-            .Add(tenant));
+            .Add(tenant)));
         builder.Run(probe.InvokeAsync);
 
         // Act
@@ -454,15 +454,15 @@ public class RewriteRuleEvaluationTests
         probe.Path!.Value.Value.ShouldBe("/orders");
     }
 
-    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - Composition: A null configure callback or rule should be rejected")]
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - Composition: A null pipeline builder or rule should be rejected")]
     public void UseRewrite_NullArguments_ShouldThrow()
     {
         // Arrange
-        TestPipelineBuilder builder = new();
+        IWebApplicationPipelineBuilder builder = null!;
         RewriteOptions options = new();
 
         // Act & Assert
-        Should.Throw<ArgumentNullException>(() => builder.UseRewrite(null!));
+        Should.Throw<ArgumentNullException>(() => builder.UseRewrite());
         Should.Throw<ArgumentNullException>(() => options.Add((IRewriteRule)null!));
         Should.Throw<ArgumentNullException>(() => options.Add((Action<IRewriteContext>)null!));
         Should.Throw<ArgumentNullException>(() => options.AddRewrite((string)null!, "/x"));
@@ -478,6 +478,76 @@ public class RewriteRuleEvaluationTests
         // Act & Assert
         Should.Throw<ArgumentOutOfRangeException>(() => options.AddRewrite("^/a$", "/b", (RewriteFlow)42));
         Should.Throw<ArgumentOutOfRangeException>(() => options.AddRewrite("^/a$", "/b", RewriteFlow.Continue, (RewriteMatchTarget)42));
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - RewriteBuilder: Rules added after Build should not reach the built middleware")]
+    public async Task Build_OptionsChangedAfterBuild_ShouldKeepTheBuiltRules()
+    {
+        // Arrange
+        DownstreamProbe probe = new();
+        RewriteBuilder rewrite = new();
+        rewrite.Options.AddRewrite("^/old$", "/new");
+        IWebApplicationMiddleware middleware = rewrite.Build();
+        rewrite.Options.AddRewrite("^/new$", "/changed");
+        TestPipelineBuilder builder = new();
+        builder.Use(middleware);
+        builder.Run(probe.InvokeAsync);
+
+        // Act
+        await builder.SendAsync(new TestHttpContext("/old"));
+
+        // Assert
+        probe.Path!.Value.Value.ShouldBe("/new");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - UseRewrite: Should place the middleware the application registered")]
+    public async Task UseRewrite_WithRegisteredMiddleware_ShouldPlaceIt()
+    {
+        // Arrange
+        DownstreamProbe probe = new();
+        TestPipelineBuilder builder = new();
+        builder.Context.Registered.Add(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/old$", "/new")));
+        builder.UseRewrite();
+        builder.Run(probe.InvokeAsync);
+
+        // Act
+        await builder.SendAsync(new TestHttpContext("/old"));
+
+        // Assert
+        probe.Path!.Value.Value.ShouldBe("/new");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - UseRewrite: Should place the last registration when the rules are registered twice")]
+    public async Task UseRewrite_WithTwoRegistrations_ShouldPlaceTheLast()
+    {
+        // Arrange
+        DownstreamProbe probe = new();
+        TestPipelineBuilder builder = new();
+        builder.Context.Registered.Add(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/old$", "/first")));
+        builder.Context.Registered.Add(TestRewriteMiddleware.Build(rules => rules.AddRewrite("^/old$", "/last")));
+        builder.UseRewrite();
+        builder.Run(probe.InvokeAsync);
+
+        // Act
+        await builder.SendAsync(new TestHttpContext("/old"));
+
+        // Assert
+        probe.Path!.Value.Value.ShouldBe("/last");
+    }
+
+    [Fact(DisplayName = "Cohesion Test [Web.Rewrite] - UseRewrite: Should fail the pipeline's composition when no rules are registered")]
+    public void UseRewrite_WithoutRegistration_ShouldFailComposition()
+    {
+        // Arrange — the rules have no default, so there is nothing to place.
+        TestPipelineBuilder builder = new();
+        builder.UseRewrite();
+        builder.Run(_ => Task.CompletedTask);
+
+        // Act
+        InvalidOperationException exception = Should.Throw<InvalidOperationException>(() => builder.Build());
+
+        // Assert
+        exception.Message.ShouldContain("AddRewrite", Case.Sensitive);
     }
 
     private sealed class TenantRule : IRewriteRule

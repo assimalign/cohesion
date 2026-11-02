@@ -8,13 +8,13 @@ using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Logging;
 
 /// <summary>
-/// Builder-time configuration for the HTTP logging middleware
-/// (<see cref="WebApplicationExtensions.UseHttpLogging(IWebApplicationPipelineBuilder, ILogger, Action{HttpLoggingOptions})"/>).
+/// Builder-time configuration for the HTTP logging middleware: the <see cref="HttpLoggingBuilder.Options"/>
+/// that <c>builder.Services.AddHttpLogging(logging =&gt; ...)</c> configures.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The options are read once when the middleware is composed and frozen into an immutable
-/// snapshot — mutating an options instance after <c>UseHttpLogging</c> returns has no effect.
+/// The options are read once, when <see cref="HttpLoggingBuilder.Build"/> builds the middleware, and
+/// frozen into an immutable snapshot — mutating the options afterwards has no effect.
 /// There is no request-time configuration surface.
 /// </para>
 /// <para>

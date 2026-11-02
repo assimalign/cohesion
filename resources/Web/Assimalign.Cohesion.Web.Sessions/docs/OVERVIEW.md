@@ -1,16 +1,21 @@
 # Assimalign.Cohesion.Web.Sessions — Overview
 
 Per-request HTTP session support for the Cohesion Web pipeline. The package wires the async session
-store seam from `Assimalign.Cohesion.Http.Sessions` into the Web middleware model: `UseSessions`
-establishes a hardened session-id cookie, installs a store-backed session on the exchange lazily on
-first access, and commits it after the pipeline unwinds. Concrete distributed backends are deferred —
-the middleware runs unchanged over any `IHttpSessionStore`, defaulting to the in-process store.
+store seam from `Assimalign.Cohesion.Http.Sessions` into the Web middleware model: the middleware
+`UseSessions` places establishes a hardened session-id cookie, installs a store-backed session on the
+exchange lazily on first access, and commits it after the pipeline unwinds. Concrete distributed
+backends are deferred — the middleware runs unchanged over any `IHttpSessionStore`, defaulting to the
+in-process store.
 
 ## Scope
 
-- **`UseSessions(...)`** — the pipeline verb. With no argument it uses an in-process
-  `InMemoryHttpSessionStore`; a store overload accepts any `IHttpSessionStore` (a distributed adapter)
-  so a multi-instance deployment gets sticky-session-free affinity with no other pipeline change.
+- **`AddSessions(sessions => ...)` and `UseSessions()`** — the registration verb on `builder.Services`
+  configures the cookie, the idle timeout, and the store (`SessionsBuilder.Options`,
+  `SessionsBuilder.UseStore`), and the pipeline verb places the middleware ("Add configures, Use
+  places"). Without `UseStore` the middleware uses an in-process `InMemoryHttpSessionStore`; any
+  `IHttpSessionStore` (a distributed adapter) gives a multi-instance deployment sticky-session-free
+  affinity with no other pipeline change. Without a registration, `UseSessions()` places the defaults,
+  and when the application registers sessions more than once, the last registration wins.
 - **Session-id cookie establishment** through the hardened `Http.Cookies` model — `HttpOnly` (from
   options), `SameSite=Lax`, `Secure` whenever the effective scheme is HTTPS (the transport-derived typed
   scheme, or a trusted proxy's forwarded scheme when `UseForwardedHeaders` runs first), session-scoped
@@ -30,6 +35,9 @@ the middleware runs unchanged over any `IHttpSessionStore`, defaulting to the in
 - `Assimalign.Cohesion.Web.Server` — request-id correlation for orphan diagnostics.
 
 - `Assimalign.Cohesion.Web` — the pipeline builder and middleware abstractions the verb and middleware build on.
+- `Assimalign.Cohesion.Core`'s `ComponentIntegration` shared source — declares `AddSessions` as a
+  component integration the consumer's generator projects onto `builder.Services`; the package takes no
+  DI reference.
 - `Assimalign.Cohesion.Http` — the HTTP context, feature collection, and transport-derived scheme.
 - `Assimalign.Cohesion.Http.Forwarded` — the `EffectiveScheme` read behind the `Secure` decision, which
   falls back to the transport-derived scheme when no forwarded-headers middleware ran.
@@ -47,12 +55,15 @@ It never references `Assimalign.Cohesion.Web.Hosting` (the resource hosting-isol
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Web.Sessions;
 
-app.UseSessions(options =>
+builder.Services.AddSessions(sessions =>
 {
-    options.CookieName = ".Cohesion.Session"; // HttpCookieName; default value
-    options.CookiePath = "/"; // HttpCookiePath; default value
-    options.IdleTimeout = TimeSpan.FromMinutes(20);
+    sessions.Options.CookieName = ".Cohesion.Session"; // HttpCookieName; default value
+    sessions.Options.CookiePath = "/"; // HttpCookiePath; default value
+    sessions.Options.IdleTimeout = TimeSpan.FromMinutes(20);
 });
+
+WebApplication app = builder.Build();
+app.UseSessions();
 
 app.Use(async (context, next) =>
 {
@@ -70,15 +81,22 @@ await context.RegenerateSessionIdAsync(context.RequestCancelled);
 
 `CookieName` and `CookiePath` use `HttpCookieName` and `HttpCookiePath`. Valid strings convert
 implicitly; an out-of-grammar string throws `ArgumentException` at assignment with parameter `value`.
-Both `UseSessions` overloads reject `default` with an option-specific message and parameter `configure`.
+`AddSessions` rejects a non-positive idle timeout and `default` cookie options where it registers the
+middleware, with an option-specific message and parameter `Options` (`configure` before 2026-10-28).
 The empty path is valid. These property types replace `string` from 10.0.0-preview.1 (#1473);
 use `.Value` when a caller needs a string-specific member.
 
-For an out-of-process deployment, pass a distributed store adapter — everything else is identical:
+For an out-of-process deployment, supply a distributed store adapter — everything else is identical:
 
 ```csharp
-app.UseSessions(new MyDistributedSessionStore(...), options => options.IdleTimeout = TimeSpan.FromMinutes(30));
+builder.Services.AddSessions(sessions =>
+{
+    sessions.UseStore(new MyDistributedSessionStore(...));
+    sessions.Options.IdleTimeout = TimeSpan.FromMinutes(30);
+});
 ```
+
+The application owns a store it supplies; the middleware never disposes it.
 
 ## Stored-session modification tracking
 

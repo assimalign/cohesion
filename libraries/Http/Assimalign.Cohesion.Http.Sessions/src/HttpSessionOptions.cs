@@ -19,7 +19,7 @@ public sealed class HttpSessionOptions
     /// The value is a non-empty RFC 6265 <c>token</c>: assigning any other
     /// <see cref="string"/> throws <see cref="ArgumentException"/> from the
     /// <see cref="HttpCookieName"/> conversion, before the setter runs.
-    /// <c>UseSessions</c> in <c>Assimalign.Cohesion.Web.Sessions</c> refuses
+    /// <c>AddSessions</c> in <c>Assimalign.Cohesion.Web.Sessions</c> refuses
     /// <see langword="default"/> when it registers the middleware, before any
     /// session is established.
     /// </remarks>
@@ -33,7 +33,7 @@ public sealed class HttpSessionOptions
     /// The value is an RFC 6265 <c>path-value</c>, US-ASCII with no <c>;</c> and
     /// no control characters: assigning any other <see cref="string"/> throws
     /// <see cref="ArgumentException"/> from the <see cref="HttpCookiePath"/>
-    /// conversion, before the setter runs. <c>UseSessions</c> in
+    /// conversion, before the setter runs. <c>AddSessions</c> in
     /// <c>Assimalign.Cohesion.Web.Sessions</c> refuses <see langword="default"/>,
     /// which holds no path, when it registers the middleware. The empty string
     /// remains a valid path-value.

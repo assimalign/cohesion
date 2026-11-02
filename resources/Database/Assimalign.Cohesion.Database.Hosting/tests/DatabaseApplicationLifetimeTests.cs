@@ -13,28 +13,26 @@ namespace Assimalign.Cohesion.Database.Hosting.Tests;
 /// <summary>Verifies nested endpoint lifecycle and complete host-run integration.</summary>
 public sealed class DatabaseApplicationLifetimeTests
 {
-    /// <summary>Verifies a listenerless application waits for shutdown through the host runner seam.</summary>
-    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Run: listenerless application waits through IHostRunner")]
-    public async Task Run_WithoutServers_ShouldWaitForShutdownThroughRunner()
+    /// <summary>Verifies a listenerless application's run waits for a shutdown request.</summary>
+    [Fact(DisplayName = "Cohesion Test [Database.Hosting] - Run: listenerless application waits for shutdown")]
+    public async Task Run_WithoutServers_ShouldWaitForShutdown()
     {
         var builder = DatabaseApplication.CreateBuilder();
         builder.AddEngine("recording-engine", _ => new RecordingEngine());
         await using var application = builder.Build();
-        var runner = new RecordingRunner();
-        application.Context.Runner = runner;
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
         Task running = application.RunAsync(timeout.Token);
-        await runner.StartedSignal.Task.WaitAsync(timeout.Token);
+        while (application.Context.State != HostState.Started)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(10), timeout.Token);
+        }
 
         running.IsCompleted.ShouldBeFalse();
-        runner.RunCount.ShouldBe(1);
-        runner.Run.ShouldNotBeNull().Host.ShouldBeSameAs(application);
         application.Context.Servers.ShouldBeEmpty();
-        runner.Run.TryShutdown().ShouldBeTrue();
+        application.Context.Shutdown();
         await running;
         application.Context.State.ShouldBe(HostState.Stopped);
-        runner.Events.ShouldBe(["started", "stopping", "stopped"]);
     }
 
     /// <summary>Verifies engines remain usable after stop but endpoints cannot be restarted.</summary>
@@ -107,25 +105,5 @@ public sealed class DatabaseApplicationLifetimeTests
         first.DisposeCount.ShouldBe(1);
         second.DisposeCount.ShouldBe(1);
         server.Stops.ShouldBe(1);
-    }
-
-    private sealed class RecordingRunner : IHostRunner, IHostRunObserver
-    {
-        internal TaskCompletionSource<bool> StartedSignal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal List<string> Events { get; } = [];
-        internal IHostRun? Run { get; private set; }
-        internal int RunCount { get; private set; }
-
-        public Task RunAsync(IHostRun run, CancellationToken cancellationToken = default)
-        {
-            Run = run;
-            RunCount++;
-            return run.RunAsync(this, cancellationToken);
-        }
-
-        public void Started(IHost host) { Events.Add("started"); StartedSignal.TrySetResult(true); }
-        public void Stopping(IHost host) => Events.Add("stopping");
-        public void DrainAborted(IHost host) => Events.Add("drain-aborted");
-        public void Stopped(IHost host) => Events.Add("stopped");
     }
 }

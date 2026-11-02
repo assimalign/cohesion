@@ -30,8 +30,7 @@ public class WebApplicationOptions : HostOptions<WebApplicationContext>
     /// are read from and the web root is resolved against.
     /// </summary>
     /// <remarks>
-    /// When <see langword="null"/>, an orchestrated resource uses its ambient resource context's
-    /// content root and a plain application uses <see cref="AppContext.BaseDirectory"/>.
+    /// When <see langword="null"/>, the application uses <see cref="AppContext.BaseDirectory"/>.
     /// </remarks>
     public FileSystemPath? ContentRootPath { get; set; }
 

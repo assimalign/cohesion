@@ -18,7 +18,7 @@ internal sealed class ConfigurationNamespaceBuilder : IConfigurationNamespaceBui
         if (key.Contains('/', StringComparison.Ordinal))
         {
             throw new ArgumentException(
-                "A configuration key cannot contain '/' because it separates the namespace from the command key.",
+                "A configuration key cannot contain '/' which is reserved as the namespace separator.",
                 nameof(key));
         }
 

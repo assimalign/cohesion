@@ -39,11 +39,12 @@ public class ExceptionBoundaryClientFaultTests
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport, http1 => http1.Limits.MaxRequestBodySize = 16));
-        factory.Application.UseErrorHandling(options => options.OnException = (_, _) =>
+        factory.Builder.Services.AddErrorHandling(errors => errors.Options.OnException = (_, _) =>
         {
             Interlocked.Increment(ref observed);
             return ValueTask.CompletedTask;
         });
+        factory.Application.UseErrorHandling();
         factory.Application.Use(async (context, next) =>
         {
             byte[] buffer = new byte[256];
@@ -84,11 +85,12 @@ public class ExceptionBoundaryClientFaultTests
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
-        factory.Application.UseErrorHandling(options => options.OnException = (_, _) =>
+        factory.Builder.Services.AddErrorHandling(errors => errors.Options.OnException = (_, _) =>
         {
             Interlocked.Increment(ref observed);
             return ValueTask.CompletedTask;
         });
+        factory.Application.UseErrorHandling();
         factory.Application.Use(async (context, next) =>
         {
             byte[] buffer = new byte[256];
@@ -138,11 +140,12 @@ public class ExceptionBoundaryClientFaultTests
         await using InMemoryConnectionListener transport = new();
         await using WebApplicationTestFactory factory = new();
         factory.Builder.Server.UseServer(options => options.UseHttp1(transport));
-        factory.Application.UseErrorHandling(options => options.OnException = (_, _) =>
+        factory.Builder.Services.AddErrorHandling(errors => errors.Options.OnException = (_, _) =>
         {
             Interlocked.Increment(ref observed);
             return ValueTask.CompletedTask;
         });
+        factory.Application.UseErrorHandling();
         factory.Application.Use(async (context, next) =>
         {
             await context.Request.Body.CopyToAsync(Stream.Null, context.RequestCancelled);

@@ -57,11 +57,17 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
     // handler armed the timer itself through IRequestTimeoutFeature.SetTimeout.
     private static readonly RequestTimeoutPolicy _fallbackPolicy = new();
 
-    private readonly RequestTimeoutOptions _options;
+    private readonly RequestTimeoutPolicy? _defaultPolicy;
+    private readonly TimeProvider _timeProvider;
+    private readonly bool _suspendWhenDebuggerAttached;
 
     public RequestTimeoutMiddleware(RequestTimeoutOptions options)
     {
-        _options = options;
+        // A snapshot: the registered middleware never observes a later change to the options object.
+        // The policy is immutable, so copying the reference is enough.
+        _defaultPolicy = options.DefaultPolicy;
+        _timeProvider = options.TimeProvider;
+        _suspendWhenDebuggerAttached = options.SuspendWhenDebuggerAttached;
     }
 
     public async Task InvokeAsync(IHttpContext context, WebApplicationMiddleware next)
@@ -72,7 +78,7 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
         IRouteMatchFeature? endpoint = context.GetRouteMatch() is { IsPreflight: false } match ? match : null;
 
         // Mirrors ASP.NET: a paused debug session must not cancel the request under inspection.
-        if (_options.SuspendWhenDebuggerAttached && Debugger.IsAttached)
+        if (_suspendWhenDebuggerAttached && Debugger.IsAttached)
         {
             // Suspended, not missing: acknowledge so an endpoint with a timeout still runs.
             Acknowledge(context, endpoint);
@@ -81,8 +87,8 @@ internal sealed class RequestTimeoutMiddleware : IWebApplicationMiddleware
         }
 
         // An endpoint policy replaces the global default outright, a disabled one included.
-        RequestTimeoutPolicy? policy = endpoint?.Metadata.GetMetadata<RequestTimeoutMetadata>()?.Policy ?? _options.DefaultPolicy;
-        RequestTimeoutFeature feature = new(context, policy, _options.TimeProvider);
+        RequestTimeoutPolicy? policy = endpoint?.Metadata.GetMetadata<RequestTimeoutMetadata>()?.Policy ?? _defaultPolicy;
+        RequestTimeoutFeature feature = new(context, policy, _timeProvider);
 
         try
         {

@@ -1,17 +1,139 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Assimalign.Cohesion;
 
 /// <summary>
-/// Reads the Cohesion runtime contract from the process environment: the application environment
-/// name, raw variable values, and the typed endpoint, dependency, and mount readers over the names
-/// that <see cref="Variables"/> defines.
+/// Reads the Cohesion runtime contract from the environment: the application environment name, raw
+/// variable values, and the typed endpoint, dependency, and mount readers over the names that
+/// <see cref="Variables"/> defines.
 /// </summary>
+/// <remarks>
+/// The environment is the process's, unless the current flow runs in an
+/// <see cref="AppEnvironmentScope"/> that a host of programs entered for it
+/// (<see cref="Enter"/>): then every reader without an explicit dictionary reads the scope's
+/// variables first.
+/// </remarks>
 public static partial class AppEnvironment
 {
+    private static readonly AsyncLocal<AppEnvironmentScope?> _current = new();
+    private static readonly PosixSignal[] _shutdownSignals = [PosixSignal.SIGINT, PosixSignal.SIGQUIT, PosixSignal.SIGTERM];
+
+    /// <summary>
+    /// Gets the scope the current flow runs in, or <see langword="null"/> when it reads the
+    /// process's environment.
+    /// </summary>
+    public static AppEnvironmentScope? Current => _current.Value;
+
+    /// <summary>
+    /// Runs the current flow, and the work it starts from here, in a scope until the returned
+    /// handle is disposed.
+    /// </summary>
+    /// <remarks>
+    /// Enter the scope on the flow that runs the program, such as at the start of the thread the
+    /// program's entry point runs on. Work the flow starts, such as tasks and timers that capture
+    /// the flow's execution context, keeps the scope after the handle is disposed.
+    /// </remarks>
+    /// <param name="scope">The scope.</param>
+    /// <returns>A handle that restores the flow's previous scope when disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="scope"/> is <see langword="null"/>.</exception>
+    public static IDisposable Enter(AppEnvironmentScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        AppEnvironmentScope? previous = _current.Value;
+        _current.Value = scope;
+        return new ScopeExit(previous);
+    }
+
+    /// <summary>
+    /// Registers a request for the shutdown of the program the current flow runs: on the process's
+    /// shutdown signals, or, inside an <see cref="AppEnvironmentScope"/>, on the scope's
+    /// <see cref="AppEnvironmentScope.Shutdown"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// SIGINT and SIGQUIT are Ctrl+C and its relatives at a console, and SIGTERM is how a platform such
+    /// as Kubernetes or Docker stops a container. Left alone, each ends the process at once and cuts
+    /// off its work. A registration cancels each signal's default action and calls
+    /// <paramref name="requestShutdown"/> instead, once per signal received, so the program drains and
+    /// the process exits when its entry point returns. A platform that delivers none of a signal, such
+    /// as a browser, skips it.
+    /// </para>
+    /// <para>
+    /// A program inside a scope shares its process with other programs, so the process's signals are
+    /// not its own. It registers on the scope's shutdown instead, which the host of the programs
+    /// signals, and registers no process signal.
+    /// </para>
+    /// </remarks>
+    /// <param name="requestShutdown">Requests the program's shutdown. It must not throw: a signal handler that throws ends the process.</param>
+    /// <returns>The registration, which removes the handlers when disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="requestShutdown"/> is <see langword="null"/>.</exception>
+    public static IDisposable RegisterShutdown(Action requestShutdown)
+    {
+        ArgumentNullException.ThrowIfNull(requestShutdown);
+
+        if (_current.Value is { } scope)
+        {
+            return scope.Shutdown.Register(requestShutdown);
+        }
+
+        var registrations = new List<PosixSignalRegistration>(_shutdownSignals.Length);
+        foreach (PosixSignal signal in _shutdownSignals)
+        {
+            try
+            {
+                registrations.Add(PosixSignalRegistration.Create(signal, context =>
+                {
+                    context.Cancel = true;
+                    requestShutdown();
+                }));
+            }
+            catch (PlatformNotSupportedException)
+            {
+                // The platform delivers no such signal.
+            }
+        }
+
+        return new SignalRegistration(registrations);
+    }
+
+    /// <summary>
+    /// Gets every variable the current flow reads.
+    /// </summary>
+    /// <remarks>
+    /// Outside a scope these are the process's variables. Inside one they are the scope's variables
+    /// and the process's variables outside the runtime contract.
+    /// </remarks>
+    /// <returns>A snapshot of the variables, by name.</returns>
+    public static IDictionary<string, string?> GetValues()
+    {
+        var values = new Dictionary<string, string?>(StringComparer.Ordinal);
+        AppEnvironmentScope? scope = _current.Value;
+        foreach (DictionaryEntry entry in System.Environment.GetEnvironmentVariables())
+        {
+            if (entry.Key is string name && (scope is null || !IsContractVariable(name)))
+            {
+                values[name] = entry.Value as string;
+            }
+        }
+
+        if (scope is not null)
+        {
+            foreach (KeyValuePair<string, string> variable in scope.Variables)
+            {
+                values[variable.Key] = variable.Value;
+            }
+        }
+
+        return values;
+    }
+
     /// <summary>
     /// Gets the environment name for the current process.
     /// </summary>
@@ -43,14 +165,31 @@ public static partial class AppEnvironment
     }
 
     /// <summary>
-    /// Gets a variable from the current process environment.
+    /// Gets a variable from the current flow's environment: its scope's, then the process's.
     /// </summary>
+    /// <remarks>
+    /// Inside a scope, a variable of the runtime contract that the scope does not set reads as
+    /// unset; see <see cref="AppEnvironmentScope"/>.
+    /// </remarks>
     /// <param name="variable">The variable name.</param>
     /// <returns>The variable value, or <see langword="null"/> when it is not set.</returns>
     /// <exception cref="ArgumentException">Thrown when <paramref name="variable"/> is empty.</exception>
     public static string? GetValue(string variable)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(variable);
+
+        if (_current.Value is { } scope)
+        {
+            if (scope.Variables.TryGetValue(variable, out string? value))
+            {
+                return value;
+            }
+
+            if (IsContractVariable(variable))
+            {
+                return null;
+            }
+        }
 
         return System.Environment.GetEnvironmentVariable(variable, EnvironmentVariableTarget.Process);
     }
@@ -324,5 +463,52 @@ public static partial class AppEnvironment
         }
 
         return true;
+    }
+
+    // Environment variable names are case-insensitive on Windows, so a process variable hides as a
+    // contract variable whatever its case.
+    private static bool IsContractVariable(string variable)
+    {
+        return variable.StartsWith(Variables.Prefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class ScopeExit : IDisposable
+    {
+        private readonly AppEnvironmentScope? _previous;
+        private bool _isDisposed;
+
+        public ScopeExit(AppEnvironmentScope? previous)
+        {
+            _previous = previous;
+        }
+
+        public void Dispose()
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _isDisposed = true;
+            _current.Value = _previous;
+        }
+    }
+
+    private sealed class SignalRegistration : IDisposable
+    {
+        private readonly List<PosixSignalRegistration> _registrations;
+
+        public SignalRegistration(List<PosixSignalRegistration> registrations)
+        {
+            _registrations = registrations;
+        }
+
+        public void Dispose()
+        {
+            foreach (PosixSignalRegistration registration in _registrations)
+            {
+                registration.Dispose();
+            }
+        }
     }
 }

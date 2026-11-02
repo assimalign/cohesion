@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 
 using Assimalign.Cohesion.FileSystem;
 using Assimalign.Cohesion.Http;
@@ -9,96 +10,81 @@ using Assimalign.Cohesion.Web.StaticFiles.Internal;
 namespace Assimalign.Cohesion.Web.StaticFiles;
 
 /// <summary>
-/// Pipeline-builder members that serve static files from a mounted <see cref="IFileSystem"/>.
+/// Pipeline-builder extension that places static-file serving in the Web application middleware
+/// pipeline.
 /// </summary>
 /// <remarks>
-/// Registration is dependency-free per the Web-area rules: the file system and options are
-/// supplied explicitly at composition time and snapshotted into the middleware — no service
-/// container, no configuration binding, no request-time service location. Mount any
-/// <see cref="IFileSystem"/> implementation (physical, in-memory, aggregate); the middleware
-/// can never address anything outside that mount.
+/// Registration is dependency-free per the Web-area rules: <c>builder.Services.AddStaticFiles(files =&gt; ...)</c>
+/// supplies the file system and options explicitly (<see cref="StaticFilesBuilder"/>) and snapshots them
+/// into the middleware — no configuration binding, no request-time service location. Mount any
+/// <see cref="IFileSystem"/> implementation (physical, in-memory, aggregate); the middleware can never
+/// address anything outside that mount.
 /// </remarks>
 public static class WebApplicationStaticFilesExtensions
 {
     extension(IWebApplicationPipelineBuilder builder)
     {
         /// <summary>
-        /// Serves <c>GET</c>/<c>HEAD</c> requests from the application's web root
-        /// (<see cref="IWebApplicationContext.WebRootPath"/>, <c>wwwroot</c> under the content root by
-        /// default), with optionally configured <see cref="StaticFilesOptions"/>.
+        /// Places the middleware that serves <c>GET</c>/<c>HEAD</c> requests from mounted file systems:
+        /// every mount the application registered with <c>builder.Services.AddStaticFiles(files =&gt; ...)</c>,
+        /// in registration order, or one with the default options over the application's web root when it
+        /// registered none.
         /// </summary>
+        /// <returns>The same pipeline builder for chaining.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="builder"/> is <see langword="null"/>.</exception>
         /// <remarks>
-        /// Only the web root is served — never the content root or the process working directory,
-        /// which hold <c>appsettings*.json</c> and the application's binaries. When the application
-        /// has no web root, or the directory does not exist when the pipeline is built, the
-        /// middleware serves nothing and passes every request to the next middleware. The options
-        /// are configured once and validated when this method is called, then checked again before
-        /// the deferred middleware snapshot is created at pipeline build.
+        /// <para>
+        /// The file system and options are configured where the middleware is registered
+        /// (<see cref="StaticFilesBuilder"/>); this verb only positions it. Each registration is a mount, so
+        /// mounts add up rather than replace each other: with an asset folder under <c>/assets</c> and the web
+        /// root registered, a request goes to the first mount that serves it, and one no mount serves passes
+        /// to the next middleware.
+        /// </para>
+        /// <para>
+        /// A registration that names no file system, and the default middleware, serve the application's
+        /// web root (<see cref="IWebApplicationContext.WebRootPath"/>, <c>wwwroot</c> under the content root
+        /// by default), which this verb mounts read-only when the pipeline is built. Only the web root is
+        /// served — never the content root or the process working directory, which hold
+        /// <c>appsettings*.json</c> and the application's binaries. When the application has no web root, or
+        /// the directory does not exist when the pipeline is built, the verb places nothing and every request
+        /// passes to the next middleware.
+        /// </para>
+        /// <para>
+        /// Place it ahead of <c>UseRouting()</c>, so an existing asset is served before routing. Inside a
+        /// <c>Map(path)</c> branch it serves below the branch's prefix.
+        /// </para>
         /// </remarks>
-        /// <param name="configure">A callback that configures the composition-time options.</param>
-        /// <returns>The same pipeline builder for chaining.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// Thrown when the configured options are invalid: a request path that does not begin
-        /// with <c>/</c>, a default-document name that is not a valid bare file name,
-        /// a <c>Cache-Control</c> value that does not parse per RFC 9111, or a
-        /// content-type mapping or fallback that is empty or is not a valid HTTP field value.
-        /// </exception>
-        public IWebApplicationPipelineBuilder UseStaticFiles(Action<StaticFilesOptions>? configure = null)
+        public IWebApplicationPipelineBuilder UseStaticFiles()
         {
             ArgumentNullException.ThrowIfNull(builder);
 
-            var options = new StaticFilesOptions();
-            configure?.Invoke(options);
-            Validate(options);
-
-            return builder.Use((IWebApplicationContext context, WebApplicationMiddleware next) =>
+            return builder.Use(static (context, next) =>
             {
-                StaticFilesMiddleware? middleware = WebRootStaticFiles.TryCreate(context, options, "UseStaticFiles");
+                StaticFilesMiddleware[] registrations = [.. context.Middleware.OfType<StaticFilesMiddleware>()];
+                if (registrations.Length == 0)
+                {
+                    registrations = [new StaticFilesBuilder().BuildMiddleware()];
+                }
 
-                return middleware is null ? next : httpContext => middleware.InvokeAsync(httpContext, next);
+                // Each registration is a mount. They serve in registration order, so the chain is composed
+                // from the last mount back to the first; a mount with nothing to serve is left out.
+                WebApplicationMiddleware pipeline = next;
+                for (int index = registrations.Length - 1; index >= 0; index--)
+                {
+                    StaticFilesMiddleware registration = registrations[index];
+                    StaticFilesMiddleware? middleware = registration.MountsWebRoot
+                        ? WebRootStaticFiles.TryMount(context, registration, "UseStaticFiles")
+                        : registration;
+
+                    if (middleware is not null)
+                    {
+                        WebApplicationMiddleware following = pipeline;
+                        pipeline = exchange => middleware.InvokeAsync(exchange, following);
+                    }
+                }
+
+                return pipeline;
             });
-        }
-
-        /// <summary>
-        /// Serves <c>GET</c>/<c>HEAD</c> requests from <paramref name="fileSystem"/> at the site
-        /// root with default options: default documents (<c>index.html</c>/<c>index.htm</c>),
-        /// conditional GET, single byte-range support, precompressed <c>.br</c>/<c>.gz</c>
-        /// sibling negotiation, and unknown extensions blocked.
-        /// </summary>
-        /// <param name="fileSystem">The file system to serve as the content root.</param>
-        /// <returns>The same pipeline builder for chaining.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> or <paramref name="fileSystem"/> is <see langword="null"/>.</exception>
-        public IWebApplicationPipelineBuilder UseStaticFiles(IFileSystem fileSystem)
-        {
-            return builder.UseStaticFiles(fileSystem, configure: null);
-        }
-
-        /// <summary>
-        /// Serves <c>GET</c>/<c>HEAD</c> requests from <paramref name="fileSystem"/> with
-        /// caller-configured <see cref="StaticFilesOptions"/> (request-path prefix, default
-        /// documents, <c>Cache-Control</c>, content-type overlays, precompression).
-        /// </summary>
-        /// <param name="fileSystem">The file system to serve as the content root.</param>
-        /// <param name="configure">A callback that configures the composition-time options.</param>
-        /// <returns>The same pipeline builder for chaining.</returns>
-        /// <exception cref="ArgumentNullException">Thrown when <paramref name="builder"/> or <paramref name="fileSystem"/> is <see langword="null"/>.</exception>
-        /// <exception cref="ArgumentException">
-        /// Thrown when the configured options are invalid: a request path that does not begin
-        /// with <c>/</c>, a default-document name that is not a valid bare file name,
-        /// a <c>Cache-Control</c> value that does not parse per RFC 9111, or a
-        /// content-type mapping or fallback that is empty or is not a valid HTTP field value.
-        /// </exception>
-        public IWebApplicationPipelineBuilder UseStaticFiles(IFileSystem fileSystem, Action<StaticFilesOptions>? configure)
-        {
-            ArgumentNullException.ThrowIfNull(builder);
-            ArgumentNullException.ThrowIfNull(fileSystem);
-
-            var options = new StaticFilesOptions();
-            configure?.Invoke(options);
-            FileName[] defaultDocuments = Validate(options);
-
-            return builder.Use(new StaticFilesMiddleware(fileSystem, options, defaultDocuments));
         }
     }
 

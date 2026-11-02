@@ -23,8 +23,8 @@ using Assimalign.Cohesion.Web;
 /// <para>
 /// The middleware performs no parsing of its own at request time: the transports (or the
 /// forwarded-headers resolution) already produce a typed <see cref="HttpHost"/>, and the
-/// allowlist is precompiled into an <see cref="HttpHostMatcher"/> when <c>UseHostFiltering</c>
-/// registers this middleware. Each request costs one feature lookup, one component split, and a
+/// allowlist is precompiled into an <see cref="HttpHostMatcher"/> when <c>AddHostFiltering</c>
+/// builds this middleware. Each request costs one feature lookup, one component split, and a
 /// handful of span comparisons.
 /// </para>
 /// <para>

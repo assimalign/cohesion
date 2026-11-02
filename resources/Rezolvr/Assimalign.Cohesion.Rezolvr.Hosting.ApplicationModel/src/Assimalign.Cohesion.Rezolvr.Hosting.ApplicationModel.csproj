@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<RootNamespace>Assimalign.Cohesion.Rezolvr.Hosting.ApplicationModel</RootNamespace>
+		<Description>Runs a Cohesion Rezolvr application as a managed resource instance: it joins the gateway that runs it through the client of the platform the resource opted into, and exposes the actions the application adds.</Description>
+	</PropertyGroup>
+	<ItemGroup>
+		<CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Rezolvr.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.DependencyInjection" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.Hosting" />
+		<CohesionProjectReference Include="Assimalign.Cohesion.ApplicationModel.Hosting" />
+	</ItemGroup>
+</Project>

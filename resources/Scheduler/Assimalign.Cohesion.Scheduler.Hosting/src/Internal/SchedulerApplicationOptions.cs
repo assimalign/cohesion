@@ -1,5 +1,3 @@
-using System.IO;
-
 using Assimalign.Cohesion.Hosting;
 
 namespace Assimalign.Cohesion.Scheduler.Hosting.Internal;
@@ -8,8 +6,6 @@ namespace Assimalign.Cohesion.Scheduler.Hosting.Internal;
 [global::System.Diagnostics.DebuggerTypeProxy(typeof(DebugView))]
 internal sealed class SchedulerApplicationOptions : HostOptions<SchedulerApplicationContext>
 {
-    internal FileSystemPath? ContentRootPath { get; init; }
-
     private sealed class DebugView
     {
         private readonly SchedulerApplicationOptions _target;

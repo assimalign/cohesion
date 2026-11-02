@@ -9,7 +9,6 @@ using System.Security.Cryptography.X509Certificates;
 using Assimalign.Cohesion.Configuration;
 using Assimalign.Cohesion.Connections.Tcp;
 using Assimalign.Cohesion.Connections.Security;
-using Assimalign.Cohesion.Hosting.Resources;
 using Assimalign.Cohesion.Http;
 using Assimalign.Cohesion.Http.Connections;
 
@@ -61,9 +60,8 @@ namespace Assimalign.Cohesion.Web.Hosting.Internal;
 /// <c>Protocol</c> names the registration verb it binds to: <c>Http1</c> (the default) and
 /// <c>Http2</c> are cleartext; <c>Http1s</c> and <c>Http2s</c> serve one protocol over TLS;
 /// <c>Https</c> serves HTTP/2 and HTTP/1.1 over TLS, chosen per connection through ALPN; and
-/// <c>Http3</c> serves HTTP/3 over QUIC. A TLS endpoint's <c>Certificate</c> is either a scalar
-/// naming the Secret mount that carries a PEM bundle (the default mount is <c>tls</c>) or a section
-/// naming a file: <c>Path</c> to a PEM or PKCS#12 (PFX) file, with an optional <c>KeyPath</c> for a
+/// <c>Http3</c> serves HTTP/3 over QUIC. A TLS endpoint's <c>Certificate</c> is a section naming a
+/// file (a scalar value is refused): <c>Path</c> to a PEM or PKCS#12 (PFX) file, with an optional <c>KeyPath</c> for a
 /// separate PEM key and an optional <c>Password</c> for an encrypted key or a protected PFX. A
 /// relative path resolves against the content root. A TLS endpoint's <c>ClientCertificateMode</c>
 /// (<c>NoCertificate</c>, the default; <c>AllowCertificate</c>; <c>RequireCertificate</c>) requests
@@ -587,9 +585,8 @@ internal static class HttpServerConfiguration
     }
 
     /// <summary>
-    /// Resolves a TLS endpoint's certificate: from a file when <c>Certificate</c> is a section
-    /// (<c>Path</c>, optional <c>KeyPath</c> and <c>Password</c>), otherwise from the Secret mount the
-    /// scalar <c>Certificate</c> names (the endpoint's registered mount, or <c>tls</c>, when absent).
+    /// Resolves a TLS endpoint's certificate from the file its <c>Certificate</c> section names
+    /// (<c>Path</c>, optional <c>KeyPath</c> and <c>Password</c>).
     /// </summary>
     private static (X509Certificate2 Leaf, X509Certificate2Collection Chain) ResolveCertificate(
         IConfigurationSection endpoint,
@@ -614,13 +611,10 @@ internal static class HttpServerConfiguration
                 GetString(certificate, "Password"));
         }
 
-        if (!ResourceRuntime.Current.TryGetEndpointCertificate(endpointName, GetString(endpoint, "Certificate"), out X509Certificate2? leaf, out X509Certificate2Collection chain))
-        {
-            throw new InvalidOperationException(
-                string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
-        }
-
-        return (leaf, chain);
+        // A scalar or absent Certificate names no file: the application or its platform
+        // supplies certificates as files.
+        throw new InvalidOperationException(
+            string.Format(CultureInfo.CurrentCulture, ErrorMessages.EndpointCertificateRequired, endpointName));
     }
 
     /// <summary>
@@ -713,7 +707,7 @@ internal static class HttpServerConfiguration
             : X509Certificate2.CreateFromEncryptedPemFile(path, password, keyPath))
         {
             // A PEM key is ephemeral; the PKCS#12 import gives SslStream a key association Windows
-            // Schannel accepts for server authentication (the same import the Secret-mount loader does).
+            // Schannel accepts for server authentication.
             byte[] pkcs12 = pem.Export(X509ContentType.Pkcs12);
             try
             {
@@ -854,6 +848,29 @@ internal static class HttpServerConfiguration
                 || protocol.Equals("Http/3", StringComparison.OrdinalIgnoreCase)
                 || protocol.Equals("Http3.0", StringComparison.OrdinalIgnoreCase)
                 || protocol.Equals("h3", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Gets the address the application's platform assigned it: the runtime contract's <c>http</c>
+    /// endpoint (<see cref="AppEnvironment.TryGetEndpoint(string, out Uri?)"/>), when it is a plain
+    /// <c>http</c> one.
+    /// </summary>
+    /// <remarks>
+    /// A platform that shares the machine's ports among its resources, such as a gateway that runs
+    /// them in its own process, assigns each its port this way. An <c>https</c> endpoint needs a
+    /// certificate, which the application configures itself, so it is not bound here.
+    /// </remarks>
+    /// <returns>The endpoint, or <see langword="null"/> when the platform assigned none.</returns>
+    /// <exception cref="InvalidOperationException">The endpoint's host is neither an IP address nor <c>localhost</c>.</exception>
+    public static IPEndPoint? GetPlatformEndPoint()
+    {
+        if (!AppEnvironment.TryGetEndpoint("http", out Uri? address)
+            || !string.Equals(address.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return new IPEndPoint(ResolveHost(address.IdnHost), address.Port);
     }
 
     private static IPAddress ResolveHost(string? host)
