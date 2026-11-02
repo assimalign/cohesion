@@ -1959,14 +1959,16 @@ at most `8192 * (min(G, C) + 1)`; the extra page is the reconstruction scratch p
 record index is at most `512 * R + 128` bytes, charging allocated dictionary/list capacities and
 conservative object headers (`RetainedIndexBytes`). Existing allocator/owner and analysis identity
 state is `O(P + T + R)`, with no page payloads. Scan workspace is a returned 256 KiB journal chunk
-(or one larger frame), one decoded payload and one page-header buffer. Model-decoded catalog
+(or one larger frame), one decoded payload, one page-header buffer and an optional 8 KiB page
+for existing owner-scan checksum verification. Model-decoded catalog
 metadata follows the gate-read pages. No journal-size cap refuses an otherwise openable database;
 there is no temporary file and no dependence on query spill. In-memory preflights borrow closed
 MemoryStream buffers through non-writable views; they do not copy whole databases or journals.
 SQL's private block overlay has been removed in favor of this one mechanism.
 
-The complete database-open gate inventory (paths relative to `resources/Database`, source locations
-on this implementation) is:
+The complete database-open gate inventory (source locations on this implementation) is below.
+Paths use `<project>/...` as shorthand for
+`resources/Database/Assimalign.Cohesion.Database.<project>/...`.
 
 | Engine / layer | Gates through the recovered read-only view |
 |---|---|
